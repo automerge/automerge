@@ -79,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("repeated put", size), size, |b, &size| {
             b.iter_batched(
                 || repeated_put(size),
-                |mut doc| doc.save(),
+                |doc| doc.save(),
                 criterion::BatchSize::LargeInput,
             )
         });
@@ -89,7 +89,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || repeated_increment(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },
@@ -102,7 +102,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || increasing_put(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },
@@ -115,7 +115,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || decreasing_put(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },
@@ -181,7 +181,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 || {
                     repeated_put(size)
                         .get_changes(&[])
-                        .unwrap()
                         .into_iter()
                         .cloned()
                         .collect::<Vec<_>>()
@@ -201,7 +200,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         repeated_increment(size)
                             .get_changes(&[])
-                            .unwrap()
                             .into_iter()
                             .cloned()
                             .collect::<Vec<_>>()
@@ -224,7 +222,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         increasing_put(size)
                             .get_changes(&[])
-                            .unwrap()
                             .into_iter()
                             .cloned()
                             .collect::<Vec<_>>()
@@ -247,7 +244,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     || {
                         decreasing_put(size)
                             .get_changes(&[])
-                            .unwrap()
                             .into_iter()
                             .cloned()
                             .collect::<Vec<_>>()

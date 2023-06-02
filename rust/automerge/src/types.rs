@@ -388,6 +388,12 @@ impl From<usize> for Prop {
     }
 }
 
+impl From<&usize> for Prop {
+    fn from(index: &usize) -> Self {
+        Prop::Seq(*index)
+    }
+}
+
 impl From<f64> for Prop {
     fn from(index: f64) -> Self {
         Prop::Seq(index as usize)

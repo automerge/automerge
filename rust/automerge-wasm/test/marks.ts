@@ -225,7 +225,7 @@ describe('Automerge', () => {
       doc.mark(list, { start: 10, end: 13 }, `comment:${id}` , "foxes are my favorite animal!")
       doc.commit("marks");
       let h2 = doc.getHeads()
-      let patches = doc.popPatches();
+      let patches = doc.diffIncremental();
       let util = require('util')
       assert.deepEqual(patches, [
         { action: 'put', path: [ 'list' ], value: '' },
@@ -260,11 +260,11 @@ describe('Automerge', () => {
 
       doc2.mark(list, { start: 4, end: 13 }, "x", "c");
 
-      doc3.truncatePatches();
+      doc3.updateDiffCursor();
       doc3.merge(doc1)
       doc3.merge(doc2)
 
-      let patches = doc3.popPatches();
+      let patches = doc3.diffIncremental();
 
       assert.deepEqual(patches, [
           { action: 'put', path: [ 'foo' ], value: 'bar' },
@@ -289,7 +289,7 @@ describe('Automerge', () => {
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc1.mark(list, { start: 5, end: 10 }, "xxx", "aaa")
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [{
         action: 'mark', path: [ 'list' ], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10 }],
@@ -298,8 +298,7 @@ describe('Automerge', () => {
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
-      //let patches2 = doc2.popPatches();
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [{
         action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
@@ -315,7 +314,7 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
       doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -326,7 +325,7 @@ describe('Automerge', () => {
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 25}] },
@@ -342,7 +341,7 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "xxx", "bbb")
       doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -355,7 +354,7 @@ describe('Automerge', () => {
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: ['list'], marks: [
@@ -375,7 +374,7 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "yyy", "aaa")
       doc1.mark(list, { start: 15, end: 25 }, "zzz", "aaa")
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -388,7 +387,7 @@ describe('Automerge', () => {
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -416,7 +415,7 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -430,7 +429,7 @@ describe('Automerge', () => {
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
 
       let marks = doc3.marks(list)
 
@@ -460,7 +459,7 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -472,7 +471,7 @@ describe('Automerge', () => {
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -498,7 +497,7 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
@@ -510,7 +509,7 @@ describe('Automerge', () => {
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [

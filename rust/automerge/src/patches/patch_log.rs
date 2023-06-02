@@ -4,15 +4,47 @@ use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::Mark;
 use crate::types::{ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, OpObserver, ReadDoc};
+use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
+use super::{PatchBuilder, TextRepresentation};
+
+/// A record of changes made to a document
+///
+/// It is often necessary to maintain a materialized view of the current state of a document. E.g.
+/// in a text editor you may be rendering the current state a text field in the UI. In order to
+/// efficiently update the state of the materialized view any method which adds operations to the
+/// document has a variant which takes a [`PatchLog`] as an argument. This allows the caller to
+/// record the changes made and then use either [`crate::Automerge::make_patches`] or
+/// [`crate::AutoCommit::make_patches`] to generate a `Vec<Patch>` which can be used to upudate the
+/// materialized view.
+///
+/// A `PatchLog` is a set of _relative_ changes. It represents the changes required to go from the
+/// state at one point in history to another. What those two points are depends on how you use the
+/// log. A typical reason to create a [`PatchLog`] is to record the changes made by remote peers.
+/// Consider this example:
+///
+/// ```no_run
+/// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
+/// SyncState, SyncDoc}, patches::TextRepresentation};
+/// let doc = AutoCommit::new();
+/// let sync_message: Message = unimplemented!();
+/// let mut sync_state = SyncState::new();
+/// let mut patch_log = PatchLog::active(TextRepresentation::String);
+/// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
+///
+/// // These patches represent the changes needed to go from the state of the document before the
+/// // sync message was received, to the state after.
+/// let patches = doc.make_patches(&mut patch_log);
+/// ```
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct History {
+pub struct PatchLog {
     events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
+    text_rep: TextRepresentation,
+    pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,29 +99,41 @@ pub(crate) enum Event {
     },
 }
 
-impl History {
-    pub(crate) fn new(active: bool) -> Self {
-        History {
+impl PatchLog {
+    /// Create a new [`PatchLog`]
+    ///
+    /// # Arguments
+    ///
+    /// * `active`   - If `true` the log will record all changes made to the document. If `false`
+    ///                then no changes will be recorded.
+    /// * `text_rep` - How text will be represented in the generated patches
+    ///
+    /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
+    /// which record patches are more expensive, so sometimes you may wish to turn off patch
+    /// logging for parts of the application, but not others; but you don't want to complicate your
+    /// code with an `Option<PatchLog>`. In that case you can use an inactive [`PatchLog`].
+    pub fn new(active: bool, text_rep: TextRepresentation) -> Self {
+        PatchLog {
             active,
             expose: HashSet::default(),
             events: vec![],
+            heads: None,
+            text_rep,
         }
     }
 
-    pub(crate) fn innactive() -> Self {
-        History {
-            active: false,
-            expose: HashSet::default(),
-            events: vec![],
-        }
+    /// Create a new [`PatchLog`] which doesn't record any changes.
+    ///
+    /// See also: [`PatchLog::new`] for a more detailed explanation.
+    pub fn inactive(text_rep: TextRepresentation) -> Self {
+        Self::new(false, text_rep)
     }
 
-    pub(crate) fn active() -> Self {
-        History {
-            active: true,
-            expose: HashSet::default(),
-            events: vec![],
-        }
+    /// Create a new [`PatchLog`] which does record changes.
+    ///
+    /// See also: [`PatchLog::new`] for a more detailed explanation.
+    pub fn active(text_rep: TextRepresentation) -> Self {
+        Self::new(true, text_rep)
     }
 
     pub(crate) fn set_active(&mut self, setting: bool) {
@@ -254,37 +298,26 @@ impl History {
         ))
     }
 
-    pub(crate) fn observe<'a, O: OpObserver + 'a, T: Into<Option<&'a mut O>>>(
-        &mut self,
-        observer: T,
-        doc: &Automerge,
-        heads: Option<&[ChangeHash]>,
-    ) {
-        if let Some(observer) = observer.into() {
-            self.events.sort_by(|a, b| doc.ops().m.lamport_cmp(a, b));
-            if let Some(heads) = heads {
-                let read_doc = ReadDocAt { doc, heads };
-                self.observe_inner(observer, doc, &read_doc);
-            } else {
-                self.observe_inner(observer, doc, doc);
-            }
+    pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+        self.events.sort_by(|a, b| doc.ops().m.lamport_cmp(a, b));
+        let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
+        if let Some(heads) = self.heads.as_ref() {
+            let read_doc = ReadDocAt { doc, heads };
+            Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
+        } else {
+            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
         }
     }
 
-    fn take_exposed(&mut self, doc: &Automerge) -> ExposeQueue {
-        let mut alt_set = HashSet::new();
-        std::mem::swap(&mut alt_set, &mut self.expose);
-        ExposeQueue(alt_set.into_iter().map(|id| doc.id_to_exid(id)).collect())
-    }
-
-    fn observe_inner<O: OpObserver, R: ReadDoc>(
-        &mut self,
-        observer: &mut O,
+    fn make_patches_inner<R: ReadDoc>(
+        events: &[(ObjId, Event)],
+        mut expose_queue: ExposeQueue,
         doc: &Automerge,
         read_doc: &R,
-    ) {
-        let mut expose_queue = self.take_exposed(doc);
-        for (obj, event) in self.events.drain(..) {
+        text_rep: TextRepresentation,
+    ) -> Vec<Patch> {
+        let mut patch_builder = PatchBuilder::default();
+        for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
             // incremental updates are ignored and a observation
@@ -294,7 +327,7 @@ impl History {
                 continue;
             }
             // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, observer, doc, read_doc);
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc, text_rep);
             match event {
                 Event::PutMap {
                     key,
@@ -302,18 +335,18 @@ impl History {
                     id,
                     conflict,
                 } => {
-                    let opid = doc.id_to_exid(id);
-                    observer.put(read_doc, exid, key.into(), (value.into(), opid), conflict);
+                    let opid = doc.id_to_exid(*id);
+                    patch_builder.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
                 }
                 Event::DeleteMap { key } => {
-                    observer.delete_map(read_doc, exid, &key);
+                    patch_builder.delete_map(read_doc, exid, key);
                 }
                 Event::IncrementMap { key, n, id } => {
-                    let opid = doc.id_to_exid(id);
-                    observer.increment(read_doc, exid, key.into(), (n, opid));
+                    let opid = doc.id_to_exid(*id);
+                    patch_builder.increment(read_doc, exid, key.into(), (*n, opid));
                 }
                 Event::FlagConflictMap { key } => {
-                    observer.flag_conflict(read_doc, exid, key.into());
+                    patch_builder.flag_conflict(read_doc, exid, key.into());
                 }
                 Event::PutSeq {
                     index,
@@ -321,8 +354,14 @@ impl History {
                     id,
                     conflict,
                 } => {
-                    let opid = doc.id_to_exid(id);
-                    observer.put(read_doc, exid, index.into(), (value.into(), opid), conflict);
+                    let opid = doc.id_to_exid(*id);
+                    patch_builder.put(
+                        read_doc,
+                        exid,
+                        index.into(),
+                        (value.into(), opid),
+                        *conflict,
+                    );
                 }
                 Event::Insert {
                     index,
@@ -330,32 +369,37 @@ impl History {
                     id,
                     conflict,
                 } => {
-                    let opid = doc.id_to_exid(id);
-                    observer.insert(read_doc, exid, index, (value.into(), opid), conflict);
+                    let opid = doc.id_to_exid(*id);
+                    patch_builder.insert(read_doc, exid, *index, (value.into(), opid), *conflict);
                 }
                 Event::DeleteSeq { index, num } => {
-                    observer.delete_seq(read_doc, exid, index, num);
+                    patch_builder.delete_seq(read_doc, exid, *index, *num);
                 }
                 Event::IncrementSeq { index, n, id } => {
-                    let opid = doc.id_to_exid(id);
-                    observer.increment(read_doc, exid, index.into(), (n, opid));
+                    let opid = doc.id_to_exid(*id);
+                    patch_builder.increment(read_doc, exid, index.into(), (*n, opid));
                 }
                 Event::FlagConflictSeq { index } => {
-                    observer.flag_conflict(read_doc, exid, index.into());
+                    patch_builder.flag_conflict(read_doc, exid, index.into());
                 }
                 Event::Splice { index, text } => {
-                    observer.splice_text(read_doc, exid, index, &text);
+                    patch_builder.splice_text(read_doc, exid, *index, text);
                 }
-                Event::Mark { mark } => observer.mark(read_doc, exid, mark.into_iter()),
+                Event::Mark { mark } => {
+                    patch_builder.mark(read_doc, exid, mark.clone().into_iter())
+                }
             }
         }
         // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(observer, doc, read_doc);
+        expose_queue.flush_queue(&mut patch_builder, doc, read_doc, text_rep);
+
+        patch_builder.take_patches()
     }
 
     pub(crate) fn truncate(&mut self) {
         self.active = true;
         self.events.truncate(0);
+        self.expose.clear();
     }
 
     pub(crate) fn branch(&mut self) -> Self {
@@ -363,11 +407,21 @@ impl History {
             active: self.active,
             expose: HashSet::new(),
             events: Default::default(),
+            text_rep: self.text_rep,
+            heads: None,
         }
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.events.extend(other.events);
+    }
+
+    pub(crate) fn text_rep(&self) -> TextRepresentation {
+        self.text_rep
+    }
+
+    pub(crate) fn set_text_rep(&mut self, rep: TextRepresentation) {
+        self.text_rep = rep;
     }
 }
 
@@ -389,29 +443,31 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue<O: OpObserver, R: ReadDoc>(
+    fn pump_queue<R: ReadDoc>(
         &mut self,
         obj: &ExId,
-        observer: &mut O,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
-    fn flush_queue<O: OpObserver, R: ReadDoc>(
+    fn flush_queue<R: ReadDoc>(
         &mut self,
-        observer: &mut O,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
@@ -423,19 +479,20 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj<O: OpObserver, R: ReadDoc>(
+    fn flush_obj<R: ReadDoc>(
         &mut self,
         exid: ExId,
-        observer: &mut O,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
-            ObjType::Text if doc.text_as_seq() => {
+            ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
                 let text = read_doc.text(&exid).ok()?;
-                observer.splice_text(read_doc, exid, 0, &text);
+                patch_builder.splice_text(read_doc, exid, 0, &text);
             }
             ObjType::List | ObjType::Text => {
                 for ListRangeItem {
@@ -448,7 +505,7 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    observer.insert(read_doc, exid.clone(), index, (value, id), conflict);
+                    patch_builder.insert(read_doc, exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {
@@ -462,7 +519,7 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    observer.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
+                    patch_builder.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
                 }
             }
         }

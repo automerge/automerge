@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::ops::RangeBounds;
 
+use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
-    history::History,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
+    patches::PatchLog,
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
@@ -118,26 +119,26 @@ impl<'a> Patch<'a> {
     }
 }
 
-pub(crate) fn observe_diff(doc: &Automerge, before: &Clock, after: &Clock, history: &mut History) {
+pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        if typ == ObjType::Text && !doc.text_as_seq() {
-            observe_text_diff(doc, history, obj, diffs)
+        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_diff(doc, patch_log, obj, diffs)
         } else if typ.is_sequence() {
-            observe_list_diff(doc, history, obj, diffs);
+            log_list_diff(doc, patch_log, obj, diffs);
         } else {
-            observe_map_diff(doc, history, obj, diffs);
+            log_map_diff(doc, patch_log, obj, diffs);
         }
     }
 }
 
-fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
@@ -149,42 +150,42 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::New(op) => {
             let value = op.value_at(Some(op.clock)).into();
-            history.insert(*obj, index, value, op.id, op.conflict);
+            patch_log.insert(*obj, index, value, op.id, op.conflict);
             index + 1
         }
         Patch::Update { before, after } => {
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
                 let value = after.value_at(Some(after.clock)).into();
-                history.put_seq(*obj, index, value, after.id, conflict, true)
+                patch_log.put_seq(*obj, index, value, after.id, conflict, true)
             } else {
                 let value = after.value_at(Some(after.clock)).into();
-                history.put_seq(*obj, index, value, after.id, conflict, false)
+                patch_log.put_seq(*obj, index, value, after.id, conflict, false)
             }
             index + 1
         }
         Patch::Old { before, after } => {
             if !before.conflict && after.conflict {
-                history.flag_conflict_seq(*obj, index);
+                patch_log.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                history.increment_seq(*obj, index, n, after.id);
+                patch_log.increment_seq(*obj, index, n, after.id);
             }
             index + 1
         }
         Patch::Delete(_) => {
-            history.delete_seq(*obj, index, 1);
+            patch_log.delete_seq(*obj, index, 1);
             index
         }
     });
     if let Some(m) = marks.finish() {
-        history.mark(*obj, &m);
+        patch_log.mark(*obj, &m);
     }
 }
 
-fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
@@ -196,28 +197,28 @@ fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index
         }
         Patch::New(op) => {
-            history.splice(*obj, index, op.to_str());
+            patch_log.splice(*obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } => {
-            history.delete_seq(*obj, index, before.width(encoding));
-            history.splice(*obj, index, after.to_str());
+            patch_log.delete_seq(*obj, index, before.width(encoding));
+            patch_log.splice(*obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } => index + after.width(encoding),
         Patch::Delete(before) => {
-            history.delete_seq(*obj, index, before.width(encoding));
+            patch_log.delete_seq(*obj, index, before.width(encoding));
             index
         }
     });
     if let Some(m) = marks.finish() {
-        history.mark(*obj, &m);
+        patch_log.mark(*obj, &m);
     }
 }
 
-fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     diffs: I,
 ) {
@@ -226,27 +227,27 @@ fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .for_each(|(key, patch)| match patch {
             Patch::New(op) => {
                 let value = op.value_at(Some(op.clock)).into();
-                history.put_map(*obj, key, value, op.id, op.conflict, false)
+                patch_log.put_map(*obj, key, value, op.id, op.conflict, false)
             }
             Patch::Update { before, after } => {
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
                     let value = after.value_at(Some(after.clock)).into();
-                    history.put_map(*obj, key, value, after.id, conflict, true)
+                    patch_log.put_map(*obj, key, value, after.id, conflict, true)
                 } else {
                     let value = after.value_at(Some(after.clock)).into();
-                    history.put_map(*obj, key, value, after.id, conflict, false)
+                    patch_log.put_map(*obj, key, value, after.id, conflict, false)
                 }
             }
             Patch::Old { before, after } => {
                 if !before.conflict && after.conflict {
-                    history.flag_conflict_map(*obj, key);
+                    patch_log.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    history.increment_map(*obj, key, n, after.id);
+                    patch_log.increment_map(*obj, key, n, after.id);
                 }
             }
-            Patch::Delete(_) => history.delete_map(*obj, key),
+            Patch::Delete(_) => patch_log.delete_map(*obj, key),
             Patch::Mark(_, _) => {}
         });
 }
@@ -618,7 +619,7 @@ mod tests {
 
     use crate::{
         marks::Mark, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch,
-        PatchAction, Prop, ScalarValue, Value, VecOpObserver, ROOT,
+        PatchAction, Prop, ScalarValue, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -751,9 +752,7 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -785,9 +784,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -820,9 +817,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -864,9 +859,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -900,9 +893,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         assert_eq!(exp(patches), vec![],);
     }
@@ -915,9 +906,7 @@ mod tests {
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -938,9 +927,7 @@ mod tests {
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -962,9 +949,7 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -988,9 +973,7 @@ mod tests {
         doc.increment(ROOT, "key", 5).unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -1011,9 +994,7 @@ mod tests {
         let heads2 = doc.get_heads();
         doc.increment(ROOT, "key", 5).unwrap();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -1040,9 +1021,7 @@ mod tests {
         doc.insert(&list, 3, 35).unwrap();
         doc.delete(&list, 0).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
         assert_eq!(
             exp(patches),
             vec![
@@ -1082,9 +1061,7 @@ mod tests {
         doc.insert(&list, 1, 27).unwrap();
         doc.insert(&list, 1, 28).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc.diff(&heads1, &heads2);
         assert_eq!(
             exp(patches),
             vec![ObservedPatch {
@@ -1124,9 +1101,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         assert_eq!(
             exp(patches),
@@ -1215,9 +1190,7 @@ mod tests {
         doc1.put(&list, 2, 0).unwrap();
         doc1.put(&list, 3, 0).unwrap();
 
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
 
         let exp = exp(patches);
         assert_eq!(
@@ -1291,9 +1264,7 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2);
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1318,9 +1289,7 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1
-            .diff(&heads1a, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1a, &heads2);
         let exp2 = exp(patches);
         assert_eq!(
             exp2.get(0),
@@ -1334,9 +1303,7 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1
-            .diff(&heads1b, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1b, &heads2);
         let exp3 = exp(patches);
         assert_eq!(
             exp3.get(0),
@@ -1386,9 +1353,7 @@ mod tests {
 
         let heads2b = doc1.get_heads();
 
-        let patches = doc1
-            .diff(&heads1, &heads2a, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads1, &heads2a);
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1402,9 +1367,7 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1
-            .diff(&heads2a, &heads2b, VecOpObserver::default())
-            .take_patches();
+        let patches = doc1.diff(&heads2a, &heads2b);
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1434,9 +1397,7 @@ mod tests {
         .unwrap();
 
         let heads2 = doc1.get_heads();
-        let patches12 = doc1
-            .diff(&heads1, &heads2, VecOpObserver::default())
-            .take_patches();
+        let patches12 = doc1.diff(&heads1, &heads2);
         let exp1 = exp(patches12);
         assert_eq!(
             exp1,
@@ -1451,9 +1412,7 @@ mod tests {
             }]
         );
 
-        let patches21 = doc1
-            .diff(&heads2, &heads1, VecOpObserver::default())
-            .take_patches();
+        let patches21 = doc1.diff(&heads2, &heads1);
         let exp2 = exp(patches21);
         assert_eq!(
             exp2,

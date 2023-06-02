@@ -1,17 +1,18 @@
+use automerge::patches::TextRepresentation;
 use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
-use automerge::VecOpObserver;
 use automerge::ROOT;
-use automerge::{Patch, PatchAction};
+use automerge::{Patch, PatchAction, PatchLog};
 
 fn main() {
     let mut doc = Automerge::new();
 
     // a simple scalar change in the root object
     let mut result = doc
-        .transact_observed_with::<_, _, AutomergeError, _, VecOpObserver>(
+        .transact_and_log_patches_with::<_, _, AutomergeError, _>(
+            TextRepresentation::String,
             |_result| CommitOptions::default(),
             |tx| {
                 tx.put(ROOT, "hello", "world").unwrap();
@@ -19,9 +20,9 @@ fn main() {
             },
         )
         .unwrap();
-    get_changes(&doc, result.op_observer.take_patches());
+    get_changes(&doc, doc.make_patches(&mut result.patch_log));
 
-    let mut tx = doc.transaction_with_observer(VecOpObserver::default());
+    let mut tx = doc.transaction_log_patches(PatchLog::active(TextRepresentation::String));
     let map = tx
         .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();
@@ -36,8 +37,8 @@ fn main() {
     tx.insert(&list, 1, "woo").unwrap();
     let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
     tx.put(&m, "hi", 2).unwrap();
-    let patches = tx.observer().take_patches();
-    let _heads3 = tx.commit_with(CommitOptions::default());
+    let (_heads3, mut patch_log) = tx.commit_with(CommitOptions::default());
+    let patches = doc.make_patches(&mut patch_log);
     get_changes(&doc, patches);
 }
 

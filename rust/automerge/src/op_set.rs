@@ -4,7 +4,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpId, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+    self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
 use crate::query::TreeQuery;
@@ -144,22 +144,22 @@ impl OpSetInternal {
             .unwrap_or_default()
     }
 
-    pub(crate) fn find_op_with_observer<'a>(
+    pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
         obj: &ObjMeta,
         op: &'a Op,
-    ) -> FoundOpWithObserver<'a> {
+    ) -> FoundOpWithPatchLog<'a> {
         if let Some(tree) = self.trees.get(&obj.id) {
             tree.internal
-                .find_op_with_observer(op, obj.encoding, &self.m)
+                .find_op_with_patch_log(op, obj.encoding, &self.m)
         } else {
             Default::default()
         }
     }
 
-    pub(crate) fn find_op_without_observer(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutObserver {
+    pub(crate) fn find_op_without_patch_log(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutPatchLog {
         if let Some(tree) = self.trees.get(obj) {
-            tree.internal.find_op_without_observer(op, &self.m)
+            tree.internal.find_op_without_patch_log(op, &self.m)
         } else {
             Default::default()
         }
@@ -583,8 +583,8 @@ pub(crate) mod tests {
     fn seek_on_page_boundary() {
         let (set, new_op) = optree_with_only_internally_visible_ops();
 
-        let q1 = set.find_op_without_observer(&ObjId::root(), &new_op);
-        let q2 = set.find_op_with_observer(&ObjMeta::root(), &new_op);
+        let q1 = set.find_op_without_patch_log(&ObjId::root(), &new_op);
+        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), &new_op);
 
         // we've inserted `B - 1` elements for "a", so the index should be `B`
         assert_eq!(q1.pos, B);

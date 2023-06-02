@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use itertools::Itertools;
 
 use crate::{
-    history::History,
     marks::{Mark, MarkStateMachine},
+    patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
@@ -23,41 +23,37 @@ struct Put<'a> {
     id: OpId,
 }
 
-/// Traverse the "current" state of the document, notifying `observer`
+/// Traverse the "current" state of the document, logging patches to `patch_log`.
 ///
 /// The "current" state of the document is the set of visible operations. This function will
-/// traverse that set of operations and call the corresponding methods on the `observer` as it
-/// encounters values. The `observer` methods will be called in the order in which they appear in
-/// the document. That is to say that the observer will be notified of parent objects before the
-/// objects they contain and elements of a sequence will be notified in the order they occur.
+/// traverse that set of operations and add corresponding patches to `patch_log` as it encounters
+/// values.
 ///
-/// Due to only notifying of visible operations the observer will only be called with `put`,
+/// Due to only notifying of visible operations the [`PatchLog`] will only be called with `put`,
 /// `insert`, and `splice`, operations.
-
-pub(crate) fn observe_current_state(doc: &Automerge, history: &mut History) {
+pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLog) {
     // The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
     // ordered by key (which means by their position in a sequence for sequences).
     //
     // Effectively then we iterate over each object, then we group the operations in the object by
-    // key and for each key find the visible operations for that key. Then we notify the observer
+    // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
     for (obj, typ, ops) in doc.ops().iter_objs() {
-        if typ == ObjType::Text && !doc.text_as_seq() {
-            observe_text(doc, history, obj, ops)
+        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_patches(doc, patch_log, obj, ops)
         } else if typ.is_sequence() {
-            observe_list(doc, history, obj, ops);
+            log_list_patches(doc, patch_log, obj, ops);
         } else {
-            observe_map(doc, history, obj, ops);
+            log_map_patches(doc, patch_log, obj, ops);
         }
     }
 }
 
-fn observe_text<'a, I: Iterator<Item = &'a Op>>(
+fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
@@ -89,16 +85,13 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>>(
             }
             state
         });
-    history.splice(*obj, 0, state.text.as_str());
-    history.mark(*obj, &state.finished);
-    //observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
-    //observer.mark(doc, exid, state.finished.into_iter());
+    patch_log.splice(*obj, 0, state.text.as_str());
+    patch_log.mark(*obj, &state.finished);
 }
 
-fn observe_list<'a, I: Iterator<Item = &'a Op>>(
+fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
@@ -141,15 +134,12 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            history.insert(*obj, index, value.clone().into(), opid, conflict);
-            //let tagged_value = (value, doc.id_to_exid(opid));
-            //observer.insert(doc, exid.clone(), index, tagged_value, conflict);
+            patch_log.insert(*obj, index, value.clone().into(), opid, conflict);
         });
-    history.mark(*obj, &finished);
-    ////observer.mark(doc, exid, finished.into_iter());
+    patch_log.mark(*obj, &finished);
 }
 
-fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
     (key, key_ops): (Key, I),
 ) -> Option<(usize, Put<'a>)> {
     key_ops
@@ -177,33 +167,24 @@ fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
         .last()
 }
 
-fn observe_map<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_patches<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
-    //let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
-        .filter_map(observe_map_key)
-        //.filter_map(|(i, put)| {
+        .filter_map(log_map_key_patches)
         .for_each(|(i, put)| {
-            //let tagged_value = (put.value.clone(), doc.id_to_exid(put.id));
             if let Some(prop_index) = put.key.prop_index() {
                 if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
                     let conflict = i > 0;
-                    history.put_map(*obj, key, put.value.into(), put.id, conflict, false);
+                    patch_log.put_map(*obj, key, put.value.into(), put.id, conflict, false);
                 }
             }
-            //let prop = Prop::Map(key.to_string());
-            //Some((tagged_value, prop, conflict))
         });
-    //.for_each(|(tagged_value, prop, conflict)| {
-    //observer.put(doc, exid.clone(), prop, tagged_value, conflict);
-    //});
 }
 
 #[cfg(test)]
@@ -211,29 +192,29 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        marks::Mark, op_observer::TextRepresentation, transaction::Transactable, Automerge,
-        ObjType, OpObserver, Prop, ReadDoc, Value,
+        patches::{PatchLog, TextRepresentation},
+        transaction::Transactable,
+        Automerge, ObjType, Patch, PatchAction, Prop, Value,
     };
-    //use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
-    // Observer ops often carry a "tagged value", which is a value and the OpID of the op which
+    // Patches often carry a "tagged value", which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don't care about the
     // opid. This type implements `PartialEq` for the `Untagged` variant by ignoring the tag, which
     // allows us to express tests which don't care about the tag.
     #[derive(Clone, Debug)]
-    enum ObservedValue {
+    enum PatchValue {
         Tagged(crate::Value<'static>, crate::ObjId),
         Untagged(crate::Value<'static>),
     }
 
-    impl<'a> From<(Value<'a>, crate::ObjId)> for ObservedValue {
+    impl<'a> From<(Value<'a>, crate::ObjId)> for PatchValue {
         fn from(value: (Value<'a>, crate::ObjId)) -> Self {
             Self::Tagged(value.0.into_owned(), value.1)
         }
     }
 
-    impl PartialEq<ObservedValue> for ObservedValue {
-        fn eq(&self, other: &ObservedValue) -> bool {
+    impl PartialEq<PatchValue> for PatchValue {
+        fn eq(&self, other: &PatchValue) -> bool {
             match (self, other) {
                 (Self::Tagged(v1, o1), Self::Tagged(v2, o2)) => equal_vals(v1, v2) && o1 == o2,
                 (Self::Untagged(v1), Self::Untagged(v2)) => equal_vals(v1, v2),
@@ -257,17 +238,17 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    enum ObserverCall {
+    enum ObservedPatch {
         Put {
             obj: crate::ObjId,
             prop: Prop,
-            value: ObservedValue,
+            value: PatchValue,
             conflict: bool,
         },
         Insert {
             obj: crate::ObjId,
             index: usize,
-            value: ObservedValue,
+            value: PatchValue,
         },
         SpliceText {
             obj: crate::ObjId,
@@ -276,12 +257,76 @@ mod tests {
         },
     }
 
-    // A Vec<ObserverCall> is pretty hard to look at in a test failure. This wrapper prints the
+    // A Vec<ObservedPatch> is pretty hard to look at in a test failure. This wrapper prints the
     // calls out in a nice table so it's easier to see what's different
     #[derive(Clone, PartialEq)]
-    struct Calls(Vec<ObserverCall>);
+    struct Patches(Vec<ObservedPatch>);
 
-    impl std::fmt::Debug for Calls {
+    impl From<Vec<Patch>> for Patches {
+        fn from(patches: Vec<Patch>) -> Self {
+            let oc = patches.into_iter().fold(Vec::new(), |mut acc, patch| {
+                match patch {
+                    Patch {
+                        obj,
+                        action: PatchAction::SpliceText { index, value },
+                        ..
+                    } => acc.push(ObservedPatch::SpliceText {
+                        obj,
+                        index,
+                        chars: value.make_string(),
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutMap {
+                                key,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } => acc.push(ObservedPatch::Put {
+                        obj,
+                        prop: key.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutSeq {
+                                index,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } => acc.push(ObservedPatch::Put {
+                        obj,
+                        prop: index.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action: PatchAction::Insert { index, values, .. },
+                        ..
+                    } => {
+                        for (i, v) in values.iter().enumerate() {
+                            acc.push(ObservedPatch::Insert {
+                                obj: obj.clone(),
+                                index: index + i,
+                                value: v.clone().into(),
+                            })
+                        }
+                    }
+                    _ => panic!("Current state should only log put, splice, and insert ops"),
+                };
+                acc
+            });
+            Patches(oc)
+        }
+    }
+
+    impl std::fmt::Debug for Patches {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let mut table = prettytable::Table::new();
             table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -290,7 +335,7 @@ mod tests {
             ]);
             for call in &self.0 {
                 match call {
-                    ObserverCall::Put {
+                    ObservedPatch::Put {
                         obj,
                         prop,
                         value,
@@ -301,25 +346,25 @@ mod tests {
                             format!("{}", obj),
                             prop,
                             match value {
-                                ObservedValue::Tagged(v, o) => format!("{} ({})", v, o),
-                                ObservedValue::Untagged(v) => format!("{}", v),
+                                PatchValue::Tagged(v, o) => format!("{} ({})", v, o),
+                                PatchValue::Untagged(v) => format!("{}", v),
                             },
                             conflict
                         ]);
                     }
-                    ObserverCall::Insert { obj, index, value } => {
+                    ObservedPatch::Insert { obj, index, value } => {
                         table.add_row(prettytable::row![
                             "Insert",
                             format!("{}", obj),
                             index,
                             match value {
-                                ObservedValue::Tagged(v, o) => format!("{} ({})", v, o),
-                                ObservedValue::Untagged(v) => format!("{}", v),
+                                PatchValue::Tagged(v, o) => format!("{} ({})", v, o),
+                                PatchValue::Untagged(v) => format!("{}", v),
                             },
                             ""
                         ]);
                     }
-                    ObserverCall::SpliceText { obj, index, chars } => {
+                    ObservedPatch::SpliceText { obj, index, chars } => {
                         table.add_row(prettytable::row![
                             "SpliceText",
                             format!("{}", obj),
@@ -336,103 +381,6 @@ mod tests {
         }
     }
 
-    struct ObserverStub {
-        ops: Vec<ObserverCall>,
-    }
-
-    impl ObserverStub {
-        fn new() -> Self {
-            Self { ops: Vec::new() }
-        }
-
-        /*
-                fn new_text_v2() -> Self {
-                    Self {
-                        ops: Vec::new(),
-                    }
-                }
-        */
-    }
-
-    impl OpObserver for ObserverStub {
-        fn insert<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            index: usize,
-            tagged_value: (crate::Value<'_>, crate::ObjId),
-            _conflict: bool,
-        ) {
-            self.ops.push(ObserverCall::Insert {
-                obj: objid,
-                index,
-                value: tagged_value.into(),
-            });
-        }
-
-        fn splice_text<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            index: usize,
-            value: &str,
-        ) {
-            self.ops.push(ObserverCall::SpliceText {
-                obj: objid,
-                index,
-                chars: value.to_string(),
-            });
-        }
-
-        fn put<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            prop: crate::Prop,
-            tagged_value: (crate::Value<'_>, crate::ObjId),
-            conflict: bool,
-        ) {
-            self.ops.push(ObserverCall::Put {
-                obj: objid,
-                prop,
-                value: tagged_value.into(),
-                conflict,
-            });
-        }
-
-        fn increment<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _prop: crate::Prop,
-            _tagged_value: (i64, crate::ObjId),
-        ) {
-            panic!("increment not expected");
-        }
-
-        fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: crate::ObjId, _key: &str) {
-            panic!("delete not expected");
-        }
-
-        fn delete_seq<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _index: usize,
-            _num: usize,
-        ) {
-            panic!("delete not expected");
-        }
-
-        fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _mark: M,
-        ) {
-        }
-    }
-
     #[test]
     fn basic_test() {
         let mut doc = crate::AutoCommit::new();
@@ -444,51 +392,50 @@ mod tests {
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::default());
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "key".into(),
-                    value: ObservedValue::Untagged("value".into()),
+                    value: PatchValue::Untagged("value".into()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "map".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "text".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: map.clone(),
                     prop: "nested_key".into(),
-                    value: ObservedValue::Untagged("value".into()),
+                    value: PatchValue::Untagged("value".into()),
                     conflict: false,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: 0,
-                    value: ObservedValue::Untagged("value".into()),
+                    value: PatchValue::Untagged("value".into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: text,
                     index: 0,
-                    value: ObservedValue::Untagged("a".into()),
+                    value: PatchValue::Untagged("a".into()),
                 },
             ])
         );
@@ -519,28 +466,27 @@ mod tests {
             .unwrap();
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::default());
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "map".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                     conflict: false,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "text".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: false,
                 },
             ])
@@ -555,20 +501,19 @@ mod tests {
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "text".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: false,
                 },
-                ObserverCall::SpliceText {
+                ObservedPatch::SpliceText {
                     obj: text,
                     index: 0,
                     chars: "abgef".to_string()
@@ -593,16 +538,15 @@ mod tests {
 
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![ObservedPatch::Put {
                 obj: crate::ROOT,
                 prop: "key".into(),
-                value: ObservedValue::Untagged(Value::Scalar(Cow::Owned(
+                value: PatchValue::Untagged(Value::Scalar(Cow::Owned(
                     crate::ScalarValue::Counter(6.into())
                 ))),
                 conflict: true,
@@ -618,28 +562,27 @@ mod tests {
         doc.insert(&list, 0, 1).unwrap();
         doc.insert(&list, 1, 2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: 0,
-                    value: ObservedValue::Untagged(1.into()),
+                    value: PatchValue::Untagged(1.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: 1,
-                    value: ObservedValue::Untagged(2.into()),
+                    value: PatchValue::Untagged(2.into()),
                 },
             ])
         );
@@ -657,28 +600,27 @@ mod tests {
         doc2.insert(&list, 0, 2).unwrap();
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: 0,
-                    value: ObservedValue::Untagged(2.into()),
+                    value: PatchValue::Untagged(2.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: 1,
-                    value: ObservedValue::Untagged(1.into()),
+                    value: PatchValue::Untagged(1.into()),
                 },
             ])
         );
@@ -693,28 +635,27 @@ mod tests {
         let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
         doc.put(&map, "key", "value").unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let patches = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(patches),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: 0,
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: map,
                     prop: "key".into(),
-                    value: ObservedValue::Untagged("value".into()),
+                    value: PatchValue::Untagged("value".into()),
                     conflict: false
                 },
             ])
@@ -734,27 +675,26 @@ mod tests {
 
         doc.set_text_rep(TextRepresentation::String);
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let patches = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![
-                ObserverCall::Put {
+            Patches::from(patches),
+            Patches(vec![
+                ObservedPatch::Put {
                     obj: crate::ROOT,
                     prop: "list".into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: false,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: 0,
-                    value: ObservedValue::Untagged("three".into()),
+                    value: PatchValue::Untagged("three".into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: 1,
-                    value: ObservedValue::Untagged("four".into()),
+                    value: PatchValue::Untagged("four".into()),
                 },
             ])
         );
@@ -766,23 +706,24 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut obs = ObserverStub::new();
+        let mut patch_log = PatchLog::active(TextRepresentation::String);
         let _doc = Automerge::load_with(
             &fixture("counter_value_is_ok.automerge"),
             crate::OnPartialLoad::Error,
             crate::storage::VerificationMode::Check,
-            Some(&mut obs),
-            TextRepresentation::default(),
-        );
+            &mut patch_log,
+        )
+        .unwrap();
+        let p = _doc.make_patches(&mut patch_log);
 
         assert_eq!(
-            Calls(obs.ops),
-            Calls(vec![ObserverCall::Put {
+            Patches::from(p),
+            Patches(vec![ObservedPatch::Put {
                 obj: crate::ROOT,
                 prop: "a".into(),
-                value: ObservedValue::Untagged(crate::ScalarValue::Counter(2000.into()).into()),
+                value: PatchValue::Untagged(crate::ScalarValue::Counter(2000.into()).into()),
                 conflict: false,
-            },])
+            }])
         );
     }
 }

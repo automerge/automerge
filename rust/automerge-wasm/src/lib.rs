@@ -30,7 +30,7 @@ use am::transaction::CommitOptions;
 use am::transaction::Transactable;
 use am::ScalarValue;
 use automerge as am;
-use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
+use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -76,11 +76,11 @@ impl std::default::Default for TextRepresentation {
     }
 }
 
-impl From<TextRepresentation> for am::op_observer::TextRepresentation {
+impl From<TextRepresentation> for am::patches::TextRepresentation {
     fn from(tr: TextRepresentation) -> Self {
         match tr {
-            TextRepresentation::Array => am::op_observer::TextRepresentation::Array,
-            TextRepresentation::String => am::op_observer::TextRepresentation::String,
+            TextRepresentation::Array => am::patches::TextRepresentation::Array,
+            TextRepresentation::String => am::patches::TextRepresentation::String,
         }
     }
 }
@@ -593,7 +593,7 @@ impl Automerge {
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
 
-        let patches = self.doc.diff_incremental::<VecOpObserver>().take_patches();
+        let patches = self.doc.diff_incremental();
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
@@ -610,13 +610,13 @@ impl Automerge {
         Ok((object.into(), patches))
     }
 
-    #[wasm_bindgen(js_name = popPatches)]
-    pub fn pop_patches(&mut self) -> Result<Array, error::PopPatches> {
+    #[wasm_bindgen(js_name = diffIncremental)]
+    pub fn diff_incremental(&mut self) -> Result<Array, error::PopPatches> {
         // transactions send out observer updates as they occur, not waiting for them to be
         // committed.
         // If we pop the patches then we won't be able to revert them.
 
-        let patches = self.doc.diff_incremental::<VecOpObserver>().take_patches();
+        let patches = self.doc.diff_incremental();
         let result = Array::new();
         for p in patches {
             result.push(&interop::JsPatch(p).try_into()?);
@@ -624,15 +624,13 @@ impl Automerge {
         Ok(result)
     }
 
-    #[wasm_bindgen(js_name = truncatePatches)]
-    pub fn truncate_patches(&mut self) {
-        // FIXME - im using different names / analogies here
+    #[wasm_bindgen(js_name = updateDiffCursor)]
+    pub fn update_diff_cursor(&mut self) {
         self.doc.update_diff_cursor();
     }
 
-    #[wasm_bindgen(js_name = resetPatches)]
-    pub fn reset_patches(&mut self) {
-        // FIXME - im using different names / analogies here
+    #[wasm_bindgen(js_name = resetDiffCursor)]
+    pub fn reset_diff_cursor(&mut self) {
         self.doc.reset_diff_cursor();
     }
 
@@ -640,10 +638,7 @@ impl Automerge {
         let before = get_heads(Some(before))?.unwrap();
         let after = get_heads(Some(after))?.unwrap();
 
-        let patches = self
-            .doc
-            .diff(&before, &after, VecOpObserver::default())
-            .take_patches();
+        let patches = self.doc.diff(&before, &after);
         Ok(interop::JsPatches(patches).try_into()?)
     }
 
@@ -702,7 +697,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
         let deps: Vec<_> = JS(have_deps).try_into()?;
-        let changes = self.doc.get_changes(&deps)?;
+        let changes = self.doc.get_changes(&deps);
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))

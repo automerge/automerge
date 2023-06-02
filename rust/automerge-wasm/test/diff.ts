@@ -147,9 +147,9 @@ describe('Automerge', () => {
       let doc1 = create({ actor: "aaaa" })
       let map = doc1.putObject("/", "map", { foo: "bar" });
       let doc2 = doc1.fork("bbbb")
-      doc1.truncatePatches()
+      doc1.updateDiffCursor()
       doc1.putObject("/map", "foo", { from: "doc1", other: 1 })
-      let patches1 = doc1.popPatches();
+      let patches1 = doc1.diffIncremental();
       let heads1 = doc1.getHeads()
       assert.deepStrictEqual(patches1, [
         { action: 'put', path: [ 'map', 'foo' ], value: {} },
@@ -159,7 +159,7 @@ describe('Automerge', () => {
       doc2.putObject("/map", "foo", { from: "doc2", something: 2 })
       doc1.put("/map/foo", "other", 10);
       doc1.merge(doc2)
-      let patches2 = doc1.popPatches();
+      let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
       assert.deepStrictEqual(patches2, [
         { action: 'put', path: [ 'map', 'foo' ], value: {} },
@@ -168,7 +168,7 @@ describe('Automerge', () => {
       ])
       doc2.delete("/map", "foo")
       doc1.merge(doc2)
-      let patches3 = doc1.popPatches();
+      let patches3 = doc1.diffIncremental();
       let heads3 = doc1.getHeads()
       assert.deepStrictEqual(patches3, [
         { action: 'put', path: [ 'map', 'foo' ], value: {} },
@@ -183,10 +183,10 @@ describe('Automerge', () => {
       let doc1 = create({ actor: "aaaa" })
       let list = doc1.putObject("/", "list", [ 0 ,1, 2 ]);
       let doc2 = doc1.fork("bbbb")
-      doc1.truncatePatches()
+      doc1.updateDiffCursor()
       let heads1 = doc1.getHeads()
       doc1.putObject("/list", 1, { from: "doc1", other: 1 })
-      let patches1 = doc1.popPatches();
+      let patches1 = doc1.diffIncremental();
       assert.deepStrictEqual(patches1, [
         { action: 'put', path: [ 'list', 1 ], value: {} },
         { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc1' },
@@ -195,7 +195,7 @@ describe('Automerge', () => {
       doc2.putObject("/list", 1, { from: "doc2", something: 2 })
       doc1.put("/list/1", "other", 10);
       doc1.merge(doc2)
-      let patches2 = doc1.popPatches();
+      let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
       assert.deepStrictEqual(patches2, [
         { action: 'put', path: [ 'list', 1 ], value: {} },
@@ -204,7 +204,7 @@ describe('Automerge', () => {
       ])
       doc2.delete("/list", 1)
       doc1.merge(doc2)
-      let patches3 = doc1.popPatches();
+      let patches3 = doc1.diffIncremental();
       let heads3 = doc1.getHeads()
       assert.deepStrictEqual(patches3, [
         { action: 'put', path: [ 'list', 1 ], value: {} },

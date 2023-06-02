@@ -221,9 +221,9 @@ export class Automerge {
   // patches
   enableFreeze(enable: boolean): boolean;
   registerDatatype(datatype: string, callback: Function): void;
-  popPatches(): Patch[];
-  truncatePatches(): void;
-  resetPatches(): void;
+  diffIncremental(): Patch[];
+  updateDiffCursor(): void;
+  resetDiffCursor(): void;
 
   // save and load to local store
   save(): Uint8Array;

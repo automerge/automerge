@@ -105,32 +105,35 @@ fn test_save_incremental() -> Result<(), AutomergeError> {
     tx.commit();
 
     let save1 = doc.save();
+    let save1_heads = doc.get_heads();
 
     let mut tx = doc.transaction();
     tx.put(ROOT, "bar", 2)?;
     tx.commit();
 
-    let save2 = doc.save_incremental();
+    let save2 = doc.save_after(&save1_heads);
+    let save2_heads = doc.get_heads();
 
     let mut tx = doc.transaction();
     tx.put(ROOT, "baz", 3)?;
     tx.commit();
 
-    let save3 = doc.save_incremental();
+    let save3 = doc.save_after(&save2_heads);
+    let save3_heads = doc.get_heads();
 
     let mut save_a: Vec<u8> = vec![];
     save_a.extend(&save1);
     save_a.extend(&save2);
     save_a.extend(&save3);
 
-    assert!(doc.save_incremental().is_empty());
+    assert!(doc.save_after(&save3_heads).is_empty());
 
     let save_b = doc.save();
 
     assert!(save_b.len() < save_a.len());
 
-    let mut doc_a = Automerge::load(&save_a)?;
-    let mut doc_b = Automerge::load(&save_b)?;
+    let doc_a = Automerge::load(&save_a)?;
+    let doc_b = Automerge::load(&save_b)?;
 
     assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
@@ -1376,7 +1379,7 @@ fn load_broken_list() {
     }
     tx.commit();
     let bytes = doc.save();
-    let mut doc2 = Automerge::load(&bytes).unwrap();
+    let doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1385,7 +1388,6 @@ fn load_broken_list() {
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);
     assert_eq!(doc.deps, doc2.deps);
-    assert_eq!(doc.saved, doc2.saved);
     assert_eq!(doc.ops, doc2.ops);
     assert_eq!(doc.max_op, doc2.max_op);
 
@@ -1426,7 +1428,7 @@ fn load_broken_list_short() {
     }
     tx.commit();
     let bytes = doc.save();
-    let mut doc2 = Automerge::load(&bytes).unwrap();
+    let doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1435,7 +1437,6 @@ fn load_broken_list_short() {
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);
     assert_eq!(doc.deps, doc2.deps);
-    assert_eq!(doc.saved, doc2.saved);
     assert_eq!(doc.ops, doc2.ops);
     assert_eq!(doc.max_op, doc2.max_op);
 
@@ -1646,7 +1647,7 @@ fn observe_counter_change_application_overwrite() {
     doc3.merge(&mut doc2).unwrap();
 
     assert_eq!(
-        doc3.diff_incremental::<VecOpObserver>().take_patches(),
+        doc3.diff_incremental(),
         vec![Patch {
             obj: ExId::Root,
             path: vec![],
@@ -1666,10 +1667,7 @@ fn observe_counter_change_application_overwrite() {
     doc4.merge(&mut doc1).unwrap();
 
     // no patches as the increments operate on an invisible counter
-    assert_eq!(
-        doc4.diff_incremental::<VecOpObserver>().take_patches(),
-        vec![]
-    );
+    assert_eq!(doc4.diff_incremental(), vec![]);
 }
 
 #[test]
@@ -1678,7 +1676,7 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
+    let changes = doc.get_changes(&[]).into_iter().cloned();
 
     let mut new_doc = AutoCommit::new();
     // make a new change to the doc to stop the empty doc logic from skipping the intermediate
@@ -1689,8 +1687,7 @@ fn observe_counter_change_application() {
     new_doc.apply_changes(changes).unwrap();
     assert_eq!(
         new_doc
-            .diff_incremental::<VecOpObserver>()
-            .take_patches()
+            .diff_incremental()
             .into_iter()
             .map(|p| p.action)
             .collect::<Vec<_>>(),
@@ -1723,5 +1720,5 @@ fn get_changes_heads_empty() {
     doc.put(ROOT, "key2", 1).unwrap();
     doc.commit();
     let heads = doc.get_heads();
-    assert_eq!(doc.get_changes(&heads).unwrap(), Vec::<&Change>::new());
+    assert_eq!(doc.get_changes(&heads), Vec::<&Change>::new());
 }
