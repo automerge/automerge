@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::patch_log::PatchLog;
+use crate::patches::PatchLog;
 use crate::AutomergeError;
 use crate::{Automerge, ChangeHash, Cursor, ObjType, Prop, ReadDoc, ScalarValue, Value};
 

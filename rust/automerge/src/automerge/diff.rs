@@ -8,7 +8,7 @@ use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
-    patch_log::PatchLog,
+    patches::PatchLog,
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
@@ -118,12 +118,7 @@ impl<'a> Patch<'a> {
     }
 }
 
-pub(crate) fn observe_diff(
-    doc: &Automerge,
-    before: &Clock,
-    after: &Clock,
-    patch_log: &mut PatchLog,
-) {
+pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
@@ -131,16 +126,16 @@ pub(crate) fn observe_diff(
             .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
         if typ == ObjType::Text && !doc.text_as_seq() {
-            observe_text_diff(doc, patch_log, obj, diffs)
+            log_text_diff(doc, patch_log, obj, diffs)
         } else if typ.is_sequence() {
-            observe_list_diff(doc, patch_log, obj, diffs);
+            log_list_diff(doc, patch_log, obj, diffs);
         } else {
-            observe_map_diff(doc, patch_log, obj, diffs);
+            log_map_diff(doc, patch_log, obj, diffs);
         }
     }
 }
 
-fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -187,7 +182,7 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     }
 }
 
-fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -220,7 +215,7 @@ fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     }
 }
 
-fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,

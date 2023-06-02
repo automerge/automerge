@@ -1,4 +1,4 @@
-use crate::patch_log::PatchLog;
+use crate::patches::PatchLog;
 use crate::ChangeHash;
 
 /// The result of a successful, and committed, transaction.

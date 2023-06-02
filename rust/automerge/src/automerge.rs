@@ -11,10 +11,9 @@ use crate::exid::ExId;
 use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{Patch, TextRepresentation};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
-use crate::patch_log::PatchLog;
+use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
 use crate::types::{
@@ -550,7 +549,7 @@ impl Automerge {
             }
         }
         if patch_log.is_active() {
-            current_state::observe_current_state(&am, patch_log);
+            current_state::log_current_state_patches(&am, patch_log);
         }
         Ok(am)
     }
@@ -567,7 +566,7 @@ impl Automerge {
     /// This is a convienence method for `doc.diff(&[], current_heads)`
     pub fn current_state(&self) -> Vec<Patch> {
         let mut patch_log = PatchLog::active();
-        current_state::observe_current_state(self, &mut patch_log);
+        current_state::log_current_state_patches(self, &mut patch_log);
         patch_log.make_patches(self)
     }
 
@@ -599,7 +598,7 @@ impl Automerge {
             )?;
             doc = doc.with_actor(self.actor_id());
             if patch_log.is_active() {
-                current_state::observe_current_state(&doc, patch_log);
+                current_state::log_current_state_patches(&doc, patch_log);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -1065,11 +1064,11 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj)?;
-            let found = self.ops.find_op_with_observer(&obj, &op);
-            found.observe(&obj, &op, self, patch_log);
+            let found = self.ops.find_op_with_patch_log(&obj, &op);
+            found.log_patches(&obj, &op, self, patch_log);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.find_op_without_observer(obj, &op);
+            let found = self.ops.find_op_without_patch_log(obj, &op);
             (found.pos, found.succ)
         };
 
@@ -1088,7 +1087,7 @@ impl Automerge {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
         let mut patch_log = PatchLog::active();
-        diff::observe_diff(self, &before, &after, &mut patch_log);
+        diff::log_diff(self, &before, &after, &mut patch_log);
         patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)
     }

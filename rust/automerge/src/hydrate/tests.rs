@@ -1,5 +1,5 @@
 use crate::hydrate;
-use crate::op_observer::TextRepresentation;
+use crate::patches::TextRepresentation;
 use crate::text_value::TextValue;
 use crate::transaction::Transactable;
 use crate::*;

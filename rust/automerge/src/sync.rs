@@ -72,7 +72,7 @@ use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    patch_log::PatchLog,
+    patches::PatchLog,
     storage::{parse, Change as StoredChange, ReadChangeOpError},
     Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
 };

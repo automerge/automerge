@@ -3,11 +3,12 @@ use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::Mark;
-use crate::op_observer::OpObserver;
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+
+use super::PatchBuilder;
 
 /// A record of changes made to a document
 ///
@@ -299,19 +300,19 @@ impl PatchLog {
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };
-            Self::observe_inner(&self.events, expose, doc, &read_doc)
+            Self::make_patches_inner(&self.events, expose, doc, &read_doc)
         } else {
-            Self::observe_inner(&self.events, expose, doc, doc)
+            Self::make_patches_inner(&self.events, expose, doc, doc)
         }
     }
 
-    fn observe_inner<R: ReadDoc>(
+    fn make_patches_inner<R: ReadDoc>(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
         doc: &Automerge,
         read_doc: &R,
     ) -> Vec<Patch> {
-        let mut observer = OpObserver::default();
+        let mut patch_builder = PatchBuilder::default();
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
@@ -322,7 +323,7 @@ impl PatchLog {
                 continue;
             }
             // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut observer, doc, read_doc);
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc);
             match event {
                 Event::PutMap {
                     key,
@@ -331,17 +332,17 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    observer.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
+                    patch_builder.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
                 }
                 Event::DeleteMap { key } => {
-                    observer.delete_map(read_doc, exid, key);
+                    patch_builder.delete_map(read_doc, exid, key);
                 }
                 Event::IncrementMap { key, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    observer.increment(read_doc, exid, key.into(), (*n, opid));
+                    patch_builder.increment(read_doc, exid, key.into(), (*n, opid));
                 }
                 Event::FlagConflictMap { key } => {
-                    observer.flag_conflict(read_doc, exid, key.into());
+                    patch_builder.flag_conflict(read_doc, exid, key.into());
                 }
                 Event::PutSeq {
                     index,
@@ -350,7 +351,7 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    observer.put(
+                    patch_builder.put(
                         read_doc,
                         exid,
                         index.into(),
@@ -365,28 +366,30 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    observer.insert(read_doc, exid, *index, (value.into(), opid), *conflict);
+                    patch_builder.insert(read_doc, exid, *index, (value.into(), opid), *conflict);
                 }
                 Event::DeleteSeq { index, num } => {
-                    observer.delete_seq(read_doc, exid, *index, *num);
+                    patch_builder.delete_seq(read_doc, exid, *index, *num);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    observer.increment(read_doc, exid, index.into(), (*n, opid));
+                    patch_builder.increment(read_doc, exid, index.into(), (*n, opid));
                 }
                 Event::FlagConflictSeq { index } => {
-                    observer.flag_conflict(read_doc, exid, index.into());
+                    patch_builder.flag_conflict(read_doc, exid, index.into());
                 }
                 Event::Splice { index, text } => {
-                    observer.splice_text(read_doc, exid, *index, text);
+                    patch_builder.splice_text(read_doc, exid, *index, text);
                 }
-                Event::Mark { mark } => observer.mark(read_doc, exid, mark.clone().into_iter()),
+                Event::Mark { mark } => {
+                    patch_builder.mark(read_doc, exid, mark.clone().into_iter())
+                }
             }
         }
         // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut observer, doc, read_doc);
+        expose_queue.flush_queue(&mut patch_builder, doc, read_doc);
 
-        observer.take_patches()
+        patch_builder.take_patches()
     }
 
     pub(crate) fn truncate(&mut self) {
@@ -430,7 +433,7 @@ impl ExposeQueue {
     fn pump_queue<R: ReadDoc>(
         &mut self,
         obj: &ExId,
-        observer: &mut OpObserver,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
     ) {
@@ -438,18 +441,18 @@ impl ExposeQueue {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc);
         }
     }
 
     fn flush_queue<R: ReadDoc>(
         &mut self,
-        observer: &mut OpObserver,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc);
         }
     }
 
@@ -464,7 +467,7 @@ impl ExposeQueue {
     fn flush_obj<R: ReadDoc>(
         &mut self,
         exid: ExId,
-        observer: &mut OpObserver,
+        patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
     ) -> Option<()> {
@@ -473,7 +476,7 @@ impl ExposeQueue {
         match doc.ops().object_type(&id)? {
             ObjType::Text if !doc.text_as_seq() => {
                 let text = read_doc.text(&exid).ok()?;
-                observer.splice_text(read_doc, exid, 0, &text);
+                patch_builder.splice_text(read_doc, exid, 0, &text);
             }
             ObjType::List | ObjType::Text => {
                 for ListRangeItem {
@@ -486,7 +489,7 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    observer.insert(read_doc, exid.clone(), index, (value, id), conflict);
+                    patch_builder.insert(read_doc, exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {
@@ -500,7 +503,7 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    observer.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
+                    patch_builder.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
                 }
             }
         }

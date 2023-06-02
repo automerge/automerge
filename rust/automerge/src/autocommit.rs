@@ -6,8 +6,7 @@ use crate::exid::ExId;
 use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::op_observer::TextRepresentation;
-use crate::patch_log::PatchLog;
+use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
@@ -59,7 +58,7 @@ pub struct AutoCommit {
     save_cursor: Vec<ChangeHash>,
 }
 
-/// An autocommit document with no observer
+/// An autocommit document with an inactive [`PatchLog`]
 ///
 /// See [`AutoCommit`]
 impl Default for AutoCommit {
@@ -134,7 +133,7 @@ impl AutoCommit {
         self.doc.make_patches(patch_log)
     }
 
-    /// Generates a diff from `before` to `after` for the given observer.
+    /// Generates a diff from `before` to `after`
     ///
     /// By default the diff requires a sequental scan of all the ops in the doc.
     ///
@@ -151,8 +150,6 @@ impl AutoCommit {
     ///
     /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
     /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
-    ///
-    /// This function returns the observer passed in for convience
     ///
     /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
     /// Normal use might look like:
@@ -179,14 +176,14 @@ impl AutoCommit {
         } else if before.is_empty() && after == heads {
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(after.to_vec());
-            current_state::observe_current_state(&self.doc, &mut patch_log);
+            current_state::log_current_state_patches(&self.doc, &mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
             let before_clock = self.doc.clock_at(before);
             let after_clock = self.doc.clock_at(after);
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(after.to_vec());
-            diff::observe_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
+            diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
         }
     }

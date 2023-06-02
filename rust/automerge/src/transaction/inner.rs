@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
-use crate::patch_log::PatchLog;
+use crate::patches::PatchLog;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds};
