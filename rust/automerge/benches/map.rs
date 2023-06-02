@@ -79,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("repeated put", size), size, |b, &size| {
             b.iter_batched(
                 || repeated_put(size),
-                |mut doc| doc.save(),
+                |doc| doc.save(),
                 criterion::BatchSize::LargeInput,
             )
         });
@@ -89,7 +89,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || repeated_increment(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },
@@ -102,7 +102,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || increasing_put(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },
@@ -115,7 +115,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             |b, &size| {
                 b.iter_batched(
                     || decreasing_put(size),
-                    |mut doc| doc.save(),
+                    |doc| doc.save(),
                     criterion::BatchSize::LargeInput,
                 )
             },

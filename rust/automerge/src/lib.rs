@@ -89,6 +89,18 @@
 //!
 //! See the [`sync`] module.
 //!
+//! ## Patches, maintaining materialized state
+//!
+//! Often you will have some state which represents the "current" state of the document. E.g. some
+//! text in a UI which is a view of a text object in the document. Rather than re-rendering this
+//! text every single time a change comes in you can use a [`PatchLog`] to capture incremental
+//! changes made to the document and then use [`Automerge::make_patches`] to get a set of patches
+//! to apply to the materialized state.
+//!
+//! Many of the methods on [`Automerge`], [`crate::sync::SyncDoc`] and
+//! [`crate::transaction::Transactable`] have a `*_log_patches` variant which allow you to pass in
+//! a [`PatchLog`] to collect these incremental changes.
+//!
 //! ## Serde serialization
 //!
 //! Sometimes you just want to get the JSON value of an automerge document. For

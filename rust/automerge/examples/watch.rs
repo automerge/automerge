@@ -10,7 +10,7 @@ fn main() {
 
     // a simple scalar change in the root object
     let mut result = doc
-        .transact_observed_with::<_, _, AutomergeError, _>(
+        .transact_and_log_patches_with::<_, _, AutomergeError, _>(
             |_result| CommitOptions::default(),
             |tx| {
                 tx.put(ROOT, "hello", "world").unwrap();
@@ -20,7 +20,7 @@ fn main() {
         .unwrap();
     get_changes(&doc, doc.make_patches(&mut result.patch_log));
 
-    let mut tx = doc.transaction_with_patch_log(PatchLog::active());
+    let mut tx = doc.transaction_log_patches(PatchLog::active());
     let map = tx
         .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();

@@ -23,7 +23,7 @@ fn replay_trace_autotx(commands: Vec<(usize, usize, String)>) -> AutoCommit {
     doc
 }
 
-fn save_trace(mut doc: Automerge) {
+fn save_trace(doc: Automerge) {
     doc.save();
 }
 
@@ -70,7 +70,7 @@ fn bench(c: &mut Criterion) {
     );
 
     let commands_len = commands.len();
-    let mut doc = replay_trace_tx(commands.clone());
+    let doc = replay_trace_tx(commands.clone());
     group.bench_with_input(BenchmarkId::new("save", commands_len), &doc, |b, doc| {
         b.iter_batched(|| doc.clone(), save_trace, criterion::BatchSize::LargeInput)
     });

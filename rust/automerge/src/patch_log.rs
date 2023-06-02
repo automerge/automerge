@@ -9,6 +9,34 @@ use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
+/// A record of changes made to a document
+///
+/// It is often necessary to maintain a materialized view of the current state of a document. E.g.
+/// in a text editor you may be rendering the current state a text field in the UI. In order to
+/// efficiently update the state of the materialized view any method which adds operations to the
+/// document has a variant which takes a [`PatchLog`] as an argument. This allows the caller to
+/// record the changes made and then use either [`crate::Automerge::make_patches`] or
+/// [`crate::AutoCommit::make_patches`] to generate a `Vec<Patch>` which can be used to upudate the
+/// materialized view.
+///
+/// A `PatchLog` is a set of _relative_ changes. It represents the changes required to go from the
+/// state at one point in history to another. What those two points are depends on how you use the
+/// log. A typical reason to create a [`PatchLog`] is to record the changes made by remote peers.
+/// Consider this example:
+///
+/// ```no_run
+/// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
+/// SyncState, SyncDoc}};
+/// let doc = AutoCommit::new();
+/// let sync_message: Message = unimplemented!();
+/// let mut sync_state = SyncState::new();
+/// let mut patch_log = PatchLog::active();
+/// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
+///
+/// // These patches represent the changes needed to go from the state of the document before the
+/// // sync message was received, to the state after.
+/// let patches = doc.make_patches(&mut patch_log);
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatchLog {
     events: Vec<(ObjId, Event)>,
@@ -70,6 +98,17 @@ pub(crate) enum Event {
 }
 
 impl PatchLog {
+    /// Create a new [`PatchLog`]
+    ///
+    /// # Arguments
+    ///
+    /// * `active` - If `true` the log will record all changes made to the document. If `false`
+    ///              then no changes will be recorded.
+    ///
+    /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
+    /// which record patches are more expensive, so sometimes you may wish to turn off patch
+    /// logging for parts of the application, but not others; but you don't want to complicate your
+    /// code with an `Option<PatchLog>`. In that case you can use an inactive [`PatchLog`].
     pub fn new(active: bool) -> Self {
         PatchLog {
             active,
@@ -79,10 +118,16 @@ impl PatchLog {
         }
     }
 
+    /// Create a new [`PatchLog`] which doesn't record any changes.
+    ///
+    /// See also: [`PatchLog::new`] for a more detailed explanation.
     pub fn inactive() -> Self {
         Self::new(false)
     }
 
+    /// Create a new [`PatchLog`] which does record changes.
+    ///
+    /// See also: [`PatchLog::new`] for a more detailed explanation.
     pub fn active() -> Self {
         Self::new(true)
     }

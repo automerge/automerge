@@ -26,7 +26,7 @@ impl TextValue {
         }
     }
 
-    pub fn splice_text_value(&mut self, index: usize, value: &TextValue) {
+    pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
         for (n, ch) in value.chars().enumerate() {
             self.0.insert(index + n, ch)
         }
@@ -61,7 +61,7 @@ impl TextValue {
         }
     }
 
-    pub fn splice_text_value(&mut self, index: usize, value: &TextValue) {
+    pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
         for (n, ch) in value.chars().enumerate() {
             self.0.insert(index + n, ch)
         }

@@ -26,7 +26,6 @@ pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
-    // As with `inner` this is an `Option` so we can `take` it during `commit`
     patch_log: PatchLog,
     doc: &'a mut Automerge,
 }

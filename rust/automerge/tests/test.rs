@@ -1577,10 +1577,10 @@ fn regression_insert_opid() {
     let mut new_doc = Automerge::new();
     let mut patch_log = PatchLog::active();
     new_doc
-        .apply_changes_with(vec![change1], &mut patch_log)
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], &mut patch_log)
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
     for i in 0..=N {
@@ -1666,10 +1666,10 @@ fn big_list() {
     let mut new_doc = Automerge::new();
     let mut patch_log = PatchLog::active();
     new_doc
-        .apply_changes_with(vec![change1], &mut patch_log)
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], &mut patch_log)
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
     let patches = new_doc.make_patches(&mut patch_log);

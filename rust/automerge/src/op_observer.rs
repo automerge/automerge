@@ -64,9 +64,7 @@ impl OpObserver {
     pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
-}
 
-impl OpObserver {
     pub(crate) fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,

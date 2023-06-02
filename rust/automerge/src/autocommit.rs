@@ -42,6 +42,14 @@ use crate::{
 ///
 /// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
 ///
+/// ## Patches, maintaining materialized views
+///
+/// [`AutoCommit`] allows you to generate [`Patch`]es representing changes to the current state of
+/// the document which you can use to maintain a materialized view of the current state. There are
+/// several ways to use this. See the documentation on `Self::diff` for more details, but the key
+/// point to remember is that [`AutoCommit`] manages an internal "diff cursor" for you. This is a
+/// representation of the heads of the document last time you called `diff_incremental` but you can
+/// also manage it directly using [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`].
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,
@@ -121,6 +129,7 @@ impl AutoCommit {
         self.diff_cursor.clone()
     }
 
+    /// Generate the patches recorded in `patch_log`
     pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
         self.doc.make_patches(patch_log)
     }
@@ -270,7 +279,8 @@ impl AutoCommit {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.load_incremental_with(data, &mut self.patch_log)
+        self.doc
+            .load_incremental_log_patches(data, &mut self.patch_log)
     }
 
     pub fn apply_changes(
@@ -278,14 +288,16 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.apply_changes_with(changes, &mut self.patch_log)
+        self.doc
+            .apply_changes_log_patches(changes, &mut self.patch_log)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        self.doc.merge_with(&mut other.doc, &mut self.patch_log)
+        self.doc
+            .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
     }
 
     /// Save the entirety of this document in a compact form.
@@ -311,8 +323,6 @@ impl AutoCommit {
 
     /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
-        //self.ensure_transaction_closed();
-        //self.doc.save_nocompress()
         self.save_with_options(SaveOptions {
             deflate: false,
             ..Default::default()
@@ -792,12 +802,14 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.inner.ensure_transaction_closed();
-        self.inner
-            .doc
-            .receive_sync_message_with(sync_state, message, &mut self.inner.patch_log)
+        self.inner.doc.receive_sync_message_log_patches(
+            sync_state,
+            message,
+            &mut self.inner.patch_log,
+        )
     }
 
-    fn receive_sync_message_with(
+    fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut sync::State,
         message: sync::Message,
@@ -806,7 +818,7 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         let mut new_patch_log = PatchLog::active();
         self.inner
             .doc
-            .receive_sync_message_with(sync_state, message, &mut new_patch_log)?;
+            .receive_sync_message_log_patches(sync_state, message, &mut new_patch_log)?;
         if self.inner.patch_log.is_active() {
             self.inner.patch_log.merge(new_patch_log.clone());
         }
