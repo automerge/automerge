@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{
     marks::{Mark, MarkStateMachine},
-    patches::PatchLog,
+    patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
@@ -41,7 +41,7 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
     for (obj, typ, ops) in doc.ops().iter_objs() {
-        if typ == ObjType::Text && !doc.text_as_seq() {
+        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
             log_text_patches(doc, patch_log, obj, ops)
         } else if typ.is_sequence() {
             log_list_patches(doc, patch_log, obj, ops);
@@ -392,7 +392,7 @@ mod tests {
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
 
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::default());
 
         assert_eq!(
             Patches::from(p),
@@ -466,7 +466,7 @@ mod tests {
             .unwrap();
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::default());
 
         assert_eq!(
             Patches::from(p),
@@ -502,7 +502,7 @@ mod tests {
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
         doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(p),
@@ -539,7 +539,7 @@ mod tests {
         doc.merge(&mut doc2).unwrap();
 
         doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(p),
@@ -563,7 +563,7 @@ mod tests {
         doc.insert(&list, 1, 2).unwrap();
 
         doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(p),
@@ -601,7 +601,7 @@ mod tests {
         doc.merge(&mut doc2).unwrap();
 
         doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state();
+        let p = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(p),
@@ -636,7 +636,7 @@ mod tests {
         doc.put(&map, "key", "value").unwrap();
 
         doc.set_text_rep(TextRepresentation::String);
-        let patches = doc.document().current_state();
+        let patches = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(patches),
@@ -675,7 +675,7 @@ mod tests {
 
         doc.set_text_rep(TextRepresentation::String);
 
-        let patches = doc.document().current_state();
+        let patches = doc.document().current_state(TextRepresentation::String);
 
         assert_eq!(
             Patches::from(patches),
@@ -706,13 +706,12 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active();
+        let mut patch_log = PatchLog::active(TextRepresentation::String);
         let _doc = Automerge::load_with(
             &fixture("counter_value_is_ok.automerge"),
             crate::OnPartialLoad::Error,
             crate::storage::VerificationMode::Check,
             &mut patch_log,
-            TextRepresentation::default(),
         )
         .unwrap();
         let p = _doc.make_patches(&mut patch_log);

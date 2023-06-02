@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::ops::RangeBounds;
 
+use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
@@ -125,7 +126,7 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        if typ == ObjType::Text && !doc.text_as_seq() {
+        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
             log_text_diff(doc, patch_log, obj, diffs)
         } else if typ.is_sequence() {
             log_list_diff(doc, patch_log, obj, diffs);

@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
-use crate::patches::PatchLog;
+use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds};
@@ -652,7 +652,9 @@ impl TransactionInner {
 
             if patch_log.is_active() {
                 match splice_type {
-                    SpliceType::Text(text) if !doc.text_as_seq() => {
+                    SpliceType::Text(text)
+                        if matches!(patch_log.text_rep(), TextRepresentation::String) =>
+                    {
                         patch_log.splice(obj, index, text);
                     }
                     SpliceType::List | SpliceType::Text(..) => {
@@ -730,7 +732,7 @@ impl TransactionInner {
                             patch_log.insert(obj, index, op.value().into(), op.id, false);
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
-                            if doc.text_as_seq() {
+                            if matches!(patch_log.text_rep(), TextRepresentation::Array) {
                                 //let value = (op.value(), doc.ops().id_to_exid(op.id));
                                 patch_log.insert(obj, index, op.value().into(), op.id, false);
                             } else {

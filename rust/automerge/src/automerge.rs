@@ -91,8 +91,6 @@ pub struct Automerge {
     actor: Actor,
     /// The maximum operation counter this document has seen.
     max_op: u64,
-    /// Treat text as sequences when generating patches
-    text_rep: TextRepresentation,
 }
 
 impl Automerge {
@@ -108,7 +106,6 @@ impl Automerge {
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
-            text_rep: TextRepresentation::default(),
         }
     }
 
@@ -190,7 +187,11 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args();
-        Transaction::new(self, args, PatchLog::inactive())
+        Transaction::new(
+            self,
+            args,
+            PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
@@ -271,16 +272,21 @@ impl Automerge {
     /// afterwards.
     ///
     /// The collected patches are available in the return value of [`Transaction::commit`]
-    pub fn transact_and_log_patches<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
+    pub fn transact_and_log_patches<F, O, E>(
+        &mut self,
+        text_rep: TextRepresentation,
+        f: F,
+    ) -> transaction::Result<O, E>
     where
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
-        self.transact_and_log_patches_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
+        self.transact_and_log_patches_with_impl(text_rep, None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
     /// Like [`Self::transact_and_log_patches`] but with a function for generating the commit options
     pub fn transact_and_log_patches_with<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: C,
         f: F,
     ) -> transaction::Result<O, E>
@@ -288,11 +294,12 @@ impl Automerge {
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
-        self.transact_and_log_patches_with_impl(Some(c), f)
+        self.transact_and_log_patches_with_impl(text_rep, Some(c), f)
     }
 
     fn transact_and_log_patches_with_impl<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: Option<C>,
         f: F,
     ) -> transaction::Result<O, E>
@@ -300,7 +307,7 @@ impl Automerge {
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
-        let mut tx = self.transaction_log_patches(PatchLog::active());
+        let mut tx = self.transaction_log_patches(PatchLog::active(text_rep));
         let result = f(&mut tx);
         match result {
             Ok(result) => {
@@ -363,7 +370,6 @@ impl Automerge {
             }
         }
         let mut f = Self::new();
-        f.set_text_rep(self.get_text_rep());
         f.set_actor(ActorId::random());
         f.apply_changes(changes.into_iter().rev().cloned())?;
         Ok(f)
@@ -427,8 +433,7 @@ impl Automerge {
             data,
             OnPartialLoad::Error,
             VerificationMode::Check,
-            &mut PatchLog::inactive(),
-            TextRepresentation::default(),
+            &mut PatchLog::inactive(TextRepresentation::default()),
         )
     }
 
@@ -440,8 +445,7 @@ impl Automerge {
             data,
             OnPartialLoad::Error,
             VerificationMode::DontCheck,
-            &mut PatchLog::inactive(),
-            TextRepresentation::default(),
+            &mut PatchLog::inactive(TextRepresentation::default()),
         )
     }
 
@@ -454,14 +458,12 @@ impl Automerge {
     /// * `mode` - Whether to verify the head hashes after loading
     /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
     ///                 the document once loaded
-    /// * `text_rep` - The text representation to use when creating the patches in `patch_log`
     #[tracing::instrument(skip(data), err)]
     pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
         patch_log: &mut PatchLog,
-        text_rep: TextRepresentation,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -509,7 +511,6 @@ impl Automerge {
                     deps: heads.into_iter().collect(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
-                    text_rep,
                 }
             }
             storage::Chunk::Change(stored_change) => {
@@ -564,8 +565,8 @@ impl Automerge {
     /// Get a set of [`Patch`]es which materialize the current state of the document
     ///
     /// This is a convienence method for `doc.diff(&[], current_heads)`
-    pub fn current_state(&self) -> Vec<Patch> {
-        let mut patch_log = PatchLog::active();
+    pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
+        let mut patch_log = PatchLog::active(text_rep);
         current_state::log_current_state_patches(self, &mut patch_log);
         patch_log.make_patches(self)
     }
@@ -578,7 +579,10 @@ impl Automerge {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_log_patches(data, &mut PatchLog::inactive())
+        self.load_incremental_log_patches(
+            data,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
@@ -593,8 +597,7 @@ impl Automerge {
                 data,
                 OnPartialLoad::Ignore,
                 VerificationMode::Check,
-                &mut PatchLog::inactive(),
-                self.text_rep,
+                &mut PatchLog::inactive(TextRepresentation::default()),
             )?;
             doc = doc.with_actor(self.actor_id());
             if patch_log.is_active() {
@@ -634,7 +637,10 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_log_patches(changes, &mut PatchLog::inactive())
+        self.apply_changes_log_patches(
+            changes,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Like [`Self::apply_changes`] but log the resulting changes to the current state of the
@@ -760,7 +766,10 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_and_log_patches(other, &mut PatchLog::inactive())
+        self.merge_and_log_patches(
+            other,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
@@ -1083,30 +1092,18 @@ impl Automerge {
     /// Create patches representing the change in the current state of the document between the
     /// 'before' and 'after' heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
-    pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
+    pub fn diff(
+        &self,
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
+        text_rep: TextRepresentation,
+    ) -> Vec<Patch> {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
-        let mut patch_log = PatchLog::active();
+        let mut patch_log = PatchLog::active(text_rep);
         diff::log_diff(self, &before, &after, &mut patch_log);
         patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)
-    }
-
-    pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.text_rep = text_rep
-    }
-
-    pub fn get_text_rep(&self) -> TextRepresentation {
-        self.text_rep
-    }
-
-    pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.text_rep = text_rep;
-        self
-    }
-
-    pub(crate) fn text_as_seq(&self) -> bool {
-        self.text_rep == TextRepresentation::Array
     }
 
     /// Get the heads of this document.

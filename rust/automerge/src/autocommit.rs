@@ -66,7 +66,7 @@ impl Default for AutoCommit {
         AutoCommit {
             doc: Automerge::new(),
             transaction: None,
-            patch_log: PatchLog::inactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
         }
@@ -83,7 +83,7 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
         })
@@ -94,7 +94,7 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
         })
@@ -104,7 +104,7 @@ impl AutoCommit {
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log = PatchLog::inactive();
+        self.patch_log = PatchLog::inactive(TextRepresentation::default());
         self.diff_cursor = Vec::new();
     }
 
@@ -174,14 +174,14 @@ impl AutoCommit {
         if after == heads && before == self.diff_cursor && self.patch_log.is_active() {
             self.patch_log.make_patches(&self.doc)
         } else if before.is_empty() && after == heads {
-            let mut patch_log = PatchLog::active();
+            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
             patch_log.heads = Some(after.to_vec());
             current_state::log_current_state_patches(&self.doc, &mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
             let before_clock = self.doc.clock_at(before);
             let after_clock = self.doc.clock_at(after);
-            let mut patch_log = PatchLog::active();
+            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
             patch_log.heads = Some(after.to_vec());
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
@@ -405,15 +405,15 @@ impl AutoCommit {
     }
 
     pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.doc.set_text_rep(text_rep)
+        self.patch_log.set_text_rep(text_rep)
     }
 
     pub fn get_text_rep(&mut self) -> TextRepresentation {
-        self.doc.get_text_rep()
+        self.patch_log.text_rep()
     }
 
     pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.doc.set_text_rep(text_rep);
+        self.patch_log.set_text_rep(text_rep);
         self
     }
 
@@ -812,7 +812,7 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         message: sync::Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let mut new_patch_log = PatchLog::active();
+        let mut new_patch_log = PatchLog::active(patch_log.text_rep());
         self.inner
             .doc
             .receive_sync_message_log_patches(sync_state, message, &mut new_patch_log)?;

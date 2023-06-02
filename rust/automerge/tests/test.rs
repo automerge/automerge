@@ -1,5 +1,6 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
+use automerge::patches::TextRepresentation;
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
@@ -1575,7 +1576,7 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
         .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
@@ -1664,7 +1665,7 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
         .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();

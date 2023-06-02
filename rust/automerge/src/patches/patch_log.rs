@@ -8,7 +8,7 @@ use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
-use super::PatchBuilder;
+use super::{PatchBuilder, TextRepresentation};
 
 /// A record of changes made to a document
 ///
@@ -27,11 +27,11 @@ use super::PatchBuilder;
 ///
 /// ```no_run
 /// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
-/// SyncState, SyncDoc}};
+/// SyncState, SyncDoc}, patches::TextRepresentation};
 /// let doc = AutoCommit::new();
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
-/// let mut patch_log = PatchLog::active();
+/// let mut patch_log = PatchLog::active(TextRepresentation::String);
 /// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
@@ -43,6 +43,7 @@ pub struct PatchLog {
     events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
+    text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
@@ -103,34 +104,36 @@ impl PatchLog {
     ///
     /// # Arguments
     ///
-    /// * `active` - If `true` the log will record all changes made to the document. If `false`
-    ///              then no changes will be recorded.
+    /// * `active`   - If `true` the log will record all changes made to the document. If `false`
+    ///                then no changes will be recorded.
+    /// * `text_rep` - How text will be represented in the generated patches
     ///
     /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
     /// which record patches are more expensive, so sometimes you may wish to turn off patch
     /// logging for parts of the application, but not others; but you don't want to complicate your
     /// code with an `Option<PatchLog>`. In that case you can use an inactive [`PatchLog`].
-    pub fn new(active: bool) -> Self {
+    pub fn new(active: bool, text_rep: TextRepresentation) -> Self {
         PatchLog {
             active,
             expose: HashSet::default(),
             events: vec![],
             heads: None,
+            text_rep,
         }
     }
 
     /// Create a new [`PatchLog`] which doesn't record any changes.
     ///
     /// See also: [`PatchLog::new`] for a more detailed explanation.
-    pub fn inactive() -> Self {
-        Self::new(false)
+    pub fn inactive(text_rep: TextRepresentation) -> Self {
+        Self::new(false, text_rep)
     }
 
     /// Create a new [`PatchLog`] which does record changes.
     ///
     /// See also: [`PatchLog::new`] for a more detailed explanation.
-    pub fn active() -> Self {
-        Self::new(true)
+    pub fn active(text_rep: TextRepresentation) -> Self {
+        Self::new(true, text_rep)
     }
 
     pub(crate) fn set_active(&mut self, setting: bool) {
@@ -300,9 +303,9 @@ impl PatchLog {
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };
-            Self::make_patches_inner(&self.events, expose, doc, &read_doc)
+            Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
         } else {
-            Self::make_patches_inner(&self.events, expose, doc, doc)
+            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
         }
     }
 
@@ -311,6 +314,7 @@ impl PatchLog {
         mut expose_queue: ExposeQueue,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) -> Vec<Patch> {
         let mut patch_builder = PatchBuilder::default();
         for (obj, event) in events {
@@ -323,7 +327,7 @@ impl PatchLog {
                 continue;
             }
             // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc);
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc, text_rep);
             match event {
                 Event::PutMap {
                     key,
@@ -387,7 +391,7 @@ impl PatchLog {
             }
         }
         // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut patch_builder, doc, read_doc);
+        expose_queue.flush_queue(&mut patch_builder, doc, read_doc, text_rep);
 
         patch_builder.take_patches()
     }
@@ -403,12 +407,21 @@ impl PatchLog {
             active: self.active,
             expose: HashSet::new(),
             events: Default::default(),
+            text_rep: self.text_rep,
             heads: None,
         }
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.events.extend(other.events);
+    }
+
+    pub(crate) fn text_rep(&self) -> TextRepresentation {
+        self.text_rep
+    }
+
+    pub(crate) fn set_text_rep(&mut self, rep: TextRepresentation) {
+        self.text_rep = rep;
     }
 }
 
@@ -436,12 +449,13 @@ impl ExposeQueue {
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
@@ -450,9 +464,10 @@ impl ExposeQueue {
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
@@ -470,11 +485,12 @@ impl ExposeQueue {
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
         read_doc: &R,
+        text_rep: TextRepresentation,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
-            ObjType::Text if !doc.text_as_seq() => {
+            ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
                 let text = read_doc.text(&exid).ok()?;
                 patch_builder.splice_text(read_doc, exid, 0, &text);
             }
