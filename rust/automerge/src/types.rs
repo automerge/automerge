@@ -11,6 +11,9 @@ use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
+// thanks to https://qrng.anu.edu.au/ for some random bytes
+pub(crate) const CONCURRENCY_MAGIC_BYTES: [u8; 4] = [0x13, 0xb2, 0x23, 0x09];
+
 mod opids;
 pub(crate) use opids::OpIds;
 
@@ -56,6 +59,15 @@ impl ActorId {
 
     pub fn to_hex_string(&self) -> String {
         hex::encode(&self.0)
+    }
+
+    pub(crate) fn with_concurrency(&self, level: usize) -> ActorId {
+        // 4 for magic bytes , 16 for leb128
+        let mut bytes = Vec::with_capacity(self.0.len() + 4 + 16);
+        bytes.extend(&CONCURRENCY_MAGIC_BYTES);
+        leb128::write::unsigned(&mut bytes, level as u64).unwrap();
+        bytes.extend(&self.0);
+        ActorId(TinyVec::from(bytes.as_slice()))
     }
 }
 

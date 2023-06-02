@@ -19,6 +19,7 @@ import {
   TRACE,
   IS_PROXY,
   OBJECT_ID,
+  CLEAR_CACHE,
   COUNTER,
   INT,
   UINT,
@@ -241,6 +242,9 @@ const MapHandler = {
     }
     if (key === TRACE) {
       target.trace = val
+      return true
+    }
+    if (key === CLEAR_CACHE) {
       return true
     }
     const [value, datatype] = import_value(val, textV2)

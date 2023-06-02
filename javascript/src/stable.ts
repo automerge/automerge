@@ -242,6 +242,7 @@ export function clone<T>(
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
+  handle.updateDiffCursor()
 
   // `change` uses the presence of state.heads to determine if we are in a view
   // set it to undefined to indicate that this is a full fat document
@@ -344,6 +345,24 @@ export function change<T>(
   }
 }
 
+export function changeAt<T>(
+  doc: Doc<T>,
+  scope: Heads,
+  options: string | ChangeOptions<T> | ChangeFn<T>,
+  callback?: ChangeFn<T>
+): Doc<T> {
+  if (typeof options === "function") {
+    return _change(doc, {}, options, scope)
+  } else if (typeof callback === "function") {
+    if (typeof options === "string") {
+      options = { message: options }
+    }
+    return _change(doc, options, callback, scope)
+  } else {
+    throw RangeError("Invalid args for changeAt")
+  }
+}
+
 function progressDocument<T>(
   doc: Doc<T>,
   heads: Heads | null,
@@ -373,7 +392,8 @@ function progressDocument<T>(
 function _change<T>(
   doc: Doc<T>,
   options: ChangeOptions<T>,
-  callback: ChangeFn<T>
+  callback: ChangeFn<T>,
+  scope?: Heads
 ): Doc<T> {
   if (typeof callback !== "function") {
     throw new RangeError("invalid change function")
@@ -392,6 +412,9 @@ function _change<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
+  if (scope) {
+    state.handle.isolate(scope)
+  }
   const heads = state.handle.getHeads()
   try {
     state.heads = heads
@@ -402,6 +425,7 @@ function _change<T>(
       return doc
     } else {
       state.handle.commit(options.message, options.time)
+      state.handle.integrate()
       return progressDocument(
         doc,
         heads,
