@@ -277,5 +277,8 @@ describe("Automerge.Text", () => {
       text: new Automerge.Text("🐦"),
     })
     assert.strictEqual(s1.text.get(0), "🐦")
+
+    s2 = Automerge.load(Automerge.save(s1))
+    assert.strictEqual(s2.text.toString(), "🐦")
   })
 })
