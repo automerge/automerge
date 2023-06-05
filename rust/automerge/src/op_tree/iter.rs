@@ -217,13 +217,14 @@ impl<'a> Iterator for Inner<'a> {
 #[cfg(test)]
 mod tests {
     use super::super::OpTreeInternal;
-    use crate::types::{Key, Op, OpId, OpType, ScalarValue};
+    use crate::types::{Key, Op, OpId, OpIds, OpType, ScalarValue};
     use proptest::prelude::*;
 
     #[derive(Clone)]
     enum Action {
         Insert(usize, Op),
         Delete(usize),
+        Overwrite(usize, Op),
     }
 
     impl std::fmt::Debug for Action {
@@ -231,6 +232,7 @@ mod tests {
             match self {
                 Self::Insert(index, ..) => write!(f, "Insert({})", index),
                 Self::Delete(index) => write!(f, "Delete({})", index),
+                Self::Overwrite(index, ..) => write!(f, "Overwrite({})", index),
             }
         }
     }
@@ -253,25 +255,38 @@ mod tests {
 
     impl<'a> std::fmt::Debug for DebugOps<'a> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "[")?;
-            for (index, op) in self.0.iter().enumerate() {
-                if index < self.0.len() - 1 {
-                    write!(f, "{},", op.id.counter())?;
-                } else {
-                    write!(f, "{}]", op.id.counter())?
-                }
+            let mut table = prettytable::Table::new();
+            table.set_format(*prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+            table.set_titles(prettytable::row!["Counter", "Preds", "Succ",]);
+            for (_index, op) in self.0.iter().enumerate() {
+                let preds = op.pred.iter().map(|o| o.counter()).collect::<Vec<_>>();
+                let succ = op.succ.iter().map(|o| o.counter()).collect::<Vec<_>>();
+                table.add_row(prettytable::row![
+                    op.id.counter(),
+                    format!("{:?}", preds),
+                    format!("{:?}", succ)
+                ]);
             }
+            let mut out = Vec::new();
+            table.print(&mut out).unwrap();
+            write!(f, "\n{}\n", String::from_utf8(out).unwrap())?;
             Ok(())
         }
     }
 
-    fn op(counter: u64) -> Op {
+    fn op(counter: u64, key: Key) -> Op {
+        op_with_pred(counter, key, &[])
+    }
+
+    fn op_with_pred(counter: u64, key: Key, pred: &[u64]) -> Op {
         Op {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
-            key: Key::Map(0),
+            key,
+            pred: OpIds::new(pred.iter().map(|c| OpId::new(*c, 0)), |a, b| {
+                a.counter().cmp(&b.counter())
+            }),
             succ: Default::default(),
-            pred: Default::default(),
             insert: false,
         }
     }
@@ -285,6 +300,8 @@ mod tests {
     struct Model {
         actions: Vec<Action>,
         model: Vec<Op>,
+        last_counter: u64,
+        last_map_key: usize,
     }
 
     impl std::fmt::Debug for Model {
@@ -297,13 +314,45 @@ mod tests {
     }
 
     impl Model {
-        fn insert(&self, index: usize, next_op_counter: u64) -> Self {
+        fn insert(&self, index: usize) -> Self {
             let mut actions = self.actions.clone();
-            let op = op(next_op_counter);
+            let next_op_key = self.last_counter + 1;
+            let next_map_key = self.last_map_key + 1;
+            let op = op(next_op_key, Key::Map(next_map_key));
             actions.push(Action::Insert(index, op.clone()));
             let mut model = self.model.clone();
             model.insert(index, op);
-            Self { actions, model }
+            Self {
+                actions,
+                model,
+                last_counter: next_op_key,
+                last_map_key: next_map_key,
+            }
+        }
+
+        fn overwrite(&self, index: usize) -> Self {
+            let mut actions = self.actions.clone();
+            let to_overwrite = &self.model[index];
+            let next_op_counter = self.last_counter + 1;
+            let op = op_with_pred(
+                next_op_counter,
+                to_overwrite.key,
+                &[to_overwrite.id.counter()],
+            );
+
+            let mut model = self.model.clone();
+            model[index]
+                .succ
+                .add(op.id, |a, b| a.counter().cmp(&b.counter()));
+            model.insert(index + 1, op.clone());
+
+            actions.push(Action::Overwrite(index, op));
+            Self {
+                actions,
+                model,
+                last_counter: next_op_counter,
+                last_map_key: self.last_map_key,
+            }
         }
 
         fn delete(&self, index: usize) -> Self {
@@ -311,12 +360,17 @@ mod tests {
             actions.push(Action::Delete(index));
             let mut model = self.model.clone();
             model.remove(index);
-            Self { actions, model }
+            Self {
+                actions,
+                model,
+                last_counter: self.last_counter,
+                last_map_key: self.last_map_key,
+            }
         }
 
-        fn next(self, next_op_counter: u64) -> impl Strategy<Value = Model> {
+        fn next(self) -> impl Strategy<Value = Model> {
             if self.model.is_empty() {
-                Just(self.insert(0, next_op_counter)).boxed()
+                Just(self.insert(0)).boxed()
             } else {
                 // Note that we have to feed `self` through the `prop_flat_map` using `Just` to
                 // appease the borrow checker, this is annoying because it does obscure the meaning
@@ -326,18 +380,43 @@ mod tests {
                 // delete action".
                 //
                 // 95% chance of inserting to make sure we deal with large lists
-                (proptest::bool::weighted(0.95), Just(self))
-                    .prop_flat_map(move |(insert, model)| {
-                        if insert {
-                            (0..model.model.len() + 1, Just(model))
-                                .prop_map(move |(index, model)| {
-                                    model.insert(index, next_op_counter)
-                                })
+                #[derive(Clone, Debug)]
+                enum ActionKind {
+                    Insert,
+                    Delete,
+                    Overwrite,
+                }
+                (
+                    Just(self),
+                    prop_oneof![
+                        50 => Just(ActionKind::Insert),
+                        40 => Just(ActionKind::Overwrite),
+                        10 => Just(ActionKind::Delete),
+                    ],
+                )
+                    .prop_flat_map(move |(model, action)| match action {
+                        ActionKind::Insert => (0..model.model.len() + 1, Just(model))
+                            .prop_map(move |(index, model)| model.insert(index))
+                            .boxed(),
+                        ActionKind::Delete => ((0..model.model.len()), Just(model))
+                            .prop_map(move |(index, model)| model.delete(index))
+                            .boxed(),
+                        ActionKind::Overwrite => {
+                            // Indices of visible ops
+                            let visible = model
+                                .model
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, op)| if op.visible() { Some(i) } else { None })
+                                .collect::<Vec<_>>();
+                            if visible.is_empty() {
+                                Just(model).boxed()
+                            } else {
+                                ((0..visible.len(), Just(model)).prop_map(move |(index, model)| {
+                                    model.overwrite(visible[index])
+                                }))
                                 .boxed()
-                        } else {
-                            ((0..model.model.len()), Just(model))
-                                .prop_map(move |(index, model)| model.delete(index))
-                                .boxed()
+                            }
                         }
                     })
                     .boxed()
@@ -347,28 +426,17 @@ mod tests {
 
     fn model() -> impl Strategy<Value = Model> {
         (0_u64..150).prop_flat_map(|num_steps| {
-            let mut strat = Just((
-                0,
-                Model {
-                    actions: Vec::new(),
-                    model: Vec::new(),
-                },
-            ))
+            let mut strat = Just(Model {
+                actions: Vec::new(),
+                model: Vec::new(),
+                last_counter: 0,
+                last_map_key: 0,
+            })
             .boxed();
             for _ in 0..num_steps {
-                strat = strat
-                    // Note the counter, which we feed through each `prop_flat_map`, incrementing
-                    // it by one each time. This mean that the generated ops have ascending (but
-                    // not necessarily consecutive because not every `Action` is an `Insert`)
-                    // counters. This makes it easier to debug failures - if we just used a random
-                    // counter it would be much harder to see where things are out of order.
-                    .prop_flat_map(|(counter, model)| {
-                        let next_counter = counter + 1;
-                        model.next(counter).prop_map(move |m| (next_counter, m))
-                    })
-                    .boxed();
+                strat = strat.prop_flat_map(|model| model.next()).boxed();
             }
-            strat.prop_map(|(_, model)| model)
+            strat
         })
     }
 
@@ -380,45 +448,24 @@ mod tests {
                 Action::Delete(index) => {
                     optree.remove(*index);
                 }
+                Action::Overwrite(index, op) => {
+                    optree.update(*index, |old_op| {
+                        old_op.add_succ(op, |a, b| a.counter().cmp(&b.counter()));
+                    });
+                    optree.insert(index + 1, op.clone());
+                }
             }
         }
         optree
     }
 
-    /// A model for calls to `nth`. `NthModel::n` is guarnateed to be in `(0..model.len())`
-    #[derive(Clone)]
-    struct NthModel {
-        model: Vec<Op>,
-        actions: Vec<Action>,
-        n: usize,
-    }
-
-    impl std::fmt::Debug for NthModel {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("Model")
-                .field("actions", &self.actions)
-                .field("model", &DebugOps(&self.model))
-                .field("n", &self.n)
-                .finish()
-        }
-    }
-
-    fn nth_model() -> impl Strategy<Value = NthModel> {
+    fn nth_model() -> impl Strategy<Value = (Model, usize)> {
         model().prop_flat_map(|model| {
             if model.model.is_empty() {
-                Just(NthModel {
-                    model: model.model,
-                    actions: model.actions,
-                    n: 0,
-                })
-                .boxed()
+                Just((model, 0)).boxed()
             } else {
                 (0..model.model.len(), Just(model))
-                    .prop_map(|(index, model)| NthModel {
-                        model: model.model,
-                        actions: model.actions,
-                        n: index,
-                    })
+                    .prop_map(|(index, model)| (model, index))
                     .boxed()
             }
         })
@@ -434,15 +481,23 @@ mod tests {
         }
 
         #[test]
-        fn optree_iter_nth(model in nth_model()) {
+        fn optree_iter_nth((model, n) in nth_model()) {
             let optree = make_optree(&model.actions);
             let mut iter = super::OpTreeIter::new(&optree);
             let mut model_iter = model.model.iter();
-            assert_eq!(model_iter.nth(model.n), iter.nth(model.n));
+            assert_eq!(model_iter.nth(n), iter.nth(n));
 
             let tail = iter.cloned().collect::<Vec<_>>();
             let expected_tail = model_iter.cloned().collect::<Vec<_>>();
             assert_eq!(DebugOps(tail.as_slice()), DebugOps(expected_tail.as_slice()));
+        }
+
+        #[test]
+        fn optree_top_ops(model in model()) {
+            let optree = make_optree(&model.actions);
+            let top = optree.top_ops(None).map(|o| o.op.clone()).collect::<Vec<_>>();
+            let expected = model.model.into_iter().filter(|op| op.visible()).collect::<Vec<_>>();
+            assert_eq!(DebugOps(&expected), DebugOps(&top))
         }
     }
 }
