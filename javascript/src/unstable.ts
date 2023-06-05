@@ -53,7 +53,13 @@ export {
 
 import type { Mark, MarkRange, MarkValue } from "./unstable_types"
 
-import type { ScalarValue, PatchCallback } from "./stable"
+import {
+  type PatchCallback,
+  type ChangeOptions,
+  view,
+  type Heads,
+  type List,
+} from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -67,12 +73,11 @@ export type {
   SyncMessage,
 } from "@automerge/automerge-wasm"
 
-export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
+export type { ChangeOptions, ApplyOptions } from "./stable"
 export {
   view,
   free,
   getHeads,
-  change,
   emptyChange,
   loadIncremental,
   save,
@@ -117,6 +122,7 @@ export { RawString } from "./raw_string"
 export const getBackend = stable.getBackend
 
 import { _is_proxy, _state, _obj } from "./internal_state"
+import { rootProxy } from "./proxies"
 
 /**
  * Create a new automerge document
@@ -359,5 +365,158 @@ export function getConflicts<T>(
     return unstableConflictAt(state.handle, objectId, prop)
   } else {
     return undefined
+  }
+}
+
+export function insertAt<T>(list: T[], index: number, ...values: T[]) {
+  (list as List<T>).insertAt(index, ...values)
+}
+
+export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
+  (list as List<T>).deleteAt(index, numDelete)
+}
+
+/**
+ * Function which is called by {@link change} when making changes to a `Doc<T>`
+ * @typeParam T - The type of value contained in the document
+ *
+ * This function may mutate `doc`
+ */
+export type ChangeFn<T> = (doc: T) => void
+
+/**
+ * Update the contents of an automerge document
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to update
+ * @param options - Either a message, an {@link ChangeOptions}, or a {@link ChangeFn}
+ * @param callback - A `ChangeFn` to be used if `options` was a `string`
+ *
+ * Note that if the second argument is a function it will be used as the `ChangeFn` regardless of what the third argument is.
+ *
+ * @example A simple change
+ * ```
+ * let doc1 = automerge.init()
+ * doc1 = automerge.change(doc1, d => {
+ *     d.key = "value"
+ * })
+ * assert.equal(doc1.key, "value")
+ * ```
+ *
+ * @example A change with a message
+ *
+ * ```
+ * doc1 = automerge.change(doc1, "add another value", d => {
+ *     d.key2 = "value2"
+ * })
+ * ```
+ *
+ * @example A change with a message and a timestamp
+ *
+ * ```
+ * doc1 = automerge.change(doc1, {message: "add another value", time: 1640995200}, d => {
+ *     d.key2 = "value2"
+ * })
+ * ```
+ *
+ * @example responding to a patch callback
+ * ```
+ * let patchedPath
+ * let patchCallback = patch => {
+ *    patchedPath = patch.path
+ * }
+ * doc1 = automerge.change(doc1, {message, "add another value", time: 1640995200, patchCallback}, d => {
+ *     d.key2 = "value2"
+ * })
+ * assert.equal(patchedPath, ["key2"])
+ * ```
+ */
+export function change<T>(
+  doc: Doc<T>,
+  options: string | ChangeOptions<T> | ChangeFn<T>,
+  callback?: ChangeFn<T>
+): Doc<T> {
+  if (typeof options === "function") {
+    return _change(doc, {}, options)
+  } else if (typeof callback === "function") {
+    if (typeof options === "string") {
+      options = { message: options }
+    }
+    return _change(doc, options, callback)
+  } else {
+    throw RangeError("Invalid args for change")
+  }
+}
+
+function progressDocument<T>(
+  doc: Doc<T>,
+  heads: Heads | null,
+  callback?: PatchCallback<T>
+): Doc<T> {
+  if (heads == null) {
+    return doc
+  }
+  const state = _state(doc)
+  const nextState = { ...state, heads: undefined }
+  let nextDoc: Doc<T>
+  if (callback != null) {
+    const headsBefore = state.heads
+    const { value, patches } = state.handle.applyAndReturnPatches(
+      doc,
+      nextState
+    )
+    if (patches.length > 0) {
+      const before = view(doc, headsBefore || [])
+      callback(patches, { before, after: value })
+    }
+    nextDoc = value
+  } else {
+    nextDoc = state.handle.applyPatches(doc, nextState)
+  }
+  state.heads = heads
+  return nextDoc
+}
+
+function _change<T>(
+  doc: Doc<T>,
+  options: ChangeOptions<T>,
+  callback: ChangeFn<T>
+): Doc<T> {
+  if (typeof callback !== "function") {
+    throw new RangeError("invalid change function")
+  }
+
+  const state = _state(doc)
+
+  if (doc === undefined || state === undefined) {
+    throw new RangeError("must be the document root")
+  }
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  try {
+    state.heads = heads
+    const root: T = rootProxy(state.handle, state.textV2)
+    callback(root)
+    if (state.handle.pendingOps() === 0) {
+      state.heads = undefined
+      return doc
+    } else {
+      state.handle.commit(options.message, options.time)
+      return progressDocument(
+        doc,
+        heads,
+        options.patchCallback || state.patchCallback
+      )
+    }
+  } catch (e) {
+    state.heads = undefined
+    state.handle.rollback()
+    throw e
   }
 }
