@@ -349,8 +349,12 @@ impl OpTreeInternal {
         match prop {
             Prop::Map(key_name) => {
                 let key = Key::Map(meta.props.lookup(&key_name)?);
-                let pos = self.binary_search_by(|op| meta.key_cmp(&op.key, &key));
-                Some(OpsFound::new(pos, self.iter(), key, clock))
+                let query = self.search(query::Prop::new(key, clock.cloned()), meta);
+                Some(OpsFound {
+                    ops: query.ops,
+                    ops_pos: query.ops_pos,
+                    end_pos: query.pos,
+                })
             }
             Prop::Seq(index) => {
                 let query = self.search(query::Nth::new(index, encoding, clock.cloned()), meta);
@@ -535,35 +539,6 @@ pub(crate) struct FoundOpId<'a> {
     pub(crate) op: &'a Op,
     pub(crate) index: usize,
     pub(crate) visible: bool,
-}
-
-impl<'a> OpsFound<'a> {
-    fn new<T: Iterator<Item = &'a Op>>(
-        start_pos: usize,
-        mut iter: T,
-        key: Key,
-        clock: Option<&Clock>,
-    ) -> Self {
-        let mut found = Self {
-            end_pos: start_pos,
-            ops: vec![],
-            ops_pos: vec![],
-        };
-        let mut next = iter.nth(start_pos);
-        while let Some(op) = next {
-            if op.elemid_or_key() == key {
-                if op.visible_at(clock) {
-                    found.ops.push(op);
-                    found.ops_pos.push(found.end_pos);
-                }
-                found.end_pos += 1;
-            } else {
-                break;
-            }
-            next = iter.next();
-        }
-        found
-    }
 }
 
 #[cfg(test)]
