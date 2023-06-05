@@ -594,31 +594,6 @@
 <a href="#594" id="594">594</a>
 <a href="#595" id="595">595</a>
 <a href="#596" id="596">596</a>
-<a href="#597" id="597">597</a>
-<a href="#598" id="598">598</a>
-<a href="#599" id="599">599</a>
-<a href="#600" id="600">600</a>
-<a href="#601" id="601">601</a>
-<a href="#602" id="602">602</a>
-<a href="#603" id="603">603</a>
-<a href="#604" id="604">604</a>
-<a href="#605" id="605">605</a>
-<a href="#606" id="606">606</a>
-<a href="#607" id="607">607</a>
-<a href="#608" id="608">608</a>
-<a href="#609" id="609">609</a>
-<a href="#610" id="610">610</a>
-<a href="#611" id="611">611</a>
-<a href="#612" id="612">612</a>
-<a href="#613" id="613">613</a>
-<a href="#614" id="614">614</a>
-<a href="#615" id="615">615</a>
-<a href="#616" id="616">616</a>
-<a href="#617" id="617">617</a>
-<a href="#618" id="618">618</a>
-<a href="#619" id="619">619</a>
-<a href="#620" id="620">620</a>
-<a href="#621" id="621">621</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
@@ -970,8 +945,12 @@
         <span class="kw">match </span>prop {
             Prop::Map(key_name) =&gt; {
                 <span class="kw">let </span>key = Key::Map(meta.props.lookup(<span class="kw-2">&amp;</span>key_name)<span class="question-mark">?</span>);
-                <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|op| meta.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span>key));
-                <span class="prelude-val">Some</span>(OpsFound::new(pos, <span class="self">self</span>.iter(), key, clock))
+                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Prop::new(key, clock.cloned()), meta);
+                <span class="prelude-val">Some</span>(OpsFound {
+                    ops: query.ops,
+                    ops_pos: query.ops_pos,
+                    end_pos: query.pos,
+                })
             }
             Prop::Seq(index) =&gt; {
                 <span class="kw">let </span>query = <span class="self">self</span>.search(query::Nth::new(index, encoding, clock.cloned()), meta);
@@ -1156,35 +1135,6 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) visible: bool,
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpsFound&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>new&lt;T: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
-        start_pos: usize,
-        <span class="kw-2">mut </span>iter: T,
-        key: Key,
-        clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
-    ) -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="self">Self </span>{
-            end_pos: start_pos,
-            ops: <span class="macro">vec!</span>[],
-            ops_pos: <span class="macro">vec!</span>[],
-        };
-        <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(start_pos);
-        <span class="kw">while let </span><span class="prelude-val">Some</span>(op) = next {
-            <span class="kw">if </span>op.elemid_or_key() == key {
-                <span class="kw">if </span>op.visible_at(clock) {
-                    found.ops.push(op);
-                    found.ops_pos.push(found.end_pos);
-                }
-                found.end_pos += <span class="number">1</span>;
-            } <span class="kw">else </span>{
-                <span class="kw">break</span>;
-            }
-            next = iter.next();
-        }
-        found
-    }
 }
 
 <span class="attr">#[cfg(test)]

@@ -239,6 +239,8 @@
 <a href="#239" id="239">239</a>
 <a href="#240" id="240">240</a>
 <a href="#241" id="241">241</a>
+<a href="#242" id="242">242</a>
+<a href="#243" id="243">243</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId};
 <span class="kw">use </span>fxhash::FxBuildHasher;
@@ -249,12 +251,14 @@
 <span class="kw">mod </span>list_state;
 <span class="kw">mod </span>nth;
 <span class="kw">mod </span>opid;
+<span class="kw">mod </span>prop;
 <span class="kw">mod </span>seek_mark;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>insert::InsertNth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_state::ListState;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth::Nth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid::{OpIdSearch, SimpleOpIdSearch};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop::Prop;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>seek_mark::SeekMark;
 
 <span class="comment">// use a struct for the args for clarity as they are passed up the update chain in the optree
