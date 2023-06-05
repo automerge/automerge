@@ -8,12 +8,14 @@ mod insert;
 mod list_state;
 mod nth;
 mod opid;
+mod prop;
 mod seek_mark;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use list_state::ListState;
 pub(crate) use nth::Nth;
 pub(crate) use opid::{OpIdSearch, SimpleOpIdSearch};
+pub(crate) use prop::Prop;
 pub(crate) use seek_mark::SeekMark;
 
 // use a struct for the args for clarity as they are passed up the update chain in the optree
