@@ -369,10 +369,18 @@ export function getConflicts<T>(
 }
 
 export function insertAt<T>(list: T[], index: number, ...values: T[]) {
+  if (!_is_proxy(list)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+
   (list as List<T>).insertAt(index, ...values)
 }
 
 export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
+  if (!_is_proxy(list)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+
   (list as List<T>).deleteAt(index, numDelete)
 }
 
