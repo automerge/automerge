@@ -128,7 +128,11 @@ export class Text {
         "object cannot be modified outside of a change block"
       )
     }
-    this.elems.splice(index, 0, ...values)
+    if (values.every(v => typeof v === "string")) {
+      this.elems.splice(index, 0, ...values.join(""))
+    } else {
+      this.elems.splice(index, 0, ...values)
+    }
   }
 
   /**

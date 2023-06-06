@@ -68,7 +68,7 @@ describe("Automerge.Text", () => {
   it("should allow modification before an object is assigned to a document", () => {
     s1 = Automerge.change(Automerge.init(), doc => {
       const text = new Automerge.Text()
-      text.insertAt(0, "a", "b", "c", "d")
+      text.insertAt(0, "abcd")
       text.deleteAt(2)
       doc.text = text
       assert.strictEqual(doc.text.toString(), "abd")
@@ -293,5 +293,31 @@ describe("Automerge.Text", () => {
     let s4 = Automerge.from({ some: "value" })
     s4 = Automerge.merge(s4, s2)
     assert.strictEqual(s4.text.toString(), "🐦")
+  })
+
+  it("should let you insert strings", () => {
+    s1 = Automerge.from({
+      text: new Automerge.Text(""),
+    })
+
+    s1 = Automerge.change(s1, d => {
+      d.text.insertAt(0, "four")
+    })
+
+    assert.strictEqual(s1.text.length, 4)
+  })
+
+  it("should index by unicode code points", () => {
+    s1 = Automerge.from({
+      text: new Automerge.Text(""),
+    })
+
+    s1 = Automerge.change(s1, d => {
+      d.text.insertAt(0, "🇬🇧")
+      d.text.insertAt(2, "four")
+    })
+
+    assert.strictEqual(s1.text.length, 6)
+    assert.strictEqual(s1.text.toString(), "🇬🇧four")
   })
 })
