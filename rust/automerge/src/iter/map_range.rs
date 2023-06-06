@@ -46,24 +46,44 @@ impl<'a, R: RangeBounds<String>> fmt::Debug for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
-    type Item = (&'a str, Value<'a>, ExId);
+    type Item = MapRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
-            for op in inner.iter.by_ref() {
-                if let Key::Map(n) = &op.key {
+            for top in inner.iter.by_ref() {
+                if let Key::Map(n) = &top.op.key {
                     if let Some(prop) = inner.op_set.m.props.safe_get(*n) {
                         if inner.range.contains(prop) {
-                            return Some((
-                                prop.as_str(),
-                                op.value_at(inner.clock.as_ref()),
-                                inner.op_set.id_to_exid(op.id),
-                            ));
+                            return Some(MapRangeItem {
+                                key: prop.as_str(),
+                                value: top.op.value_at(inner.clock.as_ref()),
+                                id: inner.op_set.id_to_exid(top.op.id),
+                                conflict: top.conflict,
+                            });
                         }
                     }
                 }
             }
             None
         })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MapRangeItem<'a> {
+    pub key: &'a str,
+    pub value: Value<'a>,
+    pub id: ExId,
+    pub conflict: bool,
+}
+
+impl<'a> MapRangeItem<'a> {
+    pub fn new(key: &'a str, value: Value<'a>, id: ExId, conflict: bool) -> MapRangeItem<'a> {
+        MapRangeItem {
+            key,
+            value,
+            id,
+            conflict,
+        }
     }
 }

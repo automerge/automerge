@@ -31,8 +31,8 @@ impl<'a> Iterator for Values<'a> {
     type Item = (Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .as_mut()
-            .and_then(|(i, doc, clock)| i.next().map(|op| doc.export_value(op, clock.as_ref())))
+        self.iter.as_mut().and_then(|(i, doc, clock)| {
+            i.next().map(|top| doc.export_value(top.op, clock.as_ref()))
+        })
     }
 }

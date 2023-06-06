@@ -300,12 +300,12 @@ impl LoadingObject {
                 op.pred = meta.sorted_opids(preds.into_iter());
             }
             if let OpType::Put(ScalarValue::Counter(c)) = &mut op.action {
-                for (inc, id) in op
+                for (id, inc) in op
                     .succ
                     .iter()
-                    .filter_map(|s| self.inc_ops.get(s).map(|inc| (inc, s)))
+                    .filter_map(|s| self.inc_ops.get(s).map(|inc| (*s, *inc)))
                 {
-                    c.increment(*inc, *id);
+                    c.increment(inc, id);
                 }
             }
             collector.collect(self.id, op.clone())?;

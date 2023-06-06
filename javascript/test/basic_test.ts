@@ -1,6 +1,7 @@
 import * as assert from "assert"
 import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
+import { mismatched_heads } from "./helpers"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -537,6 +538,34 @@ describe("Automerge", () => {
       assert.equal(Automerge.getObjectId(s1.text), null)
       assert.notEqual(Automerge.getObjectId(s1.list), null)
       assert.notEqual(Automerge.getObjectId(s1.map), null)
+    })
+  })
+  describe("load", () => {
+    it("can load a doc without checking the heads", () => {
+      assert.throws(() => {
+        Automerge.load(mismatched_heads)
+      }, /mismatching heads/)
+      let doc = Automerge.load(mismatched_heads, { unchecked: true })
+      assert.deepEqual(doc, { count: 260 })
+    })
+  })
+  describe("diff", () => {
+    it("can diff a document with before and hafter heads", () => {
+      let doc = Automerge.from({ value: "" })
+      doc = Automerge.change(doc, d => (d.value = "aaa"))
+      let heads1 = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => (d.value = "bbb"))
+      let heads2 = Automerge.getHeads(doc)
+      let patch12 = Automerge.diff(doc, heads1, heads2)
+      let patch21 = Automerge.diff(doc, heads2, heads1)
+      assert.deepEqual(patch12, [
+        { action: "put", path: ["value"], value: "" },
+        { action: "splice", path: ["value", 0], value: "bbb" },
+      ])
+      assert.deepEqual(patch21, [
+        { action: "put", path: ["value"], value: "" },
+        { action: "splice", path: ["value", 0], value: "aaa" },
+      ])
     })
   })
 })

@@ -9,23 +9,22 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
+use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
-use crate::transaction::{
-    self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
-};
+use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, Value,
 };
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
-mod current_state;
-mod diff;
+pub(crate) mod current_state;
+pub(crate) mod diff;
 
 #[cfg(test)]
 mod tests;
@@ -53,7 +52,7 @@ pub enum OnPartialLoad {
 /// [`ActorId`]. Existing documents can be loaded with [`Self::load`], or [`Self::load_with`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
-/// [`Self::merge`] or [`Self::merge_with`].
+/// [`Self::merge`] or [`Self::merge_and_log_patches`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
 /// [`Self::fork`]. If you want to split a document from ealier in its history you can use
@@ -73,11 +72,6 @@ pub enum OnPartialLoad {
 ///
 /// This type implements [`crate::sync::SyncDoc`]
 ///
-/// ## Observers
-///
-/// Many of the methods on this type have an `_with` or `_observed` variant
-/// which allow you to pass in an [`OpObserver`] to observe any changes which
-/// occur.
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
@@ -92,8 +86,6 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
-    /// Heads at the last save.
-    saved: Vec<ChangeHash>,
     /// The set of operations that form this document.
     ops: OpSet,
     /// The current actor.
@@ -113,7 +105,6 @@ impl Automerge {
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
-            saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
         }
@@ -195,18 +186,19 @@ impl Automerge {
     }
 
     /// Start a transaction.
-    pub fn transaction(&mut self) -> Transaction<'_, UnObserved> {
+    pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args();
-        Transaction::new(self, args, UnObserved)
+        Transaction::new(
+            self,
+            args,
+            PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Start a transaction with an observer
-    pub fn transaction_with_observer<Obs: OpObserver + BranchableObserver>(
-        &mut self,
-        op_observer: Obs,
-    ) -> Transaction<'_, Observed<Obs>> {
+    /// Start a transaction which records changes in a [`PatchLog`]
+    pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
         let args = self.transaction_args();
-        Transaction::new(self, args, Observed::new(op_observer))
+        Transaction::new(self, args, patch_log)
     }
 
     pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
@@ -232,36 +224,33 @@ impl Automerge {
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, (), E>
+    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
         self.transact_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, (), E>
+    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
+        // FIXME
         self.transact_with_impl(Some(c), f)
     }
 
-    fn transact_with_impl<F, O, E, C>(
-        &mut self,
-        c: Option<C>,
-        f: F,
-    ) -> transaction::Result<O, (), E>
+    fn transact_with_impl<F, O, E, C>(&mut self, c: Option<C>, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let hash = if let Some(c) = c {
+                let (hash, patch_log) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -270,7 +259,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    op_observer: (),
+                    patch_log,
                 })
             }
             Err(error) => Err(Failure {
@@ -280,46 +269,50 @@ impl Automerge {
         }
     }
 
-    /// Run a transaction on this document in a closure, observing ops with `Obs`, automatically handling commit or rollback
+    /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact_observed<F, O, E, Obs>(&mut self, f: F) -> transaction::Result<O, Obs, E>
+    ///
+    /// The collected patches are available in the return value of [`Transaction::commit`]
+    pub fn transact_and_log_patches<F, O, E>(
+        &mut self,
+        text_rep: TextRepresentation,
+        f: F,
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
-        Obs: OpObserver + BranchableObserver + Default,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
-        self.transact_observed_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
+        self.transact_and_log_patches_with_impl(text_rep, None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
-    /// Like [`Self::transact_observed`] but with a function for generating the commit options
-    pub fn transact_observed_with<F, O, E, C, Obs>(
+    /// Like [`Self::transact_and_log_patches`] but with a function for generating the commit options
+    pub fn transact_and_log_patches_with<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: C,
         f: F,
-    ) -> transaction::Result<O, Obs, E>
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + BranchableObserver + Default,
     {
-        self.transact_observed_with_impl(Some(c), f)
+        self.transact_and_log_patches_with_impl(text_rep, Some(c), f)
     }
 
-    fn transact_observed_with_impl<F, O, Obs, E, C>(
+    fn transact_and_log_patches_with_impl<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: Option<C>,
         f: F,
-    ) -> transaction::Result<O, Obs, E>
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + BranchableObserver + Default,
     {
-        let observer = Obs::default();
-        let mut tx = self.transaction_with_observer(observer);
+        let mut tx = self.transaction_log_patches(PatchLog::active(text_rep));
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (obs, hash) = if let Some(c) = c {
+                let (hash, history) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -328,7 +321,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    op_observer: obs,
+                    patch_log: history,
                 })
             }
             Err(error) => Err(Failure {
@@ -443,28 +436,41 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, OnPartialLoad::Error, VerificationMode::Check, None)
+        Self::load_with(
+            data,
+            OnPartialLoad::Error,
+            VerificationMode::Check,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Load a document without verifying the head hashes
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(
+        Self::load_with(
             data,
             OnPartialLoad::Error,
             VerificationMode::DontCheck,
-            None,
+            &mut PatchLog::inactive(TextRepresentation::default()),
         )
     }
 
-    /// Load a document with an observer
-    #[tracing::instrument(skip(data, observer), err)]
-    pub fn load_with<Obs: OpObserver>(
+    /// Load a document, with options
+    ///
+    /// # Arguments
+    /// * `data` - The data to load
+    /// * `on_error` - What to do if the document is only partially loaded. This can happen if some
+    ///                prefix of `data` contains valid data.
+    /// * `mode` - Whether to verify the head hashes after loading
+    /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
+    ///                 the document once loaded
+    #[tracing::instrument(skip(data), err)]
+    pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
-        mut observer: Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -478,9 +484,11 @@ impl Automerge {
         }
 
         let mut change: Option<Change> = None;
+        let mut first_chunk_was_doc = false;
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
+                first_chunk_was_doc = true;
                 let storage::load::Reconstructed {
                     max_op,
                     result: op_set,
@@ -508,7 +516,6 @@ impl Automerge {
                     change_graph,
                     ops: op_set,
                     deps: heads.into_iter().collect(),
-                    saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
                 }
@@ -537,7 +544,9 @@ impl Automerge {
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(change.into_iter().chain(c))?;
-                if !am.queue.is_empty() {
+                // Only allow missing deps if the first chunk was a document chunk
+                // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
+                if !am.queue.is_empty() && !first_chunk_was_doc {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
@@ -547,35 +556,59 @@ impl Automerge {
                 }
             }
         }
-        if let Some(observer) = &mut observer {
-            current_state::observe_current_state(&am, *observer);
+        if patch_log.is_active() {
+            current_state::log_current_state_patches(&am, patch_log);
         }
         Ok(am)
+    }
+
+    /// Create the patches from a [`PatchLog`]
+    ///
+    /// See the documentation for [`PatchLog`] for more details on this
+    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
+        patch_log.make_patches(self)
+    }
+
+    /// Get a set of [`Patch`]es which materialize the current state of the document
+    ///
+    /// This is a convienence method for `doc.diff(&[], current_heads)`
+    pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
+        let mut patch_log = PatchLog::active(text_rep);
+        current_state::log_current_state_patches(self, &mut patch_log);
+        patch_log.make_patches(self)
     }
 
     /// Load an incremental save of a document.
     ///
     /// Unlike `load` this imports changes into an existing document. It will work with both the
-    /// output of [`Self::save`] and [`Self::save_incremental`]
+    /// output of [`Self::save`] and [`Self::save_after`]
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_with::<()>(data, None)
+        self.load_incremental_log_patches(
+            data,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Like [`Self::load_incremental`] but with an observer
-    pub fn load_incremental_with<Obs: OpObserver>(
+    /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
+    /// [`PatchLog`]
+    pub(crate) fn load_incremental_log_patches(
         &mut self,
         data: &[u8],
-        op_observer: Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc =
-                Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
+            let mut doc = Self::load_with(
+                data,
+                OnPartialLoad::Ignore,
+                VerificationMode::Check,
+                &mut PatchLog::inactive(TextRepresentation::default()),
+            )?;
             doc = doc.with_actor(self.actor_id());
-            if let Some(obs) = op_observer {
-                current_state::observe_current_state(&doc, obs);
+            if patch_log.is_active() {
+                current_state::log_current_state_patches(&doc, patch_log);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -588,7 +621,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -611,20 +644,23 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_with::<_, ()>(changes, None)
+        self.apply_changes_log_patches(
+            changes,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Like [`Self::apply_changes`] but with an observer
-    pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
+    /// Like [`Self::apply_changes`] but log the resulting changes to the current state of the
+    /// document to `patch_log`
+    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        mut op_observer: Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
         // empty document right now, once we have logic to produce the diffs between arbitrary
         // states of the OpSet we can make this cleaner.
-        let empty_at_start = self.is_empty();
         for c in changes {
             if !self.history_index.contains_key(&c.hash()) {
                 if self.duplicate_seq(&c) {
@@ -634,11 +670,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    if empty_at_start {
-                        self.apply_change::<()>(c, &mut None)?;
-                    } else {
-                        self.apply_change(c, &mut op_observer)?;
-                    }
+                    self.apply_change(c, patch_log)?;
                 } else {
                     self.queue.push(c);
                 }
@@ -646,30 +678,21 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                if empty_at_start {
-                    self.apply_change::<()>(c, &mut None)?;
-                } else {
-                    self.apply_change(c, &mut op_observer)?;
-                }
-            }
-        }
-        if empty_at_start {
-            if let Some(observer) = &mut op_observer {
-                current_state::observe_current_state(self, *observer);
+                self.apply_change(c, patch_log)?;
             }
         }
         Ok(())
     }
 
-    fn apply_change<Obs: OpObserver>(
+    fn apply_change(
         &mut self,
         change: Change,
-        observer: &mut Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
-            self.insert_op(&obj, op, observer)?;
+            self.insert_op(&obj, op, patch_log)?;
         }
         Ok(())
     }
@@ -750,14 +773,18 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_with::<()>(other, None)
+        self.merge_and_log_patches(
+            other,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge_with<Obs: OpObserver>(
+    /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
+    /// the resulting changes to the current state of the document to `patch_log`
+    pub fn merge_and_log_patches(
         &mut self,
         other: &mut Self,
-        op_observer: Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
@@ -766,69 +793,66 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
     }
 
     /// Save the entirety of this document in a compact form.
-    ///
-    /// This takes a mutable reference to self because it saves the heads of the last save so that
-    /// `save_incremental` can be used to produce only the changes since the last `save`. This API
-    /// will be changing in future.
-    pub fn save(&mut self) -> Vec<u8> {
+    pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
-        let bytes = crate::storage::save::save_document(
+        let compress = if options.deflate {
+            None
+        } else {
+            Some(CompressConfig::None)
+        };
+        let mut bytes = crate::storage::save::save_document(
             c,
             self.ops.iter().map(|(objid, _, op)| (objid, op)),
             &self.ops.m.actors,
             &self.ops.m.props,
             &heads,
-            None,
+            compress,
         );
-        self.saved = self.get_heads();
+        if options.retain_orphans {
+            for orphaned in self.queue.iter() {
+                bytes.extend(orphaned.raw_bytes());
+            }
+        }
         bytes
     }
 
+    /// Save the entirety of this document in a compact form.
+    pub fn save(&self) -> Vec<u8> {
+        self.save_with_options(SaveOptions::default())
+    }
+
     /// Save the document and attempt to load it before returning - slow!
-    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
         Self::load(&bytes)?;
         Ok(bytes)
     }
 
     /// Save this document, but don't run it through DEFLATE afterwards
-    pub fn save_nocompress(&mut self) -> Vec<u8> {
-        let heads = self.get_heads();
-        let c = self.history.iter();
-        let bytes = crate::storage::save::save_document(
-            c,
-            self.ops.iter().map(|(objid, _, op)| (objid, op)),
-            &self.ops.m.actors,
-            &self.ops.m.props,
-            &heads,
-            Some(CompressConfig::None),
-        );
-        self.saved = self.get_heads();
-        bytes
+    pub fn save_nocompress(&self) -> Vec<u8> {
+        self.save_with_options(SaveOptions {
+            deflate: false,
+            ..Default::default()
+        })
     }
 
-    /// Save the changes since the last call to [Self::save`]
+    /// Save the changes since the given heads
     ///
     /// The output of this will not be a compressed document format, but a series of individual
     /// changes. This is useful if you know you have only made a small change since the last `save`
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
-    pub fn save_incremental(&mut self) -> Vec<u8> {
-        let changes = self
-            .get_changes(self.saved.as_slice())
-            .expect("Should only be getting changes using previously saved heads");
+    pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        let changes = self.get_changes(heads);
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
-        }
-        if !bytes.is_empty() {
-            self.saved = self.get_heads()
         }
         bytes
     }
@@ -853,7 +877,7 @@ impl Automerge {
     }
 
     /// Get the changes since `have_deps` in this document using a clock internally.
-    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         // get the clock for the given deps
         let clock = self.clock_at(have_deps);
 
@@ -874,10 +898,10 @@ impl Automerge {
         // ensure the changes are still in sorted order
         change_indexes.sort_unstable();
 
-        Ok(change_indexes
+        change_indexes
             .into_iter()
             .map(|i| &self.history[i])
-            .collect())
+            .collect()
     }
 
     /// Get the last change this actor made to the document.
@@ -889,7 +913,7 @@ impl Automerge {
             .find(|c| c.actor_id() == self.get_actor());
     }
 
-    fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         self.change_graph.clock_for_heads(heads)
     }
 
@@ -1048,19 +1072,19 @@ impl Automerge {
         self.ops.visualise(objects)
     }
 
-    pub(crate) fn insert_op<Obs: OpObserver>(
+    pub(crate) fn insert_op(
         &mut self,
         obj: &ObjId,
         op: Op,
-        observer: &mut Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let (pos, succ) = if let Some(observer) = observer {
+        let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj)?;
-            let found = self.ops.find_op_with_observer(&obj, &op);
-            found.observe(&obj, &op, self, *observer);
+            let found = self.ops.find_op_with_patch_log(&obj, &op);
+            found.log_patches(&obj, &op, self, patch_log);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.find_op_without_observer(obj, &op);
+            let found = self.ops.find_op_without_patch_log(obj, &op);
             (found.pos, found.succ)
         };
 
@@ -1072,17 +1096,21 @@ impl Automerge {
         Ok(())
     }
 
-    /// Observe changes in the document between the 'before'
-    /// and 'after' heads.  If the arguments are reverse it will
-    /// observe the same changes in the opposite order.
-    pub fn observe_diff<Obs: OpObserver>(
+    /// Create patches representing the change in the current state of the document between the
+    /// 'before' and 'after' heads.  If the arguments are reverse it will observe the same changes
+    /// in the opposite order.
+    pub fn diff(
         &self,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
-        observer: &mut Obs,
-    ) -> Result<(), AutomergeError> {
-        diff::observe_diff(self, before, after, observer);
-        Ok(())
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
+        text_rep: TextRepresentation,
+    ) -> Vec<Patch> {
+        let before = self.clock_at(before_heads);
+        let after = self.clock_at(after_heads);
+        let mut patch_log = PatchLog::active(text_rep);
+        diff::log_diff(self, &before, &after, &mut patch_log);
+        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.make_patches(self)
     }
 
     /// Get the heads of this document.
@@ -1092,7 +1120,7 @@ impl Automerge {
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         self.get_changes_clock(have_deps)
     }
 
@@ -1184,6 +1212,11 @@ impl Automerge {
                     })
             })
             .collect())
+    }
+
+    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
+        let clock = heads.map(|heads| self.clock_at(heads));
+        self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
 }
 
@@ -1486,5 +1519,23 @@ impl ReadDoc for Automerge {
 impl Default for Automerge {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Options to pass to `[Automerge::save_with_options]` and [`crate::AutoCommit::save_with_options`]
+#[derive(Debug)]
+pub struct SaveOptions {
+    /// Whether to apply DEFLATE compression to the RLE encoded columns in the document
+    pub deflate: bool,
+    /// Whether to save changes which we do not have the dependencies for
+    pub retain_orphans: bool,
+}
+
+impl std::default::Default for SaveOptions {
+    fn default() -> Self {
+        Self {
+            deflate: true,
+            retain_orphans: true,
+        }
     }
 }

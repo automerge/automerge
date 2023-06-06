@@ -28,7 +28,7 @@
  * let doc2 = automerge.init<DocType>()
  * doc2 = automerge.merge(doc2, automerge.clone(doc1))
  * doc2 = automerge.change<DocType>(doc2, d => {
- *     d.ideas.push(new automerge.Text("which records it's history"))
+ *     d.ideas.push(new automerge.Text("which records its history"))
  * })
  *
  * // Note the `automerge.clone` call, see the "cloning" section of this readme for
@@ -40,7 +40,7 @@
  * })
  *
  * let doc3 = automerge.merge(doc1, doc2)
- * // doc3 is now {ideas: ["an immutable object", "which records it's history"]}
+ * // doc3 is now {ideas: ["an immutable object", "which records its history"]}
  * ```
  *
  * ## Applying changes from another document

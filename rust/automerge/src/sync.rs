@@ -72,8 +72,9 @@ use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    patches::{PatchLog, TextRepresentation},
     storage::{parse, Change as StoredChange, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
+    Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
 };
 
 mod bloom;
@@ -92,6 +93,11 @@ pub trait SyncDoc {
     /// If this returns `None` then there are no new messages to send, either because we are
     /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
     /// date.
+    ///
+    /// * `sync_state` - The [`State`] for this document and the remote peer
+    /// * `message` - The [`Message`] to receive
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
+    ///                 current state of the document due to the received sync message
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
 
     /// Apply a received sync message to this document and `sync_state`
@@ -101,13 +107,24 @@ pub trait SyncDoc {
         message: Message,
     ) -> Result<(), AutomergeError>;
 
-    /// Apply a received sync message to this document and `sync_state`, observing any changes with
-    /// `op_observer`
-    fn receive_sync_message_with<Obs: OpObserver>(
+    /// Apply a received sync message to this document and `sync_state`, logging any changes that
+    /// are made to `patch_log`
+    ///
+    /// If this returns `None` then there are no new messages to send, either because we are
+    /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
+    /// date.
+    ///
+    /// # Arguments
+    ///
+    /// * `sync_state` - The [`State`] for this document and the remote peer
+    /// * `message` - The [`Message`] to receive
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
+    ///                 current state of the document due to the received sync message
+    fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: &mut Obs,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError>;
 }
 
@@ -208,24 +225,23 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        self.do_receive_sync_message::<()>(sync_state, message, None)
+        let mut patch_log = PatchLog::inactive(TextRepresentation::default());
+        self.receive_sync_message_inner(sync_state, message, &mut patch_log)
     }
 
-    fn receive_sync_message_with<Obs: OpObserver>(
+    fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: &mut Obs,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        self.do_receive_sync_message(sync_state, message, Some(op_observer))
+        self.receive_sync_message_inner(sync_state, message, patch_log)
     }
 }
 
 impl Automerge {
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self
-            .get_changes(&last_sync)
-            .expect("Should have only used hashes that are in the document");
+        let new_changes = self.get_changes(&last_sync);
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -254,7 +270,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes)?;
+            let changes = self.get_changes(&last_sync_hashes);
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -304,11 +320,11 @@ impl Automerge {
         }
     }
 
-    fn do_receive_sync_message<Obs: OpObserver>(
+    pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: Option<&mut Obs>,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
@@ -321,7 +337,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_with(message_changes, op_observer)?;
+            self.apply_changes_log_patches(message_changes, patch_log)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

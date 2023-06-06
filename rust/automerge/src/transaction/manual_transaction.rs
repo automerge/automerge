@@ -3,13 +3,11 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::op_observer::BranchableObserver;
+use crate::patches::PatchLog;
 use crate::AutomergeError;
-use crate::{
-    Automerge, ChangeHash, Cursor, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
-};
+use crate::{Automerge, ChangeHash, Cursor, ObjType, Prop, ReadDoc, ScalarValue, Value};
 
-use super::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
+use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -24,21 +22,20 @@ use super::{observation, CommitOptions, Transactable, TransactionArgs, Transacti
 /// intermediate state.
 /// This is consistent with `?` error handling.
 #[derive(Debug)]
-pub struct Transaction<'a, Obs: observation::Observation> {
+pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
-    // As with `inner` this is an `Option` so we can `take` it during `commit`
-    observation: Option<Obs>,
+    patch_log: PatchLog,
     doc: &'a mut Automerge,
 }
 
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, obs: Obs) -> Self {
+impl<'a> Transaction<'a> {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
-            observation: Some(obs),
+            patch_log,
         }
     }
 
@@ -53,7 +50,7 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     }
 }
 
-impl<'a> Transaction<'a, observation::UnObserved> {
+impl<'a> Transaction<'a> {
     pub(crate) fn empty(
         doc: &'a mut Automerge,
         args: TransactionArgs,
@@ -63,13 +60,7 @@ impl<'a> Transaction<'a, observation::UnObserved> {
     }
 }
 
-impl<'a, Obs: OpObserver + BranchableObserver> Transaction<'a, observation::Observed<Obs>> {
-    pub fn observer(&mut self) -> &mut Obs {
-        self.observation.as_mut().unwrap().observer()
-    }
-}
-
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
+impl<'a> Transaction<'a> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
@@ -77,11 +68,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(mut self) -> Obs::CommitResult {
+    pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, None, None);
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.patch_log.clone())
     }
 
     /// Commit the operations in this transaction with some options.
@@ -100,11 +91,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> Obs::CommitResult {
+    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, options.message, options.time);
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.patch_log.clone())
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -115,18 +106,14 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, Option<&mut Obs::Obs>) -> O,
+        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        if let Some(obs) = self.observation.as_mut() {
-            f(tx, self.doc, obs.observer())
-        } else {
-            f(tx, self.doc, None)
-        }
+        f(tx, self.doc, &mut self.patch_log)
     }
 }
 
-impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
+impl<'a> ReadDoc for Transaction<'a> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys(obj)
     }
@@ -286,7 +273,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     }
 }
 
-impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
+impl<'a> Transactable for Transaction<'a> {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
@@ -306,7 +293,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.put(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -315,7 +302,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.put_object(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -324,7 +311,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
+        self.do_tx(|tx, doc, hist| tx.insert(doc, hist, obj.as_ref(), index, value))
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -333,7 +320,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
+        self.do_tx(|tx, doc, hist| tx.insert_object(doc, hist, obj.as_ref(), index, value))
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -342,7 +329,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.increment(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -350,7 +337,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         obj: O,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
+        self.do_tx(|tx, doc, hist| tx.delete(doc, hist, obj.as_ref(), prop))
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -362,7 +349,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         del: usize,
         vals: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
+        self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -372,7 +359,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+        self.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))
     }
 
     fn mark<O: AsRef<ExId>>(
@@ -381,7 +368,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
+        self.do_tx(|tx, doc, hist| tx.mark(doc, hist, obj.as_ref(), mark, expand))
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -392,7 +379,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         end: usize,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), name, start, end, expand))
+        self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -404,7 +391,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
 // intermediate state.
 // This defaults to rolling back the transaction to be compatible with `?` error returning before
 // reaching a call to `commit`.
-impl<'a, Obs: observation::Observation> Drop for Transaction<'a, Obs> {
+impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);

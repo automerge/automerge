@@ -2,5 +2,6 @@
 /bundler
 /nodejs
 /deno
+/web
 Cargo.lock
 yarn.lock

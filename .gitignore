@@ -4,3 +4,4 @@ perf.*
 build/
 .vim/*
 /target
+.DS_Store

@@ -7,7 +7,7 @@ use crate::types::Clock;
 use crate::types::ListEncoding;
 use crate::value::Value;
 
-use super::TopOps;
+use super::{TopOp, TopOps};
 
 /// Iterator created by the [`crate::ReadDoc::list_range()`] and [`crate::ReadDoc::list_range_at()`] methods
 pub struct ListRange<'a, R: RangeBounds<usize>> {
@@ -57,22 +57,33 @@ impl<'a, R: RangeBounds<usize>> fmt::Debug for ListRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
-    type Item = (usize, Value<'a>, ExId);
+    type Item = ListRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
-            for op in inner.iter.by_ref() {
+            for TopOp { op, conflict } in inner.iter.by_ref() {
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
+                let value = op.value_at(inner.clock.as_ref());
+                let id = inner.op_set.id_to_exid(op.id);
                 if inner.range.contains(&index) {
-                    return Some((
+                    return Some(ListRangeItem {
                         index,
-                        op.value_at(inner.clock.as_ref()),
-                        inner.op_set.id_to_exid(op.id),
-                    ));
+                        value,
+                        id,
+                        conflict,
+                    });
                 }
             }
             None
         })
     }
+}
+
+#[derive(Debug)]
+pub struct ListRangeItem<'a> {
+    pub index: usize,
+    pub value: Value<'a>,
+    pub id: ExId,
+    pub conflict: bool,
 }

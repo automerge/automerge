@@ -783,15 +783,18 @@ function listMethods<T extends Target>(target: T) {
     },
 
     entries() {
-      const i = 0
-      const iterator = {
+      let i = 0
+      const iterator: IterableIterator<[number, ValueType<T>]> = {
         next: () => {
           const value = valueAt(target, i)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
-            return { value: [i, value], done: false }
+            return { value: [i++, value], done: false }
           }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator
@@ -800,29 +803,33 @@ function listMethods<T extends Target>(target: T) {
     keys() {
       let i = 0
       const len = context.length(objectId, heads)
-      const iterator = {
+      const iterator: IterableIterator<number> = {
         next: () => {
-          let value: undefined | number = undefined
           if (i < len) {
-            value = i
-            i++
+            return { value: i++, done: false }
           }
-          return { value, done: true }
+          return { value: undefined, done: true }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator
     },
 
     values() {
-      const i = 0
-      const iterator = {
+      let i = 0
+      const iterator: IterableIterator<ValueType<T>> = {
         next: () => {
-          const value = valueAt(target, i)
+          const value = valueAt(target, i++)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
             return { value, done: false }
           }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator

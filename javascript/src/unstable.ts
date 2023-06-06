@@ -65,6 +65,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
+  Heads,
 } from "@automerge/automerge-wasm"
 
 export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
@@ -98,6 +99,7 @@ export {
   toJS,
   isAutomerge,
   getObjectId,
+  diff,
 } from "./stable"
 
 export type InitOptions<T> = {

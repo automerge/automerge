@@ -1,22 +1,21 @@
 use std::ops::RangeBounds;
 
+use crate::automerge::SaveOptions;
+use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::op_observer::{BranchableObserver, OpObserver};
+use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
+use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 use crate::{
-    transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, Value,
+    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
+    Prop, Value,
 };
 
 /// An automerge document that automatically manages transactions.
-///
-/// An `AutoCommit` can optionally manage an [`OpObserver`]. This observer will be notified of all
-/// changes made by both remote and local changes. The type parameter `O` tracks whether this
-/// document is observed or not.
 ///
 /// ## Creating, loading, merging and forking documents
 ///
@@ -42,42 +41,41 @@ use crate::{
 ///
 /// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
 ///
-/// ## Observers
+/// ## Patches, maintaining materialized views
 ///
-/// An `AutoCommit` can optionally manage an [`OpObserver`]. [`Self::new`] will return a document
-/// with no observer but you can set an observer using [`Self::with_observer`]. The observer must
-/// implement both [`OpObserver`] and [`BranchableObserver`]. If you have an observed autocommit
-/// then you can obtain a mutable reference to the observer with [`Self::observer`]
+/// [`AutoCommit`] allows you to generate [`Patch`]es representing changes to the current state of
+/// the document which you can use to maintain a materialized view of the current state. There are
+/// several ways to use this. See the documentation on `Self::diff` for more details, but the key
+/// point to remember is that [`AutoCommit`] manages an internal "diff cursor" for you. This is a
+/// representation of the heads of the document last time you called `diff_incremental` but you can
+/// also manage it directly using [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`].
 #[derive(Debug, Clone)]
-pub struct AutoCommitWithObs<Obs: Observation> {
-    doc: Automerge,
-    transaction: Option<(Obs, TransactionInner)>,
-    observation: Obs,
+pub struct AutoCommit {
+    pub(crate) doc: Automerge,
+    transaction: Option<(PatchLog, TransactionInner)>,
+    patch_log: PatchLog,
+    diff_cursor: Vec<ChangeHash>,
+    save_cursor: Vec<ChangeHash>,
 }
 
-/// An autocommit document with no observer
+/// An autocommit document with an inactive [`PatchLog`]
 ///
-/// See [`AutoCommitWithObs`]
-pub type AutoCommit = AutoCommitWithObs<UnObserved>;
-
-impl<O: OpObserver + BranchableObserver + Default> Default for AutoCommitWithObs<Observed<O>> {
+/// See [`AutoCommit`]
+impl Default for AutoCommit {
     fn default() -> Self {
-        let op_observer = O::default();
-        AutoCommitWithObs {
+        AutoCommit {
             doc: Automerge::new(),
             transaction: None,
-            observation: Observed::new(op_observer),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
         }
     }
 }
 
 impl AutoCommit {
     pub fn new() -> AutoCommit {
-        AutoCommitWithObs {
-            doc: Automerge::new(),
-            transaction: None,
-            observation: UnObserved,
-        }
+        AutoCommit::default()
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
@@ -85,38 +83,138 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            observation: UnObserved,
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
         })
     }
-}
 
-impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
-    pub fn observer(&mut self) -> &mut Obs {
-        self.ensure_transaction_closed();
-        self.observation.observer()
+    pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
+        let doc = Automerge::load_unverified_heads(data)?;
+        Ok(Self {
+            doc,
+            transaction: None,
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
+        })
     }
 
-    pub fn diff(
-        &mut self,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
-    ) -> Result<Obs, AutomergeError> {
+    /// Erases the diff cursor created by [`Self::update_diff_cursor`] and no
+    /// longer indexes changes to the document.
+    pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-
-        let observer = self.observation.observer();
-        let mut branch = observer.explicit_branch();
-        self.doc.observe_diff(before, after, &mut branch)?;
-        Ok(branch)
+        self.patch_log = PatchLog::inactive(TextRepresentation::default());
+        self.diff_cursor = Vec::new();
     }
-}
 
-impl<Obs: Observation + Clone> AutoCommitWithObs<Obs> {
+    /// Sets the [`Self::diff_cursor`] to current heads of the document and will begin
+    /// building an index with every change moving forward.
+    ///
+    /// If [`Self::diff`] is called with [`Self::diff_cursor`] as `before` and
+    /// [`Self::get_heads`] as `after` - the index will be used
+    ///
+    /// If the cursor is no longer needed it can be reset with
+    /// [`Self::reset_diff_cursor`]
+    pub fn update_diff_cursor(&mut self) {
+        self.ensure_transaction_closed();
+        self.patch_log.set_active(true);
+        self.patch_log.truncate();
+        self.diff_cursor = self.doc.get_heads();
+    }
+
+    /// Returns the cursor set by [`Self::update_diff_cursor`]
+    pub fn diff_cursor(&self) -> Vec<ChangeHash> {
+        self.diff_cursor.clone()
+    }
+
+    /// Generate the patches recorded in `patch_log`
+    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
+        self.doc.make_patches(patch_log)
+    }
+
+    /// Generates a diff from `before` to `after`
+    ///
+    /// By default the diff requires a sequental scan of all the ops in the doc.
+    ///
+    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor`] and
+    /// `after` must equal [`Self::get_heads`]. The diff cursor is managed with
+    /// [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`]
+    ///
+    /// Managing the diff index has a small but non-zero overhead.  It should be
+    /// disabled if no longer needed.  If a signifigantly large change is applied
+    /// to the document it may be faster to reset the index before applying it,
+    /// doing an unindxed diff afterwards and then reenable the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
+    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
+    ///
+    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
+    /// Normal use might look like:
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use automerge::{ AutoCommit };
+    ///
+    /// let mut doc = AutoCommit::new(); // or AutoCommit::load(data)
+    /// // make some changes - use and update the index
+    /// let heads = doc.get_heads();
+    /// let diff_cursor = doc.diff_cursor();
+    /// let patches = doc.diff(&diff_cursor, &heads);
+    /// doc.update_diff_cursor();
+    /// ```
+    ///
+    /// See [`Self::diff_incremental`] for encapsulating this pattern.
+    pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
+        self.ensure_transaction_closed();
+        let heads = self.doc.get_heads();
+        if after == heads && before == self.diff_cursor && self.patch_log.is_active() {
+            self.patch_log.make_patches(&self.doc)
+        } else if before.is_empty() && after == heads {
+            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
+            patch_log.heads = Some(after.to_vec());
+            current_state::log_current_state_patches(&self.doc, &mut patch_log);
+            patch_log.make_patches(&self.doc)
+        } else {
+            let before_clock = self.doc.clock_at(before);
+            let after_clock = self.doc.clock_at(after);
+            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
+            patch_log.heads = Some(after.to_vec());
+            diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
+            patch_log.make_patches(&self.doc)
+        }
+    }
+
+    /// This is a convience function that encapsulates the following common pattern
+    /// ```
+    /// use automerge::AutoCommit;
+    /// let mut doc = AutoCommit::new();
+    /// // make some changes
+    /// let heads = doc.get_heads();
+    /// let diff_cursor = doc.diff_cursor();
+    /// let patches = doc.diff(&diff_cursor, &heads);
+    /// doc.update_diff_cursor();
+    /// ```
+    pub fn diff_incremental(&mut self) -> Vec<Patch> {
+        self.ensure_transaction_closed();
+        let heads = self.doc.get_heads();
+        let diff_cursor = self.diff_cursor();
+        let patches = self.diff(&diff_cursor, &heads);
+        self.update_diff_cursor();
+        patches
+    }
+
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
-            observation: self.observation.clone(),
+            patch_log: self.patch_log.clone(),
+            diff_cursor: self.diff_cursor.clone(),
+            save_cursor: self.save_cursor.clone(),
         }
     }
 
@@ -125,23 +223,10 @@ impl<Obs: Observation + Clone> AutoCommitWithObs<Obs> {
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
             transaction: self.transaction.clone(),
-            observation: self.observation.clone(),
+            patch_log: self.patch_log.clone(),
+            diff_cursor: self.diff_cursor.clone(),
+            save_cursor: self.save_cursor.clone(),
         })
-    }
-}
-
-impl<Obs: Observation> AutoCommitWithObs<Obs> {
-    pub fn with_observer<Obs2: OpObserver + BranchableObserver>(
-        self,
-        op_observer: Obs2,
-    ) -> AutoCommitWithObs<Observed<Obs2>> {
-        AutoCommitWithObs {
-            doc: self.doc,
-            transaction: self
-                .transaction
-                .map(|(_, t)| (Observed::new(op_observer.branch()), t)),
-            observation: Observed::new(op_observer),
-        }
     }
 
     /// Get the inner document.
@@ -171,13 +256,13 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args();
             let inner = TransactionInner::new(args);
-            self.transaction = Some((self.observation.branch(), inner))
+            self.transaction = Some((self.patch_log.branch(), inner))
         }
     }
 
     fn ensure_transaction_closed(&mut self) {
-        if let Some((current, tx)) = self.transaction.take() {
-            self.observation.merge(&current);
+        if let Some((patch_log, tx)) = self.transaction.take() {
+            self.patch_log.merge(patch_log);
             tx.commit(&mut self.doc, None, None);
         }
     }
@@ -191,12 +276,8 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        // TODO - would be nice to pass None here instead of &mut ()
-        if let Some(observer) = self.observation.observer() {
-            self.doc.load_incremental_with(data, Some(observer))
-        } else {
-            self.doc.load_incremental(data)
-        }
+        self.doc
+            .load_incremental_log_patches(data, &mut self.patch_log)
     }
 
     pub fn apply_changes(
@@ -204,43 +285,45 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if let Some(observer) = self.observation.observer() {
-            self.doc.apply_changes_with(changes, Some(observer))
-        } else {
-            self.doc.apply_changes(changes)
-        }
+        self.doc
+            .apply_changes_log_patches(changes, &mut self.patch_log)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge<Obs2: Observation>(
-        &mut self,
-        other: &mut AutoCommitWithObs<Obs2>,
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        if let Some(observer) = self.observation.observer() {
-            self.doc.merge_with(&mut other.doc, Some(observer))
-        } else {
-            self.doc.merge(&mut other.doc)
-        }
+        self.doc
+            .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
     }
 
     /// Save the entirety of this document in a compact form.
     pub fn save(&mut self) -> Vec<u8> {
-        self.ensure_transaction_closed();
-        self.doc.save()
+        self.save_with_options(SaveOptions::default())
     }
 
-    /// Save this document, but don't run it through DEFLATE afterwards
-    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
-        self.doc.save_and_verify()
+        let bytes = self.doc.save_with_options(options);
+        if !bytes.is_empty() {
+            self.save_cursor = self.get_heads()
+        }
+        bytes
+    }
+
+    /// Save the document and attempt to load it before returning - slow!
+    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        let bytes = self.save();
+        Self::load(&bytes)?;
+        Ok(bytes)
     }
 
     /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
-        self.ensure_transaction_closed();
-        self.doc.save_nocompress()
+        self.save_with_options(SaveOptions {
+            deflate: false,
+            ..Default::default()
+        })
     }
 
     /// Save the changes since the last call to [Self::save`]
@@ -251,7 +334,11 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     /// text object).
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
-        self.doc.save_incremental()
+        let bytes = self.doc.save_after(&self.save_cursor);
+        if !bytes.is_empty() {
+            self.save_cursor = self.get_heads()
+        }
+        bytes
     }
 
     pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -265,10 +352,7 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(
-        &mut self,
-        have_deps: &[ChangeHash],
-    ) -> Result<Vec<&Change>, AutomergeError> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
@@ -320,6 +404,19 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_heads()
     }
 
+    pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
+        self.patch_log.set_text_rep(text_rep)
+    }
+
+    pub fn get_text_rep(&mut self) -> TextRepresentation {
+        self.patch_log.text_rep()
+    }
+
+    pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
+        self.patch_log.set_text_rep(text_rep);
+        self
+    }
+
     /// Commit any uncommitted changes
     ///
     /// Returns `None` if there were no operations to commit
@@ -347,8 +444,8 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeHash> {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.take().unwrap();
-        self.observation.merge(&current);
+        let (patch_log, tx) = self.transaction.take().unwrap();
+        self.patch_log.merge(patch_log);
         tx.commit(&mut self.doc, options.message, options.time)
     }
 
@@ -393,9 +490,13 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
         self.doc.hash_for_opid(opid)
     }
+
+    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
+        self.doc.hydrate(heads)
+    }
 }
 
-impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
+impl ReadDoc for AutoCommit {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
     }
@@ -555,7 +656,7 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
     }
 }
 
-impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
+impl Transactable for AutoCommit {
     fn pending_ops(&self) -> usize {
         self.transaction
             .as_ref()
@@ -570,8 +671,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         value: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.put(&mut self.doc, current.observer(), obj.as_ref(), prop, value)
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.put(&mut self.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -581,8 +682,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.put_object(&mut self.doc, current.observer(), obj.as_ref(), prop, value)
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.put_object(&mut self.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -592,14 +693,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         value: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.insert(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.insert(&mut self.doc, patch_log, obj.as_ref(), index, value)
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -609,14 +704,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.insert_object(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.insert_object(&mut self.doc, patch_log, obj.as_ref(), index, value)
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -626,8 +715,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         value: i64,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.increment(&mut self.doc, current.observer(), obj.as_ref(), prop, value)
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.increment(&mut self.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -636,8 +725,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         prop: P,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.delete(&mut self.doc, current.observer(), obj.as_ref(), prop)
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.delete(&mut self.doc, patch_log, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -650,15 +739,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         vals: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.splice(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            pos,
-            del,
-            vals,
-        )
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.splice(&mut self.doc, patch_log, obj.as_ref(), pos, del, vals)
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -669,15 +751,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.splice_text(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            pos,
-            del,
-            text,
-        )
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.splice_text(&mut self.doc, patch_log, obj.as_ref(), pos, del, text)
     }
 
     fn mark<O: AsRef<ExId>>(
@@ -687,14 +762,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            mark,
-            expand,
-        )
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.mark(&mut self.doc, patch_log, obj.as_ref(), mark, expand)
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -706,10 +775,10 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
-        let (current, tx) = self.transaction.as_mut().unwrap();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
         tx.unmark(
             &mut self.doc,
-            current.observer(),
+            patch_log,
             obj.as_ref(),
             key,
             start,
@@ -725,11 +794,11 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
 
 // A wrapper we return from `AutoCommit::sync` to ensure that transactions are closed before we
 // start syncing
-struct SyncWrapper<'a, Obs: Observation> {
-    inner: &'a mut AutoCommitWithObs<Obs>,
+struct SyncWrapper<'a> {
+    inner: &'a mut AutoCommit,
 }
 
-impl<'a, Obs: Observation> SyncDoc for SyncWrapper<'a, Obs> {
+impl<'a> SyncDoc for SyncWrapper<'a> {
     fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
         self.inner.doc.generate_sync_message(sync_state)
     }
@@ -740,30 +809,29 @@ impl<'a, Obs: Observation> SyncDoc for SyncWrapper<'a, Obs> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.inner.ensure_transaction_closed();
-        if let Some(observer) = self.inner.observation.observer() {
-            self.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, observer)
-        } else {
-            self.inner.doc.receive_sync_message(sync_state, message)
-        }
+        self.inner.doc.receive_sync_message_log_patches(
+            sync_state,
+            message,
+            &mut self.inner.patch_log,
+        )
     }
 
-    fn receive_sync_message_with<Obs2: OpObserver>(
+    fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut sync::State,
         message: sync::Message,
-        op_observer: &mut Obs2,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        if let Some(our_observer) = self.inner.observation.observer() {
-            let mut composed = crate::op_observer::compose(our_observer, op_observer);
-            self.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, &mut composed)
-        } else {
-            self.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, op_observer)
+        let mut new_patch_log = PatchLog::active(patch_log.text_rep());
+        self.inner
+            .doc
+            .receive_sync_message_log_patches(sync_state, message, &mut new_patch_log)?;
+        if self.inner.patch_log.is_active() {
+            self.inner.patch_log.merge(new_patch_log.clone());
         }
+        if patch_log.is_active() {
+            patch_log.merge(new_patch_log)
+        }
+        Ok(())
     }
 }

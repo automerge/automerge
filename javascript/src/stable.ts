@@ -9,6 +9,7 @@ import {
   Counter,
   type Doc,
   type PatchCallback,
+  type Patch,
 } from "./types"
 export {
   type AutomergeValue,
@@ -141,6 +142,8 @@ export type InitOptions<T> = {
   patchCallback?: PatchCallback<T>
   /** @hidden */
   enableTextV2?: boolean
+  /** @hidden */
+  unchecked?: boolean
 }
 
 /** @hidden */
@@ -169,8 +172,9 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const opts = importOpts(_opts)
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.create(opts.enableTextV2 || false, opts.actor)
-  handle.enablePatches(true)
+  const text_v1 = !(opts.enableTextV2 || false)
+  const actor = opts.actor
+  const handle = ApiHandler.create({ actor, text_v1 })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
@@ -471,8 +475,9 @@ export function load<T>(
   const opts = importOpts(_opts)
   const actor = opts.actor
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.load(data, opts.enableTextV2 || false, actor)
-  handle.enablePatches(true)
+  const text_v1 = !(opts.enableTextV2 || false)
+  const unchecked = opts.unchecked || false
+  const handle = ApiHandler.load(data, { text_v1, actor, unchecked })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
@@ -781,6 +786,16 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
       return <T>state
     },
   }))
+}
+
+/**
+ * Create a set of patches representing the change from one set of heads to another
+ *
+ * If either of the heads are missing from the document the returned set of patches will be empty
+ */
+export function diff(doc: Doc<any>, before: Heads, after: Heads): Patch[] {
+  const state = _state(doc)
+  return state.handle.diff(before, after)
 }
 
 /** @hidden */
