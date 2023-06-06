@@ -490,7 +490,7 @@ impl AutoCommit {
     pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
         self.doc.hash_for_opid(opid)
     }
-  
+
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
         self.doc.hydrate(heads)
     }
