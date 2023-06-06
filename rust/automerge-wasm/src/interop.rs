@@ -664,24 +664,17 @@ impl Automerge {
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        let len = self.doc.length(obj);
-        let array = Array::new();
-        for i in 0..len {
-            let val_and_id = if let Some(heads) = heads {
-                self.doc.get_at(obj, i, heads)
-            } else {
-                self.doc.get(obj, i)
-            };
-            if let Ok(Some((val, id))) = val_and_id {
-                let subval = match val {
-                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
-                    Value::Scalar(_) => self.export_value(alloc(&val, self.text_rep))?,
-                };
-                array.push(&subval);
-            };
+        if let Some(heads) = heads {
+            self.doc.list_range_at(obj, .., heads)
+        } else {
+            self.doc.list_range(obj, ..)
         }
-
-        Ok(array.into())
+        .map(|item| match &item.value {
+            Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta),
+            Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep)),
+        })
+        .collect::<Result<Array, _>>()
+        .map(|array| array.into())
     }
 
     pub(crate) fn export_value(
