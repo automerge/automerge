@@ -1498,7 +1498,49 @@
 <a href="#1498" id="1498">1498</a>
 <a href="#1499" id="1499">1499</a>
 <a href="#1500" id="1500">1500</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
+<a href="#1501" id="1501">1501</a>
+<a href="#1502" id="1502">1502</a>
+<a href="#1503" id="1503">1503</a>
+<a href="#1504" id="1504">1504</a>
+<a href="#1505" id="1505">1505</a>
+<a href="#1506" id="1506">1506</a>
+<a href="#1507" id="1507">1507</a>
+<a href="#1508" id="1508">1508</a>
+<a href="#1509" id="1509">1509</a>
+<a href="#1510" id="1510">1510</a>
+<a href="#1511" id="1511">1511</a>
+<a href="#1512" id="1512">1512</a>
+<a href="#1513" id="1513">1513</a>
+<a href="#1514" id="1514">1514</a>
+<a href="#1515" id="1515">1515</a>
+<a href="#1516" id="1516">1516</a>
+<a href="#1517" id="1517">1517</a>
+<a href="#1518" id="1518">1518</a>
+<a href="#1519" id="1519">1519</a>
+<a href="#1520" id="1520">1520</a>
+<a href="#1521" id="1521">1521</a>
+<a href="#1522" id="1522">1522</a>
+<a href="#1523" id="1523">1523</a>
+<a href="#1524" id="1524">1524</a>
+<a href="#1525" id="1525">1525</a>
+<a href="#1526" id="1526">1526</a>
+<a href="#1527" id="1527">1527</a>
+<a href="#1528" id="1528">1528</a>
+<a href="#1529" id="1529">1529</a>
+<a href="#1530" id="1530">1530</a>
+<a href="#1531" id="1531">1531</a>
+<a href="#1532" id="1532">1532</a>
+<a href="#1533" id="1533">1533</a>
+<a href="#1534" id="1534">1534</a>
+<a href="#1535" id="1535">1535</a>
+<a href="#1536" id="1536">1536</a>
+<a href="#1537" id="1537">1537</a>
+<a href="#1538" id="1538">1538</a>
+<a href="#1539" id="1539">1539</a>
+<a href="#1540" id="1540">1540</a>
+<a href="#1541" id="1541">1541</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::num::NonZeroU64;
 <span class="kw">use </span>std::ops::RangeBounds;
@@ -1875,6 +1917,22 @@
         <span class="prelude-val">Ok</span>(f)
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>exid_to_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, AutomergeError&gt; {
+        <span class="kw">match </span>id {
+            ExId::Root =&gt; <span class="prelude-val">Ok</span>(OpId::new(<span class="number">0</span>, <span class="number">0</span>)),
+            ExId::Id(ctr, actor, idx) =&gt; {
+                <span class="kw">let </span>opid = <span class="kw">if </span><span class="self">self</span>.ops.m.actors.cache.get(<span class="kw-2">*</span>idx) == <span class="prelude-val">Some</span>(actor) {
+                    OpId::new(<span class="kw-2">*</span>ctr, <span class="kw-2">*</span>idx)
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(backup_idx) = <span class="self">self</span>.ops.m.actors.lookup(actor) {
+                    OpId::new(<span class="kw-2">*</span>ctr, backup_idx)
+                } <span class="kw">else </span>{
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidObjId(id.to_string()));
+                };
+                <span class="prelude-val">Ok</span>(opid)
+            }
+        }
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_obj_meta(<span class="kw-2">&amp;</span><span class="self">self</span>, id: ObjId) -&gt; <span class="prelude-ty">Result</span>&lt;ObjMeta, AutomergeError&gt; {
         <span class="kw">if </span>id.is_root() {
             <span class="prelude-val">Ok</span>(ObjMeta::root())
@@ -1904,18 +1962,8 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>exid_to_obj(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Result</span>&lt;ObjMeta, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="kw">match </span>id {
-            ExId::Root =&gt; ObjId::root(),
-            ExId::Id(ctr, actor, idx) =&gt; {
-                <span class="kw">if </span><span class="self">self</span>.ops.m.actors.cache.get(<span class="kw-2">*</span>idx) == <span class="prelude-val">Some</span>(actor) {
-                    ObjId(OpId::new(<span class="kw-2">*</span>ctr, <span class="kw-2">*</span>idx))
-                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(backup_idx) = <span class="self">self</span>.ops.m.actors.lookup(actor) {
-                    ObjId(OpId::new(<span class="kw-2">*</span>ctr, backup_idx))
-                } <span class="kw">else </span>{
-                    <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidObjId(id.to_string()));
-                }
-            }
-        };
+        <span class="kw">let </span>opid = <span class="self">self</span>.exid_to_opid(id)<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = ObjId(opid);
         <span class="self">self</span>.get_obj_meta(obj)
     }
 
@@ -2641,6 +2689,40 @@
             .into_iter()
             .filter_map(|h| other.get_change_by_hash(<span class="kw-2">&amp;</span>h))
             .collect()
+    }
+
+    <span class="doccomment">/// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    </span><span class="kw">pub fn </span>hash_for_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, exid: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
+        <span class="kw">match </span>exid {
+            ExId::Root =&gt; <span class="prelude-val">None</span>,
+            ExId::Id(..) =&gt; {
+                <span class="kw">let </span>opid = <span class="self">self</span>.exid_to_opid(exid).ok()<span class="question-mark">?</span>;
+                <span class="kw">let </span>actor_indices = <span class="self">self</span>.states.get(<span class="kw-2">&amp;</span>opid.actor())<span class="question-mark">?</span>;
+                <span class="kw">let </span>change_index_index = actor_indices
+                    .binary_search_by(|change_index| {
+                        <span class="kw">let </span>change = <span class="self">self
+                            </span>.history
+                            .get(<span class="kw-2">*</span>change_index)
+                            .expect(<span class="string">&quot;State index should refer to a valid change&quot;</span>);
+                        <span class="kw">let </span>start = change.start_op().get();
+                        <span class="kw">let </span>len = change.len() <span class="kw">as </span>u64;
+                        <span class="kw">if </span>opid.counter() &lt; start {
+                            Ordering::Greater
+                        } <span class="kw">else if </span>start + len &lt;= opid.counter() {
+                            Ordering::Less
+                        } <span class="kw">else </span>{
+                            Ordering::Equal
+                        }
+                    })
+                    .ok()<span class="question-mark">?</span>;
+                <span class="kw">let </span>change_index = actor_indices.get(change_index_index).unwrap();
+                <span class="prelude-val">Some</span>(<span class="self">self</span>.history.get(<span class="kw-2">*</span>change_index).unwrap().hash())
+            }
+        }
     }
 
     <span class="kw">fn </span>calculate_marks&lt;O: AsRef&lt;ExId&gt;&gt;(

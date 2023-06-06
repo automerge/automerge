@@ -825,6 +825,16 @@
 <a href="#825" id="825">825</a>
 <a href="#826" id="826">826</a>
 <a href="#827" id="827">827</a>
+<a href="#828" id="828">828</a>
+<a href="#829" id="829">829</a>
+<a href="#830" id="830">830</a>
+<a href="#831" id="831">831</a>
+<a href="#832" id="832">832</a>
+<a href="#833" id="833">833</a>
+<a href="#834" id="834">834</a>
+<a href="#835" id="835">835</a>
+<a href="#836" id="836">836</a>
+<a href="#837" id="837">837</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -1306,6 +1316,16 @@
     </span><span class="kw">pub fn </span>sync(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>SyncDoc + <span class="lifetime">&#39;_ </span>{
         <span class="self">self</span>.ensure_transaction_closed();
         SyncWrapper { inner: <span class="self">self </span>}
+    }
+
+    <span class="doccomment">/// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    /// - is for an operation in a transaction
+    </span><span class="kw">pub fn </span>hash_for_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.hash_for_opid(opid)
     }
 
     <span class="kw">pub fn </span>hydrate(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;) -&gt; hydrate::Value {

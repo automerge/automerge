@@ -388,6 +388,16 @@
 <a href="#388" id="388">388</a>
 <a href="#389" id="389">389</a>
 <a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -427,6 +437,16 @@
             doc,
             patch_log,
         }
+    }
+
+    <span class="doccomment">/// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    /// - is for an operation in this transaction
+    </span><span class="kw">pub fn </span>hash_for_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.hash_for_opid(opid)
     }
 }
 
