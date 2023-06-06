@@ -638,23 +638,19 @@ impl Automerge {
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        let keys = self.doc.keys(obj);
         let map = Object::new();
-        for k in keys {
-            let val_and_id = if let Some(heads) = heads {
-                self.doc.get_at(obj, &k, heads)
-            } else {
-                self.doc.get(obj, &k)
+        let items = if let Some(heads) = heads {
+            self.doc.map_range_at(obj, .., heads)
+        } else {
+            self.doc.map_range(obj, ..)
+        };
+        for item in items {
+            let subval = match item.value {
+                Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta)?,
+                Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep))?,
             };
-            if let Ok(Some((val, id))) = val_and_id {
-                let subval = match val {
-                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
-                    Value::Scalar(_) => self.export_value(alloc(&val, self.text_rep))?,
-                };
-                js_set(&map, &k, &subval)?;
-            };
+            js_set(&map, item.key, &subval)?;
         }
-
         Ok(map)
     }
 
