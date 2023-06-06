@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -375,6 +376,22 @@ impl Automerge {
         Ok(f)
     }
 
+    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
+        match id {
+            ExId::Root => Ok(OpId::new(0, 0)),
+            ExId::Id(ctr, actor, idx) => {
+                let opid = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    OpId::new(*ctr, *idx)
+                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
+                    OpId::new(*ctr, backup_idx)
+                } else {
+                    return Err(AutomergeError::InvalidObjId(id.to_string()));
+                };
+                Ok(opid)
+            }
+        }
+    }
+
     pub(crate) fn get_obj_meta(&self, id: ObjId) -> Result<ObjMeta, AutomergeError> {
         if id.is_root() {
             Ok(ObjMeta::root())
@@ -404,18 +421,8 @@ impl Automerge {
     }
 
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjMeta, AutomergeError> {
-        let obj = match id {
-            ExId::Root => ObjId::root(),
-            ExId::Id(ctr, actor, idx) => {
-                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId::new(*ctr, *idx))
-                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
-                    ObjId(OpId::new(*ctr, backup_idx))
-                } else {
-                    return Err(AutomergeError::InvalidObjId(id.to_string()));
-                }
-            }
-        };
+        let opid = self.exid_to_opid(id)?;
+        let obj = ObjId(opid);
         self.get_obj_meta(obj)
     }
 
@@ -1141,6 +1148,40 @@ impl Automerge {
             .into_iter()
             .filter_map(|h| other.get_change_by_hash(&h))
             .collect()
+    }
+
+    /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
+        match exid {
+            ExId::Root => None,
+            ExId::Id(..) => {
+                let opid = self.exid_to_opid(exid).ok()?;
+                let actor_indices = self.states.get(&opid.actor())?;
+                let change_index_index = actor_indices
+                    .binary_search_by(|change_index| {
+                        let change = self
+                            .history
+                            .get(*change_index)
+                            .expect("State index should refer to a valid change");
+                        let start = change.start_op().get();
+                        let len = change.len() as u64;
+                        if opid.counter() < start {
+                            Ordering::Greater
+                        } else if start + len <= opid.counter() {
+                            Ordering::Less
+                        } else {
+                            Ordering::Equal
+                        }
+                    })
+                    .ok()?;
+                let change_index = actor_indices.get(change_index_index).unwrap();
+                Some(self.history.get(*change_index).unwrap().hash())
+            }
+        }
     }
 
     fn calculate_marks<O: AsRef<ExId>>(

@@ -1722,3 +1722,61 @@ fn get_changes_heads_empty() {
     let heads = doc.get_heads();
     assert_eq!(doc.get_changes(&heads), Vec::<&Change>::new());
 }
+
+#[test]
+fn hash_for_opid() {
+    let mut doc = AutoCommit::new();
+
+    doc.put(ROOT, "key1", 1).unwrap();
+    let (_, id1) = doc.get(ROOT, "key1").unwrap().unwrap();
+    // it isn't available yet
+    assert_eq!(doc.hash_for_opid(&id1), None);
+    let hash1 = doc.commit();
+    // we can get the hash for the change that made this id
+    assert_eq!(doc.hash_for_opid(&id1), hash1);
+
+    // this should still work with historical opids too
+    doc.put(ROOT, "key1", 2).unwrap();
+    let (_, id2) = doc.get(ROOT, "key1").unwrap().unwrap();
+    // the newest one still isn't available yet
+    assert_eq!(doc.hash_for_opid(&id2), None);
+    let hash2 = doc.commit();
+    assert_eq!(doc.hash_for_opid(&id1), hash1);
+    assert_eq!(doc.hash_for_opid(&id2), hash2);
+
+    let mut doc = Automerge::new();
+    let result = doc
+        .transact(|txn| {
+            txn.put(ROOT, "key1", 1).unwrap();
+            let (_, id) = txn.get(ROOT, "key1").unwrap().unwrap();
+            assert_eq!(txn.hash_for_opid(&id), None);
+            Ok::<_, ()>(id)
+        })
+        .unwrap();
+
+    let id1 = result.result;
+    let hash = result.hash;
+    let result2 = doc
+        .transact(|txn| {
+            txn.put(ROOT, "key1", 2).unwrap();
+            let (_, id2) = txn.get(ROOT, "key1").unwrap().unwrap();
+            assert_eq!(txn.hash_for_opid(&id1), hash);
+            assert_eq!(txn.hash_for_opid(&id2), None);
+            Ok::<_, ()>(id2)
+        })
+        .unwrap();
+    assert_eq!(doc.hash_for_opid(&result2.result), result2.hash);
+
+    // different actors
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "key1", 1).unwrap();
+    let mut doc = doc.fork();
+    doc.put(ROOT, "key1", 2).unwrap();
+    let (_, id1) = doc.get(ROOT, "key1").unwrap().unwrap();
+    let hash1 = doc.commit();
+    doc.put(ROOT, "key1", 3).unwrap();
+    let (_, id2) = doc.get(ROOT, "key1").unwrap().unwrap();
+    let hash2 = doc.commit();
+    assert_eq!(doc.hash_for_opid(&id1), hash1);
+    assert_eq!(doc.hash_for_opid(&id2), hash2);
+}
