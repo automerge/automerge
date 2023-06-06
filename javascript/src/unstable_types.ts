@@ -11,6 +11,7 @@ export {
   type Mark,
   type MarkRange,
   type MarkValue,
+  type Cursor,
 } from "./types"
 
 import { RawString } from "./raw_string"

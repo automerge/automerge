@@ -804,6 +804,43 @@ impl Automerge {
         Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
+    #[wasm_bindgen(js_name = getCursor)]
+    pub fn get_cursor(
+        &mut self,
+        obj: JsValue,
+        index: f64,
+        heads: Option<Array>,
+    ) -> Result<String, error::Cursor> {
+        let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
+        if obj_type != am::ObjType::Text {
+            return Err(error::Cursor::InvalidObjType(obj_type));
+        }
+        let index = index as usize;
+        let heads = get_heads(heads)?;
+        let cursor = self.doc.get_cursor(obj, index, heads.as_deref())?;
+        Ok(cursor.to_string())
+    }
+
+    #[wasm_bindgen(js_name = getCursorPosition)]
+    pub fn get_cursor_position(
+        &mut self,
+        obj: JsValue,
+        cursor: JsValue,
+        heads: Option<Array>,
+    ) -> Result<f64, error::Cursor> {
+        let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
+        if obj_type != am::ObjType::Text {
+            return Err(error::Cursor::InvalidObjType(obj_type));
+        }
+        let cursor = cursor.as_string().ok_or(error::Cursor::InvalidCursor)?;
+        let cursor = am::Cursor::try_from(cursor)?;
+        let heads = get_heads(heads)?;
+        let position = self
+            .doc
+            .get_cursor_position(obj, &cursor, heads.as_deref())?;
+        Ok(position as f64)
+    }
+
     #[wasm_bindgen(js_name = emptyChange)]
     pub fn empty_change(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let time = time.map(|f| f as i64);
@@ -999,7 +1036,7 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 }
 
 pub mod error {
-    use automerge::AutomergeError;
+    use automerge::{AutomergeError, ObjType};
     use wasm_bindgen::JsValue;
 
     use crate::interop::{
@@ -1215,6 +1252,26 @@ pub mod error {
 
     impl From<Materialize> for JsValue {
         fn from(e: Materialize) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Cursor {
+        //#[error(transparent)]
+        //Export(#[from] interop::error::Export),
+        #[error("invalid cursor")]
+        InvalidCursor,
+        #[error("cursors only valid on text - obj type: {0}")]
+        InvalidObjType(ObjType),
+        #[error("bad heads: {0}")]
+        Heads(#[from] interop::error::BadChangeHashes),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<Cursor> for JsValue {
+        fn from(e: Cursor) -> Self {
             JsValue::from(e.to_string())
         }
     }
