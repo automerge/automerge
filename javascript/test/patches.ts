@@ -23,6 +23,53 @@ describe("patches", () => {
       )
       assert.deepEqual(headsAfter, Automerge.getHeads(newDoc))
     })
+
+    it("should provide correct before and after states when an array has a value deleted", () => {
+      const doc = Automerge.from<{ list: string[] }>({ list: ["a", "b", "c"] })
+
+      const newDoc = Automerge.change(
+        doc,
+        {
+          patchCallback: (_, patchInfo) => {
+            assert.deepEqual(
+              patchInfo.before.list,
+              ["a", "b", "c"],
+              "before should be the original list"
+            )
+            assert.deepEqual(patchInfo.after.list, ["a", "c"])
+          },
+        },
+        doc => {
+          doc.list.deleteAt(1)
+        }
+      )
+      assert.deepEqual(newDoc, { list: ["a", "c"] })
+    })
+
+    it("should provide correct before and after states when an object property has been removed", () => {
+      const doc = Automerge.from<{ obj: { a: string; b?: string } }>({
+        obj: { a: "a", b: "b" },
+      })
+
+      const newDoc = Automerge.change(
+        doc,
+        {
+          patchCallback: (_, patchInfo) => {
+            assert.deepEqual(
+              patchInfo.before.obj,
+              { a: "a", b: "b" },
+              "before should be the original object"
+            )
+            assert.deepEqual(patchInfo.after.obj, { a: "a" })
+          },
+        },
+        doc => {
+          delete doc.obj.b
+        }
+      )
+
+      assert.deepEqual(newDoc, { obj: { a: "a" } })
+    })
   })
 
   describe("the diff function", () => {
