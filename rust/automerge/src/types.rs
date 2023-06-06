@@ -388,6 +388,12 @@ impl From<usize> for Prop {
     }
 }
 
+impl From<&usize> for Prop {
+    fn from(index: &usize) -> Self {
+        Prop::Seq(*index)
+    }
+}
+
 impl From<f64> for Prop {
     fn from(index: f64) -> Self {
         Prop::Seq(index as usize)
@@ -503,6 +509,18 @@ impl OpId {
     #[inline]
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
+    }
+}
+
+impl AsRef<OpId> for OpId {
+    fn as_ref(&self) -> &OpId {
+        self
+    }
+}
+
+impl AsRef<OpId> for ObjId {
+    fn as_ref(&self) -> &OpId {
+        &self.0
     }
 }
 

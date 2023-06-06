@@ -1,74 +1,21 @@
-#![allow(dead_code)]
-
 use core::fmt::Debug;
 
-use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
+use crate::{ObjId, Prop, ReadDoc, Value};
 
-use crate::sequence_tree::SequenceTree;
-
-use crate::op_observer::BranchableObserver;
-use crate::op_observer::{Patch, PatchAction};
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum TextRepresentation {
-    Array,
-    String,
-}
-
-impl TextRepresentation {
-    pub fn is_array(&self) -> bool {
-        matches!(self, TextRepresentation::Array)
-    }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, TextRepresentation::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::Array
-    }
-}
+use super::{Patch, PatchAction};
+use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone, Default)]
-pub struct VecOpObserver {
+pub(crate) struct PatchBuilder {
     pub(crate) patches: Vec<Patch>,
-    pub(crate) text_rep: TextRepresentation,
 }
 
-pub trait HasPatches {
-    type Patches;
-
-    fn take_patches(&mut self) -> Self::Patches;
-    fn with_text_rep(self, text_rep: TextRepresentation) -> Self;
-    fn set_text_rep(&mut self, text_rep: TextRepresentation);
-    fn get_text_rep(&self) -> TextRepresentation;
-}
-
-impl HasPatches for VecOpObserver {
-    type Patches = Vec<Patch>;
-
-    fn take_patches(&mut self) -> Self::Patches {
-        std::mem::take(&mut self.patches)
-    }
-
-    fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.text_rep = text_rep;
-        self
-    }
-
-    fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.text_rep = text_rep;
-    }
-
-    fn get_text_rep(&self) -> TextRepresentation {
-        self.text_rep
-    }
-}
-
-impl VecOpObserver {
-    fn get_path<R: ReadDoc>(&mut self, doc: &R, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
+impl PatchBuilder {
+    pub(crate) fn get_path<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: &ObjId,
+    ) -> Option<Vec<(ObjId, Prop)>> {
         match doc.parents(obj) {
             Ok(parents) => parents.visible_path(),
             Err(e) => {
@@ -88,10 +35,12 @@ impl VecOpObserver {
             _ => None,
         }
     }
-}
 
-impl OpObserver for VecOpObserver {
-    fn insert<R: ReadDoc>(
+    pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
+        std::mem::take(&mut self.patches)
+    }
+
+    pub(crate) fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -124,14 +73,13 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        if self.text_rep == TextRepresentation::Array {
-            for (offset, c) in value.chars().map(ScalarValue::from).enumerate() {
-                let value = (c.into(), ObjId::Root);
-                self.insert(doc, obj.clone(), index + offset, value, false);
-            }
-            return;
-        }
+    pub(crate) fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,
             value: prev_value,
@@ -154,7 +102,13 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
+    pub(crate) fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
         match self.maybe_append(&obj) {
             Some(PatchAction::SpliceText {
                 index: tail_index,
@@ -200,7 +154,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+    pub(crate) fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::DeleteMap {
                 key: key.to_owned(),
@@ -209,7 +163,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn put<R: ReadDoc>(
+    pub(crate) fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -217,20 +171,17 @@ impl OpObserver for VecOpObserver {
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        let expose = false;
         if let Some(path) = self.get_path(doc, &obj) {
             let value = (tagged_value.0.to_owned(), tagged_value.1);
             let action = match prop {
                 Prop::Map(key) => PatchAction::PutMap {
                     key,
                     value,
-                    expose,
                     conflict,
                 },
                 Prop::Seq(index) => PatchAction::PutSeq {
                     index,
                     value,
-                    expose,
                     conflict,
                 },
             };
@@ -238,36 +189,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        let expose = true;
-        if let Some(path) = self.get_path(doc, &obj) {
-            let value = (tagged_value.0.to_owned(), tagged_value.1);
-            let action = match prop {
-                Prop::Map(key) => PatchAction::PutMap {
-                    key,
-                    value,
-                    expose,
-                    conflict,
-                },
-                Prop::Seq(index) => PatchAction::PutSeq {
-                    index,
-                    value,
-                    expose,
-                    conflict,
-                },
-            };
-            self.patches.push(Patch { obj, path, action })
-        }
-    }
-
-    fn increment<R: ReadDoc>(
+    pub(crate) fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -281,7 +203,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+    pub(crate) fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
         obj: ObjId,
@@ -302,20 +224,12 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn text_as_seq(&self) -> bool {
-        self.text_rep == TextRepresentation::Array
-    }
+    // FIXME
+    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ObjId, _prop: Prop) {}
 }
 
-impl BranchableObserver for VecOpObserver {
-    fn merge(&mut self, other: &Self) {
-        self.patches.extend_from_slice(other.patches.as_slice())
-    }
-
-    fn branch(&self) -> Self {
-        VecOpObserver {
-            patches: vec![],
-            text_rep: self.text_rep,
-        }
+impl AsMut<PatchBuilder> for PatchBuilder {
+    fn as_mut(&mut self) -> &mut Self {
+        self
     }
 }

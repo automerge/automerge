@@ -5,8 +5,8 @@ mod top_ops;
 mod values;
 
 pub use keys::Keys;
-pub use list_range::ListRange;
-pub use map_range::MapRange;
+pub use list_range::{ListRange, ListRangeItem};
+pub use map_range::{MapRange, MapRangeItem};
 pub use values::Values;
 
-pub(crate) use top_ops::TopOps;
+pub(crate) use top_ops::{TopOp, TopOps};

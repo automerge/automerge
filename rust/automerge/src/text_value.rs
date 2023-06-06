@@ -3,11 +3,11 @@ use core::fmt::Debug;
 use crate::sequence_tree::SequenceTree;
 
 #[cfg(not(target_family = "wasm"))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<char>);
 
 #[cfg(target_family = "wasm")]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<u16>);
 
 #[cfg(not(target_family = "wasm"))]
@@ -26,12 +26,22 @@ impl TextValue {
         }
     }
 
+    pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
+        for (n, ch) in value.chars().enumerate() {
+            self.0.insert(index + n, ch)
+        }
+    }
+
     pub fn make_string(&self) -> String {
         self.0.iter().collect()
     }
 
     pub(crate) fn width(s: &str) -> usize {
         s.chars().count()
+    }
+
+    pub fn chars(&self) -> impl Iterator<Item = char> + '_ {
+        self.0.iter().cloned()
     }
 }
 
@@ -51,6 +61,12 @@ impl TextValue {
         }
     }
 
+    pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
+        for (n, ch) in value.chars().enumerate() {
+            self.0.insert(index + n, ch)
+        }
+    }
+
     pub fn make_string(&self) -> String {
         let bytes: Vec<_> = self.0.iter().cloned().collect();
         String::from_utf16_lossy(bytes.as_slice())
@@ -58,6 +74,10 @@ impl TextValue {
 
     pub(crate) fn width(s: &str) -> usize {
         s.encode_utf16().count()
+    }
+
+    pub(crate) fn chars(&self) -> impl Iterator<Item = u16> + '_ {
+        self.0.iter().cloned()
     }
 }
 
@@ -82,6 +102,12 @@ impl Debug for TextValue {
 impl From<&str> for TextValue {
     fn from(s: &str) -> Self {
         TextValue::new(s)
+    }
+}
+
+impl From<String> for TextValue {
+    fn from(s: String) -> Self {
+        TextValue::new(&s)
     }
 }
 

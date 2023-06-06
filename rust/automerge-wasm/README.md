@@ -410,7 +410,7 @@ Methods that create new documents will generate random actors automatically - if
   let doc3 = doc1.fork()  // random actorid
   let doc4 = doc2.fork("ccdd0011")
   let doc5 = load(doc3.save()) // random actorid
-  let doc6 = load(doc4.save(), "00aabb11")
+  let doc6 = load(doc4.save(), { actor: "00aabb11" })
 
   let actor = doc1.getActor()
 ```

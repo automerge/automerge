@@ -4,7 +4,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpId, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+    self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
 use crate::query::TreeQuery;
@@ -144,22 +144,22 @@ impl OpSetInternal {
             .unwrap_or_default()
     }
 
-    pub(crate) fn find_op_with_observer<'a>(
+    pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
         obj: &ObjMeta,
         op: &'a Op,
-    ) -> FoundOpWithObserver<'a> {
+    ) -> FoundOpWithPatchLog<'a> {
         if let Some(tree) = self.trees.get(&obj.id) {
             tree.internal
-                .find_op_with_observer(op, obj.encoding, &self.m)
+                .find_op_with_patch_log(op, obj.encoding, &self.m)
         } else {
             Default::default()
         }
     }
 
-    pub(crate) fn find_op_without_observer(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutObserver {
+    pub(crate) fn find_op_without_patch_log(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutPatchLog {
         if let Some(tree) = self.trees.get(obj) {
-            tree.internal.find_op_without_observer(op, &self.m)
+            tree.internal.find_op_without_patch_log(op, &self.m)
         } else {
             Default::default()
         }
@@ -297,7 +297,7 @@ impl OpSetInternal {
                 // do it the hard way - walk each op
                 _ => self
                     .top_ops(obj, clock)
-                    .fold(0, |acc, op| acc + op.width(encoding)),
+                    .fold(0, |acc, top| acc + top.op.width(encoding)),
             }
         } else {
             0
@@ -305,7 +305,9 @@ impl OpSetInternal {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        self.top_ops(obj, clock).map(|op| op.to_str()).collect()
+        self.top_ops(obj, clock)
+            .map(|top| top.op.to_str())
+            .collect()
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
@@ -446,8 +448,9 @@ impl OpSetMetadata {
         }
     }
 
-    pub(crate) fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        left.lamport_cmp(&right, &self.actors.cache)
+    pub(crate) fn lamport_cmp<O: AsRef<OpId>>(&self, left: O, right: O) -> Ordering {
+        left.as_ref()
+            .lamport_cmp(right.as_ref(), &self.actors.cache)
     }
 
     pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {
@@ -580,8 +583,8 @@ pub(crate) mod tests {
     fn seek_on_page_boundary() {
         let (set, new_op) = optree_with_only_internally_visible_ops();
 
-        let q1 = set.find_op_without_observer(&ObjId::root(), &new_op);
-        let q2 = set.find_op_with_observer(&ObjMeta::root(), &new_op);
+        let q1 = set.find_op_without_patch_log(&ObjId::root(), &new_op);
+        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), &new_op);
 
         // we've inserted `B - 1` elements for "a", so the index should be `B`
         assert_eq!(q1.pos, B);

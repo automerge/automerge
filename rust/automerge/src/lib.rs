@@ -89,6 +89,18 @@
 //!
 //! See the [`sync`] module.
 //!
+//! ## Patches, maintaining materialized state
+//!
+//! Often you will have some state which represents the "current" state of the document. E.g. some
+//! text in a UI which is a view of a text object in the document. Rather than re-rendering this
+//! text every single time a change comes in you can use a [`PatchLog`] to capture incremental
+//! changes made to the document and then use [`Automerge::make_patches`] to get a set of patches
+//! to apply to the materialized state.
+//!
+//! Many of the methods on [`Automerge`], [`crate::sync::SyncDoc`] and
+//! [`crate::transaction::Transactable`] have a `*_log_patches` variant which allow you to pass in
+//! a [`PatchLog`] to collect these incremental changes.
+//!
 //! ## Serde serialization
 //!
 //! Sometimes you just want to get the JSON value of an automerge document. For
@@ -247,14 +259,15 @@ mod convert;
 mod cursor;
 mod error;
 mod exid;
+pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
 mod legacy;
 pub mod marks;
-pub mod op_observer;
 mod op_set;
 pub mod op_tree;
 mod parents;
+pub mod patches;
 mod query;
 mod read;
 mod sequence_tree;
@@ -267,8 +280,8 @@ mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
-pub use crate::automerge::{Automerge, OnPartialLoad};
-pub use autocommit::{AutoCommit, AutoCommitWithObs};
+pub use crate::automerge::{Automerge, OnPartialLoad, SaveOptions};
+pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
 pub use cursor::Cursor;
@@ -277,8 +290,8 @@ pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
-pub use op_observer::{OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver};
 pub use parents::{Parent, Parents};
+pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};

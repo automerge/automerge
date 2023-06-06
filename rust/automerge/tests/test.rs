@@ -1,10 +1,10 @@
 use automerge::marks::{ExpandMark, Mark};
-use automerge::op_observer::HasPatches;
 use automerge::op_tree::B;
+use automerge::patches::TextRepresentation;
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
-    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, Value, VecOpObserver, ROOT,
+    PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
 use std::fs;
 
@@ -844,7 +844,6 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
     doc1.commit();
     let changes = doc1
         .get_changes(&[])
-        .unwrap()
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
@@ -1006,9 +1005,9 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
+    let changes = doc.get_changes(&[]).into_iter().cloned();
 
-    let mut doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    let mut doc = AutoCommit::new();
     doc.apply_changes(changes).unwrap();
 }
 
@@ -1189,7 +1188,7 @@ fn delete_only_change() {
         .unwrap()
         .with_actor(actor);
 
-    let changes = doc4.get_changes(&[]).unwrap();
+    let changes = doc4.get_changes(&[]);
     assert_eq!(changes.len(), 3);
     let c = changes[2];
     assert_eq!(c.start_op().get(), 4);
@@ -1297,7 +1296,7 @@ fn save_and_load_incremented_counter() {
     doc.commit();
     doc.increment(ROOT, "counter", 1).unwrap();
     doc.commit();
-    let changes1: Vec<Change> = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
+    let changes1: Vec<Change> = doc.get_changes(&[]).into_iter().cloned().collect();
     let json: Vec<_> = changes1
         .iter()
         .map(|c| serde_json::to_string(&c.decode()).unwrap())
@@ -1495,7 +1494,7 @@ fn bad_change_on_optree_node_boundary() {
         Ok(())
     })
     .unwrap();
-    let change = doc.get_changes(&doc2.get_heads()).unwrap();
+    let change = doc.get_changes(&doc2.get_heads());
     doc2.apply_changes(change.into_iter().cloned().collect::<Vec<_>>())
         .unwrap();
     Automerge::load(doc2.save().as_slice()).unwrap();
@@ -1577,12 +1576,12 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut obs = VecOpObserver::default();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], Some(&mut obs))
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], Some(&mut obs))
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
     for i in 0..=N {
@@ -1599,7 +1598,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = obs.take_patches();
+    let patches = new_doc.make_patches(&mut patch_log);
 
     let mut expected_patches = Vec::new();
     expected_patches.push(Patch {
@@ -1607,7 +1606,6 @@ fn regression_insert_opid() {
         path: vec![],
         action: PatchAction::PutMap {
             key: "list".to_string(),
-            expose: false,
             value: (
                 Value::Object(ObjType::List),
                 ObjId::Id(1, doc.get_actor().clone(), 0),
@@ -1640,7 +1638,6 @@ fn regression_insert_opid() {
                     ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
                 ),
                 conflict: false,
-                expose: false,
             },
         });
     }
@@ -1668,15 +1665,15 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut obs = VecOpObserver::default();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], Some(&mut obs))
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], Some(&mut obs))
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
-    let patches = obs.take_patches();
+    let patches = new_doc.make_patches(&mut patch_log);
     let matches = matches!(
         patches.last().unwrap(),
         Patch {
