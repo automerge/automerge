@@ -1,6 +1,7 @@
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_tree::OpTreeNode;
 use crate::query::OpSetMetadata;
-use crate::query::{ListState, QueryResult, TreeQuery};
+use crate::query::{ListState, MarkMap, QueryResult, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, Op, OpId};
 use std::cmp::Ordering;
@@ -11,6 +12,7 @@ pub(crate) struct OpIdSearch<'a> {
     idx: ListState,
     clock: Option<&'a Clock>,
     target: SearchTarget<'a>,
+    marks: MarkMap<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +28,7 @@ impl<'a> OpIdSearch<'a> {
             idx: ListState::new(encoding, usize::MAX),
             clock,
             target: SearchTarget::OpId(target, None),
+            marks: Default::default(),
         }
     }
 
@@ -40,6 +43,7 @@ impl<'a> OpIdSearch<'a> {
             idx: ListState::new(encoding, usize::MAX),
             clock: None,
             target,
+            marks: Default::default(),
         }
     }
 
@@ -66,17 +70,25 @@ impl<'a> OpIdSearch<'a> {
             self.idx.index()
         }
     }
+
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<MarkSet> {
+        let mut marks = MarkStateMachine::default();
+        for (id, mark_data) in self.marks.iter() {
+            marks.mark_begin(*id, mark_data, m);
+        }
+        marks.current().cloned()
+    }
 }
 
 impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
+    fn query_node(&mut self, child: &'a OpTreeNode, ops: &'a [Op]) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
         if self.clock.is_some() {
             QueryResult::Descend
         } else {
             match &self.target {
                 SearchTarget::OpId(id, _) if !child.index.ops.contains(id) => {
-                    self.idx.process_node(child, ops);
+                    self.idx.process_node(child, ops, Some(&mut self.marks));
                     QueryResult::Next
                 }
                 _ => QueryResult::Descend,
@@ -85,6 +97,7 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     }
 
     fn query_element_with_metadata(&mut self, element: &'a Op, m: &OpSetMetadata) -> QueryResult {
+        self.marks.process(element);
         match self.target {
             SearchTarget::OpId(target, None) => {
                 if element.id == target {

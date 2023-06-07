@@ -1,4 +1,5 @@
 use crate::iter::TopOps;
+use crate::marks::MarkSet;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::patches::PatchLog;
 use crate::{
@@ -85,6 +86,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
+    pub(crate) marks: Option<MarkSet>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -102,12 +104,24 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         &obj.id,
                         query::SeekMark::new(op.id.prev(), self.pos, obj.encoding),
                     );
-                    patch_log.mark(obj.id, &q.marks);
+                    for mark in q.marks {
+                        let index = mark.start;
+                        let len = mark.len();
+                        let marks = mark.into_mark_set();
+                        patch_log.mark(obj.id, index, len, &marks);
+                    }
                 }
             } else if obj.typ == ObjType::Text {
-                patch_log.splice(obj.id, self.index, op.to_str());
+                patch_log.splice(obj.id, self.index, op.to_str(), self.marks.clone());
             } else {
-                patch_log.insert(obj.id, self.index, op.value().into(), op.id, false);
+                patch_log.insert(
+                    obj.id,
+                    self.index,
+                    op.value().into(),
+                    op.id,
+                    false,
+                    self.marks.clone(),
+                );
             }
             return;
         }
@@ -154,7 +168,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict);
+                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict, None);
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
@@ -225,6 +239,7 @@ impl OpTreeInternal {
         op: &'a Op,
         mut pos: usize,
         index: usize,
+        marks: Option<MarkSet>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;
@@ -272,6 +287,7 @@ impl OpTreeInternal {
             succ,
             pos,
             index,
+            marks,
         }
     }
 
@@ -317,10 +333,11 @@ impl OpTreeInternal {
             let query = self.search(query::OpIdSearch::op(op, encoding), meta);
             let pos = query.pos();
             let index = query.index();
-            self.found_op_with_patch_log(meta, op, pos, index)
+            let marks = query.marks(meta);
+            self.found_op_with_patch_log(meta, op, pos, index, marks)
         } else {
             let pos = self.binary_search_by(|o| meta.key_cmp(&o.key, &op.key));
-            self.found_op_with_patch_log(meta, op, pos, 0)
+            self.found_op_with_patch_log(meta, op, pos, 0, None)
         }
     }
 
@@ -341,7 +358,7 @@ impl OpTreeInternal {
 
     pub(crate) fn seek_ops_by_prop<'a>(
         &'a self,
-        meta: &OpSetMetadata,
+        meta: &'a OpSetMetadata,
         prop: Prop,
         encoding: ListEncoding,
         clock: Option<&Clock>,
@@ -385,7 +402,7 @@ impl OpTreeInternal {
         left
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &'a OpSetMetadata) -> Q
     where
         Q: TreeQuery<'a>,
     {

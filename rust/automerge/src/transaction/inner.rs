@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::{ExpandMark, Mark};
+use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
@@ -294,7 +294,7 @@ impl TransactionInner {
             doc.ops_mut().insert(pos, &obj, op.clone());
         }
 
-        self.finalize_op(doc, patch_log, obj, prop, op);
+        self.finalize_op(doc, patch_log, obj, prop, op, None);
     }
 
     pub(crate) fn insert<V: Into<ScalarValue>>(
@@ -346,7 +346,8 @@ impl TransactionInner {
             &obj,
             query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
         );
-
+        let marks = query.marks(&doc.ops().m);
+        let pos = query.pos();
         let key = query.key()?;
 
         let op = Op {
@@ -358,9 +359,9 @@ impl TransactionInner {
             insert: true,
         };
 
-        doc.ops_mut().insert(query.pos(), &obj, op.clone());
+        doc.ops_mut().insert(pos, &obj, op.clone());
 
-        self.finalize_op(doc, patch_log, obj, Prop::Seq(index), op);
+        self.finalize_op(doc, patch_log, obj, Prop::Seq(index), op, marks);
 
         Ok(id)
     }
@@ -505,7 +506,7 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
         if obj.typ == ObjType::Text {
-            let index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
+            let index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
             self.inner_splice(
                 doc,
                 patch_log,
@@ -639,6 +640,7 @@ impl TransactionInner {
             );
             let mut pos = query.pos();
             let mut key = query.key()?;
+            let marks = query.marks(&doc.ops().m);
             let mut cursor = index;
             let mut width = 0;
 
@@ -663,14 +665,20 @@ impl TransactionInner {
                     SpliceType::Text(text)
                         if matches!(patch_log.text_rep(), TextRepresentation::String) =>
                     {
-                        patch_log.splice(obj, index, text);
+                        patch_log.splice(obj, index, text, marks);
                     }
                     SpliceType::List | SpliceType::Text(..) => {
                         let start = self.operations.len() - values.len();
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
-                            //let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            patch_log.insert(obj, index + offset, v.clone().into(), op.id, false);
+                            patch_log.insert(
+                                obj,
+                                index + offset,
+                                v.clone().into(),
+                                op.id,
+                                false,
+                                marks.clone(),
+                            );
                         }
                     }
                 }
@@ -699,7 +707,7 @@ impl TransactionInner {
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
-            patch_log.mark(obj.id, &[mark.clone()]);
+            patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
         }
         Ok(())
     }
@@ -726,6 +734,7 @@ impl TransactionInner {
         obj: ObjId,
         prop: Prop,
         op: Op,
+        marks: Option<MarkSet>,
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if patch_log.is_active() {
@@ -737,14 +746,21 @@ impl TransactionInner {
                     match (obj_type, prop) {
                         (Some(ObjType::List), Prop::Seq(index)) => {
                             //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            patch_log.insert(obj, index, op.value().into(), op.id, false);
+                            patch_log.insert(obj, index, op.value().into(), op.id, false, marks);
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
                                 //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                patch_log.insert(obj, index, op.value().into(), op.id, false);
+                                patch_log.insert(
+                                    obj,
+                                    index,
+                                    op.value().into(),
+                                    op.id,
+                                    false,
+                                    marks,
+                                );
                             } else {
-                                patch_log.splice(obj, index, op.to_str());
+                                patch_log.splice(obj, index, op.to_str(), marks);
                             }
                         }
                         _ => {}

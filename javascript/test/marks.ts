@@ -58,12 +58,10 @@ describe("Automerge", () => {
       doc2 = Automerge.loadIncremental(doc2, Automerge.save(doc1))
 
       assert.deepStrictEqual(callbacks[0][2], {
-        action: "mark",
-        path: ["x"],
-        marks: [
-          { name: "font-weight", start: 5, end: 7, value },
-          { name: "font-weight", start: 9, end: 10, value },
-        ],
+        action: "splice",
+        path: ["x", 5],
+        value: "ui",
+        marks: { "font-weight": "bold" },
       })
 
       assert.deepStrictEqual(Automerge.marks(doc2, "x"), [

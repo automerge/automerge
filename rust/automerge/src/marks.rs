@@ -1,11 +1,13 @@
 use smol_str::SmolStr;
 use std::fmt;
 use std::fmt::Display;
+use std::sync::Arc;
 
-use crate::types::OpId;
+use crate::op_tree::OpSetMetadata;
+use crate::types::{Op, OpId, OpType};
 use crate::value::ScalarValue;
-use crate::Automerge;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 /// Marks let you store out-of-bound information about sequences.
 ///
@@ -19,6 +21,129 @@ pub struct Mark<'a> {
     pub start: usize,
     pub end: usize,
     pub(crate) data: Cow<'a, MarkData>,
+}
+
+impl<'a> Mark<'a> {
+    pub(crate) fn len(&self) -> usize {
+        self.end - self.start
+    }
+    pub(crate) fn into_mark_set(self) -> MarkSet {
+        let mut m = MarkSet::default();
+        let data = self.data.into_owned();
+        m.insert(data.name, data.value);
+        m
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MarkAccItem {
+    index: usize,
+    len: usize,
+    value: ScalarValue,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MarkAccumulator {
+    marks: BTreeMap<SmolStr, Vec<MarkAccItem>>,
+}
+
+impl MarkAccumulator {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = Mark<'static>> {
+        self.marks.into_iter().flat_map(|(name, items)| {
+            items.into_iter().map(move |i| {
+                Mark::new(name.to_string(), i.value.clone(), i.index, i.index + i.len)
+            })
+        })
+    }
+
+    pub(crate) fn into_iter_no_unmark(self) -> impl Iterator<Item = Mark<'static>> {
+        self.marks.into_iter().flat_map(|(name, items)| {
+            items
+                .into_iter()
+                .filter(|i| !i.value.is_null())
+                .map(move |i| {
+                    Mark::new(name.to_string(), i.value.clone(), i.index, i.index + i.len)
+                })
+        })
+    }
+
+    pub(crate) fn add(&mut self, index: usize, len: usize, marks: &MarkSet) {
+        for (name, value) in marks.marks.iter() {
+            let entry = self.marks.entry(name.clone()).or_default();
+            if let Some(mut last) = entry.last_mut() {
+                if &last.value == value && last.index + last.len == index {
+                    last.len += len;
+                    continue;
+                }
+            }
+            entry.push(MarkAccItem {
+                index,
+                len,
+                value: value.clone(),
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MarkSet {
+    marks: Arc<BTreeMap<SmolStr, ScalarValue>>,
+}
+
+#[derive(Debug)]
+pub struct MarkSetIterator<'a> {
+    iter: std::collections::btree_map::Iter<'a, SmolStr, ScalarValue>,
+}
+
+impl<'a> Iterator for MarkSetIterator<'a> {
+    type Item = (&'a str, &'a ScalarValue);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(name, value)| (name.as_str(), value))
+    }
+}
+
+impl MarkSet {
+    pub fn iter(&self) -> MarkSetIterator<'_> {
+        MarkSetIterator {
+            iter: self.marks.iter(),
+        }
+    }
+
+    fn insert(&mut self, name: SmolStr, value: ScalarValue) {
+        Arc::make_mut(&mut self.marks).insert(name, value);
+    }
+
+    fn remove(&mut self, name: &SmolStr) {
+        Arc::make_mut(&mut self.marks).remove(name);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.marks.is_empty()
+    }
+
+    pub(crate) fn diff(&self, other: &Self) -> Self {
+        let mut diff = BTreeMap::default();
+        for (name, value) in self.marks.iter() {
+            match other.marks.get(name) {
+                Some(v) if v != value => {
+                    diff.insert(name.clone(), v.clone());
+                }
+                None => {
+                    diff.insert(name.clone(), ScalarValue::Null);
+                }
+                _ => {}
+            }
+        }
+        for (name, value) in other.marks.iter() {
+            if !self.marks.contains_key(name) {
+                diff.insert(name.clone(), value.clone());
+            }
+        }
+        MarkSet {
+            marks: Arc::new(diff),
+        }
+    }
 }
 
 impl<'a> Mark<'a> {
@@ -36,10 +161,6 @@ impl<'a> Mark<'a> {
             start,
             end,
         }
-    }
-
-    pub(crate) fn is_null(&self) -> bool {
-        self.data.value.is_null()
     }
 
     pub(crate) fn from_data(start: usize, end: usize, data: &MarkData) -> Mark<'_> {
@@ -69,49 +190,45 @@ impl<'a> Mark<'a> {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
-    state: Vec<(OpId, Mark<'a>)>,
+    state: Vec<(OpId, &'a MarkData)>,
+    current: MarkSet,
 }
 
 impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn mark_begin(
-        &mut self,
-        id: OpId,
-        pos: usize,
-        data: &'a MarkData,
-        doc: &'a Automerge,
-    ) -> Option<Mark<'a>> {
-        self.mark_or_unmark_begin(id, pos, data, doc).and_then(|m| {
-            if m.is_null() {
-                None
-            } else {
-                Some(m)
-            }
-        })
+    pub(crate) fn current(&self) -> Option<&MarkSet> {
+        if self.current.is_empty() {
+            None
+        } else {
+            Some(&self.current)
+        }
     }
 
-    pub(crate) fn mark_or_unmark_begin(
-        &mut self,
-        id: OpId,
-        pos: usize,
-        data: &'a MarkData,
-        doc: &'a Automerge,
-    ) -> Option<Mark<'a>> {
-        let mut result = None;
-        let index = self.find(id, doc).err()?;
+    pub(crate) fn process(&mut self, op: &'a Op, m: &OpSetMetadata) -> bool {
+        match &op.action {
+            OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m),
+            OpType::MarkEnd(_) => self.mark_end(op.id, m),
+            _ => false,
+        }
+    }
 
-        let mut mark = Mark::from_data(pos, pos, data);
+    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, m: &OpSetMetadata) -> bool {
+        let mut result = false;
 
-        if let Some(above) = Self::mark_above(&self.state, index, &mark) {
-            if above.value() == mark.value() {
-                mark.start = above.start;
-            }
-        } else if let Some(below) = Self::mark_below(&mut self.state, index, &mark) {
-            if below.value() == mark.value() {
-                mark.start = below.start;
+        let index = match self.find(id.prev(), m).err() {
+            Some(index) => index,
+            None => return false,
+        };
+
+        if Self::mark_above(&self.state, index, mark).is_none() {
+            if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
+                if below.value != mark.value {
+                    self.current.insert(mark.name.clone(), mark.value.clone());
+                    result = true
+                }
             } else {
-                let mut m = below.clone();
-                m.end = pos;
-                result = Some(m);
+                // nothing above or below
+                self.current.insert(mark.name.clone(), mark.value.clone());
+                result = true
             }
         }
 
@@ -120,37 +237,25 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    pub(crate) fn mark_end(
-        &mut self,
-        id: OpId,
-        pos: usize,
-        doc: &'a Automerge,
-    ) -> Option<Mark<'a>> {
-        self.mark_or_unmark_end(id, pos, doc)
-            .and_then(|m| if m.is_null() { None } else { Some(m) })
-    }
+    pub(crate) fn mark_end(&mut self, id: OpId, m: &OpSetMetadata) -> bool {
+        let mut result = false;
+        let index = match self.find(id.prev(), m).ok() {
+            Some(index) => index,
+            None => return false,
+        };
 
-    pub(crate) fn mark_or_unmark_end(
-        &mut self,
-        id: OpId,
-        pos: usize,
-        doc: &'a Automerge,
-    ) -> Option<Mark<'a>> {
-        let mut result = None;
-        let index = self.find(id.prev(), doc).ok()?;
+        let mark = self.state.remove(index).1;
 
-        let mut mark = self.state.remove(index).1;
-        mark.end = pos;
-
-        if Self::mark_above(&self.state, index, &mark).is_none() {
-            match Self::mark_below(&mut self.state, index, &mark) {
-                Some(below) if below.value() == mark.value() => {}
+        if Self::mark_above(&self.state, index, mark).is_none() {
+            match Self::mark_below(&mut self.state, index, mark) {
+                Some(below) if below.value == mark.value => {}
                 Some(below) => {
-                    below.start = pos;
-                    result = Some(mark.clone());
+                    self.current.insert(below.name.clone(), below.value.clone());
+                    result = true;
                 }
                 None => {
-                    result = Some(mark.clone());
+                    self.current.remove(&mark.name);
+                    result = true;
                 }
             }
         }
@@ -158,34 +263,28 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    fn find(&self, target: OpId, doc: &Automerge) -> Result<usize, usize> {
-        let metadata = &doc.ops().m;
+    fn find(&self, target: OpId, m: &OpSetMetadata) -> Result<usize, usize> {
         self.state
-            .binary_search_by(|probe| metadata.lamport_cmp(probe.0, target))
+            .binary_search_by(|probe| m.lamport_cmp(probe.0, target))
     }
 
     fn mark_above<'b>(
-        state: &'b [(OpId, Mark<'a>)],
+        state: &'b [(OpId, &'a MarkData)],
         index: usize,
-        mark: &Mark<'a>,
-    ) -> Option<&'b Mark<'a>> {
-        Some(
-            &state[index..]
-                .iter()
-                .find(|(_, m)| m.name() == mark.name())?
-                .1,
-        )
+        mark: &MarkData,
+    ) -> Option<&'b MarkData> {
+        Some(state[index..].iter().find(|(_, m)| m.name == mark.name)?.1)
     }
 
     fn mark_below<'b>(
-        state: &'b mut [(OpId, Mark<'a>)],
+        state: &'b mut [(OpId, &'a MarkData)],
         index: usize,
-        mark: &Mark<'a>,
-    ) -> Option<&'b mut Mark<'a>> {
+        mark: &MarkData,
+    ) -> Option<&'b MarkData> {
         Some(
-            &mut state[0..index]
+            state[0..index]
                 .iter_mut()
-                .filter(|(_, m)| m.data.name == mark.data.name)
+                .filter(|(_, m)| m.name == mark.name)
                 .last()?
                 .1,
         )

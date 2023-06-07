@@ -136,9 +136,9 @@ describe('Automerge', () => {
         assert.deepStrictEqual(patches21, [
           { action: "mark", path: ["text"], marks: [
             { start: 8, end: 10, name: "bold", value: true },
+            { start: 10, end: 15, name: "bold", value: null },
             { start: 20, end: 25, name: "bold", value: null },
             { start: 25, end: 27, name: "bold", value: true },
-            { start: 10, end: 15, name: "bold", value: null },
           ] },
         ])
     })
@@ -162,7 +162,7 @@ describe('Automerge', () => {
       let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
       assert.deepStrictEqual(patches2, [
-        { action: 'put', path: [ 'map', 'foo' ], value: {} },
+        { action: 'put', path: [ 'map', 'foo' ], conflict: true, value: {} },
         { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc2' },
         { action: 'put', path: [ 'map', 'foo', 'something' ], value: 2 }
       ])
@@ -198,7 +198,7 @@ describe('Automerge', () => {
       let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
       assert.deepStrictEqual(patches2, [
-        { action: 'put', path: [ 'list', 1 ], value: {} },
+        { action: 'put', path: [ 'list', 1 ], conflict: true, value: {} },
         { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc2' },
         { action: 'put', path: [ 'list', 1, 'something' ], value: 2 }
       ])
@@ -213,6 +213,32 @@ describe('Automerge', () => {
       ])
       assert.deepStrictEqual(doc1.diff(heads3, heads2), patches2)
       assert.deepStrictEqual(doc1.diff(heads2, heads3), patches3)
+    })
+    it('it should expose conflicts on inserts', () => {
+      let doc1 = create()
+      doc1.putObject("/", "list", [0,1,2,3,4,5,6])
+
+      let heads1 = doc1.getHeads();
+
+      doc1.insert("/list", 2, "A");
+      doc1.insert("/list", 2, "A");
+      doc1.insert("/list", 2, "A");
+
+      let doc2 = doc1.fork();
+
+      doc1.put("/list", 2, "B");
+      doc1.put("/list", 3, "B");
+      doc2.put("/list", 3, "C");
+
+      doc1.merge(doc2)
+
+      let patches = doc1.diff(heads1, doc1.getHeads())
+      assert.deepStrictEqual(patches, [{
+          action: "insert",
+          path: [ "list", 2 ],
+          values: [ "B", "B", "A" ],
+          conflicts: [ false, true, false ],
+      }])
     })
   })
 })

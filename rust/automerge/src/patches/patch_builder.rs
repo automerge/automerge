@@ -1,5 +1,6 @@
 use core::fmt::Debug;
 
+use crate::marks::MarkSet;
 use crate::{ObjId, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
@@ -47,16 +48,18 @@ impl PatchBuilder {
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
+        marks: Option<MarkSet>,
     ) {
-        let value = (tagged_value.0.to_owned(), tagged_value.1);
+        let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
             index: tail_index,
             values,
+            marks: tail_marks,
             ..
         }) = self.maybe_append(&obj)
         {
             let range = *tail_index..=*tail_index + values.len();
-            if range.contains(&index) {
+            if &marks == tail_marks && range.contains(&index) {
                 values.insert(index - *tail_index, value);
                 return;
             }
@@ -67,7 +70,7 @@ impl PatchBuilder {
             let action = PatchAction::Insert {
                 index,
                 values,
-                conflict,
+                marks,
             };
             self.patches.push(Patch { obj, path, action });
         }
@@ -79,15 +82,17 @@ impl PatchBuilder {
         obj: ObjId,
         index: usize,
         value: &str,
+        marks: Option<MarkSet>,
     ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,
             value: prev_value,
+            marks: tail_marks,
             ..
         }) = self.maybe_append(&obj)
         {
             let range = *tail_index..=*tail_index + prev_value.len();
-            if range.contains(&index) {
+            if &marks == tail_marks && range.contains(&index) {
                 let i = index - *tail_index;
                 prev_value.splice(i, value);
                 return;
@@ -97,6 +102,7 @@ impl PatchBuilder {
             let action = PatchAction::SpliceText {
                 index,
                 value: value.into(),
+                marks,
             };
             self.patches.push(Patch { obj, path, action });
         }
@@ -203,7 +209,7 @@ impl PatchBuilder {
         }
     }
 
-    pub(crate) fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+    pub(crate) fn mark<'a, 'b, R: ReadDoc, M: Iterator<Item = Mark<'b>>>(
         &mut self,
         doc: &'a R,
         obj: ObjId,
@@ -224,8 +230,25 @@ impl PatchBuilder {
         }
     }
 
-    // FIXME
-    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ObjId, _prop: Prop) {}
+    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, prop: Prop) {
+        let conflict = match self.maybe_append(&obj) {
+            Some(PatchAction::PutMap { key, conflict, .. })
+                if Some(key.as_str()) == prop.as_str() =>
+            {
+                Some(conflict)
+            }
+            Some(PatchAction::PutSeq {
+                index, conflict, ..
+            }) if Some(*index) == prop.as_index() => Some(conflict),
+            _ => None,
+        };
+        if let Some(conflict) = conflict {
+            *conflict = true
+        } else if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::Conflict { prop };
+            self.patches.push(Patch { obj, path, action });
+        }
+    }
 }
 
 impl AsMut<PatchBuilder> for PatchBuilder {

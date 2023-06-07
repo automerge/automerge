@@ -455,7 +455,14 @@ pub enum Prop {
 }
 
 impl Prop {
-    pub(crate) fn to_index(&self) -> Option<usize> {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Prop::Map(s) => Some(s),
+            Prop::Seq(_) => None,
+        }
+    }
+
+    pub fn as_index(&self) -> Option<usize> {
         match self {
             Prop::Map(_) => None,
             Prop::Seq(n) => Some(*n),

@@ -94,13 +94,14 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch;
+export type PatchValue = string | number | boolean | null | Date | Uint8Array | {} | []
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
 
 export type PutPatch = {
   action: 'put'
   path: Prop[],
-  value: Value
-  conflict: boolean
+  value: PatchValue,
+  conflict?: boolean
 }
 
 export type MarkPatch = {
@@ -144,7 +145,13 @@ export type SpliceTextPatch = {
 export type InsertPatch = {
   action: 'insert'
   path: Prop[],
-  values: Value[],
+  values: PatchValue[],
+  conflicts?: boolean[]
+}
+
+export type ConflictPatch = {
+  action: 'conflict'
+  path: Prop[],
 }
 
 export type Mark = {

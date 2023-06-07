@@ -50,8 +50,8 @@ describe('Automerge', () => {
       doc.mark(list, { start: 3, end: 6 }, "underline" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { name: 'underline', value: true, start: 3, end: 6 },
         { name: 'bold', value: true, start: 2, end: 8 },
+        { name: 'underline', value: true, start: 3, end: 6 },
       ])
       doc.unmark(list, { start: 4, end: 6 }, 'bold')
       doc.insert(list, 7, "A")
@@ -59,8 +59,8 @@ describe('Automerge', () => {
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
         { name: 'bold', value: true, start: 2, end: 5 },
-        { name: 'underline', value: true, start: 4, end: 7 },
         { name: 'bold', value: true, start: 7, end: 10 },
+        { name: 'underline', value: true, start: 4, end: 7 },
       ])
       doc.unmark(list, { start: 0, end: 11 }, 'bold')
       marks = doc.marks(list);
@@ -195,9 +195,9 @@ describe('Automerge', () => {
       doc.commit("marks");
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
+        { name: 'bold', start: 0, end: 37, value: true },
         { name: `comment:${id}`, start: 10, end: 13,  value: 'foxes are my favorite animal!' },
         { name: 'itallic', start: 4, end: 19, value: true },
-        { name: 'bold', start: 0, end: 37, value: true }
       ])
       let text = doc.text(list);
       assert.deepStrictEqual(text, "the quick fox jumps over the lazy dog");
@@ -231,15 +231,32 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'list' ], value: '' },
         {
           action: 'splice', path: [ 'list', 0 ],
-          value: 'the quick fox jumps over the lazy dog'
+          value: 'the ',
+          marks: { bold: true },
         },
         {
-          action: 'mark', path: [ 'list' ],
-          marks: [
-            { name: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 },
-            { name: 'itallic', value: true, start: 4, end: 19 },
-            { name: 'bold', value: true, start: 0, end: 37  },
-          ]
+          action: 'splice', path: [ 'list', 4 ],
+          value: 'quick ',
+          marks: { bold: true, itallic: true },
+        },
+        {
+          action: 'splice', path: [ 'list', 10 ],
+          value: 'fox',
+          marks: {
+            bold: true,
+            [`comment:${id}`]: "foxes are my favorite animal!",
+            itallic: true,
+          }
+        },
+        {
+          action: 'splice', path: [ 'list', 13 ],
+          value: ' jumps',
+          marks: { bold: true, itallic: true },
+        },
+        {
+          action: 'splice', path: [ 'list', 19 ],
+          value: ' over the lazy dog',
+          marks: { bold: true },
         }
       ]);
     })
@@ -289,19 +306,19 @@ describe('Automerge', () => {
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc1.mark(list, { start: 5, end: 10 }, "xxx", "aaa")
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches1, [{
-        action: 'mark', path: [ 'list' ], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10 }],
+        action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "
       }]);
 
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches2, [{
-        action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
+        action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "
       }]);
     })
 
@@ -314,21 +331,19 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
       doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 25 },
-        ] },
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick fox jumps over "},
       ]);
 
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 25}] },
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick fox jumps over "},
       ]);
     })
 
@@ -341,27 +356,23 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "xxx", "bbb")
       doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 10 },
-          { name: 'xxx', value: 'bbb', start: 10, end: 15 },
-          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
-        ]}
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'bbb' }, value: "fox j"},
+        { action: 'splice', path: [ 'list', 15 ], marks: { xxx: 'aaa' }, value: "umps over "},
       ]);
 
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: ['list'], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 10 },
-          { name: 'xxx', value: 'bbb', start: 10, end: 15 },
-          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
-        ]},
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'bbb' }, value: "fox j"},
+        { action: 'splice', path: [ 'list', 15 ], marks: { xxx: 'aaa' }, value: "umps over "},
       ]);
     })
 
@@ -374,27 +385,25 @@ describe('Automerge', () => {
       doc1.mark(list, { start: 10, end: 20 }, "yyy", "aaa")
       doc1.mark(list, { start: 15, end: 25 }, "zzz", "aaa")
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end:15 },
-          { name: 'yyy', value: 'aaa', start: 10, end: 20 },
-          { name: 'zzz', value: 'aaa', start: 15, end: 25 },
-          ]}
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa', yyy: "aaa" }, value: "fox j"},
+        { action: 'splice', path: [ 'list', 15 ], marks: { yyy: "aaa", zzz: "aaa" }, value: "umps "},
+        { action: 'splice', path: [ 'list', 20 ], marks: { zzz: "aaa" }, value: "over "},
       ]);
 
       let doc2 : Automerge = create();
       doc2.loadIncremental(doc1.save())
 
-      let patches2 = doc2.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc2.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { name: 'yyy', value: 'aaa', start: 10, end: 20 },
-          { name: 'zzz', value: 'aaa', start: 15, end: 25 },
-        ]}
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa', yyy: "aaa" }, value: "fox j"},
+        { action: 'splice', path: [ 'list', 15 ], marks: { yyy: "aaa", zzz: "aaa" }, value: "umps "},
+        { action: 'splice', path: [ 'list', 20 ], marks: { zzz: "aaa" }, value: "over "},
       ]);
     })
 
@@ -415,31 +424,32 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'bbb', start: 5, end: 10 },
-            { name: 'xxx', value: 'aaa', start: 10, end: 25 },
-            { name: 'xxx', value: 'bbb', start: 25, end: 30 },
-          ]
-        },
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'bbb' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa' }, value: "fox jumps over "},
+        { action: 'splice', path: [ 'list', 25 ], marks: { xxx: 'bbb' }, value: "the l"},
       ]);
 
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.marks || p.action == 'mark')
 
       let marks = doc3.marks(list)
 
       assert.deepEqual(marks, [
-          { name: 'xxx', value: 'bbb', start: 5, end: 10 },
-          { name: 'xxx', value: 'aaa', start: 10, end: 25 },
-          { name: 'xxx', value: 'bbb', start: 25, end: 30  },
+        { end: 10, name: "xxx", start: 5, value: "bbb" },
+        { end: 25, name: "xxx", start: 10, value: "aaa" },
+        { end: 30, name: "xxx", start: 25, value: "bbb" },
       ]);
 
-      assert.deepEqual(patches2, [{ action: 'mark', path: [ 'list' ], marks }]);
+      assert.deepEqual(patches2, [
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'bbb' }, value: "uick "},
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa' }, value: "fox jumps over "},
+        { action: 'splice', path: [ 'list', 25 ], marks: { xxx: 'bbb' }, value: "the l"},
+      ])
     })
 
     it('does not show marks hidden in merge', () => {
@@ -459,24 +469,19 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks)
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'aaa', start: 10, end: 25 },
-          ]
-        },
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa' }, value: "fox jumps over "},
       ]);
 
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.marks)
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 10, end: 25 },
-        ]}
+        { action: 'splice', path: [ 'list', 10 ], marks: { xxx: 'aaa' }, value: "fox jumps over "},
       ]);
     })
 
@@ -497,26 +502,22 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      let patches1 = doc1.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches1 = doc1.diffIncremental().filter((p:any) => p.marks)
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'aaa', start: 5, end: 25 },
-          ]
-        },
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick fox jumps over "},
       ]);
 
       let doc3 : Automerge = create();
       doc3.loadIncremental(doc1.save())
 
-      let patches2 = doc3.diffIncremental().filter((p:any) => p.action == "mark")
+      let patches2 = doc3.diffIncremental().filter((p:any) => p.marks)
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 25 },
-        ]}
+        { action: 'splice', path: [ 'list', 5 ], marks: { xxx: 'aaa' }, value: "uick fox jumps over "},
       ]);
     })
+
     it('can get marks at a given heads', () => {
       let doc1 : Automerge = create({ actor: "aabbcc" })
 
@@ -545,6 +546,77 @@ describe('Automerge', () => {
       assert.deepEqual(marks2, doc1.marks(list,heads2))
       assert.deepEqual(marks3, doc1.marks(list,heads3))
       assert.deepEqual(marks4, doc1.marks(list,heads4))
+    })
+
+    it('patches for marks generate correctly on load, on merge, and on change', () => {
+      let doc1 : Automerge = create()
+
+      let text = doc1.putObject("_root", "text", "")
+
+      let heads0 = doc1.getHeads();
+
+      doc1.splice(text, 0, 0, "aaaaabbbbbcccccdddddeeeeeffff")
+
+      let heads1 = doc1.getHeads();
+
+      doc1.updateDiffCursor();
+
+      doc1.mark(text, { start: 5, end: 25 }, "mark1", "A")
+      doc1.mark(text, { start: 10, end: 25 }, "mark2", "B")
+      doc1.mark(text, { start: 15, end: 20 }, "mark2", "C")
+
+      let patches1 = doc1.diffIncremental();
+      let marks1 = doc1.marks(text);
+
+      assert.deepEqual(marks1, [
+          { start: 5, end: 25, name: 'mark1', value: 'A' },
+          { start: 10, end: 15, name: 'mark2', value: 'B' },
+          { start: 15, end: 20, name: 'mark2', value: 'C' },
+          { start: 20, end: 25, name: 'mark2', value: 'B' },
+      ])
+
+      assert.deepEqual(patches1, [
+        { action: 'mark', path: ['text'], marks: [
+          { end: 25, name: 'mark1', start: 5, value: 'A' },
+          { end: 25, name: 'mark2', start: 10, value: 'B' },
+          { end: 20, name: 'mark2', start: 15, value: 'C' },
+        ]}
+      ]);
+
+      let doc2 = load(doc1.save())
+      let patches2 = doc2.diffIncremental();
+      // this should run current_state since the doc was empty
+      assert.deepEqual(patches2, [
+        { action: 'put', path: [ 'text' ], value: '' },
+        { action: 'splice', path: [ 'text', 0 ], value: 'aaaaa' },
+        { action: 'splice', marks: { mark1: 'A' }, path: [ 'text', 5 ], value: 'bbbbb' },
+        { action: 'splice', marks: { mark1: 'A', mark2: 'B' }, path: [ 'text', 10 ], value: 'ccccc' },
+        { action: 'splice', marks: { mark1: 'A', mark2: 'C' }, path: [ 'text', 15 ], value: 'ddddd' },
+        { action: 'splice', marks: { mark1: 'A', mark2: 'B' }, path: [ 'text', 20 ], value: 'eeeee' },
+        { action: 'splice', path: [ 'text', 25 ], value: 'ffff' }
+      ]);
+
+      let doc3 = create();
+      doc3.put("/", "a", "b"); // make a small change so we don't run current_state
+      let headsLocal = doc3.getHeads()
+      doc3.updateDiffCursor();
+      doc3.merge(doc1)
+      let patches3 = doc3.diffIncremental();
+      assert.deepEqual(patches3, [
+        { action: 'put', path: [ 'text' ], value: '' },
+        { action: 'splice', path: [ 'text', 0 ], value: 'aaaaabbbbbcccccdddddeeeeeffff' },
+        { action: 'mark', path: ['text'], marks: [
+          { end: 25, name: 'mark1', start: 5, value: 'A' },
+          { end: 25, name: 'mark2', start: 10, value: 'B' },
+          { end: 20, name: 'mark2', start: 15, value: 'C' },
+        ]}
+      ]);
+
+      let headsABPlusTextObj = [ ... heads0, ... headsLocal ];
+      let patches4 = doc3.diff(doc3.getHeads(), headsABPlusTextObj);
+      assert.deepEqual(patches4, [
+        { action: 'del', length: 29, path: [ 'text', 0 ] }
+      ]);
     })
   })
 })

@@ -3,18 +3,60 @@ use std::borrow::Cow;
 use itertools::Itertools;
 
 use crate::{
-    marks::{Mark, MarkStateMachine},
+    marks::{MarkSet, MarkStateMachine},
     patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
 #[derive(Debug, Default)]
-struct TextState<'a> {
+struct TextSpan {
     text: String,
+    start: usize,
+    marks: Option<MarkSet>,
+}
+
+#[derive(Debug, Default)]
+struct TextState<'a> {
+    //text: String,
     len: usize,
+    //mark: Option<MarkData>,
+    spans: Vec<TextSpan>,
     marks: MarkStateMachine<'a>,
-    finished: Vec<Mark<'a>>,
+    //finished: Vec<Mark<'a>>,
+}
+
+impl<'a> TextState<'a> {
+    fn push_str(&mut self, text: &str, len: usize) {
+        if let Some(last_span) = self.spans.last_mut() {
+            last_span.text.push_str(text);
+        } else {
+            self.spans.push(TextSpan {
+                text: text.to_owned(),
+                start: 0,
+                marks: None,
+            });
+        }
+        self.len += len;
+    }
+
+    fn push_mark(&mut self) {
+        let marks = self.marks.current();
+        if let Some(last) = self.spans.last_mut() {
+            if last.marks.as_ref() == marks {
+                return;
+            }
+            if last.text.is_empty() {
+                last.marks = marks.cloned();
+                return;
+            }
+        }
+        self.spans.push(TextSpan {
+            text: "".to_owned(),
+            start: self.len,
+            marks: marks.cloned(),
+        })
+    }
 }
 
 struct Put<'a> {
@@ -57,7 +99,6 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
     obj: &ObjId,
     ops: I,
 ) {
-    //let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let encoding = ListEncoding::Text;
     let state = TextState::default();
@@ -67,17 +108,16 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
             if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
                 match &o.action {
                     OpType::Make(_) | OpType::Put(_) => {
-                        state.text.push_str(o.to_str());
-                        state.len += o.width(encoding);
+                        state.push_str(o.to_str(), o.width(encoding))
                     }
                     OpType::MarkBegin(_, data) => {
-                        if let Some(mark) = state.marks.mark_begin(o.id, state.len, data, doc) {
-                            state.finished.push(mark);
+                        if state.marks.mark_begin(o.id, data, &doc.ops.m) {
+                            state.push_mark();
                         }
                     }
                     OpType::MarkEnd(_) => {
-                        if let Some(mark) = state.marks.mark_end(o.id, state.len, doc) {
-                            state.finished.push(mark);
+                        if state.marks.mark_end(o.id, &doc.ops.m) {
+                            state.push_mark();
                         }
                     }
                     OpType::Increment(_) | OpType::Delete => {}
@@ -85,8 +125,11 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
             }
             state
         });
-    patch_log.splice(*obj, 0, state.text.as_str());
-    patch_log.mark(*obj, &state.finished);
+    for span in state.spans {
+        if !span.text.is_empty() {
+            patch_log.splice(*obj, span.start, span.text.as_str(), span.marks);
+        }
+    }
 }
 
 fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
@@ -95,31 +138,30 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
     obj: &ObjId,
     ops: I,
 ) {
-    //let exid = doc.id_to_exid(obj.0);
     let mut marks = MarkStateMachine::default();
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let mut len = 0;
-    let mut finished = Vec::new();
+    //let mut finished = Vec::new();
     ops_by_key
         .into_iter()
         .filter_map(|(_key, key_ops)| {
             key_ops
                 .filter(|o| o.visible_or_mark(None))
                 .filter_map(|o| match &o.action {
-                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id)),
-                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id)),
+                    OpType::Make(obj_type) => {
+                        Some((Value::Object(*obj_type), o.id, marks.current().cloned()))
+                    }
+                    OpType::Put(value) => Some((
+                        Value::Scalar(Cow::Borrowed(value)),
+                        o.id,
+                        marks.current().cloned(),
+                    )),
                     OpType::MarkBegin(_, data) => {
-                        if let Some(mark) = marks.mark_begin(o.id, len, data, doc) {
-                            // side effect
-                            finished.push(mark)
-                        }
+                        marks.mark_begin(o.id, data, &doc.ops.m);
                         None
                     }
                     OpType::MarkEnd(_) => {
-                        if let Some(mark) = marks.mark_end(o.id, len, doc) {
-                            // side effect
-                            finished.push(mark)
-                        }
+                        marks.mark_end(o.id, &doc.ops.m);
                         None
                     }
                     _ => None,
@@ -132,11 +174,11 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
                     (pos, value)
                 })
         })
-        .for_each(|(index, (val_enum, (value, opid)))| {
+        .for_each(|(index, (val_enum, (value, opid, marks)))| {
             let conflict = val_enum > 0;
-            patch_log.insert(*obj, index, value.clone().into(), opid, conflict);
+            patch_log.insert(*obj, index, value.clone().into(), opid, conflict, marks);
         });
-    patch_log.mark(*obj, &finished);
+    //patch_log.mark(*obj, &finished);
 }
 
 fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
@@ -207,6 +249,12 @@ mod tests {
         Untagged(crate::Value<'static>),
     }
 
+    impl<'a> From<(Value<'a>, crate::ObjId, bool)> for PatchValue {
+        fn from(value: (Value<'a>, crate::ObjId, bool)) -> Self {
+            Self::Tagged(value.0.into_owned(), value.1)
+        }
+    }
+
     impl<'a> From<(Value<'a>, crate::ObjId)> for PatchValue {
         fn from(value: (Value<'a>, crate::ObjId)) -> Self {
             Self::Tagged(value.0.into_owned(), value.1)
@@ -268,7 +316,7 @@ mod tests {
                 match patch {
                     Patch {
                         obj,
-                        action: PatchAction::SpliceText { index, value },
+                        action: PatchAction::SpliceText { index, value, .. },
                         ..
                     } => acc.push(ObservedPatch::SpliceText {
                         obj,

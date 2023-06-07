@@ -85,6 +85,12 @@ fn get_changes(_doc: &Automerge, patches: Vec<Patch>) {
             PatchAction::Mark { marks } => {
                 println!("mark {:?} in obj {:?}, object path {:?}", marks, obj, path,)
             }
+            PatchAction::Conflict { prop } => {
+                println!(
+                    "conflict on {:?} in obj {:?}, object path {:?}",
+                    prop, obj, path,
+                )
+            }
         }
     }
 }

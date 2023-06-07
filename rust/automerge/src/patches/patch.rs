@@ -1,4 +1,7 @@
-use crate::{marks::Mark, ObjId, Prop, Value};
+use crate::{
+    marks::{Mark, MarkSet},
+    ObjId, Prop, Value,
+};
 use core::fmt::Debug;
 use std::fmt;
 
@@ -49,14 +52,15 @@ pub enum PatchAction {
         index: usize,
         /// The values that were inserted, in order that they appear. As with [`Self::PutMap`] and
         /// [`Self::PutSeq`] the object ID is only meaningful for `Value::Obj` values
-        values: SequenceTree<(Value<'static>, ObjId)>,
-        conflict: bool,
+        values: SequenceTree<(Value<'static>, ObjId, bool)>,
+        marks: Option<MarkSet>,
     },
     /// Some text was spliced into a text object
     SpliceText {
         index: usize,
         /// The text that was inserted
         value: TextValue,
+        marks: Option<MarkSet>,
     },
     /// A counter was incremented
     Increment {
@@ -64,6 +68,11 @@ pub enum PatchAction {
         prop: Prop,
         /// The amount incremented, may be negative
         value: i64,
+    },
+    /// A new conflict has appeared
+    Conflict {
+        /// The conflicted property
+        prop: Prop,
     },
     /// A key was deleted from a map
     DeleteMap { key: String },

@@ -2,6 +2,7 @@ use std::fmt;
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::marks::MarkSet;
 use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
@@ -72,6 +73,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                         value,
                         id,
                         conflict,
+                        marks: None, // TODO
                     });
                 }
             }
@@ -86,4 +88,5 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
+    pub marks: Option<MarkSet>,
 }
