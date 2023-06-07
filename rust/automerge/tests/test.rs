@@ -1,9 +1,10 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
+use automerge::patches::TextRepresentation;
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
-    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, Value, VecOpObserver, ROOT,
+    PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
 use std::fs;
 
@@ -843,7 +844,6 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
     doc1.commit();
     let changes = doc1
         .get_changes(&[])
-        .unwrap()
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
@@ -1005,7 +1005,7 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
+    let changes = doc.get_changes(&[]).into_iter().cloned();
 
     let mut doc = AutoCommit::new();
     doc.apply_changes(changes).unwrap();
@@ -1188,7 +1188,7 @@ fn delete_only_change() {
         .unwrap()
         .with_actor(actor);
 
-    let changes = doc4.get_changes(&[]).unwrap();
+    let changes = doc4.get_changes(&[]);
     assert_eq!(changes.len(), 3);
     let c = changes[2];
     assert_eq!(c.start_op().get(), 4);
@@ -1296,7 +1296,7 @@ fn save_and_load_incremented_counter() {
     doc.commit();
     doc.increment(ROOT, "counter", 1).unwrap();
     doc.commit();
-    let changes1: Vec<Change> = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
+    let changes1: Vec<Change> = doc.get_changes(&[]).into_iter().cloned().collect();
     let json: Vec<_> = changes1
         .iter()
         .map(|c| serde_json::to_string(&c.decode()).unwrap())
@@ -1494,7 +1494,7 @@ fn bad_change_on_optree_node_boundary() {
         Ok(())
     })
     .unwrap();
-    let change = doc.get_changes(&doc2.get_heads()).unwrap();
+    let change = doc.get_changes(&doc2.get_heads());
     doc2.apply_changes(change.into_iter().cloned().collect::<Vec<_>>())
         .unwrap();
     Automerge::load(doc2.save().as_slice()).unwrap();
@@ -1576,12 +1576,12 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut obs = VecOpObserver::default();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], Some(&mut obs))
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], Some(&mut obs))
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
     for i in 0..=N {
@@ -1598,7 +1598,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = obs.take_patches();
+    let patches = new_doc.make_patches(&mut patch_log);
 
     let mut expected_patches = Vec::new();
     expected_patches.push(Patch {
@@ -1665,15 +1665,15 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut obs = VecOpObserver::default();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], Some(&mut obs))
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], Some(&mut obs))
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
-    let patches = obs.take_patches();
+    let patches = new_doc.make_patches(&mut patch_log);
     let matches = matches!(
         patches.last().unwrap(),
         Patch {
@@ -1721,6 +1721,116 @@ fn marks() {
     assert_eq!(marks[1].end, 14);
     assert_eq!(marks[1].name(), "bold");
     assert_eq!(marks[1].value(), &ScalarValue::from(true));
+}
+
+#[test]
+fn can_transaction_at() -> Result<(), AutomergeError> {
+    let mut doc1 = Automerge::new();
+    let mut tx = doc1.transaction();
+    let txt = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    tx.put(&ROOT, "size", 100).unwrap();
+    tx.splice_text(&txt, 0, 0, "aaabbbccc")?;
+    tx.commit();
+    let heads1 = doc1.get_heads();
+    let mut tx = doc1.transaction();
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "QQQ")?;
+    tx.put(&ROOT, "size", 200)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaQQQccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+    tx.commit();
+
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "ZZZ")?;
+    tx.put(&ROOT, "size", 300)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaZZZccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+    tx.commit();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "TTT")?;
+    tx.put(&ROOT, "size", 400)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaTTTccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    tx.commit();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    Ok(())
+}
+
+#[test]
+fn can_isolate() -> Result<(), AutomergeError> {
+    let mut doc1 = AutoCommit::new();
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.put(&ROOT, "size", 100).unwrap();
+    doc1.splice_text(&txt, 0, 0, "aaabbbccc")?;
+    let heads1 = doc1.get_heads();
+    doc1.put(&ROOT, "size", 150)?;
+
+    doc1.isolate(&heads1);
+
+    let mut doc2 = doc1.fork();
+    doc2.put(&ROOT, "other", 999)?;
+    doc2.splice_text(&txt, 9, 0, "111")?;
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "QQQ")?;
+    doc1.put(&ROOT, "size", 200)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+
+    let heads2 = doc1.get_heads();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaQQQccc");
+
+    doc1.merge(&mut doc2)?;
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+    assert_eq!(doc1.get(&ROOT, "other").unwrap(), None);
+
+    doc1.isolate(&heads1);
+
+    assert_ne!(heads1, heads2);
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "ZZZ")?;
+    doc1.put(&ROOT, "size", 300)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+
+    let _heads3 = doc1.get_heads(); // commit
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZccc");
+
+    doc1.integrate();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc111");
+    assert_eq!(
+        doc1.get(&ROOT, "other").unwrap().unwrap().0,
+        Value::int(999)
+    );
+
+    doc1.isolate(&heads1);
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "TTT")?;
+    doc1.put(&ROOT, "size", 400)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+
+    let _heads4 = doc1.get_heads(); // commit
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTccc");
+    doc1.integrate();
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc111");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    Ok(())
 }
 
 /*

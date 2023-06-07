@@ -1,5 +1,5 @@
 use crate::hydrate;
-use crate::op_observer::TextRepresentation;
+use crate::patches::TextRepresentation;
 use crate::text_value::TextValue;
 use crate::transaction::Transactable;
 use crate::*;
@@ -29,9 +29,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
     let heads = doc.get_heads();
     let cursor = doc.diff_cursor().to_vec();
-    let patches = doc
-        .diff(&cursor, &heads, VecOpObserver::default())
-        .take_patches();
+    let patches = doc.diff(&cursor, &heads);
     doc.update_diff_cursor();
     hydrated.apply_patches(patches)?;
     assert_eq!(

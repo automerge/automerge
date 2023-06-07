@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -8,24 +9,21 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::history::History;
 use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{OpObserver, TextRepresentation};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
+use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
-use crate::transaction::{
-    self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
-};
+use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, Value,
 };
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
-mod current_state;
+pub(crate) mod current_state;
 pub(crate) mod diff;
 
 #[cfg(test)]
@@ -54,7 +52,7 @@ pub enum OnPartialLoad {
 /// [`ActorId`]. Existing documents can be loaded with [`Self::load`], or [`Self::load_with`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
-/// [`Self::merge`] or [`Self::merge_with`].
+/// [`Self::merge`] or [`Self::merge_and_log_patches`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
 /// [`Self::fork`]. If you want to split a document from ealier in its history you can use
@@ -74,11 +72,6 @@ pub enum OnPartialLoad {
 ///
 /// This type implements [`crate::sync::SyncDoc`]
 ///
-/// ## Observers
-///
-/// Many of the methods on this type have an `_with` or `_observed` variant
-/// which allow you to pass in an [`OpObserver`] to observe any changes which
-/// occur.
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
@@ -93,16 +86,12 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
-    /// Heads at the last save.
-    saved: Vec<ChangeHash>,
     /// The set of operations that form this document.
     ops: OpSet,
     /// The current actor.
     actor: Actor,
     /// The maximum operation counter this document has seen.
     max_op: u64,
-    /// Treat text as sequences with for history/observers
-    text_rep: TextRepresentation,
 }
 
 impl Automerge {
@@ -116,10 +105,8 @@ impl Automerge {
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
-            saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
-            text_rep: TextRepresentation::default(),
         }
     }
 
@@ -199,73 +186,95 @@ impl Automerge {
     }
 
     /// Start a transaction.
-    pub fn transaction(&mut self) -> Transaction<'_, UnObserved> {
-        let args = self.transaction_args();
-        Transaction::new(self, args, UnObserved, History::innactive())
+    pub fn transaction(&mut self) -> Transaction<'_> {
+        let args = self.transaction_args(None);
+        Transaction::new(
+            self,
+            args,
+            PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Start a transaction with an observer
-    pub fn transaction_with_observer<Obs: OpObserver>(
-        &mut self,
-        op_observer: Obs,
-    ) -> Transaction<'_, Observed<Obs>> {
-        let args = self.transaction_args();
-        Transaction::new(self, args, Observed::new(op_observer), History::active())
+    /// Start a transaction which records changes in a [`PatchLog`]
+    pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
+        let args = self.transaction_args(None);
+        Transaction::new(self, args, patch_log)
     }
 
-    pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
-        let actor = self.get_actor_index();
-        let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
-        let mut deps = self.get_heads();
-        if seq > 1 {
-            let last_hash = self.get_hash(actor, seq - 1).unwrap();
-            if !deps.contains(&last_hash) {
-                deps.push(last_hash);
+    /// Start a transaction isolated at a given heads
+    pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
+        let args = self.transaction_args(Some(heads));
+        Transaction::new(self, args, patch_log)
+    }
+
+    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+        let actor_index;
+        let seq;
+        let mut deps;
+        let scope;
+        match heads {
+            Some(heads) => {
+                deps = heads.to_vec();
+                let isolation = self.isolate_actor(heads);
+                actor_index = isolation.actor_index;
+                seq = isolation.seq;
+                scope = Some(isolation.clock);
+            }
+            None => {
+                actor_index = self.get_actor_index();
+                seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+                deps = self.get_heads();
+                scope = None;
+                if seq > 1 {
+                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+                    if !deps.contains(&last_hash) {
+                        deps.push(last_hash);
+                    }
+                }
             }
         }
+
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
 
         TransactionArgs {
-            actor_index: actor,
+            actor_index,
             seq,
             start_op,
             deps,
+            scope,
         }
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, (), E>
+    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
         self.transact_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, (), E>
+    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
+        // FIXME
         self.transact_with_impl(Some(c), f)
     }
 
-    fn transact_with_impl<F, O, E, C>(
-        &mut self,
-        c: Option<C>,
-        f: F,
-    ) -> transaction::Result<O, (), E>
+    fn transact_with_impl<F, O, E, C>(&mut self, c: Option<C>, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let hash = if let Some(c) = c {
+                let (hash, patch_log) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -274,7 +283,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    op_observer: (),
+                    patch_log,
                 })
             }
             Err(error) => Err(Failure {
@@ -284,46 +293,50 @@ impl Automerge {
         }
     }
 
-    /// Run a transaction on this document in a closure, observing ops with `Obs`, automatically handling commit or rollback
+    /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact_observed<F, O, E, Obs>(&mut self, f: F) -> transaction::Result<O, Obs, E>
+    ///
+    /// The collected patches are available in the return value of [`Transaction::commit`]
+    pub fn transact_and_log_patches<F, O, E>(
+        &mut self,
+        text_rep: TextRepresentation,
+        f: F,
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
-        Obs: OpObserver + Default,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
-        self.transact_observed_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
+        self.transact_and_log_patches_with_impl(text_rep, None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
-    /// Like [`Self::transact_observed`] but with a function for generating the commit options
-    pub fn transact_observed_with<F, O, E, C, Obs>(
+    /// Like [`Self::transact_and_log_patches`] but with a function for generating the commit options
+    pub fn transact_and_log_patches_with<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: C,
         f: F,
-    ) -> transaction::Result<O, Obs, E>
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + Default,
     {
-        self.transact_observed_with_impl(Some(c), f)
+        self.transact_and_log_patches_with_impl(text_rep, Some(c), f)
     }
 
-    fn transact_observed_with_impl<F, O, Obs, E, C>(
+    fn transact_and_log_patches_with_impl<F, O, E, C>(
         &mut self,
+        text_rep: TextRepresentation,
         c: Option<C>,
         f: F,
-    ) -> transaction::Result<O, Obs, E>
+    ) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + Default,
     {
-        let observer = Obs::default();
-        let mut tx = self.transaction_with_observer(observer);
+        let mut tx = self.transaction_log_patches(PatchLog::active(text_rep));
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (obs, hash) = if let Some(c) = c {
+                let (hash, history) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -332,7 +345,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    op_observer: obs,
+                    patch_log: history,
                 })
             }
             Err(error) => Err(Failure {
@@ -347,7 +360,7 @@ impl Automerge {
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
-        let args = self.transaction_args();
+        let args = self.transaction_args(None);
         Transaction::empty(self, args, opts)
     }
 
@@ -382,10 +395,25 @@ impl Automerge {
             }
         }
         let mut f = Self::new();
-        f.set_text_rep(self.get_text_rep());
         f.set_actor(ActorId::random());
         f.apply_changes(changes.into_iter().rev().cloned())?;
         Ok(f)
+    }
+
+    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
+        match id {
+            ExId::Root => Ok(OpId::new(0, 0)),
+            ExId::Id(ctr, actor, idx) => {
+                let opid = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    OpId::new(*ctr, *idx)
+                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
+                    OpId::new(*ctr, backup_idx)
+                } else {
+                    return Err(AutomergeError::InvalidObjId(id.to_string()));
+                };
+                Ok(opid)
+            }
+        }
     }
 
     pub(crate) fn get_obj_meta(&self, id: ObjId) -> Result<ObjMeta, AutomergeError> {
@@ -417,18 +445,8 @@ impl Automerge {
     }
 
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjMeta, AutomergeError> {
-        let obj = match id {
-            ExId::Root => ObjId::root(),
-            ExId::Id(ctr, actor, idx) => {
-                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId::new(*ctr, *idx))
-                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
-                    ObjId(OpId::new(*ctr, backup_idx))
-                } else {
-                    return Err(AutomergeError::InvalidObjId(id.to_string()));
-                }
-            }
-        };
+        let opid = self.exid_to_opid(id)?;
+        let obj = ObjId(opid);
         self.get_obj_meta(obj)
     }
 
@@ -442,12 +460,11 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(
+        Self::load_with(
             data,
             OnPartialLoad::Error,
             VerificationMode::Check,
-            None,
-            TextRepresentation::default(),
+            &mut PatchLog::inactive(TextRepresentation::default()),
         )
     }
 
@@ -455,23 +472,29 @@ impl Automerge {
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(
+        Self::load_with(
             data,
             OnPartialLoad::Error,
             VerificationMode::DontCheck,
-            None,
-            TextRepresentation::default(),
+            &mut PatchLog::inactive(TextRepresentation::default()),
         )
     }
 
-    /// Load a document with an observer
-    #[tracing::instrument(skip(data, observer), err)]
-    pub fn load_with<Obs: OpObserver>(
+    /// Load a document, with options
+    ///
+    /// # Arguments
+    /// * `data` - The data to load
+    /// * `on_error` - What to do if the document is only partially loaded. This can happen if some
+    ///                prefix of `data` contains valid data.
+    /// * `mode` - Whether to verify the head hashes after loading
+    /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
+    ///                 the document once loaded
+    #[tracing::instrument(skip(data), err)]
+    pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
-        mut observer: Option<&mut Obs>,
-        text_rep: TextRepresentation,
+        patch_log: &mut PatchLog,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -517,10 +540,8 @@ impl Automerge {
                     change_graph,
                     ops: op_set,
                     deps: heads.into_iter().collect(),
-                    saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
-                    text_rep,
                 }
             }
             storage::Chunk::Change(stored_change) => {
@@ -559,71 +580,59 @@ impl Automerge {
                 }
             }
         }
-        if let Some(observer) = &mut observer {
-            am.observe_current_state(*observer);
+        if patch_log.is_active() {
+            current_state::log_current_state_patches(&am, patch_log);
         }
         Ok(am)
     }
 
-    pub(crate) fn observe_current_state<Obs: OpObserver>(&self, observer: &mut Obs) {
-        let mut history = History::active();
-        current_state::observe_current_state(self, &mut history);
-        history.observe(observer, self, None);
+    /// Create the patches from a [`PatchLog`]
+    ///
+    /// See the documentation for [`PatchLog`] for more details on this
+    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
+        patch_log.make_patches(self)
+    }
+
+    /// Get a set of [`Patch`]es which materialize the current state of the document
+    ///
+    /// This is a convienence method for `doc.diff(&[], current_heads)`
+    pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
+        let mut patch_log = PatchLog::active(text_rep);
+        current_state::log_current_state_patches(self, &mut patch_log);
+        patch_log.make_patches(self)
     }
 
     /// Load an incremental save of a document.
     ///
     /// Unlike `load` this imports changes into an existing document. It will work with both the
-    /// output of [`Self::save`] and [`Self::save_incremental`]
+    /// output of [`Self::save`] and [`Self::save_after`]
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_with::<()>(data, None)
+        self.load_incremental_log_patches(
+            data,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Like [`Self::load_incremental`] but with an observer
-    pub fn load_incremental_with<Obs: OpObserver>(
+    /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
+    /// [`PatchLog`]
+    pub(crate) fn load_incremental_log_patches(
         &mut self,
         data: &[u8],
-        op_observer: Option<&mut Obs>,
-    ) -> Result<usize, AutomergeError> {
-        let mut history = History::new(!self.is_empty() && op_observer.is_some());
-        let delta = self.load_incremental_inner(data, &mut history)?;
-        self.observe_history(op_observer, history);
-        Ok(delta)
-    }
-
-    pub(crate) fn observe_history<Obs: OpObserver>(
-        &self,
-        op_observer: Option<&mut Obs>,
-        mut history: History,
-    ) {
-        if let Some(obs) = op_observer {
-            if history.is_active() {
-                history.observe(obs, self, None);
-            } else {
-                self.observe_current_state(obs);
-            }
-        }
-    }
-
-    pub(crate) fn load_incremental_inner(
-        &mut self,
-        data: &[u8],
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with::<()>(
+            let mut doc = Self::load_with(
                 data,
                 OnPartialLoad::Ignore,
                 VerificationMode::Check,
-                None,
-                self.text_rep,
+                &mut PatchLog::inactive(TextRepresentation::default()),
             )?;
             doc = doc.with_actor(self.actor_id());
-            if history.is_active() {
-                current_state::observe_current_state(&doc, history);
+            if patch_log.is_active() {
+                current_state::log_current_state_patches(&doc, patch_log);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -636,7 +645,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_inner(changes, history)?;
+        self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -659,25 +668,18 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_with::<_, ()>(changes, None)
+        self.apply_changes_log_patches(
+            changes,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Like [`Self::apply_changes`] but with an observer
-    pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
+    /// Like [`Self::apply_changes`] but log the resulting changes to the current state of the
+    /// document to `patch_log`
+    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        op_observer: Option<&mut Obs>,
-    ) -> Result<(), AutomergeError> {
-        let mut history = History::new(!self.is_empty() && op_observer.is_some());
-        self.apply_changes_inner(changes, &mut history)?;
-        self.observe_history(op_observer, history);
-        Ok(())
-    }
-
-    pub(crate) fn apply_changes_inner<I: IntoIterator<Item = Change>>(
-        &mut self,
-        changes: I,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
@@ -692,7 +694,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c, history)?;
+                    self.apply_change(c, patch_log)?;
                 } else {
                     self.queue.push(c);
                 }
@@ -700,7 +702,7 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                self.apply_change(c, history)?;
+                self.apply_change(c, patch_log)?;
             }
         }
         Ok(())
@@ -709,12 +711,12 @@ impl Automerge {
     fn apply_change(
         &mut self,
         change: Change,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
-            self.insert_op(&obj, op, history)?;
+            self.insert_op(&obj, op, patch_log)?;
         }
         Ok(())
     }
@@ -795,25 +797,18 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_with::<()>(other, None)
+        self.merge_and_log_patches(
+            other,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
-    /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge_with<Obs: OpObserver>(
+    /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
+    /// the resulting changes to the current state of the document to `patch_log`
+    pub fn merge_and_log_patches(
         &mut self,
         other: &mut Self,
-        op_observer: Option<&mut Obs>,
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        let mut history = History::new(!self.is_empty() && op_observer.is_some());
-        let result = self.merge_inner(other, &mut history)?;
-        self.observe_history(op_observer, history);
-        Ok(result)
-    }
-
-    pub(crate) fn merge_inner(
-        &mut self,
-        other: &mut Self,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
@@ -822,16 +817,12 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_inner(changes, history)?;
+        self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
     }
 
     /// Save the entirety of this document in a compact form.
-    ///
-    /// This takes a mutable reference to self because it saves the heads of the last save so that
-    /// `save_incremental` can be used to produce only the changes since the last `save`. This API
-    /// will be changing in future.
-    pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
+    pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
         let compress = if options.deflate {
@@ -847,9 +838,8 @@ impl Automerge {
             &heads,
             compress,
         );
-        self.saved = self.get_heads();
         if options.retain_orphans {
-            for orphaned in self.queue.drain(..) {
+            for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
         }
@@ -857,45 +847,36 @@ impl Automerge {
     }
 
     /// Save the entirety of this document in a compact form.
-    ///
-    /// This takes a mutable reference to self because it saves the heads of the last save so that
-    /// `save_incremental` can be used to produce only the changes since the last `save`. This API
-    /// will be changing in future.
-    pub fn save(&mut self) -> Vec<u8> {
+    pub fn save(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
     }
 
     /// Save the document and attempt to load it before returning - slow!
-    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save_and_verify(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
         Self::load(&bytes)?;
         Ok(bytes)
     }
 
     /// Save this document, but don't run it through DEFLATE afterwards
-    pub fn save_nocompress(&mut self) -> Vec<u8> {
+    pub fn save_nocompress(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions {
             deflate: false,
             ..Default::default()
         })
     }
 
-    /// Save the changes since the last call to [Self::save`]
+    /// Save the changes since the given heads
     ///
     /// The output of this will not be a compressed document format, but a series of individual
     /// changes. This is useful if you know you have only made a small change since the last `save`
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
-    pub fn save_incremental(&mut self) -> Vec<u8> {
-        let changes = self
-            .get_changes(self.saved.as_slice())
-            .expect("Should only be getting changes using previously saved heads");
+    pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
+        let changes = self.get_changes(heads);
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
-        }
-        if !bytes.is_empty() {
-            self.saved = self.get_heads()
         }
         bytes
     }
@@ -920,7 +901,7 @@ impl Automerge {
     }
 
     /// Get the changes since `have_deps` in this document using a clock internally.
-    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         // get the clock for the given deps
         let clock = self.clock_at(have_deps);
 
@@ -941,10 +922,10 @@ impl Automerge {
         // ensure the changes are still in sorted order
         change_indexes.sort_unstable();
 
-        Ok(change_indexes
+        change_indexes
             .into_iter()
             .map(|i| &self.history[i])
-            .collect())
+            .collect()
     }
 
     /// Get the last change this actor made to the document.
@@ -960,6 +941,38 @@ impl Automerge {
         self.change_graph.clock_for_heads(heads)
     }
 
+    fn get_isolated_actor_index(&mut self, level: usize) -> usize {
+        if level == 0 {
+            self.get_actor_index()
+        } else {
+            let base_actor = self.get_actor();
+            let new_actor = base_actor.with_concurrency(level);
+            self.ops.m.actors.cache(new_actor)
+        }
+    }
+
+    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
+        let mut clock = self.clock_at(heads);
+        let mut actor_index = self.get_isolated_actor_index(0);
+
+        for i in 1.. {
+            let max_op = self.max_op_for_actor(actor_index);
+            if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
+                clock.isolate(actor_index);
+                break;
+            }
+            actor_index = self.get_isolated_actor_index(i);
+        }
+
+        let seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+
+        Isolation {
+            actor_index,
+            seq,
+            clock,
+        }
+    }
+
     fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
@@ -967,6 +980,15 @@ impl Automerge {
             .and_then(|&i| self.history.get(i))
             .map(|c| c.hash())
             .ok_or(AutomergeError::InvalidSeq(seq))
+    }
+
+    fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+        self.states
+            .get(&actor_index)
+            .and_then(|s| s.last())
+            .and_then(|index| self.history.get(*index))
+            .map(|change| change.max_op())
+            .unwrap_or(0)
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
@@ -1119,15 +1141,15 @@ impl Automerge {
         &mut self,
         obj: &ObjId,
         op: Op,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let (pos, succ) = if history.is_active() {
+        let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj)?;
-            let found = self.ops.find_op_with_observer(&obj, &op);
-            found.observe(&obj, &op, self, history);
+            let found = self.ops.find_op_with_patch_log(&obj, &op);
+            found.log_patches(&obj, &op, self, patch_log);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.find_op_without_observer(obj, &op);
+            let found = self.ops.find_op_without_patch_log(obj, &op);
             (found.pos, found.succ)
         };
 
@@ -1139,37 +1161,21 @@ impl Automerge {
         Ok(())
     }
 
-    /// Observe changes in the document between the 'before'
-    /// and 'after' heads.  If the arguments are reverse it will
-    /// observe the same changes in the opposite order.
-    pub fn observe_diff<Obs: OpObserver>(
+    /// Create patches representing the change in the current state of the document between the
+    /// 'before' and 'after' heads.  If the arguments are reverse it will observe the same changes
+    /// in the opposite order.
+    pub fn diff(
         &self,
         before_heads: &[ChangeHash],
         after_heads: &[ChangeHash],
-        observer: &mut Obs,
-    ) {
-        let mut history = History::active();
+        text_rep: TextRepresentation,
+    ) -> Vec<Patch> {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
-        diff::observe_diff(self, &before, &after, &mut history);
-        history.observe(observer, self, Some(after_heads));
-    }
-
-    pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.text_rep = text_rep
-    }
-
-    pub fn get_text_rep(&self) -> TextRepresentation {
-        self.text_rep
-    }
-
-    pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.text_rep = text_rep;
-        self
-    }
-
-    pub(crate) fn text_as_seq(&self) -> bool {
-        self.text_rep == TextRepresentation::Array
+        let mut patch_log = PatchLog::active(text_rep);
+        diff::log_diff(self, &before, &after, &mut patch_log);
+        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.make_patches(self)
     }
 
     /// Get the heads of this document.
@@ -1179,7 +1185,7 @@ impl Automerge {
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         self.get_changes_clock(have_deps)
     }
 
@@ -1209,13 +1215,46 @@ impl Automerge {
             .collect()
     }
 
-    fn calculate_marks<O: AsRef<ExId>>(
+    /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
+        match exid {
+            ExId::Root => None,
+            ExId::Id(..) => {
+                let opid = self.exid_to_opid(exid).ok()?;
+                let actor_indices = self.states.get(&opid.actor())?;
+                let change_index_index = actor_indices
+                    .binary_search_by(|change_index| {
+                        let change = self
+                            .history
+                            .get(*change_index)
+                            .expect("State index should refer to a valid change");
+                        let start = change.start_op().get();
+                        let len = change.len() as u64;
+                        if opid.counter() < start {
+                            Ordering::Greater
+                        } else if start + len <= opid.counter() {
+                            Ordering::Less
+                        } else {
+                            Ordering::Equal
+                        }
+                    })
+                    .ok()?;
+                let change_index = actor_indices.get(change_index_index).unwrap();
+                Some(self.history.get(*change_index).unwrap().hash())
+            }
+        }
+    }
+
+    fn calculate_marks(
         &self,
-        obj: O,
-        heads: Option<&[ChangeHash]>,
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.map(|heads| self.clock_at(heads));
         let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = MarkStateMachine::default();
@@ -1245,139 +1284,76 @@ impl Automerge {
     }
 }
 
-impl ReadDoc for Automerge {
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.parents(obj.id, None))
-    }
-
-    fn parents_at<O: AsRef<ExId>>(
+impl Automerge {
+    pub(crate) fn parents_for(
         &self,
-        obj: O,
-        heads: &[ChangeHash],
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
-        Ok(self.ops.parents(obj.id, Some(clock)))
+        let obj = self.exid_to_obj(obj)?;
+        Ok(self.ops.parents(obj.id, clock))
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.exid_to_obj(obj.as_ref())
+    pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.keys(&obj.id, None))
+            .map(|obj| self.ops.keys(&obj.id, clock))
             .unwrap_or_default()
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| self.ops.keys(&obj.id, Some(clock)))
-            .unwrap_or_default()
-    }
-
-    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+    pub(crate) fn map_range_for<'a, R: RangeBounds<String> + 'a>(
         &'a self,
-        obj: O,
+        obj: &ExId,
         range: R,
+        clock: Option<Clock>,
     ) -> MapRange<'a, R> {
-        self.exid_to_obj(obj.as_ref())
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.map_range(&obj.id, range, None))
+            .map(|obj| self.ops.map_range(&obj.id, range, clock))
             .unwrap_or_default()
     }
 
-    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a, R> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| self.ops.map_range(&obj.id, range, Some(clock)))
-            .unwrap_or_default()
-    }
-
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+    pub(crate) fn list_range_for<R: RangeBounds<usize>>(
         &self,
-        obj: O,
+        obj: &ExId,
         range: R,
+        clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        self.exid_to_obj(obj.as_ref())
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, None))
+            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, clock))
             .unwrap_or_default()
     }
 
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
+    pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| {
-                self.ops
-                    .list_range(&obj.id, range, obj.encoding, Some(clock))
-            })
+            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), self, clock))
             .unwrap_or_default()
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| Values::new(self.ops.top_ops(&obj.id, None), self, None))
-            .unwrap_or_default()
-    }
-
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| {
-                Values::new(
-                    self.ops.top_ops(&obj.id, Some(clock.clone())),
-                    self,
-                    Some(clock),
-                )
-            })
-            .unwrap_or_default()
-    }
-
-    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.exid_to_obj(obj.as_ref())
-            .map(|obj| self.ops.length(&obj.id, obj.encoding, None))
+    pub(crate) fn length_for(&self, obj: &ExId, clock: Option<Clock>) -> usize {
+        self.exid_to_obj(obj)
+            .map(|obj| self.ops.length(&obj.id, obj.encoding, clock))
             .unwrap_or(0)
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .map(|obj| self.ops.length(&obj.id, obj.encoding, Some(clock)))
-            .unwrap_or(0)
-    }
-
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
-        self.exid_to_obj(obj.as_ref()).map(|obj| obj.typ)
-    }
-
-    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.text(&obj.id, None))
-    }
-
-    fn get_cursor<O: AsRef<ExId>>(
+    pub(crate) fn text_for(
         &self,
-        obj: O,
+        obj: &ExId,
+        clock: Option<Clock>,
+    ) -> Result<String, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        Ok(self.ops.text(&obj.id, clock))
+    }
+
+    pub(crate) fn get_cursor_for(
+        &self,
+        obj: &ExId,
         position: usize,
-        at: Option<&[ChangeHash]>,
+        clock: Option<Clock>,
     ) -> Result<Cursor, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = at.map(|heads| self.clock_at(heads));
+        let obj = self.exid_to_obj(obj)?;
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
@@ -1392,14 +1368,13 @@ impl ReadDoc for Automerge {
         }
     }
 
-    fn get_cursor_position<O: AsRef<ExId>>(
+    pub(crate) fn get_cursor_position_for(
         &self,
-        obj: O,
+        obj: &ExId,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        clock: Option<Clock>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = at.map(|heads| self.clock_at(heads));
+        let obj = self.exid_to_obj(obj)?;
         let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
         let found = self
             .ops
@@ -1408,92 +1383,38 @@ impl ReadDoc for Automerge {
         Ok(found.index)
     }
 
-    fn text_at<O: AsRef<ExId>>(
+    pub(crate) fn marks_for(
         &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
-        Ok(self.ops.text(&obj.id, Some(clock)))
-    }
-
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.calculate_marks(obj, None)
-    }
-
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.calculate_marks(obj, Some(heads))
+        self.calculate_marks(obj, clock)
     }
 
-    fn get<O: AsRef<ExId>, P: Into<Prop>>(
+    pub(crate) fn get_for(
         &self,
-        obj: O,
-        prop: P,
+        obj: &ExId,
+        prop: Prop,
+        clock: Option<Clock>,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = None;
+        let obj = self.exid_to_obj(obj)?;
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
-            .ops
-            .into_iter()
-            .last()
-            .map(|op| self.export_value(op, clock)))
-    }
-
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = Some(self.clock_at(heads));
-        Ok(self
-            .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .last()
             .map(|op| self.export_value(op, clock.as_ref())))
     }
 
-    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
+    pub(crate) fn get_all_for<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = None;
-        let values = self
-            .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
-            .ops
-            .into_iter()
-            .map(|op| self.export_value(op, clock))
-            .collect::<Vec<_>>();
-        // this is a test to make sure opid and exid are always sorting the same way
-        assert_eq!(
-            values.iter().map(|v| &v.1).collect::<Vec<_>>(),
-            values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
-        );
-        Ok(values)
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
+        clock: Option<Clock>,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = Some(self.clock_at(heads));
         let values = self
             .ops
             .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
@@ -1507,6 +1428,170 @@ impl ReadDoc for Automerge {
             values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
         );
         Ok(values)
+    }
+}
+
+impl ReadDoc for Automerge {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
+        self.parents_for(obj.as_ref(), None)
+    }
+
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.parents_for(obj.as_ref(), Some(clock))
+    }
+
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
+        self.keys_for(obj.as_ref(), None)
+    }
+
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
+        let clock = self.clock_at(heads);
+        self.keys_for(obj.as_ref(), Some(clock))
+    }
+
+    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'a, R> {
+        self.map_range_for(obj.as_ref(), range, None)
+    }
+
+    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> MapRange<'a, R> {
+        let clock = self.clock_at(heads);
+        self.map_range_for(obj.as_ref(), range, Some(clock))
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.list_range_for(obj.as_ref(), range, None)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRange<'_, R> {
+        let clock = self.clock_at(heads);
+        self.list_range_for(obj.as_ref(), range, Some(clock))
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+        self.values_for(obj.as_ref(), None)
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
+        let clock = self.clock_at(heads);
+        self.values_for(obj.as_ref(), Some(clock))
+    }
+
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
+        self.length_for(obj.as_ref(), None)
+    }
+
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+        let clock = self.clock_at(heads);
+        self.length_for(obj.as_ref(), Some(clock))
+    }
+
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+        self.text_for(obj.as_ref(), None)
+    }
+
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_for(obj.as_ref(), position, clock)
+    }
+
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_position_for(obj.as_ref(), cursor, clock)
+    }
+
+    fn text_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.text_for(obj.as_ref(), Some(clock))
+    }
+
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.marks_for(obj.as_ref(), None)
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.marks_for(obj.as_ref(), Some(clock))
+    }
+
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        self.get_for(obj.as_ref(), prop.into(), None)
+    }
+
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        let clock = Some(self.clock_at(heads));
+        self.get_for(obj.as_ref(), prop.into(), clock)
+    }
+
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        self.get_all_for(obj.as_ref(), prop.into(), None)
+    }
+
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        let clock = Some(self.clock_at(heads));
+        self.get_all_for(obj.as_ref(), prop.into(), clock)
+    }
+
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        self.exid_to_obj(obj.as_ref()).map(|obj| obj.typ)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -1563,4 +1648,11 @@ impl std::default::Default for SaveOptions {
             retain_orphans: true,
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct Isolation {
+    actor_index: usize,
+    seq: u64,
+    clock: Clock,
 }

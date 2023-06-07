@@ -58,6 +58,16 @@ impl Clock {
             .or_insert(data);
     }
 
+    pub(crate) fn isolate(&mut self, actor_index: usize) {
+        self.include(
+            actor_index,
+            ClockData {
+                max_op: u64::MAX,
+                seq: u64::MAX,
+            },
+        )
+    }
+
     pub(crate) fn covers(&self, id: &OpId) -> bool {
         if let Some(data) = self.0.get(&id.actor()) {
             data.max_op >= id.counter()

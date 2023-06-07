@@ -100,6 +100,17 @@ impl From<Value> for value::Value<'_> {
     }
 }
 
+impl From<&Value> for value::Value<'_> {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::Map(_) => value::Value::Object(ObjType::Map),
+            Value::List(_) => value::Value::Object(ObjType::List),
+            Value::Text(_) => value::Value::Object(ObjType::Text),
+            Value::Scalar(s) => value::Value::Scalar(Cow::Owned(s.clone())),
+        }
+    }
+}
+
 impl<T: Into<ScalarValue>> From<T> for Value {
     fn from(value: T) -> Self {
         Value::Scalar(value.into())

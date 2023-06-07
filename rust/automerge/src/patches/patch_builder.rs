@@ -1,40 +1,21 @@
 use core::fmt::Debug;
 
-use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, Value};
+use crate::{ObjId, Prop, ReadDoc, Value};
 
-use crate::sequence_tree::SequenceTree;
-
-use crate::op_observer::{Patch, PatchAction};
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum TextRepresentation {
-    Array,
-    String,
-}
-
-impl TextRepresentation {
-    pub fn is_array(&self) -> bool {
-        matches!(self, TextRepresentation::Array)
-    }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, TextRepresentation::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::Array // FIXME
-    }
-}
+use super::{Patch, PatchAction};
+use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone, Default)]
-pub struct VecOpObserver {
+pub(crate) struct PatchBuilder {
     pub(crate) patches: Vec<Patch>,
 }
 
-impl VecOpObserver {
-    fn get_path<R: ReadDoc>(&mut self, doc: &R, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
+impl PatchBuilder {
+    pub(crate) fn get_path<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: &ObjId,
+    ) -> Option<Vec<(ObjId, Prop)>> {
         match doc.parents(obj) {
             Ok(parents) => parents.visible_path(),
             Err(e) => {
@@ -55,13 +36,11 @@ impl VecOpObserver {
         }
     }
 
-    pub fn take_patches(&mut self) -> Vec<Patch> {
+    pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
-}
 
-impl OpObserver for VecOpObserver {
-    fn insert<R: ReadDoc>(
+    pub(crate) fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -94,7 +73,13 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
+    pub(crate) fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,
             value: prev_value,
@@ -117,7 +102,13 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
+    pub(crate) fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
         match self.maybe_append(&obj) {
             Some(PatchAction::SpliceText {
                 index: tail_index,
@@ -163,7 +154,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+    pub(crate) fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::DeleteMap {
                 key: key.to_owned(),
@@ -172,7 +163,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn put<R: ReadDoc>(
+    pub(crate) fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -198,7 +189,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn increment<R: ReadDoc>(
+    pub(crate) fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
         obj: ObjId,
@@ -212,7 +203,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+    pub(crate) fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
         obj: ObjId,
@@ -233,15 +224,11 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn compare(&self, other: &Self) -> bool {
-        if self.patches != other.patches {
-            panic!("patches dont match");
-        }
-        true
-    }
+    // FIXME
+    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ObjId, _prop: Prop) {}
 }
 
-impl AsMut<VecOpObserver> for VecOpObserver {
+impl AsMut<PatchBuilder> for PatchBuilder {
     fn as_mut(&mut self) -> &mut Self {
         self
     }

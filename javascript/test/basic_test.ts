@@ -549,4 +549,23 @@ describe("Automerge", () => {
       assert.deepEqual(doc, { count: 260 })
     })
   })
+  describe("diff", () => {
+    it("can diff a document with before and hafter heads", () => {
+      let doc = Automerge.from({ value: "" })
+      doc = Automerge.change(doc, d => (d.value = "aaa"))
+      let heads1 = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => (d.value = "bbb"))
+      let heads2 = Automerge.getHeads(doc)
+      let patch12 = Automerge.diff(doc, heads1, heads2)
+      let patch21 = Automerge.diff(doc, heads2, heads1)
+      assert.deepEqual(patch12, [
+        { action: "put", path: ["value"], value: "" },
+        { action: "splice", path: ["value", 0], value: "bbb" },
+      ])
+      assert.deepEqual(patch21, [
+        { action: "put", path: ["value"], value: "" },
+        { action: "splice", path: ["value", 0], value: "aaa" },
+      ])
+    })
+  })
 })

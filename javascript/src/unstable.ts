@@ -65,6 +65,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
+  Heads,
 } from "@automerge/automerge-wasm"
 
 export type { ChangeOptions, ApplyOptions } from "./stable"
@@ -73,6 +74,7 @@ export {
   free,
   getHeads,
   change,
+  changeAt,
   emptyChange,
   loadIncremental,
   save,
@@ -118,7 +120,7 @@ export { RawString } from "./raw_string"
 /** @hidden */
 export const getBackend = stable.getBackend
 
-import { _is_proxy, _state, _obj } from "./internal_state"
+import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state"
 
 /**
  * Create a new automerge document
@@ -237,6 +239,7 @@ export function splice<T>(
   if (!objectId) {
     throw new RangeError("invalid object for splice")
   }
+  _clear_cache(doc)
   const value = `${objectId}/${prop}`
   try {
     return state.handle.splice(value, index, del, newText)

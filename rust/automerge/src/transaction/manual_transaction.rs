@@ -1,15 +1,14 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::history::History;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
+use crate::patches::PatchLog;
+use crate::types::Clock;
 use crate::AutomergeError;
-use crate::{
-    Automerge, ChangeHash, Cursor, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
-};
+use crate::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
 
-use super::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
+use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -24,33 +23,35 @@ use super::{observation, CommitOptions, Transactable, TransactionArgs, Transacti
 /// intermediate state.
 /// This is consistent with `?` error handling.
 #[derive(Debug)]
-pub struct Transaction<'a, Obs: observation::Observation> {
+pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
-    // As with `inner` this is an `Option` so we can `take` it during `commit`
-    observation: Option<Obs>,
-    history: History,
+    patch_log: PatchLog,
     doc: &'a mut Automerge,
 }
 
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
-    pub(crate) fn new(
-        doc: &'a mut Automerge,
-        args: TransactionArgs,
-        obs: Obs,
-        history: History,
-    ) -> Self {
+impl<'a> Transaction<'a> {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
-            history,
-            observation: Some(obs),
+            patch_log,
         }
+    }
+
+    /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    /// - is for an operation in this transaction
+    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+        self.doc.hash_for_opid(opid)
     }
 }
 
-impl<'a> Transaction<'a, observation::UnObserved> {
+impl<'a> Transaction<'a> {
     pub(crate) fn empty(
         doc: &'a mut Automerge,
         args: TransactionArgs,
@@ -60,13 +61,7 @@ impl<'a> Transaction<'a, observation::UnObserved> {
     }
 }
 
-impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
-    pub fn observer(&mut self) -> &mut Obs {
-        self.observation.as_mut().unwrap().observer()
-    }
-}
-
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
+impl<'a> Transaction<'a> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
@@ -74,11 +69,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(mut self) -> Obs::CommitResult {
+    pub fn commit(mut self) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, None, None);
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.patch_log.clone())
     }
 
     /// Commit the operations in this transaction with some options.
@@ -97,14 +92,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> Obs::CommitResult {
+    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, PatchLog) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, options.message, options.time);
-        if let Some(obs) = self.observation.as_mut().and_then(|o| o.observer()) {
-            self.history.observe(obs, self.doc, None);
-        }
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.patch_log.clone())
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -115,20 +107,28 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut History) -> O,
+        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut PatchLog) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        f(tx, self.doc, &mut self.history)
+        f(tx, self.doc, &mut self.patch_log)
+    }
+
+    fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
+        if let Some(h) = heads {
+            Some(self.doc.clock_at(h))
+        } else {
+            self.inner.as_ref().and_then(|i| i.get_scope().clone())
+        }
     }
 }
 
-impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
+impl<'a> ReadDoc for Transaction<'a> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.doc.keys(obj)
+        self.doc.keys_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        self.doc.keys_at(obj, heads)
+        self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn map_range<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(
@@ -136,7 +136,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         range: R,
     ) -> MapRange<'b, R> {
-        self.doc.map_range(obj, range)
+        self.doc
+            .map_range_for(obj.as_ref(), range, self.get_scope(None))
     }
 
     fn map_range_at<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(
@@ -145,7 +146,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         range: R,
         heads: &[ChangeHash],
     ) -> MapRange<'b, R> {
-        self.doc.map_range_at(obj, range, heads)
+        self.doc
+            .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
@@ -153,7 +155,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         range: R,
     ) -> ListRange<'_, R> {
-        self.doc.list_range(obj, range)
+        self.doc
+            .list_range_for(obj.as_ref(), range, self.get_scope(None))
     }
 
     fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
@@ -162,23 +165,26 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         range: R,
         heads: &[ChangeHash],
     ) -> ListRange<'_, R> {
-        self.doc.list_range_at(obj, range, heads)
+        self.doc
+            .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.doc.values(obj)
+        self.doc.values_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        self.doc.values_at(obj, heads)
+        self.doc
+            .values_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.doc.length(obj)
+        self.doc.length_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        self.doc.length_at(obj, heads)
+        self.doc
+            .length_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
@@ -186,7 +192,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.doc.text(obj)
+        log!("text + scope {:?}", self.get_scope(None));
+        self.doc.text_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn text_at<O: AsRef<ExId>>(
@@ -194,7 +201,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
-        self.doc.text_at(obj, heads)
+        self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn get_cursor<O: AsRef<ExId>>(
@@ -203,7 +210,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         position: usize,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        self.doc.get_cursor(obj, position, at)
+        self.doc
+            .get_cursor_for(obj.as_ref(), position, self.get_scope(at))
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(
@@ -212,11 +220,12 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         address: &Cursor,
         at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        self.doc.get_cursor_position(obj, address, at)
+        self.doc
+            .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.marks(obj)
+        self.doc.marks_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn marks_at<O: AsRef<ExId>>(
@@ -224,7 +233,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.marks_at(obj, heads)
+        self.doc
+            .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -232,7 +242,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get(obj, prop)
+        self.doc
+            .get_for(obj.as_ref(), prop.into(), self.get_scope(None))
     }
 
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -241,7 +252,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_at(obj, prop, heads)
+        self.doc
+            .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -249,7 +261,8 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_all(obj, prop)
+        self.doc
+            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(None))
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -258,19 +271,21 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_all_at(obj, prop, heads)
+        self.doc
+            .get_all_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
     }
 
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
-        self.doc.parents(obj)
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
+        self.doc.parents_for(obj.as_ref(), self.get_scope(None))
     }
 
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<crate::Parents<'_>, AutomergeError> {
-        self.doc.parents_at(obj, heads)
+    ) -> Result<Parents<'_>, AutomergeError> {
+        self.doc
+            .parents_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -282,7 +297,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     }
 }
 
-impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
+impl<'a> Transactable for Transaction<'a> {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
@@ -392,7 +407,10 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
-        self.doc.get_heads()
+        self.inner
+            .as_ref()
+            .map(|d| d.get_deps())
+            .unwrap_or_default()
     }
 }
 
@@ -400,7 +418,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
 // intermediate state.
 // This defaults to rolling back the transaction to be compatible with `?` error returning before
 // reaching a call to `commit`.
-impl<'a, Obs: observation::Observation> Drop for Transaction<'a, Obs> {
+impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);

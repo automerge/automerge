@@ -1,6 +1,6 @@
 import { type ObjID, type Heads, Automerge } from "@automerge/automerge-wasm"
 
-import { STATE, OBJECT_ID, TRACE, IS_PROXY } from "./constants"
+import { STATE, OBJECT_ID, CLEAR_CACHE, TRACE, IS_PROXY } from "./constants"
 
 import type { Doc, PatchCallback } from "./types"
 
@@ -25,6 +25,10 @@ export function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
     throw new RangeError("must be the document root")
   }
   return state
+}
+
+export function _clear_cache<T>(doc: Doc<T>): void {
+  Reflect.set(doc, CLEAR_CACHE, true)
 }
 
 export function _trace<T>(doc: Doc<T>): string | undefined {

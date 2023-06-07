@@ -1,6 +1,6 @@
 use automerge::ObjType;
 use automerge::ReadDoc;
-use automerge::{transaction::Transactable, AutoCommit, AutomergeError, VecOpObserver, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ROOT};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
@@ -34,7 +34,7 @@ fn main() -> Result<(), AutomergeError> {
     doc.commit();
     println!("Commit in {} ms", commit.elapsed().as_millis());
     let observe = Instant::now();
-    let _patches = doc.diff_incremental::<VecOpObserver>().take_patches();
+    let _patches = doc.diff_incremental();
     println!("Patches in {} ms", observe.elapsed().as_millis());
     let save = Instant::now();
     let bytes = doc.save();

@@ -277,5 +277,20 @@ describe("Automerge.Text", () => {
       text: new Automerge.Text("🐦"),
     })
     assert.strictEqual(s1.text.get(0), "🐦")
+    assert.strictEqual(s1.text.toString(), "🐦")
+
+    // this tests the wasm::materialize path
+    s2 = Automerge.load(Automerge.save(s1))
+    assert.strictEqual(s2.text.toString(), "🐦")
+
+    // this tests the observe_init_state path
+    let s3 = Automerge.init()
+    s3 = Automerge.merge(s3, s2)
+    assert.strictEqual(s3.text.toString(), "🐦")
+
+    // this tests the diff_incremental path
+    let s4 = Automerge.from({ some: "value" })
+    s4 = Automerge.merge(s4, s2)
+    assert.strictEqual(s4.text.toString(), "🐦")
   })
 })

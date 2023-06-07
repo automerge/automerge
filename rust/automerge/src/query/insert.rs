@@ -1,30 +1,33 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
 use crate::query::{ListState, OpTree, QueryResult, TreeQuery};
-use crate::types::{Key, ListEncoding, Op, HEAD};
+use crate::types::{Clock, Key, ListEncoding, Op, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertNth {
     idx: ListState,
     valid: Option<usize>,
+    clock: Option<Clock>,
     last_valid_insert: Option<Key>,
 }
 
 impl InsertNth {
-    pub(crate) fn new(target: usize, encoding: ListEncoding) -> Self {
+    pub(crate) fn new(target: usize, encoding: ListEncoding, clock: Option<Clock>) -> Self {
         let idx = ListState::new(encoding, target);
         if target == 0 {
             InsertNth {
                 idx,
                 valid: Some(0),
                 last_valid_insert: Some(Key::Seq(HEAD)),
+                clock,
             }
         } else {
             InsertNth {
                 idx,
                 valid: None,
                 last_valid_insert: None,
+                clock,
             }
         }
     }
@@ -57,12 +60,16 @@ impl<'a> TreeQuery<'a> for InsertNth {
 
     fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
-        self.idx.process_node(child, ops)
+        if self.clock.is_none() {
+            self.idx.process_node(child, ops)
+        } else {
+            QueryResult::Descend
+        }
     }
 
     fn query_element(&mut self, element: &Op) -> QueryResult {
         let key = element.elemid_or_key();
-        let visible = element.visible();
+        let visible = element.visible_at(self.clock.as_ref());
         // an insert after we're done - could be a valid insert point
         if element.insert && self.valid.is_none() && self.idx.done() {
             self.valid = Some(self.idx.pos());

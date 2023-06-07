@@ -19,6 +19,7 @@ import {
   TRACE,
   IS_PROXY,
   OBJECT_ID,
+  CLEAR_CACHE,
   COUNTER,
   INT,
   UINT,
@@ -241,6 +242,9 @@ const MapHandler = {
     }
     if (key === TRACE) {
       target.trace = val
+      return true
+    }
+    if (key === CLEAR_CACHE) {
       return true
     }
     const [value, datatype] = import_value(val, textV2)
@@ -700,7 +704,14 @@ function listMethods<T extends Target>(target: T) {
 
     splice(index: any, del: any, ...vals: any[]) {
       index = parseListIndex(index)
+
+      // if del is undefined, delete until the end of the list
+      if (typeof del !== "number") {
+        del = context.length(objectId) - index
+      }
+
       del = parseListIndex(del)
+
       for (const val of vals) {
         if (val && val[OBJECT_ID]) {
           throw new RangeError(
@@ -783,15 +794,18 @@ function listMethods<T extends Target>(target: T) {
     },
 
     entries() {
-      const i = 0
-      const iterator = {
+      let i = 0
+      const iterator: IterableIterator<[number, ValueType<T>]> = {
         next: () => {
           const value = valueAt(target, i)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
-            return { value: [i, value], done: false }
+            return { value: [i++, value], done: false }
           }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator
@@ -800,29 +814,33 @@ function listMethods<T extends Target>(target: T) {
     keys() {
       let i = 0
       const len = context.length(objectId, heads)
-      const iterator = {
+      const iterator: IterableIterator<number> = {
         next: () => {
-          let value: undefined | number = undefined
           if (i < len) {
-            value = i
-            i++
+            return { value: i++, done: false }
           }
-          return { value, done: true }
+          return { value: undefined, done: true }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator
     },
 
     values() {
-      const i = 0
-      const iterator = {
+      let i = 0
+      const iterator: IterableIterator<ValueType<T>> = {
         next: () => {
-          const value = valueAt(target, i)
+          const value = valueAt(target, i++)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
             return { value, done: false }
           }
+        },
+        [Symbol.iterator]() {
+          return this
         },
       }
       return iterator

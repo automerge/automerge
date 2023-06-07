@@ -199,6 +199,10 @@ export class Automerge {
 
   diff(before: Heads, after: Heads): Patch[];
 
+  // isolate
+  isolate(heads: Heads): void;
+  integrate(): void;
+
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
@@ -221,9 +225,9 @@ export class Automerge {
   // patches
   enableFreeze(enable: boolean): boolean;
   registerDatatype(datatype: string, callback: Function): void;
-  popPatches(): Patch[];
-  truncatePatches(): void;
-  resetPatches(): void;
+  diffIncremental(): Patch[];
+  updateDiffCursor(): void;
+  resetDiffCursor(): void;
 
   // save and load to local store
   save(): Uint8Array;

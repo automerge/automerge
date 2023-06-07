@@ -474,7 +474,7 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa' }), doc2 = create({ actor: 'bbbb'})
       doc1.put('_root', 'hello', 'world')
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['hello'], value: 'world' }
       ])
     })
@@ -483,7 +483,7 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa' }), doc2 = create({ actor: 'bbbb' })
       doc1.putObject('_root', 'birds', { friday: { robins: 3 } })
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: {} },
         { action: 'put', path: [ 'birds', 'friday' ], value: {} },
         { action: 'put', path: [ 'birds', 'friday', 'robins' ], value: 3},
@@ -496,7 +496,7 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.delete('_root', 'favouriteBird')
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
       //  { action: 'put', path: [ 'favouriteBird' ], value: 'Robin' },
       //  { action: 'del', path: [ 'favouriteBird' ] }
       ])
@@ -506,7 +506,7 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'})
       doc1.putObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] },
         { action: 'insert', path: [ 'birds', 0 ], values: ['Goldfinch', 'Chaffinch'] },
       ])
@@ -517,11 +517,11 @@ describe('Automerge', () => {
       doc1.putObject('_root', 'birds', [])
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.insertObject('1@aaaa', 0, { species: 'Goldfinch', count: 3 })
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] }
       ])
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'insert', path: [ 'birds', 0 ], values: [{}] },
         { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch' },
         { action: 'put', path: [ 'birds', 0, 'count', ], value: 3 },
@@ -532,7 +532,7 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa' }), doc2 = create({ actor: 'bbbb'})
       doc1.putObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.loadIncremental(doc1.saveIncremental())
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] },
         { action: "insert", path: [ "birds", 0 ], values: [ "Goldfinch", "Chaffinch" ] },
       ])
@@ -541,7 +541,7 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc1.getWithType('1@aaaa', 0), ['str', 'Chaffinch'])
       assert.deepEqual(doc1.getWithType('1@aaaa', 1), ['str', 'Greenfinch'])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'del', path: ['birds', 0] },
         { action: 'insert', path: ['birds', 1], values: ['Greenfinch'] }
       ])
@@ -559,20 +559,20 @@ describe('Automerge', () => {
       doc2.insert('1@aaaa', 0, 'a')
       doc2.insert('1@aaaa', 1, 'b')
       const change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), [ 
+      assert.deepEqual(doc3.diffIncremental(), [ 
         { action: 'put', path: ['values'], value:[] },
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['values'], value:[] },
       ])
       doc3.loadIncremental(change2); doc3.loadIncremental(change3)
       doc4.loadIncremental(change3); doc4.loadIncremental(change2)
       assert.deepEqual([0, 1, 2, 3].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual([0, 1, 2, 3].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'insert', path: ['values', 0], values:['a','b','c','d'] },
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'insert', path: ['values',0], values:['a','b','c','d'] },
       ])
     })
@@ -589,11 +589,11 @@ describe('Automerge', () => {
       doc2.insert('1@aaaa', 2, 'c')
       doc2.insert('1@aaaa', 3, 'd')
       const change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['values'], value:[] },
         { action: 'insert', path: [ 'values', 0 ], values: [ 'a', 'b' ] },
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['values'], value:[] },
         { action: 'insert', path: [ 'values', 0 ], values: [ 'a', 'b' ] },
       ])
@@ -601,10 +601,10 @@ describe('Automerge', () => {
       doc4.loadIncremental(change3); doc4.loadIncremental(change2)
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'insert', path: ['values', 2], values: ['c','d','e','f'] },
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'insert', path: ['values', 2], values: ['c','d','e','f'] },
       ])
     })
@@ -614,18 +614,18 @@ describe('Automerge', () => {
       doc1.put('_root', 'bird', 'Greenfinch')
       doc2.put('_root', 'bird', 'Goldfinch')
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), doc4.popPatches());
+      assert.deepEqual(doc3.diffIncremental(), doc4.diffIncremental());
       doc3.loadIncremental(change1); doc3.loadIncremental(change2)
       doc4.loadIncremental(change2); doc4.loadIncremental(change1)
       assert.deepEqual(doc3.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
       assert.deepEqual(doc4.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc4.getAll('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Greenfinch' },
         { action: 'put', path: ['bird'], value: 'Goldfinch' },
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch' },
       ])
     })
@@ -636,9 +636,9 @@ describe('Automerge', () => {
       doc2.put('_root', 'bird', 'Chaffinch')
       doc3.put('_root', 'bird', 'Goldfinch')
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental(), change3 = doc3.saveIncremental()
-      assert.deepEqual(doc1.popPatches(), [ { action: 'put', path: ['bird'], value: 'Greenfinch' } ])
-      assert.deepEqual(doc2.popPatches(), [ { action: 'put', path: ['bird'], value: 'Chaffinch' } ])
-      assert.deepEqual(doc3.popPatches(), [ { action: 'put', path: ['bird'], value: 'Goldfinch' } ])
+      assert.deepEqual(doc1.diffIncremental(), [ { action: 'put', path: ['bird'], value: 'Greenfinch' } ])
+      assert.deepEqual(doc2.diffIncremental(), [ { action: 'put', path: ['bird'], value: 'Chaffinch' } ])
+      assert.deepEqual(doc3.diffIncremental(), [ { action: 'put', path: ['bird'], value: 'Goldfinch' } ])
       doc1.loadIncremental(change2); doc1.loadIncremental(change3)
       doc2.loadIncremental(change3); doc2.loadIncremental(change1)
       doc3.loadIncremental(change1); doc3.loadIncremental(change2)
@@ -654,28 +654,28 @@ describe('Automerge', () => {
       assert.deepEqual(doc3.getAll('_root', 'bird'), [
         ['str', 'Greenfinch', '1@aaaa'], ['str', 'Chaffinch', '1@bbbb'], ['str', 'Goldfinch', '1@cccc']
       ])
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Chaffinch' },
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
       ])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch' },
       ])
-      assert.deepEqual(doc3.popPatches(), [ ])
+      assert.deepEqual(doc3.diffIncremental(), [ ])
     })
 
     it('should allow a conflict to be resolved', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'}), doc3 = create({ actor: 'cccc'})
       doc1.put('_root', 'bird', 'Greenfinch')
       doc2.put('_root', 'bird', 'Chaffinch')
-      assert.deepEqual(doc3.popPatches(), []);
+      assert.deepEqual(doc3.diffIncremental(), []);
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
       doc1.loadIncremental(change2); doc3.loadIncremental(change1)
       doc2.loadIncremental(change1); doc3.loadIncremental(change2)
       doc1.put('_root', 'bird', 'Goldfinch')
       doc3.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Greenfinch' },
         { action: 'put', path: ['bird'], value: 'Chaffinch' },
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
@@ -689,17 +689,17 @@ describe('Automerge', () => {
       doc1.put('_root', 'bird', 'Goldfinch')
       doc2.delete('_root', 'bird')
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
-      assert.deepEqual(doc1.popPatches(), [ { action: 'put', path: [ 'bird' ], value: 'Goldfinch' } ])
-      assert.deepEqual(doc2.popPatches(), [ ])
+      assert.deepEqual(doc1.diffIncremental(), [ { action: 'put', path: [ 'bird' ], value: 'Goldfinch' } ])
+      assert.deepEqual(doc2.diffIncremental(), [ ])
       doc1.loadIncremental(change2)
       doc2.loadIncremental(change1)
       assert.deepEqual(doc1.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc1.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc2.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc2.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
       ])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
       ])
     })
@@ -714,18 +714,18 @@ describe('Automerge', () => {
       doc1.put('1@aaaa', 0, 'Song Thrush')
       doc2.put('1@aaaa', 0, 'Redwing')
       const change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), doc4.popPatches())
+      assert.deepEqual(doc3.diffIncremental(), doc4.diffIncremental())
       doc3.loadIncremental(change2); doc3.loadIncremental(change3)
       doc4.loadIncremental(change3); doc4.loadIncremental(change2)
       assert.deepEqual(doc3.getWithType('1@aaaa', 0), ['str', 'Redwing'])
       assert.deepEqual(doc3.getAll('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
       assert.deepEqual(doc4.getWithType('1@aaaa', 0), ['str', 'Redwing'])
       assert.deepEqual(doc4.getAll('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['birds',0], value: 'Song Thrush' },
         { action: 'put', path: ['birds',0], value: 'Redwing' }
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['birds',0], value: 'Redwing' },
       ])
     })
@@ -742,20 +742,20 @@ describe('Automerge', () => {
       doc2.put('1@aaaa', 0, 'Ring-necked parakeet')
       doc2.put('1@aaaa', 2, 'Redwing')
       const change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), doc4.popPatches())
+      assert.deepEqual(doc3.diffIncremental(), doc4.diffIncremental())
       doc3.loadIncremental(change2); doc3.loadIncremental(change3)
       doc4.loadIncremental(change3); doc4.loadIncremental(change2)
       assert.deepEqual(doc3.getAll('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
       assert.deepEqual(doc3.getAll('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
       assert.deepEqual(doc4.getAll('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
       assert.deepEqual(doc4.getAll('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'del', path: ['birds',0], },
         { action: 'put', path: ['birds',1], value: 'Song Thrush' },
         { action: 'insert', path: ['birds',0], values: ['Ring-necked parakeet'] },
         { action: 'put', path: ['birds',2], value: 'Redwing' }
       ])
-      assert.deepEqual(doc4.popPatches(), [
+      assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
         { action: 'put', path: ['birds',2], value: 'Redwing' },
       ])
@@ -768,18 +768,18 @@ describe('Automerge', () => {
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
       doc2.delete('_root', 'bird')
       const change3 = doc2.saveIncremental()
-      assert.deepEqual(doc3.popPatches(), []);
+      assert.deepEqual(doc3.diffIncremental(), []);
       doc3.loadIncremental(change1)
       doc3.loadIncremental(change2)
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Robin', '1@aaaa'], ['str', 'Wren', '1@bbbb']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Robin' },
         { action: 'put', path: ['bird'], value: 'Wren' }
       ])
       doc3.loadIncremental(change3)
       assert.deepEqual(doc3.getWithType('_root', 'bird'), ['str', 'Robin'])
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Robin', '1@aaaa']])
-      assert.deepEqual(doc3.popPatches(), [
+      assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Robin' }
       ])
     })
@@ -789,23 +789,23 @@ describe('Automerge', () => {
       doc1.putObject('_root', 'birds', ['Parakeet'])
       doc2.putObject('_root', 'birds', { 'Sparrowhawk': 1 })
       const change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] },
         { action: 'insert', path: [ 'birds', 0 ], values: [ 'Parakeet' ] },
       ])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: {} },
         { action: 'put', path: [ 'birds', 'Sparrowhawk' ], value: 1 },
       ])
       doc1.loadIncremental(change2)
       doc2.loadIncremental(change1)
       assert.deepEqual(doc1.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['birds'], value: {} },
         { action: 'put', path: ['birds', 'Sparrowhawk'], value: 1 }
       ])
       assert.deepEqual(doc2.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
-      assert.deepEqual(doc2.popPatches(), [])
+      assert.deepEqual(doc2.diffIncremental(), [])
     })
 
     it('should support date objects', () => {
@@ -813,21 +813,21 @@ describe('Automerge', () => {
       doc1.put('_root', 'createdAt', now)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.getWithType('_root', 'createdAt'), ['timestamp', now])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['createdAt'], value: now }
       ])
     })
 
     it('should capture local put ops', () => {
       const doc1 = create({ actor: 'aaaa'})
-      assert.deepEqual(doc1.popPatches(), [])
+      assert.deepEqual(doc1.diffIncremental(), [])
       doc1.put('_root', 'key1', 1)
       doc1.put('_root', 'key1', 2)
       doc1.put('_root', 'key2', 3)
       doc1.putObject('_root', 'map', {})
       doc1.putObject('_root', 'list', [])
 
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['key1'], value: 1 },
         { action: 'put', path: ['key1'], value: 2 },
         { action: 'put', path: ['key2'], value: 3 },
@@ -845,7 +845,7 @@ describe('Automerge', () => {
       doc1.insertObject(list, 2, {})
       doc1.insertObject(list, 2, [])
 
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['list'], value: [] },
         { action: 'insert', path: ['list', 0], values: [2,1,[],{},3]  },
       ])
@@ -858,7 +858,7 @@ describe('Automerge', () => {
       doc1.pushObject(list, {})
       doc1.pushObject(list, [])
 
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['list'], value: [] },
         { action: 'insert', path: ['list',0], values: [1,{},[]] },
       ])
@@ -870,7 +870,7 @@ describe('Automerge', () => {
       doc1.splice(list, 0, 0, [1, 2, 3, 4])
       doc1.splice(list, 1, 2)
 
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['list'],  value: [] },
         { action: 'insert', path: ['list',0], values: [1,4] },
       ])
@@ -878,11 +878,11 @@ describe('Automerge', () => {
 
     it('should capture local increment ops', () => {
       const doc1 = create({ actor: 'aaaa' })
-      assert.deepEqual(doc1.popPatches(), [])
+      assert.deepEqual(doc1.diffIncremental(), [])
       doc1.put('_root', 'counter', 2, 'counter')
       doc1.increment('_root', 'counter', 4)
 
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['counter'], value: 2 },
         { action: 'inc', path: ['counter'], value: 4 },
       ])
@@ -891,12 +891,12 @@ describe('Automerge', () => {
 
     it('should capture local delete ops', () => {
       const doc1 = create({ actor: 'aaaa' })
-      assert.deepEqual(doc1.popPatches(), [])
+      assert.deepEqual(doc1.diffIncremental(), [])
       doc1.put('_root', 'key1', 1)
       doc1.put('_root', 'key2', 2)
       doc1.delete('_root', 'key1')
       doc1.delete('_root', 'key2')
-      assert.deepEqual(doc1.popPatches(), [
+      assert.deepEqual(doc1.diffIncremental(), [
         { action: 'put', path: ['key1'], value: 1 },
         { action: 'put', path: ['key2'], value: 2 },
         { action: 'del', path: ['key1'], },
@@ -906,13 +906,13 @@ describe('Automerge', () => {
 
     it('should support counters in a map', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'})
-      assert.deepEqual(doc2.popPatches(), [])
+      assert.deepEqual(doc2.diffIncremental(), [])
       doc1.put('_root', 'starlings', 2, 'counter')
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.increment('_root', 'starlings', 1)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.getWithType('_root', 'starlings'), ['counter', 3])
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['starlings'], value: 2 },
         { action: 'inc', path: ['starlings'], value: 1 }
       ])
@@ -920,7 +920,7 @@ describe('Automerge', () => {
 
     it('should support counters in a list', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'})
-      assert.deepEqual(doc2.popPatches(), [])
+      assert.deepEqual(doc2.diffIncremental(), [])
       const list = doc1.putObject('_root', 'list', [])
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.insert(list, 0, 1, 'counter')
@@ -930,7 +930,7 @@ describe('Automerge', () => {
       doc1.increment(list, 0, -5)
       doc2.loadIncremental(doc1.saveIncremental())
 
-      assert.deepEqual(doc2.popPatches(), [
+      assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: ['list'], value: [] },
         { action: 'insert', path: ['list',0], values: [1] },
         { action: 'inc', path: ['list',0], value: 2 },
@@ -2178,15 +2178,15 @@ describe('Automerge', () => {
         assert.deepStrictEqual(mat2, mat3)
     })
 
-    it("patches start accumulating after the first popPatches()", () => {
+    it("patches start accumulating after the first diffIncremental()", () => {
         let doc = create({ text_v1: true });
         doc.put("/", "a", "a1")
         doc.put("/", "b", "b1")
         doc.put("/", "a", "a2")
         doc.put("/", "b", "b2")
 
-        // the first call to popPatches observes the current document 
-        assert.deepStrictEqual( doc.popPatches(), [
+        // the first call to diffIncremental observes the current document 
+        assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'a' ], value: 'a2' },
           { action: 'put', path: [ 'b' ], value: 'b2' },
         ]);
@@ -2196,8 +2196,8 @@ describe('Automerge', () => {
         doc.put("/", "a", "a4")
         doc.put("/", "b", "b4")
 
-        // the second call to popPatches observes the history since the last call
-        assert.deepStrictEqual( doc.popPatches(), [
+        // the second call to diffIncremental observes the history since the last call
+        assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'a' ], value: 'a3' },
           { action: 'put', path: [ 'b' ], value: 'b3' },
           { action: 'put', path: [ 'a' ], value: 'a4' },
@@ -2205,22 +2205,22 @@ describe('Automerge', () => {
         ]);
 
         // nothing has been recorded since the last call
-        assert.deepStrictEqual( doc.popPatches(), [ ]);
+        assert.deepStrictEqual( doc.diffIncremental(), [ ]);
 
         // you can reset the state 
-        doc.resetPatches()
+        doc.resetDiffCursor()
 
-        assert.deepStrictEqual( doc.popPatches(), [
+        assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'a' ], value: 'a4' },
           { action: 'put', path: [ 'b' ], value: 'b4' },
         ]);
 
         // you can also truncate the patches
         doc.put("/", "a", "a5")
-        doc.truncatePatches()
+        doc.updateDiffCursor()
         doc.put("/", "b", "b5")
 
-        assert.deepStrictEqual( doc.popPatches(), [
+        assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'b' ], value: 'b5' },
         ]);
     })
