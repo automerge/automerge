@@ -6,14 +6,14 @@ type DocType = {
   list: string[]
 }
 
-describe("Proxy Tests", () => {
-  describe("Iterators", () => {
-    let doc: Doc<DocType>
-    beforeEach(() => {
-      doc = from({ list: ["a", "b", "c"] })
-    })
+describe("Proxies", () => {
+  let doc: Doc<DocType>
+  beforeEach(() => {
+    doc = from({ list: ["a", "b", "c"] })
+  })
 
-    it("Lists should return iterable entries", () => {
+  describe("List Iterators", () => {
+    it("should return iterable entries", () => {
       change(doc, d => {
         let count = 0
 
@@ -26,7 +26,7 @@ describe("Proxy Tests", () => {
       })
     })
 
-    it("Lists should return iterable values", () => {
+    it("should return iterable values", () => {
       change(doc, d => {
         let count = 0
 
@@ -38,7 +38,7 @@ describe("Proxy Tests", () => {
       })
     })
 
-    it("Lists should return iterable keys", () => {
+    it("should return iterable keys", () => {
       change(doc, d => {
         let count = 3
 
@@ -47,6 +47,36 @@ describe("Proxy Tests", () => {
         }
 
         assert.equal(count, 0)
+      })
+    })
+  })
+
+  describe("List splice", () => {
+    it("should be able to remove a defined number of list entries", () => {
+      change(doc, d => {
+        d.list.splice(1, 1)
+        assert.deepEqual(d.list, ["a", "c"])
+      })
+    })
+
+    it("should be able to remove a defined number of list entries and add new ones", () => {
+      change(doc, d => {
+        d.list.splice(1, 1, "d", "e")
+        assert.deepEqual(d.list, ["a", "d", "e", "c"])
+      })
+    })
+
+    it("should be able to insert new values", () => {
+      change(doc, d => {
+        d.list.splice(1, 0, "d", "e")
+        assert.deepEqual(d.list, ["a", "d", "e", "b", "c"])
+      })
+    })
+
+    it("should work with only a start parameter", () => {
+      change(doc, d => {
+        d.list.splice(1)
+        assert.deepEqual(d.list, ["a"])
       })
     })
   })
