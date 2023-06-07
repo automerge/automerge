@@ -129,6 +129,10 @@ impl PatchLog {
         Self::new(false, text_rep)
     }
 
+    pub fn null() -> Self {
+        Self::new(false, TextRepresentation::default())
+    }
+
     /// Create a new [`PatchLog`] which does record changes.
     ///
     /// See also: [`PatchLog::new`] for a more detailed explanation.

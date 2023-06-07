@@ -187,7 +187,7 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
-        let args = self.transaction_args();
+        let args = self.transaction_args(None);
         Transaction::new(
             self,
             args,
@@ -197,28 +197,52 @@ impl Automerge {
 
     /// Start a transaction which records changes in a [`PatchLog`]
     pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
-        let args = self.transaction_args();
+        let args = self.transaction_args(None);
         Transaction::new(self, args, patch_log)
     }
 
-    pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
-        let actor = self.get_actor_index();
-        let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
-        let mut deps = self.get_heads();
-        if seq > 1 {
-            let last_hash = self.get_hash(actor, seq - 1).unwrap();
-            if !deps.contains(&last_hash) {
-                deps.push(last_hash);
+    /// Start a transaction isolated at a given heads
+    pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
+        let args = self.transaction_args(Some(heads));
+        Transaction::new(self, args, patch_log)
+    }
+
+    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+        let actor_index;
+        let seq;
+        let mut deps;
+        let scope;
+        match heads {
+            Some(heads) => {
+                deps = heads.to_vec();
+                let isolation = self.isolate_actor(heads);
+                actor_index = isolation.actor_index;
+                seq = isolation.seq;
+                scope = Some(isolation.clock);
+            }
+            None => {
+                actor_index = self.get_actor_index();
+                seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+                deps = self.get_heads();
+                scope = None;
+                if seq > 1 {
+                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+                    if !deps.contains(&last_hash) {
+                        deps.push(last_hash);
+                    }
+                }
             }
         }
+
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
 
         TransactionArgs {
-            actor_index: actor,
+            actor_index,
             seq,
             start_op,
             deps,
+            scope,
         }
     }
 
@@ -336,7 +360,7 @@ impl Automerge {
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
-        let args = self.transaction_args();
+        let args = self.transaction_args(None);
         Transaction::empty(self, args, opts)
     }
 
@@ -917,6 +941,38 @@ impl Automerge {
         self.change_graph.clock_for_heads(heads)
     }
 
+    fn get_isolated_actor_index(&mut self, level: usize) -> usize {
+        if level == 0 {
+            self.get_actor_index()
+        } else {
+            let base_actor = self.get_actor();
+            let new_actor = base_actor.with_concurrency(level);
+            self.ops.m.actors.cache(new_actor)
+        }
+    }
+
+    pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
+        let mut clock = self.clock_at(heads);
+        let mut actor_index = self.get_isolated_actor_index(0);
+
+        for i in 1.. {
+            let max_op = self.max_op_for_actor(actor_index);
+            if max_op == 0 || clock.covers(&OpId::new(max_op, actor_index)) {
+                clock.isolate(actor_index);
+                break;
+            }
+            actor_index = self.get_isolated_actor_index(i);
+        }
+
+        let seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+
+        Isolation {
+            actor_index,
+            seq,
+            clock,
+        }
+    }
+
     fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
@@ -924,6 +980,15 @@ impl Automerge {
             .and_then(|&i| self.history.get(i))
             .map(|c| c.hash())
             .ok_or(AutomergeError::InvalidSeq(seq))
+    }
+
+    fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+        self.states
+            .get(&actor_index)
+            .and_then(|s| s.last())
+            .and_then(|index| self.history.get(*index))
+            .map(|change| change.max_op())
+            .unwrap_or(0)
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
@@ -1184,13 +1249,12 @@ impl Automerge {
         }
     }
 
-    fn calculate_marks<O: AsRef<ExId>>(
+    fn calculate_marks(
         &self,
-        obj: O,
-        heads: Option<&[ChangeHash]>,
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = heads.map(|heads| self.clock_at(heads));
         let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = MarkStateMachine::default();
@@ -1220,139 +1284,76 @@ impl Automerge {
     }
 }
 
-impl ReadDoc for Automerge {
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.parents(obj.id, None))
-    }
-
-    fn parents_at<O: AsRef<ExId>>(
+impl Automerge {
+    pub(crate) fn parents_for(
         &self,
-        obj: O,
-        heads: &[ChangeHash],
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
-        Ok(self.ops.parents(obj.id, Some(clock)))
+        let obj = self.exid_to_obj(obj)?;
+        Ok(self.ops.parents(obj.id, clock))
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.exid_to_obj(obj.as_ref())
+    pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.keys(&obj.id, None))
+            .map(|obj| self.ops.keys(&obj.id, clock))
             .unwrap_or_default()
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| self.ops.keys(&obj.id, Some(clock)))
-            .unwrap_or_default()
-    }
-
-    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+    pub(crate) fn map_range_for<'a, R: RangeBounds<String> + 'a>(
         &'a self,
-        obj: O,
+        obj: &ExId,
         range: R,
+        clock: Option<Clock>,
     ) -> MapRange<'a, R> {
-        self.exid_to_obj(obj.as_ref())
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.map_range(&obj.id, range, None))
+            .map(|obj| self.ops.map_range(&obj.id, range, clock))
             .unwrap_or_default()
     }
 
-    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> MapRange<'a, R> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| self.ops.map_range(&obj.id, range, Some(clock)))
-            .unwrap_or_default()
-    }
-
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+    pub(crate) fn list_range_for<R: RangeBounds<usize>>(
         &self,
-        obj: O,
+        obj: &ExId,
         range: R,
+        clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        self.exid_to_obj(obj.as_ref())
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, None))
+            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, clock))
             .unwrap_or_default()
     }
 
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
+    pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
+        self.exid_to_obj(obj)
             .ok()
-            .map(|obj| {
-                self.ops
-                    .list_range(&obj.id, range, obj.encoding, Some(clock))
-            })
+            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), self, clock))
             .unwrap_or_default()
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| Values::new(self.ops.top_ops(&obj.id, None), self, None))
-            .unwrap_or_default()
-    }
-
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .ok()
-            .map(|obj| {
-                Values::new(
-                    self.ops.top_ops(&obj.id, Some(clock.clone())),
-                    self,
-                    Some(clock),
-                )
-            })
-            .unwrap_or_default()
-    }
-
-    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.exid_to_obj(obj.as_ref())
-            .map(|obj| self.ops.length(&obj.id, obj.encoding, None))
+    pub(crate) fn length_for(&self, obj: &ExId, clock: Option<Clock>) -> usize {
+        self.exid_to_obj(obj)
+            .map(|obj| self.ops.length(&obj.id, obj.encoding, clock))
             .unwrap_or(0)
     }
 
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        let clock = self.clock_at(heads);
-        self.exid_to_obj(obj.as_ref())
-            .map(|obj| self.ops.length(&obj.id, obj.encoding, Some(clock)))
-            .unwrap_or(0)
-    }
-
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
-        self.exid_to_obj(obj.as_ref()).map(|obj| obj.typ)
-    }
-
-    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.text(&obj.id, None))
-    }
-
-    fn get_cursor<O: AsRef<ExId>>(
+    pub(crate) fn text_for(
         &self,
-        obj: O,
+        obj: &ExId,
+        clock: Option<Clock>,
+    ) -> Result<String, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        Ok(self.ops.text(&obj.id, clock))
+    }
+
+    pub(crate) fn get_cursor_for(
+        &self,
+        obj: &ExId,
         position: usize,
-        at: Option<&[ChangeHash]>,
+        clock: Option<Clock>,
     ) -> Result<Cursor, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = at.map(|heads| self.clock_at(heads));
+        let obj = self.exid_to_obj(obj)?;
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
@@ -1367,14 +1368,13 @@ impl ReadDoc for Automerge {
         }
     }
 
-    fn get_cursor_position<O: AsRef<ExId>>(
+    pub(crate) fn get_cursor_position_for(
         &self,
-        obj: O,
+        obj: &ExId,
         cursor: &Cursor,
-        at: Option<&[ChangeHash]>,
+        clock: Option<Clock>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = at.map(|heads| self.clock_at(heads));
+        let obj = self.exid_to_obj(obj)?;
         let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
         let found = self
             .ops
@@ -1383,92 +1383,38 @@ impl ReadDoc for Automerge {
         Ok(found.index)
     }
 
-    fn text_at<O: AsRef<ExId>>(
+    pub(crate) fn marks_for(
         &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
-        Ok(self.ops.text(&obj.id, Some(clock)))
-    }
-
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.calculate_marks(obj, None)
-    }
-
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
+        obj: &ExId,
+        clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.calculate_marks(obj, Some(heads))
+        self.calculate_marks(obj, clock)
     }
 
-    fn get<O: AsRef<ExId>, P: Into<Prop>>(
+    pub(crate) fn get_for(
         &self,
-        obj: O,
-        prop: P,
+        obj: &ExId,
+        prop: Prop,
+        clock: Option<Clock>,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = None;
+        let obj = self.exid_to_obj(obj)?;
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
-            .ops
-            .into_iter()
-            .last()
-            .map(|op| self.export_value(op, clock)))
-    }
-
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = Some(self.clock_at(heads));
-        Ok(self
-            .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .last()
             .map(|op| self.export_value(op, clock.as_ref())))
     }
 
-    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
+    pub(crate) fn get_all_for<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = None;
-        let values = self
-            .ops
-            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
-            .ops
-            .into_iter()
-            .map(|op| self.export_value(op, clock))
-            .collect::<Vec<_>>();
-        // this is a test to make sure opid and exid are always sorting the same way
-        assert_eq!(
-            values.iter().map(|v| &v.1).collect::<Vec<_>>(),
-            values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
-        );
-        Ok(values)
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
+        clock: Option<Clock>,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = Some(self.clock_at(heads));
         let values = self
             .ops
             .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
@@ -1482,6 +1428,170 @@ impl ReadDoc for Automerge {
             values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
         );
         Ok(values)
+    }
+}
+
+impl ReadDoc for Automerge {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
+        self.parents_for(obj.as_ref(), None)
+    }
+
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.parents_for(obj.as_ref(), Some(clock))
+    }
+
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
+        self.keys_for(obj.as_ref(), None)
+    }
+
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
+        let clock = self.clock_at(heads);
+        self.keys_for(obj.as_ref(), Some(clock))
+    }
+
+    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'a, R> {
+        self.map_range_for(obj.as_ref(), range, None)
+    }
+
+    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> MapRange<'a, R> {
+        let clock = self.clock_at(heads);
+        self.map_range_for(obj.as_ref(), range, Some(clock))
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.list_range_for(obj.as_ref(), range, None)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRange<'_, R> {
+        let clock = self.clock_at(heads);
+        self.list_range_for(obj.as_ref(), range, Some(clock))
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+        self.values_for(obj.as_ref(), None)
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
+        let clock = self.clock_at(heads);
+        self.values_for(obj.as_ref(), Some(clock))
+    }
+
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
+        self.length_for(obj.as_ref(), None)
+    }
+
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+        let clock = self.clock_at(heads);
+        self.length_for(obj.as_ref(), Some(clock))
+    }
+
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+        self.text_for(obj.as_ref(), None)
+    }
+
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_for(obj.as_ref(), position, clock)
+    }
+
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_position_for(obj.as_ref(), cursor, clock)
+    }
+
+    fn text_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.text_for(obj.as_ref(), Some(clock))
+    }
+
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.marks_for(obj.as_ref(), None)
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.marks_for(obj.as_ref(), Some(clock))
+    }
+
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        self.get_for(obj.as_ref(), prop.into(), None)
+    }
+
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        let clock = Some(self.clock_at(heads));
+        self.get_for(obj.as_ref(), prop.into(), clock)
+    }
+
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        self.get_all_for(obj.as_ref(), prop.into(), None)
+    }
+
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        let clock = Some(self.clock_at(heads));
+        self.get_all_for(obj.as_ref(), prop.into(), clock)
+    }
+
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        self.exid_to_obj(obj.as_ref()).map(|obj| obj.typ)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -1538,4 +1648,11 @@ impl std::default::Default for SaveOptions {
             retain_orphans: true,
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct Isolation {
+    actor_index: usize,
+    seq: u64,
+    clock: Clock,
 }

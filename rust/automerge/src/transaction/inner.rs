@@ -5,7 +5,7 @@ use crate::marks::{ExpandMark, Mark};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
-use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds};
+use crate::types::{Clock, Key, ListEncoding, ObjId, OpId, OpIds};
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -17,6 +17,7 @@ pub(crate) struct TransactionInner {
     time: i64,
     message: Option<String>,
     deps: Vec<ChangeHash>,
+    scope: Option<Clock>,
     operations: Vec<(ObjId, Op)>,
 }
 
@@ -31,6 +32,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) start_op: NonZeroU64,
     /// The dependencies of the change this transaction will create
     pub(crate) deps: Vec<ChangeHash>,
+    /// The scope that should be visible to the transaction
+    pub(crate) scope: Option<Clock>,
 }
 
 impl TransactionInner {
@@ -40,6 +43,7 @@ impl TransactionInner {
             seq,
             start_op,
             deps,
+            scope,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -50,6 +54,7 @@ impl TransactionInner {
             message: None,
             operations: vec![],
             deps,
+            scope,
         }
     }
 
@@ -109,7 +114,7 @@ impl TransactionInner {
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
         doc.update_history(change, num_ops);
-        debug_assert_eq!(doc.get_heads(), vec![hash]);
+        //debug_assert_eq!(doc.get_heads(), vec![hash]);
         hash
     }
 
@@ -337,9 +342,10 @@ impl TransactionInner {
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc
-            .ops()
-            .search(&obj, query::InsertNth::new(index, ListEncoding::List));
+        let query = doc.ops().search(
+            &obj,
+            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+        );
 
         let key = query.key()?;
 
@@ -389,9 +395,9 @@ impl TransactionInner {
         let prop_index = doc.ops_mut().m.props.cache(prop.clone());
         let key = Key::Map(prop_index);
         let prop: Prop = prop.into();
-        let query = doc
-            .ops()
-            .seek_ops_by_prop(&obj, prop.clone(), ListEncoding::List, None);
+        let query =
+            doc.ops()
+                .seek_ops_by_prop(&obj, prop.clone(), ListEncoding::List, self.scope.as_ref());
         let ops = query.ops;
         let ops_pos = query.ops_pos;
 
@@ -435,9 +441,10 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let query = doc
-            .ops()
-            .search(&obj, query::Nth::new(index, ListEncoding::List, None));
+        let query = doc.ops().search(
+            &obj,
+            query::Nth::new(index, ListEncoding::List, self.scope.clone()),
+        );
 
         let id = self.next_id();
         let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -593,7 +600,7 @@ impl TransactionInner {
             // TODO: could do this with a single custom query
             let query = doc
                 .ops()
-                .search(&obj, query::Nth::new(index, encoding, None));
+                .search(&obj, query::Nth::new(index, encoding, self.scope.clone()));
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -626,9 +633,10 @@ impl TransactionInner {
         // do the insert query for the first item and then
         // insert the remaining ops one after the other
         if !values.is_empty() {
-            let query = doc
-                .ops()
-                .search(&obj, query::InsertNth::new(index, encoding));
+            let query = doc.ops().search(
+                &obj,
+                query::InsertNth::new(index, encoding, self.scope.clone()),
+            );
             let mut pos = query.pos();
             let mut key = query.key()?;
             let mut cursor = index;
@@ -752,6 +760,14 @@ impl TransactionInner {
             }
         }
         self.operations.push((obj, op));
+    }
+
+    pub(crate) fn get_scope(&self) -> &Option<Clock> {
+        &self.scope
+    }
+
+    pub(crate) fn get_deps(&self) -> Vec<ChangeHash> {
+        self.deps.clone()
     }
 }
 
