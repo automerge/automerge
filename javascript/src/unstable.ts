@@ -68,7 +68,7 @@ export type {
   Heads,
 } from "@automerge/automerge-wasm"
 
-export type { ChangeOptions, ApplyOptions } from "./stable"
+export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
 export {
   view,
   free,
