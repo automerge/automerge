@@ -793,6 +793,22 @@
 <a href="#793" id="793">793</a>
 <a href="#794" id="794">794</a>
 <a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
+<a href="#800" id="800">800</a>
+<a href="#801" id="801">801</a>
+<a href="#802" id="802">802</a>
+<a href="#803" id="803">803</a>
+<a href="#804" id="804">804</a>
+<a href="#805" id="805">805</a>
+<a href="#806" id="806">806</a>
+<a href="#807" id="807">807</a>
+<a href="#808" id="808">808</a>
+<a href="#809" id="809">809</a>
+<a href="#810" id="810">810</a>
+<a href="#811" id="811">811</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -800,7 +816,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::patches::{PatchLog, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdSearch};
 <span class="kw">use </span><span class="kw">crate</span>::storage::Change <span class="kw">as </span>StoredChange;
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, ObjId, OpId, OpIds};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, ObjId, OpId, OpIds};
 <span class="kw">use crate</span>::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, Prop};
 <span class="kw">use crate</span>::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -812,6 +828,7 @@
     time: i64,
     message: <span class="prelude-ty">Option</span>&lt;String&gt;,
     deps: Vec&lt;ChangeHash&gt;,
+    scope: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     operations: Vec&lt;(ObjId, Op)&gt;,
 }
 
@@ -826,6 +843,8 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) start_op: NonZeroU64,
     <span class="doccomment">/// The dependencies of the change this transaction will create
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) deps: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The scope that should be visible to the transaction
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) scope: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
 }
 
 <span class="kw">impl </span>TransactionInner {
@@ -835,6 +854,7 @@
             seq,
             start_op,
             deps,
+            scope,
         }: TransactionArgs,
     ) -&gt; <span class="self">Self </span>{
         TransactionInner {
@@ -845,6 +865,7 @@
             message: <span class="prelude-val">None</span>,
             operations: <span class="macro">vec!</span>[],
             deps,
+            scope,
         }
     }
 
@@ -904,8 +925,8 @@
             <span class="macro">tracing::trace!</span>(commit=<span class="question-mark">?</span>hash, <span class="question-mark">?</span>ops, deps=<span class="question-mark">?</span>change.deps(), <span class="string">&quot;committing transaction&quot;</span>);
         }
         doc.update_history(change, num_ops);
-        <span class="macro">debug_assert_eq!</span>(doc.get_heads(), <span class="macro">vec!</span>[hash]);
-        hash
+        <span class="comment">//debug_assert_eq!(doc.get_heads(), vec![hash]);
+        </span>hash
     }
 
     <span class="attr">#[tracing::instrument(skip(<span class="self">self</span>, metadata))]
@@ -1132,9 +1153,10 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, AutomergeError&gt; {
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
 
-        <span class="kw">let </span>query = doc
-            .ops()
-            .search(<span class="kw-2">&amp;</span>obj, query::InsertNth::new(index, ListEncoding::List));
+        <span class="kw">let </span>query = doc.ops().search(
+            <span class="kw-2">&amp;</span>obj,
+            query::InsertNth::new(index, ListEncoding::List, <span class="self">self</span>.scope.clone()),
+        );
 
         <span class="kw">let </span>key = query.key()<span class="question-mark">?</span>;
 
@@ -1184,9 +1206,9 @@
         <span class="kw">let </span>prop_index = doc.ops_mut().m.props.cache(prop.clone());
         <span class="kw">let </span>key = Key::Map(prop_index);
         <span class="kw">let </span>prop: Prop = prop.into();
-        <span class="kw">let </span>query = doc
-            .ops()
-            .seek_ops_by_prop(<span class="kw-2">&amp;</span>obj, prop.clone(), ListEncoding::List, <span class="prelude-val">None</span>);
+        <span class="kw">let </span>query =
+            doc.ops()
+                .seek_ops_by_prop(<span class="kw-2">&amp;</span>obj, prop.clone(), ListEncoding::List, <span class="self">self</span>.scope.as_ref());
         <span class="kw">let </span>ops = query.ops;
         <span class="kw">let </span>ops_pos = query.ops_pos;
 
@@ -1230,9 +1252,10 @@
         index: usize,
         action: OpType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;OpId&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>query = doc
-            .ops()
-            .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, ListEncoding::List, <span class="prelude-val">None</span>));
+        <span class="kw">let </span>query = doc.ops().search(
+            <span class="kw-2">&amp;</span>obj,
+            query::Nth::new(index, ListEncoding::List, <span class="self">self</span>.scope.clone()),
+        );
 
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
         <span class="kw">let </span>pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -1388,7 +1411,7 @@
             <span class="comment">// TODO: could do this with a single custom query
             </span><span class="kw">let </span>query = doc
                 .ops()
-                .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding, <span class="prelude-val">None</span>));
+                .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding, <span class="self">self</span>.scope.clone()));
 
             <span class="comment">// if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -1421,9 +1444,10 @@
         <span class="comment">// do the insert query for the first item and then
         // insert the remaining ops one after the other
         </span><span class="kw">if </span>!values.is_empty() {
-            <span class="kw">let </span>query = doc
-                .ops()
-                .search(<span class="kw-2">&amp;</span>obj, query::InsertNth::new(index, encoding));
+            <span class="kw">let </span>query = doc.ops().search(
+                <span class="kw-2">&amp;</span>obj,
+                query::InsertNth::new(index, encoding, <span class="self">self</span>.scope.clone()),
+            );
             <span class="kw">let </span><span class="kw-2">mut </span>pos = query.pos();
             <span class="kw">let </span><span class="kw-2">mut </span>key = query.key()<span class="question-mark">?</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>cursor = index;
@@ -1547,6 +1571,14 @@
             }
         }
         <span class="self">self</span>.operations.push((obj, op));
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_scope(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;Clock&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.scope
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_deps(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.deps.clone()
     }
 }
 

@@ -526,6 +526,10 @@
 <a href="#526" id="526">526</a>
 <a href="#527" id="527">527</a>
 <a href="#528" id="528">528</a>
+<a href="#529" id="529">529</a>
+<a href="#530" id="530">530</a>
+<a href="#531" id="531">531</a>
+<a href="#532" id="532">532</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::automerge::diff::ReadDocAt;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::hydrate::Value;
@@ -655,6 +659,10 @@
     /// See also: [`PatchLog::new`] for a more detailed explanation.
     </span><span class="kw">pub fn </span>inactive(text_rep: TextRepresentation) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>::new(<span class="bool-val">false</span>, text_rep)
+    }
+
+    <span class="kw">pub fn </span>null() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(<span class="bool-val">false</span>, TextRepresentation::default())
     }
 
     <span class="doccomment">/// Create a new [`PatchLog`] which does record changes.

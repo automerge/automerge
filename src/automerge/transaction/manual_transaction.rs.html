@@ -398,14 +398,42 @@
 <a href="#398" id="398">398</a>
 <a href="#399" id="399">399</a>
 <a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
+<span class="kw">use </span><span class="kw">crate</span>::types::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::AutomergeError;
-<span class="kw">use crate</span>::{Automerge, ChangeHash, Cursor, ObjType, Prop, ReadDoc, ScalarValue, Value};
+<span class="kw">use crate</span>::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
 
 <span class="kw">use super</span>::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
@@ -511,15 +539,23 @@
         <span class="kw">let </span>tx = <span class="self">self</span>.inner.as_mut().unwrap();
         f(tx, <span class="self">self</span>.doc, <span class="kw-2">&amp;mut </span><span class="self">self</span>.patch_log)
     }
+
+    <span class="kw">fn </span>get_scope(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Clock&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(h) = heads {
+            <span class="prelude-val">Some</span>(<span class="self">self</span>.doc.clock_at(h))
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.inner.as_ref().and_then(|i| i.get_scope().clone())
+        }
+    }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ReadDoc <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="self">self</span>.doc.keys(obj)
+        <span class="self">self</span>.doc.keys_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="self">self</span>.doc.keys_at(obj, heads)
+        <span class="self">self</span>.doc.keys_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>map_range&lt;<span class="lifetime">&#39;b</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;b</span>&gt;(
@@ -527,7 +563,8 @@
         obj: O,
         range: R,
     ) -&gt; MapRange&lt;<span class="lifetime">&#39;b</span>, R&gt; {
-        <span class="self">self</span>.doc.map_range(obj, range)
+        <span class="self">self</span>.doc
+            .map_range_for(obj.as_ref(), range, <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>map_range_at&lt;<span class="lifetime">&#39;b</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;b</span>&gt;(
@@ -536,7 +573,8 @@
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; MapRange&lt;<span class="lifetime">&#39;b</span>, R&gt; {
-        <span class="self">self</span>.doc.map_range_at(obj, range, heads)
+        <span class="self">self</span>.doc
+            .map_range_for(obj.as_ref(), range, <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>list_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
@@ -544,7 +582,8 @@
         obj: O,
         range: R,
     ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="self">self</span>.doc.list_range(obj, range)
+        <span class="self">self</span>.doc
+            .list_range_for(obj.as_ref(), range, <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>list_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
@@ -553,23 +592,26 @@
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="self">self</span>.doc.list_range_at(obj, range, heads)
+        <span class="self">self</span>.doc
+            .list_range_for(obj.as_ref(), range, <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>values&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="self">self</span>.doc.values(obj)
+        <span class="self">self</span>.doc.values_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>values_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="self">self</span>.doc.values_at(obj, heads)
+        <span class="self">self</span>.doc
+            .values_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>length&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; usize {
-        <span class="self">self</span>.doc.length(obj)
+        <span class="self">self</span>.doc.length_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize {
-        <span class="self">self</span>.doc.length_at(obj, heads)
+        <span class="self">self</span>.doc
+            .length_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
@@ -577,7 +619,8 @@
     }
 
     <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="self">self</span>.doc.text(obj)
+        <span class="macro">log!</span>(<span class="string">&quot;text + scope {:?}&quot;</span>, <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>));
+        <span class="self">self</span>.doc.text_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -585,7 +628,7 @@
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="self">self</span>.doc.text_at(obj, heads)
+        <span class="self">self</span>.doc.text_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -594,7 +637,8 @@
         position: usize,
         at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Cursor, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_cursor(obj, position, at)
+        <span class="self">self</span>.doc
+            .get_cursor_for(obj.as_ref(), position, <span class="self">self</span>.get_scope(at))
     }
 
     <span class="kw">fn </span>get_cursor_position&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -603,11 +647,12 @@
         address: <span class="kw-2">&amp;</span>Cursor,
         at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_cursor_position(obj, address, at)
+        <span class="self">self</span>.doc
+            .get_cursor_position_for(obj.as_ref(), address, <span class="self">self</span>.get_scope(at))
     }
 
     <span class="kw">fn </span>marks&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.marks(obj)
+        <span class="self">self</span>.doc.marks_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>marks_at&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -615,7 +660,8 @@
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.marks_at(obj, heads)
+        <span class="self">self</span>.doc
+            .marks_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -623,7 +669,8 @@
         obj: O,
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get(obj, prop)
+        <span class="self">self</span>.doc
+            .get_for(obj.as_ref(), prop.into(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -632,7 +679,8 @@
         prop: P,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_at(obj, prop, heads)
+        <span class="self">self</span>.doc
+            .get_for(obj.as_ref(), prop.into(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -640,7 +688,8 @@
         obj: O,
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_all(obj, prop)
+        <span class="self">self</span>.doc
+            .get_all_for(obj.as_ref(), prop.into(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -649,19 +698,21 @@
         prop: P,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_all_at(obj, prop, heads)
+        <span class="self">self</span>.doc
+            .get_all_for(obj.as_ref(), prop.into(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
-    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.parents(obj)
+    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.parents_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 
     <span class="kw">fn </span>parents_at&lt;O: AsRef&lt;ExId&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.parents_at(obj, heads)
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc
+            .parents_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
     <span class="kw">fn </span>get_missing_deps(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
@@ -783,7 +834,10 @@
     }
 
     <span class="kw">fn </span>base_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
-        <span class="self">self</span>.doc.get_heads()
+        <span class="self">self</span>.inner
+            .as_ref()
+            .map(|d| d.get_deps())
+            .unwrap_or_default()
     }
 }
 

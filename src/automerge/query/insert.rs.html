@@ -82,33 +82,43 @@
 <a href="#82" id="82">82</a>
 <a href="#83" id="83">83</a>
 <a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
 <span class="kw">use </span><span class="kw">crate</span>::query::{ListState, OpTree, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>InsertNth {
     idx: ListState,
     valid: <span class="prelude-ty">Option</span>&lt;usize&gt;,
+    clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     last_valid_insert: <span class="prelude-ty">Option</span>&lt;Key&gt;,
 }
 
 <span class="kw">impl </span>InsertNth {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>idx = ListState::new(encoding, target);
         <span class="kw">if </span>target == <span class="number">0 </span>{
             InsertNth {
                 idx,
                 valid: <span class="prelude-val">Some</span>(<span class="number">0</span>),
                 last_valid_insert: <span class="prelude-val">Some</span>(Key::Seq(HEAD)),
+                clock,
             }
         } <span class="kw">else </span>{
             InsertNth {
                 idx,
                 valid: <span class="prelude-val">None</span>,
                 last_valid_insert: <span class="prelude-val">None</span>,
+                clock,
             }
         }
     }
@@ -141,12 +151,16 @@
 
     <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
         <span class="self">self</span>.idx.check_if_node_is_clean(child);
-        <span class="self">self</span>.idx.process_node(child, ops)
+        <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
+            <span class="self">self</span>.idx.process_node(child, ops)
+        } <span class="kw">else </span>{
+            QueryResult::Descend
+        }
     }
 
     <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, element: <span class="kw-2">&amp;</span>Op) -&gt; QueryResult {
         <span class="kw">let </span>key = element.elemid_or_key();
-        <span class="kw">let </span>visible = element.visible();
+        <span class="kw">let </span>visible = element.visible_at(<span class="self">self</span>.clock.as_ref());
         <span class="comment">// an insert after we&#39;re done - could be a valid insert point
         </span><span class="kw">if </span>element.insert &amp;&amp; <span class="self">self</span>.valid.is_none() &amp;&amp; <span class="self">self</span>.idx.done() {
             <span class="self">self</span>.valid = <span class="prelude-val">Some</span>(<span class="self">self</span>.idx.pos());
