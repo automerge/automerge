@@ -53,7 +53,7 @@ export {
 
 import type { Mark, MarkRange, MarkValue } from "./unstable_types"
 
-import type { ScalarValue, PatchCallback } from "./stable"
+import { type PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -68,7 +68,7 @@ export type {
   Heads,
 } from "@automerge/automerge-wasm"
 
-export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
+export type { ChangeOptions, ApplyOptions } from "./stable"
 export {
   view,
   free,
@@ -101,6 +101,8 @@ export {
   isAutomerge,
   getObjectId,
   diff,
+  insertAt,
+  deleteAt,
 } from "./stable"
 
 export type InitOptions<T> = {
