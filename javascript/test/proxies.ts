@@ -54,7 +54,8 @@ describe("Proxies", () => {
   describe("List splice", () => {
     it("should be able to remove a defined number of list entries", () => {
       doc = change(doc, d => {
-        d.list.splice(1, 1)
+        const deleted = d.list.splice(1, 1)
+        assert.deepEqual(deleted, ["b"])
       })
 
       assert.deepEqual(doc.list, ["a", "c"])
@@ -62,7 +63,8 @@ describe("Proxies", () => {
 
     it("should be able to remove a defined number of list entries and add new ones", () => {
       doc = change(doc, d => {
-        d.list.splice(1, 1, "d", "e")
+        const deleted = d.list.splice(1, 1, "d", "e")
+        assert.deepEqual(deleted, ["b"])
       })
 
       assert.deepEqual(doc.list, ["a", "d", "e", "c"])
@@ -70,7 +72,8 @@ describe("Proxies", () => {
 
     it("should be able to insert new values", () => {
       doc = change(doc, d => {
-        d.list.splice(1, 0, "d", "e")
+        const deleted = d.list.splice(1, 0, "d", "e")
+        assert.deepEqual(deleted, [])
       })
 
       assert.deepEqual(doc.list, ["a", "d", "e", "b", "c"])
@@ -78,7 +81,8 @@ describe("Proxies", () => {
 
     it("should work with only a start parameter", () => {
       doc = change(doc, d => {
-        d.list.splice(1)
+        const deleted = d.list.splice(1)
+        assert.deepEqual(deleted, ["b", "c"])
       })
 
       assert.deepEqual(doc.list, ["a"])
