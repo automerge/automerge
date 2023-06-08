@@ -1170,6 +1170,7 @@ impl Automerge {
                         OpType::Increment(_) | OpType::Delete => None,
                     })
             })
+            .filter(|m| m.start < m.end)
             .collect())
     }
 
