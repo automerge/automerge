@@ -704,7 +704,14 @@ function listMethods<T extends Target>(target: T) {
 
     splice(index: any, del: any, ...vals: any[]) {
       index = parseListIndex(index)
+
+      // if del is undefined, delete until the end of the list
+      if (typeof del !== "number") {
+        del = context.length(objectId) - index
+      }
+
       del = parseListIndex(del)
+
       for (const val of vals) {
         if (val && val[OBJECT_ID]) {
           throw new RangeError(

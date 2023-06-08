@@ -245,7 +245,7 @@ describe("Automerge", () => {
       let doc1 = Automerge.init<any>()
       let doc2 = Automerge.change(doc1, d => {
         d.list = "hello"
-        Automerge.splice(d, "list", 2, 0, "Z")
+        Automerge.splice(d, ["list"], 2, 0, "Z")
       })
       let changes = Automerge.getChanges(doc1, doc2)
       let docB1 = Automerge.init()
@@ -259,7 +259,7 @@ describe("Automerge", () => {
       let doc2 = Automerge.load<any>(doc1.save())
       assert.throws(() => {
         Automerge.change(doc2, d => {
-          Automerge.splice(d, "text", 1, 0, "Z")
+          Automerge.splice(d, ["text"], 1, 0, "Z")
         })
       }, /Cannot splice/)
     })

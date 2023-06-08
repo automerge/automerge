@@ -16,7 +16,7 @@ describe("Automerge", () => {
       doc1 = Automerge.change(doc1, d => {
         Automerge.mark(
           d,
-          "x",
+          ["x"],
           { start: 5, end: 10, expand: "none" },
           "font-weight",
           value
@@ -24,7 +24,7 @@ describe("Automerge", () => {
       })
 
       doc1 = Automerge.change(doc1, d => {
-        Automerge.unmark(d, "x", { start: 7, end: 9 }, "font-weight")
+        Automerge.unmark(d, ["x"], { start: 7, end: 9 }, "font-weight")
       })
 
       assert.deepStrictEqual(callbacks[1], [
