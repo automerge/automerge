@@ -1741,7 +1741,7 @@ describe("Automerge", () => {
     it("should handle updates to a text object", () => {
       let s1 = Automerge.change(Automerge.init<any>(), doc => (doc.text = "ab"))
       let s2 = Automerge.change(s1, doc =>
-        Automerge.splice(doc, "text", 0, 1, "A")
+        Automerge.splice(doc, ["text"], 0, 1, "A")
       )
       let [s3] = Automerge.applyChanges(
         Automerge.init<any>(),
