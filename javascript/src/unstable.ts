@@ -53,7 +53,7 @@ export {
 
 import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
 
-import type { ScalarValue, PatchCallback } from "./stable"
+import { type PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -76,6 +76,7 @@ export {
   free,
   getHeads,
   change,
+  changeAt,
   emptyChange,
   loadIncremental,
   save,
@@ -102,6 +103,8 @@ export {
   isAutomerge,
   getObjectId,
   diff,
+  insertAt,
+  deleteAt,
 } from "./stable"
 
 export type InitOptions<T> = {
@@ -119,7 +122,7 @@ export { RawString } from "./raw_string"
 /** @hidden */
 export const getBackend = stable.getBackend
 
-import { _is_proxy, _state, _obj } from "./internal_state"
+import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state"
 
 /**
  * Create a new automerge document
@@ -254,6 +257,7 @@ export function splice<T>(
   if (!objectId) {
     throw new RangeError("invalid object for splice")
   }
+  _clear_cache(doc)
   const value = `${objectId}/${prop}`
   index = cursorToIndex(state, value, index)
   try {

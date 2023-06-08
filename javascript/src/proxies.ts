@@ -19,6 +19,7 @@ import {
   TRACE,
   IS_PROXY,
   OBJECT_ID,
+  CLEAR_CACHE,
   COUNTER,
   INT,
   UINT,
@@ -241,6 +242,9 @@ const MapHandler = {
     }
     if (key === TRACE) {
       target.trace = val
+      return true
+    }
+    if (key === CLEAR_CACHE) {
       return true
     }
     const [value, datatype] = import_value(val, textV2)
@@ -700,7 +704,14 @@ function listMethods<T extends Target>(target: T) {
 
     splice(index: any, del: any, ...vals: any[]) {
       index = parseListIndex(index)
+
+      // if del is undefined, delete until the end of the list
+      if (typeof del !== "number") {
+        del = context.length(objectId) - index
+      }
+
       del = parseListIndex(del)
+
       for (const val of vals) {
         if (val && val[OBJECT_ID]) {
           throw new RangeError(

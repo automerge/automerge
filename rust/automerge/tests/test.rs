@@ -1723,6 +1723,116 @@ fn marks() {
     assert_eq!(marks[1].value(), &ScalarValue::from(true));
 }
 
+#[test]
+fn can_transaction_at() -> Result<(), AutomergeError> {
+    let mut doc1 = Automerge::new();
+    let mut tx = doc1.transaction();
+    let txt = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    tx.put(&ROOT, "size", 100).unwrap();
+    tx.splice_text(&txt, 0, 0, "aaabbbccc")?;
+    tx.commit();
+    let heads1 = doc1.get_heads();
+    let mut tx = doc1.transaction();
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "QQQ")?;
+    tx.put(&ROOT, "size", 200)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaQQQccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+    tx.commit();
+
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "ZZZ")?;
+    tx.put(&ROOT, "size", 300)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaZZZccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+    tx.commit();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    tx.splice_text(&txt, 3, 3, "TTT")?;
+    tx.put(&ROOT, "size", 400)?;
+    assert_eq!(tx.text(&txt).unwrap(), "aaaTTTccc");
+    assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    tx.commit();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    Ok(())
+}
+
+#[test]
+fn can_isolate() -> Result<(), AutomergeError> {
+    let mut doc1 = AutoCommit::new();
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.put(&ROOT, "size", 100).unwrap();
+    doc1.splice_text(&txt, 0, 0, "aaabbbccc")?;
+    let heads1 = doc1.get_heads();
+    doc1.put(&ROOT, "size", 150)?;
+
+    doc1.isolate(&heads1);
+
+    let mut doc2 = doc1.fork();
+    doc2.put(&ROOT, "other", 999)?;
+    doc2.splice_text(&txt, 9, 0, "111")?;
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "QQQ")?;
+    doc1.put(&ROOT, "size", 200)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaQQQccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+
+    let heads2 = doc1.get_heads();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaQQQccc");
+
+    doc1.merge(&mut doc2)?;
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
+    assert_eq!(doc1.get(&ROOT, "other").unwrap(), None);
+
+    doc1.isolate(&heads1);
+
+    assert_ne!(heads1, heads2);
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "ZZZ")?;
+    doc1.put(&ROOT, "size", 300)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
+
+    let _heads3 = doc1.get_heads(); // commit
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZccc");
+
+    doc1.integrate();
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc111");
+    assert_eq!(
+        doc1.get(&ROOT, "other").unwrap().unwrap().0,
+        Value::int(999)
+    );
+
+    doc1.isolate(&heads1);
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
+    doc1.splice_text(&txt, 3, 3, "TTT")?;
+    doc1.put(&ROOT, "size", 400)?;
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTccc");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+
+    let _heads4 = doc1.get_heads(); // commit
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTccc");
+    doc1.integrate();
+
+    assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc111");
+    assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    Ok(())
+}
+
 /*
 #[test]
 fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {

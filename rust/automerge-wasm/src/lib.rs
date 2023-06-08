@@ -642,6 +642,16 @@ impl Automerge {
         Ok(interop::JsPatches(patches).try_into()?)
     }
 
+    pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
+        let heads = get_heads(Some(heads))?.unwrap();
+        self.doc.isolate(&heads);
+        Ok(())
+    }
+
+    pub fn integrate(&mut self) {
+        self.doc.integrate()
+    }
+
     pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
@@ -1238,6 +1248,18 @@ pub mod error {
 
     impl From<Diff> for JsValue {
         fn from(e: Diff) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Isolate {
+        #[error("bad heads: {0}")]
+        Heads(#[from] interop::error::BadChangeHashes),
+    }
+
+    impl From<Isolate> for JsValue {
+        fn from(e: Isolate) -> Self {
             JsValue::from(e.to_string())
         }
     }

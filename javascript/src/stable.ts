@@ -94,19 +94,32 @@ export interface List<T> extends Array<T> {
 }
 
 /**
- * To extend an arbitrary type, we have to turn any arrays that are part of the type's definition into Lists.
- * So we recurse through the properties of T, turning any Arrays we find into Lists.
+ * Function for use in {@link change} which inserts values into a list at a given index
+ * @param list
+ * @param index
+ * @param values
  */
-export type Extend<T> =
-  // is it an array? make it a list (we recursively extend the type of the array's elements as well)
-  T extends Array<infer T>
-    ? List<Extend<T>>
-    : // is it an object? recursively extend all of its properties
-    // eslint-disable-next-line @typescript-eslint/ban-types
-    T extends Object
-    ? { [P in keyof T]: Extend<T[P]> }
-    : // otherwise leave the type alone
-      T
+export function insertAt<T>(list: T[], index: number, ...values: T[]) {
+  if (!_is_proxy(list)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+
+  ;(list as List<T>).insertAt(index, ...values)
+}
+
+/**
+ * Function for use in {@link change} which deletes values from a list at a given index
+ * @param list
+ * @param index
+ * @param numDelete
+ */
+export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
+  if (!_is_proxy(list)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+
+  ;(list as List<T>).deleteAt(index, numDelete)
+}
 
 /**
  * Function which is called by {@link change} when making changes to a `Doc<T>`
@@ -114,7 +127,7 @@ export type Extend<T> =
  *
  * This function may mutate `doc`
  */
-export type ChangeFn<T> = (doc: Extend<T>) => void
+export type ChangeFn<T> = (doc: T) => void
 
 /** @hidden **/
 export interface State<T> {
@@ -242,6 +255,7 @@ export function clone<T>(
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
+  handle.updateDiffCursor()
 
   // `change` uses the presence of state.heads to determine if we are in a view
   // set it to undefined to indicate that this is a full fat document
@@ -344,6 +358,24 @@ export function change<T>(
   }
 }
 
+export function changeAt<T>(
+  doc: Doc<T>,
+  scope: Heads,
+  options: string | ChangeOptions<T> | ChangeFn<T>,
+  callback?: ChangeFn<T>
+): Doc<T> {
+  if (typeof options === "function") {
+    return _change(doc, {}, options, scope)
+  } else if (typeof callback === "function") {
+    if (typeof options === "string") {
+      options = { message: options }
+    }
+    return _change(doc, options, callback, scope)
+  } else {
+    throw RangeError("Invalid args for changeAt")
+  }
+}
+
 function progressDocument<T>(
   doc: Doc<T>,
   heads: Heads | null,
@@ -356,10 +388,13 @@ function progressDocument<T>(
   const nextState = { ...state, heads: undefined }
   let nextDoc
   if (callback != null) {
-    let headsBefore = state.heads
-    let { value, patches } = state.handle.applyAndReturnPatches(doc, nextState)
+    const headsBefore = state.heads
+    const { value, patches } = state.handle.applyAndReturnPatches(
+      doc,
+      nextState
+    )
     if (patches.length > 0) {
-      let before = view(doc, headsBefore || [])
+      const before = view(doc, headsBefore || [])
       callback(patches, { before, after: value })
     }
     nextDoc = value
@@ -373,7 +408,8 @@ function progressDocument<T>(
 function _change<T>(
   doc: Doc<T>,
   options: ChangeOptions<T>,
-  callback: ChangeFn<T>
+  callback: ChangeFn<T>,
+  scope?: Heads
 ): Doc<T> {
   if (typeof callback !== "function") {
     throw new RangeError("invalid change function")
@@ -392,16 +428,20 @@ function _change<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
+  if (scope) {
+    state.handle.isolate(scope)
+  }
   const heads = state.handle.getHeads()
   try {
     state.heads = heads
     const root: T = rootProxy(state.handle, state.textV2)
-    callback(root as Extend<T>)
+    callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
       return doc
     } else {
       state.handle.commit(options.message, options.time)
+      state.handle.integrate()
       return progressDocument(
         doc,
         heads,

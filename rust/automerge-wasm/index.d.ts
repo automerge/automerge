@@ -205,6 +205,10 @@ export class Automerge {
   getCursor(obj: ObjID, index: number, heads?: Heads) : Cursor;
   getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads) : number;
 
+  // isolate
+  isolate(heads: Heads): void;
+  integrate(): void;
+
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
