@@ -81,3 +81,58 @@ fn marks_at_beginning_of_a_string() {
     assert_eq!(marks[0].name(), "bold");
     assert_eq!(marks[0].value(), &ScalarValue::from(true));
 }
+
+#[test]
+fn expand_marks_with_deleted_ends() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "aaabbbccc").unwrap();
+    let mark = Mark::new("bold".to_string(), true, 3, 6);
+    doc.mark(&text, mark, ExpandMark::Both).unwrap();
+    println!("initial marks");
+    #[cfg(feature = "optree-visualisation")]
+    {
+        doc.document().visualise_marks(&text);
+    }
+    let marks = doc.marks(&text).unwrap();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].start, 3);
+    assert_eq!(marks[0].end, 6);
+    assert_eq!(marks[0].name(), "bold");
+    assert_eq!(marks[0].value(), &ScalarValue::from(true));
+
+    doc.delete(&text, 5).unwrap();
+    doc.delete(&text, 5).unwrap();
+    doc.delete(&text, 2).unwrap();
+    doc.delete(&text, 2).unwrap();
+    let marks = doc.marks(&text).unwrap();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].start, 2);
+    assert_eq!(marks[0].end, 3);
+    assert_eq!(marks[0].name(), "bold");
+    assert_eq!(marks[0].value(), &ScalarValue::from(true));
+
+    println!("after deleting the ends of the mark");
+    #[cfg(feature = "optree-visualisation")]
+    {
+        doc.document().visualise_marks(&text);
+    }
+    doc.splice_text(&text, 3, 0, "A").unwrap();
+    println!("insert at index 3");
+    #[cfg(feature = "optree-visualisation")]
+    {
+        doc.document().visualise_marks(&text);
+    }
+    doc.splice_text(&text, 2, 0, "A").unwrap();
+    println!("insert at index 2");
+    #[cfg(feature = "optree-visualisation")]
+    {
+        doc.document().visualise_marks(&text);
+    }
+    let marks = doc.marks(&text).unwrap();
+    assert_eq!(marks.len(), 1);
+    assert_eq!(marks[0].start, 2);
+    assert_eq!(marks[0].end, 5);
+    assert_eq!(marks[0].name(), "bold");
+    assert_eq!(marks[0].value(), &ScalarValue::from(true));
+}

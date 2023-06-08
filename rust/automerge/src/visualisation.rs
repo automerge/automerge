@@ -4,6 +4,8 @@ use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
 use rand::Rng;
 
+pub(crate) mod marks;
+
 #[derive(Copy, Clone, PartialEq, Hash, Eq)]
 pub(crate) struct NodeId(u64);
 

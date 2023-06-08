@@ -1065,6 +1065,14 @@ impl Automerge {
         self.ops.visualise(objects)
     }
 
+    /// Print a visualisation of the characters and marks in a text object to the terminal
+    #[cfg(feature = "optree-visualisation")]
+    pub fn visualise_marks(&self, text: &ExId) {
+        let obj = self.exid_to_obj(text).unwrap();
+        let ops = self.ops.iter_ops(&obj.id);
+        crate::visualisation::marks::print_marks_to_terminal(ops);
+    }
+
     pub(crate) fn insert_op(
         &mut self,
         obj: &ObjId,
