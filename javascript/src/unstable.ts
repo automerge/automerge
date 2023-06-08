@@ -226,7 +226,7 @@ function importOpts<T>(
 
 export function splice<T>(
   doc: Doc<T>,
-  prop: stable.Prop,
+  path: stable.Prop[],
   index: number,
   del: number,
   newText?: string
@@ -240,7 +240,10 @@ export function splice<T>(
     throw new RangeError("invalid object for splice")
   }
   _clear_cache(doc)
-  const value = `${objectId}/${prop}`
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
   try {
     return state.handle.splice(value, index, del, newText)
   } catch (e) {
@@ -250,7 +253,7 @@ export function splice<T>(
 
 export function mark<T>(
   doc: Doc<T>,
-  prop: stable.Prop,
+  path: stable.Prop[],
   range: MarkRange,
   name: string,
   value: MarkValue
@@ -263,7 +266,10 @@ export function mark<T>(
   if (!objectId) {
     throw new RangeError("invalid object for mark")
   }
-  const obj = `${objectId}/${prop}`
+
+  path.unshift(objectId)
+  const obj = path.join("/")
+
   try {
     return state.handle.mark(obj, range, name, value)
   } catch (e) {
@@ -273,7 +279,7 @@ export function mark<T>(
 
 export function unmark<T>(
   doc: Doc<T>,
-  prop: stable.Prop,
+  path: stable.Prop[],
   range: MarkRange,
   name: string
 ) {
@@ -285,7 +291,10 @@ export function unmark<T>(
   if (!objectId) {
     throw new RangeError("invalid object for unmark")
   }
-  const obj = `${objectId}/${prop}`
+
+  path.unshift(objectId)
+  const obj = path.join("/")
+
   try {
     return state.handle.unmark(obj, range, name)
   } catch (e) {
