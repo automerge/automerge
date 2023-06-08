@@ -76,7 +76,7 @@ fn marks_at_beginning_of_a_string() {
     doc.merge(&mut doc2).unwrap();
     let marks = doc.marks(&text).unwrap();
     assert_eq!(marks.len(), 1);
-    assert_eq!(marks[0].start, 0);
+    assert_eq!(marks[0].start, 1);
     assert_eq!(marks[0].end, 4);
     assert_eq!(marks[0].name(), "bold");
     assert_eq!(marks[0].value(), &ScalarValue::from(true));

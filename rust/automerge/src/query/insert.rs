@@ -83,8 +83,6 @@ impl<'a> TreeQuery<'a> for InsertNth {
         if self.valid.is_some() {
             match element.action {
                 OpType::MarkBegin(_, _) => {
-                    self.valid = Some(self.idx.pos());
-                    self.last_valid_insert = Some(key);
                     return QueryResult::Finish;
                 }
                 OpType::MarkEnd(false) => {
