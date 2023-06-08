@@ -82,7 +82,7 @@ describe('Automerge', () => {
       doc2.insert(list, 4, "B")
       doc.merge(doc2)
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 1, end: 4 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 4 }])
     })
 
     it('should handle marks [..] with splice', () => {
