@@ -1,5 +1,5 @@
-use automerge as am;
 use am::marks::Mark;
+use automerge as am;
 
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 
@@ -364,9 +364,7 @@ impl From<Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for 
 impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(marks) => {
-                Self::items(marks.iter().map(|mark| mark.clone().into()).collect())
-            }
+            Ok(marks) => Self::items(marks.iter().map(|mark| mark.clone().into()).collect()),
             Err(e) => Self::error(&e.to_string()),
         }
     }

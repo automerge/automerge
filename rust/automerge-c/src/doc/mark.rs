@@ -3,8 +3,8 @@ use automerge as am;
 use std::any::type_name;
 
 use am::marks::{ExpandMark, Mark};
-use am::ReadDoc;
 use am::transaction::Transactable;
+use am::ReadDoc;
 
 use crate::{
     byte_span::{to_str, AMbyteSpan},
