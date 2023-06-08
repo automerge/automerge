@@ -767,14 +767,6 @@ impl Op {
         self.action.is_mark()
     }
 
-    pub(crate) fn valid_mark_anchor(&self) -> bool {
-        self.succ.is_empty()
-            && matches!(
-                &self.action,
-                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
-            )
-    }
-
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
         matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
     }

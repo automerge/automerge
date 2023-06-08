@@ -618,5 +618,21 @@ describe('Automerge', () => {
         { action: 'del', length: 29, path: [ 'text', 0 ] }
       ]);
     })
+
+    it('peritext marks', () => {
+      let doc1 : Automerge = create({ actor: "aabbcc" })
+
+      let text = doc1.putObject("_root", "text", "The Peritext editor")
+      doc1.mark(text, { start: 4, end: 12, expand: 'none' }, "link", true);
+      doc1.mark(text, { start: 8, end: 12, expand: 'both' }, "bold", true);
+      doc1.splice(text, 3, 10, "")
+      doc1.splice(text, 3, 0, "!")
+
+      let textval = doc1.text(text);
+      let marks = doc1.marks(text);
+
+      assert.deepEqual(doc1.text(text), "The!editor")
+      assert.deepEqual(doc1.marks(text), [])
+    })
   })
 })

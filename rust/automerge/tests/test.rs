@@ -1825,6 +1825,25 @@ fn can_isolate() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+#[test]
+fn inserting_text_near_deleted_marks() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
+    let mark = Mark::new("bold".to_string(), true, 2, 8);
+    tx.mark(&text_id, mark, ExpandMark::After).unwrap();
+    let mark = Mark::new("link".to_string(), true, 3, 6);
+    tx.mark(&text_id, mark, ExpandMark::None).unwrap();
+
+    tx.splice_text(&text_id, 1, 10, "").unwrap(); // 'h'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+    tx.splice_text(&text_id, 0, 0, "a").unwrap(); // 'ah'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+    tx.splice_text(&text_id, 2, 0, "a").unwrap(); // 'ah<bold>a</bold>'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+}
+
 /*
 #[test]
 fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
