@@ -1,7 +1,10 @@
-use am::marks::{ExpandMark, Mark};
 use automerge as am;
-use automerge::transaction::Transactable;
-use automerge::ReadDoc;
+
+use std::any::type_name;
+
+use am::marks::{ExpandMark, Mark};
+use am::ReadDoc;
+use am::transaction::Transactable;
 
 use crate::{
     byte_span::{to_str, AMbyteSpan},
@@ -16,33 +19,59 @@ use super::{
     AMdoc,
 };
 
+macro_rules! to_expand_mark {
+    ($mark_expand:expr) => {{
+        let result: Result<ExpandMark, am::AutomergeError> = (&$mark_expand).try_into();
+        match result {
+            Ok(expand_mark) => expand_mark,
+            Err(e) => return AMresult::error(&e.to_string()).into(),
+        }
+    }};
+}
+
+pub(crate) use to_expand_mark;
+
 /// \ingroup enumerations
 /// \enum AMmarkExpand
 /// \installed_headerfile
-/// \brief How to expand marks as the underlying text is edited.
+/// \brief A mark's expansion mode for when bordering text is inserted.
 #[derive(PartialEq, Eq)]
 #[repr(u8)]
-#[allow(dead_code)]
 pub enum AMmarkExpand {
-    /// Mark will include new text inserted at the start index
-    Before = 1,
-    /// Mark will include new text inserted at the end index
-    After = 2,
-    /// Mark will include new text inserted on either side
-    Both = 3,
-    /// Mark will not include text inserted at start or end
-    None = 0,
+    /// Include text inserted at the end offset.
+    After = 3,
+    /// Include text inserted at the start offset.
+    Before = 2,
+    /// Include text inserted at either offset.
+    Both = 4,
+    /// The default tag, not a mark expansion mode signifier.
+    Default = 0,
+    /// Exclude text inserted at either offset.
+    None = 1,
 }
 
-impl From<AMmarkExpand> for ExpandMark {
-    fn from(val: AMmarkExpand) -> Self {
+impl Default for AMmarkExpand {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+impl TryFrom<&AMmarkExpand> for ExpandMark {
+    type Error = am::AutomergeError;
+
+    fn try_from(mark_expand: &AMmarkExpand) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
         use AMmarkExpand::*;
 
-        match val {
-            Before => ExpandMark::Before,
-            After => ExpandMark::After,
-            Both => ExpandMark::Both,
-            _ => ExpandMark::None,
+        match mark_expand {
+            After => Ok(Self::After),
+            Before => Ok(Self::Before),
+            Both => Ok(Self::Both),
+            None => Ok(Self::None),
+            _ => Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<u8>().to_string(),
+            }),
         }
     }
 }
@@ -62,13 +91,12 @@ impl<'a> AsRef<Mark<'a>> for AMmark<'a> {
 }
 
 /// \memberof AMmark
-/// \brief Gets the name of the mark
+/// \brief Gets the name of a mark.
 ///
 /// \param[in] mark A pointer to an `AMmark` struct.
-/// \return An `AMbyteSpan` struct for a UTF-8 string.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p mark `!= NULL`
-/// \warning The returned `AMbyteSpan` is only valid until the
-///          result which returned the `AMmark` is freed.
+/// \post `(`\p mark `== NULL) -> (AMbyteSpan){NULL, 0}`
 /// \internal
 ///
 /// # Safety
@@ -80,14 +108,14 @@ pub unsafe extern "C" fn AMmarkName(mark: *const AMmark) -> AMbyteSpan {
             return name;
         }
     }
-    AMbyteSpan::default()
+    Default::default()
 }
 
 /// \memberof AMmark
-/// \brief Gets the value of the mark
+/// \brief Gets the value of a mark.
 ///
 /// \param[in] mark A pointer to an `AMmark` struct.
-/// \return A pointer to an `AMresult` struct with an `AMitem` struct.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_MARK` item.
 /// \pre \p mark `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
@@ -104,53 +132,60 @@ pub unsafe extern "C" fn AMmarkValue(mark: *const AMmark) -> *mut AMresult {
 }
 
 /// \memberof AMmark
-/// \brief Gets the current start offset of the mark
+/// \brief Gets the start offset of a mark.
 ///
 /// \param[in] mark A pointer to an `AMmark` struct.
-/// \return The offset at which the mark starts
+/// \return The offset at which the mark starts.
 /// \pre \p mark `!= NULL`
+/// \post `(`\p mark `== NULL) -> 0`
 /// \internal
 ///
 /// # Safety
 /// mark must be a valid pointer to an AMmark
 #[no_mangle]
 pub unsafe extern "C" fn AMmarkStart(mark: *const AMmark) -> usize {
-    match mark.as_ref() {
-        Some(mark) => mark.as_ref().start,
-        None => usize::MIN,
+    if let Some(mark) = mark.as_ref() {
+        return mark.as_ref().start;
     }
+    0
 }
 
 /// \memberof AMmark
-/// \brief Gets the current end offset of the mark
+/// \brief Gets the end offset of a mark.
 ///
 /// \param[in] mark A pointer to an `AMmark` struct.
-/// \return The offset at which the mark starts
+/// \return The offset at which the mark ends.
 /// \pre \p mark `!= NULL`
+/// \post `(`\p mark `== NULL) -> SIZE_MAX`
 /// \internal
 ///
 /// # Safety
 /// mark must be a valid pointer to an AMmark
 #[no_mangle]
 pub unsafe extern "C" fn AMmarkEnd(mark: *const AMmark) -> usize {
-    match mark.as_ref() {
-        Some(mark) => mark.as_ref().end,
-        None => usize::MAX,
+    if let Some(mark) = mark.as_ref() {
+        return mark.as_ref().end;
     }
+    usize::MAX
 }
 
 /// \memberof AMdoc
-/// \brief Gets the marks associated with this object
+/// \brief Gets the marks associated with an object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct.
-/// \param[in] heads A pointer to an `AMitems` struct.
-/// \return An `AMresult` struct containing items of type `AM_VAL_TYPE_MARK`
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+///                  items or `NULL`.
+/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_MARK` items.
 /// \pre \p doc `!= NULL`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
-/// doc must be a valid pointer to an `AMdoc` struct
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMitems or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmarks(
     doc: *const AMdoc,
@@ -169,21 +204,31 @@ pub unsafe extern "C" fn AMmarks(
 }
 
 /// \memberof AMdoc
-/// \brief Creates a new mark
+/// \brief Creates a mark.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct.
-/// \param[in] start The start offset
-/// \param[in] end The end offset
-/// \param[in] expand How to handle future edits at the mark boundary
-/// \param[in] name An `AMbyteSpan` struct containing valid utf-8 for the marks' name
-/// \param[in] value An `AMitem` struct for the marks' value.
-/// \return An `AMresult` struct containing no items.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] start The start offset of the mark.
+/// \param[in] end The end offset of the mark.
+/// \param[in] expand The mode of expanding the mark to include text inserted at
+///                   one of its offsets.
+/// \param[in] name A UTF-8 string view as an `AMbyteSpan`struct.
+/// \param[in] value A pointer to an `AMitem` struct with an `AM_VAL_TYPE_MARK`.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
+/// \pre \p start `<` \p end
+/// \pre \p name.src `!= NULL`
+/// \pre \p name.count `<= sizeof(`\p name.src `)`
+/// \pre \p value `!= NULL`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
-/// doc must be a valid pointer to an `AMdoc` struct
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// name.src must be a byte array of length >= name.count
+/// value must be a valid pointer to an AMitem
 #[no_mangle]
 pub unsafe extern "C" fn AMmarkCreate(
     doc: *mut AMdoc,
@@ -196,34 +241,41 @@ pub unsafe extern "C" fn AMmarkCreate(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let expand = to_expand_mark!(expand);
     let name = to_str!(name);
-
     let item: &Item = value.as_ref().unwrap().as_ref();
-
     match <&am::ScalarValue>::try_from(item) {
         Ok(v) => {
             let mark = Mark::new(name.into(), v.clone(), start, end);
-            to_result(doc.mark(obj_id, mark, expand.into()))
+            to_result(doc.mark(obj_id, mark, expand))
         }
         Err(e) => AMresult::Error(e.to_string()).into(),
     }
 }
 
 /// \memberof AMdoc
-/// \brief Clears a mark
+/// \brief Clears a mark.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct.
-/// \param[in] start The start offset
-/// \param[in] end The end offset
-/// \param[in] expand How to handle future edits at the mark boundary
-/// \param[in] name An `AMbyteSpan` struct containing valid utf-8 for the mark to clear
-/// \return An `AMresult` struct containing no items.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] start The start offset of the mark.
+/// \param[in] end The end offset of the mark.
+/// \param[in] expand The mode of expanding the mark to include text inserted at
+///                   one of its offsets.
+/// \param[in] name A UTF-8 string view s an `AMbyteSpan` struct.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
+/// \pre \p start `<` \p end
+/// \pre \p name.src `!= NULL`
+/// \pre \p name.count `<= sizeof(`\p name.src `)`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
-/// doc must be a valid pointer to an `AMdoc` struct
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// name.src must be a byte array of length >= name.count
 #[no_mangle]
 pub unsafe extern "C" fn AMmarkClear(
     doc: *mut AMdoc,
@@ -235,7 +287,7 @@ pub unsafe extern "C" fn AMmarkClear(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let expand = to_expand_mark!(expand);
     let name = to_str!(name);
-
-    to_result(doc.unmark(obj_id, name, start, end, expand.into()))
+    to_result(doc.unmark(obj_id, name, start, end, expand))
 }

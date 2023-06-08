@@ -19,7 +19,7 @@
 #include "doc_state.h"
 #include "macro_utils.h"
 
-static void test_AMmarkRoundTrip(void** state) {
+static void test_AMmark_round_trip(void** state) {
     DocState* doc_state = *state;
     AMstack** stack_ptr = &doc_state->base_state->stack;
 
@@ -55,6 +55,7 @@ static void test_AMmarkRoundTrip(void** state) {
     assert_int_equal(6, AMmarkStart(mark));
     assert_int_equal(10, AMmarkEnd(mark));
     AMbyteSpan name = AMmarkName(mark);
+    assert_int_equal(name.count, strlen("bold"));
     assert_memory_equal(name.src, "bold", name.count);
 
     bool b;
@@ -64,7 +65,7 @@ static void test_AMmarkRoundTrip(void** state) {
 }
 
 int run_mark_tests(void) {
-    const struct CMUnitTest tests[] = {cmocka_unit_test(test_AMmarkRoundTrip)};
+    struct CMUnitTest const tests[] = {cmocka_unit_test(test_AMmark_round_trip)};
 
     return cmocka_run_group_tests(tests, setup_doc, teardown_doc);
 }
