@@ -9,8 +9,8 @@ use std::rc::Rc;
 use crate::actor_id::AMactorId;
 use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change::AMchange;
-use crate::doc::mark::AMmark;
 use crate::doc::AMdoc;
+use crate::doc::mark::AMmark;
 use crate::index::{AMidxType, AMindex};
 use crate::obj::AMobjId;
 use crate::result::{to_result, AMresult};
@@ -158,6 +158,12 @@ impl From<am::ChangeHash> for Value {
     }
 }
 
+impl From<&am::ScalarValue> for Value {
+    fn from(value: &am::ScalarValue) -> Self {
+        Self::Value(am::Value::Scalar(Cow::Owned(value.clone())))
+    }
+}
+
 impl From<am::sync::Have> for Value {
     fn from(have: am::sync::Have) -> Self {
         Self::SyncHave(AMsyncHave::new(have))
@@ -179,12 +185,6 @@ impl From<am::sync::State> for Value {
 impl From<am::Value<'static>> for Value {
     fn from(value: am::Value<'static>) -> Self {
         Self::Value(value)
-    }
-}
-
-impl From<&am::ScalarValue> for Value {
-    fn from(value: &am::ScalarValue) -> Self {
-        Self::Value(am::Value::Scalar(Cow::Owned(value.clone())))
     }
 }
 
@@ -599,6 +599,12 @@ impl From<(am::ObjId, am::ObjType)> for Item {
     }
 }
 
+impl From<&am::ScalarValue> for Item {
+    fn from(value: &am::ScalarValue) -> Self {
+        Value::from(value).into()
+    }
+}
+
 impl From<am::sync::Have> for Item {
     fn from(have: am::sync::Have) -> Self {
         Value::from(have).into()
@@ -619,12 +625,6 @@ impl From<am::sync::State> for Item {
 
 impl From<am::Value<'static>> for Item {
     fn from(value: am::Value<'static>) -> Self {
-        Value::from(value).into()
-    }
-}
-
-impl From<&am::ScalarValue> for Item {
-    fn from(value: &am::ScalarValue) -> Self {
         Value::from(value).into()
     }
 }
@@ -1028,15 +1028,15 @@ impl From<(am::ObjId, am::ObjType)> for AMitem {
     }
 }
 
-impl From<am::sync::Have> for AMitem {
-    fn from(have: am::sync::Have) -> Self {
-        Value::from(have).into()
+impl From<&am::ScalarValue> for AMitem {
+    fn from(value: &am::ScalarValue) -> Self {
+        Value::from(value).into()
     }
 }
 
-impl From<Mark<'static>> for AMitem {
-    fn from(mark: Mark<'static>) -> Self {
-        Value::from(mark).into()
+impl From<am::sync::Have> for AMitem {
+    fn from(have: am::sync::Have) -> Self {
+        Value::from(have).into()
     }
 }
 
@@ -1058,6 +1058,12 @@ impl From<am::Value<'static>> for AMitem {
     }
 }
 
+impl From<Mark<'static>> for AMitem {
+    fn from(mark: Mark<'static>) -> Self {
+        Value::from(mark).into()
+    }
+}
+
 impl From<String> for AMitem {
     fn from(string: String) -> Self {
         Value::from(string).into()
@@ -1067,12 +1073,6 @@ impl From<String> for AMitem {
 impl From<Value> for AMitem {
     fn from(value: Value) -> Self {
         Self(Rc::new(Item::from(value)))
-    }
-}
-
-impl From<&am::ScalarValue> for AMitem {
-    fn from(value: &am::ScalarValue) -> Self {
-        Value::from(value).into()
     }
 }
 
@@ -1138,7 +1138,7 @@ impl<'a> TryFrom<&'a mut AMitem> for &'a mut AMdoc {
     }
 }
 
-impl<'a> TryFrom<&'a AMitem> for &'a AMsyncHave {
+impl<'a> TryFrom<&'a AMitem> for &'a AMmark<'a> {
     type Error = am::AutomergeError;
 
     fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
@@ -1146,7 +1146,7 @@ impl<'a> TryFrom<&'a AMitem> for &'a AMsyncHave {
     }
 }
 
-impl<'a> TryFrom<&'a AMitem> for &'a AMmark<'a> {
+impl<'a> TryFrom<&'a AMitem> for &'a AMsyncHave {
     type Error = am::AutomergeError;
 
     fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
@@ -1241,26 +1241,26 @@ pub enum AMvalType {
     F64 = 1 << 8,
     /// A 64-bit signed integer value.
     Int = 1 << 9,
-    /// A null value.
-    Null = 1 << 10,
-    /// An object type value.
-    ObjType = 1 << 11,
-    /// A UTF-8 string view value.
-    Str = 1 << 12,
-    /// A synchronization have value.
-    SyncHave = 1 << 13,
-    /// A synchronization message value.
-    SyncMessage = 1 << 14,
-    /// A synchronization state value.
-    SyncState = 1 << 15,
-    /// A *nix timestamp (milliseconds) value.
-    Timestamp = 1 << 16,
-    /// A 64-bit unsigned integer value.
-    Uint = 1 << 17,
-    /// An unknown type of value.
-    Unknown = 1 << 18,
     /// A mark
-    Mark = 1 << 19,
+    Mark = 1 << 10,
+    /// A null value.
+    Null = 1 << 11,
+    /// An object type value.
+    ObjType = 1 << 12,
+    /// A UTF-8 string view value.
+    Str = 1 << 13,
+    /// A synchronization have value.
+    SyncHave = 1 << 14,
+    /// A synchronization message value.
+    SyncMessage = 1 << 15,
+    /// A synchronization state value.
+    SyncState = 1 << 16,
+    /// A *nix timestamp (milliseconds) value.
+    Timestamp = 1 << 17,
+    /// A 64-bit unsigned integer value.
+    Uint = 1 << 18,
+    /// An unknown type of value.
+    Unknown = 1 << 19,
     /// A void.
     Void = 1 << 0,
 }
@@ -1303,10 +1303,10 @@ impl From<&Value> for AMvalType {
             Change(_, _) => Self::Change,
             ChangeHash(_) => Self::ChangeHash,
             Doc(_) => Self::Doc,
+            Mark(_) => Self::Mark,
             SyncHave(_) => Self::SyncHave,
             SyncMessage(_) => Self::SyncMessage,
             SyncState(_) => Self::SyncState,
-            Mark(_) => Self::Mark,
             Value(v) => v.into(),
         }
     }
@@ -1852,7 +1852,7 @@ pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bo
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
 /// \param[out] value A pointer to an `AMmark` struct pointer.
-/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_MARK
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_MARK` and
 ///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
 /// \internal

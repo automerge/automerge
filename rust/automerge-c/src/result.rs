@@ -1,5 +1,5 @@
-use am::marks::Mark;
 use automerge as am;
+use am::marks::Mark;
 
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 
@@ -72,6 +72,12 @@ impl From<Result<am::ChangeHash, am::AutomergeError>> for AMresult {
     }
 }
 
+impl From<&am::ScalarValue> for AMresult {
+    fn from(value: &am::ScalarValue) -> Self {
+        Self::item(value.into())
+    }
+}
+
 impl From<am::sync::State> for AMresult {
     fn from(state: am::sync::State) -> Self {
         Self::item(state.into())
@@ -81,12 +87,6 @@ impl From<am::sync::State> for AMresult {
 impl From<am::iter::Values<'static>> for AMresult {
     fn from(pairs: am::iter::Values<'static>) -> Self {
         Self::items(pairs.map(|(v, o)| AMitem::exact(o, v.into())).collect())
-    }
-}
-
-impl From<&am::ScalarValue> for AMresult {
-    fn from(value: &am::ScalarValue) -> Self {
-        Self::item(value.into())
     }
 }
 
@@ -353,24 +353,21 @@ impl From<Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for 
     }
 }
 
-impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
+impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(bytes) => Self::item(am::Value::bytes(bytes).into()),
+            Ok(marks) => {
+                Self::items(marks.iter().map(|mark| mark.clone().into()).collect())
+            }
             Err(e) => Self::error(&e.to_string()),
         }
     }
 }
 
-impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
+impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(marks) => {
-                for mark in marks.iter() {
-                    dbg!(mark.name(), mark.start, mark.end);
-                }
-                Self::items(marks.iter().map(|mark| mark.clone().into()).collect())
-            }
+            Ok(bytes) => Self::item(am::Value::bytes(bytes).into()),
             Err(e) => Self::error(&e.to_string()),
         }
     }
