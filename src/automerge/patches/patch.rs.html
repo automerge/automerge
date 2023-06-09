@@ -78,7 +78,21 @@
 <a href="#78" id="78">78</a>
 <a href="#79" id="79">79</a>
 <a href="#80" id="80">80</a>
-</pre></div><pre class="rust"><code><span class="kw">use crate</span>::{marks::Mark, ObjId, Prop, Value};
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+</pre></div><pre class="rust"><code><span class="kw">use crate</span>::{
+    marks::{Mark, MarkSet},
+    ObjId, Prop, Value,
+};
 <span class="kw">use </span>core::fmt::Debug;
 <span class="kw">use </span>std::fmt;
 
@@ -129,14 +143,17 @@
         index: usize,
         <span class="doccomment">/// The values that were inserted, in order that they appear. As with [`Self::PutMap`] and
         /// [`Self::PutSeq`] the object ID is only meaningful for `Value::Obj` values
-        </span>values: SequenceTree&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId)&gt;,
-        conflict: bool,
+        </span>values: SequenceTree&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId, bool)&gt;,
+        <span class="doccomment">/// All marks currently active for these values
+        </span>marks: <span class="prelude-ty">Option</span>&lt;MarkSet&gt;,
     },
     <span class="doccomment">/// Some text was spliced into a text object
     </span>SpliceText {
         index: usize,
         <span class="doccomment">/// The text that was inserted
         </span>value: TextValue,
+        <span class="doccomment">/// All marks currently active for this span of text
+        </span>marks: <span class="prelude-ty">Option</span>&lt;MarkSet&gt;,
     },
     <span class="doccomment">/// A counter was incremented
     </span>Increment {
@@ -145,11 +162,16 @@
         <span class="doccomment">/// The amount incremented, may be negative
         </span>value: i64,
     },
+    <span class="doccomment">/// A new conflict has appeared
+    </span>Conflict {
+        <span class="doccomment">/// The conflicted property
+        </span>prop: Prop,
+    },
     <span class="doccomment">/// A key was deleted from a map
     </span>DeleteMap { key: String },
     <span class="doccomment">/// One or more indices were removed from a sequence
     </span>DeleteSeq { index: usize, length: usize },
-    <span class="doccomment">/// Some marks within a text object were modified
+    <span class="doccomment">/// Some marks within a text object were added or removed
     </span>Mark { marks: Vec&lt;Mark&lt;<span class="lifetime">&#39;static</span>&gt;&gt; },
 }
 

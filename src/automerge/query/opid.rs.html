@@ -168,12 +168,28 @@
 <a href="#168" id="168">168</a>
 <a href="#169" id="169">169</a>
 <a href="#170" id="170">170</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
+<a href="#173" id="173">173</a>
+<a href="#174" id="174">174</a>
+<a href="#175" id="175">175</a>
+<a href="#176" id="176">176</a>
+<a href="#177" id="177">177</a>
+<a href="#178" id="178">178</a>
+<a href="#179" id="179">179</a>
+<a href="#180" id="180">180</a>
+<a href="#181" id="181">181</a>
+<a href="#182" id="182">182</a>
+<a href="#183" id="183">183</a>
+<a href="#184" id="184">184</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::{MarkSet, MarkStateMachine};
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
 <span class="kw">use </span><span class="kw">crate</span>::query::OpSetMetadata;
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, Op, OpId};
 <span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::rc::Rc;
 
 <span class="doccomment">/// Search for an OpId in a tree.  /// Returns the index of the operation in the tree.
 </span><span class="attr">#[derive(Debug, Clone, PartialEq)]
@@ -181,6 +197,7 @@
     idx: ListState,
     clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock&gt;,
     target: SearchTarget&lt;<span class="lifetime">&#39;a</span>&gt;,
+    marks: MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
@@ -196,6 +213,7 @@
             idx: ListState::new(encoding, usize::MAX),
             clock,
             target: SearchTarget::OpId(target, <span class="prelude-val">None</span>),
+            marks: Default::default(),
         }
     }
 
@@ -210,6 +228,7 @@
             idx: ListState::new(encoding, usize::MAX),
             clock: <span class="prelude-val">None</span>,
             target,
+            marks: Default::default(),
         }
     }
 
@@ -236,17 +255,25 @@
             <span class="self">self</span>.idx.index()
         }
     }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
+        <span class="kw">for </span>(id, mark_data) <span class="kw">in </span><span class="self">self</span>.marks.iter() {
+            marks.mark_begin(<span class="kw-2">*</span>id, mark_data, m);
+        }
+        marks.current().cloned()
+    }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>OpIdSearch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]) -&gt; QueryResult {
         <span class="self">self</span>.idx.check_if_node_is_clean(child);
         <span class="kw">if </span><span class="self">self</span>.clock.is_some() {
             QueryResult::Descend
         } <span class="kw">else </span>{
             <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.target {
                 SearchTarget::OpId(id, <span class="kw">_</span>) <span class="kw">if </span>!child.index.ops.contains(id) =&gt; {
-                    <span class="self">self</span>.idx.process_node(child, ops);
+                    <span class="self">self</span>.idx.process_node(child, ops, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks));
                     QueryResult::Next
                 }
                 <span class="kw">_ </span>=&gt; QueryResult::Descend,
@@ -255,6 +282,7 @@
     }
 
     <span class="kw">fn </span>query_element_with_metadata(<span class="kw-2">&amp;mut </span><span class="self">self</span>, element: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; QueryResult {
+        <span class="self">self</span>.marks.process(element);
         <span class="kw">match </span><span class="self">self</span>.target {
             SearchTarget::OpId(target, <span class="prelude-val">None</span>) =&gt; {
                 <span class="kw">if </span>element.id == target {

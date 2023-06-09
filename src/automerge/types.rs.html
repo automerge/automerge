@@ -1018,7 +1018,6 @@
 <a href="#1018" id="1018">1018</a>
 <a href="#1019" id="1019">1019</a>
 <a href="#1020" id="1020">1020</a>
-<a href="#1021" id="1021">1021</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 <span class="kw">use </span><span class="kw">crate</span>::text_value::TextValue;
@@ -1476,7 +1475,14 @@
 }
 
 <span class="kw">impl </span>Prop {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+    <span class="kw">pub fn </span>as_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Prop::Map(s) =&gt; <span class="prelude-val">Some</span>(s),
+            Prop::Seq(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="kw">pub fn </span>as_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
         <span class="kw">match </span><span class="self">self </span>{
             Prop::Map(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
             Prop::Seq(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
@@ -1779,14 +1785,6 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_mark(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.action.is_mark()
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>valid_mark_anchor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-        <span class="self">self</span>.succ.is_empty()
-            &amp;&amp; <span class="macro">matches!</span>(
-                <span class="kw-2">&amp;</span><span class="self">self</span>.action,
-                OpType::MarkBegin(<span class="bool-val">true</span>, <span class="kw">_</span>) | OpType::MarkEnd(<span class="bool-val">false</span>)
-            )
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_noop(<span class="kw-2">&amp;</span><span class="self">self</span>, action: <span class="kw-2">&amp;</span>OpType) -&gt; bool {

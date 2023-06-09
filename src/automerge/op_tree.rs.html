@@ -594,7 +594,30 @@
 <a href="#594" id="594">594</a>
 <a href="#595" id="595">595</a>
 <a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
+<span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
 <span class="kw">use crate</span>::{
@@ -607,6 +630,7 @@
     ObjType, OpType,
 };
 <span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::rc::Rc;
 <span class="kw">use </span>std::{fmt::Debug, mem};
 
 <span class="kw">mod </span>iter;
@@ -681,6 +705,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -698,12 +723,24 @@
                         <span class="kw-2">&amp;</span>obj.id,
                         query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
                     );
-                    patch_log.mark(obj.id, <span class="kw-2">&amp;</span>q.marks);
+                    <span class="kw">for </span>mark <span class="kw">in </span>q.marks {
+                        <span class="kw">let </span>index = mark.start;
+                        <span class="kw">let </span>len = mark.len();
+                        <span class="kw">let </span>marks = mark.into_mark_set();
+                        patch_log.mark(obj.id, index, len, <span class="kw-2">&amp;</span>marks);
+                    }
                 }
             } <span class="kw">else if </span>obj.typ == ObjType::Text {
-                patch_log.splice(obj.id, <span class="self">self</span>.index, op.to_str());
+                patch_log.splice(obj.id, <span class="self">self</span>.index, op.to_str(), <span class="self">self</span>.marks.clone());
             } <span class="kw">else </span>{
-                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, <span class="bool-val">false</span>);
+                patch_log.insert(
+                    obj.id,
+                    <span class="self">self</span>.index,
+                    op.value().into(),
+                    op.id,
+                    <span class="bool-val">false</span>,
+                    <span class="self">self</span>.marks.clone(),
+                );
             }
             <span class="kw">return</span>;
         }
@@ -750,7 +787,7 @@
                 &amp;&amp; <span class="self">self</span>.before.is_none()
                 &amp;&amp; <span class="self">self</span>.after.is_none()
             {
-                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict);
+                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict, <span class="prelude-val">None</span>);
             } <span class="kw">else if </span><span class="self">self</span>.after.is_some() {
                 <span class="kw">if </span><span class="self">self</span>.before.is_none() {
                     patch_log.flag_conflict(obj.id, <span class="kw-2">&amp;</span>key);
@@ -782,8 +819,12 @@
         <span class="self">self</span>.root_node.as_ref().map_or(<span class="number">0</span>, |n| n.len())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; TopOps&lt;<span class="lifetime">&#39;_</span>&gt; {
-        TopOps::new(OpTreeIter::new(<span class="self">self</span>), clock)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
+        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
+    ) -&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
+        TopOps::new(OpTreeIter::new(<span class="self">self</span>), clock, meta)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_without_patch_log(
@@ -821,6 +862,7 @@
         op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
         <span class="kw-2">mut </span>pos: usize,
         index: usize,
+        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
     ) -&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
         <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="prelude-val">None</span>;
@@ -868,6 +910,7 @@
             succ,
             pos,
             index,
+            marks,
         }
     }
 
@@ -913,10 +956,11 @@
             <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::op(op, encoding), meta);
             <span class="kw">let </span>pos = query.pos();
             <span class="kw">let </span>index = query.index();
-            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, index)
+            <span class="kw">let </span>marks = query.marks(meta);
+            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, index, marks)
         } <span class="kw">else </span>{
             <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
-            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, <span class="number">0</span>)
+            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, <span class="number">0</span>, <span class="prelude-val">None</span>)
         }
     }
 
@@ -937,7 +981,7 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seek_ops_by_prop&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
         prop: Prop,
         encoding: ListEncoding,
         clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
@@ -981,7 +1025,7 @@
         left
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, <span class="kw-2">mut </span>query: Q, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; Q
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, <span class="kw-2">mut </span>query: Q, m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata) -&gt; Q
     <span class="kw">where
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {

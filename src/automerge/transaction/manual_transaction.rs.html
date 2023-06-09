@@ -424,7 +424,6 @@
 <a href="#424" id="424">424</a>
 <a href="#425" id="425">425</a>
 <a href="#426" id="426">426</a>
-<a href="#427" id="427">427</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -619,7 +618,6 @@
     }
 
     <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="macro">log!</span>(<span class="string">&quot;text + scope {:?}&quot;</span>, <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>));
         <span class="self">self</span>.doc.text_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
 

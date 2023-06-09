@@ -241,8 +241,47 @@
 <a href="#241" id="241">241</a>
 <a href="#242" id="242">242</a>
 <a href="#243" id="243">243</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId};
+<a href="#244" id="244">244</a>
+<a href="#245" id="245">245</a>
+<a href="#246" id="246">246</a>
+<a href="#247" id="247">247</a>
+<a href="#248" id="248">248</a>
+<a href="#249" id="249">249</a>
+<a href="#250" id="250">250</a>
+<a href="#251" id="251">251</a>
+<a href="#252" id="252">252</a>
+<a href="#253" id="253">253</a>
+<a href="#254" id="254">254</a>
+<a href="#255" id="255">255</a>
+<a href="#256" id="256">256</a>
+<a href="#257" id="257">257</a>
+<a href="#258" id="258">258</a>
+<a href="#259" id="259">259</a>
+<a href="#260" id="260">260</a>
+<a href="#261" id="261">261</a>
+<a href="#262" id="262">262</a>
+<a href="#263" id="263">263</a>
+<a href="#264" id="264">264</a>
+<a href="#265" id="265">265</a>
+<a href="#266" id="266">266</a>
+<a href="#267" id="267">267</a>
+<a href="#268" id="268">268</a>
+<a href="#269" id="269">269</a>
+<a href="#270" id="270">270</a>
+<a href="#271" id="271">271</a>
+<a href="#272" id="272">272</a>
+<a href="#273" id="273">273</a>
+<a href="#274" id="274">274</a>
+<a href="#275" id="275">275</a>
+<a href="#276" id="276">276</a>
+<a href="#277" id="277">277</a>
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::MarkData;
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId, OpType};
 <span class="kw">use </span>fxhash::FxBuildHasher;
 <span class="kw">use </span>std::collections::{HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -255,7 +294,7 @@
 <span class="kw">mod </span>seek_mark;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>insert::InsertNth;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_state::ListState;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_state::{ListState, MarkMap};
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth::Nth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid::{OpIdSearch, SimpleOpIdSearch};
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop::Prop;
@@ -290,13 +329,13 @@
     </span><span class="kw">fn </span>query_node_with_metadata(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
-        _m: <span class="kw-2">&amp;</span>OpSetMetadata,
-        ops: <span class="kw-2">&amp;</span>[Op],
+        _m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
+        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
     ) -&gt; QueryResult {
         <span class="self">self</span>.query_node(child, ops)
     }
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, _ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, _ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]) -&gt; QueryResult {
         QueryResult::Descend
     }
 
@@ -371,6 +410,8 @@
     <span class="doccomment">/// Set of opids found in this node and below.
     </span>ops: HashSet&lt;OpId, FxBuildHasher&gt;,
     never_seen_puts: bool,
+    mark_begin: HashMap&lt;OpId, MarkData, FxBuildHasher&gt;,
+    mark_end: Vec&lt;OpId&gt;,
 }
 
 <span class="kw">impl </span>Index {
@@ -384,6 +425,8 @@
             visible_text: TextWidth { width: <span class="number">0 </span>},
             ops: Default::default(),
             never_seen_puts: <span class="bool-val">true</span>,
+            mark_begin: Default::default(),
+            mark_end: Default::default(),
         }
     }
 
@@ -435,8 +478,25 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
         <span class="self">self</span>.never_seen_puts &amp;= op.insert;
-        <span class="self">self</span>.ops.insert(op.id);
-        <span class="kw">if </span>op.visible() {
+
+        <span class="comment">// opids
+        </span><span class="self">self</span>.ops.insert(op.id);
+
+        <span class="comment">// marks
+        </span><span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
+            OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
+                <span class="self">self</span>.mark_begin.insert(op.id, data.clone());
+            }
+            OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.mark_begin.remove(<span class="kw-2">&amp;</span>op.id.prev()).is_none() {
+                    <span class="self">self</span>.mark_end.push(op.id)
+                }
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+
+        <span class="comment">// visible ops
+        </span><span class="kw">if </span>op.visible() {
             <span class="kw">let </span>key = op.elemid_or_key();
             <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = <span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key) {
                 <span class="self">self</span>.visible.insert(key, n + <span class="number">1</span>);
@@ -448,8 +508,22 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
-        <span class="self">self</span>.ops.remove(<span class="kw-2">&amp;</span>op.id);
-        <span class="kw">if </span>op.visible() {
+        <span class="comment">// op ids
+        </span><span class="self">self</span>.ops.remove(<span class="kw-2">&amp;</span>op.id);
+
+        <span class="comment">// marks
+        </span><span class="kw">match </span>op.action {
+            OpType::MarkBegin(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; {
+                <span class="self">self</span>.mark_begin.remove(<span class="kw-2">&amp;</span>op.id);
+            }
+            OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
+                <span class="self">self</span>.mark_end.retain(|id| id != <span class="kw-2">&amp;</span>op.id);
+            }
+            <span class="kw">_ </span>=&gt; {}
+        }
+
+        <span class="comment">// visible ops
+        </span><span class="kw">if </span>op.visible() {
             <span class="kw">let </span>key = op.elemid_or_key();
             <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
                 <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
@@ -474,6 +548,8 @@
                 .and_modify(|len| <span class="kw-2">*</span>len += <span class="kw-2">*</span>other_len)
                 .or_insert(<span class="kw-2">*</span>other_len);
         }
+        <span class="self">self</span>.mark_begin.extend(other.mark_begin.clone()); <span class="comment">// can I remove this clone?
+        </span><span class="self">self</span>.mark_end.extend(<span class="kw-2">&amp;</span>other.mark_end);
         <span class="self">self</span>.visible_text.merge(<span class="kw-2">&amp;</span>other.visible_text);
         <span class="self">self</span>.never_seen_puts &amp;= other.never_seen_puts;
     }

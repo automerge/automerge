@@ -85,8 +85,26 @@
 <a href="#85" id="85">85</a>
 <a href="#86" id="86">86</a>
 <a href="#87" id="87">87</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::{MarkSet, MarkStateMachine};
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetMetadata;
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
+<span class="kw">use </span>std::rc::Rc;
 
 <span class="attr">#[derive(Default)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -96,17 +114,20 @@
     num_ops: usize,
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
-    last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op)&gt;,
+    last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;)&gt;,
+    marks: MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt;,
+    meta: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata&gt;,
 }
 
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOp&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
     <span class="kw">pub</span>(<span class="kw">crate</span>) conflict: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(iter: OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(iter: OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;, meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             iter,
             pos: <span class="number">0</span>,
@@ -115,6 +136,8 @@
             clock,
             key: <span class="prelude-val">None</span>,
             last_op: <span class="prelude-val">None</span>,
+            marks: Default::default(),
+            meta: <span class="prelude-val">Some</span>(meta),
         }
     }
 }
@@ -128,17 +151,23 @@
             <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = <span class="self">self</span>.iter.next() {
                 <span class="kw">let </span>key = op.elemid_or_key();
                 <span class="kw">let </span>visible = op.visible_at(<span class="self">self</span>.clock.as_ref());
+                <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.clock, <span class="kw-2">&amp;</span><span class="self">self</span>.meta) {
+                    (<span class="prelude-val">Some</span>(c), <span class="prelude-val">Some</span>(m)) <span class="kw">if </span>c.covers(<span class="kw-2">&amp;</span>op.id) =&gt; {
+                        <span class="self">self</span>.marks.process(op, m);
+                    }
+                    <span class="kw">_ </span>=&gt; {}
+                }
                 <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.key {
                     <span class="prelude-val">Some</span>(k) <span class="kw">if </span>k == <span class="kw-2">&amp;</span>key =&gt; {
                         <span class="kw">if </span>visible {
-                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op, <span class="self">self</span>.marks.current().cloned()));
                             <span class="self">self</span>.num_ops += <span class="number">1</span>;
                         }
                     }
                     <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
-                        result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
+                        result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op, marks)| (op, marks));
                         <span class="kw">if </span>visible {
-                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op, <span class="self">self</span>.marks.current().cloned()));
                             <span class="self">self</span>.num_ops = <span class="number">1</span>;
                         } <span class="kw">else </span>{
                             <span class="self">self</span>.num_ops = <span class="number">0</span>;
@@ -150,7 +179,7 @@
                         <span class="self">self</span>.key = <span class="prelude-val">Some</span>(key);
                         <span class="self">self</span>.start_pos = <span class="self">self</span>.pos;
                         <span class="kw">if </span>visible {
-                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op, <span class="self">self</span>.marks.current().cloned()));
                             <span class="self">self</span>.num_ops = <span class="number">1</span>;
                         } <span class="kw">else </span>{
                             <span class="self">self</span>.num_ops = <span class="number">0</span>;
@@ -162,13 +191,14 @@
                     <span class="kw">break</span>;
                 }
             } <span class="kw">else </span>{
-                result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
+                result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op, marks)| (op, marks));
                 <span class="kw">break</span>;
             }
         }
-        result_op.map(|op| TopOp {
+        result_op.map(|(op, marks)| TopOp {
             op,
             conflict: <span class="self">self</span>.num_ops &gt; <span class="number">1</span>,
+            marks,
         })
     }
 }

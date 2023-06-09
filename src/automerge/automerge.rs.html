@@ -1656,6 +1656,22 @@
 <a href="#1656" id="1656">1656</a>
 <a href="#1657" id="1657">1657</a>
 <a href="#1658" id="1658">1658</a>
+<a href="#1659" id="1659">1659</a>
+<a href="#1660" id="1660">1660</a>
+<a href="#1661" id="1661">1661</a>
+<a href="#1662" id="1662">1662</a>
+<a href="#1663" id="1663">1663</a>
+<a href="#1664" id="1664">1664</a>
+<a href="#1665" id="1665">1665</a>
+<a href="#1666" id="1666">1666</a>
+<a href="#1667" id="1667">1667</a>
+<a href="#1668" id="1668">1668</a>
+<a href="#1669" id="1669">1669</a>
+<a href="#1670" id="1670">1670</a>
+<a href="#1671" id="1671">1671</a>
+<a href="#1672" id="1672">1672</a>
+<a href="#1673" id="1673">1673</a>
+<a href="#1674" id="1674">1674</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1669,7 +1685,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::hydrate;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
-<span class="kw">use </span><span class="kw">crate</span>::marks::{Mark, MarkStateMachine};
+<span class="kw">use </span><span class="kw">crate</span>::marks::{Mark, MarkAccumulator, MarkStateMachine};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::patches::{Patch, PatchLog, TextRepresentation};
@@ -2916,24 +2932,40 @@
         <span class="kw">let </span>ops_by_key = <span class="self">self</span>.ops().iter_ops(<span class="kw-2">&amp;</span>obj.id).group_by(|o| o.elemid_or_key());
         <span class="kw">let </span><span class="kw-2">mut </span>index = <span class="number">0</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
-
-        <span class="prelude-val">Ok</span>(ops_by_key
-            .into_iter()
-            .filter_map(|(_key, key_ops)| {
-                key_ops
-                    .filter(|o| o.visible_or_mark(clock.as_ref()))
-                    .last()
-                    .and_then(|o| <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
-                        OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
-                            index += o.width(obj.encoding);
-                            <span class="prelude-val">None
-                        </span>}
-                        OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; marks.mark_begin(o.id, index, data, <span class="self">self</span>),
-                        OpType::MarkEnd(<span class="kw">_</span>) =&gt; marks.mark_end(o.id, index, <span class="self">self</span>),
-                        OpType::Increment(<span class="kw">_</span>) | OpType::Delete =&gt; <span class="prelude-val">None</span>,
-                    })
-            })
-            .collect())
+        <span class="kw">let </span><span class="kw-2">mut </span>acc = MarkAccumulator::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>last_marks = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>mark_len = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>mark_index = <span class="number">0</span>;
+        <span class="kw">for </span>(_key, key_ops) <span class="kw">in </span>ops_by_key.into_iter() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
+                <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
+                    OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
+                        <span class="kw">let </span>len = o.width(obj.encoding);
+                        <span class="kw">if </span>last_marks.as_ref() != marks.current() {
+                            <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>&amp;&amp; last_marks.is_some() {
+                                acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+                            }
+                            last_marks = marks.current().cloned();
+                            mark_index = index;
+                            mark_len = <span class="number">0</span>;
+                        }
+                        mark_len += len;
+                        index += len;
+                    }
+                    OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
+                        marks.mark_begin(o.id, data, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m);
+                    }
+                    OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
+                        marks.mark_end(o.id, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m);
+                    }
+                    OpType::Increment(<span class="kw">_</span>) | OpType::Delete =&gt; {}
+                }
+            }
+        }
+        <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>&amp;&amp; last_marks.is_some() {
+            acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+        }
+        <span class="prelude-val">Ok</span>(acc.into_iter_no_unmark().collect())
     }
 
     <span class="kw">pub fn </span>hydrate(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;) -&gt; hydrate::Value {

@@ -58,7 +58,7 @@
 <span class="kw">impl </span>Text {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply(<span class="kw-2">&amp;mut </span><span class="self">self</span>, patch: PatchAction) -&gt; <span class="prelude-ty">Result</span>&lt;(), HydrateError&gt; {
         <span class="kw">match </span>patch {
-            PatchAction::SpliceText { index, value } =&gt; {
+            PatchAction::SpliceText { index, value, .. } =&gt; {
                 <span class="self">self</span>.value.splice_text_value(index, <span class="kw-2">&amp;</span>value);
                 <span class="prelude-val">Ok</span>(())
             }

@@ -733,7 +733,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="self">self</span>.trees
             .get(obj)
-            .map(|tree| tree.internal.top_ops(clock))
+            .map(|tree| tree.internal.top_ops(clock, <span class="kw-2">&amp;</span><span class="self">self</span>.m))
             .unwrap_or_default()
     }
 

@@ -238,14 +238,106 @@
 <a href="#238" id="238">238</a>
 <a href="#239" id="239">239</a>
 <a href="#240" id="240">240</a>
+<a href="#241" id="241">241</a>
+<a href="#242" id="242">242</a>
+<a href="#243" id="243">243</a>
+<a href="#244" id="244">244</a>
+<a href="#245" id="245">245</a>
+<a href="#246" id="246">246</a>
+<a href="#247" id="247">247</a>
+<a href="#248" id="248">248</a>
+<a href="#249" id="249">249</a>
+<a href="#250" id="250">250</a>
+<a href="#251" id="251">251</a>
+<a href="#252" id="252">252</a>
+<a href="#253" id="253">253</a>
+<a href="#254" id="254">254</a>
+<a href="#255" id="255">255</a>
+<a href="#256" id="256">256</a>
+<a href="#257" id="257">257</a>
+<a href="#258" id="258">258</a>
+<a href="#259" id="259">259</a>
+<a href="#260" id="260">260</a>
+<a href="#261" id="261">261</a>
+<a href="#262" id="262">262</a>
+<a href="#263" id="263">263</a>
+<a href="#264" id="264">264</a>
+<a href="#265" id="265">265</a>
+<a href="#266" id="266">266</a>
+<a href="#267" id="267">267</a>
+<a href="#268" id="268">268</a>
+<a href="#269" id="269">269</a>
+<a href="#270" id="270">270</a>
+<a href="#271" id="271">271</a>
+<a href="#272" id="272">272</a>
+<a href="#273" id="273">273</a>
+<a href="#274" id="274">274</a>
+<a href="#275" id="275">275</a>
+<a href="#276" id="276">276</a>
+<a href="#277" id="277">277</a>
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a>
+<a href="#284" id="284">284</a>
+<a href="#285" id="285">285</a>
+<a href="#286" id="286">286</a>
+<a href="#287" id="287">287</a>
+<a href="#288" id="288">288</a>
+<a href="#289" id="289">289</a>
+<a href="#290" id="290">290</a>
+<a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
+<a href="#294" id="294">294</a>
+<a href="#295" id="295">295</a>
+<a href="#296" id="296">296</a>
+<a href="#297" id="297">297</a>
+<a href="#298" id="298">298</a>
+<a href="#299" id="299">299</a>
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a>
+<a href="#312" id="312">312</a>
+<a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a>
+<a href="#322" id="322">322</a>
+<a href="#323" id="323">323</a>
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>smol_str::SmolStr;
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::fmt::Display;
+<span class="kw">use </span>std::rc::Rc;
 
-<span class="kw">use </span><span class="kw">crate</span>::types::OpId;
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetMetadata;
+<span class="kw">use </span><span class="kw">crate</span>::types::{Op, OpId, OpType};
 <span class="kw">use </span><span class="kw">crate</span>::value::ScalarValue;
-<span class="kw">use </span><span class="kw">crate</span>::Automerge;
 <span class="kw">use </span>std::borrow::Cow;
+<span class="kw">use </span>std::collections::BTreeMap;
 
 <span class="doccomment">/// Marks let you store out-of-bound information about sequences.
 ///
@@ -259,6 +351,120 @@
     <span class="kw">pub </span>start: usize,
     <span class="kw">pub </span>end: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) data: Cow&lt;<span class="lifetime">&#39;a</span>, MarkData&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Mark&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.end - <span class="self">self</span>.start
+    }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_mark_set(<span class="self">self</span>) -&gt; Rc&lt;MarkSet&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>m = MarkSet::default();
+        <span class="kw">let </span>data = <span class="self">self</span>.data.into_owned();
+        m.insert(data.name, data.value);
+        Rc::new(m)
+    }
+}
+
+<span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">struct </span>MarkAccItem {
+    index: usize,
+    len: usize,
+    value: ScalarValue,
+}
+
+<span class="attr">#[derive(Debug, Clone, Default)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MarkAccumulator {
+    marks: BTreeMap&lt;SmolStr, Vec&lt;MarkAccItem&gt;&gt;,
+}
+
+<span class="kw">impl </span>MarkAccumulator {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_iter(<span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = Mark&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="self">self</span>.marks.into_iter().flat_map(|(name, items)| {
+            items.into_iter().map(<span class="kw">move </span>|i| {
+                Mark::new(name.to_string(), i.value.clone(), i.index, i.index + i.len)
+            })
+        })
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_iter_no_unmark(<span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = Mark&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="self">self</span>.marks.into_iter().flat_map(|(name, items)| {
+            items
+                .into_iter()
+                .filter(|i| !i.value.is_null())
+                .map(<span class="kw">move </span>|i| {
+                    Mark::new(name.to_string(), i.value.clone(), i.index, i.index + i.len)
+                })
+        })
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, len: usize, other: <span class="kw-2">&amp;</span>MarkSet) {
+        <span class="kw">for </span>(name, value) <span class="kw">in </span>other.marks.iter() {
+            <span class="kw">let </span>entry = <span class="self">self</span>.marks.entry(name.clone()).or_default();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>last) = entry.last_mut() {
+                <span class="kw">if </span><span class="kw-2">&amp;</span>last.value == value &amp;&amp; last.index + last.len == index {
+                    last.len += len;
+                    <span class="kw">continue</span>;
+                }
+            }
+            entry.push(MarkAccItem {
+                index,
+                len,
+                value: value.clone(),
+            })
+        }
+    }
+}
+
+<span class="attr">#[derive(Debug, Clone, PartialEq, Default)]
+</span><span class="kw">pub struct </span>MarkSet {
+    marks: BTreeMap&lt;SmolStr, ScalarValue&gt;,
+}
+
+<span class="kw">impl </span>MarkSet {
+    <span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>ScalarValue)&gt; {
+        <span class="self">self</span>.marks
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
+    }
+
+    <span class="kw">fn </span>inner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>BTreeMap&lt;SmolStr, ScalarValue&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.marks
+    }
+}
+
+<span class="kw">impl </span>MarkSet {
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: SmolStr, value: ScalarValue) {
+        <span class="self">self</span>.marks.insert(name, value);
+    }
+
+    <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>SmolStr) {
+        <span class="self">self</span>.marks.remove(name);
+    }
+
+    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.inner().is_empty()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>diff(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>diff = BTreeMap::default();
+        <span class="kw">for </span>(name, value) <span class="kw">in </span><span class="self">self</span>.marks.iter() {
+            <span class="kw">match </span>other.marks.get(name) {
+                <span class="prelude-val">Some</span>(v) <span class="kw">if </span>v != value =&gt; {
+                    diff.insert(name.clone(), v.clone());
+                }
+                <span class="prelude-val">None </span>=&gt; {
+                    diff.insert(name.clone(), ScalarValue::Null);
+                }
+                <span class="kw">_ </span>=&gt; {}
+            }
+        }
+        <span class="kw">for </span>(name, value) <span class="kw">in </span>other.marks.iter() {
+            <span class="kw">if </span>!<span class="self">self</span>.marks.contains_key(name) {
+                diff.insert(name.clone(), value.clone());
+            }
+        }
+        MarkSet { marks: diff }
+    }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Mark&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -276,10 +482,6 @@
             start,
             end,
         }
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_null(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-        <span class="self">self</span>.data.value.is_null()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_data(start: usize, end: usize, data: <span class="kw-2">&amp;</span>MarkData) -&gt; Mark&lt;<span class="lifetime">&#39;_</span>&gt; {
@@ -309,50 +511,46 @@
 
 <span class="attr">#[derive(Debug, Clone, PartialEq, Default)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt; {
-    state: Vec&lt;(OpId, Mark&lt;<span class="lifetime">&#39;a</span>&gt;)&gt;,
+    state: Vec&lt;(OpId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData)&gt;,
+    current: Rc&lt;MarkSet&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_begin(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        id: OpId,
-        pos: usize,
-        data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData,
-        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="self">self</span>.mark_or_unmark_begin(id, pos, data, doc).and_then(|m| {
-            <span class="kw">if </span>m.is_null() {
-                <span class="prelude-val">None
-            </span>} <span class="kw">else </span>{
-                <span class="prelude-val">Some</span>(m)
-            }
-        })
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>current(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Rc&lt;MarkSet&gt;&gt; {
+        <span class="kw">if </span><span class="self">self</span>.current.is_empty() {
+            <span class="prelude-val">None
+        </span>} <span class="kw">else </span>{
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.current)
+        }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_or_unmark_begin(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        id: OpId,
-        pos: usize,
-        data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData,
-        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">None</span>;
-        <span class="kw">let </span>index = <span class="self">self</span>.find(id, doc).err()<span class="question-mark">?</span>;
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>process(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; bool {
+        <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
+            OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; <span class="self">self</span>.mark_begin(op.id, data, m),
+            OpType::MarkEnd(<span class="kw">_</span>) =&gt; <span class="self">self</span>.mark_end(op.id, m),
+            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+        }
+    }
 
-        <span class="kw">let </span><span class="kw-2">mut </span>mark = Mark::from_data(pos, pos, data);
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_begin(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: OpId, mark: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; bool {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="bool-val">false</span>;
 
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(above) = <span class="self">Self</span>::mark_above(<span class="kw-2">&amp;</span><span class="self">self</span>.state, index, <span class="kw-2">&amp;</span>mark) {
-            <span class="kw">if </span>above.value() == mark.value() {
-                mark.start = above.start;
-            }
-        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(below) = <span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, <span class="kw-2">&amp;</span>mark) {
-            <span class="kw">if </span>below.value() == mark.value() {
-                mark.start = below.start;
+        <span class="kw">let </span>index = <span class="kw">match </span><span class="self">self</span>.find(id.prev(), m).err() {
+            <span class="prelude-val">Some</span>(index) =&gt; index,
+            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+        };
+
+        <span class="kw">if </span><span class="self">Self</span>::mark_above(<span class="kw-2">&amp;</span><span class="self">self</span>.state, index, mark).is_none() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(below) = <span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, mark) {
+                <span class="kw">if </span>below.value != mark.value {
+                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
+                    result = <span class="bool-val">true
+                </span>}
             } <span class="kw">else </span>{
-                <span class="kw">let </span><span class="kw-2">mut </span>m = below.clone();
-                m.end = pos;
-                result = <span class="prelude-val">Some</span>(m);
-            }
+                <span class="comment">// nothing above or below
+                </span>Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
+                result = <span class="bool-val">true
+            </span>}
         }
 
         <span class="self">self</span>.state.insert(index, (id, mark));
@@ -360,37 +558,25 @@
         result
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_end(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        id: OpId,
-        pos: usize,
-        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="self">self</span>.mark_or_unmark_end(id, pos, doc)
-            .and_then(|m| <span class="kw">if </span>m.is_null() { <span class="prelude-val">None </span>} <span class="kw">else </span>{ <span class="prelude-val">Some</span>(m) })
-    }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_end(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: OpId, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; bool {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="bool-val">false</span>;
+        <span class="kw">let </span>index = <span class="kw">match </span><span class="self">self</span>.find(id.prev(), m).ok() {
+            <span class="prelude-val">Some</span>(index) =&gt; index,
+            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="bool-val">false</span>,
+        };
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark_or_unmark_end(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        id: OpId,
-        pos: usize,
-        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">None</span>;
-        <span class="kw">let </span>index = <span class="self">self</span>.find(id.prev(), doc).ok()<span class="question-mark">?</span>;
+        <span class="kw">let </span>mark = <span class="self">self</span>.state.remove(index).<span class="number">1</span>;
 
-        <span class="kw">let </span><span class="kw-2">mut </span>mark = <span class="self">self</span>.state.remove(index).<span class="number">1</span>;
-        mark.end = pos;
-
-        <span class="kw">if </span><span class="self">Self</span>::mark_above(<span class="kw-2">&amp;</span><span class="self">self</span>.state, index, <span class="kw-2">&amp;</span>mark).is_none() {
-            <span class="kw">match </span><span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, <span class="kw-2">&amp;</span>mark) {
-                <span class="prelude-val">Some</span>(below) <span class="kw">if </span>below.value() == mark.value() =&gt; {}
+        <span class="kw">if </span><span class="self">Self</span>::mark_above(<span class="kw-2">&amp;</span><span class="self">self</span>.state, index, mark).is_none() {
+            <span class="kw">match </span><span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, mark) {
+                <span class="prelude-val">Some</span>(below) <span class="kw">if </span>below.value == mark.value =&gt; {}
                 <span class="prelude-val">Some</span>(below) =&gt; {
-                    below.start = pos;
-                    result = <span class="prelude-val">Some</span>(mark.clone());
+                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(below.name.clone(), below.value.clone());
+                    result = <span class="bool-val">true</span>;
                 }
                 <span class="prelude-val">None </span>=&gt; {
-                    result = <span class="prelude-val">Some</span>(mark.clone());
+                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).remove(<span class="kw-2">&amp;</span>mark.name);
+                    result = <span class="bool-val">true</span>;
                 }
             }
         }
@@ -398,34 +584,28 @@
         result
     }
 
-    <span class="kw">fn </span>find(<span class="kw-2">&amp;</span><span class="self">self</span>, target: OpId, doc: <span class="kw-2">&amp;</span>Automerge) -&gt; <span class="prelude-ty">Result</span>&lt;usize, usize&gt; {
-        <span class="kw">let </span>metadata = <span class="kw-2">&amp;</span>doc.ops().m;
+    <span class="kw">fn </span>find(<span class="kw-2">&amp;</span><span class="self">self</span>, target: OpId, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Result</span>&lt;usize, usize&gt; {
         <span class="self">self</span>.state
-            .binary_search_by(|probe| metadata.lamport_cmp(probe.<span class="number">0</span>, target))
+            .binary_search_by(|probe| m.lamport_cmp(probe.<span class="number">0</span>, target))
     }
 
     <span class="kw">fn </span>mark_above&lt;<span class="lifetime">&#39;b</span>&gt;(
-        state: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>[(OpId, Mark&lt;<span class="lifetime">&#39;a</span>&gt;)],
+        state: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>[(OpId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData)],
         index: usize,
-        mark: <span class="kw-2">&amp;</span>Mark&lt;<span class="lifetime">&#39;a</span>&gt;,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="prelude-val">Some</span>(
-            <span class="kw-2">&amp;</span>state[index..]
-                .iter()
-                .find(|(<span class="kw">_</span>, m)| m.name() == mark.name())<span class="question-mark">?
-                </span>.<span class="number">1</span>,
-        )
+        mark: <span class="kw-2">&amp;</span>MarkData,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>MarkData&gt; {
+        <span class="prelude-val">Some</span>(state[index..].iter().find(|(<span class="kw">_</span>, m)| m.name == mark.name)<span class="question-mark">?</span>.<span class="number">1</span>)
     }
 
     <span class="kw">fn </span>mark_below&lt;<span class="lifetime">&#39;b</span>&gt;(
-        state: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span>[(OpId, Mark&lt;<span class="lifetime">&#39;a</span>&gt;)],
+        state: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span>[(OpId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData)],
         index: usize,
-        mark: <span class="kw-2">&amp;</span>Mark&lt;<span class="lifetime">&#39;a</span>&gt;,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span>Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        mark: <span class="kw-2">&amp;</span>MarkData,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>MarkData&gt; {
         <span class="prelude-val">Some</span>(
-            <span class="kw-2">&amp;mut </span>state[<span class="number">0</span>..index]
+            state[<span class="number">0</span>..index]
                 .iter_mut()
-                .filter(|(<span class="kw">_</span>, m)| m.data.name == mark.data.name)
+                .filter(|(<span class="kw">_</span>, m)| m.name == mark.name)
                 .last()<span class="question-mark">?
                 </span>.<span class="number">1</span>,
         )

@@ -809,10 +809,28 @@
 <a href="#809" id="809">809</a>
 <a href="#810" id="810">810</a>
 <a href="#811" id="811">811</a>
+<a href="#812" id="812">812</a>
+<a href="#813" id="813">813</a>
+<a href="#814" id="814">814</a>
+<a href="#815" id="815">815</a>
+<a href="#816" id="816">816</a>
+<a href="#817" id="817">817</a>
+<a href="#818" id="818">818</a>
+<a href="#819" id="819">819</a>
+<a href="#820" id="820">820</a>
+<a href="#821" id="821">821</a>
+<a href="#822" id="822">822</a>
+<a href="#823" id="823">823</a>
+<a href="#824" id="824">824</a>
+<a href="#825" id="825">825</a>
+<a href="#826" id="826">826</a>
+<a href="#827" id="827">827</a>
+<a href="#828" id="828">828</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
+<span class="kw">use </span>std::rc::Rc;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark, MarkSet};
 <span class="kw">use </span><span class="kw">crate</span>::patches::{PatchLog, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdSearch};
 <span class="kw">use </span><span class="kw">crate</span>::storage::Change <span class="kw">as </span>StoredChange;
@@ -1105,7 +1123,7 @@
             doc.ops_mut().insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
         }
 
-        <span class="self">self</span>.finalize_op(doc, patch_log, obj, prop, op);
+        <span class="self">self</span>.finalize_op(doc, patch_log, obj, prop, op, <span class="prelude-val">None</span>);
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert&lt;V: Into&lt;ScalarValue&gt;&gt;(
@@ -1157,7 +1175,8 @@
             <span class="kw-2">&amp;</span>obj,
             query::InsertNth::new(index, ListEncoding::List, <span class="self">self</span>.scope.clone()),
         );
-
+        <span class="kw">let </span>marks = query.marks(<span class="kw-2">&amp;</span>doc.ops().m);
+        <span class="kw">let </span>pos = query.pos();
         <span class="kw">let </span>key = query.key()<span class="question-mark">?</span>;
 
         <span class="kw">let </span>op = Op {
@@ -1169,9 +1188,9 @@
             insert: <span class="bool-val">true</span>,
         };
 
-        doc.ops_mut().insert(query.pos(), <span class="kw-2">&amp;</span>obj, op.clone());
+        doc.ops_mut().insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
 
-        <span class="self">self</span>.finalize_op(doc, patch_log, obj, Prop::Seq(index), op);
+        <span class="self">self</span>.finalize_op(doc, patch_log, obj, Prop::Seq(index), op, marks);
 
         <span class="prelude-val">Ok</span>(id)
     }
@@ -1316,7 +1335,7 @@
         <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = prop.into();
         <span class="kw">if </span>obj.typ == ObjType::Text {
-            <span class="kw">let </span>index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj.typ))<span class="question-mark">?</span>;
+            <span class="kw">let </span>index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))<span class="question-mark">?</span>;
             <span class="self">self</span>.inner_splice(
                 doc,
                 patch_log,
@@ -1450,6 +1469,7 @@
             );
             <span class="kw">let </span><span class="kw-2">mut </span>pos = query.pos();
             <span class="kw">let </span><span class="kw-2">mut </span>key = query.key()<span class="question-mark">?</span>;
+            <span class="kw">let </span>marks = query.marks(<span class="kw-2">&amp;</span>doc.ops().m);
             <span class="kw">let </span><span class="kw-2">mut </span>cursor = index;
             <span class="kw">let </span><span class="kw-2">mut </span>width = <span class="number">0</span>;
 
@@ -1474,14 +1494,20 @@
                     SpliceType::Text(text)
                         <span class="kw">if </span><span class="macro">matches!</span>(patch_log.text_rep(), TextRepresentation::String) =&gt;
                     {
-                        patch_log.splice(obj, index, text);
+                        patch_log.splice(obj, index, text, marks);
                     }
                     SpliceType::List | SpliceType::Text(..) =&gt; {
                         <span class="kw">let </span>start = <span class="self">self</span>.operations.len() - values.len();
                         <span class="kw">for </span>(offset, v) <span class="kw">in </span>values.iter().enumerate() {
                             <span class="kw">let </span>op = <span class="kw-2">&amp;</span><span class="self">self</span>.operations[start + offset].<span class="number">1</span>;
-                            <span class="comment">//let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            </span>patch_log.insert(obj, index + offset, v.clone().into(), op.id, <span class="bool-val">false</span>);
+                            patch_log.insert(
+                                obj,
+                                index + offset,
+                                v.clone().into(),
+                                op.id,
+                                <span class="bool-val">false</span>,
+                                marks.clone(),
+                            );
                         }
                     }
                 }
@@ -1510,7 +1536,7 @@
             OpType::MarkEnd(expand.after()),
         )<span class="question-mark">?</span>;
         <span class="kw">if </span>patch_log.is_active() {
-            patch_log.mark(obj.id, <span class="kw-2">&amp;</span>[mark.clone()]);
+            patch_log.mark(obj.id, mark.start, mark.len(), <span class="kw-2">&amp;</span>mark.into_mark_set());
         }
         <span class="prelude-val">Ok</span>(())
     }
@@ -1537,6 +1563,7 @@
         obj: ObjId,
         prop: Prop,
         op: Op,
+        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="comment">// TODO - id_to_exid should be a noop if not used - change type to Into&lt;ExId&gt;?
         </span><span class="kw">if </span>patch_log.is_active() {
@@ -1548,14 +1575,21 @@
                     <span class="kw">match </span>(obj_type, prop) {
                         (<span class="prelude-val">Some</span>(ObjType::List), Prop::Seq(index)) =&gt; {
                             <span class="comment">//let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            </span>patch_log.insert(obj, index, op.value().into(), op.id, <span class="bool-val">false</span>);
+                            </span>patch_log.insert(obj, index, op.value().into(), op.id, <span class="bool-val">false</span>, marks);
                         }
                         (<span class="prelude-val">Some</span>(ObjType::Text), Prop::Seq(index)) =&gt; {
                             <span class="kw">if </span><span class="macro">matches!</span>(patch_log.text_rep(), TextRepresentation::Array) {
                                 <span class="comment">//let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                </span>patch_log.insert(obj, index, op.value().into(), op.id, <span class="bool-val">false</span>);
+                                </span>patch_log.insert(
+                                    obj,
+                                    index,
+                                    op.value().into(),
+                                    op.id,
+                                    <span class="bool-val">false</span>,
+                                    marks,
+                                );
                             } <span class="kw">else </span>{
-                                patch_log.splice(obj, index, op.to_str());
+                                patch_log.splice(obj, index, op.to_str(), marks);
                             }
                         }
                         <span class="kw">_ </span>=&gt; {}

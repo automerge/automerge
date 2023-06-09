@@ -727,23 +727,108 @@
 <a href="#727" id="727">727</a>
 <a href="#728" id="728">728</a>
 <a href="#729" id="729">729</a>
+<a href="#730" id="730">730</a>
+<a href="#731" id="731">731</a>
+<a href="#732" id="732">732</a>
+<a href="#733" id="733">733</a>
+<a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
+<span class="kw">use </span>std::rc::Rc;
 
 <span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use crate</span>::{
-    marks::{Mark, MarkStateMachine},
+    marks::{MarkSet, MarkStateMachine},
     patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
 <span class="attr">#[derive(Debug, Default)]
-</span><span class="kw">struct </span>TextState&lt;<span class="lifetime">&#39;a</span>&gt; {
+</span><span class="kw">struct </span>TextSpan {
     text: String,
+    start: usize,
+    marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+}
+
+<span class="attr">#[derive(Debug, Default)]
+</span><span class="kw">struct </span>TextState&lt;<span class="lifetime">&#39;a</span>&gt; {
     len: usize,
+    spans: Vec&lt;TextSpan&gt;,
     marks: MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt;,
-    finished: Vec&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TextState&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>push_str(<span class="kw-2">&amp;mut </span><span class="self">self</span>, text: <span class="kw-2">&amp;</span>str, len: usize) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(last_span) = <span class="self">self</span>.spans.last_mut() {
+            last_span.text.push_str(text);
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.spans.push(TextSpan {
+                text: text.to_owned(),
+                start: <span class="number">0</span>,
+                marks: <span class="prelude-val">None</span>,
+            });
+        }
+        <span class="self">self</span>.len += len;
+    }
+
+    <span class="kw">fn </span>push_mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">let </span>marks = <span class="self">self</span>.marks.current();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = <span class="self">self</span>.spans.last_mut() {
+            <span class="kw">if </span>last.marks.as_ref() == marks {
+                <span class="kw">return</span>;
+            }
+            <span class="kw">if </span>last.text.is_empty() {
+                last.marks = marks.cloned();
+                <span class="kw">return</span>;
+            }
+        }
+        <span class="self">self</span>.spans.push(TextSpan {
+            text: <span class="string">&quot;&quot;</span>.to_owned(),
+            start: <span class="self">self</span>.len,
+            marks: marks.cloned(),
+        })
+    }
 }
 
 <span class="kw">struct </span>Put&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -786,8 +871,7 @@
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="comment">//let exid = doc.id_to_exid(obj.0);
-    </span><span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
+    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
     <span class="kw">let </span>encoding = ListEncoding::Text;
     <span class="kw">let </span>state = TextState::default();
     <span class="kw">let </span>state = ops_by_key
@@ -796,17 +880,16 @@
             <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark(<span class="prelude-val">None</span>)).last() {
                 <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
                     OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
-                        state.text.push_str(o.to_str());
-                        state.len += o.width(encoding);
+                        state.push_str(o.to_str(), o.width(encoding))
                     }
                     OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = state.marks.mark_begin(o.id, state.len, data, doc) {
-                            state.finished.push(mark);
+                        <span class="kw">if </span>state.marks.mark_begin(o.id, data, <span class="kw-2">&amp;</span>doc.ops.m) {
+                            state.push_mark();
                         }
                     }
                     OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = state.marks.mark_end(o.id, state.len, doc) {
-                            state.finished.push(mark);
+                        <span class="kw">if </span>state.marks.mark_end(o.id, <span class="kw-2">&amp;</span>doc.ops.m) {
+                            state.push_mark();
                         }
                     }
                     OpType::Increment(<span class="kw">_</span>) | OpType::Delete =&gt; {}
@@ -814,8 +897,11 @@
             }
             state
         });
-    patch_log.splice(<span class="kw-2">*</span>obj, <span class="number">0</span>, state.text.as_str());
-    patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>state.finished);
+    <span class="kw">for </span>span <span class="kw">in </span>state.spans {
+        <span class="kw">if </span>!span.text.is_empty() {
+            patch_log.splice(<span class="kw-2">*</span>obj, span.start, span.text.as_str(), span.marks);
+        }
+    }
 }
 
 <span class="kw">fn </span>log_list_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
@@ -824,31 +910,30 @@
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="comment">//let exid = doc.id_to_exid(obj.0);
-    </span><span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
+    <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
     <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
     <span class="kw">let </span><span class="kw-2">mut </span>len = <span class="number">0</span>;
-    <span class="kw">let </span><span class="kw-2">mut </span>finished = Vec::new();
-    ops_by_key
+    <span class="comment">//let mut finished = Vec::new();
+    </span>ops_by_key
         .into_iter()
         .filter_map(|(_key, key_ops)| {
             key_ops
                 .filter(|o| o.visible_or_mark(<span class="prelude-val">None</span>))
                 .filter_map(|o| <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
-                    OpType::Make(obj_type) =&gt; <span class="prelude-val">Some</span>((Value::Object(<span class="kw-2">*</span>obj_type), o.id)),
-                    OpType::Put(value) =&gt; <span class="prelude-val">Some</span>((Value::Scalar(Cow::Borrowed(value)), o.id)),
+                    OpType::Make(obj_type) =&gt; {
+                        <span class="prelude-val">Some</span>((Value::Object(<span class="kw-2">*</span>obj_type), o.id, marks.current().cloned()))
+                    }
+                    OpType::Put(value) =&gt; <span class="prelude-val">Some</span>((
+                        Value::Scalar(Cow::Borrowed(value)),
+                        o.id,
+                        marks.current().cloned(),
+                    )),
                     OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = marks.mark_begin(o.id, len, data, doc) {
-                            <span class="comment">// side effect
-                            </span>finished.push(mark)
-                        }
+                        marks.mark_begin(o.id, data, <span class="kw-2">&amp;</span>doc.ops.m);
                         <span class="prelude-val">None
                     </span>}
                     OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
-                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = marks.mark_end(o.id, len, doc) {
-                            <span class="comment">// side effect
-                            </span>finished.push(mark)
-                        }
+                        marks.mark_end(o.id, <span class="kw-2">&amp;</span>doc.ops.m);
                         <span class="prelude-val">None
                     </span>}
                     <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
@@ -861,11 +946,10 @@
                     </span>(pos, value)
                 })
         })
-        .for_each(|(index, (val_enum, (value, opid)))| {
+        .for_each(|(index, (val_enum, (value, opid, marks)))| {
             <span class="kw">let </span>conflict = val_enum &gt; <span class="number">0</span>;
-            patch_log.insert(<span class="kw-2">*</span>obj, index, value.clone().into(), opid, conflict);
+            patch_log.insert(<span class="kw-2">*</span>obj, index, value.clone().into(), opid, conflict, marks);
         });
-    patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>finished);
 }
 
 <span class="kw">fn </span>log_map_key_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
@@ -936,6 +1020,12 @@
         Untagged(<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;static</span>&gt;),
     }
 
+    <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;(Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId, bool)&gt; <span class="kw">for </span>PatchValue {
+        <span class="kw">fn </span>from(value: (Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId, bool)) -&gt; <span class="self">Self </span>{
+            <span class="self">Self</span>::Tagged(value.<span class="number">0</span>.into_owned(), value.<span class="number">1</span>)
+        }
+    }
+
     <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;(Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId)&gt; <span class="kw">for </span>PatchValue {
         <span class="kw">fn </span>from(value: (Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId)) -&gt; <span class="self">Self </span>{
             <span class="self">Self</span>::Tagged(value.<span class="number">0</span>.into_owned(), value.<span class="number">1</span>)
@@ -997,7 +1087,7 @@
                 <span class="kw">match </span>patch {
                     Patch {
                         obj,
-                        action: PatchAction::SpliceText { index, value },
+                        action: PatchAction::SpliceText { index, value, .. },
                         ..
                     } =&gt; acc.push(ObservedPatch::SpliceText {
                         obj,

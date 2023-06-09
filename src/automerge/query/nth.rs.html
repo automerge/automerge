@@ -167,7 +167,7 @@
     <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
         <span class="self">self</span>.idx.check_if_node_is_clean(child);
         <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
-            <span class="self">self</span>.idx.process_node(child, ops)
+            <span class="self">self</span>.idx.process_node(child, ops, <span class="prelude-val">None</span>)
         } <span class="kw">else </span>{
             QueryResult::Descend
         }

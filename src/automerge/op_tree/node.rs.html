@@ -516,7 +516,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>,
         query: <span class="kw-2">&amp;mut </span>Q,
-        m: <span class="kw-2">&amp;</span>OpSetMetadata,
+        m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
         ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
     ) -&gt; bool
     <span class="kw">where

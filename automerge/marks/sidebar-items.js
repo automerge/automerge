@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["ExpandMark"],"struct":["Mark","MarkData"]};
+window.SIDEBAR_ITEMS = {"enum":["ExpandMark"],"struct":["Mark","MarkData","MarkSet"]};
