@@ -19,12 +19,9 @@ struct TextSpan {
 
 #[derive(Debug, Default)]
 struct TextState<'a> {
-    //text: String,
     len: usize,
-    //mark: Option<MarkData>,
     spans: Vec<TextSpan>,
     marks: MarkStateMachine<'a>,
-    //finished: Vec<Mark<'a>>,
 }
 
 impl<'a> TextState<'a> {
@@ -179,7 +176,6 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
             let conflict = val_enum > 0;
             patch_log.insert(*obj, index, value.clone().into(), opid, conflict, marks);
         });
-    //patch_log.mark(*obj, &finished);
 }
 
 fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(

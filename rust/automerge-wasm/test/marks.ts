@@ -619,7 +619,7 @@ describe('Automerge', () => {
       ]);
     })
 
-    it('peritext marks', () => {
+    it('fully deleted marks will not attach to new text', () => {
       let doc1 : Automerge = create({ actor: "aabbcc" })
 
       let text = doc1.putObject("_root", "text", "The Peritext editor")

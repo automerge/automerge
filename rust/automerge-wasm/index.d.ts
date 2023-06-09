@@ -104,6 +104,10 @@ export type PutPatch = {
   conflict?: boolean
 }
 
+export interface MarkSet  {
+  [name : string]: Value;
+}
+
 export type MarkPatch = {
   action: 'mark'
   path: Prop[],
@@ -140,12 +144,14 @@ export type SpliceTextPatch = {
   action: 'splice'
   path: Prop[],
   value: string,
+  marks?: MarkSet,
 }
 
 export type InsertPatch = {
   action: 'insert'
   path: Prop[],
   values: PatchValue[],
+  marks?: MarkSet,
   conflicts?: boolean[]
 }
 

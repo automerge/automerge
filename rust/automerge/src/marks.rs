@@ -85,50 +85,20 @@ impl MarkAccumulator {
     }
 }
 
-/*
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct MarkSetBldr {
-    pub(crate) marks: Rc<MarkSet>,
-}
-*/
-
-/*
-impl std::ops::Deref for MarkSetBldr {
-    type Target = MarkSet;
-
-    fn deref(&self) -> &Self::Target {
-        &self.marks
-    }
-}
-*/
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MarkSet {
     marks: BTreeMap<SmolStr, ScalarValue>,
 }
 
 impl MarkSet {
-    pub fn iter(&self) -> MarkSetIterator<'_> {
-        MarkSetIterator {
-            iter: self.marks.iter(),
-        }
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
+        self.marks
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
     }
 
     fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
         &self.marks
-    }
-}
-
-#[derive(Debug)]
-pub struct MarkSetIterator<'a> {
-    iter: std::collections::btree_map::Iter<'a, SmolStr, ScalarValue>,
-}
-
-impl<'a> Iterator for MarkSetIterator<'a> {
-    type Item = (&'a str, &'a ScalarValue);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(name, value)| (name.as_str(), value))
     }
 }
 

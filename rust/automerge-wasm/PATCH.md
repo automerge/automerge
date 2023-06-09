@@ -68,10 +68,16 @@ If the field is missing, it's assumed to be false.
 Inserts one or more values into a list.  This increases the length of the list by the given amount.
 
 ```ts
+
+interface MarkSet  {
+  [name : string]: Value;
+}
+
 type InsertPatch = {
   action: 'insert'
   path: Prop[],
   values: PatchValue[],
+  marks?: MarkSet,
   conflicts?: boolean[]
 }
 
@@ -80,10 +86,11 @@ let patch : InsertPatch = {
   path: [ "emoji", 3 ],
   values: [ "😍", "🔥", "🎆" ],
   conflicts: [ false, true, false ] // optional
+  marks: { size: 24 },
 }
 ```
 
-If the `conflicts` field is missing, it's assumed to be all false.
+If the `conflicts` field is missing, it's assumed to be all false. `marks` will be missing if there are none.
 
 ### Delete
 
@@ -133,14 +140,18 @@ type SpliceTextPatch = {
   action: 'splice'
   path: Prop[],
   value: string,
+  marks?: MarkSet,
 }
 
 let patch : SpliceTextPatch = {
   action: "inc",
   path: [ "text", 123 ],
   value: "and so it was done"
+  marks: { bold: true },
 }
 ```
+
+The 'marks` field will be missing if there are none.
 
 ### Conflict
 

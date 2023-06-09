@@ -268,12 +268,6 @@ fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     None
 }
 
-// this implementation of MarkDiff creates two sets of marks - before and then after
-// and then compares them to generate a diff
-// this has a O(n2) performance vs the number of marks which isn't ideal
-// im confident theres a single pass solution to this that is O(n) but I will
-// leave it to a future person to figure out how to implement that :)
-
 #[derive(Debug, Clone)]
 struct MarkDiff<'a> {
     doc: &'a Automerge,
