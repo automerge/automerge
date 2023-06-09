@@ -4,25 +4,10 @@ use crate::query::QueryResult;
 use crate::types::{Key, ListEncoding, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct MarkMap<'a> {
     map: HashMap<OpId, &'a MarkData, FxBuildHasher>,
-}
-
-impl<'a> Deref for MarkMap<'a> {
-    type Target = HashMap<OpId, &'a MarkData, FxBuildHasher>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.map
-    }
-}
-
-impl<'a> DerefMut for MarkMap<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.map
-    }
 }
 
 impl<'a> MarkMap<'a> {
@@ -36,6 +21,18 @@ impl<'a> MarkMap<'a> {
             }
             _ => {}
         }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &&MarkData)> {
+        self.map.iter()
+    }
+
+    pub(crate) fn insert(&mut self, op: OpId, data: &'a MarkData) {
+        self.map.insert(op, data);
+    }
+
+    pub(crate) fn remove(&mut self, op: &OpId) {
+        self.map.remove(op);
     }
 }
 
