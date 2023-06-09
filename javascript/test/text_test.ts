@@ -15,7 +15,7 @@ describe("Automerge.Text", () => {
   })
 
   it("should support insertion", () => {
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 0, 0, "a"))
+    s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 0, 0, "a"))
     assert.strictEqual(s1.text.length, 1)
     assert.strictEqual(s1.text[0], "a")
     assert.strictEqual(s1.text, "a")
@@ -23,8 +23,10 @@ describe("Automerge.Text", () => {
   })
 
   it("should support deletion", () => {
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 0, 0, "abc"))
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 1, 1))
+    s1 = Automerge.change(s1, doc =>
+      Automerge.splice(doc, ["text"], 0, 0, "abc")
+    )
+    s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 1))
     assert.strictEqual(s1.text.length, 2)
     assert.strictEqual(s1.text[0], "a")
     assert.strictEqual(s1.text[1], "c")
@@ -32,9 +34,11 @@ describe("Automerge.Text", () => {
   })
 
   it("should support implicit and explicit deletion", () => {
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 0, 0, "abc"))
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 1, 1))
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 1, 0))
+    s1 = Automerge.change(s1, doc =>
+      Automerge.splice(doc, ["text"], 0, 0, "abc")
+    )
+    s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 1))
+    s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 0))
     assert.strictEqual(s1.text.length, 2)
     assert.strictEqual(s1.text[0], "a")
     assert.strictEqual(s1.text[1], "c")
@@ -42,8 +46,12 @@ describe("Automerge.Text", () => {
   })
 
   it("should handle concurrent insertion", () => {
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 0, 0, "abc"))
-    s2 = Automerge.change(s2, doc => Automerge.splice(doc, "text", 0, 0, "xyz"))
+    s1 = Automerge.change(s1, doc =>
+      Automerge.splice(doc, ["text"], 0, 0, "abc")
+    )
+    s2 = Automerge.change(s2, doc =>
+      Automerge.splice(doc, ["text"], 0, 0, "xyz")
+    )
     s1 = Automerge.merge(s1, s2)
     assert.strictEqual(s1.text.length, 6)
     assertEqualsOneOf(s1.text, "abcxyz", "xyzabc")
@@ -52,7 +60,7 @@ describe("Automerge.Text", () => {
   it("should handle text and other ops in the same change", () => {
     s1 = Automerge.change(s1, doc => {
       doc.foo = "bar"
-      Automerge.splice(doc, "text", 0, 0, "a")
+      Automerge.splice(doc, ["text"], 0, 0, "a")
     })
     assert.strictEqual(s1.foo, "bar")
     assert.strictEqual(s1.text, "a")
@@ -60,15 +68,17 @@ describe("Automerge.Text", () => {
   })
 
   it("should serialize to JSON as a simple string", () => {
-    s1 = Automerge.change(s1, doc => Automerge.splice(doc, "text", 0, 0, 'a"b'))
+    s1 = Automerge.change(s1, doc =>
+      Automerge.splice(doc, ["text"], 0, 0, 'a"b')
+    )
     assert.strictEqual(JSON.stringify(s1), '{"text":"a\\"b"}')
   })
 
   it("should allow modification after an object is assigned to a document", () => {
     s1 = Automerge.change(Automerge.init(), doc => {
       doc.text = ""
-      Automerge.splice(doc, "text", 0, 0, "abcd")
-      Automerge.splice(doc, "text", 2, 1)
+      Automerge.splice(doc, ["text"], 0, 0, "abcd")
+      Automerge.splice(doc, ["text"], 2, 1)
       assert.strictEqual(doc.text, "abd")
     })
     assert.strictEqual(s1.text, "abd")
@@ -76,7 +86,7 @@ describe("Automerge.Text", () => {
 
   it("should not allow modification outside of a change callback", () => {
     assert.throws(
-      () => Automerge.splice(s1, "text", 0, 0, "a"),
+      () => Automerge.splice(s1, ["text"], 0, 0, "a"),
       /object cannot be modified outside of a change block/
     )
   })
