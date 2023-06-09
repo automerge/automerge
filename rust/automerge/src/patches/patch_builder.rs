@@ -1,6 +1,7 @@
 use core::fmt::Debug;
+use std::rc::Rc;
 
-use crate::marks::MarkSetBldr;
+use crate::marks::MarkSet;
 use crate::{ObjId, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
@@ -9,7 +10,7 @@ use crate::{marks::Mark, sequence_tree::SequenceTree};
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PatchBuilder {
     patches: Vec<Patch>,
-    last_mark_set: Option<MarkSetBldr>, // keep this around for a quick pointer equality test
+    last_mark_set: Option<Rc<MarkSet>>, // keep this around for a quick pointer equality test
 }
 
 impl PatchBuilder {
@@ -38,7 +39,7 @@ impl PatchBuilder {
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
-        marks: Option<MarkSetBldr>,
+        marks: Option<Rc<MarkSet>>,
     ) {
         let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
@@ -77,7 +78,7 @@ impl PatchBuilder {
         obj: ObjId,
         index: usize,
         value: &str,
-        marks: Option<MarkSetBldr>,
+        marks: Option<Rc<MarkSet>>,
     ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,

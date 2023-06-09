@@ -1,8 +1,9 @@
 use std::fmt;
 use std::ops::RangeBounds;
+use std::rc::Rc;
 
 use crate::exid::ExId;
-use crate::marks::{MarkSet, MarkSetBldr};
+use crate::marks::MarkSet;
 use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
@@ -61,6 +62,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
     type Item = ListRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        log!("ListRange next");
         self.iter.as_mut().and_then(|inner| {
             for TopOp {
                 op,
@@ -68,6 +70,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 marks,
             } in inner.iter.by_ref()
             {
+                log!("TOP OP: {:?}", op);
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());
@@ -93,7 +96,7 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<MarkSetBldr>,
+    pub(crate) marks: Option<Rc<MarkSet>>,
 }
 
 impl<'a> ListRangeItem<'a> {

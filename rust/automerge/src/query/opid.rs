@@ -1,10 +1,11 @@
-use crate::marks::{MarkSetBldr, MarkStateMachine};
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_tree::OpTreeNode;
 use crate::query::OpSetMetadata;
 use crate::query::{ListState, MarkMap, QueryResult, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, Op, OpId};
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 /// Search for an OpId in a tree.  /// Returns the index of the operation in the tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +72,7 @@ impl<'a> OpIdSearch<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<MarkSetBldr> {
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Rc<MarkSet>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in self.marks.iter() {
             marks.mark_begin(*id, mark_data, m);

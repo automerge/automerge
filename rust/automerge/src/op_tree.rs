@@ -1,5 +1,5 @@
 use crate::iter::TopOps;
-use crate::marks::MarkSetBldr;
+use crate::marks::MarkSet;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::patches::PatchLog;
 use crate::{
@@ -12,6 +12,7 @@ use crate::{
     ObjType, OpType,
 };
 use std::cmp::Ordering;
+use std::rc::Rc;
 use std::{fmt::Debug, mem};
 
 mod iter;
@@ -86,7 +87,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<MarkSetBldr>,
+    pub(crate) marks: Option<Rc<MarkSet>>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -107,7 +108,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     for mark in q.marks {
                         let index = mark.start;
                         let len = mark.len();
-                        let marks = mark.into_mark_set_bldr();
+                        let marks = mark.into_mark_set();
                         patch_log.mark(obj.id, index, len, &marks);
                     }
                 }
@@ -243,7 +244,7 @@ impl OpTreeInternal {
         op: &'a Op,
         mut pos: usize,
         index: usize,
-        marks: Option<MarkSetBldr>,
+        marks: Option<Rc<MarkSet>>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;

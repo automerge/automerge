@@ -27,11 +27,11 @@ impl<'a> Mark<'a> {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
-    pub(crate) fn into_mark_set_bldr(self) -> MarkSetBldr {
-        let mut m = MarkSetBldr::default();
+    pub(crate) fn into_mark_set(self) -> Rc<MarkSet> {
+        let mut m = MarkSet::default();
         let data = self.data.into_owned();
         m.insert(data.name, data.value);
-        m
+        Rc::new(m)
     }
 }
 
@@ -67,8 +67,8 @@ impl MarkAccumulator {
         })
     }
 
-    pub(crate) fn add(&mut self, index: usize, len: usize, marks: &MarkSetBldr) {
-        for (name, value) in marks.inner().iter() {
+    pub(crate) fn add(&mut self, index: usize, len: usize, other: &MarkSet) {
+        for (name, value) in other.marks.iter() {
             let entry = self.marks.entry(name.clone()).or_default();
             if let Some(mut last) = entry.last_mut() {
                 if &last.value == value && last.index + last.len == index {
@@ -85,11 +85,14 @@ impl MarkAccumulator {
     }
 }
 
+/*
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkSetBldr {
     pub(crate) marks: Rc<MarkSet>,
 }
+*/
 
+/*
 impl std::ops::Deref for MarkSetBldr {
     type Target = MarkSet;
 
@@ -97,6 +100,7 @@ impl std::ops::Deref for MarkSetBldr {
         &self.marks
     }
 }
+*/
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MarkSet {
@@ -128,27 +132,23 @@ impl<'a> Iterator for MarkSetIterator<'a> {
     }
 }
 
-impl MarkSetBldr {
+impl MarkSet {
     fn insert(&mut self, name: SmolStr, value: ScalarValue) {
-        Rc::make_mut(&mut self.marks).marks.insert(name, value);
+        self.marks.insert(name, value);
     }
 
     fn remove(&mut self, name: &SmolStr) {
-        Rc::make_mut(&mut self.marks).marks.remove(name);
+        self.marks.remove(name);
     }
 
     fn is_empty(&self) -> bool {
         self.inner().is_empty()
     }
 
-    fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
-        self.marks.inner()
-    }
-
     pub(crate) fn diff(&self, other: &Self) -> Self {
         let mut diff = BTreeMap::default();
-        for (name, value) in self.inner().iter() {
-            match other.inner().get(name) {
+        for (name, value) in self.marks.iter() {
+            match other.marks.get(name) {
                 Some(v) if v != value => {
                     diff.insert(name.clone(), v.clone());
                 }
@@ -158,14 +158,12 @@ impl MarkSetBldr {
                 _ => {}
             }
         }
-        for (name, value) in other.inner().iter() {
-            if !self.inner().contains_key(name) {
+        for (name, value) in other.marks.iter() {
+            if !self.marks.contains_key(name) {
                 diff.insert(name.clone(), value.clone());
             }
         }
-        MarkSetBldr {
-            marks: Rc::new(MarkSet { marks: diff }),
-        }
+        MarkSet { marks: diff }
     }
 }
 
@@ -214,11 +212,11 @@ impl<'a> Mark<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
     state: Vec<(OpId, &'a MarkData)>,
-    current: MarkSetBldr,
+    current: Rc<MarkSet>,
 }
 
 impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn current(&self) -> Option<&MarkSetBldr> {
+    pub(crate) fn current(&self) -> Option<&Rc<MarkSet>> {
         if self.current.is_empty() {
             None
         } else {
@@ -245,12 +243,12 @@ impl<'a> MarkStateMachine<'a> {
         if Self::mark_above(&self.state, index, mark).is_none() {
             if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
                 if below.value != mark.value {
-                    self.current.insert(mark.name.clone(), mark.value.clone());
+                    Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                     result = true
                 }
             } else {
                 // nothing above or below
-                self.current.insert(mark.name.clone(), mark.value.clone());
+                Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                 result = true
             }
         }
@@ -273,11 +271,11 @@ impl<'a> MarkStateMachine<'a> {
             match Self::mark_below(&mut self.state, index, mark) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
-                    self.current.insert(below.name.clone(), below.value.clone());
+                    Rc::make_mut(&mut self.current).insert(below.name.clone(), below.value.clone());
                     result = true;
                 }
                 None => {
-                    self.current.remove(&mark.name);
+                    Rc::make_mut(&mut self.current).remove(&mark.name);
                     result = true;
                 }
             }

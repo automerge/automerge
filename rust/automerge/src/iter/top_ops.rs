@@ -1,7 +1,8 @@
-use crate::marks::{MarkSetBldr, MarkStateMachine};
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_tree::OpSetMetadata;
 use crate::op_tree::OpTreeIter;
 use crate::types::{Clock, Key, Op};
+use std::rc::Rc;
 
 #[derive(Default)]
 pub(crate) struct TopOps<'a> {
@@ -11,7 +12,7 @@ pub(crate) struct TopOps<'a> {
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, &'a Op, Option<MarkSetBldr>)>,
+    last_op: Option<(usize, &'a Op, Option<Rc<MarkSet>>)>,
     marks: MarkStateMachine<'a>,
     meta: Option<&'a OpSetMetadata>,
 }
@@ -20,7 +21,7 @@ pub(crate) struct TopOps<'a> {
 pub(crate) struct TopOp<'a> {
     pub(crate) op: &'a Op,
     pub(crate) conflict: bool,
-    pub(crate) marks: Option<MarkSetBldr>,
+    pub(crate) marks: Option<Rc<MarkSet>>,
 }
 
 impl<'a> TopOps<'a> {
@@ -48,9 +49,11 @@ impl<'a> Iterator for TopOps<'a> {
             if let Some(op) = self.iter.next() {
                 let key = op.elemid_or_key();
                 let visible = op.visible_at(self.clock.as_ref());
-                if self.clock.as_ref()?.covers(&op.id) {
-                    // cant use op.visible() for a mark yet :(
-                    self.marks.process(op, self.meta.unwrap());
+                match (&self.clock, &self.meta) {
+                    (Some(c), Some(m)) if c.covers(&op.id) => {
+                        self.marks.process(op, m);
+                    }
+                    _ => {}
                 }
                 match &self.key {
                     Some(k) if k == &key => {

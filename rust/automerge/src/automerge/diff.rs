@@ -1,12 +1,13 @@
 use itertools::Itertools;
 use std::ops::Deref;
 use std::ops::RangeBounds;
+use std::rc::Rc;
 
 use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
-    marks::{Mark, MarkSetBldr, MarkStateMachine},
+    marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
     types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
     value::Value,
@@ -94,16 +95,16 @@ fn resolve<'a>(
 
 #[derive(Debug, Clone)]
 enum Patch<'a> {
-    New(Winner<'a>, Option<MarkSetBldr>),
+    New(Winner<'a>, Option<Rc<MarkSet>>),
     Old {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<MarkSetBldr>,
+        marks: Option<Rc<MarkSet>>,
     },
     Update {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<MarkSetBldr>,
+        marks: Option<Rc<MarkSet>>,
     },
     Delete(Winner<'a>),
 }
@@ -289,13 +290,13 @@ impl<'a> MarkDiff<'a> {
         }
     }
 
-    fn current(&self) -> Option<MarkSetBldr> {
+    fn current(&self) -> Option<Rc<MarkSet>> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();
         if a != b {
             let result = b.diff(&a);
-            Some(result)
+            Some(Rc::new(result))
         } else {
             None
         }

@@ -1,9 +1,10 @@
 use std::borrow::Cow;
+use std::rc::Rc;
 
 use itertools::Itertools;
 
 use crate::{
-    marks::{MarkSetBldr, MarkStateMachine},
+    marks::{MarkSet, MarkStateMachine},
     patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
@@ -13,7 +14,7 @@ use crate::{
 struct TextSpan {
     text: String,
     start: usize,
-    marks: Option<MarkSetBldr>,
+    marks: Option<Rc<MarkSet>>,
 }
 
 #[derive(Debug, Default)]
