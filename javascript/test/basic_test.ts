@@ -573,7 +573,7 @@ describe("Automerge", () => {
       let doc = Automerge.from({
         value: "The sly fox jumped over the lazy dog",
       })
-      let cursor = Automerge.getCursor(doc, "value", 19)
+      let cursor = Automerge.getCursor(doc, ["value"], 19)
       doc = Automerge.change(doc, d => {
         Automerge.splice(d, ["value"], 0, 3, "Has the")
       })
@@ -585,7 +585,7 @@ describe("Automerge", () => {
         doc.value,
         "Has the sly fox jumped right over the lazy dog"
       )
-      let index = Automerge.getCursorPosition(doc, "value", cursor)
+      let index = Automerge.getCursorPosition(doc, ["value"], cursor)
     })
   })
 })
