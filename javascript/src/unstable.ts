@@ -51,12 +51,13 @@ export {
   type ScalarValue,
 } from "./unstable_types"
 
-import type { Mark, MarkRange, MarkValue } from "./unstable_types"
+import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
 
 import { type PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
+import type { InternalState } from "./internal_state"
 
 export type {
   PutPatch,
@@ -66,6 +67,7 @@ export type {
   IncPatch,
   SyncMessage,
   Heads,
+  Cursor,
 } from "@automerge/automerge-wasm"
 
 export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
@@ -224,10 +226,26 @@ function importOpts<T>(
   }
 }
 
+function cursorToIndex<T>(
+  state: InternalState<T>,
+  value: string,
+  index: number | Cursor
+): number {
+  if (typeof index == "string") {
+    if (/^[0-9]+@[0-9a-zA-z]+$/.test(index)) {
+      return state.handle.getCursorPosition(value, index)
+    } else {
+      throw new RangeError("index must be a number or cursor")
+    }
+  } else {
+    return index
+  }
+}
+
 export function splice<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  index: number,
+  index: number | Cursor,
   del: number,
   newText?: string
 ) {
@@ -244,10 +262,48 @@ export function splice<T>(
   path.unshift(objectId)
   const value = path.join("/")
 
+  index = cursorToIndex(state, value, index)
+
   try {
     return state.handle.splice(value, index, del, newText)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function getCursor<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  index: number
+): Cursor {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for getCursor")
+  }
+  const value = `${objectId}/${prop}`
+  try {
+    return state.handle.getCursor(value, index)
+  } catch (e) {
+    throw new RangeError(`Cannot getCursor: ${e}`)
+  }
+}
+
+export function getCursorPosition<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  cursor: Cursor
+): number {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for getCursorPosition")
+  }
+  const value = `${objectId}/${prop}`
+  try {
+    return state.handle.getCursorPosition(value, cursor)
+  } catch (e) {
+    throw new RangeError(`Cannot getCursorPosition: ${e}`)
   }
 }
 

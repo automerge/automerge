@@ -23,6 +23,8 @@ export type FullValue =
   ["text", ObjID] |
   ["table", ObjID]
 
+export type Cursor = string;
+
 export type FullValueWithId =
   ["str", string, ObjID ] |
   ["int", number, ObjID ] |
@@ -211,6 +213,10 @@ export class Automerge {
   marks(obj: ObjID, heads?: Heads): Mark[];
 
   diff(before: Heads, after: Heads): Patch[];
+
+  // text cursor
+  getCursor(obj: ObjID, index: number, heads?: Heads) : Cursor;
+  getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads) : number;
 
   // isolate
   isolate(heads: Heads): void;
