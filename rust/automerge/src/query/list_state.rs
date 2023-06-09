@@ -1,6 +1,40 @@
+use crate::marks::MarkData;
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::QueryResult;
-use crate::types::{Key, ListEncoding, Op};
+use crate::types::{Key, ListEncoding, Op, OpId, OpType};
+use fxhash::FxBuildHasher;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct MarkMap<'a> {
+    map: HashMap<OpId, &'a MarkData, FxBuildHasher>,
+}
+
+impl<'a> MarkMap<'a> {
+    pub(crate) fn process(&mut self, op: &'a Op) {
+        match &op.action {
+            OpType::MarkBegin(_, data) => {
+                self.map.insert(op.id, data);
+            }
+            OpType::MarkEnd(_) => {
+                self.map.remove(&op.id.prev());
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &&MarkData)> {
+        self.map.iter()
+    }
+
+    pub(crate) fn insert(&mut self, op: OpId, data: &'a MarkData) {
+        self.map.insert(op, data);
+    }
+
+    pub(crate) fn remove(&mut self, op: &OpId) {
+        self.map.remove(op);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListState {
@@ -41,12 +75,17 @@ impl ListState {
         self.never_seen_puts &= node.index.has_never_seen_puts();
     }
 
-    pub(crate) fn process_node(&mut self, node: &OpTreeNode, ops: &[Op]) -> QueryResult {
+    pub(crate) fn process_node<'a>(
+        &mut self,
+        node: &'a OpTreeNode,
+        ops: &[Op],
+        marks: Option<&mut MarkMap<'a>>,
+    ) -> QueryResult {
         if self.encoding == ListEncoding::List {
-            self.process_list_node(node, ops)
+            self.process_list_node(node, ops, marks)
         } else if self.never_seen_puts {
             // text node is clean - use the indexes
-            self.process_text_node(node)
+            self.process_text_node(node, marks)
         } else {
             // text nodes are intended to only be interacted with splice()
             // meaning all ops are inserts or deleted inserts
@@ -57,17 +96,38 @@ impl ListState {
         }
     }
 
-    fn process_text_node(&mut self, node: &OpTreeNode) -> QueryResult {
+    fn process_marks<'a>(&mut self, node: &'a OpTreeNode, marks: Option<&mut MarkMap<'a>>) {
+        if let Some(marks) = marks {
+            for (id, data) in node.index.mark_begin.iter() {
+                marks.insert(*id, data);
+            }
+            for id in node.index.mark_end.iter() {
+                marks.remove(id);
+            }
+        }
+    }
+
+    fn process_text_node<'a>(
+        &mut self,
+        node: &'a OpTreeNode,
+        marks: Option<&mut MarkMap<'a>>,
+    ) -> QueryResult {
         let num_vis = node.index.visible_len(self.encoding);
         if self.index + num_vis >= self.target {
             return QueryResult::Descend;
         }
         self.index += num_vis;
         self.pos += node.len();
+        self.process_marks(node, marks);
         QueryResult::Next
     }
 
-    fn process_list_node(&mut self, node: &OpTreeNode, ops: &[Op]) -> QueryResult {
+    fn process_list_node<'a>(
+        &mut self,
+        node: &'a OpTreeNode,
+        ops: &[Op],
+        marks: Option<&mut MarkMap<'a>>,
+    ) -> QueryResult {
         let mut num_vis = node.index.visible.len();
         if let Some(last_seen) = self.last_seen {
             // the elemid `last_seen` is counted in this node's index
@@ -99,6 +159,7 @@ impl ListState {
         } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
             self.last_seen = None;
         }
+        self.process_marks(node, marks);
         QueryResult::Next
     }
 

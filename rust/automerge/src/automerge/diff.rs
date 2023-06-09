@@ -1,16 +1,15 @@
 use itertools::Itertools;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::ops::RangeBounds;
+use std::rc::Rc;
 
 use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
-    marks::{Mark, MarkStateMachine},
+    marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
+    types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
@@ -35,6 +34,7 @@ fn process<'a, T: Iterator<Item = &'a Op>>(
     ops: T,
     before: &'a Clock,
     after: &'a Clock,
+    diff: &mut MarkDiff<'a>,
 ) -> Option<Patch<'a>> {
     let mut before_op = None;
     let mut after_op = None;
@@ -51,7 +51,7 @@ fn process<'a, T: Iterator<Item = &'a Op>>(
             push_top(&mut after_op, op, predates_before, after);
         }
     }
-    resolve(before_op, after_op)
+    resolve(before_op, after_op, diff)
 }
 
 fn push_top<'a>(top: &mut Option<Winner<'a>>, op: &'a Op, cross_visible: bool, clock: &'a Clock) {
@@ -68,68 +68,70 @@ fn push_top<'a>(top: &mut Option<Winner<'a>>, op: &'a Op, cross_visible: bool, c
     }
 }
 
-fn resolve<'a>(before: Option<Winner<'a>>, after: Option<Winner<'a>>) -> Option<Patch<'a>> {
+fn resolve<'a>(
+    before: Option<Winner<'a>>,
+    after: Option<Winner<'a>>,
+    diff: &mut MarkDiff<'a>,
+) -> Option<Patch<'a>> {
     match (before, after) {
-        (None, Some(after)) if after.is_mark() => Some(Patch::Mark(after, MarkType::Add)),
-        (None, Some(after)) => Some(Patch::New(after)),
-        (Some(before), None) if before.is_mark() => Some(Patch::Mark(before, MarkType::Del)),
+        (None, Some(after)) if after.is_mark() => diff.process_after(after.op),
+        (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
+        (Some(before), None) if before.is_mark() => diff.process_before(before.op),
         (Some(before), None) => Some(Patch::Delete(before)),
-        (Some(_), Some(after)) if after.is_mark() => Some(Patch::Mark(after, MarkType::Old)),
-        (Some(before), Some(after)) if before.op.id == after.op.id => {
-            Some(Patch::Old { before, after })
-        }
-        (Some(before), Some(after)) if before.op.id != after.op.id => {
-            Some(Patch::Update { before, after })
-        }
+        (Some(_), Some(after)) if after.is_mark() => diff.process(after.op),
+        (Some(before), Some(after)) if before.op.id == after.op.id => Some(Patch::Old {
+            before,
+            after,
+            marks: diff.current(),
+        }),
+        (Some(before), Some(after)) if before.op.id != after.op.id => Some(Patch::Update {
+            before,
+            after,
+            marks: diff.after.current().cloned(),
+        }),
         _ => None,
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-enum MarkType {
-    Add,
-    Old,
-    Del,
-}
-
 #[derive(Debug, Clone)]
 enum Patch<'a> {
-    New(Winner<'a>),
+    New(Winner<'a>, Option<Rc<MarkSet>>),
     Old {
         before: Winner<'a>,
         after: Winner<'a>,
+        marks: Option<Rc<MarkSet>>,
     },
     Update {
         before: Winner<'a>,
         after: Winner<'a>,
+        marks: Option<Rc<MarkSet>>,
     },
     Delete(Winner<'a>),
-    Mark(Winner<'a>, MarkType),
 }
 
 impl<'a> Patch<'a> {
     fn op(&'a self) -> &'a Op {
         match self {
-            Patch::New(op) => op,
+            Patch::New(op, _) => op,
             Patch::Update { after, .. } => after,
             Patch::Old { after, .. } => after,
             Patch::Delete(op) => op,
-            Patch::Mark(op, _) => op,
         }
     }
 }
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, typ, ops) in doc.ops().iter_objs() {
+        let mut diff = MarkDiff::new(doc);
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
-            .filter_map(|(_key, key_ops)| process(key_ops, before, after));
+            .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
 
         if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_diff(doc, patch_log, obj, diffs)
+            log_text_diff(patch_log, obj, diffs)
         } else if typ.is_sequence() {
-            log_list_diff(doc, patch_log, obj, diffs);
+            log_list_diff(patch_log, obj, diffs);
         } else {
             log_map_diff(doc, patch_log, obj, diffs);
         }
@@ -137,23 +139,17 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
 }
 
 fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
-    let mut marks = MarkDiff::default();
     patches.fold(0, |index, patch| match patch {
-        Patch::Mark(op, mark_type) => {
-            marks.process(index, mark_type, op.op, doc);
-            index
-        }
-        Patch::New(op) => {
+        Patch::New(op, marks) => {
             let value = op.value_at(Some(op.clock)).into();
-            patch_log.insert(*obj, index, value, op.id, op.conflict);
+            patch_log.insert(*obj, index, value, op.id, op.conflict, marks);
             index + 1
         }
-        Patch::Update { before, after } => {
+        Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
                 let value = after.value_at(Some(after.clock)).into();
@@ -164,12 +160,19 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             index + 1
         }
-        Patch::Old { before, after } => {
+        Patch::Old {
+            before,
+            after,
+            marks,
+        } => {
             if !before.conflict && after.conflict {
                 patch_log.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
                 patch_log.increment_seq(*obj, index, n, after.id);
+            }
+            if let Some(marks) = &marks {
+                patch_log.mark(*obj, index, 1, marks)
             }
             index + 1
         }
@@ -178,42 +181,40 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index
         }
     });
-    if let Some(m) = marks.finish() {
-        patch_log.mark(*obj, &m);
-    }
 }
 
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
-    let mut marks = MarkDiff::default();
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
-        Patch::Mark(op, mark_type) => {
-            marks.process(index, *mark_type, op.op, doc);
-            index
-        }
-        Patch::New(op) => {
-            patch_log.splice(*obj, index, op.to_str());
+        Patch::New(op, marks) => {
+            patch_log.splice(*obj, index, op.to_str(), marks.clone());
             index + op.width(encoding)
         }
-        Patch::Update { before, after } => {
+        Patch::Update {
+            before,
+            after,
+            marks,
+        } => {
             patch_log.delete_seq(*obj, index, before.width(encoding));
-            patch_log.splice(*obj, index, after.to_str());
+            patch_log.splice(*obj, index, after.to_str(), marks.clone());
             index + after.width(encoding)
         }
-        Patch::Old { after, .. } => index + after.width(encoding),
+        Patch::Old { after, marks, .. } => {
+            let len = after.width(encoding);
+            if let Some(marks) = marks {
+                patch_log.mark(*obj, index, len, marks)
+            }
+            index + len
+        }
         Patch::Delete(before) => {
             patch_log.delete_seq(*obj, index, before.width(encoding));
             index
         }
     });
-    if let Some(m) = marks.finish() {
-        patch_log.mark(*obj, &m);
-    }
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
@@ -225,11 +226,11 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
     diffs
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
-            Patch::New(op) => {
+            Patch::New(op, _) => {
                 let value = op.value_at(Some(op.clock)).into();
                 patch_log.put_map(*obj, key, value, op.id, op.conflict, false)
             }
-            Patch::Update { before, after } => {
+            Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
                     let value = after.value_at(Some(after.clock)).into();
@@ -239,7 +240,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                     patch_log.put_map(*obj, key, value, after.id, conflict, false)
                 }
             }
-            Patch::Old { before, after } => {
+            Patch::Old { before, after, .. } => {
                 if !before.conflict && after.conflict {
                     patch_log.flag_conflict_map(*obj, key);
                 }
@@ -248,7 +249,6 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 }
             }
             Patch::Delete(_) => patch_log.delete_map(*obj, key),
-            Patch::Mark(_, _) => {}
         });
 }
 
@@ -268,177 +268,48 @@ fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     None
 }
 
-// this implementation of MarkDiff creates two sets of marks - before and then after
-// and then compares them to generate a diff
-// this has a O(n2) performance vs the number of marks which isn't ideal
-// im confident theres a single pass solution to this that is O(n) but I will
-// leave it to a future person to figure out how to implement that :)
-
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct MarkDiff<'a> {
+    doc: &'a Automerge,
     before: MarkStateMachine<'a>,
     after: MarkStateMachine<'a>,
-    before_marks: Vec<Mark<'a>>,
-    after_marks: Vec<Mark<'a>>,
 }
 
 impl<'a> MarkDiff<'a> {
-    fn process(&mut self, index: usize, mark_type: MarkType, op: &'a Op, doc: &'a Automerge) {
-        match mark_type {
-            MarkType::Add => self.add(index, op, doc),
-            MarkType::Old => self.before(index, op, doc),
-            MarkType::Del => self.del(index, op, doc),
+    fn new(doc: &'a Automerge) -> Self {
+        MarkDiff {
+            doc,
+            before: MarkStateMachine::default(),
+            after: MarkStateMachine::default(),
         }
     }
 
-    fn add(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
-        let mark = match &op.action {
-            OpType::MarkBegin(_, data) => self.after.mark_begin(op.id, index, data, doc),
-            OpType::MarkEnd(_) => self.after.mark_end(op.id, index, doc),
-            _ => None,
-        };
-        if let Some(m) = mark {
-            self.after_marks.push(m);
-        }
-    }
-
-    fn before(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
-        let marks = match &op.action {
-            OpType::MarkBegin(_, data) => (
-                self.before.mark_begin(op.id, index, data, doc),
-                self.after.mark_begin(op.id, index, data, doc),
-            ),
-            OpType::MarkEnd(_) => (
-                self.before.mark_end(op.id, index, doc),
-                self.after.mark_end(op.id, index, doc),
-            ),
-            _ => (None, None),
-        };
-        match marks {
-            (Some(before), Some(after)) if before != after => {
-                self.after_marks.push(after);
-                self.before_marks.push(before)
-            }
-            (Some(before), None) => self.before_marks.push(before),
-            (None, Some(after)) => self.after_marks.push(after),
-            _ => {}
-        }
-    }
-
-    fn del(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
-        let mark = match &op.action {
-            OpType::MarkBegin(_, data) => self.before.mark_begin(op.id, index, data, doc),
-            OpType::MarkEnd(_) => self.before.mark_end(op.id, index, doc),
-            _ => None,
-        };
-        if let Some(m) = mark {
-            self.before_marks.push(m);
-        }
-    }
-
-    fn finish(&mut self) -> Option<Vec<Mark<'a>>> {
-        let mut f = BTreeMap::new();
-        'after_marks: for after in &mut self.after_marks {
-            for before in &mut self.before_marks {
-                if after.start > before.end {
-                    continue; // 'after_marks; // too far - next mark
-                }
-                if after.data.name != before.data.name || before.start >= before.end {
-                    continue;
-                }
-                if after.end >= before.start {
-                    // before       ------------*
-                    // after   ----------------*
-                    mark(&mut f, after.start, before.start, after);
-                    if after.end > before.start {
-                        after.start = std::cmp::max(after.start, before.start);
-                    } else {
-                        continue 'after_marks;
-                    }
-                }
-                if after.start >= before.start {
-                    // before ------------*
-                    // after    ---------*
-                    if after.start > before.start {
-                        before.start = std::cmp::min(before.start, after.start);
-                        unmark(&mut f, before.start, after.start, before);
-                    }
-                    if after.end > before.end {
-                        if after.data.value != before.data.value {
-                            mark(&mut f, after.start, before.end, after);
-                        }
-                        after.start = before.end;
-                        before.start = before.end;
-                        continue;
-                    } else {
-                        if after.data.value != before.data.value {
-                            mark(&mut f, after.start, after.end, after);
-                        }
-                        before.start = after.end;
-                        continue 'after_marks;
-                    }
-                }
-            }
-            // mark after
-            mark(&mut f, after.start, after.end, after);
-        }
-        for before in &self.before_marks {
-            if before.start != before.end {
-                unmark(&mut f, before.start, before.end, before);
-            }
-        }
-        if !f.is_empty() {
-            Some(f.into_values().flat_map(|v| v.into_iter()).collect())
+    fn current(&self) -> Option<Rc<MarkSet>> {
+        // do this without all the cloning - cache the result
+        let b = self.before.current().cloned().unwrap_or_default();
+        let a = self.after.current().cloned().unwrap_or_default();
+        if a != b {
+            let result = b.diff(&a);
+            Some(Rc::new(result))
         } else {
             None
         }
     }
-}
 
-fn unmark<'a>(
-    finished: &mut BTreeMap<String, Vec<Mark<'a>>>,
-    start: usize,
-    end: usize,
-    from: &Mark<'a>,
-) {
-    let f_vec = finished.entry(from.data.name.to_string()).or_default();
-    if start < end {
-        if let Some(last) = f_vec.last_mut() {
-            if last.data.name == from.data.name && last.data.value.is_null() && last.end == start {
-                last.end = end;
-                return;
-            }
-        }
-        f_vec.push(Mark {
-            start,
-            end,
-            data: Cow::Owned(MarkData {
-                name: from.data.name.clone(),
-                value: ScalarValue::Null,
-            }),
-        });
+    fn process(&mut self, op: &'a Op) -> Option<Patch<'static>> {
+        self.before.process(op, &self.doc.ops.m);
+        self.after.process(op, &self.doc.ops.m);
+        None
     }
-}
 
-fn mark<'a>(
-    finished: &mut BTreeMap<String, Vec<Mark<'a>>>,
-    start: usize,
-    end: usize,
-    from: &Mark<'a>,
-) {
-    let f_vec = finished.entry(from.data.name.to_string()).or_default();
-    if start < end {
-        if let Some(last) = f_vec.last_mut() {
-            if last.data == from.data && last.end == start {
-                last.end = end;
-                return;
-            }
-        }
-        f_vec.push(Mark {
-            start,
-            end,
-            data: from.data.clone(),
-        });
+    fn process_before(&mut self, op: &'a Op) -> Option<Patch<'static>> {
+        self.before.process(op, &self.doc.ops.m);
+        None
+    }
+
+    fn process_after(&mut self, op: &'a Op) -> Option<Patch<'static>> {
+        self.after.process(op, &self.doc.ops.m);
+        None
     }
 }
 
@@ -641,13 +512,13 @@ mod tests {
         },
         Insert {
             values: Vec<Value<'static>>,
-            conflict: bool,
         },
         DelMap,
         DelSeq,
         Increment(i64),
         SpliceText(String),
         Mark(Vec<ObservedMark>),
+        Conflict(Prop),
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -702,18 +573,13 @@ mod tests {
                     action: ObservedAction::Increment(value),
                     path: ex_path_and(path, prop),
                 },
-                PatchAction::Insert {
-                    index,
-                    values,
-                    conflict,
-                } => ObservedPatch {
+                PatchAction::Insert { index, values, .. } => ObservedPatch {
                     action: ObservedAction::Insert {
-                        values: values.into_iter().map(|(v, _)| v.clone()).collect(),
-                        conflict,
+                        values: values.into_iter().map(|(v, _, _)| v.clone()).collect(),
                     },
                     path: ex_path_and(path, index),
                 },
-                PatchAction::SpliceText { index, value } => ObservedPatch {
+                PatchAction::SpliceText { index, value, .. } => ObservedPatch {
                     action: ObservedAction::SpliceText(value.make_string()),
                     path: ex_path_and(path, index),
                 },
@@ -732,6 +598,10 @@ mod tests {
                             })
                             .collect(),
                     ),
+                    path: format!("/{}", path.clone().join("/")),
+                },
+                PatchAction::Conflict { prop } => ObservedPatch {
+                    action: ObservedAction::Conflict(prop),
                     path: format!("/{}", path.clone().join("/")),
                 },
             }
@@ -1033,14 +903,12 @@ mod tests {
                     path: "/list/0".into(),
                     action: ObservedAction::Insert {
                         values: vec![25.into()],
-                        conflict: false
                     },
                 },
                 ObservedPatch {
                     path: "/list/2".into(),
                     action: ObservedAction::Insert {
                         values: vec![35.into()],
-                        conflict: false
                     },
                 },
             ]
@@ -1068,7 +936,6 @@ mod tests {
                 path: "/list/1".into(),
                 action: ObservedAction::Insert {
                     values: vec![28.into(), 27.into(), 26.into(), 25.into(),],
-                    conflict: false,
                 }
             },]
         );
@@ -1117,7 +984,6 @@ mod tests {
                     path: "/list/2".into(),
                     action: ObservedAction::Insert {
                         values: vec![36.into()],
-                        conflict: false
                     },
                 },
             ]
@@ -1297,7 +1163,6 @@ mod tests {
                 path: "/list/4".into(),
                 action: ObservedAction::Insert {
                     values: vec![ScalarValue::Str("Z".into()).into()],
-                    conflict: false,
                 },
             })
             .as_ref()
@@ -1311,7 +1176,6 @@ mod tests {
                 path: "/list/3".into(),
                 action: ObservedAction::Insert {
                     values: vec![ScalarValue::Str("C".into()).into()],
-                    conflict: false,
                 }
             })
             .as_ref()

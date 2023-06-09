@@ -455,7 +455,14 @@ pub enum Prop {
 }
 
 impl Prop {
-    pub(crate) fn to_index(&self) -> Option<usize> {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Prop::Map(s) => Some(s),
+            Prop::Seq(_) => None,
+        }
+    }
+
+    pub fn as_index(&self) -> Option<usize> {
         match self {
             Prop::Map(_) => None,
             Prop::Seq(n) => Some(*n),
@@ -758,14 +765,6 @@ impl Op {
 
     pub(crate) fn is_mark(&self) -> bool {
         self.action.is_mark()
-    }
-
-    pub(crate) fn valid_mark_anchor(&self) -> bool {
-        self.succ.is_empty()
-            && matches!(
-                &self.action,
-                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
-            )
     }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {

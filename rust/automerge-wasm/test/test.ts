@@ -623,10 +623,10 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.getAll('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
       assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Greenfinch' },
-        { action: 'put', path: ['bird'], value: 'Goldfinch' },
+        { action: 'put', path: ['bird'], conflict: true, value: 'Goldfinch' },
       ])
       assert.deepEqual(doc4.diffIncremental(), [
-        { action: 'put', path: ['bird'], value: 'Goldfinch' },
+        { action: 'put', path: ['bird'], conflict: true, value: 'Goldfinch' },
       ])
     })
 
@@ -655,13 +655,13 @@ describe('Automerge', () => {
         ['str', 'Greenfinch', '1@aaaa'], ['str', 'Chaffinch', '1@bbbb'], ['str', 'Goldfinch', '1@cccc']
       ])
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: 'put', path: ['bird'], value: 'Chaffinch' },
-        { action: 'put', path: ['bird'], value: 'Goldfinch' }
+        { action: 'put', path: ['bird'], conflict: true, value: 'Chaffinch' },
+        { action: 'put', path: ['bird'], conflict: true, value: 'Goldfinch' }
       ])
       assert.deepEqual(doc2.diffIncremental(), [
-        { action: 'put', path: ['bird'], value: 'Goldfinch' },
+        { action: 'put', path: ['bird'], conflict: true, value: 'Goldfinch' },
       ])
-      assert.deepEqual(doc3.diffIncremental(), [ ])
+      assert.deepEqual(doc3.diffIncremental(), [ { action: "conflict", path: ['bird'] } ])
     })
 
     it('should allow a conflict to be resolved', () => {
@@ -677,7 +677,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Greenfinch' },
-        { action: 'put', path: ['bird'], value: 'Chaffinch' },
+        { action: 'put', path: ['bird'], value: 'Chaffinch', conflict: true },
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
       ])
     })
@@ -723,10 +723,10 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.getAll('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
       assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['birds',0], value: 'Song Thrush' },
-        { action: 'put', path: ['birds',0], value: 'Redwing' }
+        { action: 'put', path: ['birds',0], value: 'Redwing', conflict: true }
       ])
       assert.deepEqual(doc4.diffIncremental(), [
-        { action: 'put', path: ['birds',0], value: 'Redwing' },
+        { action: 'put', path: ['birds',0], value: 'Redwing', conflict: true },
       ])
     })
 
@@ -753,11 +753,11 @@ describe('Automerge', () => {
         { action: 'del', path: ['birds',0], },
         { action: 'put', path: ['birds',1], value: 'Song Thrush' },
         { action: 'insert', path: ['birds',0], values: ['Ring-necked parakeet'] },
-        { action: 'put', path: ['birds',2], value: 'Redwing' }
+        { action: 'put', path: ['birds',2], value: 'Redwing', conflict: true }
       ])
       assert.deepEqual(doc4.diffIncremental(), [
         { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
-        { action: 'put', path: ['birds',2], value: 'Redwing' },
+        { action: 'put', path: ['birds',2], value: 'Redwing', conflict: true },
       ])
     })
 
@@ -774,7 +774,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Robin', '1@aaaa'], ['str', 'Wren', '1@bbbb']])
       assert.deepEqual(doc3.diffIncremental(), [
         { action: 'put', path: ['bird'], value: 'Robin' },
-        { action: 'put', path: ['bird'], value: 'Wren' }
+        { action: 'put', path: ['bird'], value: 'Wren', conflict: true }
       ])
       doc3.loadIncremental(change3)
       assert.deepEqual(doc3.getWithType('_root', 'bird'), ['str', 'Robin'])
@@ -801,11 +801,11 @@ describe('Automerge', () => {
       doc2.loadIncremental(change1)
       assert.deepEqual(doc1.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: 'put', path: ['birds'], value: {} },
+        { action: 'put', path: ['birds'], value: {}, conflict: true },
         { action: 'put', path: ['birds', 'Sparrowhawk'], value: 1 }
       ])
       assert.deepEqual(doc2.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
-      assert.deepEqual(doc2.diffIncremental(), [])
+      assert.deepEqual(doc2.diffIncremental(), [{ action: "conflict", path: ["birds"] }])
     })
 
     it('should support date objects', () => {
