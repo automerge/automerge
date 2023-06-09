@@ -62,7 +62,6 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
     type Item = ListRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        log!("ListRange next");
         self.iter.as_mut().and_then(|inner| {
             for TopOp {
                 op,
@@ -70,7 +69,6 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 marks,
             } in inner.iter.by_ref()
             {
-                log!("TOP OP: {:?}", op);
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());

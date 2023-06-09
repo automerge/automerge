@@ -192,7 +192,6 @@ impl<'a> ReadDoc for Transaction<'a> {
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        log!("text + scope {:?}", self.get_scope(None));
         self.doc.text_for(obj.as_ref(), self.get_scope(None))
     }
 
