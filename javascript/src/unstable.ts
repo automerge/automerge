@@ -273,7 +273,7 @@ export function splice<T>(
 
 export function getCursor<T>(
   doc: Doc<T>,
-  prop: stable.Prop,
+  path: stable.Prop[],
   index: number
 ): Cursor {
   const state = _state(doc, false)
@@ -281,7 +281,10 @@ export function getCursor<T>(
   if (!objectId) {
     throw new RangeError("invalid object for getCursor")
   }
-  const value = `${objectId}/${prop}`
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
   try {
     return state.handle.getCursor(value, index)
   } catch (e) {
@@ -291,7 +294,7 @@ export function getCursor<T>(
 
 export function getCursorPosition<T>(
   doc: Doc<T>,
-  prop: stable.Prop,
+  path: stable.Prop[],
   cursor: Cursor
 ): number {
   const state = _state(doc, false)
@@ -299,7 +302,10 @@ export function getCursorPosition<T>(
   if (!objectId) {
     throw new RangeError("invalid object for getCursorPosition")
   }
-  const value = `${objectId}/${prop}`
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
   try {
     return state.handle.getCursorPosition(value, cursor)
   } catch (e) {
