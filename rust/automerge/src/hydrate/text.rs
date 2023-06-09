@@ -13,7 +13,7 @@ pub struct Text {
 impl Text {
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
-            PatchAction::SpliceText { index, value } => {
+            PatchAction::SpliceText { index, value, .. } => {
                 self.value.splice_text_value(index, &value);
                 Ok(())
             }

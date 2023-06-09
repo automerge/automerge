@@ -48,7 +48,7 @@ impl OpTreeNode {
     pub(crate) fn search<'a, 'b: 'a, Q>(
         &'b self,
         query: &mut Q,
-        m: &OpSetMetadata,
+        m: &'a OpSetMetadata,
         ops: &'a [Op],
     ) -> bool
     where

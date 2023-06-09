@@ -140,7 +140,7 @@ impl OpSetInternal {
     pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
         self.trees
             .get(obj)
-            .map(|tree| tree.internal.top_ops(clock))
+            .map(|tree| tree.internal.top_ops(clock, &self.m))
             .unwrap_or_default()
     }
 

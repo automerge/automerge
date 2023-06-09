@@ -31,14 +31,10 @@ impl List {
                     ListValue::new(value.0.into(), conflict);
                 Ok(())
             }
-            PatchAction::Insert {
-                index,
-                values,
-                conflict,
-            } => {
+            PatchAction::Insert { index, values, .. } => {
                 for (n, value) in values.into_iter().enumerate() {
                     self.0
-                        .insert(index + n, ListValue::new(value.0.clone().into(), conflict));
+                        .insert(index + n, ListValue::new(value.0.clone().into(), value.2));
                 }
                 Ok(())
             }

@@ -1,5 +1,6 @@
+use crate::marks::MarkData;
 use crate::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
-use crate::types::{Key, ListEncoding, Op, OpId};
+use crate::types::{Key, ListEncoding, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -12,7 +13,7 @@ mod prop;
 mod seek_mark;
 
 pub(crate) use insert::InsertNth;
-pub(crate) use list_state::ListState;
+pub(crate) use list_state::{ListState, MarkMap};
 pub(crate) use nth::Nth;
 pub(crate) use opid::{OpIdSearch, SimpleOpIdSearch};
 pub(crate) use prop::Prop;
@@ -47,13 +48,13 @@ pub(crate) trait TreeQuery<'a>: Clone + Debug {
     fn query_node_with_metadata(
         &mut self,
         child: &'a OpTreeNode,
-        _m: &OpSetMetadata,
-        ops: &[Op],
+        _m: &'a OpSetMetadata,
+        ops: &'a [Op],
     ) -> QueryResult {
         self.query_node(child, ops)
     }
 
-    fn query_node(&mut self, _child: &'a OpTreeNode, _ops: &[Op]) -> QueryResult {
+    fn query_node(&mut self, _child: &'a OpTreeNode, _ops: &'a [Op]) -> QueryResult {
         QueryResult::Descend
     }
 
@@ -128,6 +129,8 @@ pub(crate) struct Index {
     /// Set of opids found in this node and below.
     ops: HashSet<OpId, FxBuildHasher>,
     never_seen_puts: bool,
+    mark_begin: HashMap<OpId, MarkData, FxBuildHasher>,
+    mark_end: Vec<OpId>,
 }
 
 impl Index {
@@ -141,6 +144,8 @@ impl Index {
             visible_text: TextWidth { width: 0 },
             ops: Default::default(),
             never_seen_puts: true,
+            mark_begin: Default::default(),
+            mark_end: Default::default(),
         }
     }
 
@@ -192,7 +197,24 @@ impl Index {
 
     pub(crate) fn insert(&mut self, op: &Op) {
         self.never_seen_puts &= op.insert;
+
+        // opids
         self.ops.insert(op.id);
+
+        // marks
+        match &op.action {
+            OpType::MarkBegin(_, data) => {
+                self.mark_begin.insert(op.id, data.clone());
+            }
+            OpType::MarkEnd(_) => {
+                if self.mark_begin.remove(&op.id.prev()).is_none() {
+                    self.mark_end.push(op.id)
+                }
+            }
+            _ => {}
+        }
+
+        // visible ops
         if op.visible() {
             let key = op.elemid_or_key();
             if let Some(n) = self.visible.get(&key) {
@@ -205,7 +227,21 @@ impl Index {
     }
 
     pub(crate) fn remove(&mut self, op: &Op) {
+        // op ids
         self.ops.remove(&op.id);
+
+        // marks
+        match op.action {
+            OpType::MarkBegin(_, _) => {
+                self.mark_begin.remove(&op.id);
+            }
+            OpType::MarkEnd(_) => {
+                self.mark_end.retain(|id| id != &op.id);
+            }
+            _ => {}
+        }
+
+        // visible ops
         if op.visible() {
             let key = op.elemid_or_key();
             match self.visible.get(&key).copied() {
@@ -231,6 +267,8 @@ impl Index {
                 .and_modify(|len| *len += *other_len)
                 .or_insert(*other_len);
         }
+        self.mark_begin.extend(other.mark_begin.clone()); // can I remove this clone?
+        self.mark_end.extend(&other.mark_end);
         self.visible_text.merge(&other.visible_text);
         self.never_seen_puts &= other.never_seen_puts;
     }

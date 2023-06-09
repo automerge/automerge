@@ -1618,6 +1618,7 @@ fn regression_insert_opid() {
         seq_tree.push((
             Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Null)),
             ObjId::Id(2 * (i + 1) as u64, doc.get_actor().clone(), 0),
+            false,
         ));
         expected_patches.push(Patch {
             obj: ObjId::Id(1, doc.get_actor().clone(), 0),
@@ -1625,7 +1626,7 @@ fn regression_insert_opid() {
             action: PatchAction::Insert {
                 index: i,
                 values: seq_tree,
-                conflict: false,
+                marks: None,
             },
         });
         expected_patches.push(Patch {
@@ -1708,19 +1709,10 @@ fn marks() {
 
     let marks = tx.marks(&text_id).unwrap();
 
-    // should empty marks be returned?
-    // probably not in this case (where they can never grow)
-    // but not sure how to detect that case reliably.
-    assert_eq!(marks.len(), 2);
-    assert_eq!(marks[0].start, 0);
-    assert_eq!(marks[0].end, 0);
+    assert_eq!(marks[0].start, 9);
+    assert_eq!(marks[0].end, 14);
     assert_eq!(marks[0].name(), "bold");
     assert_eq!(marks[0].value(), &ScalarValue::from(true));
-
-    assert_eq!(marks[1].start, 9);
-    assert_eq!(marks[1].end, 14);
-    assert_eq!(marks[1].name(), "bold");
-    assert_eq!(marks[1].value(), &ScalarValue::from(true));
 }
 
 #[test]
@@ -1831,6 +1823,25 @@ fn can_isolate() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc111");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
     Ok(())
+}
+
+#[test]
+fn inserting_text_near_deleted_marks() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
+    let mark = Mark::new("bold".to_string(), true, 2, 8);
+    tx.mark(&text_id, mark, ExpandMark::After).unwrap();
+    let mark = Mark::new("link".to_string(), true, 3, 6);
+    tx.mark(&text_id, mark, ExpandMark::None).unwrap();
+
+    tx.splice_text(&text_id, 1, 10, "").unwrap(); // 'h'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+    tx.splice_text(&text_id, 0, 0, "a").unwrap(); // 'ah'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+    tx.splice_text(&text_id, 2, 0, "a").unwrap(); // 'ah<bold>a</bold>'
+    dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
 }
 
 /*

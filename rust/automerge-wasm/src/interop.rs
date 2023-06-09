@@ -840,7 +840,8 @@ impl Automerge {
                                         c.to_string().into(),
                                     ))),
                                     ObjId::Root, // Using ROOT is okay because this ID is never used as
-                                                 // we're producing ScalarValue::Str
+                                    // we're producing ScalarValue::Str
+                                    false,
                                 )
                             })
                             .collect::<Vec<_>>();
@@ -849,6 +850,7 @@ impl Automerge {
                 }
             }
             PatchAction::Mark { .. } => Ok(result.into()),
+            PatchAction::Conflict { .. } => Ok(result.into()),
         }
     }
 
@@ -895,9 +897,9 @@ impl Automerge {
                     Err(error::ApplyPatch::IncrementIndexInMap)
                 }
             }
+            PatchAction::Conflict { .. } => Ok(result),
             PatchAction::Insert { .. } => Err(error::ApplyPatch::InsertInMap),
             PatchAction::DeleteSeq { .. } => Err(error::ApplyPatch::SpliceInMap),
-            //PatchAction::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             PatchAction::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
             PatchAction::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
@@ -976,7 +978,7 @@ impl Automerge {
         }
     }
 
-    fn sub_splice<'a, I: IntoIterator<Item = &'a (Value<'a>, ObjId)>>(
+    fn sub_splice<'a, I: IntoIterator<Item = &'a (Value<'a>, ObjId, bool)>>(
         &self,
         o: Array,
         index: usize,
@@ -1220,43 +1222,53 @@ impl TryFrom<JsPatch> for JsValue {
 
     fn try_from(p: JsPatch) -> Result<Self, Self::Error> {
         let result = Object::new();
-        let path = &p.0.path;
+        let path = &p.0.path.as_slice();
         match p.0.action {
-            PatchAction::PutMap { key, value, .. } => {
+            PatchAction::PutMap {
+                key,
+                value,
+                conflict,
+                ..
+            } => {
                 js_set(&result, "action", "put")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Map(key)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
                 js_set(
                     &result,
                     "value",
                     alloc(&value.0, TextRepresentation::String).1,
                 )?;
+                if conflict {
+                    js_set(&result, "conflict", true)?;
+                }
                 Ok(result.into())
             }
-            PatchAction::PutSeq { index, value, .. } => {
+            PatchAction::PutSeq {
+                index,
+                value,
+                conflict,
+                ..
+            } => {
                 js_set(&result, "action", "put")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Seq(index)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
                 js_set(
                     &result,
                     "value",
                     alloc(&value.0, TextRepresentation::String).1,
                 )?;
+                if conflict {
+                    js_set(&result, "conflict", true)?;
+                }
                 Ok(result.into())
             }
-            PatchAction::Insert { index, values, .. } => {
+            PatchAction::Insert {
+                index,
+                values,
+                marks,
+                ..
+            } => {
+                let conflicts = values.iter().map(|v| v.2).collect::<Vec<_>>();
                 js_set(&result, "action", "insert")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Seq(index)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
                 js_set(
                     &result,
                     "values",
@@ -1265,40 +1277,65 @@ impl TryFrom<JsPatch> for JsValue {
                         .map(|v| alloc(&v.0, TextRepresentation::String).1)
                         .collect::<Array>(),
                 )?;
+                if conflicts.iter().any(|c| *c) {
+                    js_set(
+                        &result,
+                        "conflicts",
+                        conflicts
+                            .iter()
+                            .map(|c| JsValue::from(*c))
+                            .collect::<Array>(),
+                    )?;
+                }
+                if let Some(m) = marks {
+                    let marks = Object::new();
+                    for (name, value) in m.iter() {
+                        js_set(
+                            &marks,
+                            name,
+                            alloc(&value.into(), TextRepresentation::String).1,
+                        )?;
+                    }
+                    js_set(&result, "marks", marks)?;
+                }
                 Ok(result.into())
             }
-            PatchAction::SpliceText { index, value, .. } => {
+            PatchAction::SpliceText {
+                index,
+                value,
+                marks,
+                ..
+            } => {
                 js_set(&result, "action", "splice")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Seq(index)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
                 js_set(&result, "value", String::from(&value))?;
+                if let Some(m) = marks {
+                    let marks = Object::new();
+                    for (name, value) in m.iter() {
+                        js_set(
+                            &marks,
+                            name,
+                            alloc(&value.into(), TextRepresentation::String).1,
+                        )?;
+                    }
+                    js_set(&result, "marks", &marks)?;
+                }
                 Ok(result.into())
             }
             PatchAction::Increment { prop, value, .. } => {
                 js_set(&result, "action", "inc")?;
-                js_set(&result, "path", export_path(path.as_slice(), &prop))?;
+                js_set(&result, "path", export_path(path, &prop))?;
                 js_set(&result, "value", &JsValue::from_f64(value as f64))?;
                 Ok(result.into())
             }
             PatchAction::DeleteMap { key, .. } => {
                 js_set(&result, "action", "del")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Map(key)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
                 Ok(result.into())
             }
             PatchAction::DeleteSeq { index, length, .. } => {
                 js_set(&result, "action", "del")?;
-                js_set(
-                    &result,
-                    "path",
-                    export_path(path.as_slice(), &Prop::Seq(index)),
-                )?;
+                js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
                 if length > 1 {
                     js_set(&result, "length", length)?;
                 }
@@ -1306,7 +1343,7 @@ impl TryFrom<JsPatch> for JsValue {
             }
             PatchAction::Mark { marks, .. } => {
                 js_set(&result, "action", "mark")?;
-                js_set(&result, "path", export_just_path(path.as_slice()))?;
+                js_set(&result, "path", export_just_path(path))?;
                 let marks_array = Array::new();
                 for m in marks.iter() {
                     let mark = Object::new();
@@ -1321,6 +1358,11 @@ impl TryFrom<JsPatch> for JsValue {
                     marks_array.push(&mark);
                 }
                 js_set(&result, "marks", marks_array)?;
+                Ok(result.into())
+            }
+            PatchAction::Conflict { prop } => {
+                js_set(&result, "action", "conflict")?;
+                js_set(&result, "path", export_path(path, &prop))?;
                 Ok(result.into())
             }
         }

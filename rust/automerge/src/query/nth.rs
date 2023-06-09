@@ -72,7 +72,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
     fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
         if self.clock.is_none() {
-            self.idx.process_node(child, ops)
+            self.idx.process_node(child, ops, None)
         } else {
             QueryResult::Descend
         }

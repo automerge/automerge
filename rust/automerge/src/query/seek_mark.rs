@@ -19,6 +19,8 @@ pub(crate) struct SeekMark<'a> {
     pub(crate) marks: Vec<Mark<'a>>,
 }
 
+// should be able to use MarkStateMachine here now - FIXME
+
 impl<'a> SeekMark<'a> {
     pub(crate) fn new(id: OpId, end: usize, encoding: ListEncoding) -> Self {
         SeekMark {
