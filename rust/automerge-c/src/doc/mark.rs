@@ -115,7 +115,8 @@ pub unsafe extern "C" fn AMmarkName(mark: *const AMmark) -> AMbyteSpan {
 /// \brief Gets the value of a mark.
 ///
 /// \param[in] mark A pointer to an `AMmark` struct.
-/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_MARK` item.
+/// \return A pointer to an `AMresult` struct with an `AMitem` struct
+///          containing the value.
 /// \pre \p mark `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
