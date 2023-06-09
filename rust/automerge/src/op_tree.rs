@@ -1,5 +1,5 @@
 use crate::iter::TopOps;
-use crate::marks::MarkSet;
+use crate::marks::MarkSetBldr;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::patches::PatchLog;
 use crate::{
@@ -86,7 +86,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<MarkSet>,
+    pub(crate) marks: Option<MarkSetBldr>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -107,7 +107,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     for mark in q.marks {
                         let index = mark.start;
                         let len = mark.len();
-                        let marks = mark.into_mark_set();
+                        let marks = mark.into_mark_set_bldr();
                         patch_log.mark(obj.id, index, len, &marks);
                     }
                 }
@@ -200,8 +200,12 @@ impl OpTreeInternal {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub(crate) fn top_ops(&self, clock: Option<Clock>) -> TopOps<'_> {
-        TopOps::new(OpTreeIter::new(self), clock)
+    pub(crate) fn top_ops<'a>(
+        &'a self,
+        clock: Option<Clock>,
+        meta: &'a OpSetMetadata,
+    ) -> TopOps<'a> {
+        TopOps::new(OpTreeIter::new(self), clock, meta)
     }
 
     pub(crate) fn found_op_without_patch_log(
@@ -239,7 +243,7 @@ impl OpTreeInternal {
         op: &'a Op,
         mut pos: usize,
         index: usize,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;

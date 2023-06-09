@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::MarkSet;
+use crate::marks::{MarkSet, MarkSetBldr};
 use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
@@ -62,7 +62,12 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
-            for TopOp { op, conflict } in inner.iter.by_ref() {
+            for TopOp {
+                op,
+                conflict,
+                marks,
+            } in inner.iter.by_ref()
+            {
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());
@@ -73,7 +78,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                         value,
                         id,
                         conflict,
-                        marks: None, // TODO
+                        marks,
                     });
                 }
             }
@@ -88,5 +93,11 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub marks: Option<MarkSet>,
+    pub(crate) marks: Option<MarkSetBldr>,
+}
+
+impl<'a> ListRangeItem<'a> {
+    pub fn marks(&self) -> Option<&MarkSet> {
+        self.marks.as_deref()
+    }
 }

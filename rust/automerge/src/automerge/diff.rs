@@ -6,7 +6,7 @@ use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
-    marks::{Mark, MarkSet, MarkStateMachine},
+    marks::{Mark, MarkSetBldr, MarkStateMachine},
     patches::PatchLog,
     types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
     value::Value,
@@ -94,16 +94,16 @@ fn resolve<'a>(
 
 #[derive(Debug, Clone)]
 enum Patch<'a> {
-    New(Winner<'a>, Option<MarkSet>),
+    New(Winner<'a>, Option<MarkSetBldr>),
     Old {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     },
     Update {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     },
     Delete(Winner<'a>),
 }
@@ -289,7 +289,7 @@ impl<'a> MarkDiff<'a> {
         }
     }
 
-    fn current(&self) -> Option<MarkSet> {
+    fn current(&self) -> Option<MarkSetBldr> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();

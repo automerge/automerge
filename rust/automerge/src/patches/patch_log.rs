@@ -2,7 +2,7 @@ use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
-use crate::marks::{MarkAccumulator, MarkSet};
+use crate::marks::{MarkAccumulator, MarkSetBldr};
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
@@ -71,14 +71,14 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     },
     IncrementMap {
         key: String,
@@ -266,7 +266,13 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn splice(&mut self, obj: ObjId, index: usize, text: &str, marks: Option<MarkSet>) {
+    pub(crate) fn splice(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        text: &str,
+        marks: Option<MarkSetBldr>,
+    ) {
         self.events.push((
             obj,
             Event::Splice {
@@ -277,7 +283,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &MarkSet) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &MarkSetBldr) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -294,7 +300,7 @@ impl PatchLog {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     ) {
         self.events.push((
             obj,

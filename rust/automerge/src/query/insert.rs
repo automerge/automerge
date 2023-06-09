@@ -1,5 +1,5 @@
 use crate::error::AutomergeError;
-use crate::marks::MarkSet;
+use crate::marks::MarkSetBldr;
 use crate::marks::MarkStateMachine;
 use crate::op_tree::OpTreeNode;
 use crate::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
@@ -62,7 +62,7 @@ impl<'a> InsertNth<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<MarkSet> {
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<MarkSetBldr> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in self.marks.iter() {
             marks.mark_begin(*id, mark_data, m);

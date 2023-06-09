@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::marks::{ExpandMark, Mark, MarkSetBldr};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
@@ -707,7 +707,7 @@ impl TransactionInner {
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
-            patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
+            patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set_bldr());
         }
         Ok(())
     }
@@ -734,7 +734,7 @@ impl TransactionInner {
         obj: ObjId,
         prop: Prop,
         op: Op,
-        marks: Option<MarkSet>,
+        marks: Option<MarkSetBldr>,
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if patch_log.is_active() {

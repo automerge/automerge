@@ -1,7 +1,7 @@
 use smol_str::SmolStr;
 use std::fmt;
 use std::fmt::Display;
-use std::sync::Arc;
+use std::rc::Rc;
 
 use crate::op_tree::OpSetMetadata;
 use crate::types::{Op, OpId, OpType};
@@ -27,8 +27,8 @@ impl<'a> Mark<'a> {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
-    pub(crate) fn into_mark_set(self) -> MarkSet {
-        let mut m = MarkSet::default();
+    pub(crate) fn into_mark_set_bldr(self) -> MarkSetBldr {
+        let mut m = MarkSetBldr::default();
         let data = self.data.into_owned();
         m.insert(data.name, data.value);
         m
@@ -67,8 +67,8 @@ impl MarkAccumulator {
         })
     }
 
-    pub(crate) fn add(&mut self, index: usize, len: usize, marks: &MarkSet) {
-        for (name, value) in marks.marks.iter() {
+    pub(crate) fn add(&mut self, index: usize, len: usize, marks: &MarkSetBldr) {
+        for (name, value) in marks.inner().iter() {
             let entry = self.marks.entry(name.clone()).or_default();
             if let Some(mut last) = entry.last_mut() {
                 if &last.value == value && last.index + last.len == index {
@@ -86,8 +86,33 @@ impl MarkAccumulator {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct MarkSetBldr {
+    pub(crate) marks: Rc<MarkSet>,
+}
+
+impl std::ops::Deref for MarkSetBldr {
+    type Target = MarkSet;
+
+    fn deref(&self) -> &Self::Target {
+        &self.marks
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MarkSet {
-    marks: Arc<BTreeMap<SmolStr, ScalarValue>>,
+    marks: BTreeMap<SmolStr, ScalarValue>,
+}
+
+impl MarkSet {
+    pub fn iter(&self) -> MarkSetIterator<'_> {
+        MarkSetIterator {
+            iter: self.marks.iter(),
+        }
+    }
+
+    fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
+        &self.marks
+    }
 }
 
 #[derive(Debug)]
@@ -103,29 +128,27 @@ impl<'a> Iterator for MarkSetIterator<'a> {
     }
 }
 
-impl MarkSet {
-    pub fn iter(&self) -> MarkSetIterator<'_> {
-        MarkSetIterator {
-            iter: self.marks.iter(),
-        }
-    }
-
+impl MarkSetBldr {
     fn insert(&mut self, name: SmolStr, value: ScalarValue) {
-        Arc::make_mut(&mut self.marks).insert(name, value);
+        Rc::make_mut(&mut self.marks).marks.insert(name, value);
     }
 
     fn remove(&mut self, name: &SmolStr) {
-        Arc::make_mut(&mut self.marks).remove(name);
+        Rc::make_mut(&mut self.marks).marks.remove(name);
     }
 
     fn is_empty(&self) -> bool {
-        self.marks.is_empty()
+        self.inner().is_empty()
+    }
+
+    fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
+        self.marks.inner()
     }
 
     pub(crate) fn diff(&self, other: &Self) -> Self {
         let mut diff = BTreeMap::default();
-        for (name, value) in self.marks.iter() {
-            match other.marks.get(name) {
+        for (name, value) in self.inner().iter() {
+            match other.inner().get(name) {
                 Some(v) if v != value => {
                     diff.insert(name.clone(), v.clone());
                 }
@@ -135,13 +158,13 @@ impl MarkSet {
                 _ => {}
             }
         }
-        for (name, value) in other.marks.iter() {
-            if !self.marks.contains_key(name) {
+        for (name, value) in other.inner().iter() {
+            if !self.inner().contains_key(name) {
                 diff.insert(name.clone(), value.clone());
             }
         }
-        MarkSet {
-            marks: Arc::new(diff),
+        MarkSetBldr {
+            marks: Rc::new(MarkSet { marks: diff }),
         }
     }
 }
@@ -191,11 +214,11 @@ impl<'a> Mark<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
     state: Vec<(OpId, &'a MarkData)>,
-    current: MarkSet,
+    current: MarkSetBldr,
 }
 
 impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn current(&self) -> Option<&MarkSet> {
+    pub(crate) fn current(&self) -> Option<&MarkSetBldr> {
         if self.current.is_empty() {
             None
         } else {
