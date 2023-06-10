@@ -1006,6 +1006,13 @@ function textMethods(target: Target) {
       const text = context.text(objectId)
       return text.indexOf(o, start)
     },
+    insertAt(index: number, ...values: any[]) {
+      if (values.every(v => typeof v === "string")) {
+        context.splice(objectId, index, 0, values.join(""))
+      } else {
+        listMethods(target).insertAt(index, ...values)
+      }
+    },
   }
   return methods
 }
