@@ -13,6 +13,7 @@ use crate::sync::{to_sync_message, AMsyncMessage, AMsyncState};
 
 pub mod list;
 pub mod map;
+pub mod mark;
 pub mod utils;
 
 use crate::doc::utils::{clamp, to_doc, to_doc_mut, to_items};

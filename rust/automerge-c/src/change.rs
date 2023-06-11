@@ -246,8 +246,9 @@ pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
 /// \brief Gets the message of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return An `AMbyteSpan` struct for a UTF-8 string.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p change `!= NULL`
+/// \post `(`\p change `== NULL) -> (AMbyteSpan){NULL, 0}`
 /// \internal
 ///
 /// # Safety

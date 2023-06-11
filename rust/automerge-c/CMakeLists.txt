@@ -124,6 +124,7 @@ add_custom_command(
         src/doc.rs
         src/doc/list.rs
         src/doc/map.rs
+        src/doc/mark.rs
         src/doc/utils.rs
         src/index.rs
         src/item.rs
