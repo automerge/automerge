@@ -587,5 +587,44 @@ describe("Automerge", () => {
       )
       let index = Automerge.getCursorPosition(doc, ["value"], cursor)
     })
+
+    it("can use cursors in common text operations", () => {
+      let doc = Automerge.from({
+        value: "The sly fox jumped over the lazy dog",
+      })
+      let doc2 = Automerge.clone(doc)
+
+      let cursor = Automerge.getCursor(doc, ["value"], 8)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, 0, "o")
+        Automerge.splice(d, ["value"], cursor, 0, "l")
+        Automerge.splice(d, ["value"], cursor, 0, "e")
+      })
+      doc2 = Automerge.change(doc2, d => {
+        Automerge.splice(d, ["value"], 3, -3, "A")
+      })
+      doc = Automerge.merge(doc, doc2)
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, -1, "d")
+        Automerge.splice(d, ["value"], cursor, 0, " ")
+      })
+      assert.deepEqual(doc.value, "A sly old fox jumped over the lazy dog")
+    })
+
+    it("should use javascript string indices", () => {
+      let doc = Automerge.from({
+        value: "🇬🇧🇩🇪",
+      })
+
+      let cursor = Automerge.getCursor(doc, ["value"], doc.value.indexOf("🇩🇪"))
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, -2, "")
+        Automerge.splice(d, ["value"], cursor, -2, "")
+        Automerge.splice(d, ["value"], cursor, 0, "🇫🇷")
+      })
+
+      assert.deepEqual(doc.value, "🇫🇷🇩🇪")
+    })
   })
 })
