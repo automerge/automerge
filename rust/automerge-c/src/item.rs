@@ -1218,7 +1218,7 @@ impl TryFrom<&AMitem> for (am::Value<'static>, am::ObjId) {
 /// \enum AMvalType
 /// \installed_headerfile
 /// \brief The type of an item's value.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq)]
 #[repr(u32)]
 pub enum AMvalType {
     /// An actor identifier value.
@@ -1241,26 +1241,26 @@ pub enum AMvalType {
     F64 = 1 << 8,
     /// A 64-bit signed integer value.
     Int = 1 << 9,
-    /// A null value.
-    Null = 1 << 10,
-    /// An object type value.
-    ObjType = 1 << 11,
-    /// A UTF-8 string view value.
-    Str = 1 << 12,
-    /// A synchronization have value.
-    SyncHave = 1 << 13,
-    /// A synchronization message value.
-    SyncMessage = 1 << 14,
-    /// A synchronization state value.
-    SyncState = 1 << 15,
-    /// A *nix timestamp (milliseconds) value.
-    Timestamp = 1 << 16,
-    /// A 64-bit unsigned integer value.
-    Uint = 1 << 17,
-    /// An unknown type of value.
-    Unknown = 1 << 18,
     /// A mark
-    Mark = 1 << 19,
+    Mark = 1 << 10,
+    /// A null value.
+    Null = 1 << 11,
+    /// An object type value.
+    ObjType = 1 << 12,
+    /// A UTF-8 string view value.
+    Str = 1 << 13,
+    /// A synchronization have value.
+    SyncHave = 1 << 14,
+    /// A synchronization message value.
+    SyncMessage = 1 << 15,
+    /// A synchronization state value.
+    SyncState = 1 << 16,
+    /// A *nix timestamp (milliseconds) value.
+    Timestamp = 1 << 17,
+    /// A 64-bit unsigned integer value.
+    Uint = 1 << 18,
+    /// An unknown type of value.
+    Unknown = 1 << 19,
     /// A void.
     Void = 1 << 0,
 }
