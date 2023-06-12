@@ -569,6 +569,12 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 /// \memberof AMdoc
 /// \brief Gets the current or historical size of an object.
 ///
+///        If the object is a Text object then the return value will depend
+///        on whether the library was built with utf-8 (the default) or utf-32 indexing.
+///        If AUTOMERGE_C_UTF8 is defined the return value will be the number of bytes
+///        in the UTF-8 encoding of the string, if AUTOMERGE_C_UTF32 is defined, the
+///        return value will be the number of unicode code points in the string.
+///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
@@ -845,6 +851,19 @@ pub unsafe extern "C" fn AMsplice(
 /// \memberof AMdoc
 /// \brief Splices characters into and/or removes characters from the
 ///        identified object at a given position within it.
+///
+///        By default automerge-c expects indices to be provided as
+///        byte offsets into UTF-8 encoded strings.
+///
+///        If the library has been compiled with utf32 indexing, then
+///        the numbers passed to `pos` and `del` should be expressed
+///        in terms of number of unicode code points.
+///
+///        To determine the difference `<automerge-c/config.h>` will
+///        define either AUTOMERGE_C_UTF8 or AUTORMERGE_C_UTF32.
+///
+///        Regardless of the indexing model used, automerge-c expects
+///        text in an `AMbyteSpan` to be valid utf8.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.

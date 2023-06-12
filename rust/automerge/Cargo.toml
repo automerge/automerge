@@ -11,6 +11,7 @@ readme = "./README.md"
 [features]
 optree-visualisation = ["dot", "rand"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
+utf8-indexing = []
 
 [dependencies]
 hex = "^0.4.3"

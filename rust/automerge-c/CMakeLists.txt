@@ -10,6 +10,8 @@ set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
 
+option(UTF32_INDEXING "Enable UTF32 indexing.")
+
 include(CTest)
 
 include(CMakePackageConfigHelpers)
@@ -71,7 +73,13 @@ else()
     set(CARGO_FLAG -Z build-std=std,panic_abort --release --target=${CARGO_TARGET})
 endif()
 
-set(CARGO_FEATURES "")
+if(UTF32_INDEXING)
+    set(CARGO_FEATURES "")
+    set(TEXT_INDEXING_ENCODING "UTF32")
+else()
+    set(CARGO_FEATURES "-F automerge/utf8-indexing")
+    set(TEXT_INDEXING_ENCODING "UTF8")
+endif()
 
 set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_TARGET}/${CARGO_BUILD_TYPE}")
 

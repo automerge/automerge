@@ -32,4 +32,15 @@
  */
 #define @SYMBOL_PREFIX@_PATCH_VERSION (@SYMBOL_PREFIX@_VERSION % 100)
 
+/**
+ * \def @SYMBOL_PREFIX@_@TEXT_INDEXING_ENCODING@
+ * \brief Indicates the encoding used `pos` and `del` arguments to AMspliceText,
+ *        and the length returned on a text object passed to `AMobjSize`.
+ *        are interpreted using @TEXT_INDEXING_ENCODING@.
+ *
+ *        A given build of automerge-c will either define AUTOMERGE_C_UTF8 or
+ *        AUTOMERGE_C_UTF32.
+ */
+#define @SYMBOL_PREFIX@_@TEXT_INDEXING_ENCODING@
+
 #endif /* @INCLUDE_GUARD_PREFIX@_CONFIG_H */
