@@ -3,8 +3,9 @@ use std::ops::RangeBounds;
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
+use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::marks::{ExpandMark, Mark, RichText};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -595,10 +596,6 @@ impl AutoCommit {
         self.doc.hash_for_opid(opid)
     }
 
-    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        self.doc.hydrate(heads)
-    }
-
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
@@ -724,7 +721,7 @@ impl ReadDoc for AutoCommit {
         obj: O,
         index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<MarkSet, AutomergeError> {
+    ) -> Result<RichText, AutomergeError> {
         self.doc
             .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
     }
@@ -739,6 +736,19 @@ impl ReadDoc for AutoCommit {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
     fn get_cursor<O: AsRef<ExId>>(
@@ -759,6 +769,14 @@ impl ReadDoc for AutoCommit {
     ) -> Result<usize, AutomergeError> {
         self.doc
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate(obj, heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -938,6 +956,22 @@ impl Transactable for AutoCommit {
             end,
             expand,
         )
+    }
+
+    fn split_block<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+    }
+
+    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.join_block(&mut self.doc, patch_log, block.as_ref())
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

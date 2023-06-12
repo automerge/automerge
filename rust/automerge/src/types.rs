@@ -286,6 +286,10 @@ impl OpType {
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
+
+    pub(crate) fn is_block(&self) -> bool {
+        &OpType::Make(ObjType::Map) == self
+    }
 }
 
 impl From<ObjType> for OpType {
@@ -578,6 +582,11 @@ pub(crate) struct ObjMeta {
 }
 
 impl ObjMeta {
+    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
+        let encoding = typ.into();
+        ObjMeta { id, typ, encoding }
+    }
+
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -609,6 +618,8 @@ impl From<Option<ObjType>> for ListEncoding {
     }
 }
 
+// FIXME - this is dangerous - encoding is a combo
+// of ObjType **and** TextRep - this will lead to bugs
 impl From<ObjType> for ListEncoding {
     fn from(obj: ObjType) -> Self {
         if obj == ObjType::Text {

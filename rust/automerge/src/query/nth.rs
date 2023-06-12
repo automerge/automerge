@@ -1,8 +1,8 @@
 use crate::error::AutomergeError;
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::{RichText, RichTextStateMachine};
 use crate::op_set::Op;
 use crate::op_tree::{OpTree, OpTreeNode};
-use crate::query::{Index, ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
+use crate::query::{Index, ListState, OpSetData, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub(crate) struct Nth<'a> {
     list_state: ListState,
     clock: Option<Clock>,
-    marks: Option<MarkMap<'a>>,
+    marks: Option<RichTextQueryState<'a>>,
     // TODO: put osd in all queries - take out of API
     osd: &'a OpSetData,
     pub(crate) ops: Vec<Op<'a>>,
@@ -42,8 +42,8 @@ impl<'a> Nth<'a> {
         self
     }
 
-    pub(crate) fn marks(&self) -> Option<Arc<MarkSet>> {
-        let mut marks = MarkStateMachine::default();
+    pub(crate) fn marks(&self) -> Option<Arc<RichText>> {
+        let mut marks = RichTextStateMachine::default();
         if let Some(m) = &self.marks {
             for (id, mark_data) in m.iter() {
                 marks.mark_begin(*id, mark_data, self.osd);

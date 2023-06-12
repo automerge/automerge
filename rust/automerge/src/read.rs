@@ -1,8 +1,10 @@
 use crate::{
     error::AutomergeError,
     exid::ExId,
+    hydrate,
+    iter::Spans,
     iter::{Keys, ListRange, MapRange, Values},
-    marks::{Mark, MarkSet},
+    marks::{Mark, RichText},
     parents::Parents,
     Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
@@ -146,7 +148,7 @@ pub trait ReadDoc {
         obj: O,
         index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<MarkSet, AutomergeError>;
+    ) -> Result<RichText, AutomergeError>;
 
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
@@ -158,6 +160,14 @@ pub trait ReadDoc {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError>;
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
@@ -213,6 +223,12 @@ pub trait ReadDoc {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError>;
 
     /// Get all conflicting values out of the document at this prop that conflict.
     ///

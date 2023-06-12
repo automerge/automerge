@@ -7,7 +7,11 @@ export type Hash = string;
 export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
-export type ObjType = string | Array<ObjType | Value> | { [key: string]: ObjType | Value }
+export type MapObjType = { [key: string]: ObjType | Value }
+export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
+export type Span = { type: "text", value: string } | { type: "block", value: MaterializeValue }
+export type ListObjType = Array<ObjType | Value>
+export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -214,6 +218,10 @@ export class Automerge {
   marks(obj: ObjID, heads?: Heads): Mark[];
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
+  // blocks
+  splitBlock(obj: ObjID, index: number, block: MapObjType): ObjID;
+  joinBlock(block: ObjID) : void;
+
   diff(before: Heads, after: Heads): Patch[];
 
   // text cursor
@@ -229,8 +237,10 @@ export class Automerge {
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
+  objInfo(obj: ObjID, heads?: Heads): ObjInfo;
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
+  spans(obj: ObjID, heads?: Heads): Span[];
   length(obj: ObjID, heads?: Heads): number;
   materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
