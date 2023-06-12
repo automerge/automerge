@@ -2,9 +2,9 @@ use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
-use crate::marks::{MarkAccumulator, MarkSet};
 use crate::read::ReadDocInternal;
-use crate::types::{ObjId, ObjType, OpId, Prop};
+use crate::marks::{MarkAccumulator, RichText};
+use crate::types::{ObjId, ObjMeta, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -42,14 +42,14 @@ use super::{PatchBuilder, TextRepresentation};
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
+    pub(crate) events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -73,14 +73,13 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     },
     IncrementMap {
         key: String,
@@ -152,32 +151,25 @@ impl PatchLog {
         self.active
     }
 
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
-        }
+    pub(crate) fn delete_seq(&mut self, obj: &ObjMeta, index: usize, num: usize) {
+        self.events.push((obj.id, Event::DeleteSeq { index, num }))
     }
 
-    pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        self.events.push((obj, Event::DeleteSeq { index, num }))
-    }
-
-    pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
+    pub(crate) fn delete_map(&mut self, obj: &ObjMeta, key: &str) {
         self.events
-            .push((obj, Event::DeleteMap { key: key.into() }))
+            .push((obj.id, Event::DeleteMap { key: key.into() }))
     }
 
-    pub(crate) fn increment(&mut self, obj: ObjId, prop: &Prop, value: i64, id: OpId) {
+    pub(crate) fn increment(&mut self, obj: &ObjMeta, prop: &Prop, value: i64, id: OpId) {
         match prop {
             Prop::Map(key) => self.increment_map(obj, key, value, id),
             Prop::Seq(index) => self.increment_seq(obj, *index, value, id),
         }
     }
 
-    pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
+    pub(crate) fn increment_map(&mut self, obj: &ObjMeta, key: &str, n: i64, id: OpId) {
         self.events.push((
-            obj,
+            obj.id,
             Event::IncrementMap {
                 key: key.into(),
                 n,
@@ -186,30 +178,30 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
+    pub(crate) fn increment_seq(&mut self, obj: &ObjMeta, index: usize, n: i64, id: OpId) {
         self.events
-            .push((obj, Event::IncrementSeq { index, n, id }))
+            .push((obj.id, Event::IncrementSeq { index, n, id }))
     }
 
-    pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
+    pub(crate) fn flag_conflict(&mut self, obj: &ObjMeta, prop: &Prop) {
         match prop {
             Prop::Map(key) => self.flag_conflict_map(obj, key),
             Prop::Seq(index) => self.flag_conflict_seq(obj, *index),
         }
     }
 
-    pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
+    pub(crate) fn flag_conflict_map(&mut self, obj: &ObjMeta, key: &str) {
         self.events
-            .push((obj, Event::FlagConflictMap { key: key.into() }))
+            .push((obj.id, Event::FlagConflictMap { key: key.into() }))
     }
 
-    pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
-        self.events.push((obj, Event::FlagConflictSeq { index }))
+    pub(crate) fn flag_conflict_seq(&mut self, obj: &ObjMeta, index: usize) {
+        self.events.push((obj.id, Event::FlagConflictSeq { index }))
     }
 
     pub(crate) fn put(
         &mut self,
-        obj: ObjId,
+        obj: &ObjMeta,
         prop: &Prop,
         value: Value,
         id: OpId,
@@ -224,7 +216,7 @@ impl PatchLog {
 
     pub(crate) fn put_map(
         &mut self,
-        obj: ObjId,
+        obj: &ObjMeta,
         key: &str,
         value: Value,
         id: OpId,
@@ -235,7 +227,7 @@ impl PatchLog {
             self.expose.insert(id);
         }
         self.events.push((
-            obj,
+            obj.id,
             Event::PutMap {
                 key: key.into(),
                 value,
@@ -247,7 +239,7 @@ impl PatchLog {
 
     pub(crate) fn put_seq(
         &mut self,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
         value: Value,
         id: OpId,
@@ -258,7 +250,7 @@ impl PatchLog {
             self.expose.insert(id);
         }
         self.events.push((
-            obj,
+            obj.id,
             Event::PutSeq {
                 index,
                 value,
@@ -270,13 +262,13 @@ impl PatchLog {
 
     pub(crate) fn splice(
         &mut self,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
         text: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) {
         self.events.push((
-            obj,
+            obj.id,
             Event::Splice {
                 index,
                 text: text.to_string(),
@@ -285,7 +277,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<RichText>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -297,30 +289,26 @@ impl PatchLog {
 
     pub(crate) fn insert(
         &mut self,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
-        self.events.push((
-            obj,
-            Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-                marks,
-            },
-        ))
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
+        };
+        self.events.push((obj.id, event))
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
-            let read_doc = ReadDocAt { doc, heads };
+            let read_doc = ReadDocAt { text_rep: self.text_rep, doc, heads };
             Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
         } else {
             Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
@@ -380,7 +368,7 @@ impl PatchLog {
                     value,
                     id,
                     conflict,
-                    marks,
+                    //marks,
                 } => {
                     let opid = doc.id_to_exid(*id);
                     patch_builder.insert(
@@ -388,7 +376,7 @@ impl PatchLog {
                         *index,
                         (value.into(), opid),
                         *conflict,
-                        marks.clone(),
+                        //marks.clone(),
                     );
                 }
                 Event::DeleteSeq { index, num } => {
@@ -518,13 +506,13 @@ impl ExposeQueue {
                     value,
                     id,
                     conflict,
-                    marks,
+                    ..
                 } in read_doc.list_range(&exid, ..)
                 {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(exid.clone(), index, (value, id), conflict, marks);
+                    patch_builder.insert(exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {

@@ -1,4 +1,4 @@
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::{RichText, RichTextStateMachine};
 use crate::op_set::{Op, OpIter};
 use crate::types::{Clock, Key};
 use std::sync::Arc;
@@ -25,19 +25,19 @@ impl<'a> TopOps<'a> {
 pub(crate) struct TopOpsInner<'a> {
     iter: OpIter<'a>,
     pos: usize,
-    start_pos: usize,
+    //start_pos: usize,
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, Op<'a>, Option<Arc<MarkSet>>)>,
-    marks: MarkStateMachine<'a>,
+    last_op: Option<(usize, Op<'a>, Option<Arc<RichText>>)>,
+    marks: RichTextStateMachine<'a>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TopOp<'a> {
     pub(crate) op: Op<'a>,
     pub(crate) conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> TopOpsInner<'a> {
@@ -45,7 +45,7 @@ impl<'a> TopOpsInner<'a> {
         Self {
             iter,
             pos: 0,
-            start_pos: 0,
+            //start_pos: 0,
             num_ops: 0,
             clock,
             key: None,
@@ -97,11 +97,11 @@ impl<'a> Iterator for TopOpsInner<'a> {
                             self.num_ops = 0;
                         }
                         self.key = Some(key);
-                        self.start_pos = self.pos;
+                        //self.start_pos = self.pos;
                     }
                     None => {
                         self.key = Some(key);
-                        self.start_pos = self.pos;
+                        //self.start_pos = self.pos;
                         if visible {
                             self.last_op = Some((self.pos, op, self.marks.current().cloned()));
                             self.num_ops = 1;

@@ -204,8 +204,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   if (textV2) {
     handle.registerDatatype("str", (n: string) => new RawString(n))
   } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    handle.registerDatatype("text", (n: any) => new Text(n))
+    handle.registerDatatype("text", (n: string) => new Text(n))
   }
   const doc = handle.materialize("/", undefined, {
     handle,

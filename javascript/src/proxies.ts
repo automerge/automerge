@@ -225,7 +225,7 @@ const MapHandler = {
   get<T extends Target>(
     target: T,
     key: any,
-  ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
+  ): ValueType<T> | ObjID | boolean | { handle: Automerge; textV2: boolean } {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
@@ -233,7 +233,7 @@ const MapHandler = {
     if (key === OBJECT_ID) return objectId
     if (key === IS_PROXY) return true
     if (key === TRACE) return target.trace
-    if (key === STATE) return { handle: context }
+    if (key === STATE) return { handle: context, textV2: target.textV2 }
     if (!cache[key]) {
       cache[key] = valueAt(target, key)
     }

@@ -334,6 +334,29 @@ impl<'a> Op<'a> {
             .chain(self.pred().map(|op| op.actor()))
             .chain(self.succ().map(|op| op.actor()))
     }
+
+    pub(crate) fn block_id(&self) -> Option<OpId> {
+        if self.action().is_block() {
+            if self.insert() {
+                return Some(*self.id());
+            } else if let Key::Seq(ElemId(id)) = self.key() {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn visible_block(&self) -> Option<OpId> {
+        if self.visible() {
+            self.block_id()
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_put(&self) -> bool {
+        matches!(&self.action(), OpType::Put(_))
+    }
 }
 
 pub(crate) struct PredIdxIter<'a> {

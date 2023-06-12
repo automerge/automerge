@@ -1626,7 +1626,6 @@ fn regression_insert_opid() {
             action: PatchAction::Insert {
                 index: i,
                 values: seq_tree,
-                marks: None,
             },
         });
         expected_patches.push(Patch {

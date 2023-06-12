@@ -2,9 +2,9 @@ use core::fmt::Debug;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::marks::MarkSet;
 use crate::read::ReadDocInternal;
-use crate::{ObjId, Prop, ReadDoc, Value};
+use crate::marks::RichText;
+use crate::{ObjId, Parents, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
@@ -12,7 +12,7 @@ use crate::{marks::Mark, sequence_tree::SequenceTree};
 #[derive(Debug, Clone)]
 pub(crate) struct PatchBuilder<'a, R> {
     patches: Vec<Patch>,
-    last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
+    last_mark_set: Option<Arc<RichText>>, // keep this around for a quick pointer equality test
     visible_paths: Option<HashMap<ObjId, Vec<(ObjId, Prop)>>>,
     doc: &'a R,
 }
@@ -61,7 +61,6 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
         let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
@@ -71,7 +70,7 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         }) = maybe_append(&mut self.patches, &obj)
         {
             let range = *tail_index..=*tail_index + values.len();
-            if marks == self.last_mark_set && range.contains(&index) {
+            if range.contains(&index) {
                 values.insert(index - *tail_index, value);
                 return;
             }
@@ -82,10 +81,8 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
             let action = PatchAction::Insert {
                 index,
                 values,
-                marks: marks.as_deref().cloned(),
             };
             self.push(Patch { obj, path, action });
-            self.last_mark_set = marks;
         }
     }
 
@@ -99,7 +96,7 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         obj: ObjId,
         index: usize,
         value: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,
@@ -137,6 +134,9 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
                     for _ in 0..length {
                         value.remove(index - *tail_index);
                     }
+                    if value.len() == 0 {
+                        self.patches.pop();
+                    }
                     return;
                 }
             }
@@ -149,6 +149,9 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
                 if range.contains(&index) && range.contains(&(index + length - 1)) {
                     for _ in 0..length {
                         values.remove(index - *tail_index);
+                    }
+                    if values.len() == 0 {
+                        self.patches.pop();
                     }
                     return;
                 }

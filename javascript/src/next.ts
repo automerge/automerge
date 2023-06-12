@@ -54,6 +54,7 @@ export {
 } from "./next_types.js"
 
 import type {
+  MapObjType,
   Cursor,
   Mark,
   MarkSet,
@@ -65,6 +66,7 @@ import { type PatchCallback } from "./stable.js"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts.js"
 import { unstableConflictAt } from "./conflicts.js"
+import { mapProxy } from "./proxies.js"
 import type { InternalState } from "./internal_state.js"
 
 export type {
@@ -351,6 +353,82 @@ export function updateText(
     return state.handle.updateText(objPath, newText)
   } catch (e) {
     throw new RangeError(`Cannot updateText: ${e}`)
+  }
+}
+
+export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for splitBlock")
+  }
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
+  try {
+    return state.handle.spans(value)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function block<T>(doc: Doc<T>, path: stable.Prop[]) {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+
+  if (!objectId) {
+    throw new RangeError("invalid doc argument for block()")
+  }
+
+  _clear_cache(doc)
+
+  path.unshift(objectId)
+  const path_string = path.join("/")
+
+  if (_is_proxy(doc)) {
+    let info = state.handle.objInfo(path_string)
+    // TODO: I should also check that the parent is text
+    if (info.type == "map" && info.path !== undefined) {
+      return mapProxy(state.handle, info.id, state.textV2, info.path)
+    } else {
+      throw new RangeError("Not a block")
+    }
+  } else {
+    let tmp = state.handle.materialize(path_string, state.heads, state)
+    return tmp
+  }
+}
+
+export function splitBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: MapObjType,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for splitBlock")
+  }
+  _clear_cache(doc)
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
+  index = cursorToIndex(state, value, index)
+
+  try {
+    let id = state.handle.splitBlock(value, index, {})
+    let info = state.handle.objInfo(id)
+    let blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
+    Object.assign(blockProxy, block)
+    return blockProxy
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
   }
 }
 
