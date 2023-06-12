@@ -870,6 +870,22 @@ impl Transactable for AutoCommit {
         )
     }
 
+    fn split_block<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+    }
+
+    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.join_block(&mut self.doc, patch_log, block.as_ref())
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             i.clone()

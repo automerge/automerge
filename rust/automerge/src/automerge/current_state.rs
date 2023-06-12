@@ -4,9 +4,11 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{
-    marks::{MarkSet, MarkStateMachine},
+    exid::ExId,
+    marks::{RichText, RichTextStateMachine},
     patches::{PatchLog, TextRepresentation},
-    types::{Key, ListEncoding, ObjId, Op, OpId},
+    port::Exportable,
+    types::{Key, ListEncoding, ObjMeta, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
@@ -14,14 +16,14 @@ use crate::{
 struct TextSpan {
     text: String,
     start: usize,
-    marks: Option<Rc<MarkSet>>,
+    marks: Option<Rc<RichText>>,
 }
 
 #[derive(Debug, Default)]
 struct TextState<'a> {
     len: usize,
     spans: Vec<TextSpan>,
-    marks: MarkStateMachine<'a>,
+    marks: RichTextStateMachine<'a>,
 }
 
 impl<'a> TextState<'a> {
@@ -36,6 +38,33 @@ impl<'a> TextState<'a> {
             });
         }
         self.len += len;
+    }
+
+    fn push_block(&mut self, block: ExId) {
+        let marks;
+        if let Some(last) = self.spans.last_mut() {
+            if last.text.is_empty() {
+                if let Some(m) = &mut last.marks {
+                    Rc::make_mut(m).set_block(block);
+                } else {
+                    last.marks = block.into();
+                }
+                return;
+            }
+            if let Some(mut m) = last.marks.clone() {
+                Rc::make_mut(&mut m).set_block(block);
+                marks = Some(m);
+            } else {
+                marks = block.into();
+            }
+        } else {
+            marks = block.into();
+        }
+        self.spans.push(TextSpan {
+            text: "".to_owned(),
+            start: self.len,
+            marks,
+        })
     }
 
     fn push_mark(&mut self) {
@@ -80,13 +109,13 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
-    for (obj, typ, ops) in doc.ops().iter_objs() {
-        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_patches(doc, patch_log, obj, ops)
-        } else if typ.is_sequence() {
-            log_list_patches(doc, patch_log, obj, ops);
+    for (obj, ops) in doc.ops().iter_objs() {
+        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_patches(doc, patch_log, &obj, ops)
+        } else if obj.typ.is_sequence() {
+            log_list_patches(doc, patch_log, &obj, ops);
         } else {
-            log_map_patches(doc, patch_log, obj, ops);
+            log_map_patches(doc, patch_log, &obj, ops);
         }
     }
 }
@@ -94,7 +123,7 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
 fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjId,
+    obj: &ObjMeta,
     ops: I,
 ) {
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
@@ -105,6 +134,9 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
         .fold(state, |mut state, (_key, key_ops)| {
             if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
                 match &o.action {
+                    OpType::Make(ObjType::Map) => {
+                        state.push_block(o.id.export(doc));
+                    }
                     OpType::Make(_) | OpType::Put(_) => {
                         state.push_str(o.to_str(), o.width(encoding))
                     }
@@ -125,43 +157,27 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
         });
     for span in state.spans {
         if !span.text.is_empty() {
-            patch_log.splice(*obj, span.start, span.text.as_str(), span.marks);
+            patch_log.splice(obj, span.start, span.text.as_str(), span.marks);
         }
     }
 }
 
 fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
-    doc: &'a Automerge,
+    _doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjId,
+    obj: &ObjMeta,
     ops: I,
 ) {
-    let mut marks = MarkStateMachine::default();
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let mut len = 0;
-    //let mut finished = Vec::new();
     ops_by_key
         .into_iter()
         .filter_map(|(_key, key_ops)| {
             key_ops
                 .filter(|o| o.visible_or_mark(None))
                 .filter_map(|o| match &o.action {
-                    OpType::Make(obj_type) => {
-                        Some((Value::Object(*obj_type), o.id, marks.current().cloned()))
-                    }
-                    OpType::Put(value) => Some((
-                        Value::Scalar(Cow::Borrowed(value)),
-                        o.id,
-                        marks.current().cloned(),
-                    )),
-                    OpType::MarkBegin(_, data) => {
-                        marks.mark_begin(o.id, data, &doc.ops.m);
-                        None
-                    }
-                    OpType::MarkEnd(_) => {
-                        marks.mark_end(o.id, &doc.ops.m);
-                        None
-                    }
+                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id)),
+                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id)),
                     _ => None,
                 })
                 .enumerate()
@@ -172,9 +188,9 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
                     (pos, value)
                 })
         })
-        .for_each(|(index, (val_enum, (value, opid, marks)))| {
+        .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            patch_log.insert(*obj, index, value.clone().into(), opid, conflict, marks);
+            patch_log.insert(obj, index, value.clone().into(), opid, conflict);
         });
 }
 
@@ -209,7 +225,7 @@ fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
 fn log_map_patches<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjId,
+    obj: &ObjMeta,
     ops: I,
 ) {
     let ops_by_key = ops.group_by(|o| o.key);
@@ -220,7 +236,7 @@ fn log_map_patches<'a, I: Iterator<Item = &'a Op>>(
             if let Some(prop_index) = put.key.prop_index() {
                 if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
                     let conflict = i > 0;
-                    patch_log.put_map(*obj, key, put.value.into(), put.id, conflict, false);
+                    patch_log.put_map(obj, key, put.value.into(), put.id, conflict, false);
                 }
             }
         });
@@ -477,10 +493,10 @@ mod tests {
                     index: 0,
                     value: PatchValue::Untagged("value".into()),
                 },
-                ObservedPatch::Insert {
+                ObservedPatch::SpliceText {
                     obj: text,
                     index: 0,
-                    value: PatchValue::Untagged("a".into()),
+                    chars: "a".into(),
                 },
             ])
         );

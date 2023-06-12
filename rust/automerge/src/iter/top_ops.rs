@@ -1,4 +1,4 @@
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::{RichText, RichTextStateMachine};
 use crate::op_tree::OpSetMetadata;
 use crate::op_tree::OpTreeIter;
 use crate::types::{Clock, Key, Op};
@@ -12,8 +12,8 @@ pub(crate) struct TopOps<'a> {
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, &'a Op, Option<Rc<MarkSet>>)>,
-    marks: MarkStateMachine<'a>,
+    last_op: Option<(usize, &'a Op, Option<Rc<RichText>>)>,
+    marks: RichTextStateMachine<'a>,
     meta: Option<&'a OpSetMetadata>,
 }
 
@@ -21,7 +21,7 @@ pub(crate) struct TopOps<'a> {
 pub(crate) struct TopOp<'a> {
     pub(crate) op: &'a Op,
     pub(crate) conflict: bool,
-    pub(crate) marks: Option<Rc<MarkSet>>,
+    pub(crate) marks: Option<Rc<RichText>>,
 }
 
 impl<'a> TopOps<'a> {

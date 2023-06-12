@@ -6,7 +6,7 @@ use std::{
 
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
-use crate::types::Op;
+use crate::types::{Op, OpId};
 pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
@@ -93,6 +93,7 @@ impl OpTreeNode {
         for i in &self.elements {
             index.insert(&ops[*i]);
         }
+        index.block = self.regenerate_block(ops);
         self.index = index
     }
 
@@ -121,7 +122,8 @@ impl OpTreeNode {
     pub(crate) fn insert_into_non_full_node(&mut self, index: usize, element: usize, ops: &[Op]) {
         assert!(!self.is_full());
 
-        self.index.insert(&ops[element]);
+        let op = &ops[element];
+        self.index.insert(op);
 
         if self.is_leaf() {
             self.length += 1;
@@ -142,6 +144,7 @@ impl OpTreeNode {
             }
             self.length += 1;
         }
+        self.index.block = self.regenerate_block(ops);
     }
 
     // A utility function to split the child `full_child_index` of this node
@@ -353,6 +356,7 @@ impl OpTreeNode {
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
             self.index.remove(&ops[v]);
+            self.index.block = self.regenerate_block(ops);
             assert_eq!(original_len, self.len() + 1);
             debug_assert_eq!(self.check(), self.len());
             v
@@ -372,6 +376,7 @@ impl OpTreeNode {
                             ops,
                         );
                         self.index.remove(&ops[v]);
+                        self.index.block = self.regenerate_block(ops);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -379,6 +384,7 @@ impl OpTreeNode {
                     Ordering::Greater => {
                         let v = self.remove_from_internal_child(index, child_index, ops);
                         self.index.remove(&ops[v]);
+                        self.index.block = self.regenerate_block(ops);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -402,7 +408,30 @@ impl OpTreeNode {
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
         self.length += successor_sibling.length + 1;
+        self.index.block = self.regenerate_block(ops);
         assert!(self.is_full());
+    }
+
+    fn block(&self) -> Option<OpId> {
+        self.index.block
+    }
+
+    fn regenerate_block(&self, ops: &[Op]) -> Option<OpId> {
+        if self.is_leaf() {
+            self.elements
+                .iter()
+                .rev()
+                .filter_map(|e| ops[*e].visible_block())
+                .next()
+        } else {
+            let mut elems = self.elements.iter().rev().map(|e| ops[*e].visible_block());
+            let mut nodes = self
+                .children
+                .iter()
+                .rev()
+                .filter_map(|c| c.block().or_else(|| elems.next().flatten()));
+            nodes.next()
+        }
     }
 
     /// Update the operation at the given index using the provided function.
@@ -412,8 +441,10 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         vis: ChangeVisibility<'a>,
+        ops: &[Op],
     ) -> ChangeVisibility<'a> {
         if self.is_leaf() {
+            self.index.block = self.regenerate_block(ops);
             self.index.change_vis(vis)
         } else {
             let mut cumulative_len = 0;
@@ -424,10 +455,12 @@ impl OpTreeNode {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
+                        self.index.block = self.regenerate_block(ops);
                         return self.index.change_vis(vis);
                     }
                     Ordering::Greater => {
-                        let vis = child.update(index - cumulative_len, vis);
+                        let vis = child.update(index - cumulative_len, vis, ops);
+                        self.index.block = self.regenerate_block(ops);
                         return self.index.change_vis(vis);
                     }
                 }

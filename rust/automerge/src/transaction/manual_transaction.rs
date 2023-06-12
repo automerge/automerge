@@ -405,6 +405,18 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
+    fn split_block<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+    }
+
+    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, block.as_ref()))
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner
             .as_ref()

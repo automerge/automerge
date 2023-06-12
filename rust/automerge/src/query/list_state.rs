@@ -1,16 +1,21 @@
 use crate::marks::MarkData;
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::QueryResult;
-use crate::types::{Key, ListEncoding, Op, OpId, OpType};
+use crate::types::{Key, ListEncoding, ObjType, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct MarkMap<'a> {
+pub(crate) struct RichTextQueryState<'a> {
     map: HashMap<OpId, &'a MarkData, FxBuildHasher>,
+    block: Option<OpId>,
 }
 
-impl<'a> MarkMap<'a> {
+impl<'a> RichTextQueryState<'a> {
+    pub(crate) fn block(&self) -> Option<&OpId> {
+        self.block.as_ref()
+    }
+
     pub(crate) fn process(&mut self, op: &'a Op) {
         match &op.action {
             OpType::MarkBegin(_, data) => {
@@ -18,6 +23,9 @@ impl<'a> MarkMap<'a> {
             }
             OpType::MarkEnd(_) => {
                 self.map.remove(&op.id.prev());
+            }
+            OpType::Make(ObjType::Map) => {
+                self.block = Some(op.id);
             }
             _ => {}
         }
@@ -79,7 +87,7 @@ impl ListState {
         &mut self,
         node: &'a OpTreeNode,
         ops: &[Op],
-        marks: Option<&mut MarkMap<'a>>,
+        marks: Option<&mut RichTextQueryState<'a>>,
     ) -> QueryResult {
         if self.encoding == ListEncoding::List {
             self.process_list_node(node, ops, marks)
@@ -96,7 +104,11 @@ impl ListState {
         }
     }
 
-    fn process_marks<'a>(&mut self, node: &'a OpTreeNode, marks: Option<&mut MarkMap<'a>>) {
+    fn process_marks<'a>(
+        &mut self,
+        node: &'a OpTreeNode,
+        marks: Option<&mut RichTextQueryState<'a>>,
+    ) {
         if let Some(marks) = marks {
             for (id, data) in node.index.mark_begin.iter() {
                 marks.insert(*id, data);
@@ -104,13 +116,16 @@ impl ListState {
             for id in node.index.mark_end.iter() {
                 marks.remove(id);
             }
+            if let Some(block) = &node.index.block {
+                marks.block = Some(*block);
+            }
         }
     }
 
     fn process_text_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
-        marks: Option<&mut MarkMap<'a>>,
+        marks: Option<&mut RichTextQueryState<'a>>,
     ) -> QueryResult {
         let num_vis = node.index.visible_len(self.encoding);
         if self.index + num_vis >= self.target {
@@ -126,7 +141,7 @@ impl ListState {
         &mut self,
         node: &'a OpTreeNode,
         ops: &[Op],
-        marks: Option<&mut MarkMap<'a>>,
+        marks: Option<&mut RichTextQueryState<'a>>,
     ) -> QueryResult {
         let mut num_vis = node.index.visible.len();
         if let Some(last_seen) = self.last_seen {

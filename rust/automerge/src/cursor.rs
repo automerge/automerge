@@ -1,3 +1,4 @@
+use crate::exid::ExId;
 use crate::op_set::OpSetMetadata;
 use crate::storage::parse;
 use crate::types::OpId;
@@ -25,6 +26,10 @@ impl Cursor {
             ctr: id.counter(),
             actor: m.actors.cache[id.actor()].clone(),
         }
+    }
+
+    pub fn to_obj(&self) -> ExId {
+        ExId::Id(self.ctr, self.actor.clone(), 0)
     }
 
     pub(crate) fn actor(&self) -> &ActorId {
@@ -104,6 +109,18 @@ impl<'a> TryFrom<&'a [u8]> for Cursor {
             ctr,
             actor: actor.into(),
         })
+    }
+}
+
+impl From<Cursor> for ExId {
+    fn from(cursor: Cursor) -> ExId {
+        ExId::Id(cursor.ctr, cursor.actor, 0)
+    }
+}
+
+impl From<&Cursor> for ExId {
+    fn from(cursor: &Cursor) -> ExId {
+        ExId::Id(cursor.ctr, cursor.actor.clone(), 0)
     }
 }
 

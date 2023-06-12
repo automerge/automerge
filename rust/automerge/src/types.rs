@@ -278,7 +278,7 @@ impl OpType {
     pub(crate) fn to_str(&self) -> &str {
         if let OpType::Put(ScalarValue::Str(s)) = &self {
             s
-        } else if self.is_mark() {
+        } else if self.is_mark() || self.is_block() {
             ""
         } else {
             "\u{fffc}"
@@ -287,6 +287,10 @@ impl OpType {
 
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+    }
+
+    pub(crate) fn is_block(&self) -> bool {
+        &OpType::Make(ObjType::Map) == self
     }
 }
 
@@ -568,6 +572,11 @@ pub(crate) struct ObjMeta {
 }
 
 impl ObjMeta {
+    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
+        let encoding = typ.into();
+        ObjMeta { id, typ, encoding }
+    }
+
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -599,6 +608,8 @@ impl From<Option<ObjType>> for ListEncoding {
     }
 }
 
+// FIXME - this is dangerous - encoding is a combo
+// of ObjType **and** TextRep - this will lead to bugs
 impl From<ObjType> for ListEncoding {
     fn from(obj: ObjType) -> Self {
         if obj == ObjType::Text {
@@ -709,6 +720,14 @@ impl Op {
         self.action.to_str()
     }
 
+    pub(crate) fn visible_block(&self) -> Option<OpId> {
+        if self.visible() {
+            self.block_id()
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
             false
@@ -787,6 +806,17 @@ impl Op {
         } else {
             None
         }
+    }
+
+    pub(crate) fn block_id(&self) -> Option<OpId> {
+        if self.action.is_block() {
+            if self.insert {
+                return Some(self.id);
+            } else if let Key::Seq(ElemId(id)) = &self.key {
+                return Some(*id);
+            }
+        }
+        None
     }
 
     pub(crate) fn elemid_or_key(&self) -> Key {

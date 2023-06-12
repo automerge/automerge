@@ -1,8 +1,7 @@
 use crate::error::AutomergeError;
-use crate::marks::MarkSet;
-use crate::marks::MarkStateMachine;
+use crate::marks::RichText;
 use crate::op_tree::OpTreeNode;
-use crate::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
+use crate::query::{ListState, OpSetMetadata, OpTree, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
 use std::fmt::Debug;
 use std::rc::Rc;
@@ -13,7 +12,7 @@ pub(crate) struct InsertNth<'a> {
     clock: Option<Clock>,
     last_visible_key: Option<Key>,
     candidates: Vec<Loc>,
-    marks: MarkMap<'a>,
+    marks: RichTextQueryState<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,12 +62,8 @@ impl<'a> InsertNth<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Rc<MarkSet>> {
-        let mut marks = MarkStateMachine::default();
-        for (id, mark_data) in self.marks.iter() {
-            marks.mark_begin(*id, mark_data, m);
-        }
-        marks.current().cloned()
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Rc<RichText>> {
+        RichText::from_query_state(&self.marks, m)
     }
 
     pub(crate) fn pos(&self) -> usize {

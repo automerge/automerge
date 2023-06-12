@@ -1,5 +1,5 @@
 use crate::iter::TopOps;
-use crate::marks::MarkSet;
+use crate::marks::RichText;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::patches::PatchLog;
 use crate::{
@@ -87,7 +87,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<Rc<MarkSet>>,
+    pub(crate) marks: Option<Rc<RichText>>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -109,20 +109,14 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         let index = mark.start;
                         let len = mark.len();
                         let marks = mark.into_mark_set();
-                        patch_log.mark(obj.id, index, len, &marks);
+                        patch_log.mark(obj, index, len, &marks);
                     }
                 }
-            } else if obj.typ == ObjType::Text {
-                patch_log.splice(obj.id, self.index, op.to_str(), self.marks.clone());
+            // TODO - move this into patch_log()
+            } else if obj.typ == ObjType::Text && !op.action.is_block() {
+                patch_log.splice(obj, self.index, op.to_str(), self.marks.clone());
             } else {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    op.id,
-                    false,
-                    self.marks.clone(),
-                );
+                patch_log.insert(obj, self.index, op.value().into(), op.id, false);
             }
             return;
         }
@@ -135,21 +129,14 @@ impl<'a> FoundOpWithPatchLog<'a> {
         if op.is_delete() {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
-                    Prop::Map(k) => patch_log.delete_map(obj.id, &k),
+                    Prop::Map(k) => patch_log.delete_map(obj, &k),
                     Prop::Seq(index) => {
-                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
+                        patch_log.delete_seq(obj, index, over.width(obj.encoding), over.block_id())
                     }
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
-                    patch_log.put(
-                        obj.id,
-                        &key,
-                        before.value().into(),
-                        before.id,
-                        conflict,
-                        true,
-                    );
+                    patch_log.put(obj, &key, before.value().into(), before.id, conflict, true);
                 }
                 _ => { /* do nothing */ }
             }
@@ -157,25 +144,24 @@ impl<'a> FoundOpWithPatchLog<'a> {
             if self.after.is_none() {
                 if let Some(counter) = self.overwritten {
                     if op.overwrites(counter) {
-                        patch_log.increment(obj.id, &key, value, op.id);
+                        patch_log.increment(obj, &key, value, op.id);
                     }
                 }
             }
         } else {
             let conflict = self.before.is_some();
-            //let value = (op.value(), doc.ops().id_to_exid(op.id));
             if op.is_list_op()
                 && self.overwritten.is_none()
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict, None);
+                patch_log.insert(obj, self.index, op.value().into(), op.id, conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
-                    patch_log.flag_conflict(obj.id, &key);
+                    patch_log.flag_conflict(obj, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.value().into(), op.id, conflict, false);
+                patch_log.put(obj, &key, op.value().into(), op.id, conflict, false);
             }
         }
     }
@@ -244,7 +230,7 @@ impl OpTreeInternal {
         op: &'a Op,
         mut pos: usize,
         index: usize,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Rc<RichText>>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;
@@ -497,15 +483,19 @@ impl OpTreeInternal {
     {
         if self.len() > index {
             let n = self.root_node.as_ref().unwrap().get(index).unwrap();
-            let new_element = self.ops.get_mut(n).unwrap();
-            let old_vis = new_element.visible();
-            f(new_element);
+            //let new_element = self.ops.get_mut(n).unwrap();
+            let old_vis = self.ops[n].visible();
+            f(&mut self.ops[n]);
             let vis = ChangeVisibility {
                 old_vis,
-                new_vis: new_element.visible(),
-                op: new_element,
+                new_vis: self.ops[n].visible(),
+                ops: &self.ops,
+                index: n,
             };
-            self.root_node.as_mut().unwrap().update(index, vis);
+            self.root_node
+                .as_mut()
+                .unwrap()
+                .update(index, vis, &self.ops);
         }
     }
 

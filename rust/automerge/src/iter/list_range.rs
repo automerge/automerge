@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use std::rc::Rc;
 
 use crate::exid::ExId;
-use crate::marks::MarkSet;
+use crate::marks::RichText;
 use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
@@ -72,6 +72,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());
+                // FIXME
                 let id = inner.op_set.id_to_exid(op.id);
                 if inner.range.contains(&index) {
                     return Some(ListRangeItem {
@@ -94,11 +95,11 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Rc<MarkSet>>,
+    pub(crate) marks: Option<Rc<RichText>>,
 }
 
 impl<'a> ListRangeItem<'a> {
-    pub fn marks(&self) -> Option<&MarkSet> {
+    pub fn marks(&self) -> Option<&RichText> {
         self.marks.as_deref()
     }
 }

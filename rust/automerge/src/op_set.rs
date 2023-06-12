@@ -7,6 +7,7 @@ use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
+use crate::patches::TextRep;
 use crate::query::TreeQuery;
 use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
@@ -75,9 +76,14 @@ impl OpSetInternal {
     }
 
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpTreeIter<'_>)> + '_ {
-        let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
+        // TODO
+        let mut objs: Vec<_> = self
+            .trees
+            .iter()
+            .map(|t| (ObjMeta::new(*t.0, t.1.objtype), t.1))
+            .collect();
+        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).id, (b.0).id));
         IterObjs {
             trees: objs.into_iter(),
         }
@@ -99,23 +105,30 @@ impl OpSetInternal {
         &self,
         obj: &ObjId,
         id: OpId,
+        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        let (_typ, encoding) = self.type_and_encoding(obj)?;
         self.trees
             .get(obj)
             .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
     }
 
+    pub(crate) fn parent_obj_id(&self, obj: &ObjId) -> Option<ObjId> {
+        self.trees.get(obj)?.parent
+    }
+
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
-        let parent = self.trees.get(obj)?.parent?;
-        let found = self.seek_opid(&parent, obj.0, clock)?;
+        let tree = self.trees.get(obj)?;
+        let parent = tree.parent?;
+        let typ = self.trees.get(&parent)?.objtype;
+        let found = self.seek_opid(&parent, obj.0, ListEncoding::List, clock)?;
         let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
             Key::Seq(_) => Prop::Seq(found.index),
         };
         Some(Parent {
             obj: parent,
+            typ,
             prop,
             visible: found.visible,
         })
@@ -256,9 +269,13 @@ impl OpSetInternal {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
-    pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
+    pub(crate) fn type_and_encoding(
+        &self,
+        id: &ObjId,
+        text_rep: TextRep,
+    ) -> Option<(ObjType, ListEncoding)> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
-        let encoding = objtype.into();
+        let encoding = text_rep.encoding(objtype);
         Some((objtype, encoding))
     }
 
@@ -370,16 +387,14 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
+    trees: std::vec::IntoIter<(ObjMeta, &'a op_tree::OpTree)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, OpTreeIter<'a>);
+    type Item = (ObjMeta, OpTreeIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees
-            .next()
-            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+        self.trees.next().map(|(id, tree)| (id, tree.iter()))
     }
 }
 
@@ -471,6 +486,7 @@ impl OpSetMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Parent {
     pub(crate) obj: ObjId,
+    pub(crate) typ: ObjType,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
 }
