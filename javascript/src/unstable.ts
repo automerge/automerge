@@ -364,13 +364,14 @@ export function unmark<T>(
   }
 }
 
-export function marks<T>(doc: Doc<T>, prop: stable.Prop): Mark[] {
+export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {
     throw new RangeError("invalid object for unmark")
   }
-  const obj = `${objectId}/${prop}`
+  path.unshift(objectId)
+  const obj = path.join("/")
   try {
     return state.handle.marks(obj)
   } catch (e) {
