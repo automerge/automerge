@@ -1,3 +1,4 @@
+use crate::block::Block;
 use crate::error;
 use crate::types::{Clock, ObjType, OpId};
 use serde::{Deserialize, Serialize, Serializer};
@@ -237,6 +238,13 @@ impl<'a> Value<'a> {
     pub fn to_bool(&self) -> Option<bool> {
         match self {
             Value::Scalar(s) => s.to_bool(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn to_block(&self) -> Option<Block> {
+        match self {
+            Value::Scalar(s) => s.to_bytes().and_then(Block::try_decode),
             _ => None,
         }
     }

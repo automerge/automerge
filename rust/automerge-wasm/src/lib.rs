@@ -321,6 +321,55 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = splitBlock)]
+    pub fn split_block(
+        &mut self,
+        obj: JsValue,
+        index: f64,
+        name: JsValue,
+        parents: Array,
+    ) -> Result<String, error::Block> {
+        let (obj, _) = self.import(obj)?;
+        let name = name.as_string().ok_or(error::Block::InvalidName)?;
+        let parents: Result<Vec<String>, _> = parents
+            .iter()
+            .map(|p| p.as_string().ok_or(error::Block::InvalidParents))
+            .collect();
+        let parents = parents?;
+        let id = self.doc.split_block(&obj, index as usize, name, parents)?;
+        Ok(id.to_string())
+    }
+
+    #[wasm_bindgen(js_name = updateBlock)]
+    pub fn update_block(
+        &mut self,
+        obj: JsValue,
+        block_id: JsValue,
+        name: JsValue,
+        parents: Array,
+    ) -> Result<(), error::Block> {
+        let (obj, _) = self.import(obj)?;
+        let name = name.as_string().ok_or(error::Block::InvalidName)?;
+        let parents: Result<Vec<String>, _> = parents
+            .iter()
+            .map(|p| p.as_string().ok_or(error::Block::InvalidParents))
+            .collect();
+        let parents = parents?;
+        let block_id = block_id.as_string().ok_or(error::Block::InvalidCursor)?;
+        let block_id = am::Cursor::try_from(block_id)?;
+        self.doc.update_block(&obj, &block_id, name, parents)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = joinBlock)]
+    pub fn join_block(&mut self, obj: JsValue, block_id: JsValue) -> Result<(), error::Block> {
+        let (obj, _) = self.import(obj)?;
+        let block_id = block_id.as_string().ok_or(error::Block::InvalidCursor)?;
+        let block_id = am::Cursor::try_from(block_id)?;
+        self.doc.join_block(&obj, &block_id)?;
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = insertObject)]
     pub fn insert_object(
         &mut self,
@@ -962,7 +1011,7 @@ impl Automerge {
             .get_marks(obj, index as usize, heads.as_deref())
             .map_err(to_js_err)?;
         let result = Object::new();
-        for (mark, value) in marks.iter() {
+        for (mark, value) in marks.iter_marks() {
             let (_datatype, value) = alloc(&value.into(), self.text_rep);
             js_set(&result, mark, value)?;
         }
@@ -1227,6 +1276,26 @@ pub mod error {
     impl From<Insert> for JsValue {
         fn from(e: Insert) -> Self {
             RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Block {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error("block name must be a string")]
+        InvalidName,
+        #[error("block parents must be an array of strings")]
+        InvalidParents,
+        #[error("invalid cursor")]
+        InvalidCursor,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<Block> for JsValue {
+        fn from(e: Block) -> Self {
+            JsValue::from(e.to_string())
         }
     }
 

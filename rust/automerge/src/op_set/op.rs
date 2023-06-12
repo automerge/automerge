@@ -1,3 +1,5 @@
+use types::Block;
+
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::op_set::OpSetData;
@@ -200,6 +202,35 @@ impl<'a> Op<'a> {
 
     pub(crate) fn pred(&self) -> impl Iterator<Item = &OpId> + ExactSizeIterator {
         self.op().pred.iter()
+    }
+
+    pub(crate) fn block_id(&self) -> Option<OpId> {
+        if self.action().is_block() {
+            if self.insert() {
+                return Some(*self.id());
+            } else if let Key::Seq(ElemId(id)) = &self.key() {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn as_block(&self) -> Option<Block> {
+        match self.value() {
+            Value::Scalar(v) => match v.as_ref() {
+                ScalarValue::Bytes(bytes) => Block::try_decode(bytes.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub(crate) fn visible_block(&self) -> Option<(OpId, Block)> {
+        if self.visible() {
+            self.as_block().map(|b| (*self.id(), b))
+        } else {
+            None
+        }
     }
 }
 

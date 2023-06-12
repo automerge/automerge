@@ -1,7 +1,7 @@
-use crate::marks::MarkSet;
+use crate::marks::RichText;
 pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
-use crate::patches::PatchLog;
+use crate::patches::{InsertArgs, PatchLog, PutArgs};
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
@@ -87,7 +87,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -112,17 +112,18 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         patch_log.mark(obj.id, index, len, &marks);
                     }
                 }
-            } else if obj.typ == ObjType::Text {
+            } else if obj.typ == ObjType::Text && !op.action().is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
-                    false,
-                    self.marks.clone(),
-                );
+                patch_log.insert(InsertArgs {
+                    obj: obj.id,
+                    index: self.index,
+                    value: op.value().into(),
+                    id: *op.id(),
+                    conflict: false,
+                    marks: self.marks.clone(),
+                    block_id: op.block_id(),
+                });
             }
             return;
         }
@@ -136,20 +137,24 @@ impl<'a> FoundOpWithPatchLog<'a> {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => patch_log.delete_map(obj.id, &k),
-                    Prop::Seq(index) => {
-                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
-                    }
+                    Prop::Seq(index) => patch_log.delete_seq(
+                        obj.id,
+                        index,
+                        over.width(obj.encoding),
+                        over.block_id(),
+                    ),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
-                    patch_log.put(
-                        obj.id,
-                        &key,
-                        before.value().into(),
-                        *before.id(),
+                    patch_log.put(PutArgs {
+                        obj: obj.id,
+                        prop: &key,
+                        value: before.value().into(),
+                        id: *before.id(),
                         conflict,
-                        true,
-                    );
+                        expose: true,
+                        block_id: before.block_id(),
+                    });
                 }
                 _ => { /* do nothing */ }
             }
@@ -168,20 +173,29 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
+                patch_log.insert(InsertArgs {
+                    obj: obj.id,
+                    index: self.index,
+                    value: op.value().into(),
+                    id: *op.id(),
                     conflict,
-                    None,
-                );
+                    marks: None,
+                    block_id: op.block_id(),
+                });
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.value().into(), *op.id(), conflict, false);
+                patch_log.put(PutArgs {
+                    obj: obj.id,
+                    prop: &key,
+                    value: op.value().into(),
+                    id: *op.id(),
+                    conflict,
+                    expose: false,
+                    block_id: op.block_id(),
+                });
             }
         }
     }
@@ -239,7 +253,7 @@ impl OpTreeInternal {
         op: Op<'a>,
         mut pos: usize,
         index: usize,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;
@@ -481,9 +495,9 @@ impl OpTreeInternal {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>) {
+    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>, osd: &OpSetData) {
         if self.len() > index {
-            self.root_node.as_mut().unwrap().update(index, vis);
+            self.root_node.as_mut().unwrap().update(index, vis, osd);
         }
     }
 

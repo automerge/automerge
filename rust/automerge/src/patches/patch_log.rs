@@ -2,14 +2,16 @@ use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
-use crate::marks::{MarkAccumulator, MarkSet};
+use crate::marks::{MarkAccumulator, RichText};
 use crate::types::{ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Patch, ReadDoc};
+use crate::{Automerge, ChangeHash, Cursor, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{PatchBuilder, TextRepresentation};
+use super::{
+    patch_builder::InsertArgs as PatchBuilderInsertArgs, PatchBuilder, TextRepresentation,
+};
 
 /// A record of changes made to a document
 ///
@@ -61,10 +63,12 @@ pub(crate) enum Event {
         value: Value,
         id: OpId,
         conflict: bool,
+        block_id: Option<OpId>,
     },
     DeleteSeq {
         index: usize,
         num: usize,
+        block_id: Option<OpId>,
     },
     DeleteMap {
         key: String,
@@ -72,14 +76,15 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
+        block_id: Option<OpId>,
     },
     IncrementMap {
         key: String,
@@ -100,6 +105,9 @@ pub(crate) enum Event {
     Mark {
         marks: MarkAccumulator,
     },
+    //SplitBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
+    //JoinBlock { index: usize, id: OpId },
+    //UpdateBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
 }
 
 impl PatchLog {
@@ -151,15 +159,30 @@ impl PatchLog {
         self.active
     }
 
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
+    /*
+        pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
+            match prop {
+                Prop::Map(key) => self.delete_map(obj, key),
+                Prop::Seq(index) => self.delete_seq(obj, *index, 1),
+            }
         }
-    }
+    */
 
-    pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        self.events.push((obj, Event::DeleteSeq { index, num }))
+    pub(crate) fn delete_seq(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        num: usize,
+        block_id: Option<OpId>,
+    ) {
+        self.events.push((
+            obj,
+            Event::DeleteSeq {
+                index,
+                num,
+                block_id,
+            },
+        ))
     }
 
     pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
@@ -208,16 +231,27 @@ impl PatchLog {
 
     pub(crate) fn put(
         &mut self,
-        obj: ObjId,
-        prop: &Prop,
-        value: Value,
-        id: OpId,
-        conflict: bool,
-        expose: bool,
+        PutArgs {
+            obj,
+            prop,
+            value,
+            id,
+            conflict,
+            expose,
+            block_id,
+        }: PutArgs<'_>,
     ) {
         match prop {
             Prop::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
-            Prop::Seq(index) => self.put_seq(obj, *index, value, id, conflict, expose),
+            Prop::Seq(index) => self.put_seq(PutSeqArgs {
+                obj,
+                index: *index,
+                value,
+                id,
+                conflict,
+                expose,
+                block_id,
+            }),
         }
     }
 
@@ -246,12 +280,15 @@ impl PatchLog {
 
     pub(crate) fn put_seq(
         &mut self,
-        obj: ObjId,
-        index: usize,
-        value: Value,
-        id: OpId,
-        conflict: bool,
-        expose: bool,
+        PutSeqArgs {
+            obj,
+            index,
+            value,
+            id,
+            conflict,
+            expose,
+            block_id,
+        }: PutSeqArgs,
     ) {
         if expose && value.is_object() {
             self.expose.insert(id);
@@ -263,6 +300,7 @@ impl PatchLog {
                 value,
                 id,
                 conflict,
+                block_id,
             },
         ))
     }
@@ -272,7 +310,7 @@ impl PatchLog {
         obj: ObjId,
         index: usize,
         text: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) {
         self.events.push((
             obj,
@@ -284,7 +322,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<RichText>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -296,12 +334,15 @@ impl PatchLog {
 
     pub(crate) fn insert(
         &mut self,
-        obj: ObjId,
-        index: usize,
-        value: Value,
-        id: OpId,
-        conflict: bool,
-        marks: Option<Arc<MarkSet>>,
+        InsertArgs {
+            obj,
+            index,
+            value,
+            id,
+            conflict,
+            marks,
+            block_id,
+        }: InsertArgs,
     ) {
         self.events.push((
             obj,
@@ -311,6 +352,7 @@ impl PatchLog {
                 id,
                 conflict,
                 marks,
+                block_id,
             },
         ))
     }
@@ -353,7 +395,14 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
+                    patch_builder.put(
+                        read_doc,
+                        exid,
+                        key.into(),
+                        (value.into(), opid),
+                        *conflict,
+                        None,
+                    );
                 }
                 Event::DeleteMap { key } => {
                     patch_builder.delete_map(read_doc, exid, key);
@@ -370,14 +419,17 @@ impl PatchLog {
                     value,
                     id,
                     conflict,
+                    block_id,
                 } => {
                     let opid = doc.id_to_exid(*id);
+                    let block_id = block_id.map(|b| Cursor::new(b, &doc.ops().osd));
                     patch_builder.put(
                         read_doc,
                         exid,
                         index.into(),
                         (value.into(), opid),
                         *conflict,
+                        block_id,
                     );
                 }
                 Event::Insert {
@@ -386,19 +438,27 @@ impl PatchLog {
                     id,
                     conflict,
                     marks,
+                    block_id,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.insert(
-                        read_doc,
-                        exid,
-                        *index,
-                        (value.into(), opid),
-                        *conflict,
-                        marks.clone(),
-                    );
+                    let block_id = block_id.map(|b| Cursor::new(b, &doc.ops().osd));
+                    patch_builder.insert(PatchBuilderInsertArgs {
+                        doc: read_doc,
+                        obj: exid,
+                        index: *index,
+                        tagged_value: (value.into(), opid),
+                        conflict: *conflict,
+                        marks: marks.clone(),
+                        block_id,
+                    });
                 }
-                Event::DeleteSeq { index, num } => {
-                    patch_builder.delete_seq(read_doc, exid, *index, *num);
+                Event::DeleteSeq {
+                    index,
+                    num,
+                    block_id,
+                } => {
+                    let block_id = block_id.map(|b| Cursor::new(b, &doc.ops().osd));
+                    patch_builder.delete_seq(read_doc, exid, *index, *num, block_id);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
@@ -412,7 +472,21 @@ impl PatchLog {
                 }
                 Event::Mark { marks } => {
                     patch_builder.mark(read_doc, exid, marks.clone().into_iter())
-                }
+                } //Event::SplitBlock { index, id, name, parents } => {
+                  //let id = Cursor::new(*id, &doc.ops().m);
+                  //patch_builder.split_block(read_doc, exid, *index, name.clone(), parents.clone(), id)
+                  //    todo!()
+                  //}
+                  /*
+                                  Event::JoinBlock { index, id } => {
+                                      let id = Cursor::new(*id, &doc.ops().m);
+                                      patch_builder.join_block(read_doc, exid, *index, id)
+                                  }
+                                  Event::UpdateBlock { index, id, name, parents } => {
+                                      let id = Cursor::new(*id, &doc.ops().m);
+                                      patch_builder.update_block(read_doc, exid, *index, name.clone(), parents.clone(), id)
+                                  }
+                  */
             }
         }
         // any objects exposed AFTER all other events get exposed here
@@ -448,6 +522,50 @@ impl PatchLog {
     pub(crate) fn set_text_rep(&mut self, rep: TextRepresentation) {
         self.text_rep = rep;
     }
+
+    /*
+        pub(crate) fn split_block(&mut self, obj: ObjId, index: usize, name: String, parents: Vec<String>, id: OpId) {
+            self.events.push((
+                obj,
+                Event::SplitBlock {
+                    index,
+                    name,
+                    parents,
+                    id,
+                },
+            ))
+        }
+    */
+
+    /*
+        pub(crate) fn join_block(&mut self, obj: ObjId, index: usize, id: OpId) {
+            self.events.push((
+                obj,
+                Event::JoinBlock {
+                    index,
+                    id,
+                },
+            ))
+        }
+    */
+
+    /*
+        pub(crate) fn update_block(&mut self, obj: ObjId, index: usize, name: String, parents: Vec<String>, id: OpId) {
+            self.events.push((
+                obj,
+                Event::UpdateBlock {
+                    index,
+                    name,
+                    parents,
+                    id,
+                },
+            ))
+        }
+    */
+
+    //SplitBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
+    //JoinBlock { index: usize, id: OpId },
+    //UpdateBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
 }
 
 impl AsRef<OpId> for &(ObjId, Event) {
@@ -524,6 +642,7 @@ impl ExposeQueue {
                 for ListRangeItem {
                     index,
                     value,
+                    block_id,
                     id,
                     conflict,
                     marks,
@@ -532,14 +651,16 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(
-                        read_doc,
-                        exid.clone(),
+                    let block_id = block_id.map(|b| Cursor::new(b, &doc.ops().osd));
+                    patch_builder.insert(PatchBuilderInsertArgs {
+                        doc: read_doc,
+                        obj: exid.clone(),
                         index,
-                        (value, id),
+                        tagged_value: (value, id),
                         conflict,
                         marks,
-                    );
+                        block_id,
+                    });
                 }
             }
             ObjType::Map | ObjType::Table => {
@@ -553,10 +674,47 @@ impl ExposeQueue {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
+                    patch_builder.put(
+                        read_doc,
+                        exid.clone(),
+                        key.into(),
+                        (value, id),
+                        conflict,
+                        None,
+                    );
                 }
             }
         }
         Some(())
     }
+}
+
+pub(crate) struct InsertArgs {
+    pub(crate) obj: ObjId,
+    pub(crate) index: usize,
+    pub(crate) value: Value,
+    pub(crate) id: OpId,
+    pub(crate) conflict: bool,
+    pub(crate) marks: Option<Arc<RichText>>,
+    pub(crate) block_id: Option<OpId>,
+}
+
+pub(crate) struct PutSeqArgs {
+    pub(crate) obj: ObjId,
+    pub(crate) index: usize,
+    pub(crate) value: Value,
+    pub(crate) id: OpId,
+    pub(crate) conflict: bool,
+    pub(crate) expose: bool,
+    pub(crate) block_id: Option<OpId>,
+}
+
+pub(crate) struct PutArgs<'a> {
+    pub(crate) obj: ObjId,
+    pub(crate) prop: &'a Prop,
+    pub(crate) value: Value,
+    pub(crate) id: OpId,
+    pub(crate) conflict: bool,
+    pub(crate) expose: bool,
+    pub(crate) block_id: Option<OpId>,
 }

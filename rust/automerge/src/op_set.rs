@@ -247,6 +247,7 @@ impl OpSetInternal {
                         new_vis,
                         op: idx.as_op2(&self.osd),
                     },
+                    &self.osd,
                 )
             }
         }
@@ -268,6 +269,7 @@ impl OpSetInternal {
                             new_vis,
                             op: idx.as_op2(&self.osd),
                         },
+                        &self.osd,
                     );
                 }
             }

@@ -4,6 +4,7 @@ mod patch_log;
 pub use patch::{Patch, PatchAction};
 pub(crate) use patch_builder::PatchBuilder;
 pub use patch_log::PatchLog;
+pub(crate) use patch_log::{InsertArgs, PutArgs, PutSeqArgs};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {

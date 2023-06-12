@@ -4,8 +4,12 @@ use std::{
     mem,
 };
 
+use crate::block::Block;
 pub(crate) use crate::op_set::{OpIdx, OpSetData};
-use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
+use crate::{
+    query::{ChangeVisibility, Index, QueryResult, TreeQuery},
+    types::OpId,
+};
 pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
@@ -86,6 +90,7 @@ impl OpTreeNode {
         for i in &self.elements {
             index.insert(i.as_op2(osd));
         }
+        index.block = self.regenerate_block(osd);
         self.index = index
     }
 
@@ -115,11 +120,11 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         element: OpIdx,
-        m: &OpSetData,
+        osd: &OpSetData,
     ) {
         assert!(!self.is_full());
 
-        self.index.insert(element.as_op2(m));
+        self.index.insert(element.as_op2(osd));
 
         if self.is_leaf() {
             self.length += 1;
@@ -129,17 +134,18 @@ impl OpTreeNode {
             let child = &mut self.children[child_index];
 
             if child.is_full() {
-                self.split_child(child_index, m);
+                self.split_child(child_index, osd);
 
                 // child structure has changed so we need to find the index again
                 let (child_index, sub_index) = self.find_child_index(index);
                 let child = &mut self.children[child_index];
-                child.insert_into_non_full_node(sub_index, element, m);
+                child.insert_into_non_full_node(sub_index, element, osd);
             } else {
-                child.insert_into_non_full_node(sub_index, element, m);
+                child.insert_into_non_full_node(sub_index, element, osd);
             }
             self.length += 1;
         }
+        self.index.block = self.regenerate_block(osd);
     }
 
     // A utility function to split the child `full_child_index` of this node
@@ -351,6 +357,7 @@ impl OpTreeNode {
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
             self.index.remove(v.as_op2(osd));
+            self.index.block = self.regenerate_block(osd);
             assert_eq!(original_len, self.len() + 1);
             debug_assert_eq!(self.check(), self.len());
             v
@@ -370,6 +377,7 @@ impl OpTreeNode {
                             osd,
                         );
                         self.index.remove(v.as_op2(osd));
+                        self.index.block = self.regenerate_block(osd);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -377,6 +385,7 @@ impl OpTreeNode {
                     Ordering::Greater => {
                         let v = self.remove_from_internal_child(index, child_index, osd);
                         self.index.remove(v.as_op2(osd));
+                        self.index.block = self.regenerate_block(osd);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -400,7 +409,33 @@ impl OpTreeNode {
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
         self.length += successor_sibling.length + 1;
+        self.index.block = self.regenerate_block(osd);
         assert!(self.is_full());
+    }
+
+    fn block(&self) -> Option<(OpId, Block)> {
+        self.index.block.clone()
+    }
+
+    fn regenerate_block(&self, osd: &OpSetData) -> Option<(OpId, Block)> {
+        if self.is_leaf() {
+            self.elements
+                .iter()
+                .rev()
+                .find_map(|e| e.as_op2(osd).visible_block())
+        } else {
+            let mut elems = self
+                .elements
+                .iter()
+                .rev()
+                .map(|e| e.as_op2(osd).visible_block());
+            let mut nodes = self
+                .children
+                .iter()
+                .rev()
+                .filter_map(|c| c.block().or_else(|| elems.next().flatten()));
+            nodes.next()
+        }
     }
 
     /// Update the operation at the given index using the provided function.
@@ -410,8 +445,10 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         vis: ChangeVisibility<'a>,
+        osd: &'a OpSetData,
     ) -> ChangeVisibility<'a> {
         if self.is_leaf() {
+            self.index.block = self.regenerate_block(osd);
             self.index.change_vis(vis)
         } else {
             let mut cumulative_len = 0;
@@ -422,10 +459,12 @@ impl OpTreeNode {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
+                        self.index.block = self.regenerate_block(osd);
                         return self.index.change_vis(vis);
                     }
                     Ordering::Greater => {
-                        let vis = child.update(index - cumulative_len, vis);
+                        let vis = child.update(index - cumulative_len, vis, osd);
+                        self.index.block = self.regenerate_block(osd);
                         return self.index.change_vis(vis);
                     }
                 }

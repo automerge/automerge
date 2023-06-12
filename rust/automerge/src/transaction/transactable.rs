@@ -1,6 +1,6 @@
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
-use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
+use crate::{AutomergeError, ChangeHash, Cursor, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
 pub trait Transactable: ReadDoc {
@@ -108,6 +108,28 @@ pub trait Transactable: ReadDoc {
         start: usize,
         end: usize,
         expand: ExpandMark,
+    ) -> Result<(), AutomergeError>;
+
+    fn split_block<S: Into<String>, O: AsRef<ExId>, P: IntoIterator<Item = S>>(
+        &mut self,
+        obj: O,
+        index: usize,
+        name: S,
+        parents: P,
+    ) -> Result<Cursor, AutomergeError>;
+
+    fn join_block<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        block_id: &Cursor,
+    ) -> Result<(), AutomergeError>;
+
+    fn update_block<S: Into<String>, O: AsRef<ExId>, P: IntoIterator<Item = S>>(
+        &mut self,
+        obj: O,
+        block_id: &Cursor,
+        name: S,
+        parents: P,
     ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on

@@ -10,7 +10,7 @@ use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
+use crate::marks::{Mark, MarkAccumulator, RichText, RichTextStateMachine};
 use crate::op_set::{OpSet, OpSetData};
 use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
@@ -1381,7 +1381,7 @@ impl Automerge {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
-        let mut marks = MarkStateMachine::default();
+        let mut marks = RichTextStateMachine::default();
         let mut acc = MarkAccumulator::default();
         let mut last_marks = None;
         let mut mark_len = 0;
@@ -1577,7 +1577,7 @@ impl Automerge {
         obj: O,
         index: usize,
         clock: Option<Clock>,
-    ) -> Result<MarkSet, AutomergeError> {
+    ) -> Result<RichText, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let result = self
             .ops
@@ -1766,7 +1766,7 @@ impl ReadDoc for Automerge {
         obj: O,
         index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<MarkSet, AutomergeError> {
+    ) -> Result<RichText, AutomergeError> {
         let clock = heads.map(|h| self.clock_at(h));
         self.get_marks_for(obj.as_ref(), index, clock)
     }

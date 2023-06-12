@@ -1,4 +1,4 @@
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::{RichText, RichTextStateMachine};
 use crate::op_set::{Op, OpIter};
 use crate::types::{Clock, Key};
 use std::sync::Arc;
@@ -27,15 +27,15 @@ pub(crate) struct TopOpsInner<'a> {
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, Op<'a>, Option<Arc<MarkSet>>)>,
-    marks: MarkStateMachine<'a>,
+    last_op: Option<(usize, Op<'a>, Option<Arc<RichText>>)>,
+    marks: RichTextStateMachine<'a>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TopOp<'a> {
     pub(crate) op: Op<'a>,
     pub(crate) conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> TopOpsInner<'a> {
@@ -75,7 +75,7 @@ impl<'a> Iterator for TopOpsInner<'a> {
                 let visible = op.visible_at(self.clock.as_ref());
                 match &self.clock {
                     Some(c) if c.covers(op.id()) => {
-                        self.marks.process(*op.id(), op.action(), self.iter.osd);
+                        self.marks.process(op, self.iter.osd);
                     }
                     _ => {}
                 }

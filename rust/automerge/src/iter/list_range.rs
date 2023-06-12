@@ -3,9 +3,9 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use crate::exid::ExId;
-use crate::marks::MarkSet;
+use crate::marks::RichText;
 use crate::types::Clock;
-use crate::types::ListEncoding;
+use crate::types::{ListEncoding, OpId};
 use crate::value::Value;
 
 use super::{TopOp, TopOps};
@@ -69,6 +69,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());
                 let id = op.exid();
+                let block_id = op.block_id();
                 if inner.range.contains(&index) {
                     return Some(ListRangeItem {
                         index,
@@ -76,6 +77,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                         id,
                         conflict,
                         marks,
+                        block_id,
                     });
                 }
             }
@@ -90,11 +92,12 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
+    pub(crate) block_id: Option<OpId>,
 }
 
 impl<'a> ListRangeItem<'a> {
-    pub fn marks(&self) -> Option<&MarkSet> {
+    pub fn marks(&self) -> Option<&RichText> {
         self.marks.as_deref()
     }
 }

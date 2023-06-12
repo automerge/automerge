@@ -3,8 +3,10 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
+use crate::op_set::Op;
 use crate::op_tree::OpSetData;
-use crate::types::{OpId, OpType};
+use crate::query::RichTextQueryState;
+use crate::types::{Block, OpId, OpType};
 use crate::value::ScalarValue;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -27,8 +29,8 @@ impl<'a> Mark<'a> {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
-    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
-        let mut m = MarkSet::default();
+    pub(crate) fn into_mark_set(self) -> Arc<RichText> {
+        let mut m = RichText::default();
         let data = self.data.into_owned();
         m.insert(data.name, data.value);
         Arc::new(m)
@@ -67,7 +69,7 @@ impl MarkAccumulator {
         })
     }
 
-    pub(crate) fn add(&mut self, index: usize, len: usize, other: &MarkSet) {
+    pub(crate) fn add(&mut self, index: usize, len: usize, other: &RichText) {
         for (name, value) in other.marks.iter() {
             let entry = self.marks.entry(name.clone()).or_default();
             if let Some(last) = entry.last_mut() {
@@ -86,12 +88,39 @@ impl MarkAccumulator {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct MarkSet {
+pub struct RichText {
     marks: BTreeMap<SmolStr, ScalarValue>,
+    block: Option<Block>,
 }
 
-impl MarkSet {
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
+impl RichText {
+    pub(crate) fn from_query_state(
+        q: &RichTextQueryState<'_>,
+        osd: &OpSetData,
+    ) -> Option<Arc<Self>> {
+        let mut marks = RichTextStateMachine::with_block(q.block().cloned());
+        for (id, mark_data) in q.iter() {
+            marks.mark_begin(*id, mark_data, osd);
+        }
+        marks.current().cloned()
+    }
+
+    pub(crate) fn with_block(block: Option<Block>) -> RichText {
+        RichText {
+            block,
+            marks: Default::default(),
+        }
+    }
+
+    pub(crate) fn set_block(&mut self, block: Block) {
+        self.block = Some(block);
+    }
+
+    pub fn block(&self) -> Option<&Block> {
+        self.block.as_ref()
+    }
+
+    pub fn iter_marks(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
         self.marks
             .iter()
             .map(|(name, value)| (name.as_str(), value))
@@ -114,7 +143,7 @@ impl MarkSet {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner().is_empty()
+        self.inner().is_empty() && self.block.is_none()
     }
 
     pub(crate) fn diff(&self, other: &Self) -> Self {
@@ -135,7 +164,11 @@ impl MarkSet {
                 diff.insert(name.clone(), value.clone());
             }
         }
-        MarkSet { marks: diff }
+        // TODO: what is correct behavior for block diff?
+        RichText {
+            marks: diff,
+            block: None,
+        }
     }
 }
 
@@ -182,13 +215,20 @@ impl<'a> Mark<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct MarkStateMachine<'a> {
+pub(crate) struct RichTextStateMachine<'a> {
     state: Vec<(OpId, &'a MarkData)>,
-    current: Arc<MarkSet>,
+    current: Arc<RichText>,
 }
 
-impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn current(&self) -> Option<&Arc<MarkSet>> {
+impl<'a> RichTextStateMachine<'a> {
+    fn with_block(block: Option<Block>) -> Self {
+        Self {
+            state: vec![],
+            current: Arc::new(RichText::with_block(block)),
+        }
+    }
+
+    pub(crate) fn current(&self) -> Option<&Arc<RichText>> {
         if self.current.is_empty() {
             None
         } else {
@@ -196,11 +236,16 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, opid: OpId, action: &'a OpType, osd: &OpSetData) -> bool {
-        match action {
-            OpType::MarkBegin(_, data) => self.mark_begin(opid, data, osd),
-            OpType::MarkEnd(_) => self.mark_end(opid, osd),
-            _ => false,
+    pub(crate) fn process(&mut self, op: Op<'a>, osd: &OpSetData) -> bool {
+        match op.action() {
+            OpType::MarkBegin(_, data) => self.mark_begin(*op.id(), data, osd),
+            OpType::MarkEnd(_) => self.mark_end(*op.id(), osd),
+            _ => {
+                if let Some(block) = op.as_block() {
+                    Arc::make_mut(&mut self.current).block = Some(block);
+                }
+                false
+            }
         }
     }
 
@@ -329,5 +374,14 @@ impl ExpandMark {
     }
     pub fn after(&self) -> bool {
         matches!(self, Self::After | Self::Both)
+    }
+}
+
+impl From<Block> for Option<Arc<RichText>> {
+    fn from(b: Block) -> Option<Arc<RichText>> {
+        Some(Arc::new(RichText {
+            block: Some(b),
+            marks: Default::default(),
+        }))
     }
 }

@@ -1020,6 +1020,9 @@ impl Automerge {
             }
             PatchAction::Mark { .. } => Ok(()),
             PatchAction::Conflict { .. } => Ok(()),
+            PatchAction::SplitBlock { .. } => Ok(()),
+            PatchAction::JoinBlock { .. } => Ok(()),
+            PatchAction::UpdateBlock { .. } => Ok(()),
         }
     }
 
@@ -1073,6 +1076,9 @@ impl Automerge {
             PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             PatchAction::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
             PatchAction::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
+            PatchAction::SplitBlock { .. } => Err(error::ApplyPatch::BlockInMap),
+            PatchAction::JoinBlock { .. } => Err(error::ApplyPatch::BlockInMap),
+            PatchAction::UpdateBlock { .. } => Err(error::ApplyPatch::BlockInMap),
         }
     }
 
@@ -1412,12 +1418,7 @@ impl TryFrom<JsPatch> for JsValue {
                 }
                 Ok(result.into())
             }
-            PatchAction::Insert {
-                index,
-                values,
-                marks,
-                ..
-            } => {
+            PatchAction::Insert { index, values, .. } => {
                 let conflicts = values.iter().map(|v| v.2).collect::<Vec<_>>();
                 js_set(&result, "action", "insert")?;
                 js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
@@ -1439,17 +1440,6 @@ impl TryFrom<JsPatch> for JsValue {
                             .collect::<Array>(),
                     )?;
                 }
-                if let Some(m) = marks {
-                    let marks = Object::new();
-                    for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
-                    }
-                    js_set(&result, "marks", marks)?;
-                }
                 Ok(result.into())
             }
             PatchAction::SpliceText {
@@ -1463,14 +1453,21 @@ impl TryFrom<JsPatch> for JsValue {
                 js_set(&result, "value", String::from(&value))?;
                 if let Some(m) = marks {
                     let marks = Object::new();
-                    for (name, value) in m.iter() {
+                    for (name, value) in m.iter_marks() {
                         js_set(
                             &marks,
                             name,
                             alloc(&value.into(), TextRepresentation::String).1,
                         )?;
                     }
-                    js_set(&result, "marks", &marks)?;
+                    js_set(&result, "marks", marks)?;
+                    if let Some(b) = m.block() {
+                        let block = Object::new();
+                        js_set(&block, "name", &b.name)?;
+                        let parents = b.parents.iter().map(JsValue::from).collect::<Array>();
+                        js_set(&block, "parents", &parents)?;
+                        js_set(&result, "block", block)?;
+                    }
                 }
                 Ok(result.into())
             }
@@ -1515,6 +1512,54 @@ impl TryFrom<JsPatch> for JsValue {
             PatchAction::Conflict { prop } => {
                 js_set(&result, "action", "conflict")?;
                 js_set(&result, "path", export_path(path, &prop))?;
+                Ok(result.into())
+            }
+            PatchAction::SplitBlock {
+                index,
+                name,
+                parents,
+                cursor,
+                conflict,
+            } => {
+                js_set(&result, "action", "splitBlock")?;
+                js_set(&result, "path", export_path(path, &index.into()))?;
+                js_set(&result, "name", name)?;
+                js_set(
+                    &result,
+                    "parents",
+                    parents.iter().map(JsValue::from).collect::<Array>(),
+                )?;
+                js_set(&result, "cursor", cursor.to_string())?;
+                if conflict {
+                    js_set(&result, "conflict", true)?;
+                }
+                Ok(result.into())
+            }
+            PatchAction::UpdateBlock {
+                index,
+                name,
+                parents,
+                cursor,
+                conflict,
+            } => {
+                js_set(&result, "action", "updateBlock")?;
+                js_set(&result, "path", export_path(path, &index.into()))?;
+                js_set(&result, "name", name)?;
+                js_set(
+                    &result,
+                    "parents",
+                    parents.iter().map(JsValue::from).collect::<Array>(),
+                )?;
+                js_set(&result, "cursor", cursor.to_string())?;
+                if conflict {
+                    js_set(&result, "conflict", true)?;
+                }
+                Ok(result.into())
+            }
+            PatchAction::JoinBlock { index, cursor } => {
+                js_set(&result, "action", "joinBlock")?;
+                js_set(&result, "path", export_path(path, &index.into()))?;
+                js_set(&result, "cursor", cursor.to_string())?;
                 Ok(result.into())
             }
         }
@@ -1738,6 +1783,8 @@ pub(crate) mod error {
         MarkInMap,
         #[error("array patch applied to non array")]
         NotArray,
+        #[error("cannot have blocks in a map")]
+        BlockInMap,
         #[error(transparent)]
         GetProp(#[from] GetProp),
         #[error(transparent)]

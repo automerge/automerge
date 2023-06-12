@@ -1,3 +1,4 @@
+use crate::block::Block;
 use crate::marks::MarkData;
 use crate::op_set::Op;
 use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
@@ -14,7 +15,7 @@ mod prop;
 mod seek_mark;
 
 pub(crate) use insert::InsertNth;
-pub(crate) use list_state::{ListState, MarkMap};
+pub(crate) use list_state::{ListState, RichTextQueryState};
 pub(crate) use nth::Nth;
 pub(crate) use opid::{OpIdSearch, SimpleOpIdSearch};
 pub(crate) use prop::Prop;
@@ -117,6 +118,7 @@ pub(crate) struct Index {
     never_seen_puts: bool,
     mark_begin: HashMap<OpId, MarkData, FxBuildHasher>,
     mark_end: Vec<OpId>,
+    pub(crate) block: Option<(OpId, Block)>,
 }
 
 impl Index {
@@ -132,6 +134,7 @@ impl Index {
             never_seen_puts: true,
             mark_begin: Default::default(),
             mark_end: Default::default(),
+            block: None,
         }
     }
 
@@ -256,6 +259,7 @@ impl Index {
         self.mark_begin.extend(other.mark_begin.clone()); // can I remove this clone?
         self.mark_end.extend(&other.mark_end);
         self.visible_text.merge(&other.visible_text);
+        self.block = other.block.clone();
         self.never_seen_puts &= other.never_seen_puts;
     }
 }
