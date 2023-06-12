@@ -8,12 +8,14 @@ for other language bindings that have good support for calling C functions.
 See the main README for instructions on getting your environment set up and then
 you can build the automerge-c library and install its constituent files within
 a root directory of your choosing (e.g. "/usr/local") like so:
+
 ```shell
 cmake -E make_directory automerge-c/build
 cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build
 cmake --install automerge-c/build --prefix "/usr/local"
 ```
+
 Installation is important because the name, location and structure of CMake's
 out-of-source build subdirectory is subject to change based on the platform and
 the release version; generated headers like `automerge-c/config.h` and
@@ -47,9 +49,22 @@ processor architecture of the computer on which it was built so, for example,
 don't use a header generated for a 64-bit processor if your target is a 32-bit
 processor.
 
+# Unicode indexing
+
+By default automerge-c expects string indexes to be given in terms of UTF-8
+byte offsets, so for example the length of "😀" is 4.
+
+That said, you can run `cmake -S automerge-c -B automerge-c/build -DUTF32_INDEXING=true`
+if you need to work in terms of unicode code points; at which point the length of "😀"
+will be 1.
+
+Regardless of the indexing encoding, automerge-c always requires strings to be
+provided in `AMbyteSpan` structs that contain valid UTF-8.
+
 # Usage
 
 You can build and view the C API's HTML reference documentation like so:
+
 ```shell
 cmake -E make_directory automerge-c/build
 cmake -S automerge-c -B automerge-c/build
@@ -78,6 +93,7 @@ The result of a successful function call that doesn't produce any values will
 contain a single item that is void (`AM_VAL_TYPE_VOID`).
 A returned result **must** be passed to `AMresultFree()` once the item(s) or
 error message it contains is no longer needed in order to avoid a memory leak.
+
 ```
 #include <stdio.h>
 #include <stdlib.h>
