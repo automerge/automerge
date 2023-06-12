@@ -31,11 +31,9 @@ type TargetCommon = {
   context: Automerge
   objectId: ObjID
   path: Array<Prop>
-  readonly: boolean
-  heads?: Array<string>
+  allowDocRef: boolean
   cache: object
   trace?: any
-  frozen: boolean
 }
 
 export type Text2Target = TargetCommon & { textV2: true }
@@ -73,8 +71,8 @@ function valueAt<T extends Target>(
   target: T,
   prop: Prop
 ): ValueType<T> | undefined {
-  const { context, objectId, path, readonly, heads, textV2 } = target
-  const value = context.getWithType(objectId, prop, heads)
+  const { context, objectId, path, allowDocRef, textV2 } = target
+  const value = context.getWithType(objectId, prop)
   if (value === null) {
     return
   }
@@ -89,8 +87,7 @@ function valueAt<T extends Target>(
         val as ObjID,
         textV2,
         [...path, prop],
-        readonly,
-        heads
+        allowDocRef
       )
     case "list":
       return listProxy<T>(
@@ -98,19 +95,17 @@ function valueAt<T extends Target>(
         val as ObjID,
         textV2,
         [...path, prop],
-        readonly,
-        heads
+        allowDocRef
       )
     case "text":
       if (textV2) {
-        return context.text(val as ObjID, heads) as ValueType<T>
+        return context.text(val as ObjID) as ValueType<T>
       } else {
         return textProxy(
           context,
           val as ObjID,
           [...path, prop],
-          readonly,
-          heads
+          allowDocRef
         ) as unknown as ValueType<T>
       }
     case "str":
@@ -130,18 +125,14 @@ function valueAt<T extends Target>(
     case "timestamp":
       return val as ValueType<T>
     case "counter": {
-      if (readonly) {
-        return new Counter(val as number) as ValueType<T>
-      } else {
-        const counter: Counter = getWriteableCounter(
-          val as number,
-          context,
-          path,
-          objectId,
-          prop
-        )
-        return counter as ValueType<T>
-      }
+      const counter: Counter = getWriteableCounter(
+        val as number,
+        context,
+        path,
+        objectId,
+        prop
+      )
+      return counter as ValueType<T>
     }
     default:
       throw RangeError(`datatype ${datatype} unimplemented`)
@@ -162,7 +153,11 @@ type ImportedValue =
   | [Record<string, any>, "map"]
   | [boolean, "boolean"]
 
-function import_value(value: any, textV2: boolean): ImportedValue {
+function import_value(
+  value: any,
+  textV2: boolean,
+  allowDocRef: boolean
+): ImportedValue {
   switch (typeof value) {
     case "object":
       if (value == null) {
@@ -187,7 +182,7 @@ function import_value(value: any, textV2: boolean): ImportedValue {
         return [value, "list"]
       } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
         return [value, "map"]
-      } else if (value[OBJECT_ID]) {
+      } else if (value[OBJECT_ID] && !allowDocRef) {
         throw new RangeError(
           "Cannot create a reference to an existing document object"
         )
@@ -218,7 +213,7 @@ const MapHandler = {
     target: T,
     key: any
   ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
-    const { context, objectId, cache } = target
+    const { context, objectId, cache, allowDocRef } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
     }
@@ -233,9 +228,9 @@ const MapHandler = {
   },
 
   set(target: Target, key: any, val: any) {
-    const { context, objectId, path, readonly, frozen, textV2 } = target
+    const { context, objectId, path, textV2, allowDocRef } = target
     target.cache = {} // reset cache on set
-    if (val && val[OBJECT_ID]) {
+    if (val && val[OBJECT_ID] && !allowDocRef) {
       throw new RangeError(
         "Cannot create a reference to an existing document object"
       )
@@ -247,13 +242,7 @@ const MapHandler = {
     if (key === CLEAR_CACHE) {
       return true
     }
-    const [value, datatype] = import_value(val, textV2)
-    if (frozen) {
-      throw new RangeError("Attempting to use an outdated Automerge document")
-    }
-    if (readonly) {
-      throw new RangeError(`Object property "${key}" cannot be modified`)
-    }
+    const [value, datatype] = import_value(val, textV2, allowDocRef)
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
@@ -262,7 +251,7 @@ const MapHandler = {
           list,
           textV2,
           [...path, key],
-          readonly
+          allowDocRef
         )
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
@@ -276,7 +265,12 @@ const MapHandler = {
         } else {
           assertText(value)
           const text = context.putObject(objectId, key, "")
-          const proxyText = textProxy(context, text, [...path, key], readonly)
+          const proxyText = textProxy(
+            context,
+            text,
+            [...path, key],
+            allowDocRef
+          )
           for (let i = 0; i < value.length; i++) {
             proxyText[i] = value.get(i)
           }
@@ -290,7 +284,7 @@ const MapHandler = {
           map,
           textV2,
           [...path, key],
-          readonly
+          allowDocRef
         )
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -304,11 +298,8 @@ const MapHandler = {
   },
 
   deleteProperty(target: Target, key: any) {
-    const { context, objectId, readonly } = target
+    const { context, objectId } = target
     target.cache = {} // reset cache on delete
-    if (readonly) {
-      throw new RangeError(`Object property "${key}" cannot be modified`)
-    }
     context.delete(objectId, key)
     return true
   },
@@ -331,9 +322,9 @@ const MapHandler = {
   },
 
   ownKeys(target: Target) {
-    const { context, objectId, heads } = target
+    const { context, objectId } = target
     // FIXME - this is a tmp workaround until fix the dupe key bug in keys()
-    const keys = context.keys(objectId, heads)
+    const keys = context.keys(objectId)
     return [...new Set<string>(keys)]
   },
 }
@@ -349,7 +340,7 @@ const ListHandler = {
     | { handle: Automerge }
     | number
     | ((_: any) => boolean) {
-    const { context, objectId, heads } = target
+    const { context, objectId } = target
     index = parseListIndex(index)
     if (index === Symbol.hasInstance) {
       return (instance: any) => {
@@ -363,7 +354,7 @@ const ListHandler = {
     if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
     if (index === STATE) return { handle: context }
-    if (index === "length") return context.length(objectId, heads)
+    if (index === "length") return context.length(objectId)
     if (typeof index === "number") {
       return valueAt(target, index) as ValueType<T>
     } else {
@@ -372,9 +363,9 @@ const ListHandler = {
   },
 
   set(target: Target, index: any, val: any) {
-    const { context, objectId, path, readonly, frozen, textV2 } = target
+    const { context, objectId, path, textV2, allowDocRef } = target
     index = parseListIndex(index)
-    if (val && val[OBJECT_ID]) {
+    if (val && val[OBJECT_ID] && !allowDocRef) {
       throw new RangeError(
         "Cannot create a reference to an existing document object"
       )
@@ -386,13 +377,7 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2)
-    if (frozen) {
-      throw new RangeError("Attempting to use an outdated Automerge document")
-    }
-    if (readonly) {
-      throw new RangeError(`Object property "${index}" cannot be modified`)
-    }
+    const [value, datatype] = import_value(val, textV2, allowDocRef)
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -406,7 +391,7 @@ const ListHandler = {
           list,
           textV2,
           [...path, index],
-          readonly
+          allowDocRef
         )
         proxyList.splice(0, 0, ...value)
         break
@@ -427,7 +412,12 @@ const ListHandler = {
           } else {
             text = context.putObject(objectId, index, "")
           }
-          const proxyText = textProxy(context, text, [...path, index], readonly)
+          const proxyText = textProxy(
+            context,
+            text,
+            [...path, index],
+            allowDocRef
+          )
           proxyText.splice(0, 0, ...value)
         }
         break
@@ -444,7 +434,7 @@ const ListHandler = {
           map,
           textV2,
           [...path, index],
-          readonly
+          allowDocRef
         )
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -475,19 +465,19 @@ const ListHandler = {
   },
 
   has(target: Target, index: any) {
-    const { context, objectId, heads } = target
+    const { context, objectId } = target
     index = parseListIndex(index)
     if (typeof index === "number") {
-      return index < context.length(objectId, heads)
+      return index < context.length(objectId)
     }
     return index === "length"
   },
 
   getOwnPropertyDescriptor(target: Target, index: any) {
-    const { context, objectId, heads } = target
+    const { context, objectId } = target
 
     if (index === "length")
-      return { writable: true, value: context.length(objectId, heads) }
+      return { writable: true, value: context.length(objectId) }
     if (index === OBJECT_ID)
       return { configurable: false, enumerable: false, value: objectId }
 
@@ -504,8 +494,8 @@ const ListHandler = {
     const keys: string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
-    //const {context, objectId, heads } = target
-    //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
+    //const {context, objectId } = target
+    //for (let i = 0; i < target.context.length(objectId); i++) { keys.push(i.toString()) }
     keys.push("length")
     return keys
   },
@@ -513,7 +503,7 @@ const ListHandler = {
 
 const TextHandler = Object.assign({}, ListHandler, {
   get(target: Target, index: any) {
-    const { context, objectId, heads } = target
+    const { context, objectId } = target
     index = parseListIndex(index)
     if (index === Symbol.hasInstance) {
       return (instance: any) => {
@@ -527,7 +517,7 @@ const TextHandler = Object.assign({}, ListHandler, {
     if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
     if (index === STATE) return { handle: context }
-    if (index === "length") return context.length(objectId, heads)
+    if (index === "length") return context.length(objectId)
     if (typeof index === "number") {
       return valueAt(target, index)
     } else {
@@ -543,19 +533,16 @@ export function mapProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path?: Prop[],
-  readonly?: boolean,
-  heads?: Heads
+  path: Prop[],
+  allowDocRef: boolean
 ): MapValueType<T> {
   const target: Target = {
     context,
     objectId,
     path: path || [],
-    readonly: !!readonly,
-    frozen: false,
-    heads,
     cache: {},
     textV2,
+    allowDocRef,
   }
   const proxied = {}
   Object.assign(proxied, target)
@@ -568,19 +555,16 @@ export function listProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path?: Prop[],
-  readonly?: boolean,
-  heads?: Heads
+  path: Prop[],
+  allowDocRef: boolean
 ): ListValueType<T> {
   const target: Target = {
     context,
     objectId,
     path: path || [],
-    readonly: !!readonly,
-    frozen: false,
-    heads,
     cache: {},
     textV2,
+    allowDocRef,
   }
   const proxied = []
   Object.assign(proxied, target)
@@ -596,17 +580,14 @@ interface TextProxy extends Text {
 export function textProxy(
   context: Automerge,
   objectId: ObjID,
-  path?: Prop[],
-  readonly?: boolean,
-  heads?: Heads
+  path: Prop[],
+  allowDocRef: boolean
 ): TextProxy {
   const target: Target = {
     context,
     objectId,
     path: path || [],
-    readonly: !!readonly,
-    frozen: false,
-    heads,
+    allowDocRef,
     cache: {},
     textV2: false,
   }
@@ -618,14 +599,14 @@ export function textProxy(
 export function rootProxy<T>(
   context: Automerge,
   textV2: boolean,
-  readonly?: boolean
+  allowDocRef: boolean
 ): T {
   /* eslint-disable-next-line */
-  return <any>mapProxy(context, "_root", textV2, [], !!readonly)
+  return <any>mapProxy(context, "_root", textV2, [], allowDocRef)
 }
 
 function listMethods<T extends Target>(target: T) {
-  const { context, objectId, path, readonly, frozen, heads, textV2 } = target
+  const { context, objectId, path, allowDocRef, textV2 } = target
   const methods = {
     deleteAt(index: number, numDelete: number) {
       if (typeof numDelete === "number") {
@@ -637,7 +618,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2)
+      const [value, datatype] = import_value(val, textV2, allowDocRef)
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
@@ -651,7 +632,12 @@ function listMethods<T extends Target>(target: T) {
           } else {
             assertText(value)
             const text = context.putObject(objectId, i, "")
-            const proxyText = textProxy(context, text, [...path, i], readonly)
+            const proxyText = textProxy(
+              context,
+              text,
+              [...path, i],
+              allowDocRef
+            )
             for (let i = 0; i < value.length; i++) {
               proxyText[i] = value.get(i)
             }
@@ -666,7 +652,7 @@ function listMethods<T extends Target>(target: T) {
     indexOf(o: any, start = 0) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
-        const value = context.getWithType(objectId, i, heads)
+        const value = context.getWithType(objectId, i)
         if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
           return i
         }
@@ -713,19 +699,11 @@ function listMethods<T extends Target>(target: T) {
       del = parseListIndex(del)
 
       for (const val of vals) {
-        if (val && val[OBJECT_ID]) {
+        if (val && val[OBJECT_ID] && !allowDocRef) {
           throw new RangeError(
             "Cannot create a reference to an existing document object"
           )
         }
-      }
-      if (frozen) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
-      }
-      if (readonly) {
-        throw new RangeError(
-          "Sequence object cannot be modified outside of a change block"
-        )
       }
       const result: ValueType<T>[] = []
       for (let i = 0; i < del; i++) {
@@ -735,7 +713,7 @@ function listMethods<T extends Target>(target: T) {
         }
         context.delete(objectId, index)
       }
-      const values = vals.map(val => import_value(val, textV2))
+      const values = vals.map(val => import_value(val, textV2, allowDocRef))
       for (const [value, datatype] of values) {
         switch (datatype) {
           case "list": {
@@ -745,7 +723,7 @@ function listMethods<T extends Target>(target: T) {
               list,
               textV2,
               [...path, index],
-              readonly
+              allowDocRef
             )
             proxyList.splice(0, 0, ...value)
             break
@@ -760,7 +738,7 @@ function listMethods<T extends Target>(target: T) {
                 context,
                 text,
                 [...path, index],
-                readonly
+                allowDocRef
               )
               proxyText.splice(0, 0, ...value)
             }
@@ -773,7 +751,7 @@ function listMethods<T extends Target>(target: T) {
               map,
               textV2,
               [...path, index],
-              readonly
+              allowDocRef
             )
             for (const key in value) {
               proxyMap[key] = value[key]
@@ -813,7 +791,7 @@ function listMethods<T extends Target>(target: T) {
 
     keys() {
       let i = 0
-      const len = context.length(objectId, heads)
+      const len = context.length(objectId)
       const iterator: IterableIterator<number> = {
         next: () => {
           if (i < len) {
@@ -967,7 +945,7 @@ function listMethods<T extends Target>(target: T) {
 }
 
 function textMethods(target: Target) {
-  const { context, objectId, heads } = target
+  const { context, objectId } = target
   const methods = {
     set(index: number, value: any) {
       return (this[index] = value)
@@ -976,7 +954,7 @@ function textMethods(target: Target) {
       return this[index]
     },
     toString(): string {
-      return context.text(objectId, heads).replace(/￼/g, "")
+      return context.text(objectId).replace(/￼/g, "")
     },
     toSpans(): AutomergeValue[] {
       const spans: AutomergeValue[] = []

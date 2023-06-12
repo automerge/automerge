@@ -587,5 +587,19 @@ describe("Automerge", () => {
       )
       let index = Automerge.getCursorPosition(doc, ["value"], cursor)
     })
+
+    it("should be able to pass a doc to from() to make a shallow copy", () => {
+      let state = {
+        text: "The sly fox jumped over the lazy dog",
+        x: 5,
+        y: new Date(),
+        z: [1, 2, 3, { alpha: "bravo" }],
+      }
+      let doc1 = Automerge.from(state)
+      assert.deepEqual(doc1, state)
+      console.log(Automerge.toJS(doc1))
+      let doc2 = Automerge.from(doc1)
+      assert.deepEqual(doc1, doc2)
+    })
   })
 })
