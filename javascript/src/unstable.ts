@@ -242,6 +242,21 @@ function cursorToIndex<T>(
   }
 }
 
+/**
+ * Modify a string
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to modify
+ * @param path - The path to the string to modify
+ * @param index - The position (as a {@link Cursor} or index) to edit.
+ *   If a cursor is used then the edit happens such that the cursor will
+ *   now point to the end of the newText, so you can continue to reuse
+ *   the same cursor for multiple calls to splice.
+ * @param del - The number of code units to delete, a positive number
+ *   deletes N characters after the cursor, a negative number deletes
+ *   N characters before the cursor.
+ * @param newText - The string to insert (if any).
+ */
 export function splice<T>(
   doc: Doc<T>,
   path: stable.Prop[],
@@ -271,6 +286,24 @@ export function splice<T>(
   }
 }
 
+/**
+ * Returns a cursor for the given position in a string.
+ *
+ * @remarks
+ * A cursor represents a relative position, "before character X",
+ * rather than an absolute position. As the document is edited, the
+ * cursor remains stable relative to its context, just as you'd expect
+ * from a cursor in a concurrent text editor.
+ *
+ * The string representation is shareable, and so you can use this both
+ * to edit the document yourself (using {@link splice}) or to share multiple
+ * collaborator's current cursor positions over the network.
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document
+ * @param path - The path to the string
+ * @param index - The current index of the position of the cursor
+ */
 export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
@@ -292,6 +325,15 @@ export function getCursor<T>(
   }
 }
 
+/**
+ * Returns the current index of the cursor.
+ *
+ * @typeParam T - The type of the value contained in the document
+ *
+ * @param doc - The document
+ * @param path - The path to the string
+ * @param index - The cursor
+ */
 export function getCursorPosition<T>(
   doc: Doc<T>,
   path: stable.Prop[],

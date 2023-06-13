@@ -72,11 +72,14 @@ pub trait Transactable: ReadDoc {
         prop: P,
     ) -> Result<(), AutomergeError>;
 
+    /// replace a section of a list. If `del` is positive then N values
+    /// are deleted after position `pos` and the new values inserted. If
+    /// it is negative then N values are deleted before position `pos` instead.
     fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -> Result<(), AutomergeError>;
 
@@ -85,7 +88,7 @@ pub trait Transactable: ReadDoc {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError>;
 

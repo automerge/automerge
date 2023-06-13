@@ -9,7 +9,7 @@ fn main() -> Result<(), AutomergeError> {
     let mut commands = vec![];
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
-        let del: usize = edits[i][1].as_usize().unwrap();
+        let del: isize = edits[i][1].as_isize().unwrap();
         let mut vals = String::new();
         for j in 2..edits[i].len() {
             let v = edits[i][j].as_str().unwrap();

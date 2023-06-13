@@ -837,7 +837,7 @@ pub unsafe extern "C" fn AMsplice(
     let pos = clamp!(pos, len, "pos");
     let del = clamp!(del, len, "del");
     match Vec::<am::ScalarValue>::try_from(&values) {
-        Ok(vals) => to_result(doc.splice(obj_id, pos, del, vals)),
+        Ok(vals) => to_result(doc.splice(obj_id, pos, del as isize, vals)),
         Err(e) => AMresult::error(&e.to_string()).into(),
     }
 }
@@ -877,7 +877,7 @@ pub unsafe extern "C" fn AMspliceText(
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
     let del = clamp!(del, len, "del");
-    to_result(doc.splice_text(obj_id, pos, del, to_str!(text)))
+    to_result(doc.splice_text(obj_id, pos, del as isize, to_str!(text)))
 }
 
 /// \memberof AMdoc

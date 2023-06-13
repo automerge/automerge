@@ -217,7 +217,7 @@ impl Automerge {
     ) -> Result<(), error::Splice> {
         let (obj, obj_type) = self.import(obj)?;
         let start = start as usize;
-        let delete_count = delete_count as usize;
+        let delete_count = delete_count as isize;
         let vals = if let Some(t) = text.as_string() {
             if obj_type == am::ObjType::Text && self.text_rep == TextRepresentation::String {
                 self.doc.splice_text(&obj, start, delete_count, &t)?;
