@@ -279,11 +279,6 @@ export function splice<T>(
 
   index = cursorToIndex(state, value, index)
 
-  if (del < 0) {
-    index += del
-    del = 0 - del
-  }
-
   try {
     return state.handle.splice(value, index, del, newText)
   } catch (e) {
