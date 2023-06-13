@@ -1744,7 +1744,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
@@ -1756,7 +1756,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();

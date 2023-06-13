@@ -826,6 +826,15 @@
 <a href="#826" id="826">826</a>
 <a href="#827" id="827">827</a>
 <a href="#828" id="828">828</a>
+<a href="#829" id="829">829</a>
+<a href="#830" id="830">830</a>
+<a href="#831" id="831">831</a>
+<a href="#832" id="832">832</a>
+<a href="#833" id="833">833</a>
+<a href="#834" id="834">834</a>
+<a href="#835" id="835">835</a>
+<a href="#836" id="836">836</a>
+<a href="#837" id="837">837</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 <span class="kw">use </span>std::rc::Rc;
 
@@ -1361,7 +1370,7 @@
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
         ex_obj: <span class="kw-2">&amp;</span>ExId,
         index: usize,
-        del: usize,
+        del: isize,
         vals: <span class="kw">impl </span>IntoIterator&lt;Item = ScalarValue&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
@@ -1389,7 +1398,7 @@
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
         ex_obj: <span class="kw-2">&amp;</span>ExId,
         index: usize,
-        del: usize,
+        del: isize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
@@ -1422,11 +1431,20 @@
             splice_type,
         }: SpliceArgs&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">if </span>del &lt; <span class="number">0 </span>{
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = index.checked_add_signed(del) {
+                index = n;
+                del = del.abs();
+            } <span class="kw">else </span>{
+                <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidIndex(index));
+            }
+        }
+
         <span class="comment">//let ex_obj = doc.ops().id_to_exid(obj.0);
         </span><span class="kw">let </span>encoding = splice_type.encoding();
         <span class="comment">// delete `del` items - performing the query for each one
-        </span><span class="kw">let </span><span class="kw-2">mut </span>deleted = <span class="number">0</span>;
-        <span class="kw">while </span>deleted &lt; del {
+        </span><span class="kw">let </span><span class="kw-2">mut </span>deleted: usize = <span class="number">0</span>;
+        <span class="kw">while </span>deleted &lt; (del <span class="kw">as </span>usize) {
             <span class="comment">// TODO: could do this with a single custom query
             </span><span class="kw">let </span>query = doc
                 .ops()
@@ -1436,7 +1454,7 @@
             // move cursor back to the beginning and expand the del width
             </span><span class="kw">let </span>adjusted_index = query.index();
             <span class="kw">if </span>adjusted_index &lt; index {
-                del += index - adjusted_index;
+                del += (index - adjusted_index) <span class="kw">as </span>isize;
                 index = adjusted_index;
             }
 
@@ -1633,7 +1651,7 @@
 <span class="kw">struct </span>SpliceArgs&lt;<span class="lifetime">&#39;a</span>&gt; {
     obj: ObjId,
     index: usize,
-    del: usize,
+    del: isize,
     values: Vec&lt;ScalarValue&gt;,
     splice_type: SpliceType&lt;<span class="lifetime">&#39;a</span>&gt;,
 }

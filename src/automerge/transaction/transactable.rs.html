@@ -110,6 +110,9 @@
 <a href="#110" id="110">110</a>
 <a href="#111" id="111">111</a>
 <a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use crate</span>::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
@@ -184,11 +187,14 @@
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
 
-    <span class="kw">fn </span>splice&lt;O: AsRef&lt;ExId&gt;, V: IntoIterator&lt;Item = ScalarValue&gt;&gt;(
+    <span class="doccomment">/// replace a section of a list. If `del` is positive then N values
+    /// are deleted after position `pos` and the new values inserted. If
+    /// it is negative then N values are deleted before position `pos` instead.
+    </span><span class="kw">fn </span>splice&lt;O: AsRef&lt;ExId&gt;, V: IntoIterator&lt;Item = ScalarValue&gt;&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
 
@@ -197,7 +203,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
 

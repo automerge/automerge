@@ -795,7 +795,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
@@ -805,7 +805,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))
