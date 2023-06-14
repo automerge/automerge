@@ -810,8 +810,8 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of values to delete or `SIZE_MAX` to indicate
-///                all of them.
+/// \param[in] del The number of values to delete. Positive `del` deletes items
+///                after `pos`, negative `del` deletes items before `pos`.
 /// \param[in] values A copy of an `AMitems` struct from which values will be
 ///                   spliced <b>starting at its current position</b>; call
 ///                   `AMitemsRewound()` on a used `AMitems` first to ensure
@@ -834,14 +834,14 @@ pub unsafe extern "C" fn AMsplice(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     pos: usize,
-    del: usize,
+    del: isize,
     values: AMitems,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
-    let del = clamp!(del, len, "del");
+
     match Vec::<am::ScalarValue>::try_from(&values) {
         Ok(vals) => to_result(doc.splice(obj_id, pos, del, vals)),
         Err(e) => AMresult::error(&e.to_string()).into(),
@@ -869,8 +869,9 @@ pub unsafe extern "C" fn AMsplice(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the text object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of characters to delete or `SIZE_MAX` to indicate
-///                all of them.
+/// \param[in] del The number of characters to delete. Positive `del` deletes
+///                 characters after `pos`, and negative `del` deletes characters
+///                 before `pos`.
 /// \param[in] text A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
@@ -888,14 +889,13 @@ pub unsafe extern "C" fn AMspliceText(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     pos: usize,
-    del: usize,
+    del: isize,
     text: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
-    let del = clamp!(del, len, "del");
     to_result(doc.splice_text(obj_id, pos, del, to_str!(text)))
 }
 

@@ -2,7 +2,7 @@ use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, ROOT}
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 
-fn replay_trace_tx(commands: Vec<(usize, usize, String)>) -> Automerge {
+fn replay_trace_tx(commands: Vec<(usize, isize, String)>) -> Automerge {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -13,7 +13,7 @@ fn replay_trace_tx(commands: Vec<(usize, usize, String)>) -> Automerge {
     doc
 }
 
-fn replay_trace_autotx(commands: Vec<(usize, usize, String)>) -> AutoCommit {
+fn replay_trace_autotx(commands: Vec<(usize, isize, String)>) -> AutoCommit {
     let mut doc = AutoCommit::new();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (pos, del, vals) in commands {
@@ -45,7 +45,7 @@ fn bench(c: &mut Criterion) {
     let mut commands = vec![];
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
-        let del: usize = edits[i][1].as_usize().unwrap();
+        let del: isize = edits[i][1].as_isize().unwrap();
         let mut vals = String::new();
         for j in 2..edits[i].len() {
             let v = edits[i][j].as_str().unwrap();

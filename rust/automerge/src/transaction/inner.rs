@@ -533,7 +533,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
@@ -561,7 +561,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
@@ -594,11 +594,20 @@ impl TransactionInner {
             splice_type,
         }: SpliceArgs<'_>,
     ) -> Result<(), AutomergeError> {
+        if del < 0 {
+            if let Some(n) = index.checked_add_signed(del) {
+                index = n;
+                del = del.abs();
+            } else {
+                return Err(AutomergeError::InvalidIndex(index));
+            }
+        }
+
         //let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding();
         // delete `del` items - performing the query for each one
-        let mut deleted = 0;
-        while deleted < del {
+        let mut deleted: usize = 0;
+        while deleted < (del as usize) {
             // TODO: could do this with a single custom query
             let query = doc
                 .ops()
@@ -608,7 +617,7 @@ impl TransactionInner {
             // move cursor back to the beginning and expand the del width
             let adjusted_index = query.index();
             if adjusted_index < index {
-                del += index - adjusted_index;
+                del += (index - adjusted_index) as isize;
                 index = adjusted_index;
             }
 
@@ -805,7 +814,7 @@ impl<'a> SpliceType<'a> {
 struct SpliceArgs<'a> {
     obj: ObjId,
     index: usize,
-    del: usize,
+    del: isize,
     values: Vec<ScalarValue>,
     splice_type: SpliceType<'a>,
 }
