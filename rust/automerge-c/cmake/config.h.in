@@ -53,6 +53,6 @@
 
 #define @SYMBOL_PREFIX@_@TEXT_INDEXING_ENCODING@
 
-#endif /* DOXYGEN*/
+#endif
 
 #endif /* @INCLUDE_GUARD_PREFIX@_CONFIG_H */
