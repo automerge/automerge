@@ -221,7 +221,7 @@ static void test_AMspliceText(void** state) {
     assert_int_equal(str.count, strlen("one two three"));
     assert_memory_equal(str.src, "one two three", str.count);
 
-#ifdef AUTOMERGE_C_UTF8
+#if defined(AUTOMERGE_C_UTF8)
 
     AMobjId const* const unicode =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("unicode"), AM_OBJ_TYPE_TEXT), cmocka_cb,
@@ -253,8 +253,7 @@ static void test_AMspliceText(void** state) {
         AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, edge, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
     assert_str_equal(str, "🇬🇵");
 
-#else // AUTOMERGE_C_UTF8
-#ifdef AUTOMERGE_C_UTF32
+#elif defined(AUTOMERGE_C_UTF32)
 
     AMobjId const* const unicode =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("unicode"), AM_OBJ_TYPE_TEXT), cmocka_cb,
@@ -268,12 +267,11 @@ static void test_AMspliceText(void** state) {
         AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, unicode, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
     assert_str_equal(str, "🇬🇧🇦🇪");
 
-#else // AUTOMERGE_C_UTF32
+#else
 
-    assert_int_equal(0, 1);
+    print_error("%s", "Neither `AUTOMERGE_C_UTF8` nor `AUTOMERGE_C_UTF32` are defined.");
 
-#endif // AUTOMERGE_C_UTF32
-#endif // AUTOMERGE_C_UTF8 else
+#endif
 }
 
 int run_doc_tests(void) {

@@ -10,7 +10,7 @@ set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
 
-option(UTF32_INDEXING "Enable UTF32 indexing.")
+option(UTF32_INDEXING "Enable UTF-32 indexing.")
 
 include(CTest)
 
