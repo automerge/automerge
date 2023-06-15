@@ -56,7 +56,8 @@ offsets so, for example, the length of "😀" (U+1F600) is 4.
 
 If instead you need string indices to be given in terms of Unicode code point
 offsets such that the length of "😀" (U+1F600) will be 1, build it like so:
-`cmake -S automerge-c -B automerge-c/build -DUTF32_INDEXING=true`.
+
+`cmake -S automerge-c -B automerge-c/build -DUTF32_INDEXING=true`
 
 Regardless of the specified encoding for character indices, automerge-c always
 requires a string to be provided as an `AMbyteSpan` struct that references an
