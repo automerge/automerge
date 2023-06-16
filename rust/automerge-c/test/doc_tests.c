@@ -221,12 +221,13 @@ static void test_AMspliceText(void** state) {
     assert_int_equal(str.count, strlen("one two three"));
     assert_memory_equal(str.src, "one two three", str.count);
 
-#if defined(AUTOMERGE_C_UTF8)
-
     AMobjId const* const unicode =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("unicode"), AM_OBJ_TYPE_TEXT), cmocka_cb,
                                 AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMspliceText(doc, unicode, 0, 0, AMstr("🇬🇧🇩🇪")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+#if defined(AUTOMERGE_C_UTF8)
+
     AMstackItem(NULL, AMspliceText(doc, unicode, 8, 4, AMstr("🇦")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
 
     assert_int_equal(AMobjSize(doc, unicode, NULL), 16);
@@ -255,10 +256,6 @@ static void test_AMspliceText(void** state) {
 
 #elif defined(AUTOMERGE_C_UTF32)
 
-    AMobjId const* const unicode =
-        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("unicode"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
-    AMstackItem(NULL, AMspliceText(doc, unicode, 0, 0, AMstr("🇬🇧🇩🇪")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMspliceText(doc, unicode, 2, 1, AMstr("🇦")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
 
     assert_int_equal(AMobjSize(doc, unicode, NULL), 4);
