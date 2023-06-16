@@ -1241,7 +1241,7 @@ pub enum AMvalType {
     F64 = 1 << 8,
     /// A 64-bit signed integer value.
     Int = 1 << 9,
-    /// A mark
+    /// A mark.
     Mark = 1 << 10,
     /// A null value.
     Null = 1 << 11,

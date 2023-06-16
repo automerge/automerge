@@ -568,19 +568,15 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 
 /// \memberof AMdoc
 /// \brief Gets the current or historical size of an object.
-///
-///        If the object is a Text object then the return value will depend
-///        on whether the library was built with utf-8 (the default) or utf-32 indexing.
-///        If AUTOMERGE_C_UTF8 is defined the return value will be the number of bytes
-///        in the UTF-8 encoding of the string, if AUTOMERGE_C_UTF32 is defined, the
-///        return value will be the number of unicode code points in the string.
-///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical size or `NULL` to select its
 ///                  current size.
 /// \return The count of items in the object identified by \p obj_id.
+///         For an `AM_OBJ_TYPE_TEXT` object, if `AUTOMERGE_C_UTF8` is defined
+///         then the items are bytes but if `AUTOMERGE_C_UTF32` is defined then
+///         the items are Unicode code points.
 /// \pre \p doc `!= NULL`
 /// \internal
 ///
@@ -810,8 +806,9 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of values to delete. Positive `del` deletes items
-///                after `pos`, negative `del` deletes items before `pos`.
+/// \param[in] del The number of values to delete. If \p del `> 0` then
+///                deletion begins at \p pos but if \p del `< 0` then deletion
+///                ends at \p pos.
 /// \param[in] values A copy of an `AMitems` struct from which values will be
 ///                   spliced <b>starting at its current position</b>; call
 ///                   `AMitemsRewound()` on a used `AMitems` first to ensure
@@ -820,7 +817,7 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
+/// \pre `-AMobjSize(`\p obj_id `) <=` \p del `<= AMobjSize(`\p obj_id `)`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
@@ -841,7 +838,6 @@ pub unsafe extern "C" fn AMsplice(
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
-
     match Vec::<am::ScalarValue>::try_from(&values) {
         Ok(vals) => to_result(doc.splice(obj_id, pos, del, vals)),
         Err(e) => AMresult::error(&e.to_string()).into(),
@@ -851,32 +847,24 @@ pub unsafe extern "C" fn AMsplice(
 /// \memberof AMdoc
 /// \brief Splices characters into and/or removes characters from the
 ///        identified object at a given position within it.
-///
-///        By default automerge-c expects indices to be provided as
-///        byte offsets into UTF-8 encoded strings.
-///
-///        If the library has been compiled with utf32 indexing, then
-///        the numbers passed to `pos` and `del` should be expressed
-///        in terms of number of unicode code points.
-///
-///        To determine the difference `<automerge-c/config.h>` will
-///        define either AUTOMERGE_C_UTF8 or AUTORMERGE_C_UTF32.
-///
-///        Regardless of the indexing model used, automerge-c expects
-///        text in an `AMbyteSpan` to be valid utf8.
-///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the text object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of characters to delete. Positive `del` deletes
-///                 characters after `pos`, and negative `del` deletes characters
-///                 before `pos`.
+///                If `AUTOMERGE_C_UTF8` is defined then \p pos is in units of
+///                bytes but if `AUTOMERGE_C_UTF32` is defined then \p pos is in
+///                units of Unicode code points.
+/// \param[in] del The number of characters to delete. If \p del `> 0` then
+///                deletion begins at \p pos but if \p del `< 0` then deletion
+///                ends at \p pos.
+///                If `AUTOMERGE_C_UTF8` is defined then \p del is in units of
+///                bytes but if `AUTOMERGE_C_UTF32` is defined then \p del is in
+///                units of Unicode code points.
 /// \param[in] text A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
+/// \pre `-AMobjSize(`\p obj_id `) <=` \p del `<= AMobjSize(`\p obj_id `)`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal

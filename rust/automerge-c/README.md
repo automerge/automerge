@@ -51,15 +51,17 @@ processor.
 
 # Unicode indexing
 
-By default automerge-c expects string indexes to be given in terms of UTF-8
-byte offsets, so for example the length of "😀" is 4.
+By default automerge-c expects string indices to be given in terms of UTF-8 byte
+offsets so, for example, the length of "😀" (U+1F600) is 4.
 
-That said, you can run `cmake -S automerge-c -B automerge-c/build -DUTF32_INDEXING=true`
-if you need to work in terms of unicode code points; at which point the length of "😀"
-will be 1.
+If instead you need string indices to be given in terms of Unicode code point
+offsets such that the length of "😀" (U+1F600) will be 1, build it like so:
 
-Regardless of the indexing encoding, automerge-c always requires strings to be
-provided in `AMbyteSpan` structs that contain valid UTF-8.
+`cmake -S automerge-c -B automerge-c/build -DUTF32_INDEXING=true`
+
+Regardless of the specified encoding for character indices, automerge-c always
+requires a string to be provided as an `AMbyteSpan` struct that references an
+array of valid UTF-8 code points.
 
 # Usage
 
@@ -129,13 +131,13 @@ If you are wrapping automerge-c in another language, particularly one that has a
 garbage collector, you can call the `AMresultFree()` function within a finalizer
 to ensure that memory is reclaimed when it is no longer needed.
 
-Automerge documents consist of a mutable root which is always a map from string
-keys to values. A value can be one of the following types:
+An Automerge document consists of a mutable root which is always a map from
+string keys to values. A value can be one of the following types:
 
 - A number of type double / int64_t / uint64_t
 - An explicit true / false / null
-- An immutable UTF-8 string (`AMbyteSpan`).
-- An immutable array of arbitrary bytes (`AMbyteSpan`).
+- An immutable UTF-8 string (`AMbyteSpan` struct).
+- An immutable array of arbitrary bytes (`AMbyteSpan` struct).
 - A mutable map from string keys to values.
 - A mutable list of values.
 - A mutable UTF-8 string.
@@ -148,17 +150,17 @@ Under the hood, automerge references a mutable object by its object identifier
 where `AM_ROOT` signifies a document's root map object.
 
 There are functions to put each type of value into either a map or a list, and
-functions to read the current or a historical value from a map or a list. As (in general) collaborators
-may edit the document at any time, you cannot guarantee that the type of the
-value at a given part of the document will stay the same. As a result, reading
-from the document will return an `AMitem` struct that you can inspect to
-determine the type of value that it contains.
+functions to read the current or a historical value from a map or a list. As
+(in general) collaborators may edit the document at any time, you cannot
+guarantee that the type of the value at a given part of the document will stay
+the same. As a result, reading from the document will return an `AMitem` struct
+that you can inspect to determine the type of value that it contains.
 
-Strings in automerge-c are represented using an `AMbyteSpan` which contains a
-pointer and a length. Strings must be valid UTF-8 and may contain NUL (`0`)
-characters.
-For your convenience, you can call `AMstr()` to get the `AMbyteSpan` struct
-equivalent of a null-terminated byte string or `AMstrdup()` to get the
+Strings in automerge-c are represented using an `AMbyteSpan` struct which
+contains a pointer and a length. Strings must be valid UTF-8 and may contain
+NUL (`0`) characters.
+For your convenience, you can call `AMstr()` to get an `AMbyteSpan` struct
+referencing a null-terminated byte string or `AMstrdup()` to get the
 representation of an `AMbyteSpan` struct as a null-terminated byte string
 wherein its NUL characters have been removed/replaced as you choose.
 
