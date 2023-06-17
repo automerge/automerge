@@ -405,6 +405,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
+    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(&mut self, src: O, dst: O, src_prop: P, dst_prop: P) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.move_element(doc, src.as_ref(), dst.as_ref(), src_prop, dst_prop))
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner
             .as_ref()

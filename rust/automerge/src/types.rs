@@ -214,6 +214,7 @@ pub enum OpType {
     Put(ScalarValue),
     MarkBegin(bool, MarkData),
     MarkEnd(bool),
+    Move(ScalarValue)
 }
 
 impl OpType {
@@ -230,6 +231,7 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            Self::Move(_) => 8
         }
     }
 
@@ -843,6 +845,7 @@ impl Op {
             OpType::Delete => "del".to_string(),
             OpType::MarkBegin(_, _) => "markBegin".to_string(),
             OpType::MarkEnd(_) => "markEnd".to_string(),
+            OpType::Move(_) => "move".to_string(),
         }
     }
 

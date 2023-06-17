@@ -59,6 +59,10 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
+    #[error("cannot perform move operation on objects other than map and list")]
+    MoveSourceNotSupported,
+    #[error("cannot perform move operation on objects other than map and list")]
+    MoveDestinationNotSupported,
 }
 
 impl PartialEq for AutomergeError {

@@ -737,6 +737,31 @@ impl TransactionInner {
         self.mark(doc, patch_log, ex_obj, mark, expand)
     }
 
+    pub(crate) fn move_element<P: Into<Prop>>(
+        &mut self,
+        doc: &mut Automerge,
+        src: &ExId,
+        dst: &ExId,
+        _src_prop: P,
+        _dst_prop: P,
+    )-> Result<(), AutomergeError> {
+        let src_obj = doc.exid_to_obj(src)?;
+        let dst_obj = doc.exid_to_obj(dst)?;
+        // TODO: move from a list or a map
+        let move_from = match src_obj.typ {
+            ObjType::Map => (),
+            ObjType::List => (),
+            _ => return Err(AutomergeError::MoveSourceNotSupported),
+        };
+        // TODO: move to a list or a map
+        let move_to = match dst_obj.typ {
+            ObjType::Map => (),
+            ObjType::List => (),
+            _ => return Err(AutomergeError::MoveDestinationNotSupported),
+        };
+        Ok(())
+    }
+
     fn finalize_op(
         &mut self,
         doc: &mut Automerge,

@@ -110,6 +110,15 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
+    /// Move an element from one position to another
+    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        src: O,
+        dst: O,
+        src_prop: P,
+        dst_prop: P,
+    )-> Result<(), AutomergeError>;
+
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
 }

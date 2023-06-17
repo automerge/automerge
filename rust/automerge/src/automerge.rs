@@ -1096,6 +1096,7 @@ impl Automerge {
                     format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
+                OpType::Move(scalar) => format!("move({})", scalar),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_short_string(*id)).collect();
             let succ: Vec<_> = op
@@ -1284,7 +1285,7 @@ impl Automerge {
                     OpType::MarkEnd(_) => {
                         marks.mark_end(o.id, &self.ops.m);
                     }
-                    OpType::Increment(_) | OpType::Delete => {}
+                    OpType::Increment(_) | OpType::Delete | OpType::Move(_) => {}
                 }
             }
         }
