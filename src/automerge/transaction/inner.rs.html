@@ -835,6 +835,23 @@
 <a href="#835" id="835">835</a>
 <a href="#836" id="836">836</a>
 <a href="#837" id="837">837</a>
+<a href="#838" id="838">838</a>
+<a href="#839" id="839">839</a>
+<a href="#840" id="840">840</a>
+<a href="#841" id="841">841</a>
+<a href="#842" id="842">842</a>
+<a href="#843" id="843">843</a>
+<a href="#844" id="844">844</a>
+<a href="#845" id="845">845</a>
+<a href="#846" id="846">846</a>
+<a href="#847" id="847">847</a>
+<a href="#848" id="848">848</a>
+<a href="#849" id="849">849</a>
+<a href="#850" id="850">850</a>
+<a href="#851" id="851">851</a>
+<a href="#852" id="852">852</a>
+<a href="#853" id="853">853</a>
+<a href="#854" id="854">854</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 <span class="kw">use </span>std::rc::Rc;
 
@@ -1149,7 +1166,14 @@
         }
         <span class="kw">let </span>value = value.into();
         <span class="macro">tracing::trace!</span>(obj=<span class="question-mark">?</span>obj, value=<span class="question-mark">?</span>value, <span class="string">&quot;inserting value&quot;</span>);
-        <span class="self">self</span>.do_insert(doc, patch_log, obj.id, index, value.into())<span class="question-mark">?</span>;
+        <span class="self">self</span>.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -1165,7 +1189,14 @@
         <span class="kw">if </span>!<span class="macro">matches!</span>(obj.typ, ObjType::List | ObjType::Text) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ));
         }
-        <span class="kw">let </span>id = <span class="self">self</span>.do_insert(doc, patch_log, obj.id, index, value.into())<span class="question-mark">?</span>;
+        <span class="kw">let </span>id = <span class="self">self</span>.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )<span class="question-mark">?</span>;
         <span class="kw">let </span>id = doc.id_to_exid(id);
         <span class="prelude-val">Ok</span>(id)
     }
@@ -1176,13 +1207,14 @@
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
         obj: ObjId,
         index: usize,
+        encoding: ListEncoding,
         action: OpType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, AutomergeError&gt; {
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
 
         <span class="kw">let </span>query = doc.ops().search(
             <span class="kw-2">&amp;</span>obj,
-            query::InsertNth::new(index, ListEncoding::List, <span class="self">self</span>.scope.clone()),
+            query::InsertNth::new(index, encoding, <span class="self">self</span>.scope.clone()),
         );
         <span class="kw">let </span>marks = query.marks(<span class="kw-2">&amp;</span>doc.ops().m);
         <span class="kw">let </span>pos = query.pos();
@@ -1545,12 +1577,14 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
-        <span class="self">self</span>.do_insert(doc, patch_log, obj.id, mark.start, action)<span class="question-mark">?</span>;
+
+        <span class="self">self</span>.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)<span class="question-mark">?</span>;
         <span class="self">self</span>.do_insert(
             doc,
             patch_log,
             obj.id,
             mark.end,
+            obj.encoding,
             OpType::MarkEnd(expand.after()),
         )<span class="question-mark">?</span>;
         <span class="kw">if </span>patch_log.is_active() {
