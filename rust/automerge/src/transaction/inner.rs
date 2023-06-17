@@ -312,7 +312,14 @@ impl TransactionInner {
         }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(doc, patch_log, obj.id, index, value.into())?;
+        self.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )?;
         Ok(())
     }
 
@@ -328,7 +335,14 @@ impl TransactionInner {
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let id = self.do_insert(doc, patch_log, obj.id, index, value.into())?;
+        let id = self.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )?;
         let id = doc.id_to_exid(id);
         Ok(id)
     }
@@ -339,13 +353,14 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: ObjId,
         index: usize,
+        encoding: ListEncoding,
         action: OpType,
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops().search(
             &obj,
-            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+            query::InsertNth::new(index, encoding, self.scope.clone()),
         );
         let marks = query.marks(&doc.ops().m);
         let pos = query.pos();
@@ -708,12 +723,14 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
-        self.do_insert(doc, patch_log, obj.id, mark.start, action)?;
+
+        self.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)?;
         self.do_insert(
             doc,
             patch_log,
             obj.id,
             mark.end,
+            obj.encoding,
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
