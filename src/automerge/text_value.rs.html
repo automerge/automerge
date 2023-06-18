@@ -116,11 +116,51 @@
 <a href="#116" id="116">116</a>
 <a href="#117" id="117">117</a>
 <a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
+<a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
+<a href="#134" id="134">134</a>
+<a href="#135" id="135">135</a>
+<a href="#136" id="136">136</a>
+<a href="#137" id="137">137</a>
+<a href="#138" id="138">138</a>
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a>
+<a href="#142" id="142">142</a>
+<a href="#143" id="143">143</a>
+<a href="#144" id="144">144</a>
+<a href="#145" id="145">145</a>
+<a href="#146" id="146">146</a>
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+<a href="#149" id="149">149</a>
+<a href="#150" id="150">150</a>
+<a href="#151" id="151">151</a>
+<a href="#152" id="152">152</a>
+<a href="#153" id="153">153</a>
+<a href="#154" id="154">154</a>
+<a href="#155" id="155">155</a>
+<a href="#156" id="156">156</a>
+<a href="#157" id="157">157</a>
+<a href="#158" id="158">158</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>core::fmt::Debug;
 
 <span class="kw">use </span><span class="kw">crate</span>::sequence_tree::SequenceTree;
 
-<span class="attr">#[cfg(not(target_family = <span class="string">&quot;wasm&quot;</span>))]
+<span class="attr">#[cfg(not(any(target_family = <span class="string">&quot;wasm&quot;</span>, feature = <span class="string">&quot;utf8-indexing&quot;</span>)))]
 #[derive(Clone, PartialEq, Default)]
 </span><span class="kw">pub struct </span>TextValue(SequenceTree&lt;char&gt;);
 
@@ -128,7 +168,11 @@
 #[derive(Clone, PartialEq, Default)]
 </span><span class="kw">pub struct </span>TextValue(SequenceTree&lt;u16&gt;);
 
-<span class="attr">#[cfg(not(target_family = <span class="string">&quot;wasm&quot;</span>))]
+<span class="attr">#[cfg(feature = <span class="string">&quot;utf8-indexing&quot;</span>)]
+#[derive(Clone, PartialEq, Default)]
+</span><span class="kw">pub struct </span>TextValue(SequenceTree&lt;u8&gt;);
+
+<span class="attr">#[cfg(not(any(target_family = <span class="string">&quot;wasm&quot;</span>, feature = <span class="string">&quot;utf8-indexing&quot;</span>)))]
 </span><span class="kw">impl </span>TextValue {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span><span class="kw-2">mut </span>v = SequenceTree::new();
@@ -195,6 +239,42 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>chars(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = u16&gt; + <span class="lifetime">&#39;_ </span>{
+        <span class="self">self</span>.<span class="number">0</span>.iter().cloned()
+    }
+}
+
+<span class="attr">#[cfg(feature = <span class="string">&quot;utf8-indexing&quot;</span>)]
+</span><span class="kw">impl </span>TextValue {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>v = SequenceTree::new();
+        <span class="kw">for </span>ch <span class="kw">in </span>s.bytes() {
+            v.push(ch)
+        }
+        <span class="self">Self</span>(v)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, value: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">for </span>(n, ch) <span class="kw">in </span>value.bytes().enumerate() {
+            <span class="self">self</span>.<span class="number">0</span>.insert(index + n, ch)
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice_text_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, value: <span class="kw-2">&amp;</span>TextValue) {
+        <span class="kw">for </span>(n, ch) <span class="kw">in </span>value.chars().enumerate() {
+            <span class="self">self</span>.<span class="number">0</span>.insert(index + n, ch)
+        }
+    }
+
+    <span class="kw">pub fn </span>make_string(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String {
+        <span class="kw">let </span>bytes: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.<span class="number">0</span>.iter().cloned().collect();
+        String::from_utf8_lossy(bytes.as_slice()).to_string()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>width(s: <span class="kw-2">&amp;</span>str) -&gt; usize {
+        s.len()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>chars(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = u8&gt; + <span class="lifetime">&#39;_ </span>{
         <span class="self">self</span>.<span class="number">0</span>.iter().cloned()
     }
 }
