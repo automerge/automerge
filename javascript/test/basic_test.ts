@@ -254,7 +254,7 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create(true)
+      let doc1 = WASM.create({ text_v1: true })
       doc1.put("_root", "text", "hello world")
       let doc2 = Automerge.load<any>(doc1.save())
       assert.throws(() => {
@@ -586,6 +586,20 @@ describe("Automerge", () => {
         "Has the sly fox jumped right over the lazy dog"
       )
       let index = Automerge.getCursorPosition(doc, ["value"], cursor)
+    })
+
+    it("should be able to pass a doc to from() to make a shallow copy", () => {
+      let state = {
+        text: "The sly fox jumped over the lazy dog",
+        x: 5,
+        y: new Date(),
+        z: [1, 2, 3, { alpha: "bravo" }],
+      }
+      let doc1 = Automerge.from(state)
+      assert.deepEqual(doc1, state)
+      console.log(Automerge.toJS(doc1))
+      let doc2 = Automerge.from(doc1)
+      assert.deepEqual(doc1, doc2)
     })
 
     it("can use cursors in common text operations", () => {
