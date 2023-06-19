@@ -31,7 +31,6 @@ type TargetCommon = {
   context: Automerge
   objectId: ObjID
   path: Array<Prop>
-  allowDocRef: boolean
   cache: object
   trace?: any
 }
@@ -71,7 +70,7 @@ function valueAt<T extends Target>(
   target: T,
   prop: Prop
 ): ValueType<T> | undefined {
-  const { context, objectId, path, allowDocRef, textV2 } = target
+  const { context, objectId, path, textV2 } = target
   const value = context.getWithType(objectId, prop)
   if (value === null) {
     return
@@ -82,31 +81,17 @@ function valueAt<T extends Target>(
     case undefined:
       return
     case "map":
-      return mapProxy<T>(
-        context,
-        val as ObjID,
-        textV2,
-        [...path, prop],
-        allowDocRef
-      )
+      return mapProxy<T>(context, val as ObjID, textV2, [...path, prop])
     case "list":
-      return listProxy<T>(
-        context,
-        val as ObjID,
-        textV2,
-        [...path, prop],
-        allowDocRef
-      )
+      return listProxy<T>(context, val as ObjID, textV2, [...path, prop])
     case "text":
       if (textV2) {
         return context.text(val as ObjID) as ValueType<T>
       } else {
-        return textProxy(
-          context,
-          val as ObjID,
-          [...path, prop],
-          allowDocRef
-        ) as unknown as ValueType<T>
+        return textProxy(context, val as ObjID, [
+          ...path,
+          prop,
+        ]) as unknown as ValueType<T>
       }
     case "str":
       return val as ValueType<T>
@@ -153,11 +138,7 @@ type ImportedValue =
   | [Record<string, any>, "map"]
   | [boolean, "boolean"]
 
-function import_value(
-  value: any,
-  textV2: boolean,
-  allowDocRef: boolean
-): ImportedValue {
+function import_value(value: any, textV2: boolean): ImportedValue {
   switch (typeof value) {
     case "object":
       if (value == null) {
@@ -182,7 +163,7 @@ function import_value(
         return [value, "list"]
       } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
         return [value, "map"]
-      } else if (value[OBJECT_ID] && !allowDocRef) {
+      } else if (isSameDocument(value, context)) {
         throw new RangeError(
           "Cannot create a reference to an existing document object"
         )
@@ -208,12 +189,22 @@ function import_value(
   }
 }
 
+function isSameDocument(val, context) {
+  // this depends on __wbg_ptr being the wasm pointer
+  // a new version of wasm-bindgen will break this
+  // but the tests should expose the break
+  if (val && val[STATE]?.handle?.__wbg_ptr === context.__wbg_ptr) {
+    return true
+  }
+  return false
+}
+
 const MapHandler = {
   get<T extends Target>(
     target: T,
     key: any
   ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
-    const { context, objectId, cache, allowDocRef } = target
+    const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
     }
@@ -228,9 +219,9 @@ const MapHandler = {
   },
 
   set(target: Target, key: any, val: any) {
-    const { context, objectId, path, textV2, allowDocRef } = target
+    const { context, objectId, path, textV2 } = target
     target.cache = {} // reset cache on set
-    if (val && val[OBJECT_ID] && !allowDocRef) {
+    if (isSameDocument(val, context)) {
       throw new RangeError(
         "Cannot create a reference to an existing document object"
       )
@@ -242,17 +233,11 @@ const MapHandler = {
     if (key === CLEAR_CACHE) {
       return true
     }
-    const [value, datatype] = import_value(val, textV2, allowDocRef)
+    const [value, datatype] = import_value(val, textV2)
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
-        const proxyList = listProxy(
-          context,
-          list,
-          textV2,
-          [...path, key],
-          allowDocRef
-        )
+        const proxyList = listProxy(context, list, textV2, [...path, key])
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
@@ -265,12 +250,7 @@ const MapHandler = {
         } else {
           assertText(value)
           const text = context.putObject(objectId, key, "")
-          const proxyText = textProxy(
-            context,
-            text,
-            [...path, key],
-            allowDocRef
-          )
+          const proxyText = textProxy(context, text, [...path, key])
           for (let i = 0; i < value.length; i++) {
             proxyText[i] = value.get(i)
           }
@@ -279,13 +259,7 @@ const MapHandler = {
       }
       case "map": {
         const map = context.putObject(objectId, key, {})
-        const proxyMap = mapProxy(
-          context,
-          map,
-          textV2,
-          [...path, key],
-          allowDocRef
-        )
+        const proxyMap = mapProxy(context, map, textV2, [...path, key])
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -363,9 +337,9 @@ const ListHandler = {
   },
 
   set(target: Target, index: any, val: any) {
-    const { context, objectId, path, textV2, allowDocRef } = target
+    const { context, objectId, path, textV2 } = target
     index = parseListIndex(index)
-    if (val && val[OBJECT_ID] && !allowDocRef) {
+    if (isSameDocument(val, context)) {
       throw new RangeError(
         "Cannot create a reference to an existing document object"
       )
@@ -377,7 +351,7 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2, allowDocRef)
+    const [value, datatype] = import_value(val, textV2)
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -386,13 +360,7 @@ const ListHandler = {
         } else {
           list = context.putObject(objectId, index, [])
         }
-        const proxyList = listProxy(
-          context,
-          list,
-          textV2,
-          [...path, index],
-          allowDocRef
-        )
+        const proxyList = listProxy(context, list, textV2, [...path, index])
         proxyList.splice(0, 0, ...value)
         break
       }
@@ -412,12 +380,7 @@ const ListHandler = {
           } else {
             text = context.putObject(objectId, index, "")
           }
-          const proxyText = textProxy(
-            context,
-            text,
-            [...path, index],
-            allowDocRef
-          )
+          const proxyText = textProxy(context, text, [...path, index])
           proxyText.splice(0, 0, ...value)
         }
         break
@@ -429,13 +392,7 @@ const ListHandler = {
         } else {
           map = context.putObject(objectId, index, {})
         }
-        const proxyMap = mapProxy(
-          context,
-          map,
-          textV2,
-          [...path, index],
-          allowDocRef
-        )
+        const proxyMap = mapProxy(context, map, textV2, [...path, index])
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -533,8 +490,7 @@ export function mapProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[],
-  allowDocRef: boolean
+  path: Prop[]
 ): MapValueType<T> {
   const target: Target = {
     context,
@@ -542,7 +498,6 @@ export function mapProxy<T extends Target>(
     path: path || [],
     cache: {},
     textV2,
-    allowDocRef,
   }
   const proxied = {}
   Object.assign(proxied, target)
@@ -555,8 +510,7 @@ export function listProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[],
-  allowDocRef: boolean
+  path: Prop[]
 ): ListValueType<T> {
   const target: Target = {
     context,
@@ -564,7 +518,6 @@ export function listProxy<T extends Target>(
     path: path || [],
     cache: {},
     textV2,
-    allowDocRef,
   }
   const proxied = []
   Object.assign(proxied, target)
@@ -580,14 +533,12 @@ interface TextProxy extends Text {
 export function textProxy(
   context: Automerge,
   objectId: ObjID,
-  path: Prop[],
-  allowDocRef: boolean
+  path: Prop[]
 ): TextProxy {
   const target: Target = {
     context,
     objectId,
     path: path || [],
-    allowDocRef,
     cache: {},
     textV2: false,
   }
@@ -596,17 +547,13 @@ export function textProxy(
   return new Proxy(proxied, TextHandler) as unknown as TextProxy
 }
 
-export function rootProxy<T>(
-  context: Automerge,
-  textV2: boolean,
-  allowDocRef: boolean
-): T {
+export function rootProxy<T>(context: Automerge, textV2: boolean): T {
   /* eslint-disable-next-line */
-  return <any>mapProxy(context, "_root", textV2, [], allowDocRef)
+  return <any>mapProxy(context, "_root", textV2, [])
 }
 
 function listMethods<T extends Target>(target: T) {
-  const { context, objectId, path, allowDocRef, textV2 } = target
+  const { context, objectId, path, textV2 } = target
   const methods = {
     deleteAt(index: number, numDelete: number) {
       if (typeof numDelete === "number") {
@@ -618,7 +565,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2, allowDocRef)
+      const [value, datatype] = import_value(val, textV2)
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
@@ -632,12 +579,7 @@ function listMethods<T extends Target>(target: T) {
           } else {
             assertText(value)
             const text = context.putObject(objectId, i, "")
-            const proxyText = textProxy(
-              context,
-              text,
-              [...path, i],
-              allowDocRef
-            )
+            const proxyText = textProxy(context, text, [...path, i])
             for (let i = 0; i < value.length; i++) {
               proxyText[i] = value.get(i)
             }
@@ -699,7 +641,7 @@ function listMethods<T extends Target>(target: T) {
       del = parseListIndex(del)
 
       for (const val of vals) {
-        if (val && val[OBJECT_ID] && !allowDocRef) {
+        if (isSameDocument(val, context)) {
           throw new RangeError(
             "Cannot create a reference to an existing document object"
           )
@@ -713,18 +655,12 @@ function listMethods<T extends Target>(target: T) {
         }
         context.delete(objectId, index)
       }
-      const values = vals.map(val => import_value(val, textV2, allowDocRef))
+      const values = vals.map(val => import_value(val, textV2))
       for (const [value, datatype] of values) {
         switch (datatype) {
           case "list": {
             const list = context.insertObject(objectId, index, [])
-            const proxyList = listProxy(
-              context,
-              list,
-              textV2,
-              [...path, index],
-              allowDocRef
-            )
+            const proxyList = listProxy(context, list, textV2, [...path, index])
             proxyList.splice(0, 0, ...value)
             break
           }
@@ -734,25 +670,14 @@ function listMethods<T extends Target>(target: T) {
               context.insertObject(objectId, index, value)
             } else {
               const text = context.insertObject(objectId, index, "")
-              const proxyText = textProxy(
-                context,
-                text,
-                [...path, index],
-                allowDocRef
-              )
+              const proxyText = textProxy(context, text, [...path, index])
               proxyText.splice(0, 0, ...value)
             }
             break
           }
           case "map": {
             const map = context.insertObject(objectId, index, {})
-            const proxyMap = mapProxy(
-              context,
-              map,
-              textV2,
-              [...path, index],
-              allowDocRef
-            )
+            const proxyMap = mapProxy(context, map, textV2, [...path, index])
             for (const key in value) {
               proxyMap[key] = value[key]
             }

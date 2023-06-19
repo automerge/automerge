@@ -78,8 +78,6 @@ export type ChangeOptions<T> = {
   time?: number
   /** A callback which will be called to notify the caller of any changes to the document */
   patchCallback?: PatchCallback<T>
-  /** copy doc references **/
-  allowDocRef?: boolean
 }
 
 /** Options passed to {@link loadIncremental}, {@link applyChanges}, and {@link receiveSyncMessage}
@@ -294,10 +292,7 @@ export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
   _opts?: ActorId | InitOptions<T>
 ): Doc<T> {
-  const opts = importOpts(_opts)
-  return change(init(opts), { allowDocRef: true }, d =>
-    Object.assign(d, initialState)
-  )
+  return change(init(_opts), d => Object.assign(d, initialState))
 }
 
 /**
@@ -439,7 +434,7 @@ function _change<T>(
   const heads = state.handle.getHeads()
   try {
     state.heads = heads
-    const root: T = rootProxy(state.handle, state.textV2, !!options.allowDocRef)
+    const root: T = rootProxy(state.handle, state.textV2)
     callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
