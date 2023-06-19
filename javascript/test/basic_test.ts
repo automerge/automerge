@@ -254,7 +254,7 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create(true)
+      let doc1 = WASM.create({ text_v1: true })
       doc1.put("_root", "text", "hello world")
       let doc2 = Automerge.load<any>(doc1.save())
       assert.throws(() => {
