@@ -214,7 +214,7 @@ pub enum OpType {
     Put(ScalarValue),
     MarkBegin(bool, MarkData),
     MarkEnd(bool),
-    Move(ScalarValue)
+    Move(ScalarValue),
 }
 
 impl OpType {
@@ -231,7 +231,7 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
-            Self::Move(_) => 8
+            Self::Move(_) => 8,
         }
     }
 

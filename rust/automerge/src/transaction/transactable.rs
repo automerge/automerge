@@ -117,7 +117,7 @@ pub trait Transactable: ReadDoc {
         dst: O,
         src_prop: P,
         dst_prop: P,
-    )-> Result<(), AutomergeError>;
+    ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;

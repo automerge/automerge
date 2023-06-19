@@ -14,12 +14,14 @@ use crate::types::{
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
+use move_manager::MoveManager;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 mod load;
+mod move_manager;
 pub(crate) use load::OpSetBuilder;
 
 pub(crate) type OpSet = OpSetInternal;
@@ -48,6 +50,7 @@ impl OpSetInternal {
             m: OpSetMetadata {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
+                move_manager: MoveManager::new(),
             },
         }
     }
@@ -422,6 +425,7 @@ impl<'a> ExactSizeIterator for Iter<'a> {
 pub(crate) struct OpSetMetadata {
     pub(crate) actors: IndexedCache<ActorId>,
     pub(crate) props: IndexedCache<String>,
+    pub(crate) move_manager: MoveManager,
 }
 
 impl Default for OpSetMetadata {
@@ -429,6 +433,7 @@ impl Default for OpSetMetadata {
         Self {
             actors: IndexedCache::new(),
             props: IndexedCache::new(),
+            move_manager: MoveManager::new(),
         }
     }
 }
@@ -438,6 +443,7 @@ impl OpSetMetadata {
         Self {
             props: IndexedCache::new(),
             actors: actors.into_iter().collect(),
+            move_manager: MoveManager::new(),
         }
     }
 

@@ -744,17 +744,17 @@ impl TransactionInner {
         dst: &ExId,
         _src_prop: P,
         _dst_prop: P,
-    )-> Result<(), AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let src_obj = doc.exid_to_obj(src)?;
         let dst_obj = doc.exid_to_obj(dst)?;
         // TODO: move from a list or a map
-        let move_from = match src_obj.typ {
+        match src_obj.typ {
             ObjType::Map => (),
             ObjType::List => (),
             _ => return Err(AutomergeError::MoveSourceNotSupported),
         };
         // TODO: move to a list or a map
-        let move_to = match dst_obj.typ {
+        match dst_obj.typ {
             ObjType::Map => (),
             ObjType::List => (),
             _ => return Err(AutomergeError::MoveDestinationNotSupported),

@@ -264,7 +264,6 @@ mod indexed_cache;
 pub mod iter;
 mod legacy;
 pub mod marks;
-mod move_manager;
 mod op_set;
 pub mod op_tree;
 mod parents;
