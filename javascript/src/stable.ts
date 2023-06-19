@@ -394,8 +394,7 @@ function progressDocument<T>(
       nextState
     )
     if (patches.length > 0) {
-      const before = view(doc, headsBefore || [])
-      callback(patches, { before, after: value })
+      callback(patches, { before: doc, after: value })
     }
     nextDoc = value
   } else {
