@@ -14,6 +14,7 @@ add_executable(
         macro_utils.c
         main.c
         map_tests.c
+        mark_tests.c
         str_utils.c
         ported_wasm/basic_tests.c
         ported_wasm/suite.c

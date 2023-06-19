@@ -164,7 +164,7 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \ingroup enumerations
 /// \enum AMobjType
 /// \installed_headerfile
-/// \brief The type of an object value.
+/// \brief The type of an object.
 #[derive(PartialEq, Eq)]
 #[repr(u8)]
 pub enum AMobjType {
@@ -209,7 +209,7 @@ impl TryFrom<&AMobjType> for am::ObjType {
             Text => Ok(Self::Text),
             _ => Err(InvalidValueType {
                 expected: type_name::<Self>().to_string(),
-                unexpected: type_name::<AMobjType>().to_string(),
+                unexpected: type_name::<u8>().to_string(),
             }),
         }
     }

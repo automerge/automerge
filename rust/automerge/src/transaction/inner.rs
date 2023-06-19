@@ -312,7 +312,14 @@ impl TransactionInner {
         }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(doc, patch_log, obj.id, index, value.into())?;
+        self.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )?;
         Ok(())
     }
 
@@ -328,7 +335,14 @@ impl TransactionInner {
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let id = self.do_insert(doc, patch_log, obj.id, index, value.into())?;
+        let id = self.do_insert(
+            doc,
+            patch_log,
+            obj.id,
+            index,
+            ListEncoding::List,
+            value.into(),
+        )?;
         let id = doc.id_to_exid(id);
         Ok(id)
     }
@@ -339,13 +353,14 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: ObjId,
         index: usize,
+        encoding: ListEncoding,
         action: OpType,
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops().search(
             &obj,
-            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+            query::InsertNth::new(index, encoding, self.scope.clone()),
         );
         let marks = query.marks(&doc.ops().m);
         let pos = query.pos();
@@ -533,7 +548,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
@@ -561,7 +576,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
@@ -594,11 +609,20 @@ impl TransactionInner {
             splice_type,
         }: SpliceArgs<'_>,
     ) -> Result<(), AutomergeError> {
+        if del < 0 {
+            if let Some(n) = index.checked_add_signed(del) {
+                index = n;
+                del = del.abs();
+            } else {
+                return Err(AutomergeError::InvalidIndex(index));
+            }
+        }
+
         //let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding();
         // delete `del` items - performing the query for each one
-        let mut deleted = 0;
-        while deleted < del {
+        let mut deleted: usize = 0;
+        while deleted < (del as usize) {
             // TODO: could do this with a single custom query
             let query = doc
                 .ops()
@@ -608,7 +632,7 @@ impl TransactionInner {
             // move cursor back to the beginning and expand the del width
             let adjusted_index = query.index();
             if adjusted_index < index {
-                del += index - adjusted_index;
+                del += (index - adjusted_index) as isize;
                 index = adjusted_index;
             }
 
@@ -699,12 +723,14 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
-        self.do_insert(doc, patch_log, obj.id, mark.start, action)?;
+
+        self.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)?;
         self.do_insert(
             doc,
             patch_log,
             obj.id,
             mark.end,
+            obj.encoding,
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
@@ -805,7 +831,7 @@ impl<'a> SpliceType<'a> {
 struct SpliceArgs<'a> {
     obj: ObjId,
     index: usize,
-    del: usize,
+    del: isize,
     values: Vec<ScalarValue>,
     splice_type: SpliceType<'a>,
 }

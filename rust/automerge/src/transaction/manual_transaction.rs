@@ -369,7 +369,7 @@ impl<'a> Transactable for Transaction<'a> {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
@@ -379,7 +379,7 @@ impl<'a> Transactable for Transaction<'a> {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))

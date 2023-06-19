@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
-project(automerge-c VERSION 0.1.0
+project(automerge-c VERSION 0.2.0
                     LANGUAGES C
                     DESCRIPTION "C bindings for the Automerge Rust library.")
 
@@ -9,6 +9,8 @@ set(LIBRARY_NAME "automerge")
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
+
+option(UTF32_INDEXING "Enable UTF-32 indexing.")
 
 include(CTest)
 
@@ -71,7 +73,13 @@ else()
     set(CARGO_FLAG -Z build-std=std,panic_abort --release --target=${CARGO_TARGET})
 endif()
 
-set(CARGO_FEATURES "")
+if(UTF32_INDEXING)
+    set(CARGO_FEATURES "")
+    set(TEXT_INDEXING_ENCODING "UTF32")
+else()
+    set(CARGO_FEATURES "-F automerge/utf8-indexing")
+    set(TEXT_INDEXING_ENCODING "UTF8")
+endif()
 
 set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_TARGET}/${CARGO_BUILD_TYPE}")
 
@@ -124,6 +132,7 @@ add_custom_command(
         src/doc.rs
         src/doc/list.rs
         src/doc/map.rs
+        src/doc/mark.rs
         src/doc/utils.rs
         src/index.rs
         src/item.rs

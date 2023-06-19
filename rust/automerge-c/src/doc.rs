@@ -13,6 +13,7 @@ use crate::sync::{to_sync_message, AMsyncMessage, AMsyncState};
 
 pub mod list;
 pub mod map;
+pub mod mark;
 pub mod utils;
 
 use crate::doc::utils::{clamp, to_doc, to_doc_mut, to_items};
@@ -567,13 +568,15 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 
 /// \memberof AMdoc
 /// \brief Gets the current or historical size of an object.
-///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
 ///                  items to select a historical size or `NULL` to select its
 ///                  current size.
 /// \return The count of items in the object identified by \p obj_id.
+///         For an `AM_OBJ_TYPE_TEXT` object, if `AUTOMERGE_C_UTF8` is defined
+///         then the items are bytes but if `AUTOMERGE_C_UTF32` is defined then
+///         the items are Unicode code points.
 /// \pre \p doc `!= NULL`
 /// \internal
 ///
@@ -803,8 +806,9 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of values to delete or `SIZE_MAX` to indicate
-///                all of them.
+/// \param[in] del The number of values to delete. If \p del `> 0` then
+///                deletion begins at \p pos but if \p del `< 0` then deletion
+///                ends at \p pos.
 /// \param[in] values A copy of an `AMitems` struct from which values will be
 ///                   spliced <b>starting at its current position</b>; call
 ///                   `AMitemsRewound()` on a used `AMitems` first to ensure
@@ -813,7 +817,7 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
+/// \pre `-AMobjSize(`\p obj_id `) <=` \p del `<= AMobjSize(`\p obj_id `)`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
@@ -827,14 +831,13 @@ pub unsafe extern "C" fn AMsplice(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     pos: usize,
-    del: usize,
+    del: isize,
     values: AMitems,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
-    let del = clamp!(del, len, "del");
     match Vec::<am::ScalarValue>::try_from(&values) {
         Ok(vals) => to_result(doc.splice(obj_id, pos, del, vals)),
         Err(e) => AMresult::error(&e.to_string()).into(),
@@ -844,18 +847,24 @@ pub unsafe extern "C" fn AMsplice(
 /// \memberof AMdoc
 /// \brief Splices characters into and/or removes characters from the
 ///        identified object at a given position within it.
-///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] pos A position in the text object identified by \p obj_id or
 ///                `SIZE_MAX` to indicate one past its end.
-/// \param[in] del The number of characters to delete or `SIZE_MAX` to indicate
-///                all of them.
+///                If `AUTOMERGE_C_UTF8` is defined then \p pos is in units of
+///                bytes but if `AUTOMERGE_C_UTF32` is defined then \p pos is in
+///                units of Unicode code points.
+/// \param[in] del The number of characters to delete. If \p del `> 0` then
+///                deletion begins at \p pos but if \p del `< 0` then deletion
+///                ends at \p pos.
+///                If `AUTOMERGE_C_UTF8` is defined then \p del is in units of
+///                bytes but if `AUTOMERGE_C_UTF32` is defined then \p del is in
+///                units of Unicode code points.
 /// \param[in] text A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
+/// \pre `-AMobjSize(`\p obj_id `) <=` \p del `<= AMobjSize(`\p obj_id `)`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
@@ -868,14 +877,13 @@ pub unsafe extern "C" fn AMspliceText(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     pos: usize,
-    del: usize,
+    del: isize,
     text: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
     let pos = clamp!(pos, len, "pos");
-    let del = clamp!(del, len, "del");
     to_result(doc.splice_text(obj_id, pos, del, to_str!(text)))
 }
 

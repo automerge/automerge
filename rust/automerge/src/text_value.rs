@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use crate::sequence_tree::SequenceTree;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(any(target_family = "wasm", feature = "utf8-indexing")))]
 #[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<char>);
 
@@ -10,7 +10,11 @@ pub struct TextValue(SequenceTree<char>);
 #[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<u16>);
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "utf8-indexing")]
+#[derive(Clone, PartialEq, Default)]
+pub struct TextValue(SequenceTree<u8>);
+
+#[cfg(not(any(target_family = "wasm", feature = "utf8-indexing")))]
 impl TextValue {
     pub(crate) fn new(s: &str) -> Self {
         let mut v = SequenceTree::new();
@@ -77,6 +81,42 @@ impl TextValue {
     }
 
     pub(crate) fn chars(&self) -> impl Iterator<Item = u16> + '_ {
+        self.0.iter().cloned()
+    }
+}
+
+#[cfg(feature = "utf8-indexing")]
+impl TextValue {
+    pub(crate) fn new(s: &str) -> Self {
+        let mut v = SequenceTree::new();
+        for ch in s.bytes() {
+            v.push(ch)
+        }
+        Self(v)
+    }
+
+    pub(crate) fn splice(&mut self, index: usize, value: &str) {
+        for (n, ch) in value.bytes().enumerate() {
+            self.0.insert(index + n, ch)
+        }
+    }
+
+    pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
+        for (n, ch) in value.chars().enumerate() {
+            self.0.insert(index + n, ch)
+        }
+    }
+
+    pub fn make_string(&self) -> String {
+        let bytes: Vec<_> = self.0.iter().cloned().collect();
+        String::from_utf8_lossy(bytes.as_slice()).to_string()
+    }
+
+    pub(crate) fn width(s: &str) -> usize {
+        s.len()
+    }
+
+    pub(crate) fn chars(&self) -> impl Iterator<Item = u8> + '_ {
         self.0.iter().cloned()
     }
 }

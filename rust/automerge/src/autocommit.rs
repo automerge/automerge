@@ -818,7 +818,7 @@ impl Transactable for AutoCommit {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
@@ -830,7 +830,7 @@ impl Transactable for AutoCommit {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();

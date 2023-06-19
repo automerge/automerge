@@ -32,4 +32,27 @@
  */
 #define @SYMBOL_PREFIX@_PATCH_VERSION (@SYMBOL_PREFIX@_VERSION % 100)
 
+#ifdef DOXYGEN
+/**
+ * \def @SYMBOL_PREFIX@_UTF8
+ * \brief Defined if the `pos` and `del` arguments of `AMspliceText()` and the
+ *        length returned by `AMobjSize()` for an `AM_OBJ_TYPE_TEXT` object are
+ *        in units of UTF-8 code points (i.e. bytes).
+ */
+ #define @SYMBOL_PREFIX@_UTF8
+
+ /**
+ * \def @SYMBOL_PREFIX@_UTF32
+ * \brief Defined if the `pos` and `del` arguments of `AMspliceText()` and the
+ *        length returned by `AMobjSize()` for an `AM_OBJ_TYPE_TEXT` object are
+ *        in units of UTF-32 code points.
+ */
+#define @SYMBOL_PREFIX@_UTF32
+
+#else
+
+#define @SYMBOL_PREFIX@_@TEXT_INDEXING_ENCODING@
+
+#endif
+
 #endif /* @INCLUDE_GUARD_PREFIX@_CONFIG_H */
