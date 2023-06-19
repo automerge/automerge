@@ -50,6 +50,10 @@ automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
 
 [[bench]]
+name = "large_doc"
+harness = false
+
+[[bench]]
 name = "range"
 harness = false
 
