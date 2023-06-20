@@ -641,5 +641,36 @@ describe("Automerge", () => {
 
       assert.deepEqual(doc.value, "🇫🇷🇩🇪")
     })
+
+    it("patch callbacks inform where they came from", () => {
+      let callbacks = []
+      let patchCallback = (p, meta) => callbacks.push(meta.source)
+      let doc1 = Automerge.from({ hello: "world" }, { patchCallback })
+      let heads1 = Automerge.getHeads(doc1)
+      let doc2 = Automerge.clone(doc1, { patchCallback })
+      doc2 = Automerge.change(doc2, d => (d.a = "b"))
+      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c"))
+      doc1 = Automerge.merge(doc1, doc2)
+      doc2 = Automerge.change(doc2, d => (d.x = "y"))
+      doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
+      doc2 = Automerge.change(doc2, d => (d.n = "m"))
+      let s1 = Automerge.initSyncState()
+      let s2 = Automerge.initSyncState()
+      let message
+      ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
+      ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
+      ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
+      ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message)
+      assert.deepEqual(callbacks, [
+        "from",
+        "change",
+        "changeAt",
+        "merge",
+        "change",
+        "loadIncremental",
+        "change",
+        "sync",
+      ])
+    })
   })
 })

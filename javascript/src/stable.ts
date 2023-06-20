@@ -292,7 +292,7 @@ export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
   _opts?: ActorId | InitOptions<T>
 ): Doc<T> {
-  return change(init(_opts), d => Object.assign(d, initialState))
+  return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
 }
 
 /**
@@ -347,12 +347,12 @@ export function change<T>(
   callback?: ChangeFn<T>
 ): Doc<T> {
   if (typeof options === "function") {
-    return _change(doc, {}, options)
+    return _change(doc, "change", {}, options)
   } else if (typeof callback === "function") {
     if (typeof options === "string") {
       options = { message: options }
     }
-    return _change(doc, options, callback)
+    return _change(doc, "change", options, callback)
   } else {
     throw RangeError("Invalid args for change")
   }
@@ -365,12 +365,12 @@ export function changeAt<T>(
   callback?: ChangeFn<T>
 ): Doc<T> {
   if (typeof options === "function") {
-    return _change(doc, {}, options, scope)
+    return _change(doc, "changeAt", {}, options, scope)
   } else if (typeof callback === "function") {
     if (typeof options === "string") {
       options = { message: options }
     }
-    return _change(doc, options, callback, scope)
+    return _change(doc, "changeAt", options, callback, scope)
   } else {
     throw RangeError("Invalid args for changeAt")
   }
@@ -378,6 +378,7 @@ export function changeAt<T>(
 
 function progressDocument<T>(
   doc: Doc<T>,
+  source: string,
   heads: Heads | null,
   callback?: PatchCallback<T>
 ): Doc<T> {
@@ -394,7 +395,7 @@ function progressDocument<T>(
       nextState
     )
     if (patches.length > 0) {
-      callback(patches, { before: doc, after: value })
+      callback(patches, { before: doc, after: value, source })
     }
     nextDoc = value
   } else {
@@ -406,6 +407,7 @@ function progressDocument<T>(
 
 function _change<T>(
   doc: Doc<T>,
+  source: string,
   options: ChangeOptions<T>,
   callback: ChangeFn<T>,
   scope?: Heads
@@ -443,6 +445,7 @@ function _change<T>(
       state.handle.integrate()
       return progressDocument(
         doc,
+        source,
         heads,
         options.patchCallback || state.patchCallback
       )
@@ -489,7 +492,7 @@ export function emptyChange<T>(
 
   const heads = state.handle.getHeads()
   state.handle.emptyChange(options.message, options.time)
-  return progressDocument(doc, heads)
+  return progressDocument(doc, "local", heads)
 }
 
 /**
@@ -570,7 +573,12 @@ export function loadIncremental<T>(
   }
   const heads = state.handle.getHeads()
   state.handle.loadIncremental(data)
-  return progressDocument(doc, heads, opts.patchCallback || state.patchCallback)
+  return progressDocument(
+    doc,
+    "loadIncremental",
+    heads,
+    opts.patchCallback || state.patchCallback
+  )
 }
 
 /**
@@ -635,7 +643,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
   const remoteState = _state(remote)
   const changes = localState.handle.getChangesAdded(remoteState.handle)
   localState.handle.applyChanges(changes)
-  return progressDocument(local, heads, localState.patchCallback)
+  return progressDocument(local, "merge", heads, localState.patchCallback)
 }
 
 /**
@@ -805,7 +813,12 @@ export function applyChanges<T>(
   state.handle.applyChanges(changes)
   state.heads = heads
   return [
-    progressDocument(doc, heads, opts.patchCallback || state.patchCallback),
+    progressDocument(
+      doc,
+      "applyChanges",
+      heads,
+      opts.patchCallback || state.patchCallback
+    ),
   ]
 }
 
@@ -938,7 +951,12 @@ export function receiveSyncMessage<T>(
   state.handle.receiveSyncMessage(syncState, message)
   const outSyncState = ApiHandler.exportSyncState(syncState) as SyncState
   return [
-    progressDocument(doc, heads, opts.patchCallback || state.patchCallback),
+    progressDocument(
+      doc,
+      "sync",
+      heads,
+      opts.patchCallback || state.patchCallback
+    ),
     outSyncState,
     null,
   ]
