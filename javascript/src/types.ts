@@ -37,6 +37,7 @@ export type Doc<T> = { readonly [P in keyof T]: T[P] }
 export type PatchInfo<T> = {
   before: Doc<T>
   after: Doc<T>
+  source: string
 }
 
 /**
