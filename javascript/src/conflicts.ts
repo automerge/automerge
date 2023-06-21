@@ -57,22 +57,10 @@ function conflictAt<T extends Target>(
   for (const fullVal of values) {
     switch (fullVal[0]) {
       case "map":
-        result[fullVal[1]] = mapProxy<T>(
-          context,
-          fullVal[1],
-          textV2,
-          [prop],
-          true
-        )
+        result[fullVal[1]] = mapProxy<T>(context, fullVal[1], textV2, [prop])
         break
       case "list":
-        result[fullVal[1]] = listProxy<T>(
-          context,
-          fullVal[1],
-          textV2,
-          [prop],
-          true
-        )
+        result[fullVal[1]] = listProxy<T>(context, fullVal[1], textV2, [prop])
         break
       case "text":
         result[fullVal[1]] = handleText(context, fullVal[1] as ObjID)
