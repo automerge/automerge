@@ -2,6 +2,7 @@ import * as assert from "assert"
 import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
+import { PatchSource } from "../src/types"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -586,7 +587,7 @@ describe("Automerge", () => {
         doc.value,
         "Has the sly fox jumped right over the lazy dog"
       )
-      let index = Automerge.getCursorPosition(doc, ["value"], cursor)
+      Automerge.getCursorPosition(doc, ["value"], cursor)
     })
 
     it("should be able to pass a doc to from() to make a shallow copy", () => {
@@ -598,7 +599,6 @@ describe("Automerge", () => {
       }
       let doc1 = Automerge.from(state)
       assert.deepEqual(doc1, state)
-      console.log(Automerge.toJS(doc1))
       let doc2 = Automerge.from(doc1)
       assert.deepEqual(doc1, doc2)
     })
@@ -640,6 +640,46 @@ describe("Automerge", () => {
       })
 
       assert.deepEqual(doc.value, "🇫🇷🇩🇪")
+    })
+
+    it("patch callbacks inform where they came from", () => {
+      type DocShape = {
+        hello: string
+        a?: string
+        b?: string
+        x?: string
+        n?: string
+      }
+      let callbacks: Array<PatchSource> = []
+      let patchCallback = (_p, meta) => callbacks.push(meta.source)
+      let doc1 = Automerge.from<DocShape>({ hello: "world" }, { patchCallback })
+      let heads1 = Automerge.getHeads(doc1)
+      let doc2 = Automerge.clone(doc1, { patchCallback })
+      doc2 = Automerge.change(doc2, d => (d.a = "b"))
+      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c"))
+      doc1 = Automerge.merge(doc1, doc2)
+      doc2 = Automerge.change(doc2, d => (d.x = "y"))
+      doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
+      doc2 = Automerge.change(doc2, d => (d.n = "m"))
+      let s1 = Automerge.initSyncState()
+      let s2 = Automerge.initSyncState()
+      let message
+      ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
+      ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
+      ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
+      ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message, {
+        patchCallback,
+      })
+      assert.deepEqual(callbacks, [
+        "from",
+        "change",
+        "changeAt",
+        "merge",
+        "change",
+        "loadIncremental",
+        "change",
+        "receiveSyncMessage",
+      ])
     })
   })
 })

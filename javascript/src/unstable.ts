@@ -79,6 +79,7 @@ export {
   changeAt,
   emptyChange,
   loadIncremental,
+  saveIncremental,
   save,
   merge,
   getActorId,
