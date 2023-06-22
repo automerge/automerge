@@ -10,6 +10,7 @@ import {
   type Doc,
   type PatchCallback,
   type Patch,
+  type PatchSource,
 } from "./types"
 export {
   type AutomergeValue,
@@ -378,7 +379,7 @@ export function changeAt<T>(
 
 function progressDocument<T>(
   doc: Doc<T>,
-  source: string,
+  source: PatchSource,
   heads: Heads | null,
   callback?: PatchCallback<T>
 ): Doc<T> {
@@ -407,7 +408,7 @@ function progressDocument<T>(
 
 function _change<T>(
   doc: Doc<T>,
-  source: string,
+  source: PatchSource,
   options: ChangeOptions<T>,
   callback: ChangeFn<T>,
   scope?: Heads
@@ -492,7 +493,7 @@ export function emptyChange<T>(
 
   const heads = state.handle.getHeads()
   state.handle.emptyChange(options.message, options.time)
-  return progressDocument(doc, "local", heads)
+  return progressDocument(doc, "emptyChange", heads)
 }
 
 /**
@@ -953,7 +954,7 @@ export function receiveSyncMessage<T>(
   return [
     progressDocument(
       doc,
-      "sync",
+      "receiveSyncMessage",
       heads,
       opts.patchCallback || state.patchCallback
     ),
