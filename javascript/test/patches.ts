@@ -40,7 +40,7 @@ describe("patches", () => {
           },
         },
         doc => {
-          doc.list.deleteAt(1)
+          Automerge.deleteAt(doc.list, 1)
         }
       )
       assert.deepEqual(newDoc, { list: ["a", "c"] })
