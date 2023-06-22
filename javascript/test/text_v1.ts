@@ -284,13 +284,15 @@ describe("Automerge.Text", () => {
     assert.strictEqual(s2.text.toString(), "🐦")
 
     // this tests the observe_init_state path
-    let s3 = Automerge.init()
+    let s3 = Automerge.init<DocType>()
     s3 = Automerge.merge(s3, s2)
     assert.strictEqual(s3.text.toString(), "🐦")
 
     // this tests the diff_incremental path
     let s4 = Automerge.from({ some: "value" })
+    // @ts-ignore
     s4 = Automerge.merge(s4, s2)
+    // @ts-ignore
     assert.strictEqual(s4.text.toString(), "🐦")
   })
 

@@ -113,6 +113,8 @@ export type InitOptions<T> = {
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
+  /** @hidden */
+  unchecked?: boolean
 }
 
 import { ActorId, Doc } from "./stable"

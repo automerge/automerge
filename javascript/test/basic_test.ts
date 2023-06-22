@@ -284,7 +284,7 @@ describe("Automerge", () => {
       })
       assert.deepEqual(doc5, { list: [2, 1, 9, 10, 3, 11, 12] })
       let doc6 = Automerge.change(doc5, d => {
-        d.list.insertAt(3, 100, 101)
+        Automerge.insertAt(d.list, 3, 100, 101)
       })
       assert.deepEqual(doc6, { list: [2, 1, 9, 100, 101, 10, 3, 11, 12] })
     })
@@ -308,6 +308,7 @@ describe("Automerge", () => {
 
   describe("merge", () => {
     it("it should handle conflicts the same in merges as with loads", () => {
+      type DocShape = { sub: { x: number; y: number } }
       let doc1 = Automerge.from({ sub: { x: 0, y: 0 } })
       let doc2 = Automerge.clone(doc1)
       let doc3 = Automerge.clone(doc1)
@@ -334,13 +335,13 @@ describe("Automerge", () => {
       doc4 = Automerge.change(doc4, d => (d.sub.y = 9))
       doc4 = Automerge.change(doc4, d => (d.sub.y = 10))
 
-      let docM = Automerge.init()
+      let docM = Automerge.init<DocShape>()
       docM = Automerge.merge(docM, doc1)
       docM = Automerge.merge(docM, doc2)
       docM = Automerge.merge(docM, doc3)
       docM = Automerge.merge(docM, doc4)
 
-      let docL = Automerge.load(Automerge.save(docM))
+      let docL = Automerge.load<DocShape>(Automerge.save(docM))
 
       assert.deepEqual(docM.sub.x, docL.sub.x)
     })

@@ -24,7 +24,7 @@
   "scripts": {
     "lint": "eslint src",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
-    "test": "ts-mocha test/*.ts",
+    "test": "ts-mocha --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
     "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"

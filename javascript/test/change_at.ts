@@ -1,12 +1,10 @@
 import * as assert from "assert"
 import { unstable as Automerge } from "../src"
-import * as WASM from "@automerge/automerge-wasm"
-import { mismatched_heads } from "./helpers"
 
 describe("Automerge", () => {
   describe("changeAt", () => {
     it("should be able to change a doc at a prior state", () => {
-      let doc1 = Automerge.init()
+      let doc1 = Automerge.init<{ text: string }>()
       doc1 = Automerge.change(doc1, d => (d.text = "aaabbbccc"))
       let heads1 = Automerge.getHeads(doc1)
       doc1 = Automerge.change(doc1, d => {
