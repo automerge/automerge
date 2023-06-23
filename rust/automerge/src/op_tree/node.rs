@@ -4,12 +4,16 @@ use std::{
     mem,
 };
 
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
+
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
 use crate::types::Op;
 pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) struct OpTreeNode {
     pub(crate) children: Vec<OpTreeNode>,
     pub(crate) elements: Vec<usize>,
@@ -464,5 +468,10 @@ impl OpTreeNode {
             }
         }
         None
+    }
+
+    #[cfg(feature = "optree-visualisation")]
+    fn index_size(&self) -> usize {
+        self.index.get_size()
     }
 }

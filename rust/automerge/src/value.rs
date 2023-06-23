@@ -5,6 +5,9 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use std::fmt;
 
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
+
 /// The type of values in an automerge document
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
@@ -366,6 +369,7 @@ pub(crate) enum DataType {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub struct Counter {
     pub(crate) start: i64,
     pub(crate) current: i64,
@@ -469,6 +473,32 @@ pub enum ScalarValue {
         bytes: Vec<u8>,
     },
     Null,
+}
+
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for ScalarValue {
+    fn get_stack_size() -> usize {
+        48
+    }
+
+    fn get_heap_size(&self) -> usize {
+        match self {
+            ScalarValue::Bytes(b) => Vec::<u8>::get_stack_size(),
+            ScalarValue::Str(s) => if s.is_heap_allocated() {
+                s.bytes().len()
+            } else {
+                0
+            },
+            ScalarValue::Int(_) => 0,
+            ScalarValue::Uint(_) => 0,
+            ScalarValue::F64(_) => 0,
+            ScalarValue::Counter(c) => c.get_heap_size(),
+            ScalarValue::Timestamp(_) => 0,
+            ScalarValue::Boolean(_) => 0,
+            ScalarValue::Unknown { bytes, .. } => bytes.get_heap_size(),
+            ScalarValue::Null => 0,
+        }
+    }
 }
 
 impl PartialEq for Counter {

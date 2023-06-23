@@ -9,6 +9,9 @@ use crate::value::ScalarValue;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
+
 /// Marks let you store out-of-bound information about sequences.
 ///
 /// The motivating use-case is rich text editing, see <https://www.inkandswitch.com/peritext/>.
@@ -286,6 +289,18 @@ impl<'a> MarkStateMachine<'a> {
 pub struct MarkData {
     pub name: SmolStr,
     pub value: ScalarValue,
+}
+
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for MarkData {
+    fn get_heap_size(&self) -> usize {
+        let name_heap = if self.name.is_heap_allocated() {
+            self.name.bytes().len()
+        } else {
+            0
+        };
+        name_heap + self.value.get_heap_size()
+    }
 }
 
 impl Display for MarkData {

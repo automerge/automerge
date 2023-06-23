@@ -5,12 +5,17 @@ use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
+
 mod insert;
 mod list_state;
 mod nth;
 mod opid;
 mod prop;
 mod seek_mark;
+#[cfg(feature = "optree-visualisation")]
+pub(crate) mod stats;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use list_state::{ListState, MarkMap};
@@ -76,6 +81,7 @@ pub(crate) enum QueryResult {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 struct TextWidth {
     width: usize,
 }
@@ -131,6 +137,46 @@ pub(crate) struct Index {
     never_seen_puts: bool,
     mark_begin: HashMap<OpId, MarkData, FxBuildHasher>,
     mark_end: Vec<OpId>,
+}
+
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for Index {
+    fn get_heap_size(&self) -> usize {
+        let visible_size = {
+            let elems_size: usize = self
+                .visible
+                .iter()
+                .map(|(k, v)| k.get_heap_size() + v.get_heap_size())
+                .sum();
+            let additional_size = (self.visible.capacity() - self.visible.len())
+                * (Key::get_stack_size() + usize::get_stack_size());
+            elems_size + additional_size
+        };
+        let visible_text = self.visible_text.width.get_heap_size();
+        let ops_size = {
+            let elems_size: usize = self.ops.iter().map(|opid| opid.get_size()).sum();
+            let additional_size =
+                (self.ops.capacity() - self.ops.len()) * OpId::get_stack_size();
+            elems_size + additional_size
+        };
+        let never_seen_puts = self.never_seen_puts.get_heap_size();
+        let mark_begin_size = {
+            let elems: usize = self
+                .mark_begin
+                .iter()
+                .map(|(opid, mark_data)| opid.get_size() + mark_data.get_size())
+                .sum();
+            let additional_size = (self.mark_begin.capacity() - self.mark_begin.len())
+                * (OpId::get_stack_size() + MarkData::get_stack_size());
+            elems + additional_size
+        };
+        let mark_end = self.mark_end.get_heap_size();
+        visible_size + visible_text + ops_size + never_seen_puts + mark_begin_size + mark_end
+    }
+
+    fn get_size(&self) -> usize {
+        Self::get_stack_size() + GetSize::get_heap_size(self)
+    }
 }
 
 impl Index {

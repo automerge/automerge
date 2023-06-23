@@ -265,6 +265,8 @@ pub mod iter;
 mod legacy;
 pub mod marks;
 mod op_set;
+#[cfg(feature = "optree-visualisation")]
+pub use op_set::OpSetStats;
 pub mod op_tree;
 mod parents;
 pub mod patches;

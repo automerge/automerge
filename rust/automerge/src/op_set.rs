@@ -14,6 +14,8 @@ use crate::types::{
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -284,6 +286,11 @@ impl OpSetInternal {
         String::from_utf8_lossy(&out[..]).to_string()
     }
 
+    #[cfg(feature = "optree-visualisation")]
+    pub(crate) fn stats(&self) -> OpSetStats {
+        OpSetStats::new(self)
+    }
+
     pub(crate) fn length(
         &self,
         obj: &ObjId,
@@ -473,6 +480,36 @@ pub(crate) struct Parent {
     pub(crate) obj: ObjId,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
+}
+
+#[cfg(feature = "optree-visualisation")]
+#[derive(Debug)]
+pub struct OpSetStats {
+    num_ops: usize,
+    optrees_size: usize,
+    index_size: usize,
+    ops_size: usize,
+    num_objs: usize,
+}
+
+#[cfg(feature = "optree-visualisation")]
+impl OpSetStats {
+    fn new(opset: &OpSetInternal) -> Self {
+        let tree_stats = opset
+            .trees
+            .iter()
+            .map(|(o, t)| t.stats(&opset.m))
+            .collect::<Vec<_>>();
+        let index_size = tree_stats.iter().map(|s| s.index_size).sum();
+        let ops_size = tree_stats.iter().map(|s| s.ops_size).sum();
+        OpSetStats {
+            num_ops: opset.len(),
+            optrees_size: opset.trees.iter().map(|(o, t)| t.get_size()).sum(),
+            index_size,
+            ops_size,
+            num_objs: opset.trees.len(),
+        }
+    }
 }
 
 #[cfg(test)]

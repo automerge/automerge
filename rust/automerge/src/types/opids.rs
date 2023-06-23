@@ -1,4 +1,6 @@
 use itertools::Itertools;
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
 
 use super::OpId;
 
@@ -8,6 +10,23 @@ use super::OpId;
 /// ops as the actor indices in an  OpId are not sufficient to order the OpIds
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct OpIds(Vec<OpId>);
+
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for OpIds {
+    fn get_heap_size(&self) -> usize {
+        self.0.get_heap_size()
+    }
+
+    fn get_stack_size() -> usize {
+        Vec::<OpId>::get_stack_size()
+    }
+
+    fn get_size(&self) -> usize {
+        self.0.get_size()
+    }
+
+
+}
 
 impl<'a> IntoIterator for &'a OpIds {
     type Item = &'a OpId;

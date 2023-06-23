@@ -10,6 +10,8 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
 
 // thanks to https://qrng.anu.edu.au/ for some random bytes
 pub(crate) const CONCURRENCY_MAGIC_BYTES: [u8; 4] = [0x13, 0xb2, 0x23, 0x09];
@@ -159,6 +161,7 @@ impl fmt::Display for ActorId {
 
 /// The type of an object
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     /// A map
@@ -207,6 +210,7 @@ impl fmt::Display for ObjType {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub enum OpType {
     Make(ObjType),
     Delete,
@@ -437,6 +441,7 @@ impl From<Option<ElemId>> for Key {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
@@ -498,6 +503,10 @@ impl Key {
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
 
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for OpId {
+}
+
 impl OpId {
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
@@ -545,6 +554,10 @@ impl AsRef<OpId> for ObjId {
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub(crate) OpId);
+
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for ObjId {
+}
 
 impl ObjId {
     pub(crate) const fn root() -> Self {
@@ -612,6 +625,10 @@ impl From<ObjType> for ListEncoding {
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ElemId(pub(crate) OpId);
 
+#[cfg(feature = "optree-visualisation")]
+impl GetSize for ElemId {
+}
+
 impl ElemId {
     pub(crate) fn is_head(&self) -> bool {
         *self == HEAD
@@ -623,6 +640,7 @@ impl ElemId {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) struct Op {
     pub(crate) id: OpId,
     pub(crate) action: OpType,

@@ -14,6 +14,8 @@ use crate::{
 use std::cmp::Ordering;
 use std::rc::Rc;
 use std::{fmt::Debug, mem};
+#[cfg(feature = "optree-visualisation")]
+use get_size::GetSize;
 
 mod iter;
 mod node;
@@ -24,6 +26,7 @@ pub(crate) use node::OpTreeNode;
 pub use node::B;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) struct OpTree {
     pub(crate) internal: OpTreeInternal,
     pub(crate) objtype: ObjType,
@@ -37,6 +40,7 @@ pub(crate) struct OpTree {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) struct LastInsert {
     pub(crate) pos: usize,
     pub(crate) index: usize,
@@ -69,6 +73,12 @@ impl OpTree {
         } else {
             None
         }
+    }
+
+    #[cfg(feature = "optree-visualisation")]
+    pub(crate) fn stats(&self, m: &OpSetMetadata) -> query::stats::OpTreeStats {
+        let q = self.internal.search(query::stats::StatsQuery::new(), m);
+        q.result()
     }
 }
 
@@ -182,6 +192,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "optree-visualisation", derive(GetSize))]
 pub(crate) struct OpTreeInternal {
     pub(crate) root_node: Option<OpTreeNode>,
     pub(crate) ops: Vec<Op>,

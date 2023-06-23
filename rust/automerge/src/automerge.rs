@@ -23,6 +23,10 @@ use crate::types::{
 };
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
+#[cfg(feature = "optree-visualisation")]
+use crate::op_set::OpSetStats;
+
+
 pub(crate) mod current_state;
 pub(crate) mod diff;
 
@@ -1135,6 +1139,11 @@ impl Automerge {
                 .collect()
         });
         self.ops.visualise(objects)
+    }
+
+    #[cfg(feature = "optree-visualisation")]
+    pub fn opset_stats(&self) -> OpSetStats {
+        self.ops.stats()
     }
 
     pub(crate) fn insert_op(
