@@ -390,7 +390,6 @@ function progressDocument<T>(
   const nextState = { ...state, heads: undefined }
   let nextDoc
   if (callback != null) {
-    const headsBefore = state.heads
     const { value, patches } = state.handle.applyAndReturnPatches(
       doc,
       nextState
@@ -440,6 +439,9 @@ function _change<T>(
     callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
+      if (scope != null) {
+        state.handle.integrate()
+      }
       return doc
     } else {
       state.handle.commit(options.message, options.time)
