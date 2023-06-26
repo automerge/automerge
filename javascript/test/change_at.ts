@@ -19,7 +19,7 @@ describe("Automerge", () => {
       assert.deepEqual(doc1.text, "aaXXXBBBccc")
     })
 
-    it.only("should leave multiple heads intact on empty changes", () => {
+    it("should leave multiple heads intact on empty changes", () => {
       let doc1 = Automerge.init<{ text: string; [key: string]: string }>()
       doc1 = Automerge.change(doc1, d => (d.text = "aaabbbccc"))
       const headsBeforeFork = Automerge.getHeads(doc1)
