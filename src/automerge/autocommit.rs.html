@@ -924,6 +924,9 @@
 <a href="#924" id="924">924</a>
 <a href="#925" id="925">925</a>
 <a href="#926" id="926">926</a>
+<a href="#927" id="927">927</a>
+<a href="#928" id="928">928</a>
+<a href="#929" id="929">929</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -1106,7 +1109,10 @@
             <span class="self">self</span>.patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         } <span class="kw">else if </span>before.is_empty() &amp;&amp; after == heads {
             <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(<span class="self">self</span>.patch_log.text_rep());
-            patch_log.heads = <span class="prelude-val">Some</span>(after.to_vec());
+            <span class="comment">// This if statement is only active if the current heads are the same as `after`
+            // so we don&#39;t need to tell the patch log to target a specific heads and consequently
+            // it wll be able to generate patches very fast as it doesn&#39;t need to make any clocks
+            </span>patch_log.heads = <span class="prelude-val">None</span>;
             current_state::log_current_state_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="kw-2">&amp;mut </span>patch_log);
             patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         } <span class="kw">else </span>{
