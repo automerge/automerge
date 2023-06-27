@@ -13,13 +13,13 @@ use crate::types::{
     Prop,
 };
 use crate::ObjType;
-use fxhash::FxBuildHasher;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 mod load;
+mod objects;
 pub(crate) use load::OpSetBuilder;
 
 pub(crate) type OpSet = OpSetInternal;
@@ -27,7 +27,7 @@ pub(crate) type OpSet = OpSetInternal;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal {
     /// The map of objects to their type and ops.
-    trees: HashMap<ObjId, OpTree, FxBuildHasher>,
+    objects: objects::Objects,
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
@@ -43,7 +43,7 @@ impl OpSetInternal {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), OpTree::new());
         OpSetInternal {
-            trees,
+            objects: objects::Objects::new(trees),
             length: 0,
             m: OpSetMetadata {
                 actors: IndexedCache::new(),
@@ -65,7 +65,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
+        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
             opset: self,
@@ -76,7 +76,7 @@ impl OpSetInternal {
 
     /// Iterate over objects in the opset in causal order
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpTreeIter<'_>)> + '_ {
-        let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
+        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         IterObjs {
             trees: objs.into_iter(),
@@ -84,7 +84,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = &Op> {
-        self.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
+        self.objects.get(obj).map(|o| o.iter()).into_iter().flatten()
     }
 
     pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
@@ -102,13 +102,13 @@ impl OpSetInternal {
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
         let (_typ, encoding) = self.type_and_encoding(obj)?;
-        self.trees
+        self.objects
             .get(obj)
             .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
     }
 
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
-        let parent = self.trees.get(obj)?.parent?;
+        let parent = self.objects.get(obj)?.parent?;
         let found = self.seek_opid(&parent, obj.0, clock)?;
         let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
@@ -128,7 +128,7 @@ impl OpSetInternal {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        self.trees
+        self.objects
             .get(obj)
             .and_then(|tree| {
                 tree.internal
@@ -138,7 +138,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
-        self.trees
+        self.objects
             .get(obj)
             .map(|tree| tree.internal.top_ops(clock, &self.m))
             .unwrap_or_default()
@@ -149,7 +149,7 @@ impl OpSetInternal {
         obj: &ObjMeta,
         op: &'a Op,
     ) -> FoundOpWithPatchLog<'a> {
-        if let Some(tree) = self.trees.get(&obj.id) {
+        if let Some(tree) = self.objects.get(&obj.id) {
             tree.internal
                 .find_op_with_patch_log(op, obj.encoding, &self.m)
         } else {
@@ -158,7 +158,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn find_op_without_patch_log(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutPatchLog {
-        if let Some(tree) = self.trees.get(obj) {
+        if let Some(tree) = self.objects.get(obj) {
             tree.internal.find_op_without_patch_log(op, &self.m)
         } else {
             Default::default()
@@ -169,7 +169,7 @@ impl OpSetInternal {
     where
         Q: TreeQuery<'a>,
     {
-        if let Some(tree) = self.trees.get(obj) {
+        if let Some(tree) = self.objects.get(obj) {
             if query.can_shortcut_search(tree) {
                 query
             } else {
@@ -184,7 +184,7 @@ impl OpSetInternal {
     where
         F: Fn(&mut Op),
     {
-        if let Some(tree) = self.trees.get_mut(obj) {
+        if let Some(tree) = self.objects.get_mut(obj) {
             tree.last_insert = None;
             tree.internal.update(index, f)
         }
@@ -192,7 +192,7 @@ impl OpSetInternal {
 
     /// Add `op` as a successor to each op at `op_indices` in `obj`
     pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: &Op) {
-        if let Some(tree) = self.trees.get_mut(obj) {
+        if let Some(tree) = self.objects.get_mut(obj) {
             tree.last_insert = None;
             for i in op_indices {
                 tree.internal.update(*i, |old_op| {
@@ -204,12 +204,12 @@ impl OpSetInternal {
 
     pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
-        let tree = self.trees.get_mut(obj).unwrap();
+        let tree = self.objects.get_mut(obj).unwrap();
         self.length -= 1;
         tree.last_insert = None;
         let op = tree.internal.remove(index);
         if let OpType::Make(_) = &op.action {
-            self.trees.remove(&op.id.into());
+            self.objects.remove(&op.id.into());
         }
         op
     }
@@ -219,7 +219,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn hint(&mut self, obj: &ObjId, index: usize, pos: usize, width: usize, key: Key) {
-        if let Some(tree) = self.trees.get_mut(obj) {
+        if let Some(tree) = self.objects.get_mut(obj) {
             tree.last_insert = Some(LastInsert {
                 index,
                 pos,
@@ -232,7 +232,7 @@ impl OpSetInternal {
     #[tracing::instrument(skip(self, index))]
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
-            self.trees.insert(
+            self.objects.insert(
                 element.id.into(),
                 OpTree {
                     internal: Default::default(),
@@ -243,7 +243,7 @@ impl OpSetInternal {
             );
         }
 
-        if let Some(tree) = self.trees.get_mut(obj) {
+        if let Some(tree) = self.objects.get_mut(obj) {
             tree.last_insert = None;
             tree.internal.insert(index, element);
             self.length += 1;
@@ -253,11 +253,11 @@ impl OpSetInternal {
     }
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
-        self.trees.get(id).map(|tree| tree.objtype)
+        self.objects.get(id).map(|tree| tree.objtype)
     }
 
     pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
-        let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
+        let objtype = self.objects.get(id).map(|tree| tree.objtype)?;
         let encoding = objtype.into();
         Some((objtype, encoding))
     }
@@ -273,11 +273,11 @@ impl OpSetInternal {
         use std::borrow::Cow;
         let mut out = Vec::new();
         let trees = if let Some(objects) = objects {
-            let mut filtered = self.trees.clone();
+            let mut filtered = self.objects.trees().clone();
             filtered.retain(|k, _| objects.contains(k));
             Cow::Owned(filtered)
         } else {
-            Cow::Borrowed(&self.trees)
+            Cow::Borrowed(self.objects.trees())
         };
         let graph = super::visualisation::GraphVisualisation::construct(&trees, &self.m);
         dot::render(&graph, &mut out).unwrap();
@@ -290,7 +290,7 @@ impl OpSetInternal {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> usize {
-        if let Some(tree) = self.trees.get(obj) {
+        if let Some(tree) = self.objects.get(obj) {
             match (&clock, tree.index(encoding)) {
                 // no clock and a clean index? - use it
                 (None, Some(index)) => index.visible_len(encoding),

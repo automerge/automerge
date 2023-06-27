@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use fxhash::FxBuildHasher;
 
-use super::{OpSet, OpTree};
 use crate::{
-    op_tree::OpTreeInternal,
+    op_set::{OpSet, objects::Objects},
+    op_tree::{OpTree, OpTreeInternal},
     storage::load::{DocObserver, LoadedObject},
     types::ObjId,
 };
@@ -44,7 +44,7 @@ impl DocObserver for OpSetBuilder {
     fn finish(self, metadata: super::OpSetMetadata) -> Self::Output {
         let len = self.completed_objects.values().map(|t| t.len()).sum();
         OpSet {
-            trees: self.completed_objects,
+            objects: Objects::new(self.completed_objects),
             length: len,
             m: metadata,
         }
