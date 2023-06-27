@@ -299,6 +299,15 @@
 <a href="#299" id="299">299</a>
 <a href="#300" id="300">300</a>
 <a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -493,6 +502,15 @@
 //! # }
 //! ```
 //!
+//! ## Cursors, referring to positions in sequences
+//!
+//! When working with text or other sequences it is often useful to be able to
+//! refer to a specific position within the sequence whilst merging remote
+//! changes. You can manually do this by maintaining your own offsets and
+//! observing patches, but this is error prone. The `Cursor` type provides
+//! an API for allowing automerge to do the index translations for you. Cursors
+//! are created with [`ReadDoc::get_cursor`] and dereferneced with
+//! [`ReadDoc::get_cursor_position`].
 
 </span><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
