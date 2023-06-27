@@ -11,6 +11,9 @@ use std::fmt;
 /// Therefore, we use this lightweight specialized structure.
 ///
 /// This can be persisted using to_bytes and TryFrom<&[u8]>.
+///
+/// A cursor is obtained from [`ReadDoc::get_cursor`](crate::ReadDoc::get_cursor) and dereferenced
+/// with [`ReadDoc::get_cursor_position`](crate::ReadDoc::get_cursor_position).
 #[derive(Clone, PartialEq, Debug)]
 pub struct Cursor {
     ctr: u64,
