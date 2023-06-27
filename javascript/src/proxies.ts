@@ -1,11 +1,6 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 import { Text } from "./text"
-import {
-  Automerge,
-  type Heads,
-  type ObjID,
-  type Prop,
-} from "@automerge/automerge-wasm"
+import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
 
 import type { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
 import {

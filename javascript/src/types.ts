@@ -4,7 +4,7 @@ export { Counter } from "./counter"
 export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
-import type { Cursor, Patch, MarkRange } from "@automerge/automerge-wasm"
+import type { Patch } from "@automerge/automerge-wasm"
 export type { Cursor, Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
