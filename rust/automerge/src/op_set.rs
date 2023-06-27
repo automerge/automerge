@@ -2,9 +2,8 @@ use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
-use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
+    FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
 use crate::query::TreeQuery;
@@ -65,21 +64,21 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
+        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype(), t.1)).collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
             opset: self,
-            trees: objs.into_iter(),
+            objects: objs.into_iter(),
             current: None,
         }
     }
 
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpTreeIter<'_>)> + '_ {
-        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, objects::ObjIter<'_>)> + '_ {
+        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype(), t.1)).collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         IterObjs {
-            trees: objs.into_iter(),
+            objects: objs.into_iter(),
         }
     }
 
@@ -370,14 +369,14 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
+    objects: std::vec::IntoIter<(&'a ObjId, ObjType, objects::ObjectOps<'a>)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, OpTreeIter<'a>);
+    type Item = (&'a ObjId, ObjType, objects::ObjIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees
+        self.objects
             .next()
             .map(|(id, typ, tree)| (id, typ, tree.iter()))
     }
@@ -386,8 +385,8 @@ impl<'a> Iterator for IterObjs<'a> {
 #[derive(Clone)]
 pub(crate) struct Iter<'a> {
     opset: &'a OpSet,
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
-    current: Option<(&'a ObjId, ObjType, OpTreeIter<'a>)>,
+    objects: std::vec::IntoIter<(&'a ObjId, ObjType, objects::ObjectOps<'a>)>,
+    current: Option<(&'a ObjId, ObjType, objects::ObjIter<'a>)>,
 }
 impl<'a> Iterator for Iter<'a> {
     type Item = (&'a ObjId, ObjType, &'a Op);
@@ -400,7 +399,7 @@ impl<'a> Iterator for Iter<'a> {
         }
 
         loop {
-            self.current = self.trees.next().map(|o| (o.0, o.1, o.2.iter()));
+            self.current = self.objects.next().map(|o| (o.0, o.1, o.2.iter()));
             if let Some((obj, typ, tree)) = &mut self.current {
                 if let Some(next) = tree.next() {
                     return Some((obj, *typ, next));

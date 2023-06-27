@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use fxhash::FxBuildHasher;
 
-use crate::{types::ObjId, op_tree::OpTree};
+use crate::{types::{ObjId, Op}, op_tree::{OpTree, OpTreeIter}, ObjType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Objects {
@@ -18,8 +18,10 @@ impl Objects {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item=(&ObjId, &OpTree)> {
-        self.full_fat_optrees.iter()
+    pub(crate) fn iter(&self) -> impl Iterator<Item=(&ObjId, ObjectOps<'_>)> {
+        self.full_fat_optrees.iter().map(|(id, tree)| {
+            (id, ObjectOps::FullFat(tree.objtype, tree))
+        })
     }
 
     pub(crate) fn get(&self, obj: &ObjId) -> Option<&OpTree> {
@@ -46,4 +48,51 @@ impl Objects {
 
 #[derive(Debug, Clone, PartialEq)]
 struct SmallObjects {
+}
+
+#[derive(Clone)]
+pub(crate) enum ObjectOps<'a> {
+    FullFat(ObjType, &'a OpTree),
+}
+
+impl<'a> ObjectOps<'a> {
+    pub(crate) fn objtype(&self) -> ObjType {
+        match self {
+            ObjectOps::FullFat(t, _) => *t,
+        }
+    }
+
+    pub(crate) fn iter(&self) -> ObjIter<'a> {
+        match self {
+            ObjectOps::FullFat(_, t) => ObjIter::OpTree(t.iter()),
+        }
+    }
+}
+
+struct ObjectsIter<'a> {
+    objects: &'a Objects,
+    cur: Option<ObjId>,
+}
+
+impl<'a> Iterator for ObjectsIter<'a> {
+    type Item = ObjectOps<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ObjIter<'a> {
+    OpTree(OpTreeIter<'a>),
+}
+
+impl<'a> Iterator for ObjIter<'a> {
+    type Item = &'a Op;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::OpTree(o) => o.next()
+        }
+    }
 }
