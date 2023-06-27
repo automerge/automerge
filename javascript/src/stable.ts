@@ -22,6 +22,8 @@ export {
   type Patch,
   type PatchCallback,
   type ScalarValue,
+  type PatchInfo,
+  type PatchSource,
 } from "./types"
 
 import { Text } from "./text"

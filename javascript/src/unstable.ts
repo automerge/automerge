@@ -49,6 +49,8 @@ export {
   type MarkValue,
   type AutomergeValue,
   type ScalarValue,
+  type PatchSource,
+  type PatchInfo,
 } from "./unstable_types"
 
 import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
