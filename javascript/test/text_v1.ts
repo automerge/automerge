@@ -321,4 +321,10 @@ describe("Automerge.Text", () => {
     assert.strictEqual(s1.text.length, 6)
     assert.strictEqual(s1.text.toString(), "🇬🇧four")
   })
+
+  it("should allow initiializing with multiple codepoint characters", () => {
+    s1 = Automerge.from({
+      text: new Automerge.Text("🇺🇸"),
+    })
+  })
 })
