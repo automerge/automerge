@@ -246,9 +246,7 @@ const MapHandler = {
           assertText(value)
           const text = context.putObject(objectId, key, "")
           const proxyText = textProxy(context, text, [...path, key])
-          for (let i = 0; i < value.length; i++) {
-            proxyText[i] = value.get(i)
-          }
+          proxyText.splice(0, 0, ...value)
         }
         break
       }
