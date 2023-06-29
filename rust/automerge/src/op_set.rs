@@ -64,7 +64,11 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype(), t.1)).collect();
+        let mut objs: Vec<_> = self
+            .objects
+            .iter()
+            .map(|t| (t.0, t.1.objtype(), t.1))
+            .collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
             opset: self,
@@ -74,8 +78,14 @@ impl OpSetInternal {
     }
 
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, objects::ObjIter<'_>)> + '_ {
-        let mut objs: Vec<_> = self.objects.iter().map(|t| (t.0, t.1.objtype(), t.1)).collect();
+    pub(crate) fn iter_objs(
+        &self,
+    ) -> impl Iterator<Item = (&ObjId, ObjType, objects::ObjIter<'_>)> + '_ {
+        let mut objs: Vec<_> = self
+            .objects
+            .iter()
+            .map(|t| (t.0, t.1.objtype(), t.1))
+            .collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         IterObjs {
             objects: objs.into_iter(),
@@ -83,7 +93,11 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = &Op> {
-        self.objects.get(obj).map(|o| o.iter()).into_iter().flatten()
+        self.objects
+            .get(obj)
+            .map(|o| o.iter_ops())
+            .into_iter()
+            .flatten()
     }
 
     pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
@@ -103,11 +117,11 @@ impl OpSetInternal {
         let (_typ, encoding) = self.type_and_encoding(obj)?;
         self.objects
             .get(obj)
-            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
+            .and_then(|obj| obj.seek_opid(id, encoding, clock, &self.m))
     }
 
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
-        let parent = self.objects.get(obj)?.parent?;
+        let parent = self.objects.get(obj)?.parent()?;
         let found = self.seek_opid(&parent, obj.0, clock)?;
         let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
@@ -129,28 +143,24 @@ impl OpSetInternal {
     ) -> OpsFound<'a> {
         self.objects
             .get(obj)
-            .and_then(|tree| {
-                tree.internal
-                    .seek_ops_by_prop(&self.m, prop, encoding, clock)
-            })
+            .and_then(|obj| obj.seek_ops_by_prop(&self.m, prop, encoding, clock))
             .unwrap_or_default()
     }
 
     pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
         self.objects
             .get(obj)
-            .map(|tree| tree.internal.top_ops(clock, &self.m))
+            .map(|obj| obj.top_ops(clock, &self.m))
             .unwrap_or_default()
     }
 
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
-        obj: &ObjMeta,
+        obj_meta: &ObjMeta,
         op: &'a Op,
     ) -> FoundOpWithPatchLog<'a> {
-        if let Some(tree) = self.objects.get(&obj.id) {
-            tree.internal
-                .find_op_with_patch_log(op, obj.encoding, &self.m)
+        if let Some(obj) = self.objects.get(&obj_meta.id) {
+            obj.find_op_with_patch_log(op, obj_meta.encoding, &self.m)
         } else {
             Default::default()
         }
@@ -158,22 +168,18 @@ impl OpSetInternal {
 
     pub(crate) fn find_op_without_patch_log(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutPatchLog {
         if let Some(tree) = self.objects.get(obj) {
-            tree.internal.find_op_without_patch_log(op, &self.m)
+            tree.find_op_without_patch_log(op, &self.m)
         } else {
             Default::default()
         }
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<'a>,
     {
         if let Some(tree) = self.objects.get(obj) {
-            if query.can_shortcut_search(tree) {
-                query
-            } else {
-                tree.internal.search(query, &self.m)
-            }
+            tree.search(&self.m, query)
         } else {
             query
         }
@@ -252,11 +258,11 @@ impl OpSetInternal {
     }
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
-        self.objects.get(id).map(|tree| tree.objtype)
+        self.objects.get(id).map(|tree| tree.objtype())
     }
 
     pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
-        let objtype = self.objects.get(id).map(|tree| tree.objtype)?;
+        let objtype = self.objects.get(id).map(|tree| tree.objtype())?;
         let encoding = objtype.into();
         Some((objtype, encoding))
     }
@@ -290,14 +296,7 @@ impl OpSetInternal {
         clock: Option<Clock>,
     ) -> usize {
         if let Some(tree) = self.objects.get(obj) {
-            match (&clock, tree.index(encoding)) {
-                // no clock and a clean index? - use it
-                (None, Some(index)) => index.visible_len(encoding),
-                // do it the hard way - walk each op
-                _ => self
-                    .top_ops(obj, clock)
-                    .fold(0, |acc, top| acc + top.op.width(encoding)),
-            }
+            tree.length(&self.m, encoding, clock)
         } else {
             0
         }

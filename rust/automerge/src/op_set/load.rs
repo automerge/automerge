@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use fxhash::FxBuildHasher;
 
 use crate::{
-    op_set::{OpSet, objects::Objects},
+    op_set::{objects::Objects, OpSet},
     op_tree::{OpTree, OpTreeInternal},
     storage::load::{DocObserver, LoadedObject},
     types::ObjId,
