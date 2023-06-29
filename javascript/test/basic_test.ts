@@ -681,5 +681,17 @@ describe("Automerge", () => {
         "receiveSyncMessage",
       ])
     })
+
+    it("should allow dates from an existing document to be used in another document", () => {
+      let originalDoc: any = Automerge.change(Automerge.init(), (doc: any) => {
+        doc.date = new Date()
+        doc.dates = [new Date()]
+      })
+
+      Automerge.change(originalDoc, (doc: any) => {
+        doc.anotherDate = originalDoc.date
+        doc.dates[0] = originalDoc.dates[0]
+      })
+    })
   })
 })

@@ -184,7 +184,23 @@ function import_value(value: any, textV2: boolean): ImportedValue {
   }
 }
 
+// When we assign a value to a property in a proxy we recursively walk through
+// the value we are assigning and copy it into the document. This is generally
+// desirable behaviour. However, a very common bug is to accidentally assign a
+// value which is already in the document to another key within the same
+// document, this often leads to surprising behaviour where users expected to
+// _move_ the object, but it is instead copied. To avoid this we check if the
+// value is from the same document and if it is we throw an error, this means
+// we require an explicit Object.assign call to copy the object, thus avoiding
+// the footgun
 function isSameDocument(val, context) {
+  // Date is technically an object, but immutable, so allowing people to assign
+  // a date from one place in the document to another place in the document is
+  // not likely to be a bug
+  if (val instanceof Date) {
+    return false
+  }
+
   // this depends on __wbg_ptr being the wasm pointer
   // a new version of wasm-bindgen will break this
   // but the tests should expose the break
