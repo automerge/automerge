@@ -21,6 +21,7 @@ import {
   F64,
 } from "./constants"
 import { RawString } from "./raw_string"
+import { AutomergeError } from "./error"
 
 type TargetCommon = {
   context: Automerge
@@ -59,6 +60,187 @@ function parseListIndex(key: any) {
     throw new RangeError("A list index must be positive, but you passed " + key)
   }
   return key
+}
+
+export function safeProxyHandler<O extends ProxyHandler<T>, T extends Target>(
+  handler: O
+): O {
+  const proxyHandler = Object.assign({}, handler)
+
+  if (proxyHandler.apply) {
+    const previous = proxyHandler.apply.bind(proxyHandler)
+    proxyHandler.apply = function (
+      target: T,
+      thisArg: any,
+      argArray: any[]
+    ): object | null {
+      try {
+        return previous(target, thisArg, argArray)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.construct) {
+    const previous = proxyHandler.construct.bind(proxyHandler)
+    proxyHandler.construct = function (
+      target: T,
+      argArray: any[],
+      newTarget: Function
+    ): object {
+      try {
+        return previous(target, argArray, newTarget)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.get) {
+    const previous = proxyHandler.get.bind(proxyHandler)
+    proxyHandler.get = function (
+      target: T,
+      p: string | symbol,
+      receiver: any
+    ): any {
+      try {
+        return previous(target, p, receiver)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.set) {
+    const previous = proxyHandler.set.bind(proxyHandler)
+    proxyHandler.set = function (
+      target: T,
+      p: string | symbol,
+      newValue: any,
+      receiver: any
+    ): any {
+      try {
+        return previous(target, p, newValue, receiver)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.defineProperty) {
+    const previous = proxyHandler.defineProperty.bind(proxyHandler)
+    proxyHandler.defineProperty = function (
+      target: T,
+      p: string | symbol,
+      attributes: PropertyDescriptor
+    ): any {
+      try {
+        return previous(target, p, attributes)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.deleteProperty) {
+    const previous = proxyHandler.deleteProperty.bind(proxyHandler)
+    proxyHandler.deleteProperty = function (
+      target: T,
+      p: string | symbol
+    ): any {
+      try {
+        return previous(target, p)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.has) {
+    const previous = proxyHandler.has.bind(proxyHandler)
+    proxyHandler.has = function (target: T, p: string | symbol): any {
+      try {
+        return previous(target, p)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.getOwnPropertyDescriptor) {
+    const previous = proxyHandler.getOwnPropertyDescriptor.bind(proxyHandler)
+    proxyHandler.getOwnPropertyDescriptor = function (
+      target: T,
+      p: string | symbol
+    ): any {
+      try {
+        return previous(target, p)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.isExtensible) {
+    const previous = proxyHandler.isExtensible.bind(proxyHandler)
+    proxyHandler.isExtensible = function (target: T): boolean {
+      try {
+        return previous(target)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.preventExtensions) {
+    const previous = proxyHandler.preventExtensions.bind(proxyHandler)
+    proxyHandler.preventExtensions = function (target: T): boolean {
+      try {
+        return previous(target)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.setPrototypeOf) {
+    const previous = proxyHandler.setPrototypeOf.bind(proxyHandler)
+    proxyHandler.setPrototypeOf = function (
+      target: T,
+      v: object | null
+    ): boolean {
+      try {
+        return previous(target, v)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.getPrototypeOf) {
+    const previous = proxyHandler.getPrototypeOf.bind(proxyHandler)
+    proxyHandler.getPrototypeOf = function (target: T): object | null {
+      try {
+        return previous(target)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  if (proxyHandler.ownKeys) {
+    const previous = proxyHandler.ownKeys.bind(proxyHandler)
+    proxyHandler.ownKeys = function (target: T): any {
+      try {
+        return previous(target)
+      } catch (err) {
+        throw new AutomergeError(err)
+      }
+    }
+  }
+
+  return proxyHandler
 }
 
 function valueAt<T extends Target>(
@@ -210,7 +392,7 @@ function isSameDocument(val, context) {
   return false
 }
 
-const MapHandler = {
+const MapHandler = safeProxyHandler({
   get<T extends Target>(
     target: T,
     key: any,
@@ -288,13 +470,13 @@ const MapHandler = {
   },
 
   has(target: Target, key: any) {
-    const value = this.get(target, key)
+    const value = this.get!(target, key)
     return value !== undefined
   },
 
   getOwnPropertyDescriptor(target: Target, key: any) {
     // const { context, objectId } = target
-    const value = this.get(target, key)
+    const value = this.get!(target, key)
     if (typeof value !== "undefined") {
       return {
         configurable: true,
@@ -310,9 +492,9 @@ const MapHandler = {
     const keys = context.keys(objectId)
     return [...new Set<string>(keys)]
   },
-}
+})
 
-const ListHandler = {
+const ListHandler = safeProxyHandler({
   get<T extends Target>(
     target: T,
     index: any,
@@ -465,35 +647,37 @@ const ListHandler = {
     keys.push("length")
     return keys
   },
-}
-
-const TextHandler = Object.assign({}, ListHandler, {
-  get(target: Target, index: any) {
-    const { context, objectId } = target
-    index = parseListIndex(index)
-    if (index === Symbol.hasInstance) {
-      return (instance: any) => {
-        return Array.isArray(instance)
-      }
-    }
-    if (index === Symbol.toStringTag) {
-      return target[Symbol.toStringTag]
-    }
-    if (index === OBJECT_ID) return objectId
-    if (index === IS_PROXY) return true
-    if (index === TRACE) return target.trace
-    if (index === STATE) return { handle: context }
-    if (index === "length") return context.length(objectId)
-    if (typeof index === "number") {
-      return valueAt(target, index)
-    } else {
-      return textMethods(target)[index] || listMethods(target)[index]
-    }
-  },
-  getPrototypeOf(/*target*/) {
-    return Object.getPrototypeOf(new Text())
-  },
 })
+
+const TextHandler = safeProxyHandler(
+  Object.assign({}, ListHandler, {
+    get(target: Target, index: any) {
+      const { context, objectId } = target
+      index = parseListIndex(index)
+      if (index === Symbol.hasInstance) {
+        return (instance: any) => {
+          return Array.isArray(instance)
+        }
+      }
+      if (index === Symbol.toStringTag) {
+        return target[Symbol.toStringTag]
+      }
+      if (index === OBJECT_ID) return objectId
+      if (index === IS_PROXY) return true
+      if (index === TRACE) return target.trace
+      if (index === STATE) return { handle: context }
+      if (index === "length") return context.length(objectId)
+      if (typeof index === "number") {
+        return valueAt(target, index)
+      } else {
+        return textMethods(target)[index] || listMethods(target)[index]
+      }
+    },
+    getPrototypeOf(/*target*/) {
+      return Object.getPrototypeOf(new Text())
+    },
+  })
+)
 
 export function mapProxy<T extends Target>(
   context: Automerge,

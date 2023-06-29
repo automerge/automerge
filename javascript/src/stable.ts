@@ -25,6 +25,7 @@ export {
   type PatchInfo,
   type PatchSource,
 } from "./types"
+export { AutomergeError } from "./error"
 
 import { Text } from "./text"
 export { Text } from "./text"
@@ -144,6 +145,7 @@ export function use(api: API) {
 }
 
 import * as wasm from "@automerge/automerge-wasm"
+import { AutomergeError } from "./error"
 use(wasm)
 
 /**
@@ -295,8 +297,12 @@ export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
   _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
-  return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
-    .newDoc
+  try {
+    return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
+      .newDoc
+  } catch (err) {
+    throw new AutomergeError(err)
+  }
 }
 
 /**
