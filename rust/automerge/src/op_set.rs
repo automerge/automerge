@@ -20,6 +20,8 @@ use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 mod load;
+mod move_manager;
+
 pub(crate) use load::OpSetBuilder;
 
 pub(crate) type OpSet = OpSetInternal;
