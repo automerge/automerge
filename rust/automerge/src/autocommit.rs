@@ -870,24 +870,6 @@ impl Transactable for AutoCommit {
         )
     }
 
-    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        src: O,
-        dst: O,
-        src_prop: P,
-        dst_prop: P,
-    ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_open();
-        let (_current, tx) = self.transaction.as_mut().unwrap();
-        tx.move_element(
-            &mut self.doc,
-            src.as_ref(),
-            dst.as_ref(),
-            src_prop,
-            dst_prop,
-        )
-    }
-
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             i.clone()
