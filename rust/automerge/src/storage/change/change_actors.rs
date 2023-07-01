@@ -272,7 +272,7 @@ where
 
     fn move_id(&self) -> Option<ObjId<Self::OpId>> {
         if self.op.move_id().is_none() {
-             None
+            None
         } else {
             Some(
                 self.op
