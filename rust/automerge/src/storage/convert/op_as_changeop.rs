@@ -99,6 +99,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
             OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::Move(v) => Cow::Borrowed(v),
         }
     }
 
