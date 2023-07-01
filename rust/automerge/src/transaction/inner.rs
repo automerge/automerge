@@ -493,7 +493,7 @@ impl TransactionInner {
             pred,
             insert: false,
             move_id: None,
-            move_from: None
+            move_from: None,
         };
 
         let pos = query.pos();

@@ -211,8 +211,8 @@ impl From<crate::ExpandedChange> for Change {
 mod convert_expanded {
     use std::borrow::Cow;
 
-    use crate::{convert, legacy, storage::AsChangeOp, types::ActorId, ScalarValue};
     use crate::convert::ObjId;
+    use crate::{convert, legacy, storage::AsChangeOp, types::ActorId, ScalarValue};
 
     impl<'a> AsChangeOp<'a> for &'a legacy::Op {
         type ActorId = &'a ActorId;

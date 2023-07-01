@@ -137,8 +137,15 @@ impl DocOpColumns {
         let succ = OpIdListRange::encode(ops.clone().map(|o| o.succ()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
         let mark_name = RleRange::encode(ops.clone().map(|o| o.mark_name()), out);
-        let move_from = ObjIdRange::encode(ops.clone().map(|o| o.move_from().unwrap_or(convert::ObjId::Root)), out);
-        let move_id = ObjIdRange::encode(ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)), out);
+        let move_from = ObjIdRange::encode(
+            ops.clone()
+                .map(|o| o.move_from().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
+        let move_id = ObjIdRange::encode(
+            ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
 
         Self {
             obj,
@@ -548,7 +555,7 @@ impl TryFrom<Columns> for DocOpColumns {
                 (other_col, other_type) => {
                     tracing::warn!(id=?other_col, typ=?other_type, "unknown column type");
                     other.append(col)
-                },
+                }
             }
         }
         Ok(DocOpColumns {

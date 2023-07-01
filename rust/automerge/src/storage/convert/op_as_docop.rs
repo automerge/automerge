@@ -132,7 +132,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
             if id.is_root() {
                 convert::ObjId::Root
             } else {
-                convert::ObjId::Op(translate(self.actor_lookup, &id.opid()))
+                convert::ObjId::Op(translate(self.actor_lookup, id.opid()))
             }
         })
     }
@@ -142,7 +142,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
             if id.is_root() {
                 convert::ObjId::Root
             } else {
-                convert::ObjId::Op(translate(self.actor_lookup, &id.opid()))
+                convert::ObjId::Op(translate(self.actor_lookup, id.opid()))
             }
         })
     }

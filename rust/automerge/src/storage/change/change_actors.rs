@@ -259,17 +259,27 @@ where
 
     fn move_from(&self) -> Option<ObjId<Self::OpId>> {
         if self.op.move_from().is_none() {
-            return None;
+            None
         } else {
-            Some(self.op.move_from().unwrap_or(convert::ObjId::Root).map(|o| self.actors.translate_opid(&o)))
+            Some(
+                self.op
+                    .move_from()
+                    .unwrap_or(convert::ObjId::Root)
+                    .map(|o| self.actors.translate_opid(&o)),
+            )
         }
     }
 
     fn move_id(&self) -> Option<ObjId<Self::OpId>> {
         if self.op.move_id().is_none() {
-            return None;
+             None
         } else {
-            Some(self.op.move_id().unwrap_or(convert::ObjId::Root).map(|o| self.actors.translate_opid(&o)))
+            Some(
+                self.op
+                    .move_id()
+                    .unwrap_or(convert::ObjId::Root)
+                    .map(|o| self.actors.translate_opid(&o)),
+            )
         }
     }
 }

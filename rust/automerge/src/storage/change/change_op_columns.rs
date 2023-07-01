@@ -48,7 +48,7 @@ pub(crate) struct ChangeOp {
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
     pub(crate) move_from: Option<ObjId>,
-    pub(crate) move_id: Option<ObjId>
+    pub(crate) move_id: Option<ObjId>,
 }
 
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
@@ -211,12 +211,21 @@ impl ChangeOpsColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let pred = OpIdListRange::encode(ops.clone().map(|o| o.pred()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_name =
-            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.clone().map(|o| o.mark_name()), out);
+        let mark_name = RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(
+            ops.clone().map(|o| o.mark_name()),
+            out,
+        );
 
         // TODO: distinguish between root and None
-        let move_from = ObjIdRange::encode(ops.clone().map(|o| o.move_from().unwrap_or(convert::ObjId::Root)), out);
-        let move_id = ObjIdRange::encode(ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)), out);
+        let move_from = ObjIdRange::encode(
+            ops.clone()
+                .map(|o| o.move_from().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
+        let move_id = ObjIdRange::encode(
+            ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
         Self {
             obj,
             key,
@@ -600,12 +609,8 @@ impl TryFrom<Columns> for ChangeOpsColumns {
                 (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
                 (MOVE_ID_COL_ID, ColumnType::Actor) => move_id_actor = Some(col.range().into()),
                 (MOVE_ID_COL_ID, ColumnType::Integer) => move_id_ctr = Some(col.range().into()),
-                (MOVE_FROM_COL_ID, ColumnType::Actor) => {
-                    move_from_actor = Some(col.range().into())
-                },
-                (MOVE_FROM_COL_ID, ColumnType::Integer) => {
-                    move_from_ctr = Some(col.range().into())
-                },
+                (MOVE_FROM_COL_ID, ColumnType::Actor) => move_from_actor = Some(col.range().into()),
+                (MOVE_FROM_COL_ID, ColumnType::Integer) => move_from_ctr = Some(col.range().into()),
                 (other_type, other_col) => {
                     tracing::warn!(typ=?other_type, id=?other_col, "unknown column");
                     other.append(col);

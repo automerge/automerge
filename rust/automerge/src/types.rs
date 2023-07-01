@@ -631,7 +631,7 @@ pub(crate) struct Op {
     pub(crate) pred: OpIds,
     pub(crate) insert: bool,
     pub(crate) move_from: Option<ObjId>,
-    pub(crate) move_id: Option<ObjId>
+    pub(crate) move_id: Option<ObjId>,
 }
 
 pub(crate) enum SuccIter<'a> {
