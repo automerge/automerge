@@ -327,6 +327,8 @@ impl LoadingObject {
                     succ: OpIds::empty(),
                     key: *key,
                     action: OpType::Delete,
+                    move_from: None,
+                    move_id: None,
                 },
             )?;
         }
@@ -358,6 +360,8 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
         insert: op.insert,
+        move_from: op.move_from,
+        move_id: op.move_id,
     })
 }
 

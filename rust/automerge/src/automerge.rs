@@ -774,6 +774,14 @@ impl Automerge {
                     .pred
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
+
+                let move_from = c.move_from.map(|m| {
+                    ObjId(OpId::new(m.opid().counter(), actors[m.opid().actor()]))
+                });
+                let move_id = c.move_id.map(|m| {
+                    ObjId(OpId::new(m.opid().counter(), actors[m.opid().actor()]))
+                });
+
                 let pred = self.ops.m.sorted_opids(pred);
                 (
                     obj,
@@ -789,6 +797,8 @@ impl Automerge {
                         succ: Default::default(),
                         pred,
                         insert: c.insert,
+                        move_from,
+                        move_id,
                     },
                 )
             })

@@ -561,6 +561,8 @@ pub(crate) mod tests {
                     succ,
                     pred,
                     insert: false,
+                    move_from: None,
+                    move_id: None,
                 };
                 set.insert(counter as usize, &ObjId::root(), op);
                 counter += 1;
@@ -577,6 +579,8 @@ pub(crate) mod tests {
                 .m
                 .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
             insert: false,
+            move_from: None,
+            move_id: None,
         };
         (set, new_op)
     }

@@ -578,6 +578,8 @@ mod tests {
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
+            move_from: None,
+            move_id: None,
         }
     }
 

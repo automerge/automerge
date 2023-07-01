@@ -630,6 +630,8 @@ pub(crate) struct Op {
     pub(crate) succ: OpIds,
     pub(crate) pred: OpIds,
     pub(crate) insert: bool,
+    pub(crate) move_from: Option<ObjId>,
+    pub(crate) move_id: Option<ObjId>
 }
 
 pub(crate) enum SuccIter<'a> {
@@ -1014,6 +1016,8 @@ pub(crate) mod gen {
                 action,
                 succ: OpIds::empty(),
                 pred: OpIds::empty(),
+                move_id: None,
+                move_from: None,
             },
         )
     }

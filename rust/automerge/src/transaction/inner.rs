@@ -264,6 +264,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            move_id: None,
+            move_from: None,
         }
     }
 
@@ -275,6 +277,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None,
         }
     }
 
@@ -373,6 +377,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            move_id: None,
+            move_from: None,
         };
 
         doc.ops_mut().insert(pos, &obj, op.clone());
@@ -442,6 +448,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None,
         };
 
         let pos = query.end_pos;
@@ -484,6 +492,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None
         };
 
         let pos = query.pos();
