@@ -411,6 +411,18 @@ impl<'a> Transactable for Transaction<'a> {
             .map(|d| d.get_deps())
             .unwrap_or_default()
     }
+
+    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        src: O,
+        dst: O,
+        src_prop: P,
+        dst_prop: P,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| {
+            tx.move_element(doc, hist, src.as_ref(), dst.as_ref(), src_prop, dst_prop)
+        })
+    }
 }
 
 // If a transaction is not commited or rolled back manually then it can leave the document in an

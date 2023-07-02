@@ -451,7 +451,10 @@ impl Automerge {
     }
 
     pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExId) {
-        (op.value_at(clock), self.id_to_exid(op.id))
+        match &op.action {
+            OpType::Move(_) => (op.value_at(clock), self.id_to_exid(op.move_id.unwrap().0)),
+            _ => (op.value_at(clock), self.id_to_exid(op.id)),
+        }
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {

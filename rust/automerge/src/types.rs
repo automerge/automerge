@@ -834,6 +834,10 @@ impl Op {
                 Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
             }
             OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
+            OpType::Move(scalar) => match scalar {
+                ScalarValue::Null => Value::Object(ObjType::Map),
+                other => Value::Scalar(Cow::Borrowed(other)),
+            },
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }

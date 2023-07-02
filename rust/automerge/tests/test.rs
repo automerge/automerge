@@ -11,6 +11,7 @@ use std::fs;
 // set up logging for all the tests
 use test_log::test;
 
+use automerge::ObjType::Map;
 #[allow(unused_imports)]
 use automerge_test::{
     assert_doc, assert_obj, list, map, mk_counter, new_doc, new_doc_with_actor, pretty_print,
@@ -1842,6 +1843,21 @@ fn inserting_text_near_deleted_marks() {
     dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
     tx.splice_text(&text_id, 2, 0, "a").unwrap(); // 'ah<bold>a</bold>'
     dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
+}
+
+#[test]
+fn move_from_map_to_map() -> Result<(), AutomergeError> {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let a = tx.put_object(&ROOT, "A", ObjType::Map)?;
+    let b = tx.put_object(&ROOT, "B", ObjType::Map)?;
+    tx.put_object(&ROOT, "C", ObjType::Map)?;
+    tx.move_element(&ROOT, &b, "A", "A")?;
+    let new_a = tx.get(&b, "A")?;
+    assert_eq!(new_a, Some((Value::Object(Map), a)));
+    let old_a = tx.get(&ROOT, "A")?;
+    assert_eq!(old_a, None);
+    Ok(())
 }
 
 /*

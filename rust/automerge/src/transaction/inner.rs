@@ -774,7 +774,7 @@ impl TransactionInner {
         dst: &ExId,
         src_prop: P,
         dst_prop: P,
-    ) -> Result<OpId, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let id = self.next_id();
         let src_obj = doc.exid_to_obj(src)?;
         let dst_obj = doc.exid_to_obj(dst)?;
@@ -835,7 +835,7 @@ impl TransactionInner {
                         dst_obj.id,
                         &ops_pos,
                     );
-                    Ok(id)
+                    Ok(())
                 }
                 Prop::Seq(_) => Err(AutomergeError::InvalidMoveProperty),
             },
