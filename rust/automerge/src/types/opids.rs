@@ -32,6 +32,20 @@ impl OpIds {
         Self(inner)
     }
 
+    pub(crate) fn from_two_opids<
+        I: Iterator<Item = OpId>,
+        T: Iterator<Item = OpId>,
+        F: Fn(&OpId, &OpId) -> std::cmp::Ordering,
+    >(
+        opids1: I,
+        opids2: T,
+        cmp: F,
+    ) -> Self {
+        let mut inner = opids1.chain(opids2).collect::<Vec<_>>();
+        inner.sort_by(cmp);
+        Self(inner)
+    }
+
     /// Create a new OpIds if `opids` are sorted with respect to `cmp` and contain no duplicates.
     ///
     /// Returns `Some(OpIds)` if `opids` is sorted and has no duplicates, otherwise returns `None`

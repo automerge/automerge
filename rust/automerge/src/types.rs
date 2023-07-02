@@ -821,6 +821,7 @@ impl Op {
     pub(crate) fn scalar_value(&self) -> Option<&ScalarValue> {
         match &self.action {
             OpType::Put(scalar) => Some(scalar),
+            OpType::Move(scalar) => Some(scalar),
             _ => None,
         }
     }

@@ -7,6 +7,7 @@ use std::fmt::Debug;
 
 mod insert;
 mod list_state;
+mod map_move;
 mod nth;
 mod opid;
 mod prop;
@@ -14,6 +15,7 @@ mod seek_mark;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use list_state::{ListState, MarkMap};
+pub(crate) use map_move::MapMove;
 pub(crate) use nth::Nth;
 pub(crate) use opid::{OpIdSearch, SimpleOpIdSearch};
 pub(crate) use prop::Prop;

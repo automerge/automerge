@@ -2,10 +2,10 @@ use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
-use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
+use crate::op_tree::{MoveSrcFound, OpTreeIter};
 use crate::parents::Parents;
 use crate::query::TreeQuery;
 use crate::types::{
@@ -136,6 +136,13 @@ impl OpSetInternal {
                 tree.internal
                     .seek_ops_by_prop(&self.m, prop, encoding, clock)
             })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn seek_move_ops_by_prop<'a>(&'a self, obj: &ObjId, prop: Prop) -> MoveSrcFound<'a> {
+        self.trees
+            .get(obj)
+            .and_then(|tree| tree.internal.seek_move_ops_by_prop(&self.m, prop))
             .unwrap_or_default()
     }
 
@@ -457,6 +464,16 @@ impl OpSetMetadata {
 
     pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {
         OpIds::new(opids, |left, right| self.lamport_cmp(*left, *right))
+    }
+
+    pub(crate) fn sorted_two_opids<I: Iterator<Item = OpId>, T: Iterator<Item = OpId>>(
+        &self,
+        opids1: I,
+        opids2: T,
+    ) -> OpIds {
+        OpIds::from_two_opids(opids1, opids2, |left, right| {
+            self.lamport_cmp(*left, *right)
+        })
     }
 
     /// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
