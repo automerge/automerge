@@ -161,7 +161,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
  */
 export function clone<T>(
   doc: Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -186,7 +186,7 @@ export function clone<T>(
  */
 export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -210,7 +210,7 @@ export function from<T extends Record<string, unknown>>(
  */
 export function load<T>(
   data: Uint8Array,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -222,7 +222,7 @@ export function load<T>(
 }
 
 function importOpts<T>(
-  _actor?: ActorId | InitOptions<T>
+  _actor?: ActorId | InitOptions<T>,
 ): stable.InitOptions<T> {
   if (typeof _actor === "object") {
     return _actor
@@ -234,7 +234,7 @@ function importOpts<T>(
 function cursorToIndex<T>(
   state: InternalState<T>,
   value: string,
-  index: number | Cursor
+  index: number | Cursor,
 ): number {
   if (typeof index == "string") {
     if (/^[0-9]+@[0-9a-zA-z]+$/.test(index)) {
@@ -267,7 +267,7 @@ export function splice<T>(
   path: stable.Prop[],
   index: number | Cursor,
   del: number,
-  newText?: string
+  newText?: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -312,7 +312,7 @@ export function splice<T>(
 export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  index: number
+  index: number,
 ): Cursor {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -342,7 +342,7 @@ export function getCursor<T>(
 export function getCursorPosition<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  cursor: Cursor
+  cursor: Cursor,
 ): number {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -365,7 +365,7 @@ export function mark<T>(
   path: stable.Prop[],
   range: MarkRange,
   name: string,
-  value: MarkValue
+  value: MarkValue,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -390,7 +390,7 @@ export function unmark<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   range: MarkRange,
-  name: string
+  name: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -472,7 +472,7 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
  */
 export function getConflicts<T>(
   doc: Doc<T>,
-  prop: stable.Prop
+  prop: stable.Prop,
 ): Conflicts | undefined {
   const state = _state(doc, false)
   if (!state.textV2) {

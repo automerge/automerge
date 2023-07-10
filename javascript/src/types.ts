@@ -57,5 +57,5 @@ export type PatchInfo<T> = {
  */
 export type PatchCallback<T> = (
   patches: Array<Patch>,
-  info: PatchInfo<T>
+  info: PatchInfo<T>,
 ) => void

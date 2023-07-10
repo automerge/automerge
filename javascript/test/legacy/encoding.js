@@ -142,7 +142,7 @@ class Encoder {
       throw new RangeError("number out of range")
 
     const numBytes = Math.ceil(
-      (33 - Math.clz32(value >= 0 ? value : -value - 1)) / 7
+      (33 - Math.clz32(value >= 0 ? value : -value - 1)) / 7,
     )
     if (this.offset + numBytes > this.buf.byteLength) this.grow()
 
@@ -246,7 +246,7 @@ class Encoder {
       return this.appendInt32(low32 - 0x100000000)
 
     const numBytes = Math.ceil(
-      (65 - Math.clz32(high32 >= 0 ? high32 : -high32 - 1)) / 7
+      (65 - Math.clz32(high32 >= 0 ? high32 : -high32 - 1)) / 7,
     )
     if (this.offset + numBytes > this.buf.byteLength) this.grow()
     for (let i = 0; i < 4; i++) {
@@ -779,7 +779,7 @@ class RLEEncoder extends Encoder {
           const value = decoder.readRawValue()
           if (value === decoder.lastValue)
             throw new RangeError(
-              "Repetition of values is not allowed in literal"
+              "Repetition of values is not allowed in literal",
             )
           decoder.lastValue = value
           this._appendValue(value)
@@ -952,14 +952,14 @@ class RLEDecoder extends Decoder {
         this.lastValue === value
       ) {
         throw new RangeError(
-          "Successive repetitions with the same value are not allowed"
+          "Successive repetitions with the same value are not allowed",
         )
       }
       this.state = "repetition"
       this.lastValue = value
     } else if (this.count === 1) {
       throw new RangeError(
-        "Repetition count of 1 is not allowed, use a literal instead"
+        "Repetition count of 1 is not allowed, use a literal instead",
       )
     } else if (this.count < 0) {
       this.count = -this.count
