@@ -50,7 +50,7 @@ export class Counter {
    */
   increment(_delta: number): number {
     throw new Error(
-      "Counters should not be incremented outside of a change callback"
+      "Counters should not be incremented outside of a change callback",
     )
   }
 
@@ -62,7 +62,7 @@ export class Counter {
    */
   decrement(_delta: number): number {
     throw new Error(
-      "Counters should not be decremented outside of a change callback"
+      "Counters should not be decremented outside of a change callback",
     )
   }
 }
@@ -82,7 +82,7 @@ class WriteableCounter extends Counter {
     context: Automerge,
     path: Prop[],
     objectId: ObjID,
-    key: Prop
+    key: Prop,
   ) {
     super(value)
     this.context = context
@@ -123,7 +123,7 @@ export function getWriteableCounter(
   context: Automerge,
   path: Prop[],
   objectId: ObjID,
-  key: Prop
+  key: Prop,
 ): WriteableCounter {
   return new WriteableCounter(value, context, path, objectId, key)
 }

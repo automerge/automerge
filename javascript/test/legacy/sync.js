@@ -49,7 +49,7 @@ class BloomFilter {
       this.numBitsPerEntry = BITS_PER_ENTRY
       this.numProbes = NUM_PROBES
       this.bits = new Uint8Array(
-        Math.ceil((this.numEntries * this.numBitsPerEntry) / 8)
+        Math.ceil((this.numEntries * this.numBitsPerEntry) / 8),
       )
       for (let hash of arg) this.addHash(hash)
     } else if (arg instanceof Uint8Array) {
@@ -64,7 +64,7 @@ class BloomFilter {
         this.numBitsPerEntry = decoder.readUint32()
         this.numProbes = decoder.readUint32()
         this.bits = decoder.readRawBytes(
-          Math.ceil((this.numEntries * this.numBitsPerEntry) / 8)
+          Math.ceil((this.numEntries * this.numBitsPerEntry) / 8),
         )
       }
     } else {
@@ -292,7 +292,7 @@ function getChangesToSend(backend, have, need) {
 
   // Get all changes that were added since the last sync
   const changes = Backend.getChanges(backend, Object.keys(lastSyncHashes)).map(
-    change => decodeChangeMeta(change, true)
+    change => decodeChangeMeta(change, true),
   )
 
   let changeHashes = {},
@@ -370,7 +370,7 @@ function generateSyncMessage(backend, syncState) {
   }
   if (!syncState) {
     throw new Error(
-      "generateSyncMessage requires a syncState, which can be created with initSyncState()"
+      "generateSyncMessage requires a syncState, which can be created with initSyncState()",
     )
   }
 
@@ -435,7 +435,7 @@ function generateSyncMessage(backend, syncState) {
   // TODO: this recomputes the SHA-256 hash of each change; we should restructure this to avoid the
   // unnecessary recomputation
   changesToSend = changesToSend.filter(
-    change => !sentHashes[decodeChangeMeta(change, true).hash]
+    change => !sentHashes[decodeChangeMeta(change, true).hash],
   )
 
   // Regular response to a sync message: send any changes that the other node
@@ -477,7 +477,7 @@ function generateSyncMessage(backend, syncState) {
 function advanceHeads(myOldHeads, myNewHeads, ourOldSharedHeads) {
   const newHeads = myNewHeads.filter(head => !myOldHeads.includes(head))
   const commonHeads = ourOldSharedHeads.filter(head =>
-    myNewHeads.includes(head)
+    myNewHeads.includes(head),
   )
   const advancedHeads = [...new Set([...newHeads, ...commonHeads])].sort()
   return advancedHeads
@@ -493,7 +493,7 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
   }
   if (!oldSyncState) {
     throw new Error(
-      "generateSyncMessage requires a syncState, which can be created with initSyncState()"
+      "generateSyncMessage requires a syncState, which can be created with initSyncState()",
     )
   }
 
@@ -511,7 +511,7 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
     sharedHeads = advanceHeads(
       beforeHeads,
       Backend.getHeads(backend),
-      sharedHeads
+      sharedHeads,
     )
   }
 
@@ -526,7 +526,7 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
   // If all of the remote heads are known to us, that means either our heads are equal, or we are
   // ahead of the remote peer. In this case, take the remote heads to be our shared heads.
   const knownHeads = message.heads.filter(head =>
-    Backend.getChangeByHash(backend, head)
+    Backend.getChangeByHash(backend, head),
   )
   if (knownHeads.length === message.heads.length) {
     sharedHeads = message.heads

@@ -13,7 +13,7 @@ export type UnstableConflicts = ConflictsF<Text2Target>
 export function stableConflictAt(
   context: Automerge,
   objectId: ObjID,
-  prop: Prop
+  prop: Prop,
 ): Conflicts | undefined {
   return conflictAt<Text1Target>(
     context,
@@ -22,14 +22,14 @@ export function stableConflictAt(
     true,
     (context: Automerge, conflictId: ObjID): AutomergeValue => {
       return new Text(context.text(conflictId))
-    }
+    },
   )
 }
 
 export function unstableConflictAt(
   context: Automerge,
   objectId: ObjID,
-  prop: Prop
+  prop: Prop,
 ): UnstableConflicts | undefined {
   return conflictAt<Text2Target>(
     context,
@@ -38,7 +38,7 @@ export function unstableConflictAt(
     true,
     (context: Automerge, conflictId: ObjID): UnstableAutomergeValue => {
       return context.text(conflictId)
-    }
+    },
   )
 }
 
@@ -47,7 +47,7 @@ function conflictAt<T extends Target>(
   objectId: ObjID,
   prop: Prop,
   textV2: boolean,
-  handleText: (a: Automerge, conflictId: ObjID) => ValueType<T>
+  handleText: (a: Automerge, conflictId: ObjID) => ValueType<T>,
 ): ConflictsF<T> | undefined {
   const values = context.getAll(objectId, prop)
   if (values.length <= 1) {

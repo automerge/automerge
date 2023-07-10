@@ -194,7 +194,7 @@ function parseAllOpIds(changes, single) {
   let actorIds = Object.keys(actors).sort()
   if (single) {
     actorIds = [changes[0].actor].concat(
-      actorIds.filter(actor => actor !== changes[0].actor)
+      actorIds.filter(actor => actor !== changes[0].actor),
     )
   }
   for (let change of newChanges) {
@@ -228,7 +228,7 @@ function encodeObjectId(op, columns) {
     columns.objCtr.appendValue(op.obj.counter)
   } else {
     throw new RangeError(
-      `Unexpected objectId reference: ${JSON.stringify(op.obj)}`
+      `Unexpected objectId reference: ${JSON.stringify(op.obj)}`,
     )
   }
 }
@@ -322,7 +322,7 @@ function encodeValue(op, columns) {
     columns.valLen.appendValue((numBytes << 4) | VALUE_TYPE.UTF8)
   } else if (ArrayBuffer.isView(op.value)) {
     const numBytes = columns.valRaw.appendRawBytes(
-      new Uint8Array(op.value.buffer)
+      new Uint8Array(op.value.buffer),
     )
     columns.valLen.appendValue((numBytes << 4) | VALUE_TYPE.BYTES)
   } else if (typeof op.value === "number") {
@@ -346,7 +346,7 @@ function encodeValue(op, columns) {
     columns.valLen.appendValue((numBytes << 4) | op.datatype)
   } else if (op.datatype) {
     throw new RangeError(
-      `Unknown datatype ${op.datatype} for value ${op.value}`
+      `Unknown datatype ${op.datatype} for value ${op.value}`,
     )
   } else {
     throw new RangeError(`Unsupported value in operation: ${op.value}`)
@@ -377,13 +377,13 @@ function decodeValue(sizeTag, bytes) {
       const view = new DataView(
         bytes.buffer,
         bytes.byteOffset,
-        bytes.byteLength
+        bytes.byteLength,
       )
       if (bytes.byteLength === 8) {
         return { value: view.getFloat64(0, true), datatype: "float64" }
       } else {
         throw new RangeError(
-          `Invalid length for floating point number: ${bytes.byteLength}`
+          `Invalid length for floating point number: ${bytes.byteLength}`,
         )
       }
     } else if (sizeTag % 16 === VALUE_TYPE.COUNTER) {
@@ -532,7 +532,7 @@ function expandMultiOps(ops, startOp, actor) {
       for (const value of op.values) {
         if (!validDatatype(value, datatype))
           throw new RangeError(
-            `Decode failed: bad value/datatype association (${value},${datatype})`
+            `Decode failed: bad value/datatype association (${value},${datatype})`,
           )
         expandedOps.push({
           action: "set",
@@ -591,7 +591,7 @@ function decodeOps(ops, forDocument) {
     }
     if (!!op.chldCtr !== !!op.chldActor) {
       throw new RangeError(
-        `Mismatched child columns: ${op.chldCtr} and ${op.chldActor}`
+        `Mismatched child columns: ${op.chldCtr} and ${op.chldActor}`,
       )
     }
     if (op.chldCtr !== null) newOp.child = `${op.chldCtr}@${op.chldActor}`
@@ -602,7 +602,7 @@ function decodeOps(ops, forDocument) {
         op.succNum.map(succ => ({
           counter: succ.succCtr,
           actorId: succ.succActor,
-        }))
+        })),
       )
     } else {
       newOp.pred = op.predNum.map(pred => `${pred.predCtr}@${pred.predActor}`)
@@ -610,7 +610,7 @@ function decodeOps(ops, forDocument) {
         op.predNum.map(pred => ({
           counter: pred.predCtr,
           actorId: pred.predActor,
-        }))
+        })),
       )
     }
     newOps.push(newOp)
@@ -761,7 +761,7 @@ function decodeColumnInfo(decoder) {
 
 function encodeColumnInfo(encoder, columns) {
   const nonEmptyColumns = columns.filter(
-    column => column.encoder.buffer.byteLength > 0
+    column => column.encoder.buffer.byteLength > 0,
   )
   encoder.appendUint53(nonEmptyColumns.length)
   for (let column of nonEmptyColumns) {
@@ -822,7 +822,10 @@ function encodeContainer(chunkType, encodeContentsCallback) {
   // Copy header into the body buffer so that they are contiguous
   bodyBuf.set(
     MAGIC_BYTES,
-    HEADER_SPACE - headerBuf.byteLength - CHECKSUM_SIZE - MAGIC_BYTES.byteLength
+    HEADER_SPACE -
+      headerBuf.byteLength -
+      CHECKSUM_SIZE -
+      MAGIC_BYTES.byteLength,
   )
   bodyBuf.set(checksum, HEADER_SPACE - headerBuf.byteLength - CHECKSUM_SIZE)
   bodyBuf.set(headerBuf, HEADER_SPACE - headerBuf.byteLength)
@@ -832,7 +835,7 @@ function encodeContainer(chunkType, encodeContentsCallback) {
       HEADER_SPACE -
         headerBuf.byteLength -
         CHECKSUM_SIZE -
-        MAGIC_BYTES.byteLength
+        MAGIC_BYTES.byteLength,
     ),
   }
 }
@@ -890,7 +893,7 @@ function encodeChange(changeObj) {
   const hexHash = bytesToHexString(hash)
   if (changeObj.hash && changeObj.hash !== hexHash) {
     throw new RangeError(
-      `Change hash does not match encoding: ${changeObj.hash} != ${hexHash}`
+      `Change hash does not match encoding: ${changeObj.hash} != ${hexHash}`,
     )
   }
   return bytes.byteLength >= DEFLATE_MIN_SIZE ? deflateChange(bytes) : bytes
@@ -930,7 +933,7 @@ function decodeChange(buffer) {
   const change = decodeChangeColumns(buffer)
   change.ops = decodeOps(
     decodeColumns(change.columns, change.actorIds, CHANGE_COLUMNS),
-    false
+    false,
   )
   delete change.actorIds
   delete change.columns
@@ -1052,7 +1055,7 @@ function groupChangeOps(changes, ops) {
       throw new RangeError(
         `Expected seq = ${changesByActor[change.actor].length + 1}, got ${
           change.seq
-        }`
+        }`,
       )
     }
     if (
@@ -1142,7 +1145,7 @@ function decodeDocumentChanges(changes, expectedHeads) {
     for (let index of change.depsNum.map(d => d.depsIndex)) {
       if (!changes[index] || !changes[index].hash) {
         throw new RangeError(
-          `No hash for index ${index} while processing index ${i}`
+          `No hash for index ${index} while processing index ${i}`,
         )
       }
       const hash = changes[index].hash
@@ -1173,8 +1176,8 @@ function decodeDocumentChanges(changes, expectedHeads) {
   if (!headsEqual) {
     throw new RangeError(
       `Mismatched heads hashes: expected ${expectedHeads.join(
-        ", "
-      )}, got ${actualHeads.join(", ")}`
+        ", ",
+      )}, got ${actualHeads.join(", ")}`,
     )
   }
 }
@@ -1246,7 +1249,7 @@ function decodeDocumentHeader(buffer) {
   }
 
   const extraBytes = decoder.readRawBytes(
-    decoder.buf.byteLength - decoder.offset
+    decoder.buf.byteLength - decoder.offset,
   )
   return {
     changesColumns,
@@ -1264,7 +1267,7 @@ function decodeDocument(buffer) {
   const changes = decodeColumns(changesColumns, actorIds, DOCUMENT_COLUMNS)
   const ops = decodeOps(
     decodeColumns(opsColumns, actorIds, DOC_OPS_COLUMNS),
-    true
+    true,
   )
   groupChangeOps(changes, ops)
   decodeDocumentChanges(changes, heads)
