@@ -656,7 +656,7 @@ describe("Automerge", () => {
       let heads1 = Automerge.getHeads(doc1)
       let doc2 = Automerge.clone(doc1, { patchCallback })
       doc2 = Automerge.change(doc2, d => (d.a = "b"))
-      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c"))
+      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c")).newDoc
       doc1 = Automerge.merge(doc1, doc2)
       doc2 = Automerge.change(doc2, d => (d.x = "y"))
       doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
