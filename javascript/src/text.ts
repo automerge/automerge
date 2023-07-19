@@ -215,7 +215,7 @@ export class Text {
   }
 
   slice(start?: number, end?: number) {
-    new Text(this.elems.slice(start, end))
+    return new Text(this.elems.slice(start, end))
   }
 
   some(test: (arg: Value) => boolean): boolean {

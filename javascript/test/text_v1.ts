@@ -327,4 +327,8 @@ describe("Automerge.Text", () => {
       text: new Automerge.Text("🇺🇸"),
     })
   })
+
+  it("should support slice", () => {
+    assert.strictEqual(s1.text.slice(0).toString(), s1.text.toString())
+  })
 })
