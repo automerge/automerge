@@ -49,6 +49,8 @@ export {
   type MarkValue,
   type AutomergeValue,
   type ScalarValue,
+  type PatchSource,
+  type PatchInfo,
 } from "./unstable_types"
 
 import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
@@ -79,6 +81,7 @@ export {
   changeAt,
   emptyChange,
   loadIncremental,
+  saveIncremental,
   save,
   merge,
   getActorId,
@@ -113,6 +116,8 @@ export type InitOptions<T> = {
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
+  /** @hidden */
+  unchecked?: boolean
 }
 
 import { ActorId, Doc } from "./stable"
@@ -156,7 +161,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
  */
 export function clone<T>(
   doc: Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -181,7 +186,7 @@ export function clone<T>(
  */
 export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -205,7 +210,7 @@ export function from<T extends Record<string, unknown>>(
  */
 export function load<T>(
   data: Uint8Array,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -217,7 +222,7 @@ export function load<T>(
 }
 
 function importOpts<T>(
-  _actor?: ActorId | InitOptions<T>
+  _actor?: ActorId | InitOptions<T>,
 ): stable.InitOptions<T> {
   if (typeof _actor === "object") {
     return _actor
@@ -229,7 +234,7 @@ function importOpts<T>(
 function cursorToIndex<T>(
   state: InternalState<T>,
   value: string,
-  index: number | Cursor
+  index: number | Cursor,
 ): number {
   if (typeof index == "string") {
     if (/^[0-9]+@[0-9a-zA-z]+$/.test(index)) {
@@ -242,12 +247,27 @@ function cursorToIndex<T>(
   }
 }
 
+/**
+ * Modify a string
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to modify
+ * @param path - The path to the string to modify
+ * @param index - The position (as a {@link Cursor} or index) to edit.
+ *   If a cursor is used then the edit happens such that the cursor will
+ *   now point to the end of the newText, so you can continue to reuse
+ *   the same cursor for multiple calls to splice.
+ * @param del - The number of code units to delete, a positive number
+ *   deletes N characters after the cursor, a negative number deletes
+ *   N characters before the cursor.
+ * @param newText - The string to insert (if any).
+ */
 export function splice<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
   del: number,
-  newText?: string
+  newText?: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -271,10 +291,28 @@ export function splice<T>(
   }
 }
 
+/**
+ * Returns a cursor for the given position in a string.
+ *
+ * @remarks
+ * A cursor represents a relative position, "before character X",
+ * rather than an absolute position. As the document is edited, the
+ * cursor remains stable relative to its context, just as you'd expect
+ * from a cursor in a concurrent text editor.
+ *
+ * The string representation is shareable, and so you can use this both
+ * to edit the document yourself (using {@link splice}) or to share multiple
+ * collaborator's current cursor positions over the network.
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document
+ * @param path - The path to the string
+ * @param index - The current index of the position of the cursor
+ */
 export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  index: number
+  index: number,
 ): Cursor {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -292,10 +330,19 @@ export function getCursor<T>(
   }
 }
 
+/**
+ * Returns the current index of the cursor.
+ *
+ * @typeParam T - The type of the value contained in the document
+ *
+ * @param doc - The document
+ * @param path - The path to the string
+ * @param index - The cursor
+ */
 export function getCursorPosition<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  cursor: Cursor
+  cursor: Cursor,
 ): number {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -318,7 +365,7 @@ export function mark<T>(
   path: stable.Prop[],
   range: MarkRange,
   name: string,
-  value: MarkValue
+  value: MarkValue,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -343,7 +390,7 @@ export function unmark<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   range: MarkRange,
-  name: string
+  name: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -364,13 +411,14 @@ export function unmark<T>(
   }
 }
 
-export function marks<T>(doc: Doc<T>, prop: stable.Prop): Mark[] {
+export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {
     throw new RangeError("invalid object for unmark")
   }
-  const obj = `${objectId}/${prop}`
+  path.unshift(objectId)
+  const obj = path.join("/")
   try {
     return state.handle.marks(obj)
   } catch (e) {
@@ -424,7 +472,7 @@ export function marks<T>(doc: Doc<T>, prop: stable.Prop): Mark[] {
  */
 export function getConflicts<T>(
   doc: Doc<T>,
-  prop: stable.Prop
+  prop: stable.Prop,
 ): Conflicts | undefined {
   const state = _state(doc, false)
   if (!state.textV2) {

@@ -192,6 +192,15 @@
 //! # }
 //! ```
 //!
+//! ## Cursors, referring to positions in sequences
+//!
+//! When working with text or other sequences it is often useful to be able to
+//! refer to a specific position within the sequence whilst merging remote
+//! changes. You can manually do this by maintaining your own offsets and
+//! observing patches, but this is error prone. The `Cursor` type provides
+//! an API for allowing automerge to do the index translations for you. Cursors
+//! are created with [`ReadDoc::get_cursor`] and dereferneced with
+//! [`ReadDoc::get_cursor_position`].
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",

@@ -38,5 +38,5 @@ makeThisModuleAnExecutableReplacer(
 
     //The replacer should return undefined when we want to let denoify replace the statement
     return undefined
-  }
+  },
 )

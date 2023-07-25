@@ -12,6 +12,8 @@ export {
   type MarkRange,
   type MarkValue,
   type Cursor,
+  type PatchInfo,
+  type PatchSource,
 } from "./types"
 
 import { RawString } from "./raw_string"

@@ -178,15 +178,11 @@ skip = [
     # redox_syscall has a dupliucate version included by prettytable
     # which is only used in tests
     { name = "redox_syscall", version = "0.2.16" },
-    { name = "windows-sys", version = "0.45.0" },
-    { name = "windows-targets", version = "0.42.2" },
-    { name = "windows_x86_64_msvc", version = "0.42.0" },
-    { name = "windows_x86_64_gnu", version = "0.42.2" },
-    { name = "windows_x86_64_gnullvm", version = "0.42.2" },
-    { name = "windows_i686_msvc", version = "0.42.2" },
-    { name = "windows_aarch64_msvc", version = "0.42.2" },
-    { name = "windows_aarch64_gnullvm", version = "0.42.2" },
-    { name = "windows_i686_gnu", version = "0.42.2" },
+
+    # linux-raw-sys and rustix are duplicated due to transitive dependencies of
+    # cbindgen, which we only use at build time in automerge-c
+    { name = "linux-raw-sys", version = "0.3.8" },
+    { name = "rustix", version = "0.37.21" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 

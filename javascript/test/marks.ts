@@ -19,7 +19,7 @@ describe("Automerge", () => {
           ["x"],
           { start: 5, end: 10, expand: "none" },
           "font-weight",
-          value
+          value,
         )
       })
 
@@ -64,10 +64,42 @@ describe("Automerge", () => {
         marks: { "font-weight": "bold" },
       })
 
-      assert.deepStrictEqual(Automerge.marks(doc2, "x"), [
+      assert.deepStrictEqual(Automerge.marks(doc2, ["x"]), [
         { name: "font-weight", value, start: 5, end: 7 },
         { name: "font-weight", value, start: 9, end: 10 },
       ])
     })
+  })
+
+  it("should do unicode sensibly", () => {
+    let doc = Automerge.from({ content: "😀😀" })
+
+    doc = Automerge.change(doc, d => {
+      Automerge.mark(
+        d,
+        ["content"],
+        { start: 2, end: 4, expand: "none" },
+        "bold",
+        true,
+      )
+      Automerge.splice(d, ["content"], 0, 0, "🙃")
+    })
+    assert.deepStrictEqual(Automerge.marks(doc, ["content"]), [
+      {
+        name: "bold",
+        value: true,
+        start: 4,
+        end: 6,
+      },
+    ])
+    doc = Automerge.change(doc, d => {
+      Automerge.unmark(
+        d,
+        ["content"],
+        { start: 4, end: 6, expand: "none" },
+        "bold",
+      )
+    })
+    assert.deepStrictEqual(Automerge.marks(doc, ["content"]), [])
   })
 })

@@ -10,6 +10,7 @@ import {
   type Doc,
   type PatchCallback,
   type Patch,
+  type PatchSource,
 } from "./types"
 export {
   type AutomergeValue,
@@ -21,6 +22,8 @@ export {
   type Patch,
   type PatchCallback,
   type ScalarValue,
+  type PatchInfo,
+  type PatchSource,
 } from "./types"
 
 import { Text } from "./text"
@@ -249,7 +252,7 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  */
 export function clone<T>(
   doc: Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const state = _state(doc)
   const heads = state.heads
@@ -290,9 +293,9 @@ export function free<T>(doc: Doc<T>) {
  */
 export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
-  return change(init(_opts), d => Object.assign(d, initialState))
+  return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
 }
 
 /**
@@ -344,15 +347,15 @@ export function from<T extends Record<string, unknown>>(
 export function change<T>(
   doc: Doc<T>,
   options: string | ChangeOptions<T> | ChangeFn<T>,
-  callback?: ChangeFn<T>
+  callback?: ChangeFn<T>,
 ): Doc<T> {
   if (typeof options === "function") {
-    return _change(doc, {}, options)
+    return _change(doc, "change", {}, options)
   } else if (typeof callback === "function") {
     if (typeof options === "string") {
       options = { message: options }
     }
-    return _change(doc, options, callback)
+    return _change(doc, "change", options, callback)
   } else {
     throw RangeError("Invalid args for change")
   }
@@ -362,15 +365,15 @@ export function changeAt<T>(
   doc: Doc<T>,
   scope: Heads,
   options: string | ChangeOptions<T> | ChangeFn<T>,
-  callback?: ChangeFn<T>
+  callback?: ChangeFn<T>,
 ): Doc<T> {
   if (typeof options === "function") {
-    return _change(doc, {}, options, scope)
+    return _change(doc, "changeAt", {}, options, scope)
   } else if (typeof callback === "function") {
     if (typeof options === "string") {
       options = { message: options }
     }
-    return _change(doc, options, callback, scope)
+    return _change(doc, "changeAt", options, callback, scope)
   } else {
     throw RangeError("Invalid args for changeAt")
   }
@@ -378,8 +381,9 @@ export function changeAt<T>(
 
 function progressDocument<T>(
   doc: Doc<T>,
+  source: PatchSource,
   heads: Heads | null,
-  callback?: PatchCallback<T>
+  callback?: PatchCallback<T>,
 ): Doc<T> {
   if (heads == null) {
     return doc
@@ -388,14 +392,12 @@ function progressDocument<T>(
   const nextState = { ...state, heads: undefined }
   let nextDoc
   if (callback != null) {
-    const headsBefore = state.heads
     const { value, patches } = state.handle.applyAndReturnPatches(
       doc,
-      nextState
+      nextState,
     )
     if (patches.length > 0) {
-      const before = view(doc, headsBefore || [])
-      callback(patches, { before, after: value })
+      callback(patches, { before: doc, after: value, source })
     }
     nextDoc = value
   } else {
@@ -407,9 +409,10 @@ function progressDocument<T>(
 
 function _change<T>(
   doc: Doc<T>,
+  source: PatchSource,
   options: ChangeOptions<T>,
   callback: ChangeFn<T>,
-  scope?: Heads
+  scope?: Heads,
 ): Doc<T> {
   if (typeof callback !== "function") {
     throw new RangeError("invalid change function")
@@ -422,7 +425,7 @@ function _change<T>(
   }
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -438,14 +441,18 @@ function _change<T>(
     callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
+      if (scope != null) {
+        state.handle.integrate()
+      }
       return doc
     } else {
       state.handle.commit(options.message, options.time)
       state.handle.integrate()
       return progressDocument(
         doc,
+        source,
         heads,
-        options.patchCallback || state.patchCallback
+        options.patchCallback || state.patchCallback,
       )
     }
   } catch (e) {
@@ -468,7 +475,7 @@ function _change<T>(
  */
 export function emptyChange<T>(
   doc: Doc<T>,
-  options: string | ChangeOptions<T> | void
+  options: string | ChangeOptions<T> | void,
 ) {
   if (options === undefined) {
     options = {}
@@ -481,7 +488,7 @@ export function emptyChange<T>(
 
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -490,7 +497,7 @@ export function emptyChange<T>(
 
   const heads = state.handle.getHeads()
   state.handle.emptyChange(options.message, options.time)
-  return progressDocument(doc, heads)
+  return progressDocument(doc, "emptyChange", heads)
 }
 
 /**
@@ -510,7 +517,7 @@ export function emptyChange<T>(
  */
 export function load<T>(
   data: Uint8Array,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   const actor = opts.actor
@@ -555,7 +562,7 @@ export function load<T>(
 export function loadIncremental<T>(
   doc: Doc<T>,
   data: Uint8Array,
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): Doc<T> {
   if (!opts) {
     opts = {}
@@ -563,7 +570,7 @@ export function loadIncremental<T>(
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(doc)
+      "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
   if (_is_proxy(doc)) {
@@ -571,7 +578,12 @@ export function loadIncremental<T>(
   }
   const heads = state.handle.getHeads()
   state.handle.loadIncremental(data)
-  return progressDocument(doc, heads, opts.patchCallback || state.patchCallback)
+  return progressDocument(
+    doc,
+    "loadIncremental",
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
 }
 
 /**
@@ -589,7 +601,7 @@ export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(doc)
+      "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
   if (_is_proxy(doc)) {
@@ -629,14 +641,14 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
 
   if (localState.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(local)
+      "Attempting to change an out of date document - set at: " + _trace(local),
     )
   }
   const heads = localState.handle.getHeads()
   const remoteState = _state(remote)
   const changes = localState.handle.getChangesAdded(remoteState.handle)
   localState.handle.applyChanges(changes)
-  return progressDocument(local, heads, localState.patchCallback)
+  return progressDocument(local, "merge", heads, localState.patchCallback)
 }
 
 /**
@@ -705,7 +717,7 @@ type Conflicts = { [key: string]: AutomergeValue }
  */
 export function getConflicts<T>(
   doc: Doc<T>,
-  prop: Prop
+  prop: Prop,
 ): Conflicts | undefined {
   const state = _state(doc, false)
   if (state.textV2) {
@@ -788,7 +800,7 @@ export function getAllChanges<T>(doc: Doc<T>): Change[] {
 export function applyChanges<T>(
   doc: Doc<T>,
   changes: Change[],
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): [Doc<T>] {
   const state = _state(doc)
   if (!opts) {
@@ -796,7 +808,7 @@ export function applyChanges<T>(
   }
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -806,7 +818,12 @@ export function applyChanges<T>(
   state.handle.applyChanges(changes)
   state.heads = heads
   return [
-    progressDocument(doc, heads, opts.patchCallback || state.patchCallback),
+    progressDocument(
+      doc,
+      "applyChanges",
+      heads,
+      opts.patchCallback || state.patchCallback,
+    ),
   ]
 }
 
@@ -821,7 +838,7 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
     get snapshot() {
       const [state] = applyChanges(
         init({ enableTextV2: textV2 }),
-        history.slice(0, index + 1)
+        history.slice(0, index + 1),
       )
       return <T>state
     },
@@ -890,7 +907,7 @@ export function decodeSyncState(state: Uint8Array): SyncState {
  */
 export function generateSyncMessage<T>(
   doc: Doc<T>,
-  inState: SyncState
+  inState: SyncState,
 ): [SyncState, SyncMessage | null] {
   const state = _state(doc)
   const syncState = ApiHandler.importSyncState(inState)
@@ -920,7 +937,7 @@ export function receiveSyncMessage<T>(
   doc: Doc<T>,
   inState: SyncState,
   message: SyncMessage,
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): [Doc<T>, SyncState, null] {
   const syncState = ApiHandler.importSyncState(inState)
   if (!opts) {
@@ -929,7 +946,7 @@ export function receiveSyncMessage<T>(
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -939,7 +956,12 @@ export function receiveSyncMessage<T>(
   state.handle.receiveSyncMessage(syncState, message)
   const outSyncState = ApiHandler.exportSyncState(syncState) as SyncState
   return [
-    progressDocument(doc, heads, opts.patchCallback || state.patchCallback),
+    progressDocument(
+      doc,
+      "receiveSyncMessage",
+      heads,
+      opts.patchCallback || state.patchCallback,
+    ),
     outSyncState,
     null,
   ]

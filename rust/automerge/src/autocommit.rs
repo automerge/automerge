@@ -180,7 +180,10 @@ impl AutoCommit {
             self.patch_log.make_patches(&self.doc)
         } else if before.is_empty() && after == heads {
             let mut patch_log = PatchLog::active(self.patch_log.text_rep());
-            patch_log.heads = Some(after.to_vec());
+            // This if statement is only active if the current heads are the same as `after`
+            // so we don't need to tell the patch log to target a specific heads and consequently
+            // it wll be able to generate patches very fast as it doesn't need to make any clocks
+            patch_log.heads = None;
             current_state::log_current_state_patches(&self.doc, &mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
@@ -818,7 +821,7 @@ impl Transactable for AutoCommit {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         vals: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
@@ -830,7 +833,7 @@ impl Transactable for AutoCommit {
         &mut self,
         obj: O,
         pos: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();

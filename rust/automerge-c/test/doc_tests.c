@@ -9,6 +9,7 @@
 
 /* local */
 #include <automerge-c/automerge.h>
+#include <automerge-c/config.h>
 #include <automerge-c/utils/stack_callback_data.h>
 #include "base_state.h"
 #include "cmocka_utils.h"
@@ -199,6 +200,10 @@ static void test_AMputActor_str(void** state) {
     assert_memory_equal(str.src, test_state->actor_id_str.src, str.count);
 }
 
+#define assert_str_equal(actual, expected) \
+    assert_int_equal(actual.count, strlen(expected)); \
+    assert_memory_equal(actual.src, expected, actual.count);
+
 static void test_AMspliceText(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
@@ -215,6 +220,55 @@ static void test_AMspliceText(void** state) {
         AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, text, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
     assert_int_equal(str.count, strlen("one two three"));
     assert_memory_equal(str.src, "one two three", str.count);
+
+    AMobjId const* const unicode =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("unicode"), AM_OBJ_TYPE_TEXT), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMstackItem(NULL, AMspliceText(doc, unicode, 0, 0, AMstr("🇬🇧🇩🇪")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+#if defined(AUTOMERGE_C_UTF8)
+
+    AMstackItem(NULL, AMspliceText(doc, unicode, 8, 4, AMstr("🇦")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+    assert_int_equal(AMobjSize(doc, unicode, NULL), 16);
+
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, unicode, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_str_equal(str, "🇬🇧🇦🇪");
+
+    AMobjId const* const edge =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("edge"), AM_OBJ_TYPE_TEXT), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMstackItem(NULL, AMspliceText(doc, edge, 0, 0, AMstr("🇬🇧")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    // it should delete the whole character instead of partial characters
+    AMstackItem(NULL, AMspliceText(doc, edge, 4, 1, AMstr("")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, edge, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_str_equal(str, "🇬");
+
+    // it should insert at the character boundary
+    AMstackItem(NULL, AMspliceText(doc, edge, 2, 0, AMstr("🇵")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, edge, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_str_equal(str, "🇬🇵");
+
+#elif defined(AUTOMERGE_C_UTF32)
+
+    AMstackItem(NULL, AMspliceText(doc, unicode, 2, 1, AMstr("🇦")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+
+    assert_int_equal(AMobjSize(doc, unicode, NULL), 4);
+
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, unicode, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_str_equal(str, "🇬🇧🇦🇪");
+
+#else
+
+    print_error("%s", "Neither `AUTOMERGE_C_UTF8` nor `AUTOMERGE_C_UTF32` are defined.");
+
+#endif
 }
 
 int run_doc_tests(void) {

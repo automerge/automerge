@@ -1,3 +1,4 @@
+use am::marks::Mark;
 use automerge as am;
 
 use std::any::type_name;
@@ -8,6 +9,7 @@ use std::rc::Rc;
 use crate::actor_id::AMactorId;
 use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change::AMchange;
+use crate::doc::mark::AMmark;
 use crate::doc::AMdoc;
 use crate::index::{AMidxType, AMindex};
 use crate::obj::AMobjId;
@@ -31,6 +33,7 @@ pub enum Value {
     Change(Box<am::Change>, UnsafeCell<Option<AMchange>>),
     ChangeHash(am::ChangeHash),
     Doc(RefCell<AMdoc>),
+    Mark(AMmark<'static>),
     SyncHave(AMsyncHave),
     SyncMessage(AMsyncMessage),
     SyncState(RefCell<AMsyncState>),
@@ -155,6 +158,12 @@ impl From<am::ChangeHash> for Value {
     }
 }
 
+impl From<&am::ScalarValue> for Value {
+    fn from(value: &am::ScalarValue) -> Self {
+        Self::Value(am::Value::Scalar(Cow::Owned(value.clone())))
+    }
+}
+
 impl From<am::sync::Have> for Value {
     fn from(have: am::sync::Have) -> Self {
         Self::SyncHave(AMsyncHave::new(have))
@@ -176,6 +185,12 @@ impl From<am::sync::State> for Value {
 impl From<am::Value<'static>> for Value {
     fn from(value: am::Value<'static>) -> Self {
         Self::Value(value)
+    }
+}
+
+impl From<Mark<'static>> for Value {
+    fn from(mark: Mark<'static>) -> Self {
+        Self::Mark(AMmark::new(mark))
     }
 }
 
@@ -432,6 +447,23 @@ impl TryFrom<&Value> for AMunknownValue {
     }
 }
 
+impl<'a> TryFrom<&'a Value> for &'a AMmark<'a> {
+    type Error = am::AutomergeError;
+
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        use self::Value::*;
+        use am::AutomergeError::InvalidValueType;
+
+        match value {
+            Mark(mark) => Ok(mark.to_owned()),
+            _ => Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<self::Value>().to_string(),
+            }),
+        }
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         use self::Value::*;
@@ -567,6 +599,12 @@ impl From<(am::ObjId, am::ObjType)> for Item {
     }
 }
 
+impl From<&am::ScalarValue> for Item {
+    fn from(value: &am::ScalarValue) -> Self {
+        Value::from(value).into()
+    }
+}
+
 impl From<am::sync::Have> for Item {
     fn from(have: am::sync::Have) -> Self {
         Value::from(have).into()
@@ -588,6 +626,12 @@ impl From<am::sync::State> for Item {
 impl From<am::Value<'static>> for Item {
     fn from(value: am::Value<'static>) -> Self {
         Value::from(value).into()
+    }
+}
+
+impl From<Mark<'static>> for Item {
+    fn from(mark: Mark<'static>) -> Self {
+        Value::from(mark).into()
     }
 }
 
@@ -775,6 +819,23 @@ impl<'a> TryFrom<&'a mut Item> for &'a mut AMsyncState {
     }
 }
 
+impl<'a> TryFrom<&'a Item> for &'a AMmark<'a> {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
+
+        if let Some(value) = &item.value {
+            value.try_into()
+        } else {
+            Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<Option<Mark>>().to_string(),
+            })
+        }
+    }
+}
+
 impl TryFrom<&Item> for bool {
     type Error = am::AutomergeError;
 
@@ -875,6 +936,10 @@ impl TryFrom<&Item> for (am::Value<'static>, am::ObjId) {
                     expected,
                     unexpected: type_name::<AMdoc>().to_string(),
                 }),
+                Mark(_) => Err(InvalidValueType {
+                    expected,
+                    unexpected: type_name::<AMmark>().to_string(),
+                }),
                 SyncHave(_) => Err(InvalidValueType {
                     expected,
                     unexpected: type_name::<AMsyncHave>().to_string(),
@@ -963,6 +1028,12 @@ impl From<(am::ObjId, am::ObjType)> for AMitem {
     }
 }
 
+impl From<&am::ScalarValue> for AMitem {
+    fn from(value: &am::ScalarValue) -> Self {
+        Value::from(value).into()
+    }
+}
+
 impl From<am::sync::Have> for AMitem {
     fn from(have: am::sync::Have) -> Self {
         Value::from(have).into()
@@ -984,6 +1055,12 @@ impl From<am::sync::State> for AMitem {
 impl From<am::Value<'static>> for AMitem {
     fn from(value: am::Value<'static>) -> Self {
         Value::from(value).into()
+    }
+}
+
+impl From<Mark<'static>> for AMitem {
+    fn from(mark: Mark<'static>) -> Self {
+        Value::from(mark).into()
     }
 }
 
@@ -1058,6 +1135,14 @@ impl<'a> TryFrom<&'a mut AMitem> for &'a mut AMdoc {
         } else {
             Err(Self::Error::Fail)
         }
+    }
+}
+
+impl<'a> TryFrom<&'a AMitem> for &'a AMmark<'a> {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
+        item.as_ref().try_into()
     }
 }
 
@@ -1156,24 +1241,26 @@ pub enum AMvalType {
     F64 = 1 << 8,
     /// A 64-bit signed integer value.
     Int = 1 << 9,
+    /// A mark.
+    Mark = 1 << 10,
     /// A null value.
-    Null = 1 << 10,
+    Null = 1 << 11,
     /// An object type value.
-    ObjType = 1 << 11,
+    ObjType = 1 << 12,
     /// A UTF-8 string view value.
-    Str = 1 << 12,
+    Str = 1 << 13,
     /// A synchronization have value.
-    SyncHave = 1 << 13,
+    SyncHave = 1 << 14,
     /// A synchronization message value.
-    SyncMessage = 1 << 14,
+    SyncMessage = 1 << 15,
     /// A synchronization state value.
-    SyncState = 1 << 15,
+    SyncState = 1 << 16,
     /// A *nix timestamp (milliseconds) value.
-    Timestamp = 1 << 16,
+    Timestamp = 1 << 17,
     /// A 64-bit unsigned integer value.
-    Uint = 1 << 17,
+    Uint = 1 << 18,
     /// An unknown type of value.
-    Unknown = 1 << 18,
+    Unknown = 1 << 19,
     /// A void.
     Void = 1 << 0,
 }
@@ -1216,6 +1303,7 @@ impl From<&Value> for AMvalType {
             Change(_, _) => Self::Change,
             ChangeHash(_) => Self::ChangeHash,
             Doc(_) => Self::Doc,
+            Mark(_) => Self::Mark,
             SyncHave(_) => Self::SyncHave,
             SyncMessage(_) => Self::SyncMessage,
             SyncState(_) => Self::SyncState,
@@ -1752,6 +1840,34 @@ pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bo
         if let Ok(int) = item.as_ref().try_into_int() {
             if !value.is_null() {
                 *value = int;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// \memberof AMitem
+/// \brief Gets the mark value of an item.
+///
+/// \param[in] item A pointer to an `AMitem` struct.
+/// \param[out] value A pointer to an `AMmark` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_MARK` and
+///         \p *value has been reassigned, `false` otherwise.
+/// \pre \p item `!= NULL`
+/// \internal
+///
+/// # Safety
+/// item must be a valid pointer to an AMitem
+#[no_mangle]
+pub unsafe extern "C" fn AMitemToMark<'a>(
+    item: *const AMitem,
+    value: &mut *const AMmark<'a>,
+) -> bool {
+    if let Some(item) = item.as_ref() {
+        if let Ok(mark) = <&AMmark<'a>>::try_from(item) {
+            if !value.is_null() {
+                *value = mark;
                 return true;
             }
         }

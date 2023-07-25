@@ -8,7 +8,7 @@
   "description": "wasm-bindgen bindings to the automerge rust implementation",
   "homepage": "https://github.com/automerge/automerge/tree/main/rust/automerge-wasm",
   "repository": "github:automerge/automerge",
-  "version": "0.2.4",
+  "version": "0.2.7",
   "license": "MIT",
   "files": [
     "README.md",

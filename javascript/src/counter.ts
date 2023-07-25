@@ -41,6 +41,30 @@ export class Counter {
   toJSON(): number {
     return this.value
   }
+
+  /**
+   * Increases the value of the counter by `delta`. If `delta` is not given,
+   * increases the value of the counter by 1.
+   *
+   * Will throw an error if used outside of a change callback.
+   */
+  increment(_delta: number): number {
+    throw new Error(
+      "Counters should not be incremented outside of a change callback",
+    )
+  }
+
+  /**
+   * Decreases the value of the counter by `delta`. If `delta` is not given,
+   * decreases the value of the counter by 1.
+   *
+   * Will throw an error if used outside of a change callback.
+   */
+  decrement(_delta: number): number {
+    throw new Error(
+      "Counters should not be decremented outside of a change callback",
+    )
+  }
 }
 
 /**
@@ -58,7 +82,7 @@ class WriteableCounter extends Counter {
     context: Automerge,
     path: Prop[],
     objectId: ObjID,
-    key: Prop
+    key: Prop,
   ) {
     super(value)
     this.context = context
@@ -99,7 +123,7 @@ export function getWriteableCounter(
   context: Automerge,
   path: Prop[],
   objectId: ObjID,
-  key: Prop
+  key: Prop,
 ): WriteableCounter {
   return new WriteableCounter(value, context, path, objectId, key)
 }

@@ -3,7 +3,6 @@ import {
   Automerge,
   type Change,
   type DecodedChange,
-  type Actor,
   SyncState,
   type SyncMessage,
   type JsSyncState,

@@ -2,6 +2,6 @@
 set -eoux pipefail
 
 cd rust
-cargo build --workspace --all-features
+cargo build --workspace --features=optree-visualisation,wasm
 
-RUST_LOG=error cargo test --workspace --all-features
+RUST_LOG=error cargo test --workspace --features=optree-visualisation,wasm

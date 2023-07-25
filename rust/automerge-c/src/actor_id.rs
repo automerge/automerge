@@ -159,7 +159,7 @@ pub unsafe extern "C" fn AMactorIdFromBytes(src: *const u8, count: usize) -> *mu
 /// \internal
 ///
 /// # Safety
-/// hex_str must be a valid pointer to an AMbyteSpan
+/// value.src must be a byte array of length >= value.count
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdFromStr(value: AMbyteSpan) -> *mut AMresult {
     use am::AutomergeError::InvalidActorId;

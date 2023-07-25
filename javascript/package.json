@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "2.1.0-alpha.5",
+  "version": "2.1.0-alpha.8",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge/tree/main/javascript",
   "repository": "github:automerge/automerge",
@@ -24,7 +24,7 @@
   "scripts": {
     "lint": "eslint src",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
-    "test": "ts-mocha test/*.ts",
+    "test": "ts-mocha --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
     "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"
@@ -40,7 +40,7 @@
     "fast-sha256": "^1.3.0",
     "mocha": "^10.2.0",
     "pako": "^2.1.0",
-    "prettier": "^2.8.1",
+    "prettier": "^3.0.0",
     "ts-mocha": "^10.0.0",
     "ts-node": "^10.9.1",
     "typedoc": "^0.23.22",
@@ -50,7 +50,7 @@
     "denoify/evt": "2.4.18"
   },
   "dependencies": {
-    "@automerge/automerge-wasm": "^0.2.4",
+    "@automerge/automerge-wasm": "^0.2.7",
     "uuid": "^9.0.0"
   }
 }

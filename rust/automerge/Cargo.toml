@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -11,6 +11,7 @@ readme = "./README.md"
 [features]
 optree-visualisation = ["dot", "rand"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
+utf8-indexing = []
 
 [dependencies]
 hex = "^0.4.3"

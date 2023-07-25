@@ -346,7 +346,7 @@ impl TransactionInner {
 
         let query = doc.ops().search(
             &obj.id,
-            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+            query::InsertNth::new(index, obj.encoding, self.scope.clone()),
         );
         let marks = query.marks(&doc.ops().m);
         let pos = query.pos();
@@ -398,12 +398,9 @@ impl TransactionInner {
         let prop_index = doc.ops_mut().m.props.cache(prop.clone());
         let key = Key::Map(prop_index);
         let prop: Prop = prop.into();
-        let query = doc.ops().seek_ops_by_prop(
-            &obj.id,
-            prop.clone(),
-            ListEncoding::List,
-            self.scope.as_ref(),
-        );
+        let query =
+            doc.ops()
+                .seek_ops_by_prop(&obj.id, prop.clone(), obj.encoding, self.scope.as_ref());
         let ops = query.ops;
         let ops_pos = query.ops_pos;
 
@@ -449,7 +446,7 @@ impl TransactionInner {
     ) -> Result<Option<OpId>, AutomergeError> {
         let query = doc.ops().search(
             &obj.id,
-            query::Nth::new(index, ListEncoding::List, self.scope.clone()),
+            query::Nth::new(index, obj.encoding, self.scope.clone()),
         );
 
         let id = self.next_id();
@@ -531,7 +528,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
@@ -559,7 +556,7 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
-        del: usize,
+        del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
@@ -592,11 +589,20 @@ impl TransactionInner {
             splice_type,
         }: SpliceArgs<'_>,
     ) -> Result<(), AutomergeError> {
+        if del < 0 {
+            if let Some(n) = index.checked_add_signed(del) {
+                index = n;
+                del = del.abs();
+            } else {
+                return Err(AutomergeError::InvalidIndex(index));
+            }
+        }
+
         //let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding();
         // delete `del` items - performing the query for each one
-        let mut deleted = 0;
-        while deleted < del {
+        let mut deleted: usize = 0;
+        while deleted < (del as usize) {
             // TODO: could do this with a single custom query
             let query = doc.ops().search(
                 &obj.id,
@@ -607,7 +613,7 @@ impl TransactionInner {
             // move cursor back to the beginning and expand the del width
             let adjusted_index = query.index();
             if adjusted_index < index {
-                del += index - adjusted_index;
+                del += (index - adjusted_index) as isize;
                 index = adjusted_index;
             }
 
@@ -737,7 +743,7 @@ impl TransactionInner {
 
         let query = doc.ops().search(
             &obj.id,
-            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+            query::InsertNth::new(index, obj.encoding, self.scope.clone()),
         );
         let pos = query.pos();
         let key = query.key()?;
@@ -905,7 +911,7 @@ impl<'a> SpliceType<'a> {
 struct SpliceArgs<'a> {
     obj: ObjMeta,
     index: usize,
-    del: usize,
+    del: isize,
     values: Vec<ScalarValue>,
     splice_type: SpliceType<'a>,
 }

@@ -2,6 +2,7 @@ import * as assert from "assert"
 import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
+import { PatchSource } from "../src/types"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -97,7 +98,7 @@ describe("Automerge", () => {
       // will also freeze sub objects
       doc1 = Automerge.change(
         doc1,
-        doc => (doc.book = { title: "how to win friends" })
+        doc => (doc.book = { title: "how to win friends" }),
       )
       doc2 = Automerge.merge(doc2, doc1)
       assert(Object.isFrozen(doc1))
@@ -254,7 +255,7 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create(true)
+      let doc1 = WASM.create({ text_v1: true })
       doc1.put("_root", "text", "hello world")
       let doc2 = Automerge.load<any>(doc1.save())
       assert.throws(() => {
@@ -284,7 +285,7 @@ describe("Automerge", () => {
       })
       assert.deepEqual(doc5, { list: [2, 1, 9, 10, 3, 11, 12] })
       let doc6 = Automerge.change(doc5, d => {
-        d.list.insertAt(3, 100, 101)
+        Automerge.insertAt(d.list, 3, 100, 101)
       })
       assert.deepEqual(doc6, { list: [2, 1, 9, 100, 101, 10, 3, 11, 12] })
     })
@@ -308,6 +309,7 @@ describe("Automerge", () => {
 
   describe("merge", () => {
     it("it should handle conflicts the same in merges as with loads", () => {
+      type DocShape = { sub: { x: number; y: number } }
       let doc1 = Automerge.from({ sub: { x: 0, y: 0 } })
       let doc2 = Automerge.clone(doc1)
       let doc3 = Automerge.clone(doc1)
@@ -334,13 +336,13 @@ describe("Automerge", () => {
       doc4 = Automerge.change(doc4, d => (d.sub.y = 9))
       doc4 = Automerge.change(doc4, d => (d.sub.y = 10))
 
-      let docM = Automerge.init()
+      let docM = Automerge.init<DocShape>()
       docM = Automerge.merge(docM, doc1)
       docM = Automerge.merge(docM, doc2)
       docM = Automerge.merge(docM, doc3)
       docM = Automerge.merge(docM, doc4)
 
-      let docL = Automerge.load(Automerge.save(docM))
+      let docL = Automerge.load<DocShape>(Automerge.save(docM))
 
       assert.deepEqual(docM.sub.x, docL.sub.x)
     })
@@ -392,57 +394,57 @@ describe("Automerge", () => {
         ])
         assert.deepEqual(
           d.chars.map(n => n + "!"),
-          ["a!", "b!", "c!"]
+          ["a!", "b!", "c!"],
         )
         assert.deepEqual(
           d.numbers.map(n => n + 10),
-          [30, 13, 110]
+          [30, 13, 110],
         )
         assert.deepEqual(d.numbers.toString(), "20,3,100")
         assert.deepEqual(d.numbers.toLocaleString(), "20,3,100")
         assert.deepEqual(
           d.numbers.forEach((n: number) => r1.push(n)),
-          undefined
+          undefined,
         )
         assert.deepEqual(
           d.numbers.every(n => n > 1),
-          true
+          true,
         )
         assert.deepEqual(
           d.numbers.every(n => n > 10),
-          false
+          false,
         )
         assert.deepEqual(
           d.numbers.filter(n => n > 10),
-          [20, 100]
+          [20, 100],
         )
         assert.deepEqual(
           d.repeats.find(n => n < 10),
-          3
+          3,
         )
         assert.deepEqual(
           d.repeats.find(n => n < 10),
-          3
+          3,
         )
         assert.deepEqual(
           d.repeats.find(n => n < 0),
-          undefined
+          undefined,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 10),
-          2
+          2,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 0),
-          -1
+          -1,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 10),
-          2
+          2,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 0),
-          -1
+          -1,
         )
         assert.deepEqual(d.numbers.includes(3), true)
         assert.deepEqual(d.numbers.includes(-3), false)
@@ -450,31 +452,31 @@ describe("Automerge", () => {
         assert.deepEqual(d.numbers.join(), "20,3,100")
         assert.deepEqual(
           d.numbers.some(f => f === 3),
-          true
+          true,
         )
         assert.deepEqual(
           d.numbers.some(f => f < 0),
-          false
+          false,
         )
         assert.deepEqual(
           d.numbers.reduce((sum, n) => sum + n, 100),
-          223
+          223,
         )
         assert.deepEqual(
           d.repeats.reduce((sum, n) => sum + n, 100),
-          352
+          352,
         )
         assert.deepEqual(
           d.chars.reduce((sum, n) => sum + n, "="),
-          "=abc"
+          "=abc",
         )
         assert.deepEqual(
           d.chars.reduceRight((sum, n) => sum + n, "="),
-          "=cba"
+          "=cba",
         )
         assert.deepEqual(
           d.numbers.reduceRight((sum, n) => sum + n, 100),
-          223
+          223,
         )
         assert.deepEqual(d.repeats.lastIndexOf(3), 5)
         assert.deepEqual(d.repeats.lastIndexOf(3, 3), 3)
@@ -504,7 +506,7 @@ describe("Automerge", () => {
     const m2 = Automerge.merge(Automerge.clone(s2), Automerge.clone(s1))
     assert.deepStrictEqual(
       Automerge.getConflicts(m1, "x"),
-      Automerge.getConflicts(m2, "x")
+      Automerge.getConflicts(m2, "x"),
     )
   })
 
@@ -583,9 +585,113 @@ describe("Automerge", () => {
       })
       assert.deepEqual(
         doc.value,
-        "Has the sly fox jumped right over the lazy dog"
+        "Has the sly fox jumped right over the lazy dog",
       )
-      let index = Automerge.getCursorPosition(doc, ["value"], cursor)
+      Automerge.getCursorPosition(doc, ["value"], cursor)
+    })
+
+    it("should be able to pass a doc to from() to make a shallow copy", () => {
+      let state = {
+        text: "The sly fox jumped over the lazy dog",
+        x: 5,
+        y: new Date(),
+        z: [1, 2, 3, { alpha: "bravo" }],
+      }
+      let doc1 = Automerge.from(state)
+      assert.deepEqual(doc1, state)
+      let doc2 = Automerge.from(doc1)
+      assert.deepEqual(doc1, doc2)
+    })
+
+    it("can use cursors in common text operations", () => {
+      let doc = Automerge.from({
+        value: "The sly fox jumped over the lazy dog",
+      })
+      let doc2 = Automerge.clone(doc)
+
+      let cursor = Automerge.getCursor(doc, ["value"], 8)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, 0, "o")
+        Automerge.splice(d, ["value"], cursor, 0, "l")
+        Automerge.splice(d, ["value"], cursor, 0, "e")
+      })
+      doc2 = Automerge.change(doc2, d => {
+        Automerge.splice(d, ["value"], 3, -3, "A")
+      })
+      doc = Automerge.merge(doc, doc2)
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, -1, "d")
+        Automerge.splice(d, ["value"], cursor, 0, " ")
+      })
+      assert.deepEqual(doc.value, "A sly old fox jumped over the lazy dog")
+    })
+
+    it("should use javascript string indices", () => {
+      let doc = Automerge.from({
+        value: "🇬🇧🇩🇪",
+      })
+
+      let cursor = Automerge.getCursor(doc, ["value"], doc.value.indexOf("🇩🇪"))
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, -2, "")
+        Automerge.splice(d, ["value"], cursor, -2, "")
+        Automerge.splice(d, ["value"], cursor, 0, "🇫🇷")
+      })
+
+      assert.deepEqual(doc.value, "🇫🇷🇩🇪")
+    })
+
+    it("patch callbacks inform where they came from", () => {
+      type DocShape = {
+        hello: string
+        a?: string
+        b?: string
+        x?: string
+        n?: string
+      }
+      let callbacks: Array<PatchSource> = []
+      let patchCallback = (_p, meta) => callbacks.push(meta.source)
+      let doc1 = Automerge.from<DocShape>({ hello: "world" }, { patchCallback })
+      let heads1 = Automerge.getHeads(doc1)
+      let doc2 = Automerge.clone(doc1, { patchCallback })
+      doc2 = Automerge.change(doc2, d => (d.a = "b"))
+      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c"))
+      doc1 = Automerge.merge(doc1, doc2)
+      doc2 = Automerge.change(doc2, d => (d.x = "y"))
+      doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
+      doc2 = Automerge.change(doc2, d => (d.n = "m"))
+      let s1 = Automerge.initSyncState()
+      let s2 = Automerge.initSyncState()
+      let message
+      ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
+      ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
+      ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
+      ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message, {
+        patchCallback,
+      })
+      assert.deepEqual(callbacks, [
+        "from",
+        "change",
+        "changeAt",
+        "merge",
+        "change",
+        "loadIncremental",
+        "change",
+        "receiveSyncMessage",
+      ])
+    })
+
+    it("should allow dates from an existing document to be used in another document", () => {
+      let originalDoc: any = Automerge.change(Automerge.init(), (doc: any) => {
+        doc.date = new Date()
+        doc.dates = [new Date()]
+      })
+
+      Automerge.change(originalDoc, (doc: any) => {
+        doc.anotherDate = originalDoc.date
+        doc.dates[0] = originalDoc.dates[0]
+      })
     })
   })
 })

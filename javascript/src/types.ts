@@ -4,7 +4,7 @@ export { Counter } from "./counter"
 export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
-import type { Cursor, Patch, MarkRange } from "@automerge/automerge-wasm"
+import type { Patch } from "@automerge/automerge-wasm"
 export type { Cursor, Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
@@ -34,9 +34,19 @@ export type MarkValue = string | number | null | boolean | Date | Uint8Array
  */
 export type Doc<T> = { readonly [P in keyof T]: T[P] }
 
+export type PatchSource =
+  | "from"
+  | "emptyChange"
+  | "change"
+  | "changeAt"
+  | "merge"
+  | "loadIncremental"
+  | "applyChanges"
+  | "receiveSyncMessage"
 export type PatchInfo<T> = {
   before: Doc<T>
   after: Doc<T>
+  source: PatchSource
 }
 
 /**
@@ -47,5 +57,5 @@ export type PatchInfo<T> = {
  */
 export type PatchCallback<T> = (
   patches: Array<Patch>,
-  info: PatchInfo<T>
+  info: PatchInfo<T>,
 ) => void
