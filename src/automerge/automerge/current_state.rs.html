@@ -773,7 +773,7 @@
 <a href="#773" id="773">773</a>
 <a href="#774" id="774">774</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span>itertools::Itertools;
 
@@ -788,7 +788,7 @@
 </span><span class="kw">struct </span>TextSpan {
     text: String,
     start: usize,
-    marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+    marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
 }
 
 <span class="attr">#[derive(Debug, Default)]

@@ -927,6 +927,17 @@
 <a href="#927" id="927">927</a>
 <a href="#928" id="928">928</a>
 <a href="#929" id="929">929</a>
+<a href="#930" id="930">930</a>
+<a href="#931" id="931">931</a>
+<a href="#932" id="932">932</a>
+<a href="#933" id="933">933</a>
+<a href="#934" id="934">934</a>
+<a href="#935" id="935">935</a>
+<a href="#936" id="936">936</a>
+<a href="#937" id="937">937</a>
+<a href="#938" id="938">938</a>
+<a href="#939" id="939">939</a>
+<a href="#940" id="940">940</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -1854,6 +1865,17 @@
         <span class="self">self</span>.inner
             .doc
             .receive_sync_message_log_patches(sync_state, message, patch_log)
+    }
+}
+
+<span class="attr">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+
+    <span class="kw">fn </span>is_send&lt;S: Send&gt;() {}
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>test_autocommit_is_send() {
+        is_send::&lt;<span class="kw">super</span>::AutoCommit&gt;();
     }
 }
 </code></pre></div></section></main></body></html>

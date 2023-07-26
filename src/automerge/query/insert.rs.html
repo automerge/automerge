@@ -165,7 +165,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>InsertNth&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -223,7 +223,7 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
         <span class="kw">for </span>(id, mark_data) <span class="kw">in </span><span class="self">self</span>.marks.iter() {
             marks.mark_begin(<span class="kw-2">*</span>id, mark_data, m);

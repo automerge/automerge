@@ -264,7 +264,7 @@
 <a href="#264" id="264">264</a>
 <a href="#265" id="265">265</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>core::fmt::Debug;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
 <span class="kw">use crate</span>::{ObjId, Prop, ReadDoc, Value};
@@ -275,7 +275,7 @@
 <span class="attr">#[derive(Debug, Clone, Default)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PatchBuilder {
     patches: Vec&lt;Patch&gt;,
-    last_mark_set: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;, <span class="comment">// keep this around for a quick pointer equality test
+    last_mark_set: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;, <span class="comment">// keep this around for a quick pointer equality test
 </span>}
 
 <span class="kw">impl </span>PatchBuilder {
@@ -304,7 +304,7 @@
         index: usize,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
         conflict: bool,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="kw">let </span>value = (tagged_value.<span class="number">0</span>.to_owned(), tagged_value.<span class="number">1</span>, conflict);
         <span class="kw">if let </span><span class="prelude-val">Some</span>(PatchAction::Insert {
@@ -343,7 +343,7 @@
         obj: ObjId,
         index: usize,
         value: <span class="kw-2">&amp;</span>str,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(PatchAction::SpliceText {
             index: tail_index,

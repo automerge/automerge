@@ -853,7 +853,7 @@
 <a href="#853" id="853">853</a>
 <a href="#854" id="854">854</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark, MarkSet};
@@ -1615,7 +1615,7 @@
         obj: ObjId,
         prop: Prop,
         op: Op,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="comment">// TODO - id_to_exid should be a noop if not used - change type to Into&lt;ExId&gt;?
         </span><span class="kw">if </span>patch_log.is_active() {

@@ -569,7 +569,7 @@
 <span class="kw">use crate</span>::{Automerge, ChangeHash, Patch, ReadDoc};
 <span class="kw">use </span>std::collections::BTreeSet;
 <span class="kw">use </span>std::collections::HashSet;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use super</span>::{PatchBuilder, TextRepresentation};
 
@@ -634,14 +634,14 @@
     Splice {
         index: usize,
         text: String,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     },
     IncrementMap {
         key: String,
@@ -834,7 +834,7 @@
         obj: ObjId,
         index: usize,
         text: <span class="kw-2">&amp;</span>str,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="self">self</span>.events.push((
             obj,
@@ -846,7 +846,7 @@
         ))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: ObjId, index: usize, len: usize, marks: <span class="kw-2">&amp;</span>Rc&lt;MarkSet&gt;) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: ObjId, index: usize, len: usize, marks: <span class="kw-2">&amp;</span>Arc&lt;MarkSet&gt;) {
         <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, Event::Mark { marks: tail_marks })) = <span class="self">self</span>.events.last_mut() {
             tail_marks.add(index, len, marks);
             <span class="kw">return</span>;
@@ -863,7 +863,7 @@
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     ) {
         <span class="self">self</span>.events.push((
             obj,

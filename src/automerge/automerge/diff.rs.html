@@ -1295,7 +1295,7 @@
 </pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::ops::Deref;
 <span class="kw">use </span>std::ops::RangeBounds;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span><span class="kw">crate</span>::patches::TextRepresentation;
 <span class="kw">use crate</span>::{
@@ -1389,16 +1389,16 @@
 
 <span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">enum </span>Patch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    New(Winner&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;),
+    New(Winner&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;),
     Old {
         before: Winner&lt;<span class="lifetime">&#39;a</span>&gt;,
         after: Winner&lt;<span class="lifetime">&#39;a</span>&gt;,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     },
     Update {
         before: Winner&lt;<span class="lifetime">&#39;a</span>&gt;,
         after: Winner&lt;<span class="lifetime">&#39;a</span>&gt;,
-        marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+        marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
     },
     Delete(Winner&lt;<span class="lifetime">&#39;a</span>&gt;),
 }
@@ -1578,13 +1578,13 @@
         }
     }
 
-    <span class="kw">fn </span>current(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt; {
+    <span class="kw">fn </span>current(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
         <span class="comment">// do this without all the cloning - cache the result
         </span><span class="kw">let </span>b = <span class="self">self</span>.before.current().cloned().unwrap_or_default();
         <span class="kw">let </span>a = <span class="self">self</span>.after.current().cloned().unwrap_or_default();
         <span class="kw">if </span>a != b {
             <span class="kw">let </span>result = b.diff(<span class="kw-2">&amp;</span>a);
-            <span class="prelude-val">Some</span>(Rc::new(result))
+            <span class="prelude-val">Some</span>(Arc::new(result))
         } <span class="kw">else </span>{
             <span class="prelude-val">None
         </span>}

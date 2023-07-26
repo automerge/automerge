@@ -328,10 +328,11 @@
 <a href="#328" id="328">328</a>
 <a href="#329" id="329">329</a>
 <a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>smol_str::SmolStr;
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::fmt::Display;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetMetadata;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Op, OpId, OpType};
@@ -357,11 +358,11 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.end - <span class="self">self</span>.start
     }
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_mark_set(<span class="self">self</span>) -&gt; Rc&lt;MarkSet&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_mark_set(<span class="self">self</span>) -&gt; Arc&lt;MarkSet&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>m = MarkSet::default();
         <span class="kw">let </span>data = <span class="self">self</span>.data.into_owned();
         m.insert(data.name, data.value);
-        Rc::new(m)
+        Arc::new(m)
     }
 }
 
@@ -400,7 +401,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, len: usize, other: <span class="kw-2">&amp;</span>MarkSet) {
         <span class="kw">for </span>(name, value) <span class="kw">in </span>other.marks.iter() {
             <span class="kw">let </span>entry = <span class="self">self</span>.marks.entry(name.clone()).or_default();
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>last) = entry.last_mut() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = entry.last_mut() {
                 <span class="kw">if </span><span class="kw-2">&amp;</span>last.value == value &amp;&amp; last.index + last.len == index {
                     last.len += len;
                     <span class="kw">continue</span>;
@@ -512,11 +513,11 @@
 <span class="attr">#[derive(Debug, Clone, PartialEq, Default)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt; {
     state: Vec&lt;(OpId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>MarkData)&gt;,
-    current: Rc&lt;MarkSet&gt;,
+    current: Arc&lt;MarkSet&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>current(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Rc&lt;MarkSet&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>current(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Arc&lt;MarkSet&gt;&gt; {
         <span class="kw">if </span><span class="self">self</span>.current.is_empty() {
             <span class="prelude-val">None
         </span>} <span class="kw">else </span>{
@@ -543,12 +544,12 @@
         <span class="kw">if </span><span class="self">Self</span>::mark_above(<span class="kw-2">&amp;</span><span class="self">self</span>.state, index, mark).is_none() {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(below) = <span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, mark) {
                 <span class="kw">if </span>below.value != mark.value {
-                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
+                    Arc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
                     result = <span class="bool-val">true
                 </span>}
             } <span class="kw">else </span>{
                 <span class="comment">// nothing above or below
-                </span>Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
+                </span>Arc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(mark.name.clone(), mark.value.clone());
                 result = <span class="bool-val">true
             </span>}
         }
@@ -571,11 +572,12 @@
             <span class="kw">match </span><span class="self">Self</span>::mark_below(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, index, mark) {
                 <span class="prelude-val">Some</span>(below) <span class="kw">if </span>below.value == mark.value =&gt; {}
                 <span class="prelude-val">Some</span>(below) =&gt; {
-                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).insert(below.name.clone(), below.value.clone());
+                    Arc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current)
+                        .insert(below.name.clone(), below.value.clone());
                     result = <span class="bool-val">true</span>;
                 }
                 <span class="prelude-val">None </span>=&gt; {
-                    Rc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).remove(<span class="kw-2">&amp;</span>mark.name);
+                    Arc::make_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>.current).remove(<span class="kw-2">&amp;</span>mark.name);
                     result = <span class="bool-val">true</span>;
                 }
             }

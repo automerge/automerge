@@ -189,7 +189,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::types::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, Op, OpId};
 <span class="kw">use </span>std::cmp::Ordering;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="doccomment">/// Search for an OpId in a tree.  /// Returns the index of the operation in the tree.
 </span><span class="attr">#[derive(Debug, Clone, PartialEq)]
@@ -256,7 +256,7 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
         <span class="kw">for </span>(id, mark_data) <span class="kw">in </span><span class="self">self</span>.marks.iter() {
             marks.mark_begin(<span class="kw-2">*</span>id, mark_data, m);

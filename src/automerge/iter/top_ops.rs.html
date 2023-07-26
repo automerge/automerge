@@ -104,7 +104,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetMetadata;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="attr">#[derive(Default)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -114,7 +114,7 @@
     num_ops: usize,
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
-    last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;)&gt;,
+    last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;)&gt;,
     marks: MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt;,
     meta: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata&gt;,
 }
@@ -123,7 +123,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOp&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
     <span class="kw">pub</span>(<span class="kw">crate</span>) conflict: bool,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {

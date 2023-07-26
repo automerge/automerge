@@ -104,7 +104,7 @@
 <a href="#104" id="104">104</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::ops::RangeBounds;
-<span class="kw">use </span>std::rc::Rc;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
@@ -198,7 +198,7 @@
     <span class="kw">pub </span>value: Value&lt;<span class="lifetime">&#39;a</span>&gt;,
     <span class="kw">pub </span>id: ExId,
     <span class="kw">pub </span>conflict: bool,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Rc&lt;MarkSet&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ListRangeItem&lt;<span class="lifetime">&#39;a</span>&gt; {
