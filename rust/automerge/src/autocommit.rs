@@ -927,3 +927,14 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
             .receive_sync_message_log_patches(sync_state, message, patch_log)
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    fn is_send<S: Send>() {}
+
+    #[test]
+    fn test_autocommit_is_send() {
+        is_send::<super::AutoCommit>();
+    }
+}
