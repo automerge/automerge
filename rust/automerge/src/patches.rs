@@ -4,6 +4,7 @@ mod patch_log;
 use crate::types::{ListEncoding, ObjType};
 pub use patch::{Patch, PatchAction};
 pub(crate) use patch_builder::PatchBuilder;
+pub(crate) use patch_log::Event;
 pub use patch_log::PatchLog;
 
 #[derive(Debug, Copy, Clone, PartialEq)]

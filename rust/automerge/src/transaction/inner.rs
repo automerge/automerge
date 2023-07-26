@@ -634,7 +634,7 @@ impl TransactionInner {
         }
 
         if deleted > 0 && patch_log.is_active() {
-            patch_log.delete_seq(&obj, index, deleted, None);
+            patch_log.delete_seq(&obj, index, deleted);
         }
 
         // do the insert query for the first item and then
@@ -782,20 +782,22 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
 
-        // TODO - inline this
-        self.update_block_inner(doc, patch_log, obj, &block.id.into())?;
+        /*
+                // TODO - inline this
+                self.update_block_inner(doc, patch_log, obj, &block.id.into())?;
 
-        Ok(())
-    }
+                Ok(())
+            }
 
-    fn update_block_inner(
-        &mut self,
-        doc: &mut Automerge,
-        patch_log: &mut PatchLog,
-        obj: ObjMeta,
-        block_id: &OpId,
-    ) -> Result<(), AutomergeError> {
-        let key = Key::Seq((*block_id).into());
+            fn update_block_inner(
+                &mut self,
+                doc: &mut Automerge,
+                patch_log: &mut PatchLog,
+                obj: ObjMeta,
+                block_id: &OpId,
+            ) -> Result<(), AutomergeError> {
+        */
+        let key = Key::Seq(block.id.0.into());
 
         let action = OpType::Delete;
 
@@ -835,7 +837,7 @@ impl TransactionInner {
 
         ops.add_succ(&obj.id, &succ_pos, &op);
 
-        patch_log.delete_seq(&obj, index, 1, Some(*block_id));
+        patch_log.delete_seq(&obj, index, 1);
 
         self.operations.push((obj.id, op));
 
@@ -873,7 +875,7 @@ impl TransactionInner {
                 }
             } else if op.is_delete() {
                 match prop {
-                    Prop::Seq(index) => patch_log.delete_seq(obj, index, 1, op.block_id()),
+                    Prop::Seq(index) => patch_log.delete_seq(obj, index, 1),
                     Prop::Map(key) => patch_log.delete_map(obj, &key),
                 }
             } else if let Some(value) = op.get_increment_value() {

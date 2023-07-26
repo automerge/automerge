@@ -172,8 +172,8 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             index + 1
         }
-        Patch::Delete(before) => {
-            patch_log.delete_seq(obj, index, 1, before.block_id());
+        Patch::Delete(_) => {
+            patch_log.delete_seq(obj, index, 1);
             index
         }
     });
@@ -187,7 +187,13 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::New(op, marks) => {
-            patch_log.splice(obj, index, op.to_str(), marks.clone());
+            if op.is_put() {
+                patch_log.splice(obj, index, op.to_str(), marks.clone());
+            } else {
+                // blocks
+                let value = op.value_at(Some(op.clock)).into();
+                patch_log.insert(obj, index, value, op.id, op.conflict);
+            }
             index + op.width(encoding)
         }
         Patch::Update {
@@ -195,7 +201,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             after,
             marks,
         } => {
-            patch_log.delete_seq(obj, index, before.width(encoding), before.block_id());
+            patch_log.delete_seq(obj, index, before.width(encoding));
             patch_log.splice(obj, index, after.to_str(), marks.clone());
             index + after.width(encoding)
         }
@@ -207,7 +213,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index + len
         }
         Patch::Delete(before) => {
-            patch_log.delete_seq(obj, index, before.width(encoding), before.block_id());
+            patch_log.delete_seq(obj, index, before.width(encoding));
             index
         }
     });

@@ -1302,7 +1302,8 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj, TextRep::Array)?;
-        Ok(self.ops.parents(obj.id, clock))
+        // FIXME - now that we have blocks a correct text_rep is relevent
+        Ok(self.ops.parents(obj.id, TextRep::default(), clock))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {

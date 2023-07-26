@@ -589,7 +589,8 @@ impl Automerge {
     ) -> Result<JsValue, JsValue> {
         let (value, patches) = self.apply_patches_impl(object, meta)?;
 
-        let patches = interop::export_patches(patches)?;
+        let heads = self.doc.get_heads();
+        let patches = interop::export_patches(self, patches, &heads)?;
 
         let result = Object::new();
         js_set(&result, "value", value)?;
@@ -630,7 +631,8 @@ impl Automerge {
         // If we pop the patches then we won't be able to revert them.
 
         let patches = self.doc.diff_incremental();
-        let result = interop::export_patches(patches)?;
+        let heads = self.doc.get_heads();
+        let result = interop::export_patches(self, patches, &heads)?;
         Ok(result)
     }
 
@@ -650,7 +652,7 @@ impl Automerge {
 
         let patches = self.doc.diff(&before, &after);
 
-        Ok(interop::export_patches(patches)?)
+        Ok(interop::export_patches(self, patches, &after)?)
     }
 
     pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
@@ -826,7 +828,7 @@ impl Automerge {
             self,
             &obj,
             obj_type.into(),
-            heads.as_ref(),
+            heads.as_deref(),
             &meta,
         )?)
     }

@@ -2,23 +2,21 @@ use core::fmt::Debug;
 use std::rc::Rc;
 
 use crate::marks::RichText;
-use crate::{Cursor, ObjId, ObjType, Parents, Prop, Value};
+use crate::{ObjId, Parents, Prop, Value};
 
-use super::{Patch, PatchAction, TextRepresentation};
+use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PatchBuilder {
     patches: Vec<Patch>,
-    text_rep: TextRepresentation,
     last_mark_set: Option<Rc<RichText>>, // keep this around for a quick pointer equality test
 }
 
 impl PatchBuilder {
-    pub(crate) fn new(text_rep: TextRepresentation) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             patches: Vec::new(),
-            text_rep,
             last_mark_set: None,
         }
     }
@@ -90,11 +88,7 @@ impl PatchBuilder {
         obj: ObjId,
         index: usize,
         length: usize,
-        block_id: Option<Cursor>,
     ) {
-        if let Some(block) = block_id {
-            return self.join_block(parents, obj, index, block);
-        }
         match maybe_append(&mut self.patches, &obj) {
             Some(PatchAction::SpliceText {
                 index: tail_index,
@@ -105,6 +99,9 @@ impl PatchBuilder {
                 if range.contains(&index) && range.contains(&(index + length - 1)) {
                     for _ in 0..length {
                         value.remove(index - *tail_index);
+                    }
+                    if value.len() == 0 {
+                        self.patches.pop();
                     }
                     return;
                 }
@@ -118,6 +115,9 @@ impl PatchBuilder {
                 if range.contains(&index) && range.contains(&(index + length - 1)) {
                     for _ in 0..length {
                         values.remove(index - *tail_index);
+                    }
+                    if values.len() == 0 {
+                        self.patches.pop();
                     }
                     return;
                 }
@@ -220,26 +220,6 @@ impl PatchBuilder {
         }
     }
 
-    pub(crate) fn split_block(
-        &mut self,
-        parents: Parents<'_>,
-        obj: ObjId,
-        index: usize,
-        cursor: Cursor,
-        conflict: bool,
-    ) {
-        let action = PatchAction::SplitBlock {
-            index,
-            cursor,
-            conflict,
-        };
-        self.finish(parents, obj, action);
-    }
-
-    fn join_block(&mut self, parents: Parents<'_>, obj: ObjId, index: usize, cursor: Cursor) {
-        self.finish(parents, obj, PatchAction::JoinBlock { index, cursor });
-    }
-
     fn finish(&mut self, parents: Parents<'_>, obj: ObjId, action: PatchAction) {
         let mut patch = Patch {
             obj,
@@ -251,20 +231,7 @@ impl PatchBuilder {
             if !p.visible {
                 return;
             }
-            if p.typ == ObjType::Text && self.text_rep == TextRepresentation::String {
-                // this is an UpdateBlock patch action
-                patch.path.reverse();
-                patch = Patch {
-                    obj: p.obj.clone(),
-                    path: vec![(p.obj, p.prop)],
-                    action: PatchAction::UpdateBlock {
-                        patch: Box::new(patch),
-                    },
-                };
-            } else {
-                // normal path
-                patch.path.push((p.obj, p.prop));
-            }
+            patch.path.push((p.obj, p.prop));
         }
         patch.path.reverse();
         self.patches.push(patch);

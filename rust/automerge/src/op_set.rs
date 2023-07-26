@@ -93,10 +93,16 @@ impl OpSetInternal {
         self.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
     }
 
-    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+    pub(crate) fn parents(
+        &self,
+        obj: ObjId,
+        text_rep: TextRep,
+        clock: Option<Clock>,
+    ) -> Parents<'_> {
         Parents {
             obj,
             ops: self,
+            text_rep,
             clock,
         }
     }
@@ -117,11 +123,16 @@ impl OpSetInternal {
         self.trees.get(obj)?.parent
     }
 
-    pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
+    pub(crate) fn parent_object(
+        &self,
+        obj: &ObjId,
+        text_rep: TextRep,
+        clock: Option<&Clock>,
+    ) -> Option<Parent> {
         let tree = self.trees.get(obj)?;
         let parent = tree.parent?;
         let typ = self.trees.get(&parent)?.objtype;
-        let found = self.seek_opid(&parent, obj.0, ListEncoding::List, clock)?;
+        let found = self.seek_opid(&parent, obj.0, text_rep.encoding(typ), clock)?;
         let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
             Key::Seq(_) => Prop::Seq(found.index),

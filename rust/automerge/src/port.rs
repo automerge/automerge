@@ -24,7 +24,19 @@ impl HasMetadata for OpSetMetadata {
     }
 }
 
+impl HasMetadata for &OpSetMetadata {
+    fn meta(&self) -> &OpSetMetadata {
+        self
+    }
+}
+
 impl HasMutMetadata for OpSetMetadata {
+    fn mut_meta(&mut self) -> &mut OpSetMetadata {
+        self
+    }
+}
+
+impl HasMutMetadata for &mut OpSetMetadata {
     fn mut_meta(&mut self) -> &mut OpSetMetadata {
         self
     }

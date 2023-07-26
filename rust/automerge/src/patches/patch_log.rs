@@ -2,8 +2,8 @@ use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, RichText};
-use crate::types::{Clock, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Cursor, Patch};
+use crate::types::{Clock, ObjId, ObjMeta, ObjType, OpId, Prop};
+use crate::{Automerge, ChangeHash, Patch};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -64,7 +64,6 @@ pub(crate) enum Event {
     DeleteSeq {
         index: usize,
         num: usize,
-        block_id: Option<OpId>,
     },
     DeleteMap {
         key: String,
@@ -77,12 +76,6 @@ pub(crate) enum Event {
     Insert {
         index: usize,
         value: Value,
-        id: OpId,
-        conflict: bool,
-        //marks: Option<Rc<RichText>>,
-    },
-    SplitBlock {
-        index: usize,
         id: OpId,
         conflict: bool,
     },
@@ -105,9 +98,6 @@ pub(crate) enum Event {
     Mark {
         marks: MarkAccumulator,
     },
-    //SplitBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
-    //JoinBlock { index: usize, id: OpId },
-    //UpdateBlock { index: usize, name: String, parents: Vec<String>, id: OpId },
 }
 
 impl PatchLog {
@@ -159,21 +149,8 @@ impl PatchLog {
         self.active
     }
 
-    pub(crate) fn delete_seq(
-        &mut self,
-        obj: &ObjMeta,
-        index: usize,
-        num: usize,
-        block_id: Option<OpId>,
-    ) {
-        self.events.push((
-            obj.id,
-            Event::DeleteSeq {
-                index,
-                num,
-                block_id,
-            },
-        ))
+    pub(crate) fn delete_seq(&mut self, obj: &ObjMeta, index: usize, num: usize) {
+        self.events.push((obj.id, Event::DeleteSeq { index, num }))
     }
 
     pub(crate) fn delete_map(&mut self, obj: &ObjMeta, key: &str) {
@@ -316,24 +293,11 @@ impl PatchLog {
         id: OpId,
         conflict: bool,
     ) {
-        let event = match value {
-            Value::Map(_)
-                if obj.encoding == ListEncoding::Text
-                    && self.text_rep == TextRepresentation::String =>
-            {
-                Event::SplitBlock {
-                    index,
-                    id,
-                    conflict,
-                }
-            }
-            _ => Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-                //marks,
-            },
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
         };
         self.events.push((obj.id, event))
     }
@@ -352,10 +316,10 @@ impl PatchLog {
         clock: Option<&Clock>,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new(text_rep);
+        let mut patch_builder = PatchBuilder::new();
         for (obj, event) in events {
             // FIXME - adding a Cow::* to parents would let us not clone here
-            let parents = doc.ops().parents(*obj, clock.cloned());
+            let parents = doc.ops().parents(*obj, text_rep, clock.cloned());
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
             // incremental updates are ignored and a observation
@@ -412,21 +376,8 @@ impl PatchLog {
                         //marks.clone(),
                     );
                 }
-                Event::SplitBlock {
-                    index,
-                    id,
-                    conflict,
-                } => {
-                    let cursor = Cursor::new(*id, &doc.ops().m);
-                    patch_builder.split_block(parents, exid, *index, cursor, *conflict);
-                }
-                Event::DeleteSeq {
-                    index,
-                    num,
-                    block_id,
-                } => {
-                    let block_id = block_id.map(|b| Cursor::new(b, &doc.ops().m));
-                    patch_builder.delete_seq(parents, exid, *index, *num, block_id);
+                Event::DeleteSeq { index, num } => {
+                    patch_builder.delete_seq(parents, exid, *index, *num);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
@@ -463,6 +414,10 @@ impl PatchLog {
             text_rep: self.text_rep,
             heads: None,
         }
+    }
+
+    pub(crate) fn extend(&mut self, other: Vec<(ObjId, Event)>) {
+        self.events.extend(other);
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
@@ -541,7 +496,7 @@ impl ExposeQueue {
         text_rep: TextRepresentation,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
-        let parents = doc.ops().parents(id, clock.cloned());
+        let parents = doc.ops().parents(id, text_rep, clock.cloned());
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text if matches!(text_rep, TextRepresentation::String) => {

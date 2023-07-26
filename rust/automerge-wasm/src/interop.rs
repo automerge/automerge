@@ -7,6 +7,7 @@ use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
@@ -605,7 +606,7 @@ pub(crate) fn export_object(
     doc: &Automerge,
     obj: &ObjId,
     datatype: Datatype,
-    heads: Option<&Vec<ChangeHash>>,
+    heads: Option<&[ChangeHash]>,
     meta: &JsValue,
 ) -> Result<JsValue, error::Export> {
     doc.export_object(obj, datatype, heads, meta)
@@ -658,7 +659,7 @@ impl Automerge {
         &self,
         obj: &ObjId,
         datatype: Datatype,
-        heads: Option<&Vec<ChangeHash>>,
+        heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         let result = match datatype {
@@ -687,7 +688,7 @@ impl Automerge {
     fn export_map(
         &self,
         obj: &ObjId,
-        heads: Option<&Vec<ChangeHash>>,
+        heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
         let map = Object::new();
@@ -709,7 +710,7 @@ impl Automerge {
     fn export_list(
         &self,
         obj: &ObjId,
-        heads: Option<&Vec<ChangeHash>>,
+        heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
         if let Some(heads) = heads {
@@ -1266,16 +1267,28 @@ fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
 }
 
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
+    doc: &Automerge,
     patches: I,
+    heads: &[ChangeHash],
 ) -> Result<Array, error::Export> {
+    // this is for performance - each block is the same
+    // so i only want to materialize each block once per
+    // apply patches
+    let mut blocks = HashMap::new();
     patches
         .into_iter()
+        // removing update block for now
         .filter(|p| !matches!(p.action, PatchAction::UpdateBlock { .. }))
-        .map(export_patch)
+        .map(|p| export_patch(doc, p, &mut blocks, heads))
         .collect()
 }
 
-pub(crate) fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
+fn export_patch(
+    doc: &Automerge,
+    p: Patch,
+    blocks: &mut HashMap<ObjId, Object>,
+    heads: &[ChangeHash],
+) -> Result<JsValue, error::Export> {
     let result = Object::new();
     let path = &p.path.as_slice();
     match p.action {
@@ -1349,17 +1362,21 @@ pub(crate) fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
             js_set(&result, "value", String::from(&value))?;
             if let Some(m) = marks {
-                let marks = Object::new();
-                for (name, value) in m.iter_marks() {
-                    js_set(
-                        &marks,
-                        name,
-                        alloc(&value.into(), TextRepresentation::String).1,
-                    )?;
+                if m.num_marks() > 0 {
+                    let marks = Object::new();
+                    for (name, value) in m.iter_marks() {
+                        js_set(
+                            &marks,
+                            name,
+                            alloc(&value.into(), TextRepresentation::String).1,
+                        )?;
+                    }
+                    js_set(&result, "marks", marks)?;
                 }
-                js_set(&result, "marks", marks)?;
                 if let Some(b) = m.block() {
-                    js_set(&result, "block", b.to_string())?;
+                    let block = export_block(doc, b, blocks, heads)?;
+                    //blocks.entry(b).or_insert(export_object(doc,b,ObjType::Map.into(),Some(heads),&JsValue::undefined())?);
+                    js_set(&result, "block", block)?;
                 }
             }
             Ok(result.into())
@@ -1423,7 +1440,7 @@ pub(crate) fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
         PatchAction::UpdateBlock { patch } => {
             js_set(&result, "action", "updateBlock")?;
             js_set(&result, "path", export_path(path, &Prop::from(999)))?;
-            js_set(&result, "patch", export_patch(*patch)?)?;
+            js_set(&result, "patch", export_patch(doc, *patch, blocks, heads)?)?;
             Ok(result.into())
         }
         PatchAction::JoinBlock { index, cursor } => {
@@ -1433,6 +1450,19 @@ pub(crate) fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
             Ok(result.into())
         }
     }
+}
+
+fn export_block<'a>(
+    doc: &Automerge,
+    id: &ObjId,
+    blocks: &'a mut HashMap<ObjId, Object>,
+    heads: &[ChangeHash],
+) -> Result<&'a Object, error::Export> {
+    Ok(blocks.entry(id.clone()).or_insert_with(|| {
+        doc.export_map(id, Some(heads), &JsValue::undefined())
+            // how do I remove this unwrap?
+            .unwrap_or_else(|_| Object::new())
+    }))
 }
 
 fn shallow_copy(obj: &Object) -> Object {

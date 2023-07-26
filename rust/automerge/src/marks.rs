@@ -6,6 +6,7 @@ use std::rc::Rc;
 use crate::exid::ExId;
 use crate::op_tree::OpSetMetadata;
 use crate::port::Exportable;
+use crate::port::HasMetadata;
 use crate::query::RichTextQueryState;
 use crate::types::{ObjType, Op, OpId, OpType};
 use crate::value::ScalarValue;
@@ -99,14 +100,20 @@ impl RichText {
         self.block.as_ref()
     }
 
-    pub(crate) fn set_block(&mut self, block: ExId) {
-        self.block = Some(block);
-    }
+    /*
+        pub(crate) fn set_block(&mut self, block: ExId) {
+            self.block = Some(block);
+        }
+    */
 
     pub fn iter_marks(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
         self.marks
             .iter()
             .map(|(name, value)| (name.as_str(), value))
+    }
+
+    pub fn num_marks(&self) -> usize {
+        self.marks.len()
     }
 
     fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
@@ -143,7 +150,6 @@ impl RichText {
                 diff.insert(name.clone(), value.clone());
             }
         }
-        // TODO: what is correct behavior for block diff?
         RichText {
             marks: diff,
             block: None,
@@ -233,10 +239,10 @@ impl<'a> RichTextStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, op: &'a Op, m: &OpSetMetadata) -> bool {
+    pub(crate) fn process<M: HasMetadata>(&mut self, op: &'a Op, m: &M) -> bool {
         match &op.action {
-            OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m),
-            OpType::MarkEnd(_) => self.mark_end(op.id, m),
+            OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m.meta()),
+            OpType::MarkEnd(_) => self.mark_end(op.id, m.meta()),
             OpType::Make(ObjType::Map) => {
                 Rc::make_mut(&mut self.current).block = Some(op.id.export(m));
                 false

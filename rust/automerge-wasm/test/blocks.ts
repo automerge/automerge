@@ -12,76 +12,69 @@ describe('Automerge', () => {
   describe('blocks', () => {
     it('can split a block', () => {
       let doc = create({ actor: "aabbcc" })
-      let list = doc.putObject("_root", "list", "aaabbbccc")
+      let list = doc.putObject("_root", "list", "🐻🐻🐻bbbccc")
       doc.updateDiffCursor();
       let doc2 = doc.fork();
-      let blockId = doc.splitBlock(list, 3, { name: "li", parents: ["ul"] });
+      let blockId = doc.splitBlock(list, 6, { name: "li", parents: ["ul"] });
+      let patches1 = doc.diffIncremental();
+      assert.deepStrictEqual(doc.text(list), "🐻🐻🐻\ufffcbbbccc")
+      assert.deepStrictEqual(doc.length(list), 13)
       doc.joinBlock(blockId);
-      doc.commit();
-      let patches = doc.diffIncremental();
-      assert.deepStrictEqual(patches, [
-        { action: 'splitBlock', path: ['list', 3], cursor: blockId },
-        { action: 'joinBlock', path: ['list', 3], cursor: blockId },
+      let patches2 = doc.diffIncremental();
+      assert.deepStrictEqual(patches1, [
+        { action: 'insert', path: ['list',6], values: [{}] },
+        { action: 'put', path: [ 'list', 6, 'name' ], value: 'li' },
+        { action: 'put', path: [ 'list', 6, 'parents' ], value: [] },
+        { action: 'insert', path: [ 'list', 6, 'parents', 0 ], values: [ 'ul' ] }
       ]);
-      assert.deepStrictEqual(doc.text(list), "aaabbbccc")
-      assert.deepStrictEqual(doc.length(list), 9)
+      assert.deepStrictEqual(patches2, [
+        { action: 'del', path: ['list',6] }
+      ]);
+      assert.deepStrictEqual(doc.text(list), "🐻🐻🐻bbbccc")
+      assert.deepStrictEqual(doc.length(list), 12)
 
       doc2.updateDiffCursor();
       doc2.merge(doc);
-      let patches2 = doc2.diffIncremental();
-      assert.deepStrictEqual(patches2, [
-        { action: 'splitBlock', path: ['list', 3], cursor: blockId },
-        { action: 'joinBlock', path: ['list', 3], cursor: blockId },
-      ]);
+      let patches3 = doc2.diffIncremental();
+      assert.deepStrictEqual(patches3, []);
     })
     it('patches correctly reference blocks', () => {
       let doc = create({ actor: "aabbcc" })
-      let list = doc.putObject("_root", "list", "aaabbbccc")
+      let text = doc.putObject("_root", "text", "aaabbbccc")
       let starterHeads = doc.getHeads();
       doc.updateDiffCursor();
       let doc2 = doc.fork();
-      let blockId = doc.splitBlock(list, 3, { name: "li", parents: ["ul"] });
-      //doc.updateBlock(list, blockId, "div", ["block","pre"]);
+      let block = { name: "li", parents: ["ul"] };
+      let blockId = doc.splitBlock(text, 3, block);
+      //doc.updateBlock(text, blockId, "div", ["block","pre"]);
       let blockHeads = doc.getHeads()
       doc.joinBlock(blockId);
       doc.commit();
       let patches = doc.diffIncremental();
-      assert.deepStrictEqual(patches, [
-        { action: 'splitBlock', path: ['list', 3], cursor: blockId },
-        { action: 'joinBlock', path: ['list', 3], cursor: blockId },
-      ]);
-      assert.deepStrictEqual(doc.text(list), "aaabbbccc")
-      assert.deepStrictEqual(doc.length(list), 9)
+      assert.deepStrictEqual(patches,[]);
+      assert.deepStrictEqual(doc.text(text), "aaabbbccc")
+      assert.deepStrictEqual(doc.length(text), 9)
 
       doc2.updateDiffCursor();
       doc2.merge(doc);
       let patches2 = doc2.diffIncremental();
-      assert.deepStrictEqual(patches2, [
-        { action: 'splitBlock', path: ['list', 3], cursor: blockId },
-        { action: 'joinBlock', path: ['list', 3], cursor: blockId },
-      ]);
+      assert.deepStrictEqual(patches2,[]); // insert and delete
       let doc3 = doc.fork(undefined,blockHeads);
       let patches3A = doc3.diff([],doc3.getHeads());
       let patches3B = doc.diff([],blockHeads);
       let patches3C = doc.diff(blockHeads, starterHeads);
       assert.deepStrictEqual(patches3A, [
-        { action: 'put', path: [ 'list' ], value: '' },
-        { action: 'splice', 
-          path: [ 'list', 0 ],
-          value: 'aaa',
-        },
-        { action: 'splice', 
-          path: [ 'list', 3 ],
-          value: 'bbbccc',
-          //block: { name: 'div', parents: [ 'block', 'pre' ] },
-          block: blockId,
-          marks: {},
-        }
+        { action: 'put', path: [ 'text' ], value: '' },
+        { action: 'splice', path: [ 'text', 0 ], value: 'aaa' },
+        { action: 'insert', path: [ 'text', 3 ], values: [{}] },
+        { action: 'splice', path: [ 'text', 4 ], value: 'bbbccc', block },
+        { action: 'put', path: [ 'text', 3, 'name' ], value: 'li' },
+        { action: 'put', path: [ 'text', 3, 'parents' ], value: [] },
+        { action: 'insert', path: [ 'text', 3, 'parents', 0 ], values: [ 'ul' ] }
       ]);
-/*
       assert.deepStrictEqual(patches3A, patches3B);
       assert.deepStrictEqual(patches3C, [
-        { action: "joinBlock", cursor: blockId, path: [ "list", 3 ] }
+        { action: "del", path: [ "text", 3 ] }
       ]);
       // now make sure the patches look good on merge
       let doc4 = doc.fork(undefined,blockHeads);
@@ -91,11 +84,25 @@ describe('Automerge', () => {
       doc5.merge(doc4);
       let patches3D = doc5.diffIncremental();
       assert.deepStrictEqual(patches3D, [
-        { action: 'put', path: [ 'list' ], value: '' },
-        { action: 'splice', path: [ 'list', 0 ], value: 'aaabbbccc' },
-        { action: 'splitBlock', path: [ 'list', 3 ], cursor: '11@aabbcc' }
+        { action: 'put', path: [ 'text' ], value: '' },
+        { action: 'splice', path: [ 'text', 0 ], value: 'aaabbbccc' },
+        { action: 'insert', path: [ 'text', 3 ], values: [{}] },
+        { action: 'put', path: [ 'text', 3, 'name' ], value: 'li' },
+        { action: 'put', path: [ 'text', 3, 'parents' ], value: [] },
+        { action: 'insert', path: [ 'text', 3, 'parents', 0 ], values: [ 'ul' ] }
       ]);
-*/
+    })
+    it('references blocks on local changes', () => {
+      let doc = create({ actor: "aabbcc" })
+      let text = doc.putObject("_root", "text", "aaabbbccc")
+      let block = { name: "li", parents: ["ul"] };
+      let blockId = doc.splitBlock(text, 3, block);
+      doc.updateDiffCursor();
+      doc.splice("/text", 6, 0, "AAA");
+      let patches = doc.diffIncremental();
+      assert.deepStrictEqual(patches, [
+        { action: 'splice', path: [ 'text', 6], value: 'AAA', block },
+      ])
     })
   })
 })

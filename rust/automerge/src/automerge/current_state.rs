@@ -4,85 +4,69 @@ use std::rc::Rc;
 use itertools::Itertools;
 
 use crate::{
-    exid::ExId,
     marks::{RichText, RichTextStateMachine},
-    patches::{PatchLog, TextRepresentation},
-    port::Exportable,
-    types::{Key, ListEncoding, ObjMeta, Op, OpId},
+    patches::{Event, PatchLog, TextRepresentation},
+    types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
 #[derive(Debug, Default)]
-struct TextSpan {
-    text: String,
-    start: usize,
-    marks: Option<Rc<RichText>>,
-}
-
-#[derive(Debug, Default)]
 struct TextState<'a> {
+    obj: ObjId,
     len: usize,
-    spans: Vec<TextSpan>,
-    marks: RichTextStateMachine<'a>,
+    index: usize,
+    text: String,
+    spans: Vec<(ObjId, Event)>,
+    marks: Option<Rc<RichText>>,
+    marks_state: RichTextStateMachine<'a>,
 }
 
 impl<'a> TextState<'a> {
-    fn push_str(&mut self, text: &str, len: usize) {
-        if let Some(last_span) = self.spans.last_mut() {
-            last_span.text.push_str(text);
-        } else {
-            self.spans.push(TextSpan {
-                text: text.to_owned(),
-                start: 0,
-                marks: None,
-            });
+    fn new(obj: ObjId) -> Self {
+        Self {
+            obj,
+            ..Default::default()
         }
+    }
+
+    fn push_str(&mut self, text: &str, len: usize) {
+        self.text.push_str(text);
         self.len += len;
     }
 
-    fn push_block(&mut self, block: ExId) {
-        let marks;
-        if let Some(last) = self.spans.last_mut() {
-            if last.text.is_empty() {
-                if let Some(m) = &mut last.marks {
-                    Rc::make_mut(m).set_block(block);
-                } else {
-                    last.marks = block.into();
-                }
-                return;
-            }
-            if let Some(mut m) = last.marks.clone() {
-                Rc::make_mut(&mut m).set_block(block);
-                marks = Some(m);
-            } else {
-                marks = block.into();
-            }
-        } else {
-            marks = block.into();
+    fn flush(&mut self) {
+        if self.len > 0 {
+            let index = self.index;
+            let mut text = String::new();
+            let mut marks = None;
+            std::mem::swap(&mut text, &mut self.text);
+            std::mem::swap(&mut marks, &mut self.marks);
+
+            self.spans
+                .push((self.obj, Event::Splice { text, index, marks }));
+
+            self.index += self.len;
+            self.len = 0;
         }
-        self.spans.push(TextSpan {
-            text: "".to_owned(),
-            start: self.len,
-            marks,
-        })
+        self.marks = self.marks_state.current().cloned();
     }
 
-    fn push_mark(&mut self) {
-        let marks = self.marks.current();
-        if let Some(last) = self.spans.last_mut() {
-            if last.marks.as_ref() == marks {
-                return;
-            }
-            if last.text.is_empty() {
-                last.marks = marks.cloned();
-                return;
-            }
-        }
-        self.spans.push(TextSpan {
-            text: "".to_owned(),
-            start: self.len,
-            marks: marks.cloned(),
-        })
+    fn insert(&mut self, op: &Op, width: usize) {
+        self.flush();
+
+        let index = self.index;
+        let value = op.value().into();
+        let id = op.id;
+        self.spans.push((
+            self.obj,
+            Event::Insert {
+                index,
+                value,
+                id,
+                conflict: false,
+            },
+        ));
+        self.index += width;
     }
 }
 
@@ -128,26 +112,25 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
 ) {
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let encoding = ListEncoding::Text;
-    let state = TextState::default();
-    let state = ops_by_key
+    let state = TextState::new(obj.id);
+    let mut state = ops_by_key
         .into_iter()
         .fold(state, |mut state, (_key, key_ops)| {
             if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
                 match &o.action {
-                    OpType::Make(ObjType::Map) => {
-                        state.push_block(o.id.export(doc));
+                    OpType::Make(_) => {
+                        state.marks_state.process(o, doc.ops());
+                        state.insert(o, o.width(encoding));
                     }
-                    OpType::Make(_) | OpType::Put(_) => {
-                        state.push_str(o.to_str(), o.width(encoding))
-                    }
+                    OpType::Put(_) => state.push_str(o.to_str(), o.width(encoding)),
                     OpType::MarkBegin(_, data) => {
-                        if state.marks.mark_begin(o.id, data, &doc.ops.m) {
-                            state.push_mark();
+                        if state.marks_state.mark_begin(o.id, data, &doc.ops.m) {
+                            state.flush();
                         }
                     }
                     OpType::MarkEnd(_) => {
-                        if state.marks.mark_end(o.id, &doc.ops.m) {
-                            state.push_mark();
+                        if state.marks_state.mark_end(o.id, &doc.ops.m) {
+                            state.flush();
                         }
                     }
                     OpType::Increment(_) | OpType::Delete => {}
@@ -155,11 +138,15 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
             }
             state
         });
-    for span in state.spans {
-        if !span.text.is_empty() {
-            patch_log.splice(obj, span.start, span.text.as_str(), span.marks);
+    state.flush();
+    patch_log.extend(state.spans);
+    /*
+        for span in state.spans {
+            if !span.text.is_empty() {
+                patch_log.splice(obj, span.start, span.text.as_str(), span.marks);
+            }
         }
-    }
+    */
 }
 
 fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(

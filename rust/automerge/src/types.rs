@@ -278,7 +278,7 @@ impl OpType {
     pub(crate) fn to_str(&self) -> &str {
         if let OpType::Put(ScalarValue::Str(s)) = &self {
             s
-        } else if self.is_mark() || self.is_block() {
+        } else if self.is_mark() {
             ""
         } else {
             "\u{fffc}"
@@ -768,6 +768,10 @@ impl Op {
         } else {
             0
         }
+    }
+
+    pub(crate) fn is_put(&self) -> bool {
+        matches!(&self.action, OpType::Put(_))
     }
 
     pub(crate) fn is_delete(&self) -> bool {

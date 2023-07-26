@@ -130,9 +130,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => patch_log.delete_map(obj, &k),
-                    Prop::Seq(index) => {
-                        patch_log.delete_seq(obj, index, over.width(obj.encoding), over.block_id())
-                    }
+                    Prop::Seq(index) => patch_log.delete_seq(obj, index, over.width(obj.encoding)),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
