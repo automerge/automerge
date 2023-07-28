@@ -1,5 +1,5 @@
 use std::num::NonZeroU64;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::hydrate::{Map, Value};
@@ -850,7 +850,7 @@ impl TransactionInner {
         obj: &ObjMeta,
         prop: Prop,
         op: Op,
-        marks: Option<Rc<RichText>>,
+        marks: Option<Arc<RichText>>,
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if patch_log.is_active() {

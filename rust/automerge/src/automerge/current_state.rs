@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -17,7 +17,7 @@ struct TextState<'a> {
     index: usize,
     text: String,
     spans: Vec<(ObjId, Event)>,
-    marks: Option<Rc<RichText>>,
+    marks: Option<Arc<RichText>>,
     marks_state: RichTextStateMachine<'a>,
 }
 

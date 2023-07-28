@@ -619,7 +619,7 @@ impl Automerge {
 
     /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
     /// [`PatchLog`]
-    pub(crate) fn load_incremental_log_patches(
+    pub fn load_incremental_log_patches(
         &mut self,
         data: &[u8],
         patch_log: &mut PatchLog,

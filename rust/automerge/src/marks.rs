@@ -1,7 +1,7 @@
 use smol_str::SmolStr;
 use std::fmt;
 use std::fmt::Display;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::op_tree::OpSetMetadata;
@@ -31,11 +31,11 @@ impl<'a> Mark<'a> {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
-    pub(crate) fn into_mark_set(self) -> Rc<RichText> {
+    pub(crate) fn into_mark_set(self) -> Arc<RichText> {
         let mut m = RichText::default();
         let data = self.data.into_owned();
         m.insert(data.name, data.value);
-        Rc::new(m)
+        Arc::new(m)
     }
 }
 
@@ -74,7 +74,7 @@ impl MarkAccumulator {
     pub(crate) fn add(&mut self, index: usize, len: usize, other: &RichText) {
         for (name, value) in other.marks.iter() {
             let entry = self.marks.entry(name.clone()).or_default();
-            if let Some(mut last) = entry.last_mut() {
+            if let Some(last) = entry.last_mut() {
                 if &last.value == value && last.index + last.len == index {
                     last.len += len;
                     continue;
@@ -159,7 +159,7 @@ impl RichText {
     pub(crate) fn from_query_state(
         q: &RichTextQueryState<'_>,
         m: &OpSetMetadata,
-    ) -> Option<Rc<Self>> {
+    ) -> Option<Arc<Self>> {
         let mut marks = RichTextStateMachine::with_block(q.block().export(m));
         for (id, mark_data) in q.iter() {
             marks.mark_begin(*id, mark_data, m);
@@ -220,18 +220,18 @@ impl<'a> Mark<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct RichTextStateMachine<'a> {
     state: Vec<(OpId, &'a MarkData)>,
-    current: Rc<RichText>,
+    current: Arc<RichText>,
 }
 
 impl<'a> RichTextStateMachine<'a> {
     fn with_block(block: Option<ExId>) -> Self {
         Self {
             state: vec![],
-            current: Rc::new(RichText::with_block(block)),
+            current: Arc::new(RichText::with_block(block)),
         }
     }
 
-    pub(crate) fn current(&self) -> Option<&Rc<RichText>> {
+    pub(crate) fn current(&self) -> Option<&Arc<RichText>> {
         if self.current.is_empty() {
             None
         } else {
@@ -244,7 +244,7 @@ impl<'a> RichTextStateMachine<'a> {
             OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m.meta()),
             OpType::MarkEnd(_) => self.mark_end(op.id, m.meta()),
             OpType::Make(ObjType::Map) => {
-                Rc::make_mut(&mut self.current).block = Some(op.id.export(m));
+                Arc::make_mut(&mut self.current).block = Some(op.id.export(m));
                 false
             }
             _ => false,
@@ -262,12 +262,12 @@ impl<'a> RichTextStateMachine<'a> {
         if Self::mark_above(&self.state, index, mark).is_none() {
             if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
                 if below.value != mark.value {
-                    Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                    Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                     result = true
                 }
             } else {
                 // nothing above or below
-                Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                 result = true
             }
         }
@@ -290,11 +290,12 @@ impl<'a> RichTextStateMachine<'a> {
             match Self::mark_below(&mut self.state, index, mark) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
-                    Rc::make_mut(&mut self.current).insert(below.name.clone(), below.value.clone());
+                    Arc::make_mut(&mut self.current)
+                        .insert(below.name.clone(), below.value.clone());
                     result = true;
                 }
                 None => {
-                    Rc::make_mut(&mut self.current).remove(&mark.name);
+                    Arc::make_mut(&mut self.current).remove(&mark.name);
                     result = true;
                 }
             }
@@ -378,9 +379,9 @@ impl ExpandMark {
     }
 }
 
-impl From<ExId> for Option<Rc<RichText>> {
-    fn from(block: ExId) -> Option<Rc<RichText>> {
-        Some(Rc::new(RichText {
+impl From<ExId> for Option<Arc<RichText>> {
+    fn from(block: ExId) -> Option<Arc<RichText>> {
+        Some(Arc::new(RichText {
             block: Some(block),
             marks: Default::default(),
         }))

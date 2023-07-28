@@ -4,7 +4,7 @@ use crate::op_tree::OpTreeNode;
 use crate::query::{ListState, OpSetMetadata, OpTree, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
 use std::fmt::Debug;
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertNth<'a> {
@@ -62,7 +62,7 @@ impl<'a> InsertNth<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Rc<RichText>> {
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Arc<RichText>> {
         RichText::from_query_state(&self.marks, m)
     }
 

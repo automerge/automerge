@@ -5,7 +5,7 @@ use crate::query::{ListState, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, Op, OpId};
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Search for an OpId in a tree.  /// Returns the index of the operation in the tree.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,7 +72,7 @@ impl<'a> OpIdSearch<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Rc<RichText>> {
+    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Arc<RichText>> {
         RichText::from_query_state(&self.marks, m)
     }
 }

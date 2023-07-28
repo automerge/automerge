@@ -12,7 +12,7 @@ use crate::{
     ObjType, OpType,
 };
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
 mod iter;
@@ -87,7 +87,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<Rc<RichText>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -228,7 +228,7 @@ impl OpTreeInternal {
         op: &'a Op,
         mut pos: usize,
         index: usize,
-        marks: Option<Rc<RichText>>,
+        marks: Option<Arc<RichText>>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;
