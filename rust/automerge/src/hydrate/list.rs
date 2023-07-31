@@ -18,7 +18,7 @@ pub struct ListValue {
 
 impl List {
     pub fn iter(&self) -> impl Iterator<Item = &ListValue> {
-      self.0.iter()
+        self.0.iter()
     }
 
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {

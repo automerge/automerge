@@ -1,3 +1,4 @@
+use crate::exid::ExId;
 use crate::hydrate;
 use crate::patches::TextRepresentation;
 use crate::text_value::TextValue;
@@ -17,7 +18,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     doc.insert_object(&list, 6, ObjType::List)?;
     let text = doc.put_object(&ObjId::Root, "text", ObjType::Text)?;
     doc.splice_text(&text, 0, 0, "hello world")?;
-    let mut hydrated = doc.hydrate(None);
+    let mut hydrated = doc.hydrate(ExId::Root, None)?;
     assert_eq!(
         hydrated,
         hydrate_map!(

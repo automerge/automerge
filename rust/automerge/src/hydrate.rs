@@ -183,8 +183,8 @@ macro_rules! hydrate_list {
 #[cfg(feature = "wasm")]
 impl From<&Value> for wasm_bindgen::JsValue {
     fn from(value: &Value) -> Self {
-        use wasm_bindgen::{JsValue};
-        use js_sys::{ Reflect, Object, Array, Uint8Array, Date };
+        use js_sys::{Array, Date, Object, Reflect, Uint8Array};
+        use wasm_bindgen::JsValue;
         match value {
             Value::Scalar(s) => match s {
                 ScalarValue::Bytes(v) => Uint8Array::from(v.as_slice()).into(),
@@ -196,17 +196,23 @@ impl From<&Value> for wasm_bindgen::JsValue {
                 ScalarValue::Timestamp(v) => Date::new(&(*v as f64).into()).into(),
                 ScalarValue::Boolean(v) => (*v).into(),
                 ScalarValue::Null => JsValue::null(),
-                ScalarValue::Unknown { bytes, type_code: _ } =>
-                    Uint8Array::from(bytes.as_slice()).into()
+                ScalarValue::Unknown {
+                    bytes,
+                    type_code: _,
+                } => Uint8Array::from(bytes.as_slice()).into(),
             },
             Value::Map(m) => {
-              let result = Object::new();
-              for (key,val) in m.iter() {
-                 Reflect::set(&result, &key.into(), &JsValue::from(&val.value)).unwrap();
-              }
-              result.into()
+                let result = Object::new();
+                for (key, val) in m.iter() {
+                    Reflect::set(&result, &key.into(), &JsValue::from(&val.value)).unwrap();
+                }
+                result.into()
             }
-            Value::List(l) => l.iter().map(|v| JsValue::from(&v.value)).collect::<Array>().into(),
+            Value::List(l) => l
+                .iter()
+                .map(|v| JsValue::from(&v.value))
+                .collect::<Array>()
+                .into(),
             Value::Text(t) => String::from(t).into(),
         }
     }

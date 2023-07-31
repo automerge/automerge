@@ -18,7 +18,7 @@ pub struct MapValue {
 
 impl Map {
     pub fn iter(&self) -> impl Iterator<Item = (&String, &MapValue)> {
-      self.0.iter()
+        self.0.iter()
     }
 
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {

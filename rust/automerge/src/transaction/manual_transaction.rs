@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
@@ -248,6 +249,14 @@ impl<'a> ReadDoc for Transaction<'a> {
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate(obj, heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(

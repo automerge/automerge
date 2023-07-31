@@ -53,7 +53,13 @@ export {
   type PatchInfo,
 } from "./unstable_types"
 
-import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
+import type {
+  MapObjType,
+  Cursor,
+  Mark,
+  MarkRange,
+  MarkValue,
+} from "./unstable_types"
 
 import { type PatchCallback } from "./stable"
 
@@ -286,6 +292,51 @@ export function splice<T>(
 
   try {
     return state.handle.splice(value, index, del, newText)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for splitBlock")
+  }
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
+  try {
+    return state.handle.spans(value)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function splitBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: MapObjType,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for splitBlock")
+  }
+  _clear_cache(doc)
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
+  index = cursorToIndex(state, value, index)
+
+  try {
+    return state.handle.splitBlock(value, index, block)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }

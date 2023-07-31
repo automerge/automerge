@@ -44,7 +44,6 @@ impl From<TextValue> for Value {
     }
 }
 
-
 impl From<&Text> for String {
     fn from(text: &Text) -> Self {
         text.value.make_string()
