@@ -43,3 +43,10 @@ impl From<TextValue> for Value {
         Value::Text(Text::new(text))
     }
 }
+
+
+impl From<&Text> for String {
+    fn from(text: &Text) -> Self {
+        text.value.make_string()
+    }
+}

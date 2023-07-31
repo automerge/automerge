@@ -10,7 +10,7 @@ use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::hydrate;
-use crate::iter::{Keys, ListRange, MapRange, Values};
+use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, RichTextStateMachine};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
@@ -1360,6 +1360,16 @@ impl Automerge {
         Ok(self.ops.text(&obj.id, clock))
     }
 
+    pub(crate) fn spans_for(
+        &self,
+        obj: &ExId,
+        clock: Option<Clock>,
+    ) -> Result<Spans<'_>, AutomergeError> {
+        let obj = self.exid_to_obj(obj, TextRep::String)?;
+        let iter = self.ops.iter_obj(&obj.id);
+        Ok(Spans::new(iter, self, clock))
+    }
+
     pub(crate) fn get_cursor_for(
         &self,
         obj: &ExId,
@@ -1523,6 +1533,19 @@ impl ReadDoc for Automerge {
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.text_for(obj.as_ref(), None)
+    }
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.spans_for(obj.as_ref(), None)
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        let clock = self.clock_at(heads);
+        self.spans_for(obj.as_ref(), Some(clock))
     }
 
     fn get_cursor<O: AsRef<ExId>>(

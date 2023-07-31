@@ -1,74 +1,13 @@
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use itertools::Itertools;
 
+use crate::iter::{SpanInternal, SpansInternal};
 use crate::{
-    marks::{RichText, RichTextStateMachine},
-    patches::{Event, PatchLog, TextRepresentation},
-    types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId},
+    patches::{PatchLog, TextRepresentation},
+    types::{Key, ObjMeta, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
-
-#[derive(Debug, Default)]
-struct TextState<'a> {
-    obj: ObjId,
-    len: usize,
-    index: usize,
-    text: String,
-    spans: Vec<(ObjId, Event)>,
-    marks: Option<Arc<RichText>>,
-    marks_state: RichTextStateMachine<'a>,
-}
-
-impl<'a> TextState<'a> {
-    fn new(obj: ObjId) -> Self {
-        Self {
-            obj,
-            ..Default::default()
-        }
-    }
-
-    fn push_str(&mut self, text: &str, len: usize) {
-        self.text.push_str(text);
-        self.len += len;
-    }
-
-    fn flush(&mut self) {
-        if self.len > 0 {
-            let index = self.index;
-            let mut text = String::new();
-            let mut marks = None;
-            std::mem::swap(&mut text, &mut self.text);
-            std::mem::swap(&mut marks, &mut self.marks);
-
-            self.spans
-                .push((self.obj, Event::Splice { text, index, marks }));
-
-            self.index += self.len;
-            self.len = 0;
-        }
-        self.marks = self.marks_state.current().cloned();
-    }
-
-    fn insert(&mut self, op: &Op, width: usize) {
-        self.flush();
-
-        let index = self.index;
-        let value = op.value().into();
-        let id = op.id;
-        self.spans.push((
-            self.obj,
-            Event::Insert {
-                index,
-                value,
-                id,
-                conflict: false,
-            },
-        ));
-        self.index += width;
-    }
-}
 
 struct Put<'a> {
     value: Value<'a>,
@@ -104,49 +43,24 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     }
 }
 
-fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_text_patches<'a, I: Iterator<Item = &'a Op> + Clone>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| o.elemid_or_key());
-    let encoding = ListEncoding::Text;
-    let state = TextState::new(obj.id);
-    let mut state = ops_by_key
-        .into_iter()
-        .fold(state, |mut state, (_key, key_ops)| {
-            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
-                match &o.action {
-                    OpType::Make(_) => {
-                        state.marks_state.process(o, doc.ops());
-                        state.insert(o, o.width(encoding));
-                    }
-                    OpType::Put(_) => state.push_str(o.to_str(), o.width(encoding)),
-                    OpType::MarkBegin(_, data) => {
-                        if state.marks_state.mark_begin(o.id, data, &doc.ops.m) {
-                            state.flush();
-                        }
-                    }
-                    OpType::MarkEnd(_) => {
-                        if state.marks_state.mark_end(o.id, &doc.ops.m) {
-                            state.flush();
-                        }
-                    }
-                    OpType::Increment(_) | OpType::Delete => {}
-                }
+    let spans = SpansInternal::new(ops, doc, None);
+    for span in spans {
+        match span {
+            SpanInternal::Text(text, index, marks) => {
+                patch_log.splice(obj, index, &text, marks);
             }
-            state
-        });
-    state.flush();
-    patch_log.extend(state.spans);
-    /*
-        for span in state.spans {
-            if !span.text.is_empty() {
-                patch_log.splice(obj, span.start, span.text.as_str(), span.marks);
+            SpanInternal::Obj(id, index) => {
+                let value = Value::Object(ObjType::Map);
+                patch_log.insert(obj, index, value.into(), id, false);
             }
         }
-    */
+    }
 }
 
 fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(

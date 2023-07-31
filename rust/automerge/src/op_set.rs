@@ -75,6 +75,10 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn iter_obj(&self, obj: &ObjId) -> Option<OpTreeIter<'_>> {
+        self.trees.get(obj).map(|t| t.iter())
+    }
+
     /// Iterate over objects in the opset in causal order
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
         // TODO

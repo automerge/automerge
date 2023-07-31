@@ -39,14 +39,14 @@ impl<'a> Mark<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 struct MarkAccItem {
     index: usize,
     len: usize,
     value: ScalarValue,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkAccumulator {
     marks: BTreeMap<SmolStr, Vec<MarkAccItem>>,
 }

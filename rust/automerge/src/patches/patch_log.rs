@@ -40,14 +40,14 @@ use super::{PatchBuilder, TextRepresentation};
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
+    pub(crate) events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -414,10 +414,6 @@ impl PatchLog {
             text_rep: self.text_rep,
             heads: None,
         }
-    }
-
-    pub(crate) fn extend(&mut self, other: Vec<(ObjId, Event)>) {
-        self.events.extend(other);
     }
 
     pub(crate) fn merge(&mut self, other: Self) {

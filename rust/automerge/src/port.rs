@@ -60,6 +60,12 @@ impl HasMetadata for Automerge {
     }
 }
 
+impl HasMetadata for &Automerge {
+    fn meta(&self) -> &OpSetMetadata {
+        self.ops().meta()
+    }
+}
+
 impl HasMutMetadata for Automerge {
     fn mut_meta(&mut self) -> &mut OpSetMetadata {
         self.ops_mut().mut_meta()

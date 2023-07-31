@@ -4,7 +4,10 @@ use crate::{Automerge, TextRepresentation};
 use automerge as am;
 use automerge::ReadDoc;
 use automerge::ROOT;
-use automerge::{Change, ChangeHash, ObjType, Prop};
+use automerge::{
+    iter::{Span, Spans},
+    Change, ChangeHash, ObjType, Prop,
+};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -1264,6 +1267,41 @@ fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
         result.push(&prop_to_js(&p.1));
     }
     result
+}
+
+pub(crate) fn export_spans(spans: Spans<'_>) -> Result<Array, error::SetProp> {
+    spans.map(|s| export_span(s)).collect()
+}
+
+pub(crate) fn export_span(span: Span) -> Result<Object, error::SetProp> {
+    match span {
+        Span::Text(t, m) => {
+            let result = Object::new();
+            js_set(&result, "type", "text")?;
+            js_set(&result, "value", t)?;
+            if let Some(m) = &m {
+                // copy paste - export marks
+                if m.num_marks() > 0 {
+                    let marks = Object::new();
+                    for (name, value) in m.iter_marks() {
+                        js_set(
+                            &marks,
+                            name,
+                            alloc(&value.into(), TextRepresentation::String).1,
+                        )?;
+                    }
+                    js_set(&result, "marks", marks)?;
+                }
+            }
+            Ok(result)
+        }
+        Span::Block(b) => {
+            let result = Object::new();
+            js_set(&result, "type", "block")?;
+            js_set(&result, "value", &JsValue::from(&b))?;
+            Ok(result)
+        }
+    }
 }
 
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(

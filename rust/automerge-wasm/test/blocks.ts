@@ -91,6 +91,12 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'text', 3, 'parents' ], value: [] },
         { action: 'insert', path: [ 'text', 3, 'parents', 0 ], values: [ 'ul' ] }
       ]);
+      let spans = doc5.spans("/text");
+      assert.deepStrictEqual(spans, [
+        { type: 'text', value: 'aaa' },
+        { type: 'block', value: block },
+        { type: 'text', value: 'bbbccc' }
+      ])
     })
     it('references blocks on local changes', () => {
       let doc = create({ actor: "aabbcc" })
@@ -102,6 +108,12 @@ describe('Automerge', () => {
       let patches = doc.diffIncremental();
       assert.deepStrictEqual(patches, [
         { action: 'splice', path: [ 'text', 6], value: 'AAA', block },
+      ])
+      let spans = doc.spans("/text");
+      assert.deepStrictEqual(spans, [
+        { type: 'text', value: 'aaa' },
+        { type: 'block', value: block },
+        { type: 'text', value: 'bbAAAbccc' }
       ])
     })
   })

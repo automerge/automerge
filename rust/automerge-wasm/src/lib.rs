@@ -207,6 +207,16 @@ impl Automerge {
         }
     }
 
+    pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
+        let (obj, _) = interop::import(self, obj)?;
+        let spans = if let Some(heads) = get_heads(heads)? {
+            self.doc.spans_at(&obj, &heads)?
+        } else {
+            self.doc.spans(&obj)?
+        };
+        Ok(interop::export_spans(spans)?)
+    }
+
     pub fn splice(
         &mut self,
         obj: JsValue,
@@ -1132,6 +1142,8 @@ pub mod error {
         BadHeads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         InvalidProp(#[from] interop::error::InvalidProp),
+        #[error(transparent)]
+        ExportError(#[from] interop::error::SetProp),
     }
 
     impl From<Get> for JsValue {

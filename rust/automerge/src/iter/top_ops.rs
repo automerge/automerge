@@ -8,7 +8,7 @@ use std::sync::Arc;
 pub(crate) struct TopOps<'a> {
     iter: OpTreeIter<'a>,
     pos: usize,
-    start_pos: usize,
+    //start_pos: usize,
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
@@ -29,7 +29,7 @@ impl<'a> TopOps<'a> {
         Self {
             iter,
             pos: 0,
-            start_pos: 0,
+            //start_pos: 0,
             num_ops: 0,
             clock,
             key: None,
@@ -71,11 +71,11 @@ impl<'a> Iterator for TopOps<'a> {
                             self.num_ops = 0;
                         }
                         self.key = Some(key);
-                        self.start_pos = self.pos;
+                        //self.start_pos = self.pos;
                     }
                     None => {
                         self.key = Some(key);
-                        self.start_pos = self.pos;
+                        //self.start_pos = self.pos;
                         if visible {
                             self.last_op = Some((self.pos, op, self.marks.current().cloned()));
                             self.num_ops = 1;

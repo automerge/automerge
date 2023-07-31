@@ -8,6 +8,7 @@ export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
 export type MapObjType = { [key: string]: ObjType | Value }
+export type Span = { type: "text", value: string } | { type: block, value: MaterializeValue }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
@@ -235,6 +236,7 @@ export class Automerge {
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
+  spans(obj: ObjID, heads?: Heads): Span[];
   length(obj: ObjID, heads?: Heads): number;
   materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
