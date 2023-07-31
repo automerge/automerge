@@ -1,3 +1,8 @@
+# 0.5.1
+
+* Make `AutoCommit` and `PatchLog` `Send`
+* Make `Automerge::load_incremental_log_patches` `pub`
+
 # 0.5.0
 
 * Added `Cursor` for managing references to positions in sequences and text
