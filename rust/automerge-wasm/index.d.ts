@@ -8,7 +8,7 @@ export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
 export type MapObjType = { [key: string]: ObjType | Value }
-export type Span = { type: "text", value: string } | { type: block, value: MaterializeValue }
+export type Span = { type: "text", value: string } | { type: "block", value: MaterializeValue }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
@@ -216,8 +216,8 @@ export class Automerge {
   marks(obj: ObjID, heads?: Heads): Mark[];
 
   // blocks
-  splitBlock(obj: ObjID, index: number, block: MapObjType): ObjId;
-  joinBlock(block: ObjId);
+  splitBlock(obj: ObjID, index: number, block: MapObjType): ObjID;
+  joinBlock(block: ObjID) : void;
 
   diff(before: Heads, after: Heads): Patch[];
 
