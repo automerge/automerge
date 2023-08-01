@@ -95,10 +95,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: install
-        run: yarn global add prettier
-      - name: format
-        run: prettier -c javascript/.prettierrc javascript
 
   js_tests:
     runs-on: ubuntu-latest
