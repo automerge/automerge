@@ -1047,6 +1047,7 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};
+    use js_sys::RangeError;
     use wasm_bindgen::JsValue;
 
     use crate::interop::{
@@ -1060,7 +1061,7 @@ pub mod error {
 
     impl From<BadActorId> for JsValue {
         fn from(s: BadActorId) -> Self {
-            JsValue::from(s.to_string())
+            RangeError::new(&s.to_string()).into()
         }
     }
 
@@ -1074,7 +1075,7 @@ pub mod error {
 
     impl From<ApplyChangesError> for JsValue {
         fn from(e: ApplyChangesError) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1090,7 +1091,7 @@ pub mod error {
 
     impl From<Fork> for JsValue {
         fn from(f: Fork) -> Self {
-            JsValue::from(f.to_string())
+            RangeError::new(&f.to_string()).into()
         }
     }
 
@@ -1100,7 +1101,7 @@ pub mod error {
 
     impl From<Merge> for JsValue {
         fn from(e: Merge) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1118,7 +1119,7 @@ pub mod error {
 
     impl From<Get> for JsValue {
         fn from(e: Get) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1134,7 +1135,7 @@ pub mod error {
 
     impl From<Splice> for JsValue {
         fn from(e: Splice) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1154,7 +1155,7 @@ pub mod error {
 
     impl From<Insert> for JsValue {
         fn from(e: Insert) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1174,7 +1175,7 @@ pub mod error {
 
     impl From<InsertObject> for JsValue {
         fn from(e: InsertObject) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1192,7 +1193,7 @@ pub mod error {
 
     impl From<Increment> for JsValue {
         fn from(e: Increment) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1204,7 +1205,7 @@ pub mod error {
 
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1222,7 +1223,7 @@ pub mod error {
 
     impl From<ApplyPatch> for JsValue {
         fn from(e: ApplyPatch) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1232,7 +1233,7 @@ pub mod error {
 
     impl From<PopPatches> for JsValue {
         fn from(e: PopPatches) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1248,7 +1249,7 @@ pub mod error {
 
     impl From<Diff> for JsValue {
         fn from(e: Diff) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1260,7 +1261,7 @@ pub mod error {
 
     impl From<Isolate> for JsValue {
         fn from(e: Isolate) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1274,7 +1275,7 @@ pub mod error {
 
     impl From<Materialize> for JsValue {
         fn from(e: Materialize) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1294,7 +1295,7 @@ pub mod error {
 
     impl From<Cursor> for JsValue {
         fn from(e: Cursor) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1308,7 +1309,7 @@ pub mod error {
 
     impl From<ReceiveSyncMessage> for JsValue {
         fn from(e: ReceiveSyncMessage) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1322,7 +1323,7 @@ pub mod error {
 
     impl From<Load> for JsValue {
         fn from(e: Load) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1332,7 +1333,7 @@ pub mod error {
 
     impl From<EncodeChange> for JsValue {
         fn from(e: EncodeChange) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1346,7 +1347,7 @@ pub mod error {
 
     impl From<DecodeChange> for JsValue {
         fn from(e: DecodeChange) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1372,7 +1373,7 @@ pub mod error {
 
     impl From<Mark> for JsValue {
         fn from(e: Mark) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 }
