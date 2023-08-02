@@ -1,7 +1,7 @@
 use smol_str::SmolStr;
 use std::fmt;
 use std::fmt::Display;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::op_tree::OpSetMetadata;
 use crate::types::{Op, OpId, OpType};
@@ -27,11 +27,11 @@ impl<'a> Mark<'a> {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
-    pub(crate) fn into_mark_set(self) -> Rc<MarkSet> {
+    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
         let data = self.data.into_owned();
         m.insert(data.name, data.value);
-        Rc::new(m)
+        Arc::new(m)
     }
 }
 
@@ -70,7 +70,7 @@ impl MarkAccumulator {
     pub(crate) fn add(&mut self, index: usize, len: usize, other: &MarkSet) {
         for (name, value) in other.marks.iter() {
             let entry = self.marks.entry(name.clone()).or_default();
-            if let Some(mut last) = entry.last_mut() {
+            if let Some(last) = entry.last_mut() {
                 if &last.value == value && last.index + last.len == index {
                     last.len += len;
                     continue;
@@ -182,11 +182,11 @@ impl<'a> Mark<'a> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
     state: Vec<(OpId, &'a MarkData)>,
-    current: Rc<MarkSet>,
+    current: Arc<MarkSet>,
 }
 
 impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn current(&self) -> Option<&Rc<MarkSet>> {
+    pub(crate) fn current(&self) -> Option<&Arc<MarkSet>> {
         if self.current.is_empty() {
             None
         } else {
@@ -213,12 +213,12 @@ impl<'a> MarkStateMachine<'a> {
         if Self::mark_above(&self.state, index, mark).is_none() {
             if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
                 if below.value != mark.value {
-                    Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                    Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                     result = true
                 }
             } else {
                 // nothing above or below
-                Rc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
                 result = true
             }
         }
@@ -241,11 +241,12 @@ impl<'a> MarkStateMachine<'a> {
             match Self::mark_below(&mut self.state, index, mark) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
-                    Rc::make_mut(&mut self.current).insert(below.name.clone(), below.value.clone());
+                    Arc::make_mut(&mut self.current)
+                        .insert(below.name.clone(), below.value.clone());
                     result = true;
                 }
                 None => {
-                    Rc::make_mut(&mut self.current).remove(&mark.name);
+                    Arc::make_mut(&mut self.current).remove(&mark.name);
                     result = true;
                 }
             }

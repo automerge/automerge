@@ -7,7 +7,7 @@ describe("Automerge errors", () => {
     try {
       Automerge.change(
         Automerge.from({ d: ["test"] }),
-        doc => (doc.d[2] = "oops")
+        doc => (doc.d[2] = "oops"),
       )
     } catch (err) {
       error = err

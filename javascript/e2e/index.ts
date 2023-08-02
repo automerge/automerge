@@ -18,7 +18,7 @@ import fetch from "node-fetch"
 const VERDACCIO_DB_PATH = path.normalize(`${__dirname}/verdacciodb`)
 const VERDACCIO_CONFIG_PATH = path.normalize(`${__dirname}/verdaccio.yaml`)
 const AUTOMERGE_WASM_PATH = path.normalize(
-  `${__dirname}/../../rust/automerge-wasm`
+  `${__dirname}/../../rust/automerge-wasm`,
 )
 const AUTOMERGE_JS_PATH = path.normalize(`${__dirname}/..`)
 const EXAMPLES_DIR = path.normalize(path.join(__dirname, "../", "examples"))
@@ -170,7 +170,7 @@ async function buildExamples(examples: Array<Example>, profile: Profile) {
             registryUrl,
             "--check-files",
           ],
-          { stdio: "inherit" }
+          { stdio: "inherit" },
         )
         await spawnAndWait("yarn", ["--cwd", projectPath, "build"], {
           stdio: "inherit",
@@ -191,7 +191,7 @@ async function buildExamples(examples: Array<Example>, profile: Profile) {
             registryUrl,
             "--check-files",
           ],
-          { stdio: "inherit" }
+          { stdio: "inherit" },
         )
         await spawnAndWait("yarn", ["--cwd", projectPath, "build"], {
           stdio: "inherit",
@@ -212,7 +212,7 @@ async function buildExamples(examples: Array<Example>, profile: Profile) {
             registryUrl,
             "--check-files",
           ],
-          { stdio: "inherit" }
+          { stdio: "inherit" },
         )
         await spawnAndWait("yarn", ["--cwd", projectPath, "build"], {
           stdio: "inherit",
@@ -266,7 +266,7 @@ function buildAutomergeWasm(profile: Profile): WithRegistryAction {
     await spawnAndWait(
       "yarn",
       ["--cwd", AUTOMERGE_WASM_PATH, "--registry", registryUrl, "install"],
-      { stdio: "inherit" }
+      { stdio: "inherit" },
     )
     const cmd = profile === "release" ? "release" : "debug"
     await spawnAndWait("yarn", ["--cwd", AUTOMERGE_WASM_PATH, cmd], {
@@ -279,7 +279,7 @@ async function publishAutomergeWasm(registryUrl: string) {
   printHeader("Publishing automerge-wasm to verdaccio")
   await fsPromises.rm(
     path.join(VERDACCIO_DB_PATH, "@automerge/automerge-wasm"),
-    { recursive: true, force: true }
+    { recursive: true, force: true },
   )
   await yarnPublish(registryUrl, AUTOMERGE_WASM_PATH)
 }
@@ -302,7 +302,7 @@ async function buildAndPublishAutomergeJs(registryUrl: string) {
       registryUrl,
       "--check-files",
     ],
-    { stdio: "inherit" }
+    { stdio: "inherit" },
   )
   await spawnAndWait("yarn", ["--cwd", AUTOMERGE_JS_PATH, "build"], {
     stdio: "inherit",
@@ -358,7 +358,7 @@ class VerdaccioProcess {
     const child = spawn(
       "yarn",
       ["verdaccio", "--config", VERDACCIO_CONFIG_PATH],
-      { env: { ...process.env, FORCE_COLOR: "true" } }
+      { env: { ...process.env, FORCE_COLOR: "true" } },
     )
 
     // Forward stdout and stderr whilst waiting for startup to complete
@@ -450,7 +450,7 @@ type SpawnResult = {
 async function spawnAndWait(
   cmd: string,
   args: Array<string>,
-  options: child_process.SpawnOptions
+  options: child_process.SpawnOptions,
 ): Promise<SpawnResult> {
   const child = spawn(cmd, args, options)
   let stdout = null
@@ -501,7 +501,7 @@ async function yarnPublish(registryUrl: string, cwd: string) {
         npm_config__auth:
           "//localhost:4873/:_authToken=Gp2Mgxm4faa/7wp0dMSuRA==",
       },
-    }
+    },
   )
 }
 
@@ -514,7 +514,7 @@ async function yarnPublish(registryUrl: string, cwd: string) {
  */
 async function withTimeout<T>(
   promise: Promise<T>,
-  timeout: number
+  timeout: number,
 ): Promise<T> {
   type Step = "timed-out" | { result: T }
   const timedOut: () => Promise<Step> = async () => {

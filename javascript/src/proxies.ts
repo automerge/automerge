@@ -1,11 +1,6 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 import { Text } from "./text"
-import {
-  Automerge,
-  type Heads,
-  type ObjID,
-  type Prop,
-} from "@automerge/automerge-wasm"
+import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
 
 import type { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
 import {
@@ -68,7 +63,7 @@ function parseListIndex(key: any) {
 
 function valueAt<T extends Target>(
   target: T,
-  prop: Prop
+  prop: Prop,
 ): ValueType<T> | undefined {
   const { context, objectId, path, textV2 } = target
   const value = context.getWithType(objectId, prop)
@@ -115,7 +110,7 @@ function valueAt<T extends Target>(
         context,
         path,
         objectId,
-        prop
+        prop,
       )
       return counter as ValueType<T>
     }
@@ -165,7 +160,7 @@ function import_value(value: any, textV2: boolean): ImportedValue {
         return [value, "map"]
       } else if (isSameDocument(value, context)) {
         throw new RangeError(
-          "Cannot create a reference to an existing document object"
+          "Cannot create a reference to an existing document object",
         )
       } else {
         throw new RangeError(`Cannot assign unknown object: ${value}`)
@@ -189,7 +184,23 @@ function import_value(value: any, textV2: boolean): ImportedValue {
   }
 }
 
+// When we assign a value to a property in a proxy we recursively walk through
+// the value we are assigning and copy it into the document. This is generally
+// desirable behaviour. However, a very common bug is to accidentally assign a
+// value which is already in the document to another key within the same
+// document, this often leads to surprising behaviour where users expected to
+// _move_ the object, but it is instead copied. To avoid this we check if the
+// value is from the same document and if it is we throw an error, this means
+// we require an explicit Object.assign call to copy the object, thus avoiding
+// the footgun
 function isSameDocument(val, context) {
+  // Date is technically an object, but immutable, so allowing people to assign
+  // a date from one place in the document to another place in the document is
+  // not likely to be a bug
+  if (val instanceof Date) {
+    return false
+  }
+
   // this depends on __wbg_ptr being the wasm pointer
   // a new version of wasm-bindgen will break this
   // but the tests should expose the break
@@ -202,7 +213,7 @@ function isSameDocument(val, context) {
 const MapHandler = {
   get<T extends Target>(
     target: T,
-    key: any
+    key: any,
   ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
@@ -223,7 +234,7 @@ const MapHandler = {
     target.cache = {} // reset cache on set
     if (isSameDocument(val, context)) {
       throw new RangeError(
-        "Cannot create a reference to an existing document object"
+        "Cannot create a reference to an existing document object",
       )
     }
     if (key === TRACE) {
@@ -251,9 +262,7 @@ const MapHandler = {
           assertText(value)
           const text = context.putObject(objectId, key, "")
           const proxyText = textProxy(context, text, [...path, key])
-          for (let i = 0; i < value.length; i++) {
-            proxyText[i] = value.get(i)
-          }
+          proxyText.splice(0, 0, ...value)
         }
         break
       }
@@ -306,7 +315,7 @@ const MapHandler = {
 const ListHandler = {
   get<T extends Target>(
     target: T,
-    index: any
+    index: any,
   ):
     | ValueType<T>
     | boolean
@@ -341,7 +350,7 @@ const ListHandler = {
     index = parseListIndex(index)
     if (isSameDocument(val, context)) {
       throw new RangeError(
-        "Cannot create a reference to an existing document object"
+        "Cannot create a reference to an existing document object",
       )
     }
     if (index === TRACE) {
@@ -414,7 +423,7 @@ const ListHandler = {
     const elem = context.get(objectId, index)
     if (elem != null && elem[0] == "counter") {
       throw new TypeError(
-        "Unsupported operation: deleting a counter from a list"
+        "Unsupported operation: deleting a counter from a list",
       )
     }
     context.delete(objectId, index)
@@ -490,7 +499,7 @@ export function mapProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[]
+  path: Prop[],
 ): MapValueType<T> {
   const target: Target = {
     context,
@@ -510,7 +519,7 @@ export function listProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[]
+  path: Prop[],
 ): ListValueType<T> {
   const target: Target = {
     context,
@@ -533,7 +542,7 @@ interface TextProxy extends Text {
 export function textProxy(
   context: Automerge,
   objectId: ObjID,
-  path: Prop[]
+  path: Prop[],
 ): TextProxy {
   const target: Target = {
     context,
@@ -643,7 +652,7 @@ function listMethods<T extends Target>(target: T) {
       for (const val of vals) {
         if (isSameDocument(val, context)) {
           throw new RangeError(
-            "Cannot create a reference to an existing document object"
+            "Cannot create a reference to an existing document object",
           )
         }
       }
@@ -792,7 +801,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     find(
-      f: (_a: ValueType<T>, _n: number) => boolean
+      f: (_a: ValueType<T>, _n: number) => boolean,
     ): ValueType<T> | undefined {
       let index = 0
       for (const v of this) {
@@ -824,14 +833,14 @@ function listMethods<T extends Target>(target: T) {
 
     reduce<U>(
       f: (acc: U, currentValue: ValueType<T>) => U,
-      initialValue: U
+      initialValue: U,
     ): U | undefined {
       return this.toArray().reduce<U>(f, initialValue)
     },
 
     reduceRight<U>(
       f: (acc: U, item: ValueType<T>) => U,
-      initialValue: U
+      initialValue: U,
     ): U | undefined {
       return this.toArray().reduceRight(f, initialValue)
     },

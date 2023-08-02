@@ -1,6 +1,6 @@
 [package]
 name = "automerge-test"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -10,7 +10,7 @@ description = "Utilities for testing automerge libraries"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-automerge = { version = "0.4.0", path = "../automerge" }
+automerge = { version = "0.5.1", path = "../automerge" }
 smol_str = { version = "^0.1.21", features=["serde"] }
 serde = { version = "^1.0", features=["derive"] }
 decorum = "0.3.1"

@@ -113,7 +113,7 @@ export class Text {
   set(index: number, value: Value) {
     if (this[STATE]) {
       throw new RangeError(
-        "object cannot be modified outside of a change block"
+        "object cannot be modified outside of a change block",
       )
     }
     this.elems[index] = value
@@ -125,7 +125,7 @@ export class Text {
   insertAt(index: number, ...values: Array<Value | object>) {
     if (this[STATE]) {
       throw new RangeError(
-        "object cannot be modified outside of a change block"
+        "object cannot be modified outside of a change block",
       )
     }
     if (values.every(v => typeof v === "string")) {
@@ -142,7 +142,7 @@ export class Text {
   deleteAt(index: number, numDelete = 1) {
     if (this[STATE]) {
       throw new RangeError(
-        "object cannot be modified outside of a change block"
+        "object cannot be modified outside of a change block",
       )
     }
     this.elems.splice(index, numDelete)
@@ -197,8 +197,8 @@ export class Text {
       previousValue: Value,
       currentValue: Value,
       currentIndex: number,
-      array: Value[]
-    ) => Value
+      array: Value[],
+    ) => Value,
   ) {
     this.elems.reduce(f)
   }
@@ -208,14 +208,14 @@ export class Text {
       previousValue: Value,
       currentValue: Value,
       currentIndex: number,
-      array: Value[]
-    ) => Value
+      array: Value[],
+    ) => Value,
   ) {
     this.elems.reduceRight(f)
   }
 
   slice(start?: number, end?: number) {
-    new Text(this.elems.slice(start, end))
+    return new Text(this.elems.slice(start, end))
   }
 
   some(test: (arg: Value) => boolean): boolean {

@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -14,7 +14,7 @@ use crate::{
 struct TextSpan {
     text: String,
     start: usize,
-    marks: Option<Rc<MarkSet>>,
+    marks: Option<Arc<MarkSet>>,
 }
 
 #[derive(Debug, Default)]
