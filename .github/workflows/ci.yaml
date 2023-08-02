@@ -14,7 +14,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: stable
           default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
@@ -28,7 +28,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: stable
           default: true
           components: clippy
       - uses: Swatinem/rust-cache@v1
@@ -42,7 +42,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: stable
           default: true
       - uses: Swatinem/rust-cache@v1
       - name: Build rust docs
@@ -117,6 +117,13 @@ jobs:
         with:
           profile: minimal
           toolchain: nightly-2023-01-26
+          components: rust-src, rustfmt, clippy
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.67.0
+          components: rust-src, rustfmt, clippy
           default: true
       - uses: Swatinem/rust-cache@v1
       - name: Install CMocka
@@ -125,8 +132,6 @@ jobs:
         uses: jwlawson/actions-setup-cmake@v1.12
         with:
           cmake-version: latest
-      - name: Install rust-src
-        run: rustup component add rust-src
       - name: Build and test C bindings
         run: ./scripts/ci/cmake-build Release Static
         shell: bash
@@ -136,7 +141,7 @@ jobs:
     strategy:
       matrix:
         toolchain:
-          - 1.67.0
+          - stable
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -155,7 +160,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: stable
           default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
@@ -168,7 +173,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: stable
           default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
