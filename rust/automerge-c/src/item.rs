@@ -1862,7 +1862,7 @@ pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bo
 #[no_mangle]
 pub unsafe extern "C" fn AMitemToMark<'a>(
     item: *const AMitem,
-    value: &mut *const AMmark<'a>,
+    value: *mut *const AMmark<'a>,
 ) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(mark) = <&AMmark<'a>>::try_from(item) {
