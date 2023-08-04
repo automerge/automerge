@@ -181,6 +181,13 @@ macro_rules! hydrate_list {
 }
 
 #[cfg(feature = "wasm")]
+impl From<Value> for wasm_bindgen::JsValue {
+    fn from(value: Value) -> Self {
+        (&value).into()
+    }
+}
+
+#[cfg(feature = "wasm")]
 impl From<&Value> for wasm_bindgen::JsValue {
     fn from(value: &Value) -> Self {
         use js_sys::{Array, Date, Object, Reflect, Uint8Array};

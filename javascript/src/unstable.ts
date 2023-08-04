@@ -65,6 +65,7 @@ import { type PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
+import { mapProxy } from "./proxies"
 import type { InternalState } from "./internal_state"
 
 export type {
@@ -314,6 +315,33 @@ export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
   }
 }
 
+export function block<T>(doc: Doc<T>, path: stable.Prop[]) {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+
+  if (!objectId) {
+    throw new RangeError("invalid doc argument for block()")
+  }
+
+  _clear_cache(doc)
+
+  path.unshift(objectId)
+  const path_string = path.join("/")
+
+  if (_is_proxy(doc)) {
+    let info = state.handle.objInfo(path_string)
+    // TODO: I should also check that the parent is text
+    if (info.type == "map" && info.path !== undefined) {
+      return mapProxy(state.handle, info.id, state.textV2, info.path)
+    } else {
+      throw new RangeError("Not a block")
+    }
+  } else {
+    let tmp = state.handle.materialize(path_string, state.heads, state)
+    return tmp
+  }
+}
+
 export function splitBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
@@ -336,7 +364,11 @@ export function splitBlock<T>(
   index = cursorToIndex(state, value, index)
 
   try {
-    return state.handle.splitBlock(value, index, block)
+    let id = state.handle.splitBlock(value, index, {})
+    let info = state.handle.objInfo(id)
+    let blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
+    Object.assign(blockProxy, block)
+    return blockProxy
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }

@@ -530,6 +530,26 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = objInfo)]
+    pub fn obj_info(&self, obj: JsValue, heads: Option<Array>) -> Result<Object, error::Get> {
+        // fixme - import takes a path - needs heads to be accurate
+        let (obj, _) = interop::import(self, obj)?;
+        let typ = self.doc.object_type(&obj)?;
+        let result = Object::new();
+        let parents = if let Some(heads) = get_heads(heads)? {
+            self.doc.parents_at(&obj, &heads)
+        } else {
+            self.doc.parents(&obj)
+        }?;
+        js_set(&result, "id", obj.to_string())?;
+        js_set(&result, "type", typ.to_string())?;
+        if let Some(path) = parents.visible_path() {
+            let path = interop::export_just_path(&path);
+            js_set(&result, "path", &path)?;
+        }
+        Ok(result)
+    }
+
     #[wasm_bindgen(js_name = getAll)]
     pub fn get_all(
         &self,
@@ -1137,6 +1157,8 @@ pub mod error {
     pub enum Get {
         #[error("invalid object ID: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
+        #[error("object not visible")]
+        NotVisible,
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("bad heads: {0}")]

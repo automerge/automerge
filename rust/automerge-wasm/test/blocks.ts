@@ -115,6 +115,15 @@ describe('Automerge', () => {
         { type: 'block', value: block },
         { type: 'text', value: 'bbAAAbccc' }
       ])
+      assert.deepStrictEqual(doc.objInfo("/"),
+        { id: "_root", type: "map", path: [] }
+      )
+      assert.deepStrictEqual(doc.objInfo("/text"),
+        { id: text, type: "text", path: ["text"] }
+      )
+      assert.deepStrictEqual(doc.objInfo("/text/3"),
+        { id: blockId, type: "map", path: ["text", 3] }
+      )
     })
   })
 })

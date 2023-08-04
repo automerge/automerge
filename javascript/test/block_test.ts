@@ -8,6 +8,7 @@ import { inspect } from "util"
 describe("Automerge", () => {
   describe("block", () => {
     it("can split a block", () => {
+      let tmp = Automerge.from({ hello: ["world", "zip"] })
       let block = { parents: ["div"], type: "p" }
       let callbacks: Automerge.Patch[][] = []
       let patchCallback: any = (p, info) => {
@@ -17,12 +18,16 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, { patchCallback }, d => {
         Automerge.splitBlock(d, ["text"], 3, block)
       })
-      //console.log(inspect(callbacks, { depth: null, colors: true }))
-      assert.deepStrictEqual(callbacks[0], [
+
+      assert.deepStrictEqual(Automerge.block(doc, ["text", 3]), block)
+
+      assert.deepStrictEqual(callbacks[0].slice(0, 6), [
         { action: "insert", path: ["text", 3], values: [{}] },
         { action: "put", path: ["text", 3, "parents"], value: [] },
-        { action: "put", path: ["text", 3, "type"], value: "p" },
-        { action: "insert", path: ["text", 3, "parents", 0], values: ["div"] },
+        { action: "put", path: ["text", 3, "type"], value: "" },
+        { action: "insert", path: ["text", 3, "parents", 0], values: [""] },
+        { action: "splice", path: ["text", 3, "parents", 0, 0], value: "div" },
+        { action: "splice", path: ["text", 3, "type", 0], value: "p" },
       ])
       assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
         { type: "text", value: "aaa" },

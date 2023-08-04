@@ -1260,7 +1260,7 @@ fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     result
 }
 
-fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
+pub(crate) fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
     let result = Array::new();
     for p in path {
         result.push(&prop_to_js(&p.1));
