@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 import { assertEqualsOneOf } from "./helpers"
 
 type DocType = {
