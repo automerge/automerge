@@ -1377,6 +1377,19 @@
 <a href="#1377" id="1377">1377</a>
 <a href="#1378" id="1378">1378</a>
 <a href="#1379" id="1379">1379</a>
+<a href="#1380" id="1380">1380</a>
+<a href="#1381" id="1381">1381</a>
+<a href="#1382" id="1382">1382</a>
+<a href="#1383" id="1383">1383</a>
+<a href="#1384" id="1384">1384</a>
+<a href="#1385" id="1385">1385</a>
+<a href="#1386" id="1386">1386</a>
+<a href="#1387" id="1387">1387</a>
+<a href="#1388" id="1388">1388</a>
+<a href="#1389" id="1389">1389</a>
+<a href="#1390" id="1390">1390</a>
+<a href="#1391" id="1391">1391</a>
+<a href="#1392" id="1392">1392</a>
 </pre></div><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -1407,7 +1420,9 @@
 </span><span class="kw">use </span>am::marks::Mark;
 <span class="kw">use </span>am::transaction::CommitOptions;
 <span class="kw">use </span>am::transaction::Transactable;
+<span class="kw">use </span>am::OnPartialLoad;
 <span class="kw">use </span>am::ScalarValue;
+<span class="kw">use </span>am::VerificationMode;
 <span class="kw">use </span>automerge <span class="kw">as </span>am;
 <span class="kw">use </span>automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 <span class="kw">use </span>js_sys::{Array, Function, Object, Uint8Array};
@@ -2328,20 +2343,31 @@
         .ok()
         .and_then(|v1| v1.as_bool())
         .unwrap_or(<span class="bool-val">false</span>);
-    <span class="kw">let </span>unchecked = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;unchecked&quot;</span>)
-        .ok()
-        .and_then(|v1| v1.as_bool())
-        .unwrap_or(<span class="bool-val">false</span>);
     <span class="kw">let </span>text_rep = <span class="kw">if </span>text_v1 {
         TextRepresentation::Array
     } <span class="kw">else </span>{
         TextRepresentation::String
     };
-    <span class="kw">let </span><span class="kw-2">mut </span>doc = <span class="kw">if </span>unchecked {
-        am::AutoCommit::load_unverified_heads(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into())
+    <span class="kw">let </span>unchecked = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;unchecked&quot;</span>)
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(<span class="bool-val">false</span>);
+    <span class="kw">let </span>verification_mode = <span class="kw">if </span>unchecked {
+        VerificationMode::DontCheck
     } <span class="kw">else </span>{
-        am::AutoCommit::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into())
+        VerificationMode::Check
     };
+    <span class="kw">let </span>allow_missing_deps = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;allowMissingDeps&quot;</span>)
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(<span class="bool-val">false</span>);
+    <span class="kw">let </span>on_partial_load = <span class="kw">if </span>allow_missing_deps {
+        OnPartialLoad::Ignore
+    } <span class="kw">else </span>{
+        OnPartialLoad::Error
+    };
+    <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommit::load_with(<span class="kw-2">&amp;</span>data, on_partial_load, verification_mode)<span class="question-mark">?
+        </span>.with_text_rep(text_rep.into());
     <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
         <span class="kw">let </span>actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)<span class="question-mark">?</span>.to_vec());

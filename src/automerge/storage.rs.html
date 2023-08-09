@@ -33,12 +33,12 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>parse;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>save;
 
+<span class="kw">pub use </span>load::VerificationMode;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>{
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
     columns::{Columns, MismatchingColumn, RawColumn, RawColumns},
     document::{AsChangeMeta, AsDocOp, ChangeMetadata, CompressConfig, DocOp, Document},
-    load::VerificationMode,
 };
 
 <span class="kw">fn </span>shift_range(range: Range&lt;usize&gt;, by: usize) -&gt; Range&lt;usize&gt; {

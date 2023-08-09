@@ -1672,6 +1672,7 @@
 <a href="#1672" id="1672">1672</a>
 <a href="#1673" id="1673">1673</a>
 <a href="#1674" id="1674">1674</a>
+<a href="#1675" id="1675">1675</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -2244,7 +2245,8 @@
                 am.apply_changes(change.into_iter().chain(c))<span class="question-mark">?</span>;
                 <span class="comment">// Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                </span><span class="kw">if </span>!am.queue.is_empty() &amp;&amp; !first_chunk_was_doc {
+                </span><span class="kw">if </span>!am.queue.is_empty() &amp;&amp; !first_chunk_was_doc &amp;&amp; on_error == OnPartialLoad::Error
+                {
                     <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::MissingDeps);
                 }
             }

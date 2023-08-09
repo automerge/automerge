@@ -118,6 +118,7 @@
 <a href="#118" id="118">118</a>
 <a href="#119" id="119">119</a>
 <a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>tracing::instrument;
 
 <span class="kw">use crate</span>::{
@@ -127,8 +128,9 @@
 
 <span class="kw">mod </span>change_collector;
 <span class="kw">mod </span>reconstruct_document;
+<span class="kw">pub use </span>reconstruct_document::VerificationMode;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>reconstruct_document::{
-    reconstruct_document, DocObserver, LoadedObject, Reconstructed, VerificationMode,
+    reconstruct_document, DocObserver, LoadedObject, Reconstructed,
 };
 
 <span class="attr">#[derive(Debug, thiserror::Error)]
