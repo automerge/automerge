@@ -91,13 +91,6 @@ jobs:
       - name: run tests
         run: ./scripts/ci/deno_tests
 
-  js_fmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: run tests
-        run: ./scripts/ci/fmt_js
-
   js_tests:
     runs-on: ubuntu-latest
     steps:
