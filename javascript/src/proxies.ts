@@ -7,7 +7,7 @@ import {
   type AutomergeValue as UnstableAutomergeValue,
   MapValue as UnstableMapValue,
   ListValue as UnstableListValue,
-} from "./unstable_types"
+} from "./next_types"
 import { Counter, getWriteableCounter } from "./counter"
 import {
   STATE,

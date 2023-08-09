@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
 import { PatchSource } from "../src/types"

@@ -1,12 +1,9 @@
 /**
- * # The unstable API
+ * # The next API
  *
- * This module contains new features we are working on which are either not yet
- * ready for a stable release and/or which will result in backwards incompatible
- * API changes. The API of this module may change in arbitrary ways between
- * point releases - we will always document what these changes are in the
- * [CHANGELOG](#changelog) below, but only depend on this module if you are prepared to deal
- * with frequent changes.
+ * This module contains new features we are working on which are backwards
+ * incompatible with the current API of Automerge. This module will become the
+ * API of the next major version of Automerge
  *
  * ## Differences from stable
  *
@@ -30,6 +27,8 @@
  *   type
  *
  * ## CHANGELOG
+ * * Rename this module to `next` to reflect our increased confidence in it
+ *   and stability commitment to it
  * * Introduce this module to expose the new API which has no `Text` class
  *
  *
@@ -51,7 +50,7 @@ export {
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
-} from "./unstable_types"
+} from "./next_types"
 
 import type {
   MapObjType,
@@ -59,7 +58,7 @@ import type {
   Mark,
   MarkRange,
   MarkValue,
-} from "./unstable_types"
+} from "./next_types"
 
 import { type PatchCallback } from "./stable"
 
@@ -125,6 +124,8 @@ export type InitOptions<T> = {
   patchCallback?: PatchCallback<T>
   /** @hidden */
   unchecked?: boolean
+  /** Allow loading a document with missing changes */
+  allowMissingChanges?: boolean
 }
 
 import { ActorId, Doc } from "./stable"
