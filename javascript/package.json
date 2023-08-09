@@ -23,6 +23,8 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
+    "check-fmt": "prettier -c .prettierrc --check",
+    "fmt": "prettier -c .prettierrc -w",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
     "test": "ts-mocha --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
