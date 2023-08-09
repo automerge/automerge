@@ -469,6 +469,31 @@ describe('Automerge', () => {
     })
   })
 
+  describe("loadIncremental", () => {
+    it("should allow you to load changes with missing deps", () => {
+      const doc1 = create({ actor: "aaaa" })
+      doc1.put("_root", "key", "value") 
+      doc1.saveIncremental()
+      doc1.put("_root", "key", "value2") 
+      const changeWithoutDep = doc1.saveIncremental()
+
+      const doc2 = create({ actor: "bbbb" })
+      doc2.loadIncremental(changeWithoutDep)
+    })
+  })
+
+  describe("load", () => {
+    it("should allow explicitly allowing missing deps", () => {
+      const doc1 = create({ actor: "aaaa" })
+      doc1.put("_root", "key", "value") 
+      doc1.saveIncremental()
+      doc1.put("_root", "key", "value2") 
+      const changeWithoutDep = doc1.saveIncremental()
+
+      load(changeWithoutDep, { allowMissingDeps: true })
+    })
+  })
+
   describe('patch generation', () => {
     it('should include root object key updates', () => {
       const doc1 = create({ actor: 'aaaa' }), doc2 = create({ actor: 'bbbb'})

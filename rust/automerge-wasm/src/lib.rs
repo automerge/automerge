@@ -28,7 +28,9 @@
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::OnPartialLoad;
 use am::ScalarValue;
+use am::VerificationMode;
 use automerge as am;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -949,20 +951,31 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .ok()
         .and_then(|v1| v1.as_bool())
         .unwrap_or(false);
-    let unchecked = js_get(&options, "unchecked")
-        .ok()
-        .and_then(|v1| v1.as_bool())
-        .unwrap_or(false);
     let text_rep = if text_v1 {
         TextRepresentation::Array
     } else {
         TextRepresentation::String
     };
-    let mut doc = if unchecked {
-        am::AutoCommit::load_unverified_heads(&data)?.with_text_rep(text_rep.into())
+    let unchecked = js_get(&options, "unchecked")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let verification_mode = if unchecked {
+        VerificationMode::DontCheck
     } else {
-        am::AutoCommit::load(&data)?.with_text_rep(text_rep.into())
+        VerificationMode::Check
     };
+    let allow_missing_deps = js_get(&options, "allowMissingDeps")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let on_partial_load = if allow_missing_deps {
+        OnPartialLoad::Ignore
+    } else {
+        OnPartialLoad::Error
+    };
+    let mut doc = am::AutoCommit::load_with(&data, on_partial_load, verification_mode)?
+        .with_text_rep(text_rep.into());
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

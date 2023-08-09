@@ -570,7 +570,8 @@ impl Automerge {
                 am.apply_changes(change.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty() && !first_chunk_was_doc {
+                if !am.queue.is_empty() && !first_chunk_was_doc && on_error == OnPartialLoad::Error
+                {
                     return Err(AutomergeError::MissingDeps);
                 }
             }

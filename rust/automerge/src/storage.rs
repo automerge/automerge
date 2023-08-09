@@ -9,12 +9,12 @@ pub(crate) mod load;
 pub(crate) mod parse;
 pub(crate) mod save;
 
+pub use load::VerificationMode;
 pub(crate) use {
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
     columns::{Columns, MismatchingColumn, RawColumn, RawColumns},
     document::{AsChangeMeta, AsDocOp, ChangeMetadata, CompressConfig, DocOp, Document},
-    load::VerificationMode,
 };
 
 fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {

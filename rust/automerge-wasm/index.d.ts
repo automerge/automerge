@@ -302,6 +302,7 @@ export type LoadOptions = {
   actor?: Actor,
   text_v1?: boolean,
   unchecked?: boolean,
+  allowMissingDeps?: boolean,
 }
 
 export type InitOptions = {

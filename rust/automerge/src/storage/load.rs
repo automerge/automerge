@@ -7,8 +7,9 @@ use crate::{
 
 mod change_collector;
 mod reconstruct_document;
+pub use reconstruct_document::VerificationMode;
 pub(crate) use reconstruct_document::{
-    reconstruct_document, DocObserver, LoadedObject, Reconstructed, VerificationMode,
+    reconstruct_document, DocObserver, LoadedObject, Reconstructed,
 };
 
 #[derive(Debug, thiserror::Error)]

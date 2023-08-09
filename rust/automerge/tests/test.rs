@@ -1844,6 +1844,33 @@ fn inserting_text_near_deleted_marks() {
     dbg!(tx.text(&text_id).unwrap(), tx.marks(&text_id).unwrap());
 }
 
+#[test]
+fn test_load_incremental_partial_load() {
+    let mut doc = Automerge::new();
+
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "a", 1).unwrap();
+    tx.commit();
+
+    let start_heads = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "b", 2).unwrap();
+    tx.commit();
+
+    let changes = doc.get_changes(&start_heads);
+
+    let encoded = changes
+        .into_iter()
+        .cloned()
+        .fold(Vec::new(), |mut acc, mut change| {
+            acc.extend_from_slice(change.bytes().as_ref());
+            acc
+        });
+
+    let mut doc2 = Automerge::new();
+    doc2.load_incremental(&encoded).unwrap();
+}
+
 /*
 #[test]
 fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
