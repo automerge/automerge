@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
-import { deleteAt, insertAt } from "../src/unstable"
+import { next as Automerge } from "../src"
+import { deleteAt, insertAt } from "../src/next"
 
 describe("Unstable change tests", () => {
   it("should be able to make simple changes to a document", () => {

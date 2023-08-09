@@ -1,97 +1,94 @@
 import * as assert from "assert"
-import * as stable from "../src"
-import { unstable } from "../src"
+import * as old from "../src"
+import { next } from "../src"
 
-describe("stable/unstable interop", () => {
-  it("should allow reading Text from stable as strings in unstable", () => {
-    let stableDoc = stable.from({
-      text: new stable.Text("abc"),
+describe("old/next interop", () => {
+  it("should allow reading Text from old as strings in next", () => {
+    let nextDoc = old.from({
+      text: new old.Text("abc"),
     })
-    let unstableDoc = unstable.init<any>()
-    unstableDoc = unstable.merge(unstableDoc, stableDoc)
-    assert.deepStrictEqual(unstableDoc.text, "abc")
+    let oldDoc = next.init<any>()
+    oldDoc = next.merge(oldDoc, nextDoc)
+    assert.deepStrictEqual(oldDoc.text, "abc")
   })
 
-  it("should allow string from stable as Text in unstable", () => {
-    let unstableDoc = unstable.from({
+  it("should allow string from old as Text in next", () => {
+    let nextDoc = next.from({
       text: "abc",
     })
-    let stableDoc = stable.init<any>()
-    stableDoc = unstable.merge(stableDoc, unstableDoc)
-    assert.deepStrictEqual(stableDoc.text, new stable.Text("abc"))
+    let oldDoc = old.init<any>()
+    oldDoc = next.merge(oldDoc, nextDoc)
+    assert.deepStrictEqual(oldDoc.text, new old.Text("abc"))
   })
 
-  it("should allow reading strings from stable as RawString in unstable", () => {
-    let stableDoc = stable.from({
+  it("should allow reading strings from old as RawString in next", () => {
+    let nextDoc = old.from({
       text: "abc",
     })
-    let unstableDoc = unstable.init<any>()
-    unstableDoc = unstable.merge(unstableDoc, stableDoc)
-    assert.deepStrictEqual(unstableDoc.text, new unstable.RawString("abc"))
+    let oldDoc = next.init<any>()
+    oldDoc = next.merge(oldDoc, nextDoc)
+    assert.deepStrictEqual(oldDoc.text, new next.RawString("abc"))
   })
 
-  it("should allow reading RawString from unstable as string in stable", () => {
-    let unstableDoc = unstable.from({
-      text: new unstable.RawString("abc"),
+  it("should allow reading RawString from next as string in old", () => {
+    let nextDoc = next.from({
+      text: new next.RawString("abc"),
     })
-    let stableDoc = stable.init<any>()
-    stableDoc = unstable.merge(stableDoc, unstableDoc)
-    assert.deepStrictEqual(stableDoc.text, "abc")
+    let oldDoc = old.init<any>()
+    oldDoc = next.merge(oldDoc, nextDoc)
+    assert.deepStrictEqual(oldDoc.text, "abc")
   })
 
   it("should show conflicts on text objects", () => {
-    let doc1 = stable.from({ text: new stable.Text("abc") }, "bb")
-    let doc2 = stable.from({ text: new stable.Text("def") }, "aa")
-    doc1 = stable.merge(doc1, doc2)
-    let conflicts = stable.getConflicts(doc1, "text")!
+    let doc1 = old.from({ text: new old.Text("abc") }, "bb")
+    let doc2 = old.from({ text: new old.Text("def") }, "aa")
+    doc1 = old.merge(doc1, doc2)
+    let conflicts = old.getConflicts(doc1, "text")!
     assert.equal(conflicts["1@bb"]!.toString(), "abc")
     assert.equal(conflicts["1@aa"]!.toString(), "def")
 
-    let unstableDoc = unstable.init<any>()
-    unstableDoc = unstable.merge(unstableDoc, doc1)
-    let conflicts2 = unstable.getConflicts(unstableDoc, "text")!
+    let nextDoc = next.init<any>()
+    nextDoc = next.merge(nextDoc, doc1)
+    let conflicts2 = next.getConflicts(nextDoc, "text")!
     assert.equal(conflicts2["1@bb"]!.toString(), "abc")
     assert.equal(conflicts2["1@aa"]!.toString(), "def")
   })
 
-  it("should allow filling a list with text in stable", () => {
-    let doc = stable.from<{ list: Array<stable.Text | null> }>({
+  it("should allow filling a list with text in old", () => {
+    let doc = old.from<{ list: Array<old.Text | null> }>({
       list: [null, null, null],
     })
-    doc = stable.change(doc, doc => {
-      doc.list.fill(new stable.Text("abc"), 0, 3)
+    doc = old.change(doc, doc => {
+      doc.list.fill(new old.Text("abc"), 0, 3)
     })
     assert.deepStrictEqual(doc.list, [
-      new stable.Text("abc"),
-      new stable.Text("abc"),
-      new stable.Text("abc"),
+      new old.Text("abc"),
+      new old.Text("abc"),
+      new old.Text("abc"),
     ])
   })
 
-  it("should allow filling a list with text in unstable", () => {
-    let doc = unstable.from<{ list: Array<string | null> }>({
+  it("should allow filling a list with text in next", () => {
+    let doc = next.from<{ list: Array<string | null> }>({
       list: [null, null, null],
     })
-    doc = stable.change(doc, doc => {
+    doc = old.change(doc, doc => {
       doc.list.fill("abc", 0, 3)
     })
     assert.deepStrictEqual(doc.list, ["abc", "abc", "abc"])
   })
 
-  it("should allow splicing text into a list on stable", () => {
-    let doc = stable.from<{ list: Array<stable.Text> }>({ list: [] })
-    doc = stable.change(doc, doc => {
-      doc.list.splice(0, 0, new stable.Text("abc"), new stable.Text("def"))
+  it("should allow splicing text into a list on old", () => {
+    let doc = old.from<{ list: Array<old.Text> }>({ list: [] })
+    doc = old.change(doc, doc => {
+      doc.list.splice(0, 0, new old.Text("abc"), new old.Text("def"))
     })
-    assert.deepStrictEqual(doc.list, [
-      new stable.Text("abc"),
-      new stable.Text("def"),
-    ])
+    assert.deepStrictEqual(doc.list, [new old.Text("abc"), new old.Text("def")])
   })
 
-  it("should allow splicing text into a list on unstable", () => {
-    let doc = unstable.from<{ list: Array<string> }>({ list: [] })
-    doc = unstable.change(doc, doc => {
+  it("should allow splicing text into a list on next", () => {
+    let doc = next.from<{ list: Array<string> }>({ list: [] })
+    doc = next.change(doc, doc => {
       doc.list.splice(0, 0, "abc", "def")
     })
     assert.deepStrictEqual(doc.list, ["abc", "def"])

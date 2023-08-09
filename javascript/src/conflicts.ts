@@ -1,6 +1,6 @@
 import { Counter, type AutomergeValue } from "./types"
 import { Text } from "./text"
-import { type AutomergeValue as UnstableAutomergeValue } from "./unstable_types"
+import { type AutomergeValue as NextAutomergeValue } from "./next_types"
 import { type Target, Text1Target, Text2Target } from "./proxies"
 import { mapProxy, listProxy, ValueType } from "./proxies"
 import type { Prop, ObjID } from "@automerge/automerge-wasm"
@@ -36,7 +36,7 @@ export function unstableConflictAt(
     objectId,
     prop,
     true,
-    (context: Automerge, conflictId: ObjID): UnstableAutomergeValue => {
+    (context: Automerge, conflictId: ObjID): NextAutomergeValue => {
       return context.text(conflictId)
     },
   )
