@@ -117,6 +117,8 @@ export type InitOptions<T> = {
   patchCallback?: PatchCallback<T>
   /** @hidden */
   unchecked?: boolean
+  /** Allow loading a document with missing changes */
+  allowMissingChanges?: boolean
 }
 
 import { ActorId, Doc } from "./stable"

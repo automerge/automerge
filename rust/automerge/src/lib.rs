@@ -303,6 +303,7 @@ pub use parents::{Parent, Parents};
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
+pub use storage::VerificationMode;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 pub use value::{ScalarValue, Value};
 

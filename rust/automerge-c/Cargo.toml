@@ -1,6 +1,6 @@
 [package]
 name = "automerge-c"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
 edition = "2021"
 license = "MIT"

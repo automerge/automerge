@@ -1,5 +1,6 @@
 import * as assert from "assert"
 import { next as Automerge } from "../src"
+import * as oldAutomerge from "../src/stable"
 import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
 import { PatchSource } from "../src/types"
@@ -304,6 +305,34 @@ describe("Automerge", () => {
       })
       assert.deepEqual(doc.list.indexOf(5), 5)
       assert.deepEqual(doc.text.indexOf("world"), 6)
+    })
+  })
+
+  describe("explicitly allowing missing dependencies when loading", () => {
+    it("should work in unstable", () => {
+      const doc1 = Automerge.init<any>()
+      const doc2 = Automerge.change(doc1, d => {
+        d.list = [1, 2, 3]
+      })
+      const doc3 = Automerge.change(doc2, d => {
+        d.list.push(4)
+      })
+      const changes = Automerge.getChanges(doc2, doc3)
+      assert.equal(changes.length, 1)
+      Automerge.load(changes[0], { allowMissingChanges: true })
+    })
+
+    it("should work in stable", () => {
+      const doc1 = oldAutomerge.init<any>()
+      const doc2 = oldAutomerge.change(doc1, d => {
+        d.list = [1, 2, 3]
+      })
+      const doc3 = oldAutomerge.change(doc2, d => {
+        d.list.push(4)
+      })
+      const changes = oldAutomerge.getChanges(doc2, doc3)
+      assert.equal(changes.length, 1)
+      oldAutomerge.load(changes[0], { allowMissingChanges: true })
     })
   })
 

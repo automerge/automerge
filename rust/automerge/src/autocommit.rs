@@ -3,13 +3,14 @@ use std::ops::RangeBounds;
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
-use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
+use crate::VerificationMode;
+use crate::{hydrate, OnPartialLoad};
 use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -95,6 +96,27 @@ impl AutoCommit {
 
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_unverified_heads(data)?;
+        Ok(Self {
+            doc,
+            transaction: None,
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
+            diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
+            isolation: None,
+        })
+    }
+
+    pub fn load_with(
+        data: &[u8],
+        on_error: OnPartialLoad,
+        mode: VerificationMode,
+    ) -> Result<Self, AutomergeError> {
+        let doc = Automerge::load_with(
+            data,
+            on_error,
+            mode,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )?;
         Ok(Self {
             doc,
             transaction: None,

@@ -160,6 +160,8 @@ export type InitOptions<T> = {
   enableTextV2?: boolean
   /** @hidden */
   unchecked?: boolean
+  /** Allow loading a document with missing changes */
+  allowMissingChanges?: boolean
 }
 
 /** @hidden */
@@ -608,7 +610,13 @@ export function load<T>(
   const patchCallback = opts.patchCallback
   const text_v1 = !(opts.enableTextV2 || false)
   const unchecked = opts.unchecked || false
-  const handle = ApiHandler.load(data, { text_v1, actor, unchecked })
+  const allowMissingDeps = opts.allowMissingChanges || false
+  const handle = ApiHandler.load(data, {
+    text_v1,
+    actor,
+    unchecked,
+    allowMissingDeps,
+  })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
