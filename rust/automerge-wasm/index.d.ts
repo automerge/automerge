@@ -253,6 +253,7 @@ export class Automerge {
   saveNoCompress(): Uint8Array;
   saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
+  saveSince(heads: Heads): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 
   // sync over network

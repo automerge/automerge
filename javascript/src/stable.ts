@@ -1134,6 +1134,12 @@ function isObject(obj: unknown): obj is Record<string, unknown> {
   return typeof obj === "object" && obj !== null
 }
 
+export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
+  const state = _state(doc)
+  const result = state.handle.saveSince(heads)
+  return result
+}
+
 export type {
   API,
   SyncState,

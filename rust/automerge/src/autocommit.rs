@@ -403,6 +403,12 @@ impl AutoCommit {
         bytes
     }
 
+    /// Save everything which is not a (transitive) dependency of `heads`
+    pub fn save_after(&mut self, heads: &[ChangeHash]) -> Vec<u8> {
+        self.ensure_transaction_closed();
+        self.doc.save_after(heads)
+    }
+
     pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
         self.doc.get_missing_deps(heads)
