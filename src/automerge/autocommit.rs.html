@@ -960,6 +960,12 @@
 <a href="#960" id="960">960</a>
 <a href="#961" id="961">961</a>
 <a href="#962" id="962">962</a>
+<a href="#963" id="963">963</a>
+<a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -1363,6 +1369,12 @@
             <span class="self">self</span>.save_cursor = <span class="self">self</span>.doc.get_heads()
         }
         bytes
+    }
+
+    <span class="doccomment">/// Save everything which is not a (transitive) dependency of `heads`
+    </span><span class="kw">pub fn </span>save_after(<span class="kw-2">&amp;mut </span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;u8&gt; {
+        <span class="self">self</span>.ensure_transaction_closed();
+        <span class="self">self</span>.doc.save_after(heads)
     }
 
     <span class="kw">pub fn </span>get_missing_deps(<span class="kw-2">&amp;mut </span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
