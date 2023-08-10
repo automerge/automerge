@@ -723,4 +723,17 @@ describe("Automerge", () => {
       })
     })
   })
+  describe("saveSince", () => {
+    it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      Automerge.saveIncremental(doc)
+      const heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => (d.c = "d"))
+      let incremental = Automerge.saveIncremental(doc)
+      let since = Automerge.saveSince(doc, heads)
+      assert.deepEqual(incremental, since)
+    })
+  })
 })

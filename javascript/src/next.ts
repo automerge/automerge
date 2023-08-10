@@ -107,6 +107,7 @@ export {
   diff,
   insertAt,
   deleteAt,
+  saveSince,
 } from "./stable"
 
 export type InitOptions<T> = {

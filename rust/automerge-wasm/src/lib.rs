@@ -680,6 +680,16 @@ impl Automerge {
         Uint8Array::from(bytes.as_slice())
     }
 
+    #[wasm_bindgen(js_name=saveSince)]
+    pub fn save_since(
+        &mut self,
+        heads: Array,
+    ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
+        let heads = get_heads(Some(heads))?.unwrap_or(Vec::new());
+        let bytes = self.doc.save_after(&heads);
+        Ok(Uint8Array::from(bytes.as_slice()))
+    }
+
     #[wasm_bindgen(js_name = saveNoCompress)]
     pub fn save_nocompress(&mut self) -> Uint8Array {
         let bytes = self.doc.save_nocompress();

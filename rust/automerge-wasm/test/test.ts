@@ -273,6 +273,21 @@ describe('Automerge', () => {
       assert.deepEqual(docA.save(), docC.save());
     })
 
+    it("should be able to save since a given heads", () => {
+      const doc = create()
+
+      doc.put("_root", "foo", 1)
+      const heads = doc.getHeads()
+      doc.saveIncremental()
+
+      doc.put("_root", "bar", 2)
+
+      const saveIncremental = doc.saveIncremental()
+      const saveSince = doc.saveSince(heads)
+      assert.deepEqual(saveIncremental, saveSince)
+
+    })
+
     it('should be able to splice text', () => {
       const doc = create()
       const text = doc.putObject("_root", "text", "");
