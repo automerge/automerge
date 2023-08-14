@@ -977,6 +977,44 @@
 <a href="#977" id="977">977</a>
 <a href="#978" id="978">978</a>
 <a href="#979" id="979">979</a>
+<a href="#980" id="980">980</a>
+<a href="#981" id="981">981</a>
+<a href="#982" id="982">982</a>
+<a href="#983" id="983">983</a>
+<a href="#984" id="984">984</a>
+<a href="#985" id="985">985</a>
+<a href="#986" id="986">986</a>
+<a href="#987" id="987">987</a>
+<a href="#988" id="988">988</a>
+<a href="#989" id="989">989</a>
+<a href="#990" id="990">990</a>
+<a href="#991" id="991">991</a>
+<a href="#992" id="992">992</a>
+<a href="#993" id="993">993</a>
+<a href="#994" id="994">994</a>
+<a href="#995" id="995">995</a>
+<a href="#996" id="996">996</a>
+<a href="#997" id="997">997</a>
+<a href="#998" id="998">998</a>
+<a href="#999" id="999">999</a>
+<a href="#1000" id="1000">1000</a>
+<a href="#1001" id="1001">1001</a>
+<a href="#1002" id="1002">1002</a>
+<a href="#1003" id="1003">1003</a>
+<a href="#1004" id="1004">1004</a>
+<a href="#1005" id="1005">1005</a>
+<a href="#1006" id="1006">1006</a>
+<a href="#1007" id="1007">1007</a>
+<a href="#1008" id="1008">1008</a>
+<a href="#1009" id="1009">1009</a>
+<a href="#1010" id="1010">1010</a>
+<a href="#1011" id="1011">1011</a>
+<a href="#1012" id="1012">1012</a>
+<a href="#1013" id="1013">1013</a>
+<a href="#1014" id="1014">1014</a>
+<a href="#1015" id="1015">1015</a>
+<a href="#1016" id="1016">1016</a>
+<a href="#1017" id="1017">1017</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! # Sync Protocol
 //!
 //! The sync protocol is based on this paper:
@@ -1305,6 +1343,7 @@
         message: Message,
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        sync_state.in_flight = <span class="bool-val">false</span>;
         <span class="kw">let </span>before_heads = <span class="self">self</span>.get_heads();
 
         <span class="kw">let </span>Message {
@@ -1331,17 +1370,12 @@
             sync_state.last_sent_heads = message_heads.clone();
         }
 
-        <span class="kw">if </span>sync_state.sent_hashes.is_empty() {
-            sync_state.in_flight = <span class="bool-val">false</span>;
-        }
-
         <span class="kw">let </span>known_heads = message_heads
             .iter()
             .filter(|head| <span class="self">self</span>.get_change_by_hash(head).is_some())
             .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
         <span class="kw">if </span>known_heads.len() == message_heads.len() {
             sync_state.shared_heads = message_heads.clone();
-            sync_state.in_flight = <span class="bool-val">false</span>;
             <span class="comment">// If the remote peer has lost all its data, reset our state to perform a full resync
             </span><span class="kw">if </span>message_heads.is_empty() {
                 sync_state.last_sent_heads = Default::default();
@@ -1925,6 +1959,48 @@
         sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
 
         <span class="macro">assert_eq!</span>(doc1.get_heads(), doc2.get_heads());
+    }
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>in_flight_logic_should_not_sabotage_concurrent_changes() {
+        <span class="comment">// This reproduces issue https://github.com/automerge/automerge/issues/702
+        //
+        // This problem manifested as a situation where the sync states of two
+        // ends of a connection both return None from `generate_sync_message` -
+        // indicating that there is nothing to send - yet the documents were
+        // different at either end.
+
+        // Because this logic depends on bloom filter false positives we have to
+        // run the test many times, hence this loop
+        </span><span class="kw">for _ in </span><span class="number">0</span>..<span class="number">300 </span>{
+            <span class="comment">// create two documents
+            </span><span class="kw">let </span><span class="kw-2">mut </span>doc1 = <span class="kw">crate</span>::AutoCommit::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>doc2 = <span class="kw">crate</span>::AutoCommit::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>s1 = State::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>s2 = State::new();
+
+            <span class="comment">// get them in sync
+            </span>sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
+
+            <span class="comment">// make a change on doc2
+            </span>doc2.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;x&quot;</span>, <span class="number">0</span>).unwrap();
+
+            <span class="comment">// generate a sync message containing the change (this should
+            // alwasy be Some because we have generated new local changes)
+            </span><span class="kw">let </span>msg = doc2.sync().generate_sync_message(<span class="kw-2">&amp;mut </span>s2).unwrap();
+            <span class="comment">// Receive that sync message on doc1
+            </span>doc1.sync().receive_sync_message(<span class="kw-2">&amp;mut </span>s1, msg).unwrap();
+
+            <span class="comment">// now before sending any messages back to doc2, make a change on
+            // doc1
+            </span>doc1.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;x&quot;</span>, <span class="number">1</span>).unwrap();
+
+            <span class="comment">// now synchronize
+            </span>sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
+
+            <span class="comment">// At this point both documents should be equal
+            </span><span class="macro">assert_eq!</span>(doc1.get_heads(), doc2.get_heads());
+        }
     }
 
     <span class="kw">fn </span>sync(
