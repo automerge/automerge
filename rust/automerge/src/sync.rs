@@ -326,6 +326,7 @@ impl Automerge {
         message: Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        sync_state.in_flight = false;
         let before_heads = self.get_heads();
 
         let Message {
@@ -352,17 +353,12 @@ impl Automerge {
             sync_state.last_sent_heads = message_heads.clone();
         }
 
-        if sync_state.sent_hashes.is_empty() {
-            sync_state.in_flight = false;
-        }
-
         let known_heads = message_heads
             .iter()
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads = message_heads.clone();
-            sync_state.in_flight = false;
             // If the remote peer has lost all its data, reset our state to perform a full resync
             if message_heads.is_empty() {
                 sync_state.last_sent_heads = Default::default();
@@ -946,6 +942,48 @@ mod tests {
         sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
 
         assert_eq!(doc1.get_heads(), doc2.get_heads());
+    }
+
+    #[test]
+    fn in_flight_logic_should_not_sabotage_concurrent_changes() {
+        // This reproduces issue https://github.com/automerge/automerge/issues/702
+        //
+        // This problem manifested as a situation where the sync states of two
+        // ends of a connection both return None from `generate_sync_message` -
+        // indicating that there is nothing to send - yet the documents were
+        // different at either end.
+
+        // Because this logic depends on bloom filter false positives we have to
+        // run the test many times, hence this loop
+        for _ in 0..300 {
+            // create two documents
+            let mut doc1 = crate::AutoCommit::new();
+            let mut doc2 = crate::AutoCommit::new();
+            let mut s1 = State::new();
+            let mut s2 = State::new();
+
+            // get them in sync
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // make a change on doc2
+            doc2.put(crate::ROOT, "x", 0).unwrap();
+
+            // generate a sync message containing the change (this should
+            // alwasy be Some because we have generated new local changes)
+            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap();
+            // Receive that sync message on doc1
+            doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
+
+            // now before sending any messages back to doc2, make a change on
+            // doc1
+            doc1.put(crate::ROOT, "x", 1).unwrap();
+
+            // now synchronize
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // At this point both documents should be equal
+            assert_eq!(doc1.get_heads(), doc2.get_heads());
+        }
     }
 
     fn sync(
