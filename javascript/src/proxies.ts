@@ -7,7 +7,7 @@ import {
   type AutomergeValue as UnstableAutomergeValue,
   MapValue as UnstableMapValue,
   ListValue as UnstableListValue,
-} from "./unstable_types"
+} from "./next_types"
 import { Counter, getWriteableCounter } from "./counter"
 import {
   STATE,
@@ -63,7 +63,7 @@ function parseListIndex(key: any) {
 
 function valueAt<T extends Target>(
   target: T,
-  prop: Prop
+  prop: Prop,
 ): ValueType<T> | undefined {
   const { context, objectId, path, textV2 } = target
   const value = context.getWithType(objectId, prop)
@@ -110,7 +110,7 @@ function valueAt<T extends Target>(
         context,
         path,
         objectId,
-        prop
+        prop,
       )
       return counter as ValueType<T>
     }
@@ -160,7 +160,7 @@ function import_value(value: any, textV2: boolean): ImportedValue {
         return [value, "map"]
       } else if (isSameDocument(value, context)) {
         throw new RangeError(
-          "Cannot create a reference to an existing document object"
+          "Cannot create a reference to an existing document object",
         )
       } else {
         throw new RangeError(`Cannot assign unknown object: ${value}`)
@@ -213,7 +213,7 @@ function isSameDocument(val, context) {
 const MapHandler = {
   get<T extends Target>(
     target: T,
-    key: any
+    key: any,
   ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
@@ -234,7 +234,7 @@ const MapHandler = {
     target.cache = {} // reset cache on set
     if (isSameDocument(val, context)) {
       throw new RangeError(
-        "Cannot create a reference to an existing document object"
+        "Cannot create a reference to an existing document object",
       )
     }
     if (key === TRACE) {
@@ -315,7 +315,7 @@ const MapHandler = {
 const ListHandler = {
   get<T extends Target>(
     target: T,
-    index: any
+    index: any,
   ):
     | ValueType<T>
     | boolean
@@ -350,7 +350,7 @@ const ListHandler = {
     index = parseListIndex(index)
     if (isSameDocument(val, context)) {
       throw new RangeError(
-        "Cannot create a reference to an existing document object"
+        "Cannot create a reference to an existing document object",
       )
     }
     if (index === TRACE) {
@@ -423,7 +423,7 @@ const ListHandler = {
     const elem = context.get(objectId, index)
     if (elem != null && elem[0] == "counter") {
       throw new TypeError(
-        "Unsupported operation: deleting a counter from a list"
+        "Unsupported operation: deleting a counter from a list",
       )
     }
     context.delete(objectId, index)
@@ -499,7 +499,7 @@ export function mapProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[]
+  path: Prop[],
 ): MapValueType<T> {
   const target: Target = {
     context,
@@ -519,7 +519,7 @@ export function listProxy<T extends Target>(
   context: Automerge,
   objectId: ObjID,
   textV2: boolean,
-  path: Prop[]
+  path: Prop[],
 ): ListValueType<T> {
   const target: Target = {
     context,
@@ -542,7 +542,7 @@ interface TextProxy extends Text {
 export function textProxy(
   context: Automerge,
   objectId: ObjID,
-  path: Prop[]
+  path: Prop[],
 ): TextProxy {
   const target: Target = {
     context,
@@ -652,7 +652,7 @@ function listMethods<T extends Target>(target: T) {
       for (const val of vals) {
         if (isSameDocument(val, context)) {
           throw new RangeError(
-            "Cannot create a reference to an existing document object"
+            "Cannot create a reference to an existing document object",
           )
         }
       }
@@ -801,7 +801,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     find(
-      f: (_a: ValueType<T>, _n: number) => boolean
+      f: (_a: ValueType<T>, _n: number) => boolean,
     ): ValueType<T> | undefined {
       let index = 0
       for (const v of this) {
@@ -833,14 +833,14 @@ function listMethods<T extends Target>(target: T) {
 
     reduce<U>(
       f: (acc: U, currentValue: ValueType<T>) => U,
-      initialValue: U
+      initialValue: U,
     ): U | undefined {
       return this.toArray().reduce<U>(f, initialValue)
     },
 
     reduceRight<U>(
       f: (acc: U, item: ValueType<T>) => U,
-      initialValue: U
+      initialValue: U,
     ): U | undefined {
       return this.toArray().reduceRight(f, initialValue)
     },

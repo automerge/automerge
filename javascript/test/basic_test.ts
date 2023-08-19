@@ -1,5 +1,6 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
+import * as oldAutomerge from "../src/stable"
 import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
 import { PatchSource } from "../src/types"
@@ -98,7 +99,7 @@ describe("Automerge", () => {
       // will also freeze sub objects
       doc1 = Automerge.change(
         doc1,
-        doc => (doc.book = { title: "how to win friends" })
+        doc => (doc.book = { title: "how to win friends" }),
       )
       doc2 = Automerge.merge(doc2, doc1)
       assert(Object.isFrozen(doc1))
@@ -307,6 +308,34 @@ describe("Automerge", () => {
     })
   })
 
+  describe("explicitly allowing missing dependencies when loading", () => {
+    it("should work in unstable", () => {
+      const doc1 = Automerge.init<any>()
+      const doc2 = Automerge.change(doc1, d => {
+        d.list = [1, 2, 3]
+      })
+      const doc3 = Automerge.change(doc2, d => {
+        d.list.push(4)
+      })
+      const changes = Automerge.getChanges(doc2, doc3)
+      assert.equal(changes.length, 1)
+      Automerge.load(changes[0], { allowMissingChanges: true })
+    })
+
+    it("should work in stable", () => {
+      const doc1 = oldAutomerge.init<any>()
+      const doc2 = oldAutomerge.change(doc1, d => {
+        d.list = [1, 2, 3]
+      })
+      const doc3 = oldAutomerge.change(doc2, d => {
+        d.list.push(4)
+      })
+      const changes = oldAutomerge.getChanges(doc2, doc3)
+      assert.equal(changes.length, 1)
+      oldAutomerge.load(changes[0], { allowMissingChanges: true })
+    })
+  })
+
   describe("merge", () => {
     it("it should handle conflicts the same in merges as with loads", () => {
       type DocShape = { sub: { x: number; y: number } }
@@ -394,57 +423,57 @@ describe("Automerge", () => {
         ])
         assert.deepEqual(
           d.chars.map(n => n + "!"),
-          ["a!", "b!", "c!"]
+          ["a!", "b!", "c!"],
         )
         assert.deepEqual(
           d.numbers.map(n => n + 10),
-          [30, 13, 110]
+          [30, 13, 110],
         )
         assert.deepEqual(d.numbers.toString(), "20,3,100")
         assert.deepEqual(d.numbers.toLocaleString(), "20,3,100")
         assert.deepEqual(
           d.numbers.forEach((n: number) => r1.push(n)),
-          undefined
+          undefined,
         )
         assert.deepEqual(
           d.numbers.every(n => n > 1),
-          true
+          true,
         )
         assert.deepEqual(
           d.numbers.every(n => n > 10),
-          false
+          false,
         )
         assert.deepEqual(
           d.numbers.filter(n => n > 10),
-          [20, 100]
+          [20, 100],
         )
         assert.deepEqual(
           d.repeats.find(n => n < 10),
-          3
+          3,
         )
         assert.deepEqual(
           d.repeats.find(n => n < 10),
-          3
+          3,
         )
         assert.deepEqual(
           d.repeats.find(n => n < 0),
-          undefined
+          undefined,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 10),
-          2
+          2,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 0),
-          -1
+          -1,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 10),
-          2
+          2,
         )
         assert.deepEqual(
           d.repeats.findIndex(n => n < 0),
-          -1
+          -1,
         )
         assert.deepEqual(d.numbers.includes(3), true)
         assert.deepEqual(d.numbers.includes(-3), false)
@@ -452,31 +481,31 @@ describe("Automerge", () => {
         assert.deepEqual(d.numbers.join(), "20,3,100")
         assert.deepEqual(
           d.numbers.some(f => f === 3),
-          true
+          true,
         )
         assert.deepEqual(
           d.numbers.some(f => f < 0),
-          false
+          false,
         )
         assert.deepEqual(
           d.numbers.reduce((sum, n) => sum + n, 100),
-          223
+          223,
         )
         assert.deepEqual(
           d.repeats.reduce((sum, n) => sum + n, 100),
-          352
+          352,
         )
         assert.deepEqual(
           d.chars.reduce((sum, n) => sum + n, "="),
-          "=abc"
+          "=abc",
         )
         assert.deepEqual(
           d.chars.reduceRight((sum, n) => sum + n, "="),
-          "=cba"
+          "=cba",
         )
         assert.deepEqual(
           d.numbers.reduceRight((sum, n) => sum + n, 100),
-          223
+          223,
         )
         assert.deepEqual(d.repeats.lastIndexOf(3), 5)
         assert.deepEqual(d.repeats.lastIndexOf(3, 3), 3)
@@ -506,7 +535,7 @@ describe("Automerge", () => {
     const m2 = Automerge.merge(Automerge.clone(s2), Automerge.clone(s1))
     assert.deepStrictEqual(
       Automerge.getConflicts(m1, "x"),
-      Automerge.getConflicts(m2, "x")
+      Automerge.getConflicts(m2, "x"),
     )
   })
 
@@ -585,7 +614,7 @@ describe("Automerge", () => {
       })
       assert.deepEqual(
         doc.value,
-        "Has the sly fox jumped right over the lazy dog"
+        "Has the sly fox jumped right over the lazy dog",
       )
       Automerge.getCursorPosition(doc, ["value"], cursor)
     })
@@ -656,7 +685,7 @@ describe("Automerge", () => {
       let heads1 = Automerge.getHeads(doc1)
       let doc2 = Automerge.clone(doc1, { patchCallback })
       doc2 = Automerge.change(doc2, d => (d.a = "b"))
-      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c"))
+      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c")).newDoc
       doc1 = Automerge.merge(doc1, doc2)
       doc2 = Automerge.change(doc2, d => (d.x = "y"))
       doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
@@ -692,6 +721,19 @@ describe("Automerge", () => {
         doc.anotherDate = originalDoc.date
         doc.dates[0] = originalDoc.dates[0]
       })
+    })
+  })
+  describe("saveSince", () => {
+    it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      Automerge.saveIncremental(doc)
+      const heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => (d.c = "d"))
+      let incremental = Automerge.saveIncremental(doc)
+      let since = Automerge.saveSince(doc, heads)
+      assert.deepEqual(incremental, since)
     })
   })
 })

@@ -253,6 +253,7 @@ export class Automerge {
   saveNoCompress(): Uint8Array;
   saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
+  saveSince(heads: Heads): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 
   // sync over network
@@ -302,6 +303,7 @@ export type LoadOptions = {
   actor?: Actor,
   text_v1?: boolean,
   unchecked?: boolean,
+  allowMissingDeps?: boolean,
 }
 
 export type InitOptions = {

@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 import { assertEqualsOneOf } from "./helpers"
 
 type DocType = {
@@ -24,7 +24,7 @@ describe("Automerge.Text", () => {
 
   it("should support deletion", () => {
     s1 = Automerge.change(s1, doc =>
-      Automerge.splice(doc, ["text"], 0, 0, "abc")
+      Automerge.splice(doc, ["text"], 0, 0, "abc"),
     )
     s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 1))
     assert.strictEqual(s1.text.length, 2)
@@ -35,7 +35,7 @@ describe("Automerge.Text", () => {
 
   it("should support implicit and explicit deletion", () => {
     s1 = Automerge.change(s1, doc =>
-      Automerge.splice(doc, ["text"], 0, 0, "abc")
+      Automerge.splice(doc, ["text"], 0, 0, "abc"),
     )
     s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 1))
     s1 = Automerge.change(s1, doc => Automerge.splice(doc, ["text"], 1, 0))
@@ -47,10 +47,10 @@ describe("Automerge.Text", () => {
 
   it("should handle concurrent insertion", () => {
     s1 = Automerge.change(s1, doc =>
-      Automerge.splice(doc, ["text"], 0, 0, "abc")
+      Automerge.splice(doc, ["text"], 0, 0, "abc"),
     )
     s2 = Automerge.change(s2, doc =>
-      Automerge.splice(doc, ["text"], 0, 0, "xyz")
+      Automerge.splice(doc, ["text"], 0, 0, "xyz"),
     )
     s1 = Automerge.merge(s1, s2)
     assert.strictEqual(s1.text.length, 6)
@@ -69,7 +69,7 @@ describe("Automerge.Text", () => {
 
   it("should serialize to JSON as a simple string", () => {
     s1 = Automerge.change(s1, doc =>
-      Automerge.splice(doc, ["text"], 0, 0, 'a"b')
+      Automerge.splice(doc, ["text"], 0, 0, 'a"b'),
     )
     assert.strictEqual(JSON.stringify(s1), '{"text":"a\\"b"}')
   })
@@ -87,7 +87,7 @@ describe("Automerge.Text", () => {
   it("should not allow modification outside of a change callback", () => {
     assert.throws(
       () => Automerge.splice(s1, ["text"], 0, 0, "a"),
-      /object cannot be modified outside of a change block/
+      /object cannot be modified outside of a change block/,
     )
   })
 

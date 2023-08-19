@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -10,17 +10,17 @@ describe("Automerge", () => {
       doc1 = Automerge.change(doc1, d => (d.foo2 = "bar2"))
       doc2 = Automerge.loadIncremental(
         doc2,
-        Automerge.getBackend(doc1).saveIncremental()
+        Automerge.getBackend(doc1).saveIncremental(),
       )
       doc1 = Automerge.change(doc1, d => (d.foo = "bar2"))
       doc2 = Automerge.loadIncremental(
         doc2,
-        Automerge.getBackend(doc1).saveIncremental()
+        Automerge.getBackend(doc1).saveIncremental(),
       )
       doc1 = Automerge.change(doc1, d => (d.x = "y"))
       doc2 = Automerge.loadIncremental(
         doc2,
-        Automerge.getBackend(doc1).saveIncremental()
+        Automerge.getBackend(doc1).saveIncremental(),
       )
       assert.deepEqual(doc1, doc2)
     })

@@ -1,5 +1,5 @@
 use std::num::NonZeroU64;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
@@ -865,7 +865,7 @@ impl TransactionInner {
         obj: ObjId,
         prop: Prop,
         op: Op,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if patch_log.is_active() {

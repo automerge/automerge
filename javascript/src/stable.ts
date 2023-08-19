@@ -160,6 +160,8 @@ export type InitOptions<T> = {
   enableTextV2?: boolean
   /** @hidden */
   unchecked?: boolean
+  /** Allow loading a document with missing changes */
+  allowMissingChanges?: boolean
 }
 
 /** @hidden */
@@ -252,7 +254,7 @@ export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
  */
 export function clone<T>(
   doc: Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const state = _state(doc)
   const heads = state.heads
@@ -293,9 +295,10 @@ export function free<T>(doc: Doc<T>) {
  */
 export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
+    .newDoc
 }
 
 /**
@@ -347,26 +350,103 @@ export function from<T extends Record<string, unknown>>(
 export function change<T>(
   doc: Doc<T>,
   options: string | ChangeOptions<T> | ChangeFn<T>,
-  callback?: ChangeFn<T>
+  callback?: ChangeFn<T>,
 ): Doc<T> {
   if (typeof options === "function") {
-    return _change(doc, "change", {}, options)
+    return _change(doc, "change", {}, options).newDoc
   } else if (typeof callback === "function") {
     if (typeof options === "string") {
       options = { message: options }
     }
-    return _change(doc, "change", options, callback)
+    return _change(doc, "change", options, callback).newDoc
   } else {
     throw RangeError("Invalid args for change")
   }
 }
 
+/**
+ * The type returned from {@link changeAt}
+ */
+export type ChangeAtResult<T> = {
+  /** The updated document **/
+  newDoc: Doc<T>
+  /**
+   * The heads resulting from the change
+   *
+   * @remarks
+   * Note that this is _not_ the same as the heads of `newDoc`. The newly created
+   * change will be added to the history of `newDoc` as if it was _concurrent_
+   * with whatever the heads of the document were at the time of the change.
+   * This means that `newHeads` will be the same as the heads of a fork of
+   * `newDoc` at the given heads to which the change was applied.
+   *
+   * This field will be `null` if no change was made
+   */
+  newHeads: Heads | null
+}
+
+/**
+ * Make a change to the document as it was at a particular point in history
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to update
+ * @param scope - The heads representing the point in history to make the change
+ * @param options - Either a message or a {@link ChangeOptions} for the new change
+ * @param callback - A `ChangeFn` to be used if `options` was a `string`
+ *
+ * @remarks
+ * This function is similar to {@link change} but allows you to make changes to
+ * the document as if it were at a particular point in time. To understand this
+ * imagine a document created with the following history:
+ *
+ * ```ts
+ * let doc = automerge.from({..})
+ * doc = automerge.change(doc, () => {...})
+ *
+ * const heads = automerge.getHeads(doc)
+ *
+ * // fork the document make a change
+ * let fork = automerge.fork(doc)
+ * fork = automerge.change(fork, () => {...})
+ * const headsOnFork = automerge.getHeads(fork)
+ *
+ * // make a change on the original doc
+ * doc = automerge.change(doc, () => {...})
+ * const headsOnOriginal = automerge.getHeads(doc)
+ *
+ * // now merge the changes back to the original document
+ * doc = automerge.merge(doc, fork)
+ *
+ * // The heads of the document will now be (headsOnFork, headsOnOriginal)
+ * ```
+ *
+ * {@link ChangeAt} produces an equivalent history, but without having to
+ * create a fork of the document. In particular the `newHeads` field of the
+ * returned {@link ChangeAtResult} will be the same as `headsOnFork`.
+ *
+ * Why would you want this? It's typically used in conjunction with {@link diff}
+ * to reconcile state which is managed concurrently with the document. For
+ * example, if you have a text editor component which the user is modifying
+ * and you can't send the changes to the document synchronously you might follow
+ * a workflow like this:
+ *
+ * * On initialization save the current heads of the document in the text editor state
+ * * Every time the user makes a change record the change in the text editor state
+ *
+ * Now from time to time reconcile the editor state and the document
+ * * Load the last saved heads from the text editor state, call them `oldHeads`
+ * * Apply all the unreconciled changes to the document using `changeAt(doc, oldHeads, ...)`
+ * * Get the diff from the resulting document to the current document using {@link diff}
+ *   passing the {@link ChangeAtResult.newHeads} as the `before` argument and the
+ *   heads of the entire document as the `after` argument.
+ * * Apply the diff to the text editor state
+ * * Save the current heads of the document in the text editor state
+ */
 export function changeAt<T>(
   doc: Doc<T>,
   scope: Heads,
   options: string | ChangeOptions<T> | ChangeFn<T>,
-  callback?: ChangeFn<T>
-): Doc<T> {
+  callback?: ChangeFn<T>,
+): ChangeAtResult<T> {
   if (typeof options === "function") {
     return _change(doc, "changeAt", {}, options, scope)
   } else if (typeof callback === "function") {
@@ -383,7 +463,7 @@ function progressDocument<T>(
   doc: Doc<T>,
   source: PatchSource,
   heads: Heads | null,
-  callback?: PatchCallback<T>
+  callback?: PatchCallback<T>,
 ): Doc<T> {
   if (heads == null) {
     return doc
@@ -394,7 +474,7 @@ function progressDocument<T>(
   if (callback != null) {
     const { value, patches } = state.handle.applyAndReturnPatches(
       doc,
-      nextState
+      nextState,
     )
     if (patches.length > 0) {
       callback(patches, { before: doc, after: value, source })
@@ -412,8 +492,8 @@ function _change<T>(
   source: PatchSource,
   options: ChangeOptions<T>,
   callback: ChangeFn<T>,
-  scope?: Heads
-): Doc<T> {
+  scope?: Heads,
+): { newDoc: Doc<T>; newHeads: Heads | null } {
   if (typeof callback !== "function") {
     throw new RangeError("invalid change function")
   }
@@ -425,7 +505,7 @@ function _change<T>(
   }
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -444,16 +524,22 @@ function _change<T>(
       if (scope != null) {
         state.handle.integrate()
       }
-      return doc
+      return {
+        newDoc: doc,
+        newHeads: null,
+      }
     } else {
-      state.handle.commit(options.message, options.time)
+      const newHead = state.handle.commit(options.message, options.time)
       state.handle.integrate()
-      return progressDocument(
-        doc,
-        source,
-        heads,
-        options.patchCallback || state.patchCallback
-      )
+      return {
+        newDoc: progressDocument(
+          doc,
+          source,
+          heads,
+          options.patchCallback || state.patchCallback,
+        ),
+        newHeads: newHead != null ? [newHead] : null,
+      }
     }
   } catch (e) {
     state.heads = undefined
@@ -475,7 +561,7 @@ function _change<T>(
  */
 export function emptyChange<T>(
   doc: Doc<T>,
-  options: string | ChangeOptions<T> | void
+  options: string | ChangeOptions<T> | void,
 ) {
   if (options === undefined) {
     options = {}
@@ -488,7 +574,7 @@ export function emptyChange<T>(
 
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -517,14 +603,20 @@ export function emptyChange<T>(
  */
 export function load<T>(
   data: Uint8Array,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   const actor = opts.actor
   const patchCallback = opts.patchCallback
   const text_v1 = !(opts.enableTextV2 || false)
   const unchecked = opts.unchecked || false
-  const handle = ApiHandler.load(data, { text_v1, actor, unchecked })
+  const allowMissingDeps = opts.allowMissingChanges || false
+  const handle = ApiHandler.load(data, {
+    text_v1,
+    actor,
+    unchecked,
+    allowMissingDeps,
+  })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
@@ -562,7 +654,7 @@ export function load<T>(
 export function loadIncremental<T>(
   doc: Doc<T>,
   data: Uint8Array,
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): Doc<T> {
   if (!opts) {
     opts = {}
@@ -570,7 +662,7 @@ export function loadIncremental<T>(
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(doc)
+      "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
   if (_is_proxy(doc)) {
@@ -582,7 +674,7 @@ export function loadIncremental<T>(
     doc,
     "loadIncremental",
     heads,
-    opts.patchCallback || state.patchCallback
+    opts.patchCallback || state.patchCallback,
   )
 }
 
@@ -601,7 +693,7 @@ export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(doc)
+      "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
   if (_is_proxy(doc)) {
@@ -641,7 +733,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
 
   if (localState.heads) {
     throw new RangeError(
-      "Attempting to change an out of date document - set at: " + _trace(local)
+      "Attempting to change an out of date document - set at: " + _trace(local),
     )
   }
   const heads = localState.handle.getHeads()
@@ -717,7 +809,7 @@ type Conflicts = { [key: string]: AutomergeValue }
  */
 export function getConflicts<T>(
   doc: Doc<T>,
-  prop: Prop
+  prop: Prop,
 ): Conflicts | undefined {
   const state = _state(doc, false)
   if (state.textV2) {
@@ -800,7 +892,7 @@ export function getAllChanges<T>(doc: Doc<T>): Change[] {
 export function applyChanges<T>(
   doc: Doc<T>,
   changes: Change[],
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): [Doc<T>] {
   const state = _state(doc)
   if (!opts) {
@@ -808,7 +900,7 @@ export function applyChanges<T>(
   }
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -822,7 +914,7 @@ export function applyChanges<T>(
       doc,
       "applyChanges",
       heads,
-      opts.patchCallback || state.patchCallback
+      opts.patchCallback || state.patchCallback,
     ),
   ]
 }
@@ -838,7 +930,7 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
     get snapshot() {
       const [state] = applyChanges(
         init({ enableTextV2: textV2 }),
-        history.slice(0, index + 1)
+        history.slice(0, index + 1),
       )
       return <T>state
     },
@@ -907,7 +999,7 @@ export function decodeSyncState(state: Uint8Array): SyncState {
  */
 export function generateSyncMessage<T>(
   doc: Doc<T>,
-  inState: SyncState
+  inState: SyncState,
 ): [SyncState, SyncMessage | null] {
   const state = _state(doc)
   const syncState = ApiHandler.importSyncState(inState)
@@ -937,7 +1029,7 @@ export function receiveSyncMessage<T>(
   doc: Doc<T>,
   inState: SyncState,
   message: SyncMessage,
-  opts?: ApplyOptions<T>
+  opts?: ApplyOptions<T>,
 ): [Doc<T>, SyncState, null] {
   const syncState = ApiHandler.importSyncState(inState)
   if (!opts) {
@@ -946,7 +1038,7 @@ export function receiveSyncMessage<T>(
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
-      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy."
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
   if (_is_proxy(doc)) {
@@ -960,7 +1052,7 @@ export function receiveSyncMessage<T>(
       doc,
       "receiveSyncMessage",
       heads,
-      opts.patchCallback || state.patchCallback
+      opts.patchCallback || state.patchCallback,
     ),
     outSyncState,
     null,
@@ -1040,6 +1132,12 @@ export function isAutomerge(doc: unknown): boolean {
 
 function isObject(obj: unknown): obj is Record<string, unknown> {
   return typeof obj === "object" && obj !== null
+}
+
+export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
+  const state = _state(doc)
+  const result = state.handle.saveSince(heads)
+  return result
 }
 
 export type {

@@ -7,7 +7,7 @@ use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::{PatchBuilder, TextRepresentation};
 
@@ -72,14 +72,14 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     },
     IncrementMap {
         key: String,
@@ -272,7 +272,7 @@ impl PatchLog {
         obj: ObjId,
         index: usize,
         text: &str,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     ) {
         self.events.push((
             obj,
@@ -284,7 +284,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Rc<MarkSet>) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -301,7 +301,7 @@ impl PatchLog {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     ) {
         self.events.push((
             obj,

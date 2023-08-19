@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use std::ops::Deref;
 use std::ops::RangeBounds;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::patches::TextRepresentation;
 use crate::{
@@ -95,16 +95,16 @@ fn resolve<'a>(
 
 #[derive(Debug, Clone)]
 enum Patch<'a> {
-    New(Winner<'a>, Option<Rc<MarkSet>>),
+    New(Winner<'a>, Option<Arc<MarkSet>>),
     Old {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     },
     Update {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<Rc<MarkSet>>,
+        marks: Option<Arc<MarkSet>>,
     },
     Delete(Winner<'a>),
 }
@@ -284,13 +284,13 @@ impl<'a> MarkDiff<'a> {
         }
     }
 
-    fn current(&self) -> Option<Rc<MarkSet>> {
+    fn current(&self) -> Option<Arc<MarkSet>> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();
         if a != b {
             let result = b.diff(&a);
-            Some(Rc::new(result))
+            Some(Arc::new(result))
         } else {
             None
         }

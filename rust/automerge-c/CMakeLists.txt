@@ -219,7 +219,7 @@ find_package(Threads REQUIRED)
 set(LIBRARY_DEPENDENCIES Threads::Threads ${CMAKE_DL_LIBS})
 
 if(WIN32)
-    list(APPEND LIBRARY_DEPENDENCIES Bcrypt userenv ws2_32)
+    list(APPEND LIBRARY_DEPENDENCIES Bcrypt ntdll userenv ws2_32)
 else()
     list(APPEND LIBRARY_DEPENDENCIES m)
 endif()

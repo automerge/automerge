@@ -28,7 +28,9 @@
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::OnPartialLoad;
 use am::ScalarValue;
+use am::VerificationMode;
 use automerge as am;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -678,6 +680,16 @@ impl Automerge {
         Uint8Array::from(bytes.as_slice())
     }
 
+    #[wasm_bindgen(js_name=saveSince)]
+    pub fn save_since(
+        &mut self,
+        heads: Array,
+    ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
+        let heads = get_heads(Some(heads))?.unwrap_or(Vec::new());
+        let bytes = self.doc.save_after(&heads);
+        Ok(Uint8Array::from(bytes.as_slice()))
+    }
+
     #[wasm_bindgen(js_name = saveNoCompress)]
     pub fn save_nocompress(&mut self) -> Uint8Array {
         let bytes = self.doc.save_nocompress();
@@ -949,20 +961,31 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         .ok()
         .and_then(|v1| v1.as_bool())
         .unwrap_or(false);
-    let unchecked = js_get(&options, "unchecked")
-        .ok()
-        .and_then(|v1| v1.as_bool())
-        .unwrap_or(false);
     let text_rep = if text_v1 {
         TextRepresentation::Array
     } else {
         TextRepresentation::String
     };
-    let mut doc = if unchecked {
-        am::AutoCommit::load_unverified_heads(&data)?.with_text_rep(text_rep.into())
+    let unchecked = js_get(&options, "unchecked")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let verification_mode = if unchecked {
+        VerificationMode::DontCheck
     } else {
-        am::AutoCommit::load(&data)?.with_text_rep(text_rep.into())
+        VerificationMode::Check
     };
+    let allow_missing_deps = js_get(&options, "allowMissingDeps")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let on_partial_load = if allow_missing_deps {
+        OnPartialLoad::Ignore
+    } else {
+        OnPartialLoad::Error
+    };
+    let mut doc = am::AutoCommit::load_with(&data, on_partial_load, verification_mode)?
+        .with_text_rep(text_rep.into());
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -1047,6 +1070,7 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};
+    use js_sys::RangeError;
     use wasm_bindgen::JsValue;
 
     use crate::interop::{
@@ -1060,7 +1084,7 @@ pub mod error {
 
     impl From<BadActorId> for JsValue {
         fn from(s: BadActorId) -> Self {
-            JsValue::from(s.to_string())
+            RangeError::new(&s.to_string()).into()
         }
     }
 
@@ -1074,7 +1098,7 @@ pub mod error {
 
     impl From<ApplyChangesError> for JsValue {
         fn from(e: ApplyChangesError) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1090,7 +1114,7 @@ pub mod error {
 
     impl From<Fork> for JsValue {
         fn from(f: Fork) -> Self {
-            JsValue::from(f.to_string())
+            RangeError::new(&f.to_string()).into()
         }
     }
 
@@ -1100,7 +1124,7 @@ pub mod error {
 
     impl From<Merge> for JsValue {
         fn from(e: Merge) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1118,7 +1142,7 @@ pub mod error {
 
     impl From<Get> for JsValue {
         fn from(e: Get) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1134,7 +1158,7 @@ pub mod error {
 
     impl From<Splice> for JsValue {
         fn from(e: Splice) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1154,7 +1178,7 @@ pub mod error {
 
     impl From<Insert> for JsValue {
         fn from(e: Insert) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1174,7 +1198,7 @@ pub mod error {
 
     impl From<InsertObject> for JsValue {
         fn from(e: InsertObject) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1192,7 +1216,7 @@ pub mod error {
 
     impl From<Increment> for JsValue {
         fn from(e: Increment) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1204,7 +1228,7 @@ pub mod error {
 
     impl From<BadSyncMessage> for JsValue {
         fn from(e: BadSyncMessage) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1222,7 +1246,7 @@ pub mod error {
 
     impl From<ApplyPatch> for JsValue {
         fn from(e: ApplyPatch) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1232,7 +1256,7 @@ pub mod error {
 
     impl From<PopPatches> for JsValue {
         fn from(e: PopPatches) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1248,7 +1272,7 @@ pub mod error {
 
     impl From<Diff> for JsValue {
         fn from(e: Diff) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1260,7 +1284,7 @@ pub mod error {
 
     impl From<Isolate> for JsValue {
         fn from(e: Isolate) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1274,7 +1298,7 @@ pub mod error {
 
     impl From<Materialize> for JsValue {
         fn from(e: Materialize) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1294,7 +1318,7 @@ pub mod error {
 
     impl From<Cursor> for JsValue {
         fn from(e: Cursor) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1308,7 +1332,7 @@ pub mod error {
 
     impl From<ReceiveSyncMessage> for JsValue {
         fn from(e: ReceiveSyncMessage) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1322,7 +1346,7 @@ pub mod error {
 
     impl From<Load> for JsValue {
         fn from(e: Load) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1332,7 +1356,7 @@ pub mod error {
 
     impl From<EncodeChange> for JsValue {
         fn from(e: EncodeChange) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1346,7 +1370,7 @@ pub mod error {
 
     impl From<DecodeChange> for JsValue {
         fn from(e: DecodeChange) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 
@@ -1372,7 +1396,7 @@ pub mod error {
 
     impl From<Mark> for JsValue {
         fn from(e: Mark) -> Self {
-            JsValue::from(e.to_string())
+            RangeError::new(&e.to_string()).into()
         }
     }
 }

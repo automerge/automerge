@@ -227,16 +227,12 @@
  * ```
  * @packageDocumentation
  *
- * ## The {@link unstable} module
+ * ## The {@link next} module
  *
- * We are working on some changes to automerge which are not yet complete and
- * will result in backwards incompatible API changes. Once these changes are
- * ready for production use we will release a new major version of automerge.
- * However, until that point you can use the {@link unstable} module to try out
- * the new features, documents from the {@link unstable} module are
- * interoperable with documents from the main module. Please see the docs for
- * the {@link unstable} module for more details.
+ * There have been several additions and changes to the automerge API which
+ * are not backwards compatible. This API will become the API of the next major
+ * release of automerge. New applications should use the {@link next} module.
  */
 export * from "./stable"
-import * as unstable from "./unstable"
-export { unstable }
+import * as next from "./next"
+export { next }

@@ -273,6 +273,21 @@ describe('Automerge', () => {
       assert.deepEqual(docA.save(), docC.save());
     })
 
+    it("should be able to save since a given heads", () => {
+      const doc = create()
+
+      doc.put("_root", "foo", 1)
+      const heads = doc.getHeads()
+      doc.saveIncremental()
+
+      doc.put("_root", "bar", 2)
+
+      const saveIncremental = doc.saveIncremental()
+      const saveSince = doc.saveSince(heads)
+      assert.deepEqual(saveIncremental, saveSince)
+
+    })
+
     it('should be able to splice text', () => {
       const doc = create()
       const text = doc.putObject("_root", "text", "");
@@ -466,6 +481,31 @@ describe('Automerge', () => {
 
       assert.deepEqual(C.getWithType('_root', 'text'), ['text', '1@aabbcc'])
       assert.deepEqual(C.text(At), 'hell! world')
+    })
+  })
+
+  describe("loadIncremental", () => {
+    it("should allow you to load changes with missing deps", () => {
+      const doc1 = create({ actor: "aaaa" })
+      doc1.put("_root", "key", "value") 
+      doc1.saveIncremental()
+      doc1.put("_root", "key", "value2") 
+      const changeWithoutDep = doc1.saveIncremental()
+
+      const doc2 = create({ actor: "bbbb" })
+      doc2.loadIncremental(changeWithoutDep)
+    })
+  })
+
+  describe("load", () => {
+    it("should allow explicitly allowing missing deps", () => {
+      const doc1 = create({ actor: "aaaa" })
+      doc1.put("_root", "key", "value") 
+      doc1.saveIncremental()
+      doc1.put("_root", "key", "value2") 
+      const changeWithoutDep = doc1.saveIncremental()
+
+      load(changeWithoutDep, { allowMissingDeps: true })
     })
   })
 

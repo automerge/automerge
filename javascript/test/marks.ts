@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 
 describe("Automerge", () => {
@@ -19,7 +19,7 @@ describe("Automerge", () => {
           ["x"],
           { start: 5, end: 10, expand: "none" },
           "font-weight",
-          value
+          value,
         )
       })
 
@@ -80,7 +80,7 @@ describe("Automerge", () => {
         ["content"],
         { start: 2, end: 4, expand: "none" },
         "bold",
-        true
+        true,
       )
       Automerge.splice(d, ["content"], 0, 0, "🙃")
     })
@@ -97,7 +97,7 @@ describe("Automerge", () => {
         d,
         ["content"],
         { start: 4, end: 6, expand: "none" },
-        "bold"
+        "bold",
       )
     })
     assert.deepStrictEqual(Automerge.marks(doc, ["content"]), [])

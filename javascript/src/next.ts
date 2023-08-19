@@ -1,12 +1,9 @@
 /**
- * # The unstable API
+ * # The next API
  *
- * This module contains new features we are working on which are either not yet
- * ready for a stable release and/or which will result in backwards incompatible
- * API changes. The API of this module may change in arbitrary ways between
- * point releases - we will always document what these changes are in the
- * [CHANGELOG](#changelog) below, but only depend on this module if you are prepared to deal
- * with frequent changes.
+ * This module contains new features we are working on which are backwards
+ * incompatible with the current API of Automerge. This module will become the
+ * API of the next major version of Automerge
  *
  * ## Differences from stable
  *
@@ -30,6 +27,8 @@
  *   type
  *
  * ## CHANGELOG
+ * * Rename this module to `next` to reflect our increased confidence in it
+ *   and stability commitment to it
  * * Introduce this module to expose the new API which has no `Text` class
  *
  *
@@ -51,9 +50,9 @@ export {
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
-} from "./unstable_types"
+} from "./next_types"
 
-import type { Cursor, Mark, MarkRange, MarkValue } from "./unstable_types"
+import type { Cursor, Mark, MarkRange, MarkValue } from "./next_types"
 
 import { type PatchCallback } from "./stable"
 
@@ -108,6 +107,7 @@ export {
   diff,
   insertAt,
   deleteAt,
+  saveSince,
 } from "./stable"
 
 export type InitOptions<T> = {
@@ -118,6 +118,8 @@ export type InitOptions<T> = {
   patchCallback?: PatchCallback<T>
   /** @hidden */
   unchecked?: boolean
+  /** Allow loading a document with missing changes */
+  allowMissingChanges?: boolean
 }
 
 import { ActorId, Doc } from "./stable"
@@ -161,7 +163,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
  */
 export function clone<T>(
   doc: Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -186,7 +188,7 @@ export function clone<T>(
  */
 export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -210,7 +212,7 @@ export function from<T extends Record<string, unknown>>(
  */
 export function load<T>(
   data: Uint8Array,
-  _opts?: ActorId | InitOptions<T>
+  _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
@@ -222,7 +224,7 @@ export function load<T>(
 }
 
 function importOpts<T>(
-  _actor?: ActorId | InitOptions<T>
+  _actor?: ActorId | InitOptions<T>,
 ): stable.InitOptions<T> {
   if (typeof _actor === "object") {
     return _actor
@@ -234,7 +236,7 @@ function importOpts<T>(
 function cursorToIndex<T>(
   state: InternalState<T>,
   value: string,
-  index: number | Cursor
+  index: number | Cursor,
 ): number {
   if (typeof index == "string") {
     if (/^[0-9]+@[0-9a-zA-z]+$/.test(index)) {
@@ -267,7 +269,7 @@ export function splice<T>(
   path: stable.Prop[],
   index: number | Cursor,
   del: number,
-  newText?: string
+  newText?: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -312,7 +314,7 @@ export function splice<T>(
 export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  index: number
+  index: number,
 ): Cursor {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -342,7 +344,7 @@ export function getCursor<T>(
 export function getCursorPosition<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  cursor: Cursor
+  cursor: Cursor,
 ): number {
   const state = _state(doc, false)
   const objectId = _obj(doc)
@@ -365,7 +367,7 @@ export function mark<T>(
   path: stable.Prop[],
   range: MarkRange,
   name: string,
-  value: MarkValue
+  value: MarkValue,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -390,7 +392,7 @@ export function unmark<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   range: MarkRange,
-  name: string
+  name: string,
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -472,7 +474,7 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
  */
 export function getConflicts<T>(
   doc: Doc<T>,
-  prop: stable.Prop
+  prop: stable.Prop,
 ): Conflicts | undefined {
   const state = _state(doc, false)
   if (!state.textV2) {

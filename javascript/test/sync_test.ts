@@ -21,7 +21,7 @@ function sync(
   a,
   b,
   aSyncState = initSyncState(),
-  bSyncState = initSyncState()
+  bSyncState = initSyncState(),
 ) {
   const MAX_ITER = 10
   let aToBmsg: Automerge.SyncMessage | null = null,
@@ -40,7 +40,7 @@ function sync(
 
     if (i++ > MAX_ITER) {
       throw new Error(
-        `Did not synchronize within ${MAX_ITER} iterations. Do you have a bug causing an infinite loop?`
+        `Did not synchronize within ${MAX_ITER} iterations. Do you have a bug causing an infinite loop?`,
       )
     }
   } while (aToBmsg || bToAmsg)
@@ -221,12 +221,12 @@ describe("Data sync protocol", () => {
         assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)
         assert.deepStrictEqual(
           decodeSyncMessage(msg1to2).have[0].lastSync.length,
-          0
+          0,
         )
         assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 0)
         assert.deepStrictEqual(
           decodeSyncMessage(msg2to1).have[0].lastSync.length,
-          0
+          0,
         )
 
         // n1 and n2 receives that message and update sync state but make no patch
@@ -277,7 +277,7 @@ describe("Data sync protocol", () => {
         ;[s1, msg1to2] = Automerge.generateSyncMessage(n1, s1)
         assert.deepStrictEqual(
           decodeSyncMessage(msg1to2).have[0].lastSync,
-          [head1, head2].sort()
+          [head1, head2].sort(),
         )
       })
 
@@ -566,12 +566,12 @@ describe("Data sync protocol", () => {
         const n1up = Automerge.change(
           Automerge.clone(n1, { actor: "01234567" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n1`)
+          doc => (doc.x = `${i} @ n1`),
         )
         const n2up = Automerge.change(
           Automerge.clone(n2, { actor: "89abcdef" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n2`)
+          doc => (doc.x = `${i} @ n2`),
         )
         if (new BloomFilter(getHeads(n1up)).containsHash(getHeads(n2up)[0])) {
           n1 = n1up
@@ -610,24 +610,24 @@ describe("Data sync protocol", () => {
           const n1us1 = Automerge.change(
             Automerge.clone(n1, { actor: "01234567" }),
             { time: 0 },
-            (doc: any) => (doc.x = `${i} @ n1`)
+            (doc: any) => (doc.x = `${i} @ n1`),
           )
           const n2us1 = Automerge.change(
             Automerge.clone(n2, { actor: "89abcdef" }),
             { time: 0 },
-            (doc: any) => (doc.x = `${i} @ n2`)
+            (doc: any) => (doc.x = `${i} @ n2`),
           )
           n1hash1 = getHeads(n1us1)[0]
           n2hash1 = getHeads(n2us1)[0]
           const n1us2 = Automerge.change(
             n1us1,
             { time: 0 },
-            (doc: any) => (doc.x = "final @ n1")
+            (doc: any) => (doc.x = "final @ n1"),
           )
           const n2us2 = Automerge.change(
             n2us1,
             { time: 0 },
-            (doc: any) => (doc.x = "final @ n2")
+            (doc: any) => (doc.x = "final @ n2"),
           )
           n1hash2 = getHeads(n1us2)[0]
           n2hash2 = getHeads(n2us2)[0]
@@ -703,35 +703,35 @@ describe("Data sync protocol", () => {
         const n1us1 = Automerge.change(
           Automerge.clone(n1, { actor: "01234567" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n1`)
+          doc => (doc.x = `${i} @ n1`),
         )
         const n2us1 = Automerge.change(
           Automerge.clone(n2, { actor: "89abcdef" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n2`)
+          doc => (doc.x = `${i} @ n2`),
         )
         const n1hash1 = getHeads(n1us1)[0]
         const n1us2 = Automerge.change(
           n1us1,
           { time: 0 },
-          doc => (doc.x = `${i + 1} @ n1`)
+          doc => (doc.x = `${i + 1} @ n1`),
         )
         const n2us2 = Automerge.change(
           n2us1,
           { time: 0 },
-          doc => (doc.x = `${i + 1} @ n2`)
+          doc => (doc.x = `${i + 1} @ n2`),
         )
         const n1hash2 = getHeads(n1us2)[0],
           n2hash2 = getHeads(n2us2)[0]
         const n1up3 = Automerge.change(
           n1us2,
           { time: 0 },
-          doc => (doc.x = "final @ n1")
+          doc => (doc.x = "final @ n1"),
         )
         const n2up3 = Automerge.change(
           n2us2,
           { time: 0 },
-          doc => (doc.x = "final @ n2")
+          doc => (doc.x = "final @ n2"),
         )
         n1hash3 = getHeads(n1up3)[0]
         n2hash3 = getHeads(n2up3)[0]
@@ -771,7 +771,7 @@ describe("Data sync protocol", () => {
         const n2us1 = Automerge.change(
           Automerge.clone(n2, { actor: "89abcdef" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n2`)
+          doc => (doc.x = `${i} @ n2`),
         )
         if (new BloomFilter(getHeads(n1)).containsHash(getHeads(n2us1)[0])) {
           n2 = n2us1
@@ -783,7 +783,7 @@ describe("Data sync protocol", () => {
         const n2us2 = Automerge.change(
           Automerge.clone(n2, { actor: "89abcdef" }),
           { time: 0 },
-          doc => (doc.x = `${i} again`)
+          doc => (doc.x = `${i} again`),
         )
         if (new BloomFilter(getHeads(n1)).containsHash(getHeads(n2us2)[0])) {
           n2 = n2us2
@@ -822,12 +822,12 @@ describe("Data sync protocol", () => {
         const n1up = Automerge.change(
           Automerge.clone(n1, { actor: "01234567" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n1`)
+          doc => (doc.x = `${i} @ n1`),
         )
         const n2up = Automerge.change(
           Automerge.clone(n2, { actor: "89abcdef" }),
           { time: 0 },
-          doc => (doc.x = `${i} @ n2`)
+          doc => (doc.x = `${i} @ n2`),
         )
         // check if the bloom filter on n2 will believe n1 already has a particular hash
         // this will mean n2 won't offer that data to n2 by receiving a sync message from n1
@@ -923,7 +923,7 @@ describe("Data sync protocol", () => {
       ;[n2, s23] = Automerge.receiveSyncMessage(
         n2,
         s23,
-        encodeSyncMessage(modifiedMessage)
+        encodeSyncMessage(modifiedMessage),
       )
 
       // n2 replies to n3, sending only n2c3 (the one change that n2 has but n1 doesn't)
@@ -958,13 +958,13 @@ describe("Data sync protocol", () => {
       ;[n2, s2] = Automerge.receiveSyncMessage(
         n2,
         s2,
-        encodeSyncMessage(modMsg)
+        encodeSyncMessage(modMsg),
       )
       ;[s1, message] = Automerge.generateSyncMessage(n2, s2)
       assert.strictEqual(decodeSyncMessage(message!).changes.length, 1)
       assert.strictEqual(
         Automerge.decodeChange(decodeSyncMessage(message!).changes[0]).hash,
-        lastSync[0]
+        lastSync[0],
       )
     })
 
@@ -1049,7 +1049,7 @@ describe("Data sync protocol", () => {
       assert.deepStrictEqual(decodeSyncMessage(msg).need, [c8])
       assert.deepStrictEqual(
         decodeSyncMessage(msg).have[0].lastSync,
-        [c2, c6].sort()
+        [c2, c6].sort(),
       )
       assert.deepStrictEqual(s1.sharedHeads, [c2, c6].sort())
       assert.deepStrictEqual(s2.sharedHeads, [c2, c6].sort())

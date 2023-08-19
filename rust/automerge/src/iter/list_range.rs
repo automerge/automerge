@@ -1,6 +1,6 @@
 use std::fmt;
 use std::ops::RangeBounds;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::marks::MarkSet;
@@ -94,7 +94,7 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Rc<MarkSet>>,
+    pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
 impl<'a> ListRangeItem<'a> {

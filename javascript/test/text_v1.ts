@@ -9,7 +9,7 @@ describe("Automerge.Text", () => {
   beforeEach(() => {
     s1 = Automerge.change(
       Automerge.init<DocType>(),
-      doc => (doc.text = new Automerge.Text())
+      doc => (doc.text = new Automerge.Text()),
     )
     s2 = Automerge.merge(Automerge.init(), s1)
   })
@@ -93,7 +93,7 @@ describe("Automerge.Text", () => {
   it("should not allow modification outside of a change callback", () => {
     assert.throws(
       () => s1.text.insertAt(0, "a"),
-      /object cannot be modified outside of a change block/
+      /object cannot be modified outside of a change block/,
     )
   })
 
@@ -101,7 +101,7 @@ describe("Automerge.Text", () => {
     it("should accept a string as initial value", () => {
       let s1 = Automerge.change(
         Automerge.init<DocType>(),
-        doc => (doc.text = new Automerge.Text("init"))
+        doc => (doc.text = new Automerge.Text("init")),
       )
       assert.strictEqual(s1.text.length, 4)
       assert.strictEqual(s1.text.get(0), "i")
@@ -114,7 +114,7 @@ describe("Automerge.Text", () => {
     it("should accept an array as initial value", () => {
       let s1 = Automerge.change(
         Automerge.init<DocType>(),
-        doc => (doc.text = new Automerge.Text(["i", "n", "i", "t"]))
+        doc => (doc.text = new Automerge.Text(["i", "n", "i", "t"])),
       )
       assert.strictEqual(s1.text.length, 4)
       assert.strictEqual(s1.text.get(0), "i")
@@ -211,7 +211,7 @@ describe("Automerge.Text", () => {
     it("should allow control characters to be updated", () => {
       const s2 = Automerge.change(
         s1,
-        doc => (doc.text.get(1)!.attribute = "italic")
+        doc => (doc.text.get(1)!.attribute = "italic"),
       )
       const s3 = Automerge.load<DocType>(Automerge.save(s2))
       assert.strictEqual(s1.text.get(1).attribute, "bold")
@@ -326,5 +326,9 @@ describe("Automerge.Text", () => {
     s1 = Automerge.from({
       text: new Automerge.Text("🇺🇸"),
     })
+  })
+
+  it("should support slice", () => {
+    assert.strictEqual(s1.text.slice(0).toString(), s1.text.toString())
   })
 })

@@ -11,7 +11,6 @@ use std::fs;
 // set up logging for all the tests
 use test_log::test;
 
-use automerge::ObjType::Map;
 #[allow(unused_imports)]
 use automerge_test::{
     assert_doc, assert_obj, list, map, mk_counter, new_doc, new_doc_with_actor, pretty_print,
@@ -1854,10 +1853,37 @@ fn move_from_map_to_map() -> Result<(), AutomergeError> {
     tx.put_object(&ROOT, "C", ObjType::Map)?;
     tx.move_element(&ROOT, &b, "A", "A")?;
     let new_a = tx.get(&b, "A")?;
-    assert_eq!(new_a, Some((Value::Object(Map), a)));
+    assert_eq!(new_a, Some((Value::Object(ObjType::Map), a)));
     let old_a = tx.get(&ROOT, "A")?;
     assert_eq!(old_a, None);
     Ok(())
+}
+
+#[test]
+fn test_load_incremental_partial_load() {
+    let mut doc = Automerge::new();
+
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "a", 1).unwrap();
+    tx.commit();
+
+    let start_heads = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "b", 2).unwrap();
+    tx.commit();
+
+    let changes = doc.get_changes(&start_heads);
+
+    let encoded = changes
+        .into_iter()
+        .cloned()
+        .fold(Vec::new(), |mut acc, mut change| {
+            acc.extend_from_slice(change.bytes().as_ref());
+            acc
+        });
+
+    let mut doc2 = Automerge::new();
+    doc2.load_incremental(&encoded).unwrap();
 }
 
 /*

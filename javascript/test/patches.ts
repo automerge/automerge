@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { unstable as Automerge } from "../src"
+import { next as Automerge } from "../src"
 import { type List } from "../src"
 
 describe("patches", () => {
@@ -19,7 +19,7 @@ describe("patches", () => {
         },
         doc => {
           doc.count = 1
-        }
+        },
       )
       assert.deepEqual(headsAfter, Automerge.getHeads(newDoc))
     })
@@ -34,14 +34,14 @@ describe("patches", () => {
             assert.deepEqual(
               patchInfo.before.list,
               ["a", "b", "c"],
-              "before should be the original list"
+              "before should be the original list",
             )
             assert.deepEqual(patchInfo.after.list, ["a", "c"])
           },
         },
         doc => {
           Automerge.deleteAt(doc.list, 1)
-        }
+        },
       )
       assert.deepEqual(newDoc, { list: ["a", "c"] })
     })
@@ -58,14 +58,14 @@ describe("patches", () => {
             assert.deepEqual(
               patchInfo.before.obj,
               { a: "a", b: "b" },
-              "before should be the original object"
+              "before should be the original object",
             )
             assert.deepEqual(patchInfo.after.obj, { a: "a" })
           },
         },
         doc => {
           delete doc.obj.b
-        }
+        },
       )
 
       assert.deepEqual(newDoc, { obj: { a: "a" } })
