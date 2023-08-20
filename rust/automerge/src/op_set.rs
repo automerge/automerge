@@ -247,7 +247,7 @@ impl OpSetInternal {
     }
 
     #[tracing::instrument(skip(self, index))]
-    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) -> Option<usize> {
+    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
                 element.id.into(),
@@ -262,12 +262,15 @@ impl OpSetInternal {
 
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            let element = tree.internal.insert(index, element);
+            let pos = tree.internal.insert(index, element.clone());
             self.length += 1;
-            Some(element)
+            if !element.is_delete() {
+                    self.update_validity(&element, Some(*obj), Some(pos));
+            } else {
+                self.update_validity(&element, None, None);
+            }
         } else {
             tracing::warn!("attempting to insert op for unknown object");
-            None
         }
     }
 

@@ -727,9 +727,9 @@ impl Op {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
-        } else if self.is_move() {
-            // TODO: handle invalid successors
-            self.is_valid() // && !self.succ_iter().any(|i| {})
+        // } else if self.is_move() {
+        //     // TODO: handle invalid successors
+        //     self.is_valid() // && !self.succ_iter().any(|i| {})
         } else {
             self.succ.is_empty()
         }

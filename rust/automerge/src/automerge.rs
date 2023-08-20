@@ -1184,13 +1184,9 @@ impl Automerge {
         }
 
         if !op.is_delete() {
-            let element = self.ops.insert(pos, obj, op.clone());
-            if let Some(pos) = element {
-                self.ops.update_validity(&op, Some(*obj), Some(pos));
-            }
-        } else {
-            self.ops.update_validity(&op, None, None);
+            self.ops.insert(pos, obj, op.clone());
         }
+
         Ok(())
     }
 

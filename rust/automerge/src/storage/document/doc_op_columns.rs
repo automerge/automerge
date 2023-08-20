@@ -429,7 +429,7 @@ impl<'a> DocOpColumnIter<'a> {
             let insert = self.insert.next_in_col("insert")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
-            // TODO: distinguish between None and None
+            // TODO: distinguish between root and None
             let move_from = if let Some(ref mut move_from) = self.move_from {
                 Some(move_from.next_in_col("move_from")?)
             } else if action == 8 {
