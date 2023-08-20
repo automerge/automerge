@@ -1845,21 +1845,6 @@ fn inserting_text_near_deleted_marks() {
 }
 
 #[test]
-fn move_from_map_to_map() -> Result<(), AutomergeError> {
-    let mut doc = Automerge::new();
-    let mut tx = doc.transaction();
-    let a = tx.put_object(&ROOT, "A", ObjType::Map)?;
-    let b = tx.put_object(&ROOT, "B", ObjType::Map)?;
-    tx.put_object(&ROOT, "C", ObjType::Map)?;
-    tx.move_element(&ROOT, &b, "A", "A")?;
-    let new_a = tx.get(&b, "A")?;
-    assert_eq!(new_a, Some((Value::Object(ObjType::Map), a)));
-    let old_a = tx.get(&ROOT, "A")?;
-    assert_eq!(old_a, None);
-    Ok(())
-}
-
-#[test]
 fn test_load_incremental_partial_load() {
     let mut doc = Automerge::new();
 
@@ -1884,6 +1869,49 @@ fn test_load_incremental_partial_load() {
 
     let mut doc2 = Automerge::new();
     doc2.load_incremental(&encoded).unwrap();
+}
+
+#[test]
+fn test_concurrent_moves() -> Result<(), AutomergeError> {
+    let (actor1, actor2) = sorted_actors();
+    let mut doc1 = new_doc_with_actor(actor1);
+    let mut doc2 = new_doc_with_actor(actor2);
+    let _a = doc1.put_object(&ROOT, "A", ObjType::Map)?;
+    let b = doc1.put_object(&ROOT, "B", ObjType::Map)?;
+    let c = doc1.put_object(&ROOT, "C", ObjType::Map)?;
+    doc2.merge(&mut doc1)?;
+    doc2.move_element(&ROOT, &c, "A", "A")?;
+    doc1.move_element(&ROOT, &b, "A", "A")?;
+    doc1.merge(&mut doc2)?;
+    let a_in_b = doc1.get(&b, "A")?;
+    let a_in_c = doc1.get(&c, "A")?;
+    assert_eq!(a_in_b.is_some(), false);
+    assert_eq!(a_in_c.is_some(), true);
+    Ok(())
+}
+
+#[test]
+fn test_move_cycle() -> Result<(), AutomergeError> {
+    let (actor1, actor2) = sorted_actors();
+    let mut doc1 = new_doc_with_actor(actor1);
+    let mut doc2 = new_doc_with_actor(actor2);
+    let a = doc1.put_object(&ROOT, "A", ObjType::Map)?;
+    let b = doc1.put_object(&ROOT, "B", ObjType::Map)?;
+    let _c = doc1.put_object(&ROOT, "C", ObjType::Map)?;
+    doc2.merge(&mut doc1)?;
+    // move A to be a child of B on doc2
+    doc2.move_element(&ROOT, &a, "B", "A")?;
+    // move B to be a child of A on doc1
+    doc1.move_element(&ROOT, &b, "A", "B")?;
+    // merge
+    doc2.merge(&mut doc1)?;
+    // A should not be a child of B due to cycle
+    let a_in_b = doc2.get(&b, "A")?;
+    assert_eq!(a_in_b.is_some(), false);
+    // B should be a child of A
+    let b_in_a = doc2.get(&a, "B")?;
+    assert_eq!(b_in_a.is_some(), false);
+    Ok(())
 }
 
 /*

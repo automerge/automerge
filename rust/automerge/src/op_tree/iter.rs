@@ -378,7 +378,9 @@ mod tests {
         let mut optree = OpTreeInternal::new();
         for action in actions {
             match action {
-                Action::Insert(index, op) => optree.insert(*index, op.clone()),
+                Action::Insert(index, op) => {
+                    optree.insert(*index, op.clone());
+                }
                 Action::Delete(index) => {
                     optree.remove(*index);
                 }

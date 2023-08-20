@@ -471,9 +471,10 @@ impl<'a> ChangeOpsIter<'a> {
             // TODO: distinguish between root and None
             let move_from = if let Some(ref mut objs) = self.move_from {
                 Some(objs.next_in_col("move_from")?)
+            } else if action == 8 {
+                // if it is a move operation, we treat `None` as root
+                Some(ObjId::root())
             } else {
-                // even if it is the root id, we use `None` in the column.
-                // and if the action column is Move, we treat it as root
                 None
             };
 

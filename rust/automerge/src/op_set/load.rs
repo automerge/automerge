@@ -47,6 +47,8 @@ impl DocObserver for OpSetBuilder {
             trees: self.completed_objects,
             length: len,
             m: metadata,
+            move_manager: Default::default(),
+            delete_ops: Default::default(),
         }
     }
 }

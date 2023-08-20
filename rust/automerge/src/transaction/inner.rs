@@ -297,7 +297,12 @@ impl TransactionInner {
         doc.ops_mut().add_succ(&obj, succ_pos, &op);
 
         if !op.is_delete() {
-            doc.ops_mut().insert(pos, &obj, op.clone());
+            let element = doc.ops_mut().insert(pos, &obj, op.clone());
+            if let Some(pos) = element {
+                doc.ops_mut().update_validity(&op, Some(obj), Some(pos));
+            }
+        } else {
+            doc.ops_mut().update_validity(&op, None, None);
         }
 
         self.finalize_op(doc, patch_log, obj, prop, op, None);
@@ -816,7 +821,7 @@ impl TransactionInner {
 
                     let op = Op {
                         id,
-                        action: OpType::Move(scalar_value),
+                        action: OpType::Move(scalar_value, true),
                         key,
                         succ: Default::default(),
                         pred,

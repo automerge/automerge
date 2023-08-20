@@ -66,7 +66,7 @@ impl<'a> TreeQuery<'a> for MapMove<'a> {
                             self.target_move_id = Some(element.id);
                             self.scalar_value = Some(val.clone());
                         }
-                        OpType::Move(scalar) => {
+                        OpType::Move(scalar, _) => {
                             self.target_move_id = element.move_id.map(|id| id.0);
                             self.scalar_value = Some(scalar.clone());
                         }

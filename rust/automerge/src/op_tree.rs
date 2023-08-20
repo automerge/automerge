@@ -453,7 +453,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub(crate) fn insert(&mut self, index: usize, op: Op) {
+    pub(crate) fn insert(&mut self, index: usize, op: Op) -> usize {
         assert!(
             index <= self.len(),
             "tried to insert at {} but len is {}",
@@ -503,6 +503,7 @@ impl OpTreeInternal {
             self.root_node = Some(root)
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
+        element
     }
 
     /// Get the `element` at `index` in the sequence.

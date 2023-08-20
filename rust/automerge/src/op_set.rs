@@ -14,6 +14,7 @@ use crate::types::{
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
+use move_manager::MoveManager;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ use std::ops::RangeBounds;
 mod load;
 mod move_manager;
 
+use crate::op_set::move_manager::LogEntry;
 pub(crate) use load::OpSetBuilder;
 
 pub(crate) type OpSet = OpSetInternal;
@@ -34,6 +36,10 @@ pub(crate) struct OpSetInternal {
     length: usize,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
+    /// Manages the validity of move operations
+    move_manager: MoveManager,
+    /// Store delete operations for validity check
+    delete_ops: HashMap<OpId, Op>,
 }
 
 impl OpSetInternal {
@@ -51,6 +57,8 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
+            move_manager: MoveManager::new(),
+            delete_ops: HashMap::new(),
         }
     }
 
@@ -239,7 +247,7 @@ impl OpSetInternal {
     }
 
     #[tracing::instrument(skip(self, index))]
-    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
+    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) -> Option<usize> {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
                 element.id.into(),
@@ -254,10 +262,12 @@ impl OpSetInternal {
 
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            tree.internal.insert(index, element);
+            let element = tree.internal.insert(index, element);
             self.length += 1;
+            Some(element)
         } else {
             tracing::warn!("attempting to insert op for unknown object");
+            None
         }
     }
 
@@ -357,9 +367,56 @@ impl OpSetInternal {
         }
     }
 
-    //    pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExI
-    //        (op.value_at(clock), self.id_to_exid(op.id))
-    //    }
+    pub(crate) fn insert_delete_op(&mut self, op: Op) {
+        self.delete_ops.insert(op.id, op);
+    }
+
+    pub(crate) fn update_validity(
+        &mut self,
+        new_op: &Op,
+        op_tree_id: Option<ObjId>,
+        index: Option<usize>,
+    ) -> HashMap<OpId, bool> {
+        if new_op.is_delete() {
+            self.insert_delete_op(new_op.clone());
+        }
+        let mut checker = self.move_manager.start_validity_check(new_op.id, &self.m);
+        let mut ops_with_greater_ids = Vec::new();
+        let logs = checker.get_logs_with_greater_ids();
+        for log in &logs {
+            let op = match log.op_tree_id {
+                Some(id) => {
+                    let tree = self.trees.get(&id).expect("op tree not found");
+                    &tree.internal.ops[log.op_tree_index.unwrap()]
+                }
+                None => self.delete_ops.get(&log.id).expect("delete op not found"),
+            };
+            ops_with_greater_ids.push(op);
+        }
+
+        let new_log = LogEntry::new(new_op.id, op_tree_id, index, new_op.move_id);
+        let validity_changes_internal =
+            checker.update_validity(ops_with_greater_ids, new_op, new_log);
+        let mut validity_changes = HashMap::new();
+        for ((op_tree_id, index), v) in validity_changes_internal {
+            let op = &mut self
+                .trees
+                .get_mut(&op_tree_id)
+                .expect("op tree not found")
+                .internal
+                .ops[index];
+            match op.action {
+                OpType::Move(_, ref mut validity) => {
+                    if *validity != v {
+                        *validity = v;
+                        validity_changes.insert(op.id, v);
+                    }
+                }
+                _ => panic!("expected move op"),
+            }
+        }
+        validity_changes
+    }
 }
 
 impl Default for OpSetInternal {

@@ -252,7 +252,7 @@ impl OpTableRow {
             crate::OpType::Increment(v) => format!("inc {}", v),
             crate::OpType::MarkBegin(_, m) => format!("markEnd {}", m),
             crate::OpType::MarkEnd(m) => format!("markEnd {}", m),
-            crate::OpType::Move(v) => format!("move {}", v),
+            crate::OpType::Move(c, v) => format!("move {} {}", c, v),
         };
         let prop = match op.key {
             crate::types::Key::Map(k) => metadata.props[k].clone(),

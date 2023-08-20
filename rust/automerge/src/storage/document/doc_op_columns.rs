@@ -432,9 +432,12 @@ impl<'a> DocOpColumnIter<'a> {
             // TODO: distinguish between None and None
             let move_from = if let Some(ref mut move_from) = self.move_from {
                 Some(move_from.next_in_col("move_from")?)
+            } else if action == 8 {
+                Some(ObjId::root())
             } else {
                 None
             };
+
             let move_id = if let Some(ref mut move_id) = self.move_id {
                 Some(move_id.next_in_col("move_id")?)
             } else {
