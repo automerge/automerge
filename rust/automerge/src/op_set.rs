@@ -265,7 +265,7 @@ impl OpSetInternal {
             let pos = tree.internal.insert(index, element.clone());
             self.length += 1;
             if !element.is_delete() {
-                    self.update_validity(&element, Some(*obj), Some(pos));
+                self.update_validity(&element, Some(*obj), Some(pos));
             } else {
                 self.update_validity(&element, None, None);
             }
