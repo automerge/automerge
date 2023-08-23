@@ -1899,10 +1899,10 @@ fn test_move_cycle() -> Result<(), AutomergeError> {
     let b = doc1.put_object(&ROOT, "B", ObjType::Map)?;
     let _c = doc1.put_object(&ROOT, "C", ObjType::Map)?;
     doc2.merge(&mut doc1)?;
-    // move A to be a child of B on doc2
-    doc2.move_element(&ROOT, &a, "B", "A")?;
-    // move B to be a child of A on doc1
-    doc1.move_element(&ROOT, &b, "A", "B")?;
+    // move B to be a child of A on doc2
+    doc2.move_element(&ROOT, &a, "B", "B")?;
+    // move A to be a child of B on doc1
+    doc1.move_element(&ROOT, &b, "A", "A")?;
     // merge
     doc2.merge(&mut doc1)?;
     // A should not be a child of B due to cycle
@@ -1910,7 +1910,7 @@ fn test_move_cycle() -> Result<(), AutomergeError> {
     assert_eq!(a_in_b.is_some(), false);
     // B should be a child of A
     let b_in_a = doc2.get(&a, "B")?;
-    assert_eq!(b_in_a.is_some(), false);
+    assert_eq!(b_in_a.is_some(), true);
     Ok(())
 }
 
