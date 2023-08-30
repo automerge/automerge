@@ -1,9 +1,9 @@
-import * as assert from "assert"
-import { next as Automerge } from "../src"
-import * as oldAutomerge from "../src/stable"
-import * as WASM from "@automerge/automerge-wasm"
-import { mismatched_heads } from "./helpers"
-import { PatchSource } from "../src/types"
+import { default as assert } from "assert"
+import { next as Automerge } from "../src/index.js"
+import * as oldAutomerge from "../src/stable.js"
+import { default as WASM } from "@automerge/automerge-wasm"
+import { mismatched_heads } from "./helpers.js"
+import { PatchSource } from "../src/types.js"
 
 describe("Automerge", () => {
   describe("basics", () => {

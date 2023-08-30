@@ -2,11 +2,8 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create, load, Automerge, encodeChange, decodeChange } from '..'
+import { create, load, Automerge, encodeChange, decodeChange } from '../nodejs/automerge_wasm.cjs'
 import { v4 as uuid } from "uuid"
-
-
-let util = require('util')
 
 describe('Automerge', () => {
   describe('marks', () => {
@@ -204,7 +201,6 @@ describe('Automerge', () => {
 
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
-      let util = require('util');
       let encoded = decoded.map((c) => encodeChange(c))
       let decoded2 = encoded.map((c) => decodeChange(c))
       let doc2 = create();
@@ -226,7 +222,6 @@ describe('Automerge', () => {
       doc.commit("marks");
       let h2 = doc.getHeads()
       let patches = doc.diffIncremental();
-      let util = require('util')
       assert.deepEqual(patches, [
         { action: 'put', path: [ 'list' ], value: '' },
         {

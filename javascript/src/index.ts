@@ -233,6 +233,6 @@
  * are not backwards compatible. This API will become the API of the next major
  * release of automerge. New applications should use the {@link next} module.
  */
-export * from "./stable"
-import * as next from "./next"
+export * from "./stable.js"
+import * as next from "./next.js"
 export { next }

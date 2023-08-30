@@ -1,7 +1,7 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src"
-import { assertEqualsOneOf } from "./helpers"
-import { decodeChange } from "./legacy/columnar"
+import { next as Automerge } from "../src/index.js"
+import { assertEqualsOneOf } from "./helpers.js"
+import { decodeChange } from "./legacy/columnar.js"
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@([0-9a-f][0-9a-f])*$/

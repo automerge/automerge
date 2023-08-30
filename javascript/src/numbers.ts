@@ -1,6 +1,6 @@
 // Convenience classes to allow users to strictly specify the number type they want
 
-import { INT, UINT, F64 } from "./constants"
+import { INT, UINT, F64 } from "./constants.js"
 
 export class Int {
   value: number

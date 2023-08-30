@@ -1,6 +1,6 @@
 import type { Value } from "@automerge/automerge-wasm"
-import { TEXT, STATE } from "./constants"
-import type { InternalState } from "./internal_state"
+import { TEXT, STATE } from "./constants.js"
+import type { InternalState } from "./internal_state.js"
 
 export class Text {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any

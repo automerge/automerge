@@ -1,5 +1,5 @@
 import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
-import { COUNTER } from "./constants"
+import { COUNTER } from "./constants.js"
 /**
  * The most basic CRDT: an integer value that can be changed only by
  * incrementing and decrementing. Since addition of integers is commutative,

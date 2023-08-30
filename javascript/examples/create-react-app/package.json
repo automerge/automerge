@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@automerge/automerge": "2.0.0-alpha.7",
+    "@automerge/automerge": "2.1.0-alpha.11",
     "@craco/craco": "^7.0.0-alpha.8",
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",

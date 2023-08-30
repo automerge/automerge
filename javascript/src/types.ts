@@ -1,9 +1,9 @@
-export { Text } from "./text"
-import { Text } from "./text"
-export { Counter } from "./counter"
-export { Int, Uint, Float64 } from "./numbers"
+export { Text } from "./text.js"
+import { Text } from "./text.js"
+export { Counter } from "./counter.js"
+export { Int, Uint, Float64 } from "./numbers.js"
 
-import { Counter } from "./counter"
+import { Counter } from "./counter.js"
 import type { Patch } from "@automerge/automerge-wasm"
 export type { Cursor, Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 

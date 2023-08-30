@@ -1,7 +1,7 @@
 
 import { describe, it } from 'mocha';
 import assert from 'assert'
-import { create, Value } from '..'
+import { create } from '../nodejs/automerge_wasm.cjs'
 
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
 

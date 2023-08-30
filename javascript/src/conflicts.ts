@@ -1,8 +1,8 @@
-import { Counter, type AutomergeValue } from "./types"
-import { Text } from "./text"
-import { type AutomergeValue as NextAutomergeValue } from "./next_types"
-import { type Target, Text1Target, Text2Target } from "./proxies"
-import { mapProxy, listProxy, ValueType } from "./proxies"
+import { Counter, type AutomergeValue } from "./types.js"
+import { Text } from "./text.js"
+import { type AutomergeValue as NextAutomergeValue } from "./next_types.js"
+import { type Target, Text1Target, Text2Target } from "./proxies.js"
+import { mapProxy, listProxy, ValueType } from "./proxies.js"
 import type { Prop, ObjID } from "@automerge/automerge-wasm"
 import { Automerge } from "@automerge/automerge-wasm"
 

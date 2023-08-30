@@ -17,16 +17,31 @@
     "dist/mjs/**/*.js",
     "dist/*.d.ts"
   ],
+  "type": "module",
   "types": "./dist/index.d.ts",
   "module": "./dist/mjs/index.js",
   "main": "./dist/cjs/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/mjs/index.js",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/mjs/index.js"
+    },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "import": "./dist/mjs/next.js",
+      "require": "./dist/cjs/next.js",
+      "default": "./dist/mjs/next.js"
+    }
+  },
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
     "check-fmt": "prettier -c .prettierrc --check",
     "fmt": "prettier -c .prettierrc -w",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
-    "test": "ts-mocha --type-check test/*.ts",
+    "test": "ts-mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
     "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"
@@ -34,6 +49,7 @@
   "devDependencies": {
     "@types/expect": "^24.3.0",
     "@types/mocha": "^10.0.1",
+    "@types/node": "^20.5.7",
     "@types/uuid": "^9.0.0",
     "@typescript-eslint/eslint-plugin": "^5.46.0",
     "@typescript-eslint/parser": "^5.46.0",

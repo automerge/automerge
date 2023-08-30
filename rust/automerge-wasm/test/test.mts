@@ -1,10 +1,9 @@
 import { describe, it } from 'mocha';
 import assert from 'assert'
 // @ts-ignore
-import { BloomFilter } from './helpers/sync'
-import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
-import { Value, DecodedSyncMessage, Hash } from '..';
-import {kill} from 'process';
+import { BloomFilter } from './helpers/sync.mjs'
+import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../nodejs/automerge_wasm.cjs'
+import { DecodedSyncMessage, Hash } from '../nodejs/automerge_wasm.cjs';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
@@ -1512,21 +1511,27 @@ describe('Automerge', () => {
       //                                                                      `-- n2
       // where n2 is a false positive in the Bloom filter containing {n1}.
       // lastSync is c9.
-      let n1 = create({ actor: '01234567'}), n2 = create({ actor: '89abcdef'})
-      let s1 = initSyncState(), s2 = initSyncState()
+      let n1 = create({ actor: '01234567'}), n2 = create({ actor: '89abcdef'});
+      let s1 = initSyncState(), s2 = initSyncState();
 
       for (let i = 0; i < 10; i++) {
-        n1.put("_root", "x", i); n1.commit("", 0)
+        n1.put("_root", "x", i); n1.commit("", 0);
       }
 
-      sync(n1, n2, s1, s2)
+      sync(n1, n2, s1, s2);
       for (let i = 1; ; i++) { // search for false positive; see comment above
         const n1up = n1.clone('01234567');
-        n1up.put("_root", "x", `${i} @ n1`); n1up.commit("", 0)
+        n1up.put("_root", "x", `${i} @ n1`);
+        n1up.commit("", 0);
+
         const n2up = n2.clone('89abcdef');
-        n2up.put("_root", "x", `${i} @ n2`); n2up.commit("", 0)
-        if (new BloomFilter(n1up.getHeads()).containsHash(n2up.getHeads()[0])) {
-          n1 = n1up; n2 = n2up; break
+        n2up.put("_root", "x", `${i} @ n2`);
+        n2up.commit("", 0);
+        const falsePositive = (new BloomFilter(n1up.getHeads())).containsHash(n2up.getHeads()[0]);
+        if (falsePositive) {
+          n1 = n1up;
+          n2 = n2up;
+          break;
         }
       }
       const allHeads = [...n1.getHeads(), ...n2.getHeads()].sort()

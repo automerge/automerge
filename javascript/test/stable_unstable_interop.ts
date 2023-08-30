@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import * as old from "../src"
-import { next } from "../src"
+import * as old from "../src/index.js"
+import { next } from "../src/index.js"
 
 describe("old/next interop", () => {
   it("should allow reading Text from old as strings in next", () => {
