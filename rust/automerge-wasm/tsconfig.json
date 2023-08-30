@@ -6,14 +6,14 @@
     "baseUrl": ".",
     "esModuleInterop": true,
     "lib": ["dom", "esnext.asynciterable", "es2017", "es2016", "es2015"],
-    "module": "commonjs",
+    "module": "esnext",
     "moduleResolution": "node",
     "paths": { "dev": ["*"]},
     "rootDir": "",
-    "target": "es2016",
+    "target": "es2018",
     "types": ["mocha", "node"],
     "typeRoots": ["./index.d.ts"]
   },
-  "include": ["test/**/*.ts"],
+  "include": ["test/**/*.mts"],
   "exclude": ["dist/**/*", "examples/**/*"]
 }

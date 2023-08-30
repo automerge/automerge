@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "target": "es2016",
+    "target": "es6",
     "sourceMap": false,
     "declaration": true,
     "resolveJsonModule": true,
-    "module": "commonjs",
+    "module": "es6",
     "moduleResolution": "node",
     "noImplicitAny": false,
     "allowSyntheticDefaultImports": true,
@@ -15,5 +15,6 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["./dist/**/*", "./node_modules", "./src/**/*.deno.ts"]
+  "exclude": ["./dist/**/*", "./node_modules", "./src/**/*.deno.ts"],
+  "ts-node": { "esm": true }
 }

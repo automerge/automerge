@@ -1,9 +1,9 @@
-const pako = require('pako')
-const { copyObject, parseOpId, equalBytes } = require('./common')
-const {
+import pako from 'pako'
+import { copyObject, parseOpId, equalBytes } from './common.mjs'
+import {
   utf8ToString, hexStringToBytes, bytesToHexString,
   Encoder, Decoder, RLEEncoder, RLEDecoder, DeltaEncoder, DeltaDecoder, BooleanEncoder, BooleanDecoder
-} = require('./encoding')
+} from './encoding.mjs'
 
 // Maybe we should be using the platform's built-in hash implementation?
 // Node has the crypto module: https://nodejs.org/api/crypto.html and browsers have
@@ -18,7 +18,7 @@ const {
 // - It does not need a secure source of random bits and does not need to be
 //   constant-time;
 // - I have reviewed the source code and it seems pretty reasonable.
-const { Hash } = require('fast-sha256')
+import { Hash } from 'fast-sha256'
 
 // These bytes don't mean anything, they were generated randomly
 const MAGIC_BYTES = new Uint8Array([0x85, 0x6f, 0x4a, 0x83])
@@ -780,7 +780,7 @@ function decodeChange(buffer) {
  * the operations. Saves work when we only need to inspect the headers. Only
  * computes the hash of the change if `computeHash` is true.
  */
-function decodeChangeMeta(buffer, computeHash) {
+export function decodeChangeMeta(buffer, computeHash) {
   if (buffer[8] === CHUNK_TYPE_DEFLATE) buffer = inflateChange(buffer)
   const header = decodeContainerHeader(new Decoder(buffer), computeHash)
   if (header.chunkType !== CHUNK_TYPE_CHANGE) {
@@ -1404,12 +1404,4 @@ function constructPatch(documentBuffer) {
   if (property) addPatchProperty(objects, property)
   condenseEdits(objects._root)
   return objects._root
-}
-
-module.exports = {
-  COLUMN_TYPE, VALUE_TYPE, ACTIONS, OBJECT_TYPE, DOC_OPS_COLUMNS, CHANGE_COLUMNS,
-  encoderByColumnId, decoderByColumnId, makeDecoders, decodeValue,
-  splitContainers, encodeChange, decodeChangeColumns, decodeChange, decodeChangeMeta, decodeChanges,
-  decodeDocumentHeader, encodeDocument, decodeDocument,
-  getChangeChecksum, appendEdit, constructPatch
 }

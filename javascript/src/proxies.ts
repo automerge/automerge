@@ -1,14 +1,19 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
-import { Text } from "./text"
+import { Text } from "./text.js"
 import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
 
-import type { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
+import type {
+  AutomergeValue,
+  ScalarValue,
+  MapValue,
+  ListValue,
+} from "./types.js"
 import {
   type AutomergeValue as UnstableAutomergeValue,
   MapValue as UnstableMapValue,
   ListValue as UnstableListValue,
-} from "./next_types"
-import { Counter, getWriteableCounter } from "./counter"
+} from "./next_types.js"
+import { Counter, getWriteableCounter } from "./counter.js"
 import {
   STATE,
   TRACE,
@@ -19,8 +24,8 @@ import {
   INT,
   UINT,
   F64,
-} from "./constants"
-import { RawString } from "./raw_string"
+} from "./constants.js"
+import { RawString } from "./raw_string.js"
 
 type TargetCommon = {
   context: Automerge

@@ -8,18 +8,18 @@
 const utf8encoder = new TextEncoder()
 const utf8decoder = new TextDecoder("utf-8")
 
-function stringToUtf8(string) {
+export function stringToUtf8(string) {
   return utf8encoder.encode(string)
 }
 
-function utf8ToString(buffer) {
+export function utf8ToString(buffer) {
   return utf8decoder.decode(buffer)
 }
 
 /**
  * Converts a string consisting of hexadecimal digits into an Uint8Array.
  */
-function hexStringToBytes(value) {
+export function hexStringToBytes(value) {
   if (typeof value !== "string") {
     throw new TypeError("value is not a string")
   }
@@ -59,7 +59,7 @@ for (let i = 0; i < 256; i++) {
 /**
  * Converts a Uint8Array into the equivalent hexadecimal string.
  */
-function bytesToHexString(bytes) {
+export function bytesToHexString(bytes) {
   let hex = "",
     len = bytes.byteLength
   for (let i = 0; i < len; i++) {
@@ -72,7 +72,7 @@ function bytesToHexString(bytes) {
  * Wrapper around an Uint8Array that allows values to be appended to the buffer,
  * and that automatically grows the buffer when space runs out.
  */
-class Encoder {
+export class Encoder {
   constructor() {
     this.buf = new Uint8Array(16)
     this.offset = 0
@@ -329,7 +329,7 @@ class Encoder {
  * the current decoding position, and allows values to be incrementally read by
  * decoding the bytes at the current position.
  */
-class Decoder {
+export class Decoder {
   constructor(buffer) {
     if (!(buffer instanceof Uint8Array)) {
       throw new TypeError(`Not a byte array: ${buffer}`)
@@ -611,7 +611,7 @@ class Decoder {
  * After one of these three has completed, the process repeats, starting again
  * with a repetition count, until we reach the end of the buffer.
  */
-class RLEEncoder extends Encoder {
+export class RLEEncoder extends Encoder {
   constructor(type) {
     super()
     this.type = type
@@ -864,7 +864,7 @@ class RLEEncoder extends Encoder {
  * Counterpart to RLEEncoder: reads values from an RLE-compressed sequence,
  * returning nulls and repeated values as required.
  */
-class RLEDecoder extends Decoder {
+export class RLEDecoder extends Decoder {
   constructor(type, buffer) {
     super(buffer)
     this.type = type
@@ -1021,7 +1021,7 @@ class RLEDecoder extends Decoder {
  *
  * Null values are also allowed, as with RLEEncoder.
  */
-class DeltaEncoder extends RLEEncoder {
+export class DeltaEncoder extends RLEEncoder {
   constructor() {
     super("int")
     this.absoluteValue = 0
@@ -1099,7 +1099,7 @@ class DeltaEncoder extends RLEEncoder {
  * Counterpart to DeltaEncoder: reads values from a delta-compressed sequence of
  * numbers (may include null values).
  */
-class DeltaDecoder extends RLEDecoder {
+export class DeltaDecoder extends RLEDecoder {
   constructor(buffer) {
     super("int", buffer)
     this.absoluteValue = 0
@@ -1156,7 +1156,7 @@ class DeltaDecoder extends RLEDecoder {
  * only encode the repetition count but not the actual value, since the values
  * just alternate between false and true (starting with false).
  */
-class BooleanEncoder extends Encoder {
+export class BooleanEncoder extends Encoder {
   constructor() {
     super()
     this.lastValue = false
@@ -1239,7 +1239,7 @@ class BooleanEncoder extends Encoder {
  * Counterpart to BooleanEncoder: reads boolean values from a runlength-encoded
  * sequence.
  */
-class BooleanDecoder extends Decoder {
+export class BooleanDecoder extends Decoder {
   constructor(buffer) {
     super(buffer)
     this.lastValue = true // is negated the first time we read a count
@@ -1303,19 +1303,4 @@ class BooleanDecoder extends Decoder {
       }
     }
   }
-}
-
-module.exports = {
-  stringToUtf8,
-  utf8ToString,
-  hexStringToBytes,
-  bytesToHexString,
-  Encoder,
-  Decoder,
-  RLEEncoder,
-  RLEDecoder,
-  DeltaEncoder,
-  DeltaDecoder,
-  BooleanEncoder,
-  BooleanDecoder,
 }

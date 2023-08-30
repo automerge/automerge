@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src"
-import { assertEqualsOneOf } from "./helpers"
+import { next as Automerge } from "../src/index.js"
+import { assertEqualsOneOf } from "./helpers.js"
 
 type DocType = {
   text: string

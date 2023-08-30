@@ -1,8 +1,8 @@
 /** @hidden **/
-export { /** @hidden */ uuid } from "./uuid"
+export { /** @hidden */ uuid } from "./uuid.js"
 
-import { rootProxy } from "./proxies"
-import { STATE } from "./constants"
+import { rootProxy } from "./proxies.js"
+import { STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -11,7 +11,7 @@ import {
   type PatchCallback,
   type Patch,
   type PatchSource,
-} from "./types"
+} from "./types.js"
 export {
   type AutomergeValue,
   Counter,
@@ -24,10 +24,10 @@ export {
   type ScalarValue,
   type PatchInfo,
   type PatchSource,
-} from "./types"
+} from "./types.js"
 
-import { Text } from "./text"
-export { Text } from "./text"
+import { Text } from "./text.js"
+export { Text } from "./text.js"
 
 import type {
   API as WasmAPI,
@@ -61,15 +61,15 @@ const SyncStateSymbol = Symbol("_syncstate")
  */
 type SyncState = JsSyncState & { _opaque: typeof SyncStateSymbol }
 
-import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level"
+import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
 
 import { Automerge } from "@automerge/automerge-wasm"
 
-import { RawString } from "./raw_string"
+import { RawString } from "./raw_string.js"
 
-import { _state, _is_proxy, _trace, _obj } from "./internal_state"
+import { _state, _is_proxy, _trace, _obj } from "./internal_state.js"
 
-import { stableConflictAt } from "./conflicts"
+import { stableConflictAt } from "./conflicts.js"
 
 /** Options passed to {@link change}, and {@link emptyChange}
  * @typeParam T - The type of value contained in the document

@@ -1,6 +1,6 @@
 import * as assert from "assert"
 import { beforeEach } from "mocha"
-import { type Doc, from, change } from "../src"
+import { type Doc, from, change } from "../src/index.js"
 
 type DocType = {
   list: string[]

@@ -1,4 +1,4 @@
-import { Counter } from "./types"
+import { Counter } from "./types.js"
 
 export {
   Counter,
@@ -14,10 +14,10 @@ export {
   type Cursor,
   type PatchInfo,
   type PatchSource,
-} from "./types"
+} from "./types.js"
 
-import { RawString } from "./raw_string"
-export { RawString } from "./raw_string"
+import { RawString } from "./raw_string.js"
+export { RawString } from "./raw_string.js"
 
 export type AutomergeValue =
   | ScalarValue

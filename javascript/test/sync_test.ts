@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
-import { BloomFilter } from "./legacy/sync"
+import * as Automerge from "../src/index.js"
+import { BloomFilter } from "./legacy/sync.js"
 import {
   decodeSyncMessage,
   encodeSyncMessage,

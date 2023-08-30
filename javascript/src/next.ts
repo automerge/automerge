@@ -50,15 +50,15 @@ export {
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
-} from "./next_types"
+} from "./next_types.js"
 
-import type { Cursor, Mark, MarkRange, MarkValue } from "./next_types"
+import type { Cursor, Mark, MarkRange, MarkValue } from "./next_types.js"
 
-import { type PatchCallback } from "./stable"
+import { type PatchCallback } from "./stable.js"
 
-import { type UnstableConflicts as Conflicts } from "./conflicts"
-import { unstableConflictAt } from "./conflicts"
-import type { InternalState } from "./internal_state"
+import { type UnstableConflicts as Conflicts } from "./conflicts.js"
+import { unstableConflictAt } from "./conflicts.js"
+import type { InternalState } from "./internal_state.js"
 
 export type {
   PutPatch,
@@ -71,7 +71,19 @@ export type {
   Cursor,
 } from "@automerge/automerge-wasm"
 
-export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
+export type {
+  ActorId,
+  Change,
+  ChangeOptions,
+  Prop,
+  DecodedChange,
+  DecodedSyncMessage,
+  ApplyOptions,
+  ChangeFn,
+  ChangeAtResult,
+  MaterializeValue,
+  SyncState,
+} from "./stable.js"
 export {
   view,
   free,
@@ -108,7 +120,7 @@ export {
   insertAt,
   deleteAt,
   saveSince,
-} from "./stable"
+} from "./stable.js"
 
 export type InitOptions<T> = {
   /** The actor ID to use for this document, a random one will be generated if `null` is passed */
@@ -122,14 +134,14 @@ export type InitOptions<T> = {
   allowMissingChanges?: boolean
 }
 
-import { ActorId, Doc } from "./stable"
-import * as stable from "./stable"
-export { RawString } from "./raw_string"
+import { ActorId, Doc } from "./stable.js"
+import * as stable from "./stable.js"
+export { RawString } from "./raw_string.js"
 
 /** @hidden */
 export const getBackend = stable.getBackend
 
-import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state"
+import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state.js"
 
 /**
  * Create a new automerge document
