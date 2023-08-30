@@ -1,3 +1,3 @@
 (function() {var implementors = {
-"automerge":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.71.1/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"automerge/hydrate/struct.Map.html\" title=\"struct automerge::hydrate::Map\">Map</a>"]]
+"automerge":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.72.0/core/ops/deref/trait.DerefMut.html\" title=\"trait core::ops::deref::DerefMut\">DerefMut</a> for <a class=\"struct\" href=\"automerge/hydrate/struct.Map.html\" title=\"struct automerge::hydrate::Map\">Map</a>"]]
 };if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
