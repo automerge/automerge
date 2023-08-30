@@ -202,6 +202,39 @@ mod tests {
     };
 
     use super::*;
+    
+    #[test]
+    fn clock_by_heads_performance() {
+        let duration_1 = {
+            let mut builder = TestGraphBuilder::new();
+            let actor1 = builder.actor();
+            let actor2 = builder.actor();
+            let actor3 = builder.actor();
+            let change1 = builder.change(&actor1, 10, &[]);
+            let change2 = builder.change(&actor2, 20, &[change1]);
+            let change3 = builder.change(&actor3, 30, &[change1]);
+            let change4 = builder.change(&actor1, 10, &[change2, change3]);
+            let graph = builder.build();
+            let now = std::time::Instant::now();
+            let clock = graph.clock_for_heads(&[change1]);
+            now.elapsed()
+        };
+        
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        let actor3 = builder.actor();
+        let mut change = builder.change(&actor1, 10, &[]);
+        for x in 0..2000 {
+            change = builder.change(&actor2, x, &[change]);
+        }
+        let graph = builder.build();
+        
+        let now = std::time::Instant::now();
+        let clock = graph.clock_for_heads(&[change]);
+        let duration_2 = now.elapsed();
+        assert_eq!(duration_2.as_millis(), duration_1.as_millis());
+    }
 
     #[test]
     fn clock_by_heads() {
