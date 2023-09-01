@@ -609,7 +609,12 @@ function listMethods<T extends Target>(target: T) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
         const value = context.getWithType(objectId, i)
-        if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
+        if (
+          value &&
+          (value[1] === o[OBJECT_ID] ||
+            value[1] === o ||
+            valueAt(target, i) === o)
+        ) {
           return i
         }
       }
