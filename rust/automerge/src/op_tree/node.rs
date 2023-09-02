@@ -18,6 +18,21 @@ pub(crate) struct OpTreeNode {
 }
 
 impl OpTreeNode {
+
+    pub fn dealloc(&mut self) -> crate::mem::MemU {
+      let mut mem = crate::mem::MemU::default();
+      crate::mem::memcheck(&format!("OpTreeNode (root, len={})", self.len()), &mut mem);
+      let root = self.children = Default::default();
+      crate::mem::memcheck("children", &mut mem);
+      self.elements = Vec::new();
+      crate::mem::memcheck("elements", &mut mem);
+      self.index = Default::default();
+      crate::mem::memcheck("index", &mut mem);
+      let mut other = OpTreeNode::new();
+      mem::swap(self, &mut other);
+      mem
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             elements: Vec::new(),

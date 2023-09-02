@@ -35,6 +35,30 @@ pub(crate) struct OpSetInternal {
 }
 
 impl OpSetInternal {
+
+    pub fn dealloc(&mut self) -> crate::mem::MemU {
+      let mut mem = crate::mem::MemU::default();
+      crate::mem::memcheck("OpSet", &mut mem);
+      let (id,_) = self.trees.iter().fold((None, 0), |(obj, len), (id, tree)| {
+        if tree.len() > len {
+          (Some(id), tree.len()) 
+        } else {
+          (obj,len)
+        }
+      });
+      let mut tree = id.and_then(|id| self.trees.get(id)).cloned();
+      self.trees = Default::default();
+      crate::mem::memcheck("trees", &mut mem);
+      self.m = Default::default();
+      crate::mem::memcheck("m", &mut mem);
+      let mut other = OpSetInternal::new();
+      std::mem::swap(self, &mut other);
+      if let Some(mut tree) = tree {
+        mem.append(tree.dealloc());
+      }
+      mem
+    }
+
     pub(crate) fn builder() -> OpSetBuilder {
         OpSetBuilder::new()
     }

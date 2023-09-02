@@ -6,6 +6,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::mem;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
@@ -1185,6 +1186,27 @@ impl Automerge {
             Export::Prop(index) => self.ops.m.props[index].clone(),
             Export::Special(s) => s,
         }
+    }
+
+    pub fn dealloc(mut self) -> mem::MemU {
+      let mut mem = mem::MemU::default();
+      mem::memcheck("Automerge", &mut mem);
+      self.queue = Default::default();
+      mem::memcheck("queue", &mut mem);
+      self.history = Default::default();
+      mem::memcheck("history", &mut mem);
+      self.history_index = Default::default();
+      mem::memcheck("history_index", &mut mem);
+      self.change_graph = ChangeGraph::new();
+      mem::memcheck("change_graph", &mut mem);
+      self.states = Default::default();
+      mem::memcheck("states", &mut mem);
+      self.deps = Default::default();
+      mem::memcheck("deps", &mut mem);
+      let ops_mem = self.ops.dealloc();
+      mem::memcheck("ops", &mut mem);
+      mem.append(ops_mem);
+      mem
     }
 
     pub fn dump(&self) {

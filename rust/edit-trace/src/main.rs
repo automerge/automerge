@@ -3,7 +3,29 @@ use automerge::ReadDoc;
 use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ROOT};
 use std::time::Instant;
 
+/*
+use std::alloc::GlobalAlloc;
+use jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+use jemalloc_ctl::{epoch, stats};
+
+struct XXX {
+  data: [u8; 1024 * 1024],
+}
+*/
+
 fn main() -> Result<(), AutomergeError> {
+    memcheck("begin");
+    let r = main2();
+    memcheck("end");
+    r
+}
+
+fn main2() -> Result<(), AutomergeError> {
+
     let contents = include_str!("../edits.json");
     let edits = json::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
@@ -53,5 +75,19 @@ fn main() -> Result<(), AutomergeError> {
     doc.text(&text)?;
     println!("Text in {} ms", get_txt.elapsed().as_millis());
 
+    memcheck("active");
+
     Ok(())
 }
+
+use std::process::Command;
+fn memcheck(label: &str) {
+    let pid = std::process::id();
+    let output = Command::new("leaks").arg(format!("{}", pid)).output().unwrap();
+    let text = std::str::from_utf8(output.stdout.as_slice()).unwrap();
+    println!("** {} **", label); 
+    if let Some(line) = text.lines().filter(|l| l.starts_with("Process ")).next() {
+      println!("{}", line);
+    }
+}
+

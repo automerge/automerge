@@ -273,6 +273,7 @@ mod indexed_cache;
 pub mod iter;
 mod legacy;
 pub mod marks;
+pub mod mem;
 mod op_set;
 pub mod op_tree;
 mod parents;

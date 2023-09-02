@@ -45,6 +45,9 @@ pub(crate) struct LastInsert {
 }
 
 impl OpTree {
+    pub(crate) fn dealloc(&mut self) -> crate::mem::MemU {
+      self.internal.dealloc()
+    }
     pub(crate) fn new() -> Self {
         Self {
             internal: Default::default(),
@@ -188,6 +191,24 @@ pub(crate) struct OpTreeInternal {
 }
 
 impl OpTreeInternal {
+
+    pub fn dealloc(&mut self) -> crate::mem::MemU {
+      let mut mem = crate::mem::MemU::default();
+      crate::mem::memcheck(&format!("OpTreeInternal (largest node, len={})", self.len()), &mut mem);
+      //let root = self.root_node.dealloc();
+      let root = self.root_node.as_mut().map(|mut n| n.dealloc());
+      crate::mem::memcheck("root_node", &mut mem);
+      self.ops = Vec::new();
+      crate::mem::memcheck("ops", &mut mem);
+      //mem.append(mem);
+      let mut other = OpTreeInternal::new();
+      mem::swap(self, &mut other);
+      if let Some(root) = root {
+        mem.append(root);
+      }
+      mem
+    }
+
     /// Construct a new, empty, sequence.
     pub(crate) fn new() -> Self {
         Self {
