@@ -723,7 +723,7 @@
                         <span class="kw-2">&amp;</span>obj.id,
                         query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
                     );
-                    <span class="kw">for </span>mark <span class="kw">in </span>q.marks {
+                    <span class="kw">for </span>mark <span class="kw">in </span>q.finish() {
                         <span class="kw">let </span>index = mark.start;
                         <span class="kw">let </span>len = mark.len();
                         <span class="kw">let </span>marks = mark.into_mark_set();
