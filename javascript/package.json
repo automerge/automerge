@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "2.1.0-alpha.12",
+  "version": "2.1.0-alpha.13",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge/tree/main/javascript",
   "repository": "github:automerge/automerge",
@@ -68,7 +68,7 @@
     "denoify/evt": "2.4.18"
   },
   "dependencies": {
-    "@automerge/automerge-wasm": "^0.2.11",
+    "@automerge/automerge-wasm": "^0.2.12",
     "uuid": "^9.0.0"
   }
 }
