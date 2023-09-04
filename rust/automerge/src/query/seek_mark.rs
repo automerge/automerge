@@ -12,11 +12,12 @@ pub(crate) struct SeekMark<'a> {
     idx: ListState,
     id: OpId,
     end: usize,
-    found: bool,
+    found_begin: bool,
+    found_end: bool,
     mark_name: smol_str::SmolStr,
     next_mark: Option<Mark<'a>>,
     super_marks: HashMap<OpId, smol_str::SmolStr>,
-    pub(crate) marks: Vec<Mark<'a>>,
+    marks: Vec<Mark<'a>>,
 }
 
 // should be able to use MarkStateMachine here now - FIXME
@@ -27,12 +28,29 @@ impl<'a> SeekMark<'a> {
             idx: ListState::new(encoding, usize::MAX),
             id,
             end,
-            found: false,
+            found_begin: false,
+            found_end: false,
             next_mark: None,
             mark_name: "".into(),
             super_marks: Default::default(),
             marks: Default::default(),
         }
+    }
+
+    // Called once the the query has finished to account for the situation where the op we are
+    // inserting is a MarkEnd op at the end of the text sequence. In this case
+    // query_element_with_metadata won't be called
+    pub(crate) fn finish(mut self) -> Vec<Mark<'a>> {
+        // If we searched every element in the sequence and we didn't find an end mark and there
+        // are no superceding marks then we are inserting the MarkEnd as the last element in the
+        // sequence.
+        if self.idx.pos() == self.end && !self.found_end && self.super_marks.is_empty() {
+            if let Some(next_mark) = &mut self.next_mark {
+                next_mark.end = self.idx.index();
+                self.marks.push(next_mark.clone());
+            }
+        }
+        self.marks
     }
 }
 
@@ -48,7 +66,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 if !op.succ.is_empty() {
                     return QueryResult::Finish;
                 }
-                self.found = true;
+                self.found_begin = true;
                 self.mark_name = data.name.clone();
                 // retain the name and the value
                 self.next_mark = Some(Mark::from_data(self.idx.index(), self.idx.index(), data));
@@ -83,6 +101,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                         self.marks.push(next_mark.clone());
                     }
                 }
+                self.found_end = true;
                 return QueryResult::Finish;
             }
             OpType::MarkEnd(_) if self.super_marks.contains_key(&op.id) => {
@@ -98,6 +117,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
         }
         // the end op hasn't been inserted yet so we need to work off the position
         if self.end == self.idx.pos() {
+            self.found_end = true;
             if self.super_marks.is_empty() {
                 // complete a mark
                 if let Some(next_mark) = &mut self.next_mark {

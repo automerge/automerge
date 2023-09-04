@@ -105,7 +105,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         &obj.id,
                         query::SeekMark::new(op.id.prev(), self.pos, obj.encoding),
                     );
-                    for mark in q.marks {
+                    for mark in q.finish() {
                         let index = mark.start;
                         let len = mark.len();
                         let marks = mark.into_mark_set();
