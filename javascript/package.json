@@ -41,7 +41,7 @@
     "check-fmt": "prettier -c .prettierrc --check",
     "fmt": "prettier -c .prettierrc -w",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
-    "test": "ts-mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
+    "test": "mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
     "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"

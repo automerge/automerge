@@ -943,8 +943,20 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
 export function diff(doc: Doc<any>, before: Heads, after: Heads): Patch[] {
+  checkValidHeads("before", before)
+  checkValidHeads("after", after)
+
   const state = _state(doc)
   return state.handle.diff(before, after)
+}
+
+function checkValidHeads(argName: string, heads: Heads) {
+  if (!heads) {
+    throw new Error(`${argName} must be an array of strings`)
+  }
+  if (!(heads instanceof Array)) {
+    throw new Error(`${argName} must be an array of strings`)
+  }
 }
 
 /** @hidden */
