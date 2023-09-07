@@ -166,7 +166,7 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \installed_headerfile
 /// \brief The type of an object.
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
+#[repr(C)]
 pub enum AMobjType {
     /// The default tag, not a type signifier.
     Default = 0,

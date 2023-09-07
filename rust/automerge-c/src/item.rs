@@ -1219,7 +1219,7 @@ impl TryFrom<&AMitem> for (am::Value<'static>, am::ObjId) {
 /// \installed_headerfile
 /// \brief The type of an item's value.
 #[derive(PartialEq, Eq)]
-#[repr(u32)]
+#[repr(C)]
 pub enum AMvalType {
     /// An actor identifier value.
     ActorId = 1 << 1,
