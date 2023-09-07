@@ -445,7 +445,7 @@ pub fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
 /// \installed_headerfile
 /// \brief The status of an API call.
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
+#[repr(C)]
 pub enum AMstatus {
     /// Success.
     /// \note This tag is unalphabetized so that `0` indicates success.

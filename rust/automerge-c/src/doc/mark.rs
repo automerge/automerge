@@ -36,7 +36,7 @@ pub(crate) use to_expand_mark;
 /// \installed_headerfile
 /// \brief A mark's expansion mode for when bordering text is inserted.
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
+#[repr(C)]
 pub enum AMmarkExpand {
     /// Include text inserted at the end offset.
     After = 3,
