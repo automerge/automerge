@@ -6,14 +6,14 @@ cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 # Seeks the starting line of the source enum's declaration.
 macro(seek_enum_mode)
     if (line MATCHES "^(typedef[ \t]+)?enum ")
-        string(REGEX REPLACE "^enum ([0-9a-zA-Z_]+).*$" "\\1" enum_name "${line}")
+        string(REGEX REPLACE "^(typedef[ \t]+)?enum ([0-9a-zA-Z_]+).*$" "\\2" enum_name "${line}")
         set(mode "read_tags")
     endif()
 endmacro()
 
 # Scans the input for the current enum's tags.
 macro(read_tags_mode)
-    if(line MATCHES "^}")
+    if(line MATCHES "^}[ \t]+${enum_name};")
         set(mode "generate")
     elseif(line MATCHES "^[A-Z0-9_]+.*$")
         string(REGEX REPLACE "^([A-Za-z0-9_]+).*$" "\\1" tmp "${line}")
