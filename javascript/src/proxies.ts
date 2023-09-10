@@ -154,7 +154,7 @@ function import_value(value: any, textV2: boolean): ImportedValue {
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
       } else if (value instanceof RawString) {
-        return [value.val, "str"]
+        return [value.toString(), "str"]
       } else if (value instanceof Text) {
         return [value, "text"]
       } else if (value instanceof Uint8Array) {
