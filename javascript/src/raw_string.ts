@@ -8,6 +8,6 @@ export class RawString {
    * Returns the content of the RawString object as a simple string
    */
   toString(): string {
-    return this.val;
+    return this.val
   }
 }
