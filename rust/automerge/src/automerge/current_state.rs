@@ -752,11 +752,12 @@ mod tests {
         }
 
         let mut patch_log = PatchLog::active(TextRepresentation::String);
-        let _doc = Automerge::load_with(
+        let _doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
-            crate::OnPartialLoad::Error,
-            crate::storage::VerificationMode::Check,
-            &mut patch_log,
+            crate::LoadOptions::new()
+                .on_partial_load(crate::OnPartialLoad::Error)
+                .verification_mode(crate::VerificationMode::Check)
+                .patch_log(&mut patch_log),
         )
         .unwrap();
         let p = _doc.make_patches(&mut patch_log);
