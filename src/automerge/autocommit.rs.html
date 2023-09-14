@@ -966,6 +966,14 @@
 <a href="#966" id="966">966</a>
 <a href="#967" id="967">967</a>
 <a href="#968" id="968">968</a>
+<a href="#969" id="969">969</a>
+<a href="#970" id="970">970</a>
+<a href="#971" id="971">971</a>
+<a href="#972" id="972">972</a>
+<a href="#973" id="973">973</a>
+<a href="#974" id="974">974</a>
+<a href="#975" id="975">975</a>
+<a href="#976" id="976">976</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -977,13 +985,13 @@
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
 <span class="kw">use </span><span class="kw">crate</span>::types::Clock;
-<span class="kw">use </span><span class="kw">crate</span>::VerificationMode;
 <span class="kw">use crate</span>::{hydrate, OnPartialLoad};
 <span class="kw">use crate</span>::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
     Prop, Value,
 };
+<span class="kw">use crate</span>::{LoadOptions, VerificationMode};
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
 ///
@@ -1074,17 +1082,25 @@
         })
     }
 
-    <span class="kw">pub fn </span>load_with(
+    <span class="attr">#[deprecated(since = <span class="string">&quot;0.5.2&quot;</span>, note = <span class="string">&quot;use `load_with_options` instead&quot;</span>)]
+    </span><span class="kw">pub fn </span>load_with(
         data: <span class="kw-2">&amp;</span>[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
-        <span class="kw">let </span>doc = Automerge::load_with(
+        <span class="self">Self</span>::load_with_options(
             data,
-            on_error,
-            mode,
-            <span class="kw-2">&amp;mut </span>PatchLog::inactive(TextRepresentation::default()),
-        )<span class="question-mark">?</span>;
+            LoadOptions::new()
+                .on_partial_load(on_error)
+                .verification_mode(mode),
+        )
+    }
+
+    <span class="kw">pub fn </span>load_with_options(
+        data: <span class="kw-2">&amp;</span>[u8],
+        options: LoadOptions&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
+        <span class="kw">let </span>doc = Automerge::load_with_options(data, options)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc,
             transaction: <span class="prelude-val">None</span>,
