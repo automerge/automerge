@@ -9,18 +9,20 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkStateMachine};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
-use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
+use crate::transaction::{
+    self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
+};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, Value,
 };
+use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
 pub(crate) mod current_state;
@@ -44,10 +46,20 @@ pub enum OnPartialLoad {
     Error,
 }
 
+/// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
+#[derive(Debug)]
+pub enum StringMigration {
+    /// Don't convert anything
+    NoMigration,
+    /// Convert all strings to text
+    ConvertToText,
+}
+
 #[derive(Debug)]
 pub struct LoadOptions<'a> {
     on_partial_load: OnPartialLoad,
     verification_mode: VerificationMode,
+    string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
 }
 
@@ -85,6 +97,30 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
+    ///
+    /// Until version 2.1.0 of the javascript library strings (as in, the native string of the JS
+    /// runtime) were represented in the document as [`ScalarValue::Str`] and there was a special
+    /// JS class called `Text` which users were expected to use for [`ObjType::Text`]. In `2.1.0`
+    /// we changed this so that native strings were represented as [`ObjType::Text`] and
+    /// [`ScalarValue::Str`] was represented as a special `RawString` class. This means
+    /// that upgrading the application code to use the new API would require either
+    ///
+    /// a) Maintaining two code paths in the application to deal with both `string` and `RawString`
+    ///    types
+    /// b) Writing a migration script to convert all `RawString` types to `string`
+    ///
+    /// The latter is logic which is the same for all applications so we implement it in the
+    /// library for convenience. The way this works is that after loading the document we iterate
+    /// through all visible [`ScalarValue::Str`] values and emit a change which creates a new
+    /// [`ObjType::Text`] at the same path with the same content.
+    pub fn migrate_strings(self, migration: StringMigration) -> Self {
+        Self {
+            string_migration: migration,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -93,6 +129,7 @@ impl std::default::Default for LoadOptions<'static> {
             on_partial_load: OnPartialLoad::Error,
             verification_mode: VerificationMode::Check,
             patch_log: None,
+            string_migration: StringMigration::NoMigration,
         }
     }
 }
@@ -655,6 +692,9 @@ impl Automerge {
                     return Err(error.into());
                 }
             }
+        }
+        if let StringMigration::ConvertToText = options.string_migration {
+            am.convert_scalar_strings_to_text()?;
         }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
@@ -1522,6 +1562,51 @@ impl Automerge {
             values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
         );
         Ok(values)
+    }
+
+    fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
+        struct Conversion {
+            obj_id: ExId,
+            prop: Prop,
+            text: smol_str::SmolStr,
+        }
+        let mut to_convert = Vec::new();
+        for (obj_id, obj_type, ops) in self.ops.iter_objs() {
+            match obj_type {
+                ObjType::Map | ObjType::List => {
+                    for op in ops {
+                        if !op.visible() {
+                            continue;
+                        }
+                        if let OpType::Put(ScalarValue::Str(s)) = &op.action {
+                            let prop = match op.key {
+                                Key::Map(prop) => Prop::Map(self.ops.m.props.get(prop).clone()),
+                                Key::Seq(_) => {
+                                    let Some(found) = self.ops.seek_opid(obj_id, op.id, None)
+                                    else {
+                                        continue;
+                                    };
+                                    Prop::Seq(found.index)
+                                }
+                            };
+                            to_convert.push(Conversion {
+                                obj_id: self.ops.id_to_exid(*(obj_id.as_ref())),
+                                prop,
+                                text: s.clone(),
+                            })
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut tx = self.transaction();
+        for Conversion { obj_id, prop, text } in to_convert {
+            let text_id = tx.put_object(obj_id, prop, ObjType::Text)?;
+            tx.splice_text(&text_id, 0, 0, &text)?;
+        }
+        tx.commit();
+        Ok(())
     }
 }
 
