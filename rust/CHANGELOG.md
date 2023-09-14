@@ -1,3 +1,14 @@
+# 0.5.2
+
+* Fix a bug where sync messages were not generated even though sync was not
+  complete
+* Fix a bug where adding a mark to the last character in a text string failed
+  to produce a patch
+* Add `Automerge::load_with_options` and `AutoCommit::load_with_options` and 
+  deprecate `Automerge::load_with` and `AutoCommit::load_with`. Add an option
+  to convert `ScalarValue::Str` values to `ObjType::Text` on load
+* Expose `VerficationMode`
+
 # 0.5.1
 
 * Make `AutoCommit` and `PatchLog` `Send`
