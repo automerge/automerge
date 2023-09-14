@@ -92,5 +92,25 @@ describe("patches", () => {
         { action: "splice", path: ["fish", 0, 0], value: "cod" },
       ])
     })
+
+    it("should throw a nice exception if before or after are not an array", () => {
+      let doc = Automerge.from({ text: "hello world" })
+      const goodBefore = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 0, 0, "hello ")
+      })
+
+      const goodAfter = Automerge.getHeads(doc)
+
+      assert.throws(
+        () => Automerge.diff(doc, null as any, goodAfter),
+        /before must be an array/,
+      )
+      assert.throws(
+        () => Automerge.diff(doc, goodBefore, null as any),
+        /after must be an array/,
+      )
+    })
   })
 })
