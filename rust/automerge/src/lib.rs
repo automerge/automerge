@@ -289,7 +289,7 @@ mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
-pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions};
+pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

@@ -304,6 +304,7 @@ export type LoadOptions = {
   text_v1?: boolean,
   unchecked?: boolean,
   allowMissingDeps?: boolean,
+  convertRawStringsToText?: boolean,
 }
 
 export type InitOptions = {

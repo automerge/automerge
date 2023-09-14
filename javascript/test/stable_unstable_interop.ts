@@ -93,4 +93,24 @@ describe("old/next interop", () => {
     })
     assert.deepStrictEqual(doc.list, ["abc", "def"])
   })
+
+  it("should allow converting scalar strings from old docs to text in new docs", () => {
+    type DocType = {
+      text: string
+      nested: { text: string }
+      list: [string]
+    }
+    const old_doc = old.from<DocType>({
+      text: "abc",
+      nested: { text: "def" },
+      list: ["ghi"],
+    })
+    const saved = old.save(old_doc)
+    const next_doc = next.load<DocType>(saved, {
+      convertRawStringsToText: true,
+    })
+    assert.deepStrictEqual(next_doc.text, "abc")
+    assert.deepStrictEqual(next_doc.nested.text, "def")
+    assert.deepStrictEqual(next_doc.list[0], "ghi")
+  })
 })

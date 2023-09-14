@@ -132,6 +132,16 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
+  /** Whether to convert raw string to text objects
+   *
+   * @remarks
+   * This is useful if you have some documents which were created using the older API which represented
+   * text as the `Text` class and you are migrating to the new API where text is just a `string`. In
+   * this case the strings from the old document will appear as `RawString`s in the new document. This
+   * option will convert those `RawString`s to `Text` objects. This conversion is achieved by rewriting
+   * all the old string fields to new text fields
+   **/
+  convertRawStringsToText?: boolean
 }
 
 import { ActorId, Doc } from "./stable.js"

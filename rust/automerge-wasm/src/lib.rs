@@ -30,6 +30,7 @@ use am::transaction::CommitOptions;
 use am::transaction::Transactable;
 use am::OnPartialLoad;
 use am::ScalarValue;
+use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
@@ -984,11 +985,21 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         OnPartialLoad::Error
     };
+    let string_migration = if js_get(&options, "convertRawStringsToText")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        StringMigration::ConvertToText
+    } else {
+        StringMigration::NoMigration
+    };
     let mut doc = am::AutoCommit::load_with_options(
         &data,
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
-            .verification_mode(verification_mode),
+            .verification_mode(verification_mode)
+            .migrate_strings(string_migration),
     )?
     .with_text_rep(text_rep.into());
     if let Some(s) = actor {
