@@ -44,6 +44,59 @@ pub enum OnPartialLoad {
     Error,
 }
 
+#[derive(Debug)]
+pub struct LoadOptions<'a> {
+    on_partial_load: OnPartialLoad,
+    verification_mode: VerificationMode,
+    patch_log: Option<&'a mut PatchLog>,
+}
+
+impl<'a> LoadOptions<'a> {
+    pub fn new() -> LoadOptions<'static> {
+        LoadOptions::default()
+    }
+
+    /// What to do when loading a document partially succeeds
+    ///
+    /// The default is [`OnPartialLoad::Error`]
+    pub fn on_partial_load(self, on_partial_load: OnPartialLoad) -> Self {
+        Self {
+            on_partial_load,
+            ..self
+        }
+    }
+
+    /// Whether to verify the head hashes after loading
+    ///
+    /// The default is [`VerificationMode::Check`]
+    pub fn verification_mode(self, verification_mode: VerificationMode) -> Self {
+        Self {
+            verification_mode,
+            ..self
+        }
+    }
+
+    /// A [`PatchLog`] to log the changes required to materialize the current state of the
+    ///
+    /// The default is to not log patches
+    pub fn patch_log(self, patch_log: &'a mut PatchLog) -> Self {
+        Self {
+            patch_log: Some(patch_log),
+            ..self
+        }
+    }
+}
+
+impl std::default::Default for LoadOptions<'static> {
+    fn default() -> Self {
+        Self {
+            on_partial_load: OnPartialLoad::Error,
+            verification_mode: VerificationMode::Check,
+            patch_log: None,
+        }
+    }
+}
+
 /// An automerge document which does not manage transactions for you.
 ///
 /// ## Creating, loading, merging and forking documents
@@ -460,23 +513,19 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with(
-            data,
-            OnPartialLoad::Error,
-            VerificationMode::Check,
-            &mut PatchLog::inactive(TextRepresentation::default()),
-        )
+        Self::load_with_options(data, Default::default())
     }
 
     /// Load a document without verifying the head hashes
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with(
+        Self::load_with_options(
             data,
-            OnPartialLoad::Error,
-            VerificationMode::DontCheck,
-            &mut PatchLog::inactive(TextRepresentation::default()),
+            LoadOptions {
+                verification_mode: VerificationMode::DontCheck,
+                ..Default::default()
+            },
         )
     }
 
@@ -489,12 +538,32 @@ impl Automerge {
     /// * `mode` - Whether to verify the head hashes after loading
     /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
     ///                 the document once loaded
+    #[deprecated(since = "0.5.2", note = "Use `load_with_options` instead")]
     #[tracing::instrument(skip(data), err)]
     pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
         patch_log: &mut PatchLog,
+    ) -> Result<Self, AutomergeError> {
+        Self::load_with_options(
+            data,
+            LoadOptions::new()
+                .on_partial_load(on_error)
+                .verification_mode(mode)
+                .patch_log(patch_log),
+        )
+    }
+
+    /// Load a document, with options
+    ///
+    /// # Arguments
+    /// * `data` - The data to load
+    /// * `options` - The options to use when loading
+    #[tracing::instrument(skip(data), err)]
+    pub fn load_with_options<'a, 'b>(
+        data: &'a [u8],
+        options: LoadOptions<'b>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -518,8 +587,12 @@ impl Automerge {
                     result: op_set,
                     changes,
                     heads,
-                } = storage::load::reconstruct_document(&d, mode, OpSet::builder())
-                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+                } = storage::load::reconstruct_document(
+                    &d,
+                    options.verification_mode,
+                    OpSet::builder(),
+                )
+                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
                 let mut hashes_by_index = HashMap::new();
                 let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
                 let mut change_graph = ChangeGraph::new();
@@ -570,19 +643,23 @@ impl Automerge {
                 am.apply_changes(change.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty() && !first_chunk_was_doc && on_error == OnPartialLoad::Error
+                if !am.queue.is_empty()
+                    && !first_chunk_was_doc
+                    && options.on_partial_load == OnPartialLoad::Error
                 {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
             load::LoadedChanges::Partial { error, .. } => {
-                if on_error == OnPartialLoad::Error {
+                if options.on_partial_load == OnPartialLoad::Error {
                     return Err(error.into());
                 }
             }
         }
-        if patch_log.is_active() {
-            current_state::log_current_state_patches(&am, patch_log);
+        if let Some(patch_log) = options.patch_log {
+            if patch_log.is_active() {
+                current_state::log_current_state_patches(&am, patch_log);
+            }
         }
         Ok(am)
     }
@@ -625,11 +702,11 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with(
+            let mut doc = Self::load_with_options(
                 data,
-                OnPartialLoad::Ignore,
-                VerificationMode::Check,
-                &mut PatchLog::inactive(TextRepresentation::default()),
+                LoadOptions::new()
+                    .on_partial_load(OnPartialLoad::Ignore)
+                    .verification_mode(VerificationMode::Check),
             )?;
             doc = doc.with_actor(self.actor_id());
             if patch_log.is_active() {

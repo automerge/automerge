@@ -984,8 +984,13 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         OnPartialLoad::Error
     };
-    let mut doc = am::AutoCommit::load_with(&data, on_partial_load, verification_mode)?
-        .with_text_rep(text_rep.into());
+    let mut doc = am::AutoCommit::load_with_options(
+        &data,
+        am::LoadOptions::new()
+            .on_partial_load(on_partial_load)
+            .verification_mode(verification_mode),
+    )?
+    .with_text_rep(text_rep.into());
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

@@ -9,13 +9,13 @@ use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
-use crate::VerificationMode;
 use crate::{hydrate, OnPartialLoad};
 use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
     Prop, Value,
 };
+use crate::{LoadOptions, VerificationMode};
 
 /// An automerge document that automatically manages transactions.
 ///
@@ -106,17 +106,25 @@ impl AutoCommit {
         })
     }
 
+    #[deprecated(since = "0.5.2", note = "use `load_with_options` instead")]
     pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
     ) -> Result<Self, AutomergeError> {
-        let doc = Automerge::load_with(
+        Self::load_with_options(
             data,
-            on_error,
-            mode,
-            &mut PatchLog::inactive(TextRepresentation::default()),
-        )?;
+            LoadOptions::new()
+                .on_partial_load(on_error)
+                .verification_mode(mode),
+        )
+    }
+
+    pub fn load_with_options(
+        data: &[u8],
+        options: LoadOptions<'_>,
+    ) -> Result<Self, AutomergeError> {
+        let doc = Automerge::load_with_options(data, options)?;
         Ok(Self {
             doc,
             transaction: None,
