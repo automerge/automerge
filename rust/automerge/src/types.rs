@@ -656,12 +656,15 @@ impl<'a> Iterator for SuccIter<'a> {
 }
 
 impl Op {
-    pub(crate) memsize(&self) -> usize {
-      std::mem::size_of(Self) 
+/*
+    pub(crate) fn memsize(&self) -> usize {
+      std::mem::size_of(Self) +
       self.action.memsize()
-      self.succ.cap() * std::mem::size_of(OpId)
-      self.pred
+      // FIXME
+      //self.succ.cap() * std::mem::size_of(OpId)
+      //self.pred
     }
+*/
 
     pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
         self.succ.add(op.id, cmp);

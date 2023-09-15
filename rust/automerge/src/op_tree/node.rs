@@ -18,8 +18,8 @@ pub(crate) struct OpTreeNode {
 }
 
 impl OpTreeNode {
-
-    pub fn dealloc(&mut self) -> crate::mem::MemU {
+/*
+    pub(crate) fn dealloc(&mut self) -> crate::mem::MemU {
       let mut mem = crate::mem::MemU::default();
       crate::mem::memcheck(&format!("OpTreeNode (root, len={})", self.len()), &mut mem);
       let root = self.children = Default::default();
@@ -32,6 +32,7 @@ impl OpTreeNode {
       mem::swap(self, &mut other);
       mem
     }
+*/
 
     pub(crate) fn new() -> Self {
         Self {

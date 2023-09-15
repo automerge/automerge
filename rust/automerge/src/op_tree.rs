@@ -191,21 +191,27 @@ pub(crate) struct OpTreeInternal {
 }
 
 impl OpTreeInternal {
-
-    pub fn dealloc(&mut self) -> crate::mem::MemU {
+    pub(crate) fn dealloc(&mut self) -> crate::mem::MemU {
       let mut mem = crate::mem::MemU::default();
       crate::mem::memcheck(&format!("OpTreeInternal (largest node, len={})", self.len()), &mut mem);
       //let root = self.root_node.dealloc();
-      let root = self.root_node.as_mut().map(|mut n| n.dealloc());
+      //let root = self.root_node.as_mut().map(|mut n| n.dealloc());
+      self.root_node = Default::default();
       crate::mem::memcheck("root_node", &mut mem);
+      //mem.append(mem);
       self.ops = Vec::new();
       crate::mem::memcheck("ops", &mut mem);
-      //mem.append(mem);
       let mut other = OpTreeInternal::new();
       mem::swap(self, &mut other);
+/*
       if let Some(root) = root {
         mem.append(root);
       }
+*/
+      let mut local = OpTreeInternal::default();
+      mem::swap(self, &mut local);
+      mem::drop(local);
+      mem.close();
       mem
     }
 

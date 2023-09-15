@@ -1206,6 +1206,7 @@ impl Automerge {
       let ops_mem = self.ops.dealloc();
       mem::memcheck("ops", &mut mem);
       mem.append(ops_mem);
+      mem.close();
       mem
     }
 

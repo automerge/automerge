@@ -26,6 +26,8 @@ tracing = { version = "^0.1.29" }
 fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
 serde = { version = "^1.0", features=["derive"] }
+jemalloc-ctl = "0.5.4"
+jemallocator = "0.5.4"
 
 # optional deps
 dot = { version = "0.1.4", optional = true }
