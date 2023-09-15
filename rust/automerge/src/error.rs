@@ -1,7 +1,7 @@
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
+use crate::{Branch, ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -59,6 +59,10 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
+    #[error("branch exists: {0}")]
+    BranchExists(Branch),
+    #[error("no such branch: {0}")]
+    NoSuchBranch(Branch),
 }
 
 impl PartialEq for AutomergeError {

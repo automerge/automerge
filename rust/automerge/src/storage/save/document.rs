@@ -117,6 +117,11 @@ impl<'a> AsChangeMeta<'a> for ChangeWithGraph<'a> {
         self.change.message().map(|m| Cow::Owned(m.into()))
     }
 
+    //fn packed_message(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+    fn packed_message(&self) -> Option<smol_str::SmolStr> {
+        crate::branch::pack_message(self.change.message(), self.change.branch())
+    }
+
     fn timestamp(&self) -> i64 {
         self.change.timestamp()
     }

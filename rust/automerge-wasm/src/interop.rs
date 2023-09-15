@@ -2,9 +2,8 @@ use crate::error::InsertObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation};
 use automerge as am;
-use automerge::ReadDoc;
 use automerge::ROOT;
-use automerge::{Change, ChangeHash, ObjType, Prop};
+use automerge::{Change, ChangeHash, ObjType, Prop, ReadDocV2};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
@@ -612,11 +611,14 @@ impl Automerge {
         let result = match datatype {
             Datatype::Text => match self.text_rep {
                 TextRepresentation::String => {
+                    /*
                     if let Some(heads) = heads {
                         self.doc.text_at(obj, heads)?.into()
                     } else {
                         self.doc.text(obj)?.into()
                     }
+                    */
+                    self.doc.v2_text(obj, heads.into())?.into()
                 }
                 TextRepresentation::Array => self
                     .wrap_object(self.export_list(obj, heads, meta)?, datatype, obj, meta)?
@@ -639,11 +641,14 @@ impl Automerge {
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
         let map = Object::new();
-        let items = if let Some(heads) = heads {
-            self.doc.map_range_at(obj, .., heads)
-        } else {
-            self.doc.map_range(obj, ..)
-        };
+        /*
+                let items = if let Some(heads) = heads {
+                    self.doc.map_range_at(obj, .., heads)
+                } else {
+                    self.doc.map_range(obj, ..)
+                };
+        */
+        let items = self.doc.v2_map_range(obj, .., heads.into());
         for item in items {
             let subval = match item.value {
                 Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta)?,
@@ -660,17 +665,21 @@ impl Automerge {
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        if let Some(heads) = heads {
-            self.doc.list_range_at(obj, .., heads)
-        } else {
-            self.doc.list_range(obj, ..)
-        }
-        .map(|item| match &item.value {
-            Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta),
-            Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep)),
-        })
-        .collect::<Result<Array, _>>()
-        .map(|array| array.into())
+        /*
+                if let Some(heads) = heads {
+                    self.doc.list_range_at(obj, .., heads)
+                } else {
+                    self.doc.list_range(obj, ..)
+                }
+        */
+        self.doc
+            .v2_list_range(obj, .., heads.into())
+            .map(|item| match &item.value {
+                Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta),
+                Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep)),
+            })
+            .collect::<Result<Array, _>>()
+            .map(|array| array.into())
     }
 
     pub(crate) fn export_value(
@@ -1034,12 +1043,13 @@ impl Automerge {
             }
             let is_map = matches!(obj_type, am::ObjType::Map | am::ObjType::Table);
             let val = if is_map {
-                self.doc.get(obj, prop)?
+                self.doc.v2_get(obj, prop, Default::default())?
             } else {
                 let idx = prop
                     .parse()
                     .map_err(|_| error::ImportPath::IndexNotInteger(i, prop.to_string()))?;
-                self.doc.get(obj, am::Prop::Seq(idx))?
+                self.doc
+                    .v2_get(obj, am::Prop::Seq(idx), Default::default())?
             };
             match val {
                 Some((am::Value::Object(am::ObjType::Map), id)) => {

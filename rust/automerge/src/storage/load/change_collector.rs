@@ -14,6 +14,7 @@ use crate::{
         Change as StoredChange, ChangeMetadata,
     },
     types::{ChangeHash, ObjId, Op},
+    Branch,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +69,7 @@ impl<'a> ChangeCollector<'a> {
                 timestamp: change.timestamp,
                 max_op: change.max_op,
                 message: change.message,
+                branch: change.branch,
                 extra_bytes: change.extra,
                 ops: Vec::new(),
             })
@@ -145,6 +147,7 @@ struct PartialChange<'a> {
     max_op: u64,
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
+    branch: Branch,
     extra_bytes: Cow<'a, [u8]>,
     ops: Vec<(ObjId, Op)>,
 }
@@ -202,6 +205,7 @@ impl<'a> PartialChange<'a> {
             .with_start_op(NonZeroU64::new(self.max_op - num_ops + 1).ok_or(Error::MissingOps)?)
             .with_timestamp(self.timestamp)
             .with_message(self.message.map(|s| s.to_string()))
+            .with_branch(self.branch)
             .with_extra_bytes(self.extra_bytes.into_owned())
             .build(converted_ops)
         {

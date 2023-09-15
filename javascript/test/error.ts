@@ -5,10 +5,10 @@ describe("Automerge errors", () => {
   it("proxy handler throws an error, not a string", () => {
     let error
     try {
-      Automerge.change(
-        Automerge.from({ d: ["test"] }),
-        doc => (doc.d[2] = "oops"),
-      )
+      let doc = Automerge.from({ d: ["test"] })
+      Automerge.change(doc, doc => {
+        doc.d[2] = "oops"
+      })
     } catch (err) {
       error = err
     }

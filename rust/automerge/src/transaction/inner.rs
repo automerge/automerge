@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+use crate::branch::Branch;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -19,6 +20,7 @@ pub(crate) struct TransactionInner {
     message: Option<String>,
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
+    branch: Branch,
     operations: Vec<(ObjId, Op)>,
 }
 
@@ -35,6 +37,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
+    /// The branch the transaction is acting on
+    pub(crate) branch: Branch,
 }
 
 impl TransactionInner {
@@ -45,6 +49,7 @@ impl TransactionInner {
             start_op,
             deps,
             scope,
+            branch,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -56,6 +61,7 @@ impl TransactionInner {
             operations: vec![],
             deps,
             scope,
+            branch,
         }
     }
 
@@ -129,6 +135,7 @@ impl TransactionInner {
             .with_actor(actor)
             .with_seq(self.seq)
             .with_start_op(self.start_op)
+            .with_branch(self.branch)
             .with_message(self.message.clone())
             .with_dependencies(deps)
             .with_timestamp(self.time)

@@ -1,6 +1,7 @@
 use std::{borrow::Cow, num::NonZeroU64};
 
 use crate::{
+    branch::Branch,
     columnar::Key as StoredKey,
     storage::{
         change::{Unverified, Verified},
@@ -46,6 +47,10 @@ impl Change {
 
     pub fn actor_id(&self) -> &ActorId {
         self.stored.actor()
+    }
+
+    pub fn branch(&self) -> &Branch {
+        self.stored.branch()
     }
 
     pub fn other_actor_ids(&self) -> &[ActorId] {

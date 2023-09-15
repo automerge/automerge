@@ -1,6 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
 use crate::{
+    branch::Branch,
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
@@ -30,6 +31,7 @@ pub(crate) struct ChangeMetadata<'a> {
     pub(crate) max_op: u64,
     pub(crate) timestamp: i64,
     pub(crate) message: Option<smol_str::SmolStr>,
+    pub(crate) branch: Branch,
     pub(crate) deps: Vec<u64>,
     pub(crate) extra: Cow<'a, [u8]>,
 }
@@ -48,6 +50,7 @@ pub(crate) trait AsChangeMeta<'a> {
     fn max_op(&self) -> u64;
     fn timestamp(&self) -> i64;
     fn message(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+    fn packed_message(&self) -> Option<smol_str::SmolStr>;
     fn deps(&self) -> Self::DepsIter;
     fn extra(&self) -> Cow<'a, [u8]>;
 }
@@ -97,7 +100,8 @@ impl DocChangeColumns {
         let seq = DeltaRange::encode(changes.clone().map(|c| Some(c.seq() as i64)), out);
         let max_op = DeltaRange::encode(changes.clone().map(|c| Some(c.max_op() as i64)), out);
         let time = DeltaRange::encode(changes.clone().map(|c| Some(c.timestamp())), out);
-        let message = RleRange::encode(changes.clone().map(|c| c.message()), out);
+        //let message = RleRange::encode(changes.clone().map(|c| c.message()), out);
+        let message = RleRange::encode(changes.clone().map(|c| c.packed_message()), out);
         let deps = DepsRange::encode(changes.clone().map(|c| c.deps()), out);
         let extra = ValueRange::encode(
             changes.map(|c| Cow::Owned(ScalarValue::Bytes(c.extra().to_vec()))),
@@ -213,10 +217,14 @@ impl<'a> DocChangeColumnIter<'a> {
             u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value("seq", e.to_string()))
         })?;
         let time = self.time.next_in_col("time")?;
-        let message = if let Some(ref mut message) = self.message {
-            message.maybe_next_in_col("message")?
+        let (message, branch) = if let Some(ref mut message) = self.message {
+            if let Some(packed) = message.maybe_next_in_col("message")? {
+                crate::branch::unpack_message(&packed)
+            } else {
+                (None, Branch::default())
+            }
         } else {
-            None
+            (None, Branch::default())
         };
         let deps = self.deps.next_in_col("deps")?;
         let extra = self.extra.next().transpose()?.unwrap_or(Cow::Borrowed(&[]));
@@ -226,6 +234,7 @@ impl<'a> DocChangeColumnIter<'a> {
             max_op,
             timestamp: time,
             message,
+            branch,
             deps,
             extra,
         }))

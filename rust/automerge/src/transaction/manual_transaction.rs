@@ -1,5 +1,7 @@
 use std::ops::RangeBounds;
 
+use crate::branch::{BranchScope, OpRef};
+use crate::docref::DocRef;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
@@ -421,6 +423,22 @@ impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);
+        }
+    }
+}
+
+impl DocRef for Transaction<'_> {
+    fn doc_ref(&self) -> &Automerge {
+        self.doc
+    }
+}
+
+impl BranchScope for Transaction<'_> {
+    fn scope_branch(&self, branch: &Option<OpRef>) -> Option<Clock> {
+        match branch {
+            None => None,
+            Some(OpRef::Branch(_name)) => todo!(),
+            Some(OpRef::Heads(heads)) => Some(self.doc.clock_at(heads)),
         }
     }
 }

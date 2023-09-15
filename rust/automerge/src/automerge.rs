@@ -1,11 +1,13 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::branch::Branch;
+use crate::branch::{BranchScope, OpRef};
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
@@ -86,6 +88,8 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
+    /// Current dependencies per branch
+    branches: BTreeMap<Branch, HashSet<ChangeHash>>,
     /// The set of operations that form this document.
     ops: OpSet,
     /// The current actor.
@@ -105,6 +109,7 @@ impl Automerge {
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
+            branches: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
         }
@@ -187,7 +192,7 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
-        let args = self.transaction_args(None);
+        let args = self.transaction_args(None, Branch::default());
         Transaction::new(
             self,
             args,
@@ -197,25 +202,35 @@ impl Automerge {
 
     /// Start a transaction which records changes in a [`PatchLog`]
     pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
-        let args = self.transaction_args(None);
+        let args = self.transaction_args(None, Branch::default());
         Transaction::new(self, args, patch_log)
     }
 
     /// Start a transaction isolated at a given heads
-    pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
-        let args = self.transaction_args(Some(heads));
+    pub fn transaction_at(
+        &mut self,
+        patch_log: PatchLog,
+        heads: &[ChangeHash],
+        branch: &Branch,
+    ) -> Transaction<'_> {
+        // TODO: Make sure the heads are in the branch
+        let args = self.transaction_args(Some(heads.to_vec()), branch.clone());
         Transaction::new(self, args, patch_log)
     }
 
-    pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+    pub(crate) fn transaction_args(
+        &mut self,
+        heads: Option<Vec<ChangeHash>>,
+        branch: Branch,
+    ) -> TransactionArgs {
         let actor_index;
         let seq;
         let mut deps;
         let scope;
         match heads {
             Some(heads) => {
-                deps = heads.to_vec();
-                let isolation = self.isolate_actor(heads);
+                let isolation = self.isolate_actor(&heads);
+                deps = heads;
                 actor_index = isolation.actor_index;
                 seq = isolation.seq;
                 scope = Some(isolation.clock);
@@ -225,12 +240,12 @@ impl Automerge {
                 seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
                 deps = self.get_heads();
                 scope = None;
-                if seq > 1 {
-                    let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
-                    if !deps.contains(&last_hash) {
-                        deps.push(last_hash);
-                    }
-                }
+            }
+        }
+        if seq > 1 {
+            let last_hash = self.get_hash(actor_index, seq - 1).unwrap();
+            if !deps.contains(&last_hash) {
+                deps.push(last_hash);
             }
         }
 
@@ -240,6 +255,7 @@ impl Automerge {
         TransactionArgs {
             actor_index,
             seq,
+            branch,
             start_op,
             deps,
             scope,
@@ -360,7 +376,7 @@ impl Automerge {
     /// The main reason to do this is if you want to create a "merge commit", which is a change
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
-        let args = self.transaction_args(None);
+        let args = self.transaction_args(None, Branch::default());
         Transaction::empty(self, args, opts)
     }
 
@@ -523,9 +539,12 @@ impl Automerge {
                 let mut hashes_by_index = HashMap::new();
                 let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
                 let mut change_graph = ChangeGraph::new();
+                let mut branches = BTreeMap::default();
                 for (index, change) in changes.iter().enumerate() {
+                    Self::update_branches(&mut branches, change);
                     // SAFETY: This should be fine because we just constructed an opset containing
                     // all the changes
+                    // FIXME - update branches here
                     let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
                     actor_to_history.entry(actor_index).or_default().push(index);
                     hashes_by_index.insert(index, change.hash());
@@ -540,6 +559,7 @@ impl Automerge {
                     change_graph,
                     ops: op_set,
                     deps: heads.into_iter().collect(),
+                    branches,
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
                 }
@@ -614,6 +634,7 @@ impl Automerge {
         self.load_incremental_log_patches(
             data,
             &mut PatchLog::inactive(TextRepresentation::default()),
+            &Branch::default(),
         )
     }
 
@@ -623,6 +644,7 @@ impl Automerge {
         &mut self,
         data: &[u8],
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
             let mut doc = Self::load_with(
@@ -646,7 +668,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_log_patches(changes, patch_log)?;
+        self.apply_changes_log_patches(changes, patch_log, branch)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -672,6 +694,7 @@ impl Automerge {
         self.apply_changes_log_patches(
             changes,
             &mut PatchLog::inactive(TextRepresentation::default()),
+            &Branch::default(),
         )
     }
 
@@ -681,6 +704,7 @@ impl Automerge {
         &mut self,
         changes: I,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
@@ -695,7 +719,14 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c, patch_log)?;
+                    if c.branch() == branch {
+                        self.apply_change(c, patch_log)?;
+                    } else {
+                        self.apply_change(
+                            c,
+                            &mut PatchLog::inactive(TextRepresentation::default()),
+                        )?;
+                    }
                 } else {
                     self.queue.push(c);
                 }
@@ -801,6 +832,7 @@ impl Automerge {
         self.merge_and_log_patches(
             other,
             &mut PatchLog::inactive(TextRepresentation::default()),
+            &Branch::default(),
         )
     }
 
@@ -810,6 +842,7 @@ impl Automerge {
         &mut self,
         other: &mut Self,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
@@ -818,7 +851,7 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_log_patches(changes, patch_log)?;
+        self.apply_changes_log_patches(changes, patch_log, branch)?;
         Ok(self.get_heads())
     }
 
@@ -995,7 +1028,8 @@ impl Automerge {
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
         self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
 
-        self.update_deps(&change);
+        Self::update_deps(&mut self.deps, &change);
+        Self::update_branches(&mut self.branches, &change);
 
         let history_index = self.history.len();
 
@@ -1015,11 +1049,21 @@ impl Automerge {
         history_index
     }
 
-    fn update_deps(&mut self, change: &Change) {
+    fn update_deps(deps: &mut HashSet<ChangeHash>, change: &Change) {
         for d in change.deps() {
-            self.deps.remove(d);
+            deps.remove(d);
         }
-        self.deps.insert(change.hash());
+        deps.insert(change.hash());
+    }
+
+    fn update_branches(branches: &mut BTreeMap<Branch, HashSet<ChangeHash>>, change: &Change) {
+        if let Some(deps) = branches.get_mut(change.branch()) {
+            Self::update_deps(deps, change);
+        } else {
+            let mut deps = HashSet::new();
+            deps.insert(change.hash());
+            branches.insert(change.branch().clone(), deps);
+        }
     }
 
     #[doc(hidden)]
@@ -1184,6 +1228,21 @@ impl Automerge {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
+    }
+
+    pub fn branches(&self) -> impl Iterator<Item = &Branch> {
+        self.branches.keys()
+    }
+
+    /// Get the heads of a branch.
+    pub fn get_branch_heads(&self, branch: &Branch) -> Option<Vec<ChangeHash>> {
+        if let Some(deps) = self.branches.get(branch) {
+            let mut deps: Vec<_> = deps.iter().copied().collect();
+            deps.sort_unstable();
+            Some(deps)
+        } else {
+            None
+        }
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
@@ -1663,6 +1722,16 @@ impl std::default::Default for SaveOptions {
         Self {
             deflate: true,
             retain_orphans: true,
+        }
+    }
+}
+
+impl BranchScope for Automerge {
+    fn scope_branch(&self, branch: &Option<OpRef>) -> Option<Clock> {
+        match branch {
+            None => None,
+            Some(OpRef::Branch(_name)) => todo!(),
+            Some(OpRef::Heads(heads)) => Some(self.clock_at(heads)),
         }
     }
 }

@@ -82,7 +82,11 @@ impl<'a> InsertNth<'a> {
         self.candidates
             .last()
             .map(|loc| loc.key)
-            .or(self.last_visible_key)
+            .or(if self.idx.done() {
+                self.last_visible_key
+            } else {
+                None
+            })
             .ok_or(AutomergeError::InvalidIndex(self.idx.target()))
     }
 
@@ -90,7 +94,6 @@ impl<'a> InsertNth<'a> {
         if !self.idx.done() {
             return;
         }
-
         // first insert we see after idx.done()
         if op.insert && self.candidates.is_empty() && self.last_visible_key.is_some() {
             if let Some(key) = self.last_visible_key {

@@ -27,13 +27,13 @@ use super::{PatchBuilder, TextRepresentation};
 /// Consider this example:
 ///
 /// ```no_run
-/// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
+/// # use automerge::{AutoCommit, Branch, Change, Patch, PatchLog, Value, sync::{Message, State as
 /// SyncState, SyncDoc}, patches::TextRepresentation};
 /// let doc = AutoCommit::new();
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
 /// let mut patch_log = PatchLog::active(TextRepresentation::String);
-/// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
+/// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log, &Branch::default());
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
 /// // sync message was received, to the state after.

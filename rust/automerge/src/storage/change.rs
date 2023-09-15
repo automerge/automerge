@@ -1,5 +1,6 @@
 use std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
+use crate::branch::Branch;
 use crate::{convert, ActorId, ChangeHash, ScalarValue};
 
 use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
@@ -52,6 +53,7 @@ pub(crate) struct Change<'a, O: OpReadState> {
     start_op: NonZeroU64,
     timestamp: i64,
     message: Option<String>,
+    branch: Branch,
     ops_meta: ChangeOpsColumns,
     /// The range in `Self::bytes` where the ops column data is
     ops_data: Range<usize>,
@@ -106,7 +108,8 @@ impl<'a> Change<'a, Unverified> {
         let (i, start_op) = parse::nonzero_leb128_u64(i)?;
         let (i, timestamp) = parse::leb128_i64(i)?;
         let (i, message_len) = parse::leb128_u64(i)?;
-        let (i, message) = parse::utf_8(message_len as usize, i)?;
+        let (i, packed_message) = parse::utf_8(message_len as usize, i)?;
+        let (message, branch) = crate::branch::unpack_message(&packed_message);
         let (i, other_actors) = parse::length_prefixed(parse::actor_id)(i)?;
         let (i, ops_meta) = RawColumns::parse(i)?;
         let (
@@ -142,11 +145,15 @@ impl<'a> Change<'a, Unverified> {
                 seq,
                 start_op,
                 timestamp,
-                message: if message.is_empty() {
-                    None
-                } else {
-                    Some(message)
-                },
+                message,
+                /*
+                                message: if message.is_empty() {
+                                    None
+                                } else {
+                                    Some(message)
+                                },
+                */
+                branch,
                 ops_meta,
                 ops_data,
                 extra_bytes,
@@ -190,6 +197,7 @@ impl<'a> Change<'a, Unverified> {
             start_op: self.start_op,
             timestamp: self.timestamp,
             message: self.message,
+            branch: self.branch,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             extra_bytes: self.extra_bytes,
@@ -228,6 +236,10 @@ impl<'a, O: OpReadState> Change<'a, O> {
 
     pub(crate) fn message(&self) -> &Option<String> {
         &self.message
+    }
+
+    pub(crate) fn branch(&self) -> &Branch {
+        &self.branch
     }
 
     pub(crate) fn dependencies(&self) -> &[ChangeHash] {
@@ -277,6 +289,7 @@ impl<'a, O: OpReadState> Change<'a, O> {
             start_op: self.start_op,
             timestamp: self.timestamp,
             message: self.message,
+            branch: self.branch,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             extra_bytes: self.extra_bytes,
@@ -312,6 +325,7 @@ pub(crate) struct ChangeBuilder<START_OP, ACTOR, SEQ, TIME> {
     seq: SEQ,
     start_op: START_OP,
     timestamp: TIME,
+    branch: Branch,
     message: Option<String>,
     extra_bytes: Option<Vec<u8>>,
 }
@@ -325,6 +339,7 @@ impl ChangeBuilder<Unset, Unset, Unset, Unset> {
             start_op: Unset,
             timestamp: Unset,
             message: None,
+            branch: Branch::default(),
             extra_bytes: None,
         }
     }
@@ -342,6 +357,10 @@ impl<START_OP, ACTOR, SEQ, TIME> ChangeBuilder<START_OP, ACTOR, SEQ, TIME> {
 
     pub(crate) fn with_message(self, message: Option<String>) -> Self {
         Self { message, ..self }
+    }
+
+    pub(crate) fn with_branch(self, branch: Branch) -> Self {
+        Self { branch, ..self }
     }
 
     pub(crate) fn with_extra_bytes(self, extra_bytes: Vec<u8>) -> Self {
@@ -362,6 +381,7 @@ impl<START_OP, ACTOR, TIME> ChangeBuilder<START_OP, ACTOR, Unset, TIME> {
             start_op: self.start_op,
             timestamp: self.timestamp,
             message: self.message,
+            branch: self.branch,
             extra_bytes: self.extra_bytes,
         }
     }
@@ -380,6 +400,7 @@ impl<START_OP, SEQ, TIME> ChangeBuilder<START_OP, Unset, SEQ, TIME> {
             start_op: self.start_op,
             timestamp: self.timestamp,
             message: self.message,
+            branch: self.branch,
             extra_bytes: self.extra_bytes,
         }
     }
@@ -397,6 +418,7 @@ impl<ACTOR, SEQ, TIME> ChangeBuilder<Unset, ACTOR, SEQ, TIME> {
             start_op: Set { value: start_op },
             timestamp: self.timestamp,
             message: self.message,
+            branch: self.branch,
             extra_bytes: self.extra_bytes,
         }
     }
@@ -412,6 +434,7 @@ impl<START_OP, ACTOR, SEQ> ChangeBuilder<START_OP, ACTOR, SEQ, Unset> {
             start_op: self.start_op,
             timestamp: Set { value: time },
             message: self.message,
+            branch: self.branch,
             extra_bytes: self.extra_bytes,
         }
     }
@@ -467,7 +490,11 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
         leb128::write::unsigned(&mut data, self.start_op.value.into()).unwrap();
         leb128::write::signed(&mut data, self.timestamp.value).unwrap();
         length_prefixed_bytes(
-            self.message.as_ref().map(|m| m.as_bytes()).unwrap_or(&[]),
+            //self.message.as_ref().map(|m| m.as_bytes()).unwrap_or(&[]),
+            crate::branch::pack_message(self.message.as_ref(), &self.branch)
+                .as_ref()
+                .map(|m| m.as_bytes())
+                .unwrap_or(&[]),
             &mut data,
         );
         leb128::write::unsigned(&mut data, other_actors.len() as u64).unwrap();
@@ -504,6 +531,7 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
             start_op: self.start_op.value,
             timestamp: self.timestamp.value,
             message: self.message,
+            branch: self.branch,
             ops_meta: cols,
             ops_data,
             extra_bytes,

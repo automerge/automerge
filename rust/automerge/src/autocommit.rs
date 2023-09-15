@@ -2,6 +2,8 @@ use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
+use crate::branch::{Branch, BranchScope, OpRef};
+use crate::docref::DocRef;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
@@ -59,6 +61,7 @@ pub struct AutoCommit {
     diff_cursor: Vec<ChangeHash>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
+    branch: Branch,
 }
 
 /// An autocommit document with an inactive [`PatchLog`]
@@ -73,6 +76,7 @@ impl Default for AutoCommit {
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
             isolation: None,
+            branch: Branch::default(),
         }
     }
 }
@@ -91,6 +95,7 @@ impl AutoCommit {
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
             isolation: None,
+            branch: Branch::default(),
         })
     }
 
@@ -103,6 +108,7 @@ impl AutoCommit {
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
             isolation: None,
+            branch: Branch::default(),
         })
     }
 
@@ -124,6 +130,7 @@ impl AutoCommit {
             diff_cursor: Vec::new(),
             save_cursor: Vec::new(),
             isolation: None,
+            branch: Branch::default(),
         })
     }
 
@@ -246,6 +253,7 @@ impl AutoCommit {
             diff_cursor: vec![],
             save_cursor: vec![],
             isolation: None,
+            branch: Branch::default(),
         }
     }
 
@@ -258,6 +266,7 @@ impl AutoCommit {
             diff_cursor: vec![],
             save_cursor: vec![],
             isolation: None,
+            branch: Branch::default(),
         })
     }
 
@@ -286,6 +295,7 @@ impl AutoCommit {
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
+        // FIXME - make sure heads are insie this branch or error
         self.patch_to(heads);
         self.isolation = Some(heads.to_vec())
     }
@@ -298,7 +308,12 @@ impl AutoCommit {
 
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
-            let args = self.doc.transaction_args(self.isolation.as_deref());
+            let branch = self.branch.clone();
+            let heads = match self.isolation.clone() {
+                Some(heads) => Some(heads),
+                None => Some(self.get_heads()),
+            };
+            let args = self.doc.transaction_args(heads, branch);
             let inner = TransactionInner::new(args);
             self.transaction = Some((self.patch_log.branch(), inner))
         }
@@ -323,13 +338,8 @@ impl AutoCommit {
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .load_incremental_log_patches(data, &mut PatchLog::null())
-        } else {
-            self.doc
-                .load_incremental_log_patches(data, &mut self.patch_log)
-        }
+        self.doc
+            .load_incremental_log_patches(data, &mut self.patch_log, &self.branch)
     }
 
     pub fn apply_changes(
@@ -337,26 +347,16 @@ impl AutoCommit {
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .apply_changes_log_patches(changes, &mut PatchLog::null())
-        } else {
-            self.doc
-                .apply_changes_log_patches(changes, &mut self.patch_log)
-        }
+        self.doc
+            .apply_changes_log_patches(changes, &mut self.patch_log, &self.branch)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut AutoCommit) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        if self.isolation.is_some() {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut PatchLog::null())
-        } else {
-            self.doc
-                .merge_and_log_patches(&mut other.doc, &mut self.patch_log)
-        }
+        self.doc
+            .merge_and_log_patches(&mut other.doc, &mut self.patch_log, &self.branch)
     }
 
     /// Save the entirety of this document in a compact form.
@@ -469,11 +469,16 @@ impl AutoCommit {
     /// This closes the transaction first, if one is in progress.
     pub fn get_heads(&mut self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
-        if let Some(i) = &self.isolation {
-            i.clone()
+        if let Some(heads) = &self.isolation {
+            heads.to_vec()
         } else {
-            self.doc.get_heads()
+            self.doc.get_branch_heads(&self.branch).unwrap_or_default()
         }
+    }
+
+    pub fn branches(&mut self) -> impl Iterator<Item = &Branch> {
+        self.ensure_transaction_closed();
+        self.doc.branches()
     }
 
     pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
@@ -544,7 +549,9 @@ impl AutoCommit {
     /// hash of the empty change.
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_closed();
-        let args = self.doc.transaction_args(None);
+        let args = self
+            .doc
+            .transaction_args(Some(self.base_heads()), self.branch.clone());
         TransactionInner::empty(&mut self.doc, args, options.message, options.time)
     }
 
@@ -571,18 +578,27 @@ impl AutoCommit {
         self.doc.hydrate(heads)
     }
 
+    // FIXME - never returns none
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
             return Some(self.doc.clock_at(h));
         }
+
         match (&self.isolation, &self.transaction) {
             // then look at in progress isolated transaction
-            (Some(_), Some((_, t))) => t.get_scope().clone(),
+            (_, Some((_, t))) => t.get_scope().clone(),
             // then look at clock for isolation
-            (Some(i), None) => Some(self.doc.clock_at(i)),
-            _ => None,
+            (Some(i), _) => Some(self.doc.clock_at(i)),
+            _ => Some(self.doc.clock_at(&self.base_heads())),
         }
+
+        /*
+                match &self.transaction {
+                    Some((_, t)) => t.get_scope().clone(),
+                    None => Some(self.doc.clock_at(&self.base_heads())),
+                }
+        */
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
@@ -593,6 +609,41 @@ impl AutoCommit {
             let after_clock = self.doc.clock_at(after);
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut self.patch_log);
         }
+    }
+
+    pub fn current_branch(&self) -> &Branch {
+        &self.branch
+    }
+
+    pub fn create_branch(
+        &mut self,
+        branch: &Branch,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        if self.doc.get_branch_heads(branch).is_some() {
+            return Err(AutomergeError::BranchExists(branch.clone()));
+        }
+        let base_heads = self.base_heads();
+        let heads = heads.unwrap_or(&base_heads);
+        let args = self
+            .doc
+            .transaction_args(Some(heads.to_vec()), branch.clone());
+        TransactionInner::empty(&mut self.doc, args, None, None);
+        self.branch = branch.clone();
+        self.patch_to(heads);
+        Ok(())
+    }
+
+    pub fn checkout(&mut self, branch: &Branch) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        if self.doc.get_branch_heads(branch).is_none() {
+            return Err(AutomergeError::NoSuchBranch(branch.clone()));
+        }
+        let heads = self.doc.get_branch_heads(branch).unwrap_or_default();
+        self.branch = branch.clone();
+        self.patch_to(&heads);
+        Ok(())
     }
 }
 
@@ -902,11 +953,7 @@ impl Transactable for AutoCommit {
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
-        if let Some(i) = &self.isolation {
-            i.clone()
-        } else {
-            self.doc.get_heads()
-        }
+        self.doc.get_branch_heads(&self.branch).unwrap_or_default()
     }
 }
 
@@ -927,19 +974,12 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.inner.ensure_transaction_closed();
-        if self.inner.isolation.is_some() {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut PatchLog::null(),
-            )
-        } else {
-            self.inner.doc.receive_sync_message_log_patches(
-                sync_state,
-                message,
-                &mut self.inner.patch_log,
-            )
-        }
+        self.inner.doc.receive_sync_message_log_patches(
+            sync_state,
+            message,
+            &mut self.inner.patch_log,
+            &self.inner.branch,
+        )
     }
 
     // I dont like this function - it makes sense on automerge but not autocommit
@@ -949,10 +989,27 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         sync_state: &mut sync::State,
         message: sync::Message,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<(), AutomergeError> {
         self.inner
             .doc
-            .receive_sync_message_log_patches(sync_state, message, patch_log)
+            .receive_sync_message_log_patches(sync_state, message, patch_log, branch)
+    }
+}
+
+impl DocRef for AutoCommit {
+    fn doc_ref(&self) -> &Automerge {
+        &self.doc
+    }
+}
+
+impl BranchScope for AutoCommit {
+    fn scope_branch(&self, branch: &Option<OpRef>) -> Option<Clock> {
+        match branch {
+            None => self.get_scope(None),
+            Some(OpRef::Branch(_name)) => todo!(),
+            Some(OpRef::Heads(heads)) => Some(self.doc.clock_at(heads)),
+        }
     }
 }
 

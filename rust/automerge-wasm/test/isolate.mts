@@ -3,7 +3,7 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create } from '../nodejs/automerge_wasm.cjs'
+import { load, create } from '../nodejs/automerge_wasm.cjs'
 
 describe('Automerge', () => {
   describe('isolate', () => {
@@ -44,6 +44,47 @@ describe('Automerge', () => {
         doc1.integrate()
         /// Now we can see all the changes we couldnt before
         assert.deepStrictEqual(doc1.text("/text"), "000aaaZZZBBBcCC");
+    })
+  })
+  describe('branches', () => {
+    it('it should be able to create branches and check them out', ()=> {
+        let doc1 = create();
+        doc1.putObject("/", "text", "aaabbbccc");
+        assert.deepStrictEqual(doc1.text("/text"), "aaabbbccc");
+        assert.deepStrictEqual(doc1.currentBranch(), "main");
+        assert.deepStrictEqual(doc1.branches(), ["main"]);
+
+        doc1.createBranch("branch2");
+
+        assert.deepStrictEqual(doc1.text("/text"), "aaabbbccc");
+        assert.deepStrictEqual(doc1.currentBranch(), "branch2");
+        assert.deepStrictEqual(doc1.branches(), ["main", "branch2" ]);
+
+        doc1.splice("/text", 3, 3, "BBB");
+        assert.deepStrictEqual(doc1.text("/text"), "aaaBBBccc");
+
+        doc1.checkout("main");
+        assert.deepStrictEqual(doc1.text("/text"), "aaabbbccc");
+
+        doc1.checkout("branch2");
+        assert.deepStrictEqual(doc1.text("/text"), "aaaBBBccc");
+
+        let doc2 = load(doc1.save())
+
+        assert.deepStrictEqual(doc2.currentBranch(), "main");
+        assert.deepStrictEqual(doc2.branches(), ["main", "branch2" ]);
+        assert.deepStrictEqual(doc2.text("/text"), "aaabbbccc");
+        doc2.checkout("branch2");
+        assert.deepStrictEqual(doc2.text("/text"), "aaaBBBccc");
+
+        let doc3 = create()
+        doc3.applyChanges(doc2.getChanges([]))
+
+        assert.deepStrictEqual(doc3.currentBranch(), "main");
+        assert.deepStrictEqual(doc3.branches(), ["main", "branch2" ]);
+        assert.deepStrictEqual(doc3.text("/text"), "aaabbbccc");
+        doc3.checkout("branch2");
+        assert.deepStrictEqual(doc3.text("/text"), "aaaBBBccc");
     })
   })
 })

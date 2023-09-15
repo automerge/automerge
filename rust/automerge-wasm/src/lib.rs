@@ -29,10 +29,11 @@ use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
 use am::OnPartialLoad;
+use am::ReadDocV2;
 use am::ScalarValue;
 use am::VerificationMode;
 use automerge as am;
-use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
+use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -190,24 +191,26 @@ impl Automerge {
 
     pub fn keys(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
         let (obj, _) = self.import(obj)?;
-        let result = if let Some(heads) = get_heads(heads)? {
-            self.doc
-                .keys_at(&obj, &heads)
-                .map(|s| JsValue::from_str(&s))
-                .collect()
-        } else {
-            self.doc.keys(&obj).map(|s| JsValue::from_str(&s)).collect()
-        };
+        let heads = get_heads(heads)?;
+        let result = self
+            .doc
+            .v2_keys(&obj, heads.into())
+            .map(|s| JsValue::from_str(&s))
+            .collect();
         Ok(result)
     }
 
     pub fn text(&self, obj: JsValue, heads: Option<Array>) -> Result<String, error::Get> {
         let (obj, _) = self.import(obj)?;
-        if let Some(heads) = get_heads(heads)? {
-            Ok(self.doc.text_at(&obj, &heads)?)
-        } else {
-            Ok(self.doc.text(&obj)?)
-        }
+        /*
+                if let Some(heads) = get_heads(heads)? {
+                    Ok(self.doc.text_at(&obj, &heads)?)
+                } else {
+                    Ok(self.doc.text(&obj)?)
+                }
+        */
+        let heads = get_heads(heads)?;
+        Ok(self.doc.v2_text(obj, heads.into())?)
     }
 
     pub fn splice(
@@ -274,7 +277,7 @@ impl Automerge {
         let value = self
             .import_scalar(&value, &datatype.as_string())
             .ok_or(error::Insert::ValueNotPrimitive)?;
-        let index = self.doc.length(&obj);
+        let index = self.doc.v2_length(&obj, Default::default());
         self.doc.insert(&obj, index, value)?;
         Ok(())
     }
@@ -287,7 +290,8 @@ impl Automerge {
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let imported_obj = import_obj(&value, &None)?;
-        let index = self.doc.length(&obj);
+        //let index = self.doc.length(&obj);
+        let index = self.doc.v2_length(&obj, Default::default());
         let opid = self
             .doc
             .insert_object(&obj, index, imported_obj.objtype())?;
@@ -447,11 +451,14 @@ impl Automerge {
         let prop = to_prop(prop);
         let heads = get_heads(heads)?;
         if let Ok(prop) = prop {
-            let value = if let Some(h) = heads {
-                self.doc.get_at(&obj, prop, &h)?
-            } else {
-                self.doc.get(&obj, prop)?
-            };
+            /*
+                        let value = if let Some(h) = heads {
+                            self.doc.get_at(&obj, prop, &h)?
+                        } else {
+                            self.doc.get(&obj, prop)?
+                        };
+            */
+            let value = self.doc.v2_get(&obj, prop, heads.into())?;
             if let Some((value, id)) = value {
                 match alloc(&value, self.text_rep) {
                     (datatype, js_value) if datatype.is_scalar() => Ok(js_value),
@@ -476,11 +483,14 @@ impl Automerge {
         let prop = to_prop(prop);
         let heads = get_heads(heads)?;
         if let Ok(prop) = prop {
-            let value = if let Some(h) = heads {
-                self.doc.get_at(&obj, prop, &h)?
-            } else {
-                self.doc.get(&obj, prop)?
-            };
+            /*
+                        let value = if let Some(h) = heads {
+                            self.doc.get_at(&obj, prop, &h)?
+                        } else {
+                            self.doc.get(&obj, prop)?
+                        };
+            */
+            let value = self.doc.v2_get(&obj, prop, heads.into())?;
             if let Some(value) = value {
                 match &value {
                     (Value::Object(obj_type), obj_id) => {
@@ -516,11 +526,16 @@ impl Automerge {
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
-            let values = if let Some(heads) = get_heads(heads)? {
-                self.doc.get_all_at(&obj, prop, &heads)
-            } else {
-                self.doc.get_all(&obj, prop)
-            }?;
+            /*
+                        let values = if let Some(heads) = get_heads(heads)? {
+                            self.doc.get_all_at(&obj, prop, &heads)
+                        } else {
+                            self.doc.get_all(&obj, prop)
+                        }?;
+            */
+            let heads = get_heads(heads)?;
+            let values = self.doc.v2_get_all(&obj, prop, heads.into())?;
+
             for (value, id) in values {
                 let sub = Array::new();
                 let (datatype, js_value) = alloc(&value, self.text_rep);
@@ -644,6 +659,29 @@ impl Automerge {
         Ok(interop::JsPatches(patches).try_into()?)
     }
 
+    pub fn branches(&mut self) -> Array {
+        let branches = self.doc.branches();
+        branches.map(|b| JsValue::from(&b.to_string())).collect()
+    }
+
+    #[wasm_bindgen(js_name = currentBranch)]
+    pub fn current_branch(&mut self) -> JsValue {
+        format!("{}", self.doc.current_branch()).into()
+    }
+
+    #[wasm_bindgen(js_name = createBranch)]
+    pub fn create_branch(&mut self, branch: String, heads: Option<Array>) -> Result<(), JsValue> {
+        let heads = get_heads(heads)?;
+        let branch = am::Branch::new(&branch);
+        self.doc.create_branch(&branch, heads.as_deref())?;
+        Ok(())
+    }
+
+    pub fn checkout(&mut self, branch: String) -> Result<(), JsValue> {
+        let branch = am::Branch::new(&branch);
+        self.doc.checkout(&branch)?;
+        Ok(())
+    }
     pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
         let heads = get_heads(Some(heads))?.unwrap();
         self.doc.isolate(&heads);
@@ -656,11 +694,15 @@ impl Automerge {
 
     pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
-        if let Some(heads) = get_heads(heads)? {
-            Ok(self.doc.length_at(&obj, &heads) as f64)
-        } else {
-            Ok(self.doc.length(&obj) as f64)
-        }
+        /*
+                if let Some(heads) = get_heads(heads)? {
+                    Ok(self.doc.length_at(&obj, &heads) as f64)
+                } else {
+                    Ok(self.doc.length(&obj) as f64)
+                }
+        */
+        let heads = get_heads(heads)?;
+        Ok(self.doc.v2_length(obj, heads.into()) as f64)
     }
 
     pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), error::Get> {
@@ -839,7 +881,7 @@ impl Automerge {
         }
         let index = index as usize;
         let heads = get_heads(heads)?;
-        let cursor = self.doc.get_cursor(obj, index, heads.as_deref())?;
+        let cursor = self.doc.v2_get_cursor(obj, index, heads.into())?;
         Ok(cursor.to_string())
     }
 
@@ -859,7 +901,7 @@ impl Automerge {
         let heads = get_heads(heads)?;
         let position = self
             .doc
-            .get_cursor_position(obj, &cursor, heads.as_deref())?;
+            .v2_get_cursor_position(obj, &cursor, heads.into())?;
         Ok(position as f64)
     }
 
@@ -918,11 +960,7 @@ impl Automerge {
     pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
-        let marks = if let Some(heads) = heads {
-            self.doc.marks_at(obj, &heads).map_err(to_js_err)?
-        } else {
-            self.doc.marks(obj).map_err(to_js_err)?
-        };
+        let marks = self.doc.v2_marks(obj, heads.into()).map_err(to_js_err)?;
         let result = Array::new();
         for m in marks {
             let mark = Object::new();

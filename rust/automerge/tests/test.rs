@@ -2,9 +2,10 @@ use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::Transactable;
+use automerge::{hydrate, hydrate_list, hydrate_map};
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
-    PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Branch, Change, ExpandedChange, ObjId, ObjType,
+    Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
 use std::fs;
 
@@ -1578,10 +1579,10 @@ fn regression_insert_opid() {
     let mut new_doc = Automerge::new();
     let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
+        .apply_changes_log_patches(vec![change1], &mut patch_log, &Branch::default())
         .unwrap();
     new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
+        .apply_changes_log_patches(vec![change2], &mut patch_log, &Branch::default())
         .unwrap();
 
     for i in 0..=N {
@@ -1668,10 +1669,10 @@ fn big_list() {
     let mut new_doc = Automerge::new();
     let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_log_patches(vec![change1], &mut patch_log)
+        .apply_changes_log_patches(vec![change1], &mut patch_log, &Branch::default())
         .unwrap();
     new_doc
-        .apply_changes_log_patches(vec![change2], &mut patch_log)
+        .apply_changes_log_patches(vec![change2], &mut patch_log, &Branch::default())
         .unwrap();
 
     let patches = new_doc.make_patches(&mut patch_log);
@@ -1733,7 +1734,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
     tx.commit();
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1, &Branch::default());
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "ZZZ")?;
@@ -1744,7 +1745,7 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaaZZZQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(300));
 
-    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1);
+    let mut tx = doc1.transaction_at(PatchLog::null(), &heads1, &Branch::default());
     assert_eq!(tx.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(tx.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     tx.splice_text(&txt, 3, 3, "TTT")?;
@@ -1754,6 +1755,29 @@ fn can_transaction_at() -> Result<(), AutomergeError> {
     tx.commit();
     assert_eq!(doc1.text(&txt).unwrap(), "aaaTTTZZZQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(400));
+    Ok(())
+}
+
+#[test]
+fn can_insert_at() -> Result<(), AutomergeError> {
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(&ROOT, "list", ObjType::List)?;
+    doc.insert(&list, 0, "a")?;
+    doc.insert(&list, 1, "b")?;
+    let heads = doc.get_heads();
+    doc.insert(&list, 2, "c")?;
+    assert!(doc.insert(&list, 5, "d").is_err());
+    doc.isolate(&heads);
+    doc.insert(&list, 1, "B")?;
+    doc.insert(&list, 3, "C")?;
+    assert!(doc.insert(&list, 5, "d").is_err());
+    doc.integrate();
+    let h = doc.hydrate(None);
+    assert_eq!(
+        h,
+        hydrate_map!("list" =>
+      hydrate_list!("a","B","b", "C", "c"))
+    );
     Ok(())
 }
 

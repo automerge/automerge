@@ -1,9 +1,9 @@
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
-use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
+use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDocV2, ScalarValue};
 
 /// A way of mutating a document within a single change.
-pub trait Transactable: ReadDoc {
+pub trait Transactable: ReadDocV2 {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize;
 

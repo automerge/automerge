@@ -1,5 +1,6 @@
 use crate::hydrate;
 use crate::patches::TextRepresentation;
+use crate::read::ReadDoc;
 use crate::text_value::TextValue;
 use crate::transaction::Transactable;
 use crate::*;

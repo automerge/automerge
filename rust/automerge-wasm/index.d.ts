@@ -269,6 +269,12 @@ export class Automerge {
   getLastLocalChange(): Change | null;
   getMissingDeps(heads?: Heads): Heads;
 
+  // branches
+  branches(): string[];
+  currentBranch(): string;
+  createBranch(branch: string, heads?: Heads): void;
+  checkout(branch);
+
   // memory management
   free(): void; // only needed if weak-refs are unsupported
   clone(actor?: string): Automerge; // TODO - remove, this is dangerous

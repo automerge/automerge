@@ -74,7 +74,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     patches::{PatchLog, TextRepresentation},
     storage::{parse, Change as StoredChange, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
+    Automerge, AutomergeError, Branch, Change, ChangeHash, ReadDoc,
 };
 
 mod bloom;
@@ -125,6 +125,7 @@ pub trait SyncDoc {
         sync_state: &mut State,
         message: Message,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<(), AutomergeError>;
 }
 
@@ -226,7 +227,7 @@ impl SyncDoc for Automerge {
         message: Message,
     ) -> Result<(), AutomergeError> {
         let mut patch_log = PatchLog::inactive(TextRepresentation::default());
-        self.receive_sync_message_inner(sync_state, message, &mut patch_log)
+        self.receive_sync_message_inner(sync_state, message, &mut patch_log, &Branch::default())
     }
 
     fn receive_sync_message_log_patches(
@@ -234,8 +235,9 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<(), AutomergeError> {
-        self.receive_sync_message_inner(sync_state, message, patch_log)
+        self.receive_sync_message_inner(sync_state, message, patch_log, branch)
     }
 }
 
@@ -325,6 +327,7 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
         patch_log: &mut PatchLog,
+        branch: &Branch,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
@@ -338,7 +341,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_log_patches(message_changes, patch_log)?;
+            self.apply_changes_log_patches(message_changes, patch_log, branch)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
