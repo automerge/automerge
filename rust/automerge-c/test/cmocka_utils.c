@@ -72,6 +72,7 @@ bool cmocka_cb(AMstack** stack, void* data) {
     assert_non_null_where((*stack)->result, sc_data->file, sc_data->line);
     if (AMresultStatus((*stack)->result) != AM_STATUS_OK) {
         fail_msg_view_where("%s", AMresultError((*stack)->result), sc_data->file, sc_data->line);
+        free(data);
         return false;
     }
     /* Test that the types of all item values are members of the mask. */
@@ -81,8 +82,10 @@ bool cmocka_cb(AMstack** stack, void* data) {
         AMvalType const tag = AMitemValType(item);
         if (!(tag & sc_data->bitmask)) {
             fail_msg_where("Unexpected value type `%s`.", AMvalTypeToString(tag), sc_data->file, sc_data->line);
+            free(data);
             return false;
         }
     }
+    free(data);
     return true;
 }
