@@ -8,6 +8,7 @@ export class Text {
   str: string | undefined
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
   spans: Array<any> | undefined;
+  /** @hidden */
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
   [STATE]?: InternalState<any>
 
