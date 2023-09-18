@@ -1126,7 +1126,7 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
        null")  */
     AMbyteSpan change_hash1;
     assert_true(AMitemToChangeHash(AMitemsNext(&head1, 1), &change_hash1));
-    AMchange const* change1;
+    AMchange* change1;
     assert_true(AMitemToChange(AMstackItem(stack_ptr, AMgetChangeByHash(doc1, change_hash1.src, change_hash1.count),
                                            cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE)),
                                &change1));
