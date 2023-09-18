@@ -118,4 +118,13 @@ describe("Automerge.Text", () => {
     })
     assert.strictEqual(s1.text, "🐦")
   })
+
+  it("should allow splicing into text in arrays", () => {
+    let doc = Automerge.from({ dom: [["world"]] })
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d.dom, [0, 0], 0, 0, "Hello ")
+    })
+    assert.strictEqual(doc.dom[0][0], "Hello world")
+  })
 })
