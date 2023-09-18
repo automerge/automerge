@@ -358,6 +358,9 @@ const ListHandler = {
         "Cannot create a reference to an existing document object",
       )
     }
+    if (index === CLEAR_CACHE) {
+      return true
+    }
     if (index === TRACE) {
       target.trace = val
       return true
