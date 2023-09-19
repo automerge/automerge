@@ -212,3 +212,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Remove js_tmp_branch
         run: git push origin :js_tmp_branch
+
+  publish-js-docs:
+    runs-on: ubuntu-latest
+    needs:
+      - check_if_js_version_upgraded
+    if: ${{ !contains(needs.check_if_js_version_upgraded.outputs.js_version, '-') }}
+    defaults:
+      run:
+        working-directory: ./javascript
+    steps:
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'
+          registry-url: 'https://registry.npmjs.org'
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli wasm-opt
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+      - name: build js
+        working-directory: ./
+        run: ./scripts/ci/js_tests
+      - name: build js release
+        id: build_release
+        run: |
+          npx typedoc --out api-docs
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: ./javascript/api-docs
+          target-folder: api-docs/js
