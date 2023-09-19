@@ -1785,7 +1785,7 @@ pub unsafe extern "C" fn AMitemToCounter(item: *const AMitem, value: *mut i64) -
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToDoc(item: *mut AMitem, value: *mut *const AMdoc) -> bool {
+pub unsafe extern "C" fn AMitemToDoc(item: *mut AMitem, value: *mut *mut AMdoc) -> bool {
     if let Some(item) = item.as_mut() {
         if let Ok(doc) = <&mut AMdoc>::try_from(item) {
             if !value.is_null() {
