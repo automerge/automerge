@@ -59,9 +59,9 @@ const SyncStateSymbol = Symbol("_syncstate")
 /**
  * An opaque type tracking the state of sync with a remote peer
  */
-type SyncState = JsSyncState & { 
+type SyncState = JsSyncState & {
   /** @hidden */
-  _opaque: typeof SyncStateSymbol 
+  _opaque: typeof SyncStateSymbol
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
