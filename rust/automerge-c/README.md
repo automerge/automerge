@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
 
   AMresult *getResult = AMmapGet(doc, AM_ROOT, AMstr("key"), NULL);
   if (AMresultStatus(getResult) != AM_STATUS_OK) {
-    char* const err_msg = AMstrdup(AMresultError(putResult), NULL);
+    char* const err_msg = AMstrdup(AMresultError(getResult), NULL);
     printf("failed to get: %s", err_msg);
     free(err_msg);
     goto cleanup;
