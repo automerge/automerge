@@ -1,5 +1,6 @@
+use self::ObjId as ExId;
 use crate::storage::parse;
-use crate::types::{ObjId, OpId};
+use crate::types::{ObjId as InternalObjId, OpId};
 use crate::ActorId;
 use serde::Serialize;
 use serde::Serializer;
@@ -12,7 +13,7 @@ use std::hash::{Hash, Hasher};
 /// This can be persisted using `to_bytes` and `TryFrom<&[u8]>` breaking changes to the
 /// serialization format will be considered breaking changes for this library version.
 #[derive(Debug, Clone)]
-pub enum ExId {
+pub enum ObjId {
     Root,
     Id(u64, ActorId, usize),
 }
@@ -21,7 +22,7 @@ const SERIALIZATION_VERSION_TAG: u8 = 0;
 const TYPE_ROOT: u8 = 0;
 const TYPE_ID: u8 = 1;
 
-impl ExId {
+impl ObjId {
     /// Serialize this object ID to a byte array.
     ///
     /// This serialization format is versioned and incompatible changes to it will be considered a
@@ -68,10 +69,10 @@ impl ExId {
         }
     }
 
-    pub(crate) fn to_internal_obj(&self) -> ObjId {
+    pub(crate) fn to_internal_obj(&self) -> InternalObjId {
         match self {
-            ExId::Root => ObjId::root(),
-            ExId::Id(ctr, _, actor) => ObjId(OpId::new(*ctr, *actor)),
+            ExId::Root => InternalObjId::root(),
+            ExId::Id(ctr, _, actor) => InternalObjId(OpId::new(*ctr, *actor)),
         }
     }
 }
@@ -94,7 +95,7 @@ pub enum ObjIdFromBytesError {
     ParseActorIdxHint(String),
 }
 
-impl<'a> TryFrom<&'a [u8]> for ExId {
+impl<'a> TryFrom<&'a [u8]> for ObjId {
     type Error = ObjIdFromBytesError;
 
     fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
@@ -123,7 +124,7 @@ impl<'a> TryFrom<&'a [u8]> for ExId {
     }
 }
 
-impl PartialEq for ExId {
+impl PartialEq for ObjId {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ExId::Root, ExId::Root) => true,
@@ -137,9 +138,9 @@ impl PartialEq for ExId {
     }
 }
 
-impl Eq for ExId {}
+impl Eq for ObjId {}
 
-impl fmt::Display for ExId {
+impl fmt::Display for ObjId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExId::Root => write!(f, "_root"),
@@ -148,7 +149,7 @@ impl fmt::Display for ExId {
     }
 }
 
-impl Hash for ExId {
+impl Hash for ObjId {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
             ExId::Root => 0.hash(state),
@@ -160,7 +161,7 @@ impl Hash for ExId {
     }
 }
 
-impl Serialize for ExId {
+impl Serialize for ObjId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -169,13 +170,13 @@ impl Serialize for ExId {
     }
 }
 
-impl AsRef<ExId> for ExId {
-    fn as_ref(&self) -> &ExId {
+impl AsRef<ObjId> for ObjId {
+    fn as_ref(&self) -> &ObjId {
         self
     }
 }
 
-impl Ord for ExId {
+impl Ord for ObjId {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (ExId::Root, ExId::Root) => Ordering::Equal,
@@ -187,7 +188,7 @@ impl Ord for ExId {
     }
 }
 
-impl PartialOrd for ExId {
+impl PartialOrd for ObjId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }

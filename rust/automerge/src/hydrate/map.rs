@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-use crate::exid::ExId;
 use crate::types::{OpId, Prop};
+use crate::ObjId as ExId;
 use crate::{PatchAction, ScalarValue};
 
 use super::{HydrateError, Value};

@@ -1,9 +1,9 @@
 use std::fmt;
 
-use crate::exid::ExId;
 use crate::types::Clock;
 use crate::value::Value;
 use crate::Automerge;
+use crate::ObjId as ExId;
 
 use super::TopOps;
 

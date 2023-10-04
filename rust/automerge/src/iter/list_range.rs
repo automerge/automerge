@@ -2,12 +2,12 @@ use std::fmt;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use crate::exid::ExId;
 use crate::marks::MarkSet;
 use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
 use crate::value::Value;
+use crate::ObjId as ExId;
 
 use super::{TopOp, TopOps};
 

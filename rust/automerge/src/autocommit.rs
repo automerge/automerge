@@ -2,13 +2,13 @@ use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
-use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
+use crate::ObjId as ExId;
 use crate::{hydrate, OnPartialLoad};
 use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 use crate::{

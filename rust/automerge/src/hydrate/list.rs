@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::exid::ExId;
 use crate::types::{OpId, Prop};
+use crate::ObjId as ExId;
 use crate::{PatchAction, ScalarValue, SequenceTree};
 
 use super::{HydrateError, Value};

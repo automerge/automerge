@@ -1,10 +1,10 @@
 use std::fmt;
 use std::ops::RangeBounds;
 
-use crate::exid::ExId;
 use crate::op_set::OpSet;
 use crate::types::{Clock, Key};
 use crate::value::Value;
+use crate::ObjId as ExId;
 
 use super::TopOps;
 

@@ -5,13 +5,12 @@ use std::sync::Arc;
 
 use crate::patches::TextRepresentation;
 use crate::{
-    exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
     types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, OpType, ReadDoc,
 };
 
 #[derive(Clone, Debug)]

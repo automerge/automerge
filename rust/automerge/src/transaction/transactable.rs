@@ -1,5 +1,5 @@
-use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
+use crate::ObjId as ExId;
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.

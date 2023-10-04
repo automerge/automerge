@@ -1,9 +1,9 @@
 use crate::automerge::diff::ReadDocAt;
-use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::types::{ObjId, ObjType, OpId, Prop};
+use crate::ObjId as ExId;
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;

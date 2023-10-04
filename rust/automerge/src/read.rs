@@ -1,10 +1,9 @@
 use crate::{
     error::AutomergeError,
-    exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
     marks::Mark,
     parents::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjId as ExId, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;

@@ -1,12 +1,12 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjId, OpId, OpIds};
+use crate::ObjId as ExId;
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 

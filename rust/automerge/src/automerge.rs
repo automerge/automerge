@@ -8,7 +8,6 @@ use itertools::Itertools;
 
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
-use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkStateMachine};
 use crate::op_set::OpSet;
@@ -22,6 +21,7 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, Value,
 };
+use crate::ObjId as ExId;
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 

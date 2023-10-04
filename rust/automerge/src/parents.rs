@@ -1,16 +1,18 @@
 use crate::op_set;
 use crate::op_set::OpSet;
 use crate::types::ObjId;
-use crate::{clock::Clock, exid::ExId, Prop};
+use crate::{clock::Clock, ObjId as ExId, Prop};
 
 /// An iterator over the "parents" of an object
 ///
-/// The "parent" of an object in this context is the ([`ExId`], [`Prop`]) pair which specifies the
+/// The "parent" of an object in this context is the ([`ObjId`], [`Prop`]) pair which specifies the
 /// location of this object in the composite object which contains it. Each element in the iterator
 /// is a [`Parent`], yielded in reverse order. This means that once the iterator returns `None` you
 /// have reached the root of the document.
 ///
 /// This is returned by [`crate::ReadDoc::parents`]
+///
+/// [`ObjId`]: crate::ObjId
 #[derive(Debug)]
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,

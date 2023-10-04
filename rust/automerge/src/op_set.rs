@@ -1,5 +1,4 @@
 use crate::clock::Clock;
-use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
@@ -12,6 +11,7 @@ use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
     Prop,
 };
+use crate::ObjId as ExId;
 use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::borrow::Borrow;
