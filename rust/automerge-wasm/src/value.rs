@@ -1,7 +1,7 @@
 use automerge::{ObjType, ScalarValue, Value};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Datatype {
     Map,
     Table,
@@ -44,7 +44,7 @@ impl From<ObjType> for Datatype {
 
 impl std::fmt::Display for Datatype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", String::from(self.clone()))
+        write!(f, "{}", String::from(*self))
     }
 }
 
