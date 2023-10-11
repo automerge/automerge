@@ -49,6 +49,7 @@ export {
   type AutomergeValue,
   type ScalarValue,
   type PatchSource,
+  PatchSources,
   type PatchInfo,
 } from "./next_types.js"
 

@@ -14,6 +14,7 @@ export {
   type Cursor,
   type PatchInfo,
   type PatchSource,
+  PatchSources,
 } from "./types.js"
 
 import { RawString } from "./raw_string.js"
