@@ -34,15 +34,19 @@ export type MarkValue = string | number | null | boolean | Date | Uint8Array
  */
 export type Doc<T> = { readonly [P in keyof T]: T[P] }
 
-export type PatchSource =
-  | "from"
-  | "emptyChange"
-  | "change"
-  | "changeAt"
-  | "merge"
-  | "loadIncremental"
-  | "applyChanges"
-  | "receiveSyncMessage"
+export const PatchSources = [
+  "from",
+  "emptyChange",
+  "change",
+  "changeAt",
+  "merge",
+  "loadIncremental",
+  "applyChanges",
+  "receiveSyncMessage",
+] as const
+
+export type PatchSource = (typeof PatchSources)[number]
+
 export type PatchInfo<T> = {
   before: Doc<T>
   after: Doc<T>
