@@ -8,6 +8,7 @@ export interface InternalState<T> {
   handle: Automerge
   heads: Heads | undefined
   freeze: boolean
+  mostRecentPatch: any // TODO: type this
   patchCallback?: PatchCallback<T>
   textV2: boolean
 }
