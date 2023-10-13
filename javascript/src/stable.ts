@@ -475,19 +475,27 @@ function progressDocument<T>(
   }
   const state = _state(doc)
   const nextState = { ...state, heads: undefined }
-  let nextDoc
-  if (callback != null) {
-    const { value, patches } = state.handle.applyAndReturnPatches(
-      doc,
-      nextState,
-    )
-    if (patches.length > 0) {
-      callback(patches, { before: doc, after: value, source })
+
+  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches(
+    doc,
+    nextState,
+  )
+
+  if (patches.length > 0) {
+    if (callback != null) {
+      callback(patches, { before: doc, after: nextDoc, source })
     }
-    nextDoc = value
-  } else {
-    nextDoc = state.handle.applyPatches(doc, nextState)
+
+    const newState = _state(nextDoc)
+
+    newState.mostRecentPatch = {
+      before: _state(doc).heads,
+      after: newState.handle.getHeads(),
+      patches,
+      source,
+    }
   }
+
   state.heads = heads
   return nextDoc
 }
@@ -953,6 +961,13 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
   checkHeads(before, "before")
   checkHeads(after, "after")
   const state = _state(doc)
+  if (
+    state.mostRecentPatch &&
+    equals(state.mostRecentPatch.before, before) &&
+    equals(state.mostRecentPatch.after, after)
+  ) {
+    return state.mostRecentPatch.patches
+  }
   return state.handle.diff(before, after)
 }
 
