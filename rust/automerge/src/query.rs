@@ -173,7 +173,7 @@ impl Index {
         let key = op.elemid_or_key();
         match (old_vis, new_vis) {
             (true, false) => match self.visible.get(&key).copied() {
-                Some(n) if n == 1 => {
+                Some(1) => {
                     self.visible.remove(&key);
                     self.visible_text.remove_op(op);
                 }
@@ -245,7 +245,7 @@ impl Index {
         if op.visible() {
             let key = op.elemid_or_key();
             match self.visible.get(&key).copied() {
-                Some(n) if n == 1 => {
+                Some(1) => {
                     self.visible.remove(&key);
                     self.visible_text.remove_op(op);
                 }
