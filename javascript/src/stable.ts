@@ -516,17 +516,21 @@ function _change<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
+  let heads = state.handle.getHeads()
+  if (scope && headsEqual(scope, heads)) {
+    scope = undefined
+  }
   if (scope) {
     state.handle.isolate(scope)
+    heads = scope
   }
-  const heads = state.handle.getHeads()
   try {
     state.heads = heads
     const root: T = rootProxy(state.handle, state.textV2)
     callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
-      if (scope != null) {
+      if (scope) {
         state.handle.integrate()
       }
       return {
@@ -954,6 +958,18 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
   checkHeads(after, "after")
   const state = _state(doc)
   return state.handle.diff(before, after)
+}
+
+function headsEqual(heads1: Heads, heads2: Heads): boolean {
+  if (heads1.length !== heads2.length) {
+    return false
+  }
+  for (let i = 0; i < heads1.length; i++) {
+    if (heads1[i] !== heads2[i]) {
+      return false
+    }
+  }
+  return true
 }
 
 function checkHeads(heads: Heads, fieldname: string) {

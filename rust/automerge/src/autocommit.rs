@@ -57,6 +57,7 @@ pub struct AutoCommit {
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
+    diff_cache: Option<(OpRange, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
@@ -71,6 +72,7 @@ impl Default for AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         }
@@ -89,6 +91,7 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -101,6 +104,7 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -130,6 +134,7 @@ impl AutoCommit {
             transaction: None,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: None,
             save_cursor: Vec::new(),
             isolation: None,
         })
@@ -205,10 +210,20 @@ impl AutoCommit {
     /// See [`Self::diff_incremental`] for encapsulating this pattern.
     pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
         self.ensure_transaction_closed();
+        let range = OpRange::new(before, after);
+        if let Some((r, patches)) = &self.diff_cache {
+            if r == &range {
+                // we could skip this clone and return &[Patch]
+                return patches.clone();
+            }
+        }
         let heads = self.doc.get_heads();
-        if after == heads && before == self.diff_cursor && self.patch_log.is_active() {
+        let patches = if range.after() == heads
+            && range.before() == self.diff_cursor
+            && self.patch_log.is_active()
+        {
             self.patch_log.make_patches(&self.doc)
-        } else if before.is_empty() && after == heads {
+        } else if range.before().is_empty() && range.after() == heads {
             let mut patch_log = PatchLog::active(self.patch_log.text_rep());
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
@@ -217,13 +232,15 @@ impl AutoCommit {
             current_state::log_current_state_patches(&self.doc, &mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
-            let before_clock = self.doc.clock_at(before);
-            let after_clock = self.doc.clock_at(after);
+            let before_clock = self.doc.clock_at(range.before());
+            let after_clock = self.doc.clock_at(range.after());
             let mut patch_log = PatchLog::active(self.patch_log.text_rep());
-            patch_log.heads = Some(after.to_vec());
+            patch_log.heads = Some(range.after().to_vec());
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
-        }
+        };
+        self.diff_cache = Some((range, patches));
+        self.diff_cache.as_ref().unwrap().1.clone()
     }
 
     /// This is a convience function that encapsulates the following common pattern
@@ -252,6 +269,7 @@ impl AutoCommit {
             transaction: self.transaction.clone(),
             patch_log: PatchLog::inactive(self.patch_log.text_rep()),
             diff_cursor: vec![],
+            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         }
@@ -264,6 +282,7 @@ impl AutoCommit {
             transaction: self.transaction.clone(),
             patch_log: PatchLog::inactive(self.patch_log.text_rep()),
             diff_cursor: vec![],
+            diff_cache: None,
             save_cursor: vec![],
             isolation: None,
         })
@@ -961,6 +980,35 @@ impl<'a> SyncDoc for SyncWrapper<'a> {
         self.inner
             .doc
             .receive_sync_message_log_patches(sync_state, message, patch_log)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OpRange {
+    before_len: usize,
+    hashes: Vec<ChangeHash>,
+}
+
+impl OpRange {
+    fn new(before: &[ChangeHash], after: &[ChangeHash]) -> Self {
+        let mut hashes = Vec::with_capacity(before.len() + after.len());
+        hashes.extend(before);
+        hashes.extend(after);
+        let range = Self {
+            before_len: before.len(),
+            hashes,
+        };
+        assert_eq!(before, range.before());
+        assert_eq!(after, range.after());
+        range
+    }
+
+    fn before(&self) -> &[ChangeHash] {
+        &self.hashes[0..self.before_len]
+    }
+
+    fn after(&self) -> &[ChangeHash] {
+        &self.hashes[self.before_len..]
     }
 }
 
