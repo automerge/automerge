@@ -1,5 +1,6 @@
 use crate::types::{ObjId, Op};
 use fxhash::FxHasher;
+use std::fmt::Write;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
 use rand::Rng;
@@ -229,10 +230,10 @@ impl OpTableRow {
             &self.succ,
             &self.pred,
         ];
-        let row = rows
-            .iter()
-            .map(|r| format!("<td>{}</td>", &r))
-            .collect::<String>();
+        let row = rows.iter().fold(String::new(), |mut output, r| {
+            let _ = write!(output, "<td>{}</td>", r);
+            output
+        });
         format!("<tr>{}</tr>", row)
     }
 }
@@ -257,16 +258,14 @@ impl OpTableRow {
             crate::types::Key::Map(k) => metadata.props[k].clone(),
             crate::types::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
-        let succ = op
-            .succ
-            .iter()
-            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
-            .collect();
-        let pred = op
-            .pred
-            .iter()
-            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
-            .collect();
+        let succ = op.succ.iter().fold(String::new(), |mut output, s| {
+            let _ = write!(output, ",{}", print_opid(s, actor_shorthands));
+            output
+        });
+        let pred = op.pred.iter().fold(String::new(), |mut output, p| {
+            let _ = write!(output, ",{}", print_opid(p, actor_shorthands));
+            output
+        });
         OpTableRow {
             op_description,
             obj_id: print_opid(&obj.0, actor_shorthands),
