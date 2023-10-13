@@ -974,6 +974,54 @@
 <a href="#974" id="974">974</a>
 <a href="#975" id="975">975</a>
 <a href="#976" id="976">976</a>
+<a href="#977" id="977">977</a>
+<a href="#978" id="978">978</a>
+<a href="#979" id="979">979</a>
+<a href="#980" id="980">980</a>
+<a href="#981" id="981">981</a>
+<a href="#982" id="982">982</a>
+<a href="#983" id="983">983</a>
+<a href="#984" id="984">984</a>
+<a href="#985" id="985">985</a>
+<a href="#986" id="986">986</a>
+<a href="#987" id="987">987</a>
+<a href="#988" id="988">988</a>
+<a href="#989" id="989">989</a>
+<a href="#990" id="990">990</a>
+<a href="#991" id="991">991</a>
+<a href="#992" id="992">992</a>
+<a href="#993" id="993">993</a>
+<a href="#994" id="994">994</a>
+<a href="#995" id="995">995</a>
+<a href="#996" id="996">996</a>
+<a href="#997" id="997">997</a>
+<a href="#998" id="998">998</a>
+<a href="#999" id="999">999</a>
+<a href="#1000" id="1000">1000</a>
+<a href="#1001" id="1001">1001</a>
+<a href="#1002" id="1002">1002</a>
+<a href="#1003" id="1003">1003</a>
+<a href="#1004" id="1004">1004</a>
+<a href="#1005" id="1005">1005</a>
+<a href="#1006" id="1006">1006</a>
+<a href="#1007" id="1007">1007</a>
+<a href="#1008" id="1008">1008</a>
+<a href="#1009" id="1009">1009</a>
+<a href="#1010" id="1010">1010</a>
+<a href="#1011" id="1011">1011</a>
+<a href="#1012" id="1012">1012</a>
+<a href="#1013" id="1013">1013</a>
+<a href="#1014" id="1014">1014</a>
+<a href="#1015" id="1015">1015</a>
+<a href="#1016" id="1016">1016</a>
+<a href="#1017" id="1017">1017</a>
+<a href="#1018" id="1018">1018</a>
+<a href="#1019" id="1019">1019</a>
+<a href="#1020" id="1020">1020</a>
+<a href="#1021" id="1021">1021</a>
+<a href="#1022" id="1022">1022</a>
+<a href="#1023" id="1023">1023</a>
+<a href="#1024" id="1024">1024</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -1033,6 +1081,7 @@
     transaction: <span class="prelude-ty">Option</span>&lt;(PatchLog, TransactionInner)&gt;,
     patch_log: PatchLog,
     diff_cursor: Vec&lt;ChangeHash&gt;,
+    diff_cache: <span class="prelude-ty">Option</span>&lt;(OpRange, Vec&lt;Patch&gt;)&gt;,
     save_cursor: Vec&lt;ChangeHash&gt;,
     isolation: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
 }
@@ -1047,6 +1096,7 @@
             transaction: <span class="prelude-val">None</span>,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: Vec::new(),
             isolation: <span class="prelude-val">None</span>,
         }
@@ -1065,6 +1115,7 @@
             transaction: <span class="prelude-val">None</span>,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: Vec::new(),
             isolation: <span class="prelude-val">None</span>,
         })
@@ -1077,6 +1128,7 @@
             transaction: <span class="prelude-val">None</span>,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: Vec::new(),
             isolation: <span class="prelude-val">None</span>,
         })
@@ -1106,6 +1158,7 @@
             transaction: <span class="prelude-val">None</span>,
             patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: Vec::new(),
             isolation: <span class="prelude-val">None</span>,
         })
@@ -1181,10 +1234,20 @@
     /// See [`Self::diff_incremental`] for encapsulating this pattern.
     </span><span class="kw">pub fn </span>diff(<span class="kw-2">&amp;mut </span><span class="self">self</span>, before: <span class="kw-2">&amp;</span>[ChangeHash], after: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;Patch&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
+        <span class="kw">let </span>range = OpRange::new(before, after);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((r, patches)) = <span class="kw-2">&amp;</span><span class="self">self</span>.diff_cache {
+            <span class="kw">if </span>r == <span class="kw-2">&amp;</span>range {
+                <span class="comment">// we could skip this clone and return &amp;[Patch]
+                </span><span class="kw">return </span>patches.clone();
+            }
+        }
         <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">if </span>after == heads &amp;&amp; before == <span class="self">self</span>.diff_cursor &amp;&amp; <span class="self">self</span>.patch_log.is_active() {
+        <span class="kw">let </span>patches = <span class="kw">if </span>range.after() == heads
+            &amp;&amp; range.before() == <span class="self">self</span>.diff_cursor
+            &amp;&amp; <span class="self">self</span>.patch_log.is_active()
+        {
             <span class="self">self</span>.patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
-        } <span class="kw">else if </span>before.is_empty() &amp;&amp; after == heads {
+        } <span class="kw">else if </span>range.before().is_empty() &amp;&amp; range.after() == heads {
             <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(<span class="self">self</span>.patch_log.text_rep());
             <span class="comment">// This if statement is only active if the current heads are the same as `after`
             // so we don&#39;t need to tell the patch log to target a specific heads and consequently
@@ -1193,13 +1256,15 @@
             current_state::log_current_state_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="kw-2">&amp;mut </span>patch_log);
             patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>before_clock = <span class="self">self</span>.doc.clock_at(before);
-            <span class="kw">let </span>after_clock = <span class="self">self</span>.doc.clock_at(after);
+            <span class="kw">let </span>before_clock = <span class="self">self</span>.doc.clock_at(range.before());
+            <span class="kw">let </span>after_clock = <span class="self">self</span>.doc.clock_at(range.after());
             <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(<span class="self">self</span>.patch_log.text_rep());
-            patch_log.heads = <span class="prelude-val">Some</span>(after.to_vec());
+            patch_log.heads = <span class="prelude-val">Some</span>(range.after().to_vec());
             diff::log_diff(<span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="kw-2">&amp;</span>before_clock, <span class="kw-2">&amp;</span>after_clock, <span class="kw-2">&amp;mut </span>patch_log);
             patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
-        }
+        };
+        <span class="self">self</span>.diff_cache = <span class="prelude-val">Some</span>((range, patches));
+        <span class="self">self</span>.diff_cache.as_ref().unwrap().<span class="number">1</span>.clone()
     }
 
     <span class="doccomment">/// This is a convience function that encapsulates the following common pattern
@@ -1228,6 +1293,7 @@
             transaction: <span class="self">self</span>.transaction.clone(),
             patch_log: PatchLog::inactive(<span class="self">self</span>.patch_log.text_rep()),
             diff_cursor: <span class="macro">vec!</span>[],
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: <span class="macro">vec!</span>[],
             isolation: <span class="prelude-val">None</span>,
         }
@@ -1240,6 +1306,7 @@
             transaction: <span class="self">self</span>.transaction.clone(),
             patch_log: PatchLog::inactive(<span class="self">self</span>.patch_log.text_rep()),
             diff_cursor: <span class="macro">vec!</span>[],
+            diff_cache: <span class="prelude-val">None</span>,
             save_cursor: <span class="macro">vec!</span>[],
             isolation: <span class="prelude-val">None</span>,
         })
@@ -1937,6 +2004,35 @@
         <span class="self">self</span>.inner
             .doc
             .receive_sync_message_log_patches(sync_state, message, patch_log)
+    }
+}
+
+<span class="attr">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">struct </span>OpRange {
+    before_len: usize,
+    hashes: Vec&lt;ChangeHash&gt;,
+}
+
+<span class="kw">impl </span>OpRange {
+    <span class="kw">fn </span>new(before: <span class="kw-2">&amp;</span>[ChangeHash], after: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>hashes = Vec::with_capacity(before.len() + after.len());
+        hashes.extend(before);
+        hashes.extend(after);
+        <span class="kw">let </span>range = <span class="self">Self </span>{
+            before_len: before.len(),
+            hashes,
+        };
+        <span class="macro">assert_eq!</span>(before, range.before());
+        <span class="macro">assert_eq!</span>(after, range.after());
+        range
+    }
+
+    <span class="kw">fn </span>before(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ChangeHash] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.hashes[<span class="number">0</span>..<span class="self">self</span>.before_len]
+    }
+
+    <span class="kw">fn </span>after(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ChangeHash] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.hashes[<span class="self">self</span>.before_len..]
     }
 }
 
