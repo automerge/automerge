@@ -192,7 +192,7 @@ impl OpTreeInternal {
     pub(crate) fn new() -> Self {
         Self {
             root_node: None,
-            ops: vec![],
+            ops: Vec::with_capacity(2 * B),
         }
     }
 
