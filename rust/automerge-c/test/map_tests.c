@@ -23,10 +23,15 @@ static void test_AMmapIncrement(void** state) {
     AMstack** stack_ptr = &doc_state->base_state->stack;
     AMstackItem(NULL, AMmapPutCounter(doc_state->doc, AM_ROOT, AMstr("Counter"), 0), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
+    AMitem const* const item = AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Counter"), NULL),
+                                           cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER));
+    assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);
+    AMbyteSpan key;
+    assert_true(AMitemKey(item, &key));
+    assert_int_equal(key.count, strlen("Counter"));
+    assert_memory_equal(key.src, "Counter", key.count);
     int64_t counter;
-    assert_true(AMitemToCounter(AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Counter"), NULL),
-                                            cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
-                                &counter));
+    assert_true(AMitemToCounter(item, &counter));
     assert_int_equal(counter, 0);
     AMresultFree(AMstackPop(stack_ptr, NULL));
     AMstackItem(NULL, AMmapIncrement(doc_state->doc, AM_ROOT, AMstr("Counter"), 3), cmocka_cb,
@@ -40,67 +45,85 @@ static void test_AMmapIncrement(void** state) {
 
 #define test_AMmapPut(suffix) test_AMmapPut##suffix
 
-#define static_void_test_AMmapPut(suffix, type, scalar_value)                                                        \
-    static void test_AMmapPut##suffix(void** state) {                                                                \
-        DocState* doc_state = *state;                                                                                \
-        AMstack** stack_ptr = &doc_state->base_state->stack;                                                         \
-        AMstackItem(NULL, AMmapPut##suffix(doc_state->doc, AM_ROOT, AMstr(#suffix), scalar_value), cmocka_cb,        \
-                    AMexpect(AM_VAL_TYPE_VOID));                                                                     \
-        type value;                                                                                                  \
-        assert_true(AMitemTo##suffix(AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr(#suffix), NULL), \
-                                                 cmocka_cb, AMexpect(suffix_to_val_type(#suffix))),                  \
-                                     &value));                                                                       \
-        assert_true(value == scalar_value);                                                                          \
-        AMresultFree(AMstackPop(stack_ptr, NULL));                                                                   \
+#define static_void_test_AMmapPut(suffix, type, scalar_value)                                                      \
+    static void test_AMmapPut##suffix(void** state) {                                                              \
+        DocState* doc_state = *state;                                                                              \
+        AMstack** stack_ptr = &doc_state->base_state->stack;                                                       \
+        AMstackItem(NULL, AMmapPut##suffix(doc_state->doc, AM_ROOT, AMstr(#suffix), scalar_value), cmocka_cb,      \
+                    AMexpect(AM_VAL_TYPE_VOID));                                                                   \
+        AMitem const* const item = AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr(#suffix), NULL), \
+                                               cmocka_cb, AMexpect(suffix_to_val_type(#suffix)));                  \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);                                                    \
+        AMbyteSpan key;                                                                                            \
+        assert_true(AMitemKey(item, &key));                                                                        \
+        assert_int_equal(key.count, strlen(#suffix));                                                              \
+        assert_memory_equal(key.src, #suffix, key.count);                                                          \
+        type value;                                                                                                \
+        assert_true(AMitemTo##suffix(item, &value));                                                               \
+        assert_true(value == scalar_value);                                                                        \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                                 \
     }
 
 static void test_AMmapPutBytes(void** state) {
-    static AMbyteSpan const KEY = {"Bytes", 5};
     static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
     static size_t const BYTES_SIZE = sizeof(BYTES_VALUE) / sizeof(uint8_t);
 
     DocState* doc_state = *state;
     AMstack** stack_ptr = &doc_state->base_state->stack;
-    AMstackItem(NULL, AMmapPutBytes(doc_state->doc, AM_ROOT, KEY, AMbytes(BYTES_VALUE, BYTES_SIZE)), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMmapPutBytes(doc_state->doc, AM_ROOT, AMstr("Bytes"), AMbytes(BYTES_VALUE, BYTES_SIZE)),
+                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMitem const* const item = AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Bytes"), NULL),
+                                           cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES));
+    assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);
+    AMbyteSpan key;
+    assert_true(AMitemKey(item, &key));
+    assert_int_equal(key.count, strlen("Bytes"));
+    assert_memory_equal(key.src, "Bytes", key.count);
     AMbyteSpan bytes;
-    assert_true(AMitemToBytes(
-        AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, KEY, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)),
-        &bytes));
+    assert_true(AMitemToBytes(item, &bytes));
     assert_int_equal(bytes.count, BYTES_SIZE);
     assert_memory_equal(bytes.src, BYTES_VALUE, BYTES_SIZE);
     AMresultFree(AMstackPop(stack_ptr, NULL));
 }
 
 static void test_AMmapPutNull(void** state) {
-    static AMbyteSpan const KEY = {"Null", 4};
-
     DocState* doc_state = *state;
     AMstack** stack_ptr = &doc_state->base_state->stack;
-    AMstackItem(NULL, AMmapPutNull(doc_state->doc, AM_ROOT, KEY), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMresult* result = AMstackResult(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, KEY, NULL), NULL, NULL);
+    AMstackItem(NULL, AMmapPutNull(doc_state->doc, AM_ROOT, AMstr("Null")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMresult* result = AMstackResult(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Null"), NULL), NULL, NULL);
     if (AMresultStatus(result) != AM_STATUS_OK) {
         fail_msg_view("%s", AMresultError(result));
     }
     assert_int_equal(AMresultSize(result), 1);
-    AMitem* item = AMresultItem(result);
+    AMitem const* const item = AMresultItem(result);
+    assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);
+    AMbyteSpan key;
+    assert_true(AMitemKey(item, &key));
+    assert_int_equal(key.count, strlen("Null"));
+    assert_memory_equal(key.src, "Null", key.count);
     assert_int_equal(AMitemValType(item), AM_VAL_TYPE_NULL);
 }
 
 #define test_AMmapPutObject(label) test_AMmapPutObject_##label
 
-#define static_void_test_AMmapPutObject(label)                                                                   \
-    static void test_AMmapPutObject_##label(void** state) {                                                      \
-        DocState* doc_state = *state;                                                                            \
-        AMstack** stack_ptr = &doc_state->base_state->stack;                                                     \
-        AMobjType const obj_type = suffix_to_obj_type(#label);                                                   \
-        AMobjId const* const obj_id =                                                                            \
-            AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr(#label), obj_type), \
-                                    cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                 \
-        assert_non_null(obj_id);                                                                                 \
-        assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
-        assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
-        AMresultFree(AMstackPop(stack_ptr, NULL));                                                               \
+#define static_void_test_AMmapPutObject(label)                                                                  \
+    static void test_AMmapPutObject_##label(void** state) {                                                     \
+        DocState* doc_state = *state;                                                                           \
+        AMstack** stack_ptr = &doc_state->base_state->stack;                                                    \
+        AMobjType const obj_type = suffix_to_obj_type(#label);                                                  \
+        AMitem const* const item =                                                                              \
+            AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr(#label), obj_type), cmocka_cb, \
+                        AMexpect(AM_VAL_TYPE_OBJ_TYPE));                                                        \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);                                                 \
+        AMbyteSpan key;                                                                                         \
+        assert_true(AMitemKey(item, &key));                                                                     \
+        assert_int_equal(key.count, strlen(#label));                                                            \
+        assert_memory_equal(key.src, #label, key.count);                                                        \
+        AMobjId const* const obj_id = AMitemObjId(item);                                                        \
+        assert_non_null(obj_id);                                                                                \
+        assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                       \
+        assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                           \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                              \
     }
 
 static void test_AMmapPutStr(void** state) {
@@ -108,10 +131,15 @@ static void test_AMmapPutStr(void** state) {
     AMstack** stack_ptr = &doc_state->base_state->stack;
     AMstackItem(NULL, AMmapPutStr(doc_state->doc, AM_ROOT, AMstr("Str"), AMstr("Hello, world!")), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
+    AMitem const* const item = AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Str"), NULL), cmocka_cb,
+                                           AMexpect(AM_VAL_TYPE_STR));
+    assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_KEY);
+    AMbyteSpan key;
+    assert_true(AMitemKey(item, &key));
+    assert_int_equal(key.count, strlen("Str"));
+    assert_memory_equal(key.src, "Str", key.count);
     AMbyteSpan str;
-    assert_true(AMitemToStr(AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Str"), NULL), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_STR)),
-                            &str));
+    assert_true(AMitemToStr(item, &str));
     assert_int_equal(str.count, strlen("Hello, world!"));
     assert_memory_equal(str.src, "Hello, world!", str.count);
     AMresultFree(AMstackPop(stack_ptr, NULL));

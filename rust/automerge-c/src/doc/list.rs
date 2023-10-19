@@ -90,9 +90,9 @@ pub unsafe extern "C" fn AMlistGet(
     let obj_id = to_obj_id!(obj_id);
     let (pos, _) = adjust!(pos, false, doc.length(obj_id));
     match heads.as_ref() {
-        None => to_result(doc.get(obj_id, pos)),
+        None => to_result((doc.get(obj_id, pos), pos)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.get_at(obj_id, pos, &heads)),
+            Ok(heads) => to_result((doc.get_at(obj_id, pos, &heads), pos)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -458,9 +458,9 @@ pub unsafe extern "C" fn AMlistPutObject(
     let (pos, insert) = adjust!(pos, insert, doc.length(obj_id));
     let obj_type = to_obj_type!(obj_type);
     to_result(if insert {
-        (doc.insert_object(obj_id, pos, obj_type), obj_type)
+        (doc.insert_object(obj_id, pos, obj_type), pos, obj_type)
     } else {
-        (doc.put_object(obj_id, pos, obj_type), obj_type)
+        (doc.put_object(obj_id, pos, obj_type), pos, obj_type)
     })
 }
 

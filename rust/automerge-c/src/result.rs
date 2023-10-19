@@ -223,11 +223,32 @@ impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     }
 }
 
-impl From<(Result<am::ObjId, am::AutomergeError>, am::ObjType)> for AMresult {
-    fn from(tuple: (Result<am::ObjId, am::AutomergeError>, am::ObjType)) -> Self {
-        match tuple {
-            (Ok(obj_id), obj_type) => Self::item((obj_id, obj_type).into()),
-            (Err(e), _) => Self::error(&e.to_string()),
+impl From<(Result<am::ObjId, am::AutomergeError>, &str, am::ObjType)> for AMresult {
+    fn from(
+        (maybe, key, obj_type): (Result<am::ObjId, am::AutomergeError>, &str, am::ObjType),
+    ) -> Self {
+        match maybe {
+            Ok(obj_id) => Self::item(AMitem::indexed(
+                AMindex::Key(key.into()),
+                obj_id,
+                am::Value::Object(obj_type).into(),
+            )),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
+impl From<(Result<am::ObjId, am::AutomergeError>, usize, am::ObjType)> for AMresult {
+    fn from(
+        (maybe, pos, obj_type): (Result<am::ObjId, am::AutomergeError>, usize, am::ObjType),
+    ) -> Self {
+        match maybe {
+            Ok(obj_id) => Self::item(AMitem::indexed(
+                AMindex::Pos(pos),
+                obj_id,
+                am::Value::Object(obj_type).into(),
+            )),
+            Err(e) => Self::error(&e.to_string()),
         }
     }
 }
@@ -259,10 +280,46 @@ impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
     }
 }
 
-impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
+impl
+    From<(
+        Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>,
+        &str,
+    )> for AMresult
+{
+    fn from(
+        (maybe, key): (
+            Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>,
+            &str,
+        ),
+    ) -> Self {
         match maybe {
-            Ok(Some((value, obj_id))) => Self::item(AMitem::exact(obj_id, value.into())),
+            Ok(Some((value, obj_id))) => Self::item(AMitem::indexed(
+                AMindex::Key(key.into()),
+                obj_id,
+                value.into(),
+            )),
+            Ok(None) => Self::item(Default::default()),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
+impl
+    From<(
+        Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>,
+        usize,
+    )> for AMresult
+{
+    fn from(
+        (maybe, pos): (
+            Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>,
+            usize,
+        ),
+    ) -> Self {
+        match maybe {
+            Ok(Some((value, obj_id))) => {
+                Self::item(AMitem::indexed(AMindex::Pos(pos), obj_id, value.into()))
+            }
             Ok(None) => Self::item(Default::default()),
             Err(e) => Self::error(&e.to_string()),
         }
