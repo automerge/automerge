@@ -46,7 +46,7 @@ static void test_AMmark_round_trip(void** state) {
         AMstackItems(stack_ptr, AMmarks(doc_state->doc, obj_id, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_MARK));
 
     assert_int_equal(2, AMitemsSize(&marks));
-    AMmark* mark;
+    AMmark const* mark;
 
     assert_true(AMitemToMark(AMitemsNext(&marks, 1), &mark));
     assert_int_equal(0, AMmarkStart(mark));
@@ -100,7 +100,7 @@ static void test_AMmark_unicode_indexing(void** state) {
     AMitems marks =
         AMstackItems(stack_ptr, AMmarks(doc_state->doc, obj_id, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_MARK));
 
-    AMmark* mark;
+    AMmark const* mark;
     assert_int_equal(1, AMitemsSize(&marks));
     assert_true(AMitemToMark(AMitemsNext(&marks, 1), &mark));
 
