@@ -6,8 +6,8 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
-use crate::types::{Clock, Key, ListEncoding, ObjId, OpId, OpIds};
-use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, Prop};
+use crate::types::{Clock, Key, ListEncoding, ObjId, Op, OpArgs, OpId, OpIds};
+use crate::{op_tree::OpSetMetadata, Automerge, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
@@ -257,25 +257,25 @@ impl TransactionInner {
     }
 
     fn next_insert(&mut self, key: Key, value: ScalarValue) -> Op {
-        Op {
+        Op::new(OpArgs {
             id: self.next_id(),
             action: OpType::Put(value),
             key,
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
-        }
+        })
     }
 
     fn next_delete(&mut self, key: Key, pred: OpIds) -> Op {
-        Op {
+        Op::new(OpArgs {
             id: self.next_id(),
             action: OpType::Delete,
             key,
             succ: Default::default(),
             pred,
             insert: false,
-        }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -366,14 +366,14 @@ impl TransactionInner {
         let pos = query.pos();
         let key = query.key()?;
 
-        let op = Op {
+        let op = Op::new(OpArgs {
             id,
             action,
             key,
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
-        };
+        });
 
         doc.ops_mut().insert(pos, &obj, op.clone());
 
@@ -435,14 +435,14 @@ impl TransactionInner {
 
         let pred = doc.ops().m.sorted_opids(ops.iter().map(|o| o.id));
 
-        let op = Op {
+        let op = Op::new(OpArgs {
             id,
             action,
             key,
             succ: Default::default(),
             pred,
             insert: false,
-        };
+        });
 
         let pos = query.end_pos;
         self.insert_local_op(doc, patch_log, prop, op, pos, obj, &ops_pos);
@@ -477,14 +477,14 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let op = Op {
+        let op = Op::new(OpArgs {
             id,
             action,
             key,
             succ: Default::default(),
             pred,
             insert: false,
-        };
+        });
 
         let pos = query.pos();
         let ops_pos = query.ops_pos;

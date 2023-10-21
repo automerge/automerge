@@ -565,20 +565,20 @@ pub(crate) struct FoundOpId<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::types::{Op, OpId, OpType};
+    use crate::types::{Op, OpArgs, OpId, OpType};
 
     use super::*;
 
     fn op() -> Op {
         let zero = OpId::new(0, 0);
-        Op {
+        Op::new(OpArgs {
             id: zero,
             action: OpType::Put(0.into()),
             key: zero.into(),
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
-        }
+        })
     }
 
     #[test]

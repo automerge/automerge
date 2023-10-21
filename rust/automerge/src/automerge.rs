@@ -20,7 +20,7 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, Value,
+    OpArgs, OpId, OpType, Value,
 };
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -895,7 +895,7 @@ impl Automerge {
                 let pred = self.ops.m.sorted_opids(pred);
                 (
                     obj,
-                    Op {
+                    Op::new(OpArgs {
                         id,
                         action: OpType::from_action_and_value(
                             c.action,
@@ -907,7 +907,7 @@ impl Automerge {
                         succ: Default::default(),
                         pred,
                         insert: c.insert,
-                    },
+                    }),
                 )
             })
             .collect()

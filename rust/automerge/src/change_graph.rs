@@ -197,7 +197,7 @@ mod tests {
         clock::ClockData,
         op_tree::OpSetMetadata,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
-        types::{Key, ObjId, Op, OpId, OpIds},
+        types::{Key, ObjId, Op, OpArgs, OpId, OpIds},
         ActorId,
     };
 
@@ -300,13 +300,15 @@ mod tests {
 
             let actor_idx = self.index(actor);
             let ops = (0..num_new_ops)
-                .map(|opnum| Op {
-                    id: OpId::new(start_op + opnum as u64, actor_idx),
-                    action: crate::OpType::Put("value".into()),
-                    key: Key::Map(key),
-                    succ: OpIds::empty(),
-                    pred: OpIds::empty(),
-                    insert: false,
+                .map(|opnum| {
+                    Op::new(OpArgs {
+                        id: OpId::new(start_op + opnum as u64, actor_idx),
+                        action: crate::OpType::Put("value".into()),
+                        key: Key::Map(key),
+                        succ: OpIds::empty(),
+                        pred: OpIds::empty(),
+                        insert: false,
+                    })
                 })
                 .collect::<Vec<_>>();
 

@@ -480,7 +480,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, Op, OpId},
+        types::{Key, ObjId, ObjMeta, Op, OpArgs, OpId},
         ActorId, ScalarValue,
     };
 
@@ -552,21 +552,21 @@ pub(crate) mod tests {
                         .sorted_opids(vec![OpId::new(counter, actor)].into_iter())
                 };
 
-                let op = Op {
+                let op = Op::new(OpArgs {
                     id: OpId::new(counter, actor),
                     action: crate::OpType::Put(ScalarValue::Str(val.into())),
                     key: Key::Map(key),
                     succ,
                     pred,
                     insert: false,
-                };
+                });
                 set.insert(counter as usize, &ObjId::root(), op);
                 counter += 1;
             }
         }
 
         // Now try and create an op which inserts at the next index of 'a'
-        let new_op = Op {
+        let new_op = Op::new(OpArgs {
             id: OpId::new(counter, actor),
             action: crate::OpType::Put(ScalarValue::Str("test".into())),
             key: Key::Map(a),
@@ -575,7 +575,7 @@ pub(crate) mod tests {
                 .m
                 .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
             insert: false,
-        };
+        });
         (set, new_op)
     }
 

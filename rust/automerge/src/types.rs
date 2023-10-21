@@ -275,6 +275,10 @@ impl OpType {
         }
     }
 
+    pub(crate) fn text_width(&self) -> u32 {
+        TextValue::width(self.to_str()) as u32
+    }
+
     pub(crate) fn to_str(&self) -> &str {
         if let OpType::Put(ScalarValue::Str(s)) = &self {
             s
@@ -630,6 +634,16 @@ pub(crate) struct Op {
     pub(crate) succ: OpIds,
     pub(crate) pred: OpIds,
     pub(crate) insert: bool,
+    pub(crate) text_width: u32,
+}
+
+pub(crate) struct OpArgs {
+    pub(crate) id: OpId,
+    pub(crate) action: OpType,
+    pub(crate) key: Key,
+    pub(crate) succ: OpIds,
+    pub(crate) pred: OpIds,
+    pub(crate) insert: bool,
 }
 
 pub(crate) enum SuccIter<'a> {
@@ -656,6 +670,19 @@ impl<'a> Iterator for SuccIter<'a> {
 }
 
 impl Op {
+    pub(crate) fn new(o: OpArgs) -> Op {
+        let text_width = o.action.text_width();
+        Op {
+            id: o.id,
+            action: o.action,
+            key: o.key,
+            pred: o.pred,
+            succ: o.succ,
+            insert: o.insert,
+            text_width,
+        }
+    }
+
     pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
         self.succ.add(op.id, cmp);
         if let OpType::Increment(n) = &op.action {
@@ -701,7 +728,7 @@ impl Op {
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
         match encoding {
             ListEncoding::List => 1,
-            ListEncoding::Text => TextValue::width(self.to_str()),
+            ListEncoding::Text => self.text_width as usize,
         }
     }
 
@@ -948,7 +975,8 @@ impl From<Prop> for wasm_bindgen::JsValue {
 #[cfg(test)]
 pub(crate) mod gen {
     use super::{
-        ChangeHash, Counter, ElemId, Key, ObjType, Op, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
+        ChangeHash, Counter, ElemId, Key, ObjType, Op, OpArgs, OpId, OpIds, OpType, ScalarValue,
+        HASH_SIZE,
     };
     use proptest::prelude::*;
 
@@ -1007,13 +1035,15 @@ pub(crate) mod gen {
     ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
     pub(crate) fn gen_op(id: OpId, key_prop_indices: Vec<usize>) -> impl Strategy<Value = Op> {
         (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
-            move |(key, insert, action)| Op {
-                id,
-                key,
-                insert,
-                action,
-                succ: OpIds::empty(),
-                pred: OpIds::empty(),
+            move |(key, insert, action)| {
+                Op::new(OpArgs {
+                    id,
+                    key,
+                    insert,
+                    action,
+                    succ: OpIds::empty(),
+                    pred: OpIds::empty(),
+                })
             },
         )
     }

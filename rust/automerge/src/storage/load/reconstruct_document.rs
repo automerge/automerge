@@ -7,7 +7,7 @@ use crate::{
     columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpArgs, OpId, OpIds, OpType},
     ScalarValue,
 };
 
@@ -320,14 +320,14 @@ impl LoadingObject {
             })?;
             collector.collect(
                 self.id,
-                Op {
+                Op::new(OpArgs {
                     id: opid,
                     pred: meta.sorted_opids(preds.into_iter()),
                     insert: false,
                     succ: OpIds::empty(),
                     key: *key,
                     action: OpType::Delete,
-                },
+                }),
             )?;
         }
         Ok(LoadedObject {
@@ -351,14 +351,14 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
         }
     }
     let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    Ok(Op {
+    Ok(Op::new(OpArgs {
         id: check_opid(m, op.id)?,
         action,
         key,
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
         insert: op.insert,
-    })
+    }))
 }
 
 /// We construct the OpSetMetadata directly from the vector of actors which are encoded in the

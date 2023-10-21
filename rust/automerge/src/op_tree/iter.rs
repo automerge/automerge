@@ -217,7 +217,7 @@ impl<'a> Iterator for Inner<'a> {
 #[cfg(test)]
 mod tests {
     use super::super::OpTreeInternal;
-    use crate::types::{Key, Op, OpId, OpType, ScalarValue};
+    use crate::types::{Key, Op, OpArgs, OpId, OpType, ScalarValue};
     use proptest::prelude::*;
 
     #[derive(Clone)]
@@ -266,14 +266,14 @@ mod tests {
     }
 
     fn op(counter: u64) -> Op {
-        Op {
+        Op::new(OpArgs {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
             key: Key::Map(0),
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
-        }
+        })
     }
 
     /// A model for a property based test of the OpTreeIter. We generate a set of actions, each
