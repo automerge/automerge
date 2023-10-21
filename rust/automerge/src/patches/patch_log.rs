@@ -427,7 +427,7 @@ impl PatchLog {
         self.expose.clear();
     }
 
-    pub(crate) fn branch(&mut self) -> Self {
+    pub(crate) fn begin_tx(&mut self) -> Self {
         Self {
             active: self.active,
             expose: HashSet::new(),
@@ -437,7 +437,7 @@ impl PatchLog {
         }
     }
 
-    pub(crate) fn merge(&mut self, other: Self) {
+    pub(crate) fn commit_tx(&mut self, other: Self) {
         self.events.extend(other.events);
     }
 

@@ -273,6 +273,7 @@ export class Automerge {
   branches(): string[];
   currentBranch(): string;
   createBranch(branch: string, heads?: Heads): void;
+  mergeBranch(branch: string): void;
   checkout(branch);
 
   // memory management

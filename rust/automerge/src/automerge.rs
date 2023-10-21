@@ -259,6 +259,7 @@ impl Automerge {
             start_op,
             deps,
             scope,
+            force: false,
         }
     }
 

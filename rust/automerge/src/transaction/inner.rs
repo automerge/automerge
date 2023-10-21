@@ -21,6 +21,7 @@ pub(crate) struct TransactionInner {
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
     branch: Branch,
+    force: bool,
     operations: Vec<(ObjId, Op)>,
 }
 
@@ -39,6 +40,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) scope: Option<Clock>,
     /// The branch the transaction is acting on
     pub(crate) branch: Branch,
+    /// Force commit
+    pub(crate) force: bool,
 }
 
 impl TransactionInner {
@@ -50,6 +53,7 @@ impl TransactionInner {
             deps,
             scope,
             branch,
+            force,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -62,6 +66,7 @@ impl TransactionInner {
             deps,
             scope,
             branch,
+            force,
         }
     }
 
@@ -90,7 +95,7 @@ impl TransactionInner {
         message: Option<String>,
         time: Option<i64>,
     ) -> Option<ChangeHash> {
-        if self.pending_ops() == 0 {
+        if !self.force && self.pending_ops() == 0 {
             return None;
         }
         Some(self.commit_impl(doc, message, time))

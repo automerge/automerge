@@ -677,6 +677,13 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = mergeBranch)]
+    pub fn merge_branch(&mut self, branch: String) -> Result<(), JsValue> {
+        let branch = am::Branch::new(&branch);
+        self.doc.merge_branch(&branch)?;
+        Ok(())
+    }
+
     pub fn checkout(&mut self, branch: String) -> Result<(), JsValue> {
         let branch = am::Branch::new(&branch);
         self.doc.checkout(&branch)?;

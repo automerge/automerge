@@ -302,7 +302,8 @@ impl AutoCommit {
 
     pub fn integrate(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_to(self.doc.get_heads().as_slice());
+        let branch_heads = self.doc.get_branch_heads(&self.branch).unwrap_or_default();
+        self.patch_to(&branch_heads);
         self.isolation = None;
     }
 
@@ -315,13 +316,13 @@ impl AutoCommit {
             };
             let args = self.doc.transaction_args(heads, branch);
             let inner = TransactionInner::new(args);
-            self.transaction = Some((self.patch_log.branch(), inner))
+            self.transaction = Some((self.patch_log.begin_tx(), inner))
         }
     }
 
     fn ensure_transaction_closed(&mut self) {
         if let Some((patch_log, tx)) = self.transaction.take() {
-            self.patch_log.merge(patch_log);
+            self.patch_log.commit_tx(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
@@ -469,6 +470,10 @@ impl AutoCommit {
     /// This closes the transaction first, if one is in progress.
     pub fn get_heads(&mut self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
+        self.get_heads_impl()
+    }
+
+    pub fn get_heads_impl(&mut self) -> Vec<ChangeHash> {
         if let Some(heads) = &self.isolation {
             heads.to_vec()
         } else {
@@ -522,7 +527,7 @@ impl AutoCommit {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.take().unwrap();
-        self.patch_log.merge(patch_log);
+        self.patch_log.commit_tx(patch_log);
         let hash = tx.commit(&mut self.doc, options.message, options.time);
         if self.isolation.is_some() && hash.is_some() {
             self.isolation = hash.map(|h| vec![h])
@@ -601,14 +606,25 @@ impl AutoCommit {
         */
     }
 
+    fn patch_to_impl(log: &mut PatchLog, doc: &Automerge, before: &[ChangeHash], after: &[ChangeHash]) {
+        if before != after {
+            let before_clock = doc.clock_at(before);
+            let after_clock = doc.clock_at(after);
+            diff::log_diff(&doc, &before_clock, &after_clock, log);
+        }
+    }
+
     fn patch_to(&mut self, after: &[ChangeHash]) {
         // we may be isolated so we dont use self.doc.get_heads()
-        let before = self.get_heads();
+        let before = self.get_heads_impl();
+        Self::patch_to_impl(&mut self.patch_log, &self.doc, &before, after)
+/*
         if before.as_slice() != after {
             let before_clock = self.doc.clock_at(&before);
             let after_clock = self.doc.clock_at(after);
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut self.patch_log);
         }
+*/
     }
 
     pub fn current_branch(&self) -> &Branch {
@@ -624,14 +640,37 @@ impl AutoCommit {
         if self.doc.get_branch_heads(branch).is_some() {
             return Err(AutomergeError::BranchExists(branch.clone()));
         }
-        let base_heads = self.base_heads();
-        let heads = heads.unwrap_or(&base_heads);
-        let args = self
+        let heads = heads.map(Vec::from).unwrap_or_else(|| self.base_heads());
+        let before = self.get_heads();
+        let mut log = self.patch_log.begin_tx();
+        Self::patch_to_impl(&mut log, &self.doc, &before, &heads);
+        let mut args = self
             .doc
-            .transaction_args(Some(heads.to_vec()), branch.clone());
-        TransactionInner::empty(&mut self.doc, args, None, None);
+            .transaction_args(Some(heads), branch.clone());
+        args.force = true;
+        let inner = TransactionInner::new(args);
+        self.transaction = Some((log, inner));
         self.branch = branch.clone();
-        self.patch_to(heads);
+        Ok(())
+    }
+
+    pub fn merge_branch(&mut self, branch: &Branch) -> Result<(), AutomergeError> {
+        if branch == &self.branch {
+            return Err(AutomergeError::InvalidMerge(branch.clone()));
+        }
+        let other_heads = self.doc.get_branch_heads(branch).ok_or_else(||AutomergeError::NoSuchBranch(branch.clone()))?;
+        self.ensure_transaction_closed();
+        let old_heads = self.get_heads_impl();
+        let mut new_heads = Vec::new();
+        new_heads.extend(&old_heads);
+        new_heads.extend(&other_heads);
+        new_heads.sort_unstable();
+        let mut log = self.patch_log.begin_tx();
+        Self::patch_to_impl(&mut log, &self.doc, &old_heads, &new_heads);
+        let mut args = self.doc.transaction_args(Some(new_heads), self.branch.clone());
+        args.force = true;
+        let inner = TransactionInner::new(args);
+        self.transaction = Some((log, inner));
         Ok(())
     }
 

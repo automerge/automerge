@@ -43,6 +43,8 @@ pub enum AutomergeError {
         expected: String,
         unexpected: String,
     },
+    #[error("invalid merge: {0}")]
+    InvalidMerge(Branch),
     #[error(transparent)]
     Load(#[from] LoadError),
     #[error(transparent)]
