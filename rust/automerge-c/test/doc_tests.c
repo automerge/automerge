@@ -1,6 +1,8 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -167,6 +169,53 @@ static void test_AMkeys_map(void** state) {
     assert_null(AMitemsPrev(&reverse, 1));
 }
 
+static void test_AMload(void** state) {
+    TestState* test_state = *state;
+    AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
+    FILE* fp = fopen("files/brave-ape-49.automerge", "rb");
+    assert_non_null(fp);
+    fseek(fp, 0L, SEEK_END);
+    size_t const count = ftell(fp);
+    assert_int_not_equal(count, 0);
+    rewind(fp);
+    uint8_t* src = test_calloc(count, sizeof(uint8_t));
+    for (size_t i = 0; i != count; ++i) {
+        src[i] = fgetc(fp);
+    }
+    assert_int_equal(ferror(fp), 0);
+    assert_int_equal(fclose(fp), 0);
+    AMitem* doc_item = AMstackItem(stack_ptr, AMload(src, count), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC));
+    test_free(src);
+    assert_non_null(doc_item);
+    AMdoc* doc = NULL;
+    assert_true(AMitemToDoc(doc_item, &doc));
+    assert_non_null(doc);
+    AMitems keys = AMstackItems(stack_ptr, AMkeys(doc, AM_ROOT, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR));
+
+    enum Key {ASSETS, DATA, DOM, META, SIZE_};
+
+    assert_int_equal(AMitemsSize(&keys), SIZE_);
+    size_t match_counts[SIZE_] = {0};
+    AMitem* key_item;
+    while ((key_item = AMitemsNext(&keys, 1)) != NULL) {
+        AMbyteSpan str;
+        assert_true(AMitemToStr(key_item, &str));
+        if (!strncmp(str.src, "assets", str.count)) {
+            match_counts[ASSETS] += 1;
+        } else if (!strncmp(str.src, "data", str.count)) {
+            match_counts[DATA] += 1;
+        } else if (!strncmp(str.src, "dom", str.count)) {
+            match_counts[DOM] += 1;
+        } else if (!strncmp(str.src, "meta", str.count)) {
+            match_counts[META] += 1;
+        }
+    }
+    assert_int_equal(match_counts[ASSETS], 1);
+    assert_int_equal(match_counts[DATA], 1);
+    assert_int_equal(match_counts[DOM], 1);
+    assert_int_equal(match_counts[META], 1);
+}
+
 static void test_AMputActor_bytes(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
@@ -276,6 +325,7 @@ int run_doc_tests(void) {
         cmocka_unit_test_setup_teardown(test_AMkeys_empty, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMkeys_list, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMkeys_map, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMload, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMputActor_bytes, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMputActor_str, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMspliceText, setup, teardown),
