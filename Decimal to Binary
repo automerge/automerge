@@ -1,0 +1,14 @@
+const decimal = 10; // to convert positive decimal to binary
+let binary = decimal.toString(2); // to convert negative decimal to binary
+binary = (decimal >>> 0).toString(2);
+
+while (decimal > 0) {
+  if (decimal & 1) {
+    binary = "1" + binary;
+  } else {
+    binary = "0" + binary;
+  }
+  decimal = decimal >> 1;
+}
+
+console.log(binary);
