@@ -18,23 +18,22 @@ include(CMakePackageConfigHelpers)
 
 include(GNUInstallDirs)
 
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 string(MAKE_C_IDENTIFIER ${PROJECT_NAME} SYMBOL_PREFIX)
 
 string(TOUPPER ${SYMBOL_PREFIX} SYMBOL_PREFIX)
 
-set(CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/Cargo/target")
+set(CARGO_TARGET_DIR "${PROJECT_BINARY_DIR}/Cargo/target")
 
-set(CBINDGEN_INCLUDEDIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
+set(CBINDGEN_INCLUDEDIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
 
 set(CBINDGEN_TARGET_DIR "${CBINDGEN_INCLUDEDIR}/${PROJECT_NAME}")
 
-find_program (
-    CARGO_CMD
-    "cargo"
-    PATHS "$ENV{CARGO_HOME}/bin"
-    DOC "The Cargo command"
+find_program (CARGO_CMD
+              "cargo"
+              PATHS "$ENV{CARGO_HOME}/bin"
+              DOC "The Rust package manager"
 )
 
 if(NOT CARGO_CMD)
@@ -43,12 +42,22 @@ if(NOT CARGO_CMD)
                         "environment variable to its path.")
 endif()
 
-string(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_LOWER)
+find_program(RUSTC_CMD
+             "rustc"
+             PATHS "$ENV{CARGO_HOME}/bin"
+             DOC "The Rust compiler"
+)
+
+if(NOT RUSTC_CMD)
+    message(FATAL_ERROR "Rustc (Rust compiler) not found! "
+                        "Please install it and/or set the CARGO_HOME "
+                        "environment variable to its path.")
+endif()
 
 # In order to build with -Z build-std, we need to pass target explicitly.
 # https://doc.rust-lang.org/cargo/reference/unstable.html#build-std
 execute_process (
-    COMMAND rustc -vV
+    COMMAND ${RUSTC_CMD} -vV
     OUTPUT_VARIABLE RUSTC_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
@@ -57,7 +66,11 @@ string(REGEX REPLACE ".*host: ([^ \n]*).*" "\\1"
     ${RUSTC_VERSION}
 )
 
-if(BUILD_TYPE_LOWER STREQUAL debug)
+set(CARGO_FLAGS --target=${CARGO_TARGET})
+
+set(RUSTFLAGS "")
+
+if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CARGO_BUILD_TYPE "debug")
 
     set(CARGO_FLAG --target=${CARGO_TARGET})
@@ -68,9 +81,9 @@ else()
         set(RUSTUP_TOOLCHAIN nightly)
     endif()
 
-    set(RUSTFLAGS -C\ panic=abort)
+    set(RUSTFLAGS "${RUSTFLAGS} -C panic=abort")
 
-    set(CARGO_FLAG -Z build-std=std,panic_abort --release --target=${CARGO_TARGET})
+    set(CARGO_FLAGS -Z build-std=std,panic_abort --release ${CARGO_FLAGS})
 endif()
 
 if(UTF32_INDEXING)
@@ -86,8 +99,8 @@ set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_TARGET}/${CARGO_BUILD_TYPE}")
 set(BINDINGS_NAME "${LIBRARY_NAME}_core")
 
 configure_file(
-    ${CMAKE_MODULE_PATH}/Cargo.toml.in
-    ${CMAKE_SOURCE_DIR}/Cargo.toml
+    ${PROJECT_SOURCE_DIR}/cmake/Cargo.toml.in
+    ${PROJECT_SOURCE_DIR}/Cargo.toml
     @ONLY
     NEWLINE_STYLE LF
 )
@@ -95,8 +108,8 @@ configure_file(
 set(INCLUDE_GUARD_PREFIX "${SYMBOL_PREFIX}")
 
 configure_file(
-    ${CMAKE_MODULE_PATH}/cbindgen.toml.in
-    ${CMAKE_SOURCE_DIR}/cbindgen.toml
+    ${PROJECT_SOURCE_DIR}/cmake/cbindgen.toml.in
+    ${PROJECT_SOURCE_DIR}/cbindgen.toml
     @ONLY
     NEWLINE_STYLE LF
 )
@@ -112,17 +125,16 @@ add_custom_command(
     OUTPUT
         ${CARGO_OUTPUT}
     COMMAND
-        # \note cbindgen won't regenerate its output header file after it's been removed but it will after its
-        #       configuration file has been updated.
-        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
+        # Force cbindgen to regenerate the header file by updating its configuration file; removing the header won't.
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${PROJECT_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${PROJECT_SOURCE_DIR}/cbindgen.toml
     COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN} RUSTFLAGS=${RUSTFLAGS} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN} RUSTFLAGS=${RUSTFLAGS} ${CARGO_CMD} build ${CARGO_FLAGS} ${CARGO_FEATURES}
     COMMAND
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
-        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
-        # Compensate for cbindgen ignoring `std:mem::size_of<usize>()` calls.
-        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+        # Compensate for cbindgen ignoring `std::mem::size_of<usize>()` calls.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     MAIN_DEPENDENCY
         src/lib.rs
     DEPENDS
@@ -143,11 +155,11 @@ add_custom_command(
         src/sync/have.rs
         src/sync/message.rs
         src/sync/state.rs
-        ${CMAKE_SOURCE_DIR}/build.rs
-        ${CMAKE_MODULE_PATH}/Cargo.toml.in
-        ${CMAKE_MODULE_PATH}/cbindgen.toml.in
+        ${PROJECT_SOURCE_DIR}/build.rs
+        ${PROJECT_SOURCE_DIR}/cmake/Cargo.toml.in
+        ${PROJECT_SOURCE_DIR}/cmake/cbindgen.toml.in
     WORKING_DIRECTORY
-        ${CMAKE_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}
     COMMENT
         "Producing the bindings' artifacts with Cargo..."
     VERBATIM
@@ -187,15 +199,15 @@ set(UTILS_SUBDIR "utils")
 add_custom_command(
     OUTPUT
         ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
-        ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+        ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     COMMAND
-        ${CMAKE_COMMAND} -DPROJECT_NAME=${PROJECT_NAME} -DLIBRARY_NAME=${LIBRARY_NAME} -DSUBDIR=${UTILS_SUBDIR} -P ${CMAKE_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+        ${CMAKE_COMMAND} -DPROJECT_NAME=${PROJECT_NAME} -DLIBRARY_NAME=${LIBRARY_NAME} -DSUBDIR=${UTILS_SUBDIR} -P ${PROJECT_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     MAIN_DEPENDENCY
         ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     DEPENDS
-        ${CMAKE_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake
+        ${PROJECT_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake
     WORKING_DIRECTORY
-        ${CMAKE_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}
     COMMENT
         "Generating the enum string functions with CMake..."
     VERBATIM
@@ -203,7 +215,7 @@ add_custom_command(
 
 add_custom_target(${LIBRARY_NAME}_utilities
     DEPENDS ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
-            ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+            ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
 )
 
 add_library(${LIBRARY_NAME})
@@ -224,20 +236,62 @@ else()
     list(APPEND LIBRARY_DEPENDENCIES m)
 endif()
 
-target_link_libraries(${LIBRARY_NAME}
-    PUBLIC ${BINDINGS_NAME}
-           ${LIBRARY_DEPENDENCIES}
-)
+target_link_libraries(${LIBRARY_NAME} PUBLIC ${LIBRARY_DEPENDENCIES})
 
 # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
 #       contain a non-existent path so its build-time include directory
 #       must be specified for all of its dependent targets instead.
 target_include_directories(${LIBRARY_NAME}
-    PUBLIC "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR};${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}>"
+    PUBLIC "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR};${PROJECT_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}>"
            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 add_dependencies(${LIBRARY_NAME} ${BINDINGS_NAME}_artifacts)
+
+if(WIN32)
+    find_program(LIB_TOOL "lib" REQUIRED)
+
+    add_custom_command(
+        TARGET ${LIBRARY_NAME}
+        POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${LIBRARY_NAME}>\"..."
+        COMMAND
+            ${LIB_TOOL} /OUT:$<TARGET_FILE_NAME:${LIBRARY_NAME}> $<TARGET_FILE_NAME:${LIBRARY_NAME}> $<TARGET_FILE:${BINDINGS_NAME}> ntdll.lib
+        WORKING_DIRECTORY
+            ${PROJECT_BINARY_DIR}
+        COMMENT
+            "Merging the libraries..."
+        VERBATIM
+    )
+else()
+    set(OBJECTS_DIR objects)
+
+    set(BINDINGS_OBJECTS_DIR ${OBJECTS_DIR}/$<TARGET_NAME:${BINDINGS_NAME}>)
+
+    add_custom_command(
+        TARGET "${LIBRARY_NAME}"
+        POST_BUILD
+        COMMAND
+            ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${LIBRARY_NAME}>\"..."
+        COMMAND
+            ${CMAKE_COMMAND} -E rm -rf ${OBJECTS_DIR}
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory ${BINDINGS_OBJECTS_DIR}
+        COMMAND
+            ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -x  --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>"
+        COMMAND
+            ${CMAKE_COMMAND} -E chdir ${BINDINGS_OBJECTS_DIR} ${CMAKE_AR} -x --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>
+        COMMAND
+            ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o"
+        COMMAND
+            ${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o
+        WORKING_DIRECTORY
+            ${PROJECT_BINARY_DIR}
+        COMMENT
+            "Merging the libraries' constituent object files..."
+    )
+endif()
 
 # Generate the configuration header.
 math(EXPR INTEGER_PROJECT_VERSION_MAJOR "${PROJECT_VERSION_MAJOR} * 100000")
@@ -251,7 +305,7 @@ math(EXPR INTEGER_PROJECT_VERSION "${INTEGER_PROJECT_VERSION_MAJOR} + \
                                    ${INTEGER_PROJECT_VERSION_PATCH}")
 
 configure_file(
-    ${CMAKE_MODULE_PATH}/config.h.in
+    ${PROJECT_SOURCE_DIR}/cmake/config.h.in
     ${CBINDGEN_TARGET_DIR}/config.h
     @ONLY
     NEWLINE_STYLE LF
@@ -263,19 +317,19 @@ target_sources(${LIBRARY_NAME}
         src/${UTILS_SUBDIR}/stack_callback_data.c
         src/${UTILS_SUBDIR}/stack.c
         src/${UTILS_SUBDIR}/string.c
-        ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+        ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     PUBLIC
         FILE_SET api TYPE HEADERS
             BASE_DIRS
                 ${CBINDGEN_INCLUDEDIR}
-                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
+                ${CMAKE_INSTALL_INCLUDEDIR}
             FILES
                 ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
                 ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
-                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h
-                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h
-                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack.h
-                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/string.h
+                ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h
+                ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h
+                ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack.h
+                ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/string.h
     INTERFACE
         FILE_SET config TYPE HEADERS
             BASE_DIRS
