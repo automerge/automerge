@@ -1,7 +1,8 @@
 use crate::marks::MarkData;
+use crate::op_set::{Op2, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::QueryResult;
-use crate::types::{Key, ListEncoding, Op, OpId, OpType};
+use crate::types::{Key, ListEncoding, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
 
@@ -11,13 +12,13 @@ pub(crate) struct MarkMap<'a> {
 }
 
 impl<'a> MarkMap<'a> {
-    pub(crate) fn process(&mut self, op: &'a Op) {
-        match &op.action {
+    pub(crate) fn process(&mut self, op: Op2<'a>) {
+        match op.action() {
             OpType::MarkBegin(_, data) => {
-                self.map.insert(op.id, data);
+                self.map.insert(*op.id(), data);
             }
             OpType::MarkEnd(_) => {
-                self.map.remove(&op.id.prev());
+                self.map.remove(&op.id().prev());
             }
             _ => {}
         }
@@ -78,11 +79,11 @@ impl ListState {
     pub(crate) fn process_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
-        ops: &[Op],
+        osd: &OpSetData,
         marks: Option<&mut MarkMap<'a>>,
     ) -> QueryResult {
         if self.encoding == ListEncoding::List {
-            self.process_list_node(node, ops, marks)
+            self.process_list_node(node, osd, marks)
         } else if self.never_seen_puts {
             // text node is clean - use the indexes
             self.process_text_node(node, marks)
@@ -125,7 +126,7 @@ impl ListState {
     fn process_list_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
-        ops: &[Op],
+        osd: &OpSetData,
         marks: Option<&mut MarkMap<'a>>,
     ) -> QueryResult {
         let mut num_vis = node.index.visible.len();
@@ -153,7 +154,7 @@ impl ListState {
         //              node boundary
         // scenario 2b: it is the same as the previous last_seen - do nothing
 
-        let last_elemid = ops[node.last()].elemid_or_key();
+        let last_elemid = node.last().as_op2(osd).elemid_or_key();
         if node.index.has_visible(&last_elemid) {
             self.last_seen = Some(last_elemid);
         } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
@@ -163,14 +164,13 @@ impl ListState {
         QueryResult::Next
     }
 
-    pub(crate) fn process_op(&mut self, op: &Op, current: Key, visible: bool) {
+    pub(crate) fn process_op(&mut self, op: Op2<'_>, current: Key, visible: bool) {
         if visible {
             if self.never_seen_puts {
                 // clean sequnces are simple - only insert and deletes
                 self.last_width = op.width(self.encoding);
                 self.index += self.last_width;
             } else {
-                //let current = Some(op.elemid_or_key());
                 let current_width = op.width(self.encoding);
                 if self.last_seen != Some(current) {
                     // new value - progess

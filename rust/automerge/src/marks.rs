@@ -3,8 +3,8 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::op_tree::OpSetMetadata;
-use crate::types::{Op, OpId, OpType};
+use crate::op_tree::OpSetData;
+use crate::types::{OpId, OpType};
 use crate::value::ScalarValue;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -196,18 +196,18 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, op: &'a Op, m: &OpSetMetadata) -> bool {
-        match &op.action {
-            OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m),
-            OpType::MarkEnd(_) => self.mark_end(op.id, m),
+    pub(crate) fn process(&mut self, opid: OpId, action: &'a OpType, osd: &OpSetData) -> bool {
+        match action {
+            OpType::MarkBegin(_, data) => self.mark_begin(opid, data, osd),
+            OpType::MarkEnd(_) => self.mark_end(opid, osd),
             _ => false,
         }
     }
 
-    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, m: &OpSetMetadata) -> bool {
+    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {
         let mut result = false;
 
-        let index = match self.find(id.prev(), m).err() {
+        let index = match self.find(id.prev(), osd).err() {
             Some(index) => index,
             None => return false,
         };
@@ -230,9 +230,9 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    pub(crate) fn mark_end(&mut self, id: OpId, m: &OpSetMetadata) -> bool {
+    pub(crate) fn mark_end(&mut self, id: OpId, osd: &OpSetData) -> bool {
         let mut result = false;
-        let index = match self.find(id.prev(), m).ok() {
+        let index = match self.find(id.prev(), osd).ok() {
             Some(index) => index,
             None => return false,
         };
@@ -257,9 +257,9 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    fn find(&self, target: OpId, m: &OpSetMetadata) -> Result<usize, usize> {
+    fn find(&self, target: OpId, osd: &OpSetData) -> Result<usize, usize> {
         self.state
-            .binary_search_by(|probe| m.lamport_cmp(probe.0, target))
+            .binary_search_by(|probe| osd.lamport_cmp(probe.0, target))
     }
 
     fn mark_above<'b>(

@@ -1,4 +1,4 @@
-use crate::types::{Clock, ObjId, Op, OpType};
+use crate::types::{Clock, ObjId, Op2, OpType};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -131,7 +131,7 @@ impl Automerge {
         for top in self.ops().top_ops(obj, clock.cloned()) {
             let key = self.ops().to_string(top.op.elemid_or_key());
             let value = self.hydrate_op(top.op, clock);
-            let id = self.id_to_exid(top.op.id);
+            let id = top.op.exid();
             let conflict = top.conflict;
             map.insert(key, MapValue::new(value, id, conflict));
         }
@@ -142,7 +142,7 @@ impl Automerge {
         let mut list = List::new();
         for top in self.ops().top_ops(obj, clock.cloned()) {
             let value = self.hydrate_op(top.op, clock);
-            let id = self.id_to_exid(top.op.id);
+            let id = top.op.exid();
             let conflict = top.conflict;
             list.push(value, id, conflict);
         }
@@ -154,12 +154,12 @@ impl Automerge {
         Value::Text(Text::new(text.into()))
     }
 
-    pub(crate) fn hydrate_op(&self, op: &Op, clock: Option<&Clock>) -> Value {
-        match &op.action {
-            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id.into(), clock),
-            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock),
-            OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock),
+    pub(crate) fn hydrate_op(&self, op: Op2<'_>, clock: Option<&Clock>) -> Value {
+        match op.action() {
+            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
+            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),
+            OpType::Make(ObjType::List) => self.hydrate_list(&op.id().into(), clock),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id().into(), clock),
             OpType::Put(scalar) => Value::Scalar(scalar.clone()),
             _ => panic!("invalid op to hydrate"),
         }

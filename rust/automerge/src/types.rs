@@ -1,11 +1,8 @@
 use crate::error;
 use crate::legacy as amp;
-use crate::text_value::TextValue;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::cmp::Eq;
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -19,7 +16,8 @@ pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
 pub(crate) use crate::marks::MarkData;
-pub(crate) use crate::value::{Counter, ScalarValue, Value};
+pub(crate) use crate::op_set::{Op, Op2};
+pub(crate) use crate::value::{ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
 pub(crate) const ROOT: OpId = OpId(0, 0);
@@ -370,6 +368,12 @@ impl From<OpId> for ObjId {
     }
 }
 
+impl From<&OpId> for ObjId {
+    fn from(o: &OpId) -> Self {
+        ObjId(*o)
+    }
+}
+
 impl From<OpId> for ElemId {
     fn from(o: OpId) -> Self {
         ElemId(o)
@@ -622,6 +626,7 @@ impl ElemId {
     }
 }
 
+/*
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
     pub(crate) id: OpId,
@@ -656,13 +661,6 @@ impl<'a> Iterator for SuccIter<'a> {
 }
 
 impl Op {
-    pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
-        self.succ.add(op.id, cmp);
-        if let OpType::Increment(n) = &op.action {
-            self.increment(*n, op.id);
-        }
-    }
-
     pub(crate) fn succ_iter(&self) -> SuccIter<'_> {
         if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
             let set = c
@@ -855,6 +853,8 @@ impl Op {
     }
 }
 
+*/
+
 #[derive(Debug, Clone)]
 pub(crate) struct Peer {}
 
@@ -948,8 +948,10 @@ impl From<Prop> for wasm_bindgen::JsValue {
 #[cfg(test)]
 pub(crate) mod gen {
     use super::{
-        ChangeHash, Counter, ElemId, Key, ObjType, Op, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
+        ChangeHash, ElemId, Key, ObjType, Op, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
     };
+    use crate::value::Counter;
+
     use proptest::prelude::*;
 
     pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {

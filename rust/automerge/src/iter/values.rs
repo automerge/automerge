@@ -3,20 +3,19 @@ use std::fmt;
 use crate::exid::ExId;
 use crate::types::Clock;
 use crate::value::Value;
-use crate::Automerge;
 
 use super::TopOps;
 
 /// Iterator created by the [`crate::ReadDoc::values()`] and [`crate::ReadDoc::values_at()`] methods
 #[derive(Default)]
 pub struct Values<'a> {
-    iter: Option<(TopOps<'a>, &'a Automerge, Option<Clock>)>,
+    iter: Option<(TopOps<'a>, Option<Clock>)>,
 }
 
 impl<'a> Values<'a> {
-    pub(crate) fn new(iter: TopOps<'a>, doc: &'a Automerge, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(iter: TopOps<'a>, clock: Option<Clock>) -> Self {
         Self {
-            iter: Some((iter, doc, clock)),
+            iter: Some((iter, clock)),
         }
     }
 }
@@ -31,8 +30,8 @@ impl<'a> Iterator for Values<'a> {
     type Item = (Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.as_mut().and_then(|(i, doc, clock)| {
-            i.next().map(|top| doc.export_value(top.op, clock.as_ref()))
-        })
+        self.iter
+            .as_mut()
+            .and_then(|(i, clock)| i.next().map(|top| top.op.tagged_value(clock.as_ref())))
     }
 }

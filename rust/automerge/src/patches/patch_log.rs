@@ -316,7 +316,7 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|a, b| doc.ops().m.lamport_cmp(a, b));
+        self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };

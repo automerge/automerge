@@ -1,7 +1,8 @@
 use crate::marks::Mark;
-use crate::op_tree::OpSetMetadata;
+use crate::op_set::Op2;
+use crate::op_tree::OpSetData;
 use crate::query::{ListState, OpTreeNode, QueryResult, TreeQuery};
-use crate::types::{ListEncoding, Op, OpId, OpType};
+use crate::types::{ListEncoding, OpId, OpType};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -55,15 +56,15 @@ impl<'a> SeekMark<'a> {
 }
 
 impl<'a> TreeQuery<'a> for SeekMark<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, _osd: &'a OpSetData) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
         QueryResult::Descend
     }
 
-    fn query_element_with_metadata(&mut self, op: &'a Op, m: &OpSetMetadata) -> QueryResult {
-        match &op.action {
-            OpType::MarkBegin(_, data) if op.id == self.id => {
-                if !op.succ.is_empty() {
+    fn query_element(&mut self, op: Op2<'a>) -> QueryResult {
+        match op.action() {
+            OpType::MarkBegin(_, data) if op.id() == &self.id => {
+                if !op.succ().is_empty() {
                     return QueryResult::Finish;
                 }
                 self.found_begin = true;
@@ -76,11 +77,11 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 self.super_marks.retain(|_, v| v == &data.name);
             }
             OpType::MarkBegin(_, mark) => {
-                if m.lamport_cmp(op.id, self.id) == Ordering::Greater {
+                if op.lamport_cmp(self.id) == Ordering::Greater {
                     if let Some(next_mark) = &mut self.next_mark {
                         // gather marks of the same type that supersede us
                         if mark.name == self.mark_name {
-                            self.super_marks.insert(op.id.next(), mark.name.clone());
+                            self.super_marks.insert(op.id().next(), mark.name.clone());
                             if self.super_marks.len() == 1 {
                                 // complete a mark
                                 next_mark.end = self.idx.index();
@@ -89,7 +90,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                         }
                     } else {
                         // gather all marks until we know what our mark's name is
-                        self.super_marks.insert(op.id.next(), mark.name.clone());
+                        self.super_marks.insert(op.id().next(), mark.name.clone());
                     }
                 }
             }
@@ -104,8 +105,8 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 self.found_end = true;
                 return QueryResult::Finish;
             }
-            OpType::MarkEnd(_) if self.super_marks.contains_key(&op.id) => {
-                self.super_marks.remove(&op.id);
+            OpType::MarkEnd(_) if self.super_marks.contains_key(op.id()) => {
+                self.super_marks.remove(op.id());
                 if let Some(next_mark) = &mut self.next_mark {
                     if self.super_marks.is_empty() {
                         // begin a new mark
@@ -128,7 +129,9 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
             return QueryResult::Finish;
         }
 
-        self.idx.process_op(op, op.elemid_or_key(), op.visible());
+        let elemid = op.elemid_or_key();
+        let visible = op.visible(); // why is this not *AT* FIXME
+        self.idx.process_op(op, elemid, visible);
         QueryResult::Next
     }
 }

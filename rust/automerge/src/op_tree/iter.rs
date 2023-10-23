@@ -1,17 +1,11 @@
 use std::cmp::Ordering;
 
-use crate::types::Op;
+use crate::op_set::OpIdx;
 
 use super::{OpTreeInternal, OpTreeNode};
 
 #[derive(Clone)]
 pub(crate) struct OpTreeIter<'a>(Inner<'a>);
-
-impl<'a> Default for OpTreeIter<'a> {
-    fn default() -> Self {
-        OpTreeIter(Inner::Empty)
-    }
-}
 
 impl<'a> OpTreeIter<'a> {
     pub(crate) fn new(tree: &'a OpTreeInternal) -> OpTreeIter<'a> {
@@ -27,7 +21,6 @@ impl<'a> OpTreeIter<'a> {
                     },
                     cumulative_index: 0,
                     root_node: root,
-                    ops: &tree.ops,
                 })
                 .unwrap_or(Inner::Empty),
         )
@@ -35,7 +28,7 @@ impl<'a> OpTreeIter<'a> {
 }
 
 impl<'a> Iterator for OpTreeIter<'a> {
-    type Item = &'a Op;
+    type Item = OpIdx;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
@@ -57,7 +50,6 @@ enum Inner<'a> {
         // How far through the whole optree we are
         cumulative_index: usize,
         root_node: &'a OpTreeNode,
-        ops: &'a [Op],
     },
 }
 
@@ -76,14 +68,13 @@ struct NodeIter<'a> {
 }
 
 impl<'a> Iterator for Inner<'a> {
-    type Item = &'a Op;
+    type Item = OpIdx;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Inner::Empty => None,
             Inner::NonEmpty {
                 ancestors,
-                ops,
                 current,
                 cumulative_index,
                 ..
@@ -95,7 +86,7 @@ impl<'a> Iterator for Inner<'a> {
                         let result = current.node.elements[current.index];
                         current.index += 1;
                         *cumulative_index += 1;
-                        Some(&ops[result])
+                        Some(result)
                     } else {
                         // We've exhausted the leaf node, we must find the nearest non-exhausted parent (lol)
                         let node_iter = loop {
@@ -125,7 +116,7 @@ impl<'a> Iterator for Inner<'a> {
                         let result = current.node.elements[current.index];
                         current.index += 1;
                         *cumulative_index += 1;
-                        Some(&ops[result])
+                        Some(result)
                     }
                 } else {
                     // If we're in a non-leaf node then the last iteration returned an element from the
@@ -156,7 +147,6 @@ impl<'a> Iterator for Inner<'a> {
             Self::Empty => None,
             Self::NonEmpty {
                 root_node,
-                ops,
                 cumulative_index,
                 current,
                 ancestors,
@@ -187,7 +177,7 @@ impl<'a> Iterator for Inner<'a> {
                                 Ordering::Equal => {
                                     *cumulative_index += child.len() + 1;
                                     current.index = child_index + 1;
-                                    return Some(&ops[current.node.elements[child_index]]);
+                                    return Some(current.node.elements[child_index]);
                                 }
                                 Ordering::Greater => {
                                     current.index = child_index;
@@ -207,7 +197,7 @@ impl<'a> Iterator for Inner<'a> {
                     // we're in a leaf node and we kept track of the cumulative index as we went,
                     let index_in_this_node = n.saturating_sub(*cumulative_index);
                     current.index = index_in_this_node + 1;
-                    Some(&ops[current.node.elements[index_in_this_node]])
+                    Some(current.node.elements[index_in_this_node])
                 }
             }
         }
@@ -217,12 +207,13 @@ impl<'a> Iterator for Inner<'a> {
 #[cfg(test)]
 mod tests {
     use super::super::OpTreeInternal;
+    use crate::op_set::{OpIdx, OpSetData};
     use crate::types::{Key, Op, OpId, OpType, ScalarValue};
     use proptest::prelude::*;
 
     #[derive(Clone)]
     enum Action {
-        Insert(usize, Op),
+        Insert(usize, OpIdx),
         Delete(usize),
     }
 
@@ -249,31 +240,32 @@ mod tests {
     //
     // i.e. all the other details of the ops are elided
     #[derive(PartialEq)]
-    struct DebugOps<'a>(&'a [Op]);
+    struct DebugOps<'a>(&'a [OpIdx]);
 
     impl<'a> std::fmt::Debug for DebugOps<'a> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "[")?;
             for (index, op) in self.0.iter().enumerate() {
                 if index < self.0.len() - 1 {
-                    write!(f, "{},", op.id.counter())?;
+                    write!(f, "{:?},", op)?;
                 } else {
-                    write!(f, "{}]", op.id.counter())?
+                    write!(f, "{:?}]", op)?
                 }
             }
             Ok(())
         }
     }
 
-    fn op(counter: u64) -> Op {
-        Op {
+    fn op(counter: u64, osd: &mut OpSetData) -> OpIdx {
+        let op = Op {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
             key: Key::Map(0),
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
-        }
+        };
+        osd.push(op)
     }
 
     /// A model for a property based test of the OpTreeIter. We generate a set of actions, each
@@ -284,7 +276,8 @@ mod tests {
     #[derive(Clone)]
     struct Model {
         actions: Vec<Action>,
-        model: Vec<Op>,
+        model: Vec<OpIdx>,
+        osd: OpSetData,
     }
 
     impl std::fmt::Debug for Model {
@@ -299,19 +292,29 @@ mod tests {
     impl Model {
         fn insert(&self, index: usize, next_op_counter: u64) -> Self {
             let mut actions = self.actions.clone();
-            let op = op(next_op_counter);
-            actions.push(Action::Insert(index, op.clone()));
+            let mut osd = OpSetData::default();
+            let op = op(next_op_counter, &mut osd);
+            actions.push(Action::Insert(index, op));
             let mut model = self.model.clone();
             model.insert(index, op);
-            Self { actions, model }
+            Self {
+                actions,
+                model,
+                osd,
+            }
         }
 
         fn delete(&self, index: usize) -> Self {
             let mut actions = self.actions.clone();
             actions.push(Action::Delete(index));
             let mut model = self.model.clone();
+            let osd = self.osd.clone();
             model.remove(index);
-            Self { actions, model }
+            Self {
+                actions,
+                model,
+                osd,
+            }
         }
 
         fn next(self, next_op_counter: u64) -> impl Strategy<Value = Model> {
@@ -352,6 +355,7 @@ mod tests {
                 Model {
                     actions: Vec::new(),
                     model: Vec::new(),
+                    osd: OpSetData::default(),
                 },
             ))
             .boxed();
@@ -372,13 +376,15 @@ mod tests {
         })
     }
 
-    fn make_optree(actions: &[Action]) -> super::OpTreeInternal {
+    fn make_optree(actions: &[Action], osd: &OpSetData) -> super::OpTreeInternal {
         let mut optree = OpTreeInternal::new();
         for action in actions {
             match action {
-                Action::Insert(index, op) => optree.insert(*index, op.clone()),
+                Action::Insert(index, idx) => {
+                    optree.insert(*index, *idx, osd);
+                }
                 Action::Delete(index) => {
-                    optree.remove(*index);
+                    optree.remove(*index, osd);
                 }
             }
         }
@@ -388,8 +394,9 @@ mod tests {
     /// A model for calls to `nth`. `NthModel::n` is guarnateed to be in `(0..model.len())`
     #[derive(Clone)]
     struct NthModel {
-        model: Vec<Op>,
+        model: Vec<OpIdx>,
         actions: Vec<Action>,
+        osd: OpSetData,
         n: usize,
     }
 
@@ -409,6 +416,7 @@ mod tests {
                 Just(NthModel {
                     model: model.model,
                     actions: model.actions,
+                    osd: model.osd,
                     n: 0,
                 })
                 .boxed()
@@ -417,6 +425,7 @@ mod tests {
                     .prop_map(|(index, model)| NthModel {
                         model: model.model,
                         actions: model.actions,
+                        osd: model.osd,
                         n: index,
                     })
                     .boxed()
@@ -427,20 +436,20 @@ mod tests {
     proptest! {
         #[test]
         fn optree_iter_proptest(model in model()) {
-            let optree = make_optree(&model.actions);
+            let optree = make_optree(&model.actions, &model.osd);
             let iter = super::OpTreeIter::new(&optree);
-            let iterated = iter.cloned().collect::<Vec<_>>();
+            let iterated = iter.collect::<Vec<_>>();
             assert_eq!(DebugOps(&model.model), DebugOps(&iterated))
         }
 
         #[test]
         fn optree_iter_nth(model in nth_model()) {
-            let optree = make_optree(&model.actions);
+            let optree = make_optree(&model.actions, &model.osd);
             let mut iter = super::OpTreeIter::new(&optree);
             let mut model_iter = model.model.iter();
-            assert_eq!(model_iter.nth(model.n), iter.nth(model.n));
+            assert_eq!(model_iter.nth(model.n).cloned(), iter.nth(model.n));
 
-            let tail = iter.cloned().collect::<Vec<_>>();
+            let tail = iter.collect::<Vec<_>>();
             let expected_tail = model_iter.cloned().collect::<Vec<_>>();
             assert_eq!(DebugOps(tail.as_slice()), DebugOps(expected_tail.as_slice()));
         }

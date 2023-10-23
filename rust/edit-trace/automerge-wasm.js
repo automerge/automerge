@@ -4,7 +4,6 @@ const Automerge = require('../automerge-wasm')
 const start = new Date()
 
 let doc = Automerge.create();
-doc.enablePatches(true)
 let mat = doc.materialize("/")
 let text = doc.putObject("_root", "text", "", "text")
 
@@ -25,6 +24,10 @@ console.log(`doc.save in ${new Date() - t_time} ms`)
 t_time = new Date()
 Automerge.load(saved)
 console.log(`doc.load in ${new Date() - t_time} ms`)
+
+t_time = new Date()
+doc.fork(undefined, doc.getHeads())
+console.log(`doc.forkAt in ${new Date() - t_time} ms`)
 
 t_time = new Date()
 let t = doc.text(text);

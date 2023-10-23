@@ -1,31 +1,45 @@
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_tree::OpSetMetadata;
-use crate::op_tree::OpTreeIter;
-use crate::types::{Clock, Key, Op};
+use crate::op_set::{Op2, OpIter};
+use crate::types::{Clock, Key};
 use std::sync::Arc;
 
-#[derive(Default)]
-pub(crate) struct TopOps<'a> {
-    iter: OpTreeIter<'a>,
+pub(crate) enum TopOps<'a> {
+    Empty,
+    Ops(TopOpsInner<'a>),
+}
+
+impl<'a> Default for TopOps<'a> {
+    fn default() -> Self {
+        TopOps::Empty
+    }
+}
+
+impl<'a> TopOps<'a> {
+    pub(crate) fn new(iter: OpIter<'a>, clock: Option<Clock>) -> Self {
+        TopOps::Ops(TopOpsInner::new(iter, clock))
+    }
+}
+
+pub(crate) struct TopOpsInner<'a> {
+    iter: OpIter<'a>,
     pos: usize,
     start_pos: usize,
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, &'a Op, Option<Arc<MarkSet>>)>,
+    last_op: Option<(usize, Op2<'a>, Option<Arc<MarkSet>>)>,
     marks: MarkStateMachine<'a>,
-    meta: Option<&'a OpSetMetadata>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TopOp<'a> {
-    pub(crate) op: &'a Op,
+    pub(crate) op: Op2<'a>,
     pub(crate) conflict: bool,
     pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
-impl<'a> TopOps<'a> {
-    pub(crate) fn new(iter: OpTreeIter<'a>, clock: Option<Clock>, meta: &'a OpSetMetadata) -> Self {
+impl<'a> TopOpsInner<'a> {
+    pub(crate) fn new(iter: OpIter<'a>, clock: Option<Clock>) -> Self {
         Self {
             iter,
             pos: 0,
@@ -35,7 +49,6 @@ impl<'a> TopOps<'a> {
             key: None,
             last_op: None,
             marks: Default::default(),
-            meta: Some(meta),
         }
     }
 }
@@ -44,14 +57,25 @@ impl<'a> Iterator for TopOps<'a> {
     type Item = TopOp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Empty => None,
+            Self::Ops(top) => top.next(),
+        }
+    }
+}
+
+impl<'a> Iterator for TopOpsInner<'a> {
+    type Item = TopOp<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let mut result_op = None;
         loop {
             if let Some(op) = self.iter.next() {
                 let key = op.elemid_or_key();
                 let visible = op.visible_at(self.clock.as_ref());
-                match (&self.clock, &self.meta) {
-                    (Some(c), Some(m)) if c.covers(&op.id) => {
-                        self.marks.process(op, m);
+                match &self.clock {
+                    Some(c) if c.covers(op.id()) => {
+                        self.marks.process(*op.id(), op.action(), self.iter.osd);
                     }
                     _ => {}
                 }

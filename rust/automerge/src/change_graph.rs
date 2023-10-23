@@ -235,7 +235,7 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_tree::OpSetMetadata,
+        op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
         types::{Key, ObjId, Op, OpId, OpIds},
         ActorId,
@@ -322,8 +322,8 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut meta = OpSetMetadata::from_actors(self.actors.clone());
-            let key = meta.props.cache("key".to_string());
+            let mut osd = OpSetData::from_actors(self.actors.clone());
+            let key = osd.props.cache("key".to_string());
 
             let start_op = parents
                 .iter()
@@ -363,7 +363,7 @@ mod tests {
                     .with_actor(actor.clone())
                     .with_seq(*seq)
                     .with_timestamp(timestamp)
-                    .build(ops.iter().map(|op| op_as_actor_id(&root, op, &meta)))
+                    .build(ops.iter().map(|op| op_as_actor_id(&root, op, &osd)))
                     .unwrap(),
             );
             *seq = seq.checked_add(1).unwrap();

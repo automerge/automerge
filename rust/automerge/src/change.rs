@@ -341,7 +341,7 @@ impl From<&Change> for crate::ExpandedChange {
 pub(crate) mod gen {
     use super::Change;
     use crate::{
-        op_tree::OpSetMetadata,
+        op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
         types::{
             gen::{gen_hash, gen_op},
@@ -364,11 +364,11 @@ pub(crate) mod gen {
     fn gen_ops(
         this_actor: ActorId,
         other_actors: Vec<ActorId>,
-    ) -> impl Strategy<Value = (Vec<(ObjId, Op)>, OpSetMetadata)> {
+    ) -> impl Strategy<Value = (Vec<(ObjId, Op)>, OpSetData)> {
         let mut all_actors = vec![this_actor];
         all_actors.extend(other_actors);
-        let mut m = OpSetMetadata::from_actors(all_actors);
-        m.props.cache("someprop".to_string());
+        let mut osd = OpSetData::from_actors(all_actors);
+        osd.props.cache("someprop".to_string());
         let root_id = ObjId::root();
         (0_u64..10)
             .prop_map(|num_ops| {
@@ -390,12 +390,12 @@ pub(crate) mod gen {
                 }
                 strat
             })
-            .prop_map(move |ops| (ops, m.clone()))
+            .prop_map(move |ops| (ops, osd.clone()))
     }
 
     prop_compose! {
         pub(crate) fn gen_change()((this_actor, other_actors) in gen_actors())(
-                (ops, metadata) in gen_ops(this_actor.clone(), other_actors),
+                (ops, osd) in gen_ops(this_actor.clone(), other_actors),
                 start_op in 1_u64..200000,
                 seq in 0_u64..200000,
                 timestamp in 0..i64::MAX,
@@ -403,7 +403,7 @@ pub(crate) mod gen {
                 message in proptest::option::of("[a-z]{200}"),
                 this_actor in Just(this_actor),
             ) -> Change {
-            let ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op, &metadata));
+            let ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op, &osd));
             Change::new(ChangeBuilder::new()
                 .with_dependencies(deps)
                 .with_start_op(start_op.try_into().unwrap())

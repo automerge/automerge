@@ -1,5 +1,6 @@
 use crate::marks::MarkData;
-use crate::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
+use crate::op_set::Op2;
+use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
 use crate::types::{Key, ListEncoding, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
@@ -24,7 +25,7 @@ pub(crate) use seek_mark::SeekMark;
 pub(crate) struct ChangeVisibility<'a> {
     pub(crate) old_vis: bool,
     pub(crate) new_vis: bool,
-    pub(crate) op: &'a Op,
+    pub(crate) op: Op2<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,30 +41,15 @@ pub(crate) trait TreeQuery<'a>: Clone + Debug {
         false
     }
 
-    fn can_shortcut_search(&mut self, _tree: &'a OpTree) -> bool {
+    fn can_shortcut_search(&mut self, _tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
         false
     }
 
-    #[inline(always)]
-    fn query_node_with_metadata(
-        &mut self,
-        child: &'a OpTreeNode,
-        _m: &'a OpSetMetadata,
-        ops: &'a [Op],
-    ) -> QueryResult {
-        self.query_node(child, ops)
-    }
-
-    fn query_node(&mut self, _child: &'a OpTreeNode, _ops: &'a [Op]) -> QueryResult {
+    fn query_node(&mut self, _child: &'a OpTreeNode, _osd: &'a OpSetData) -> QueryResult {
         QueryResult::Descend
     }
 
-    #[inline(always)]
-    fn query_element_with_metadata(&mut self, element: &'a Op, _m: &OpSetMetadata) -> QueryResult {
-        self.query_element(element)
-    }
-
-    fn query_element(&mut self, _element: &'a Op) -> QueryResult {
+    fn query_element(&mut self, _op: Op2<'a>) -> QueryResult {
         panic!("invalid element query")
     }
 }
@@ -81,11 +67,11 @@ struct TextWidth {
 }
 
 impl TextWidth {
-    fn add_op(&mut self, op: &Op) {
+    fn add_op(&mut self, op: Op2<'_>) {
         self.width += op.width(ListEncoding::Text);
     }
 
-    fn remove_op(&mut self, op: &Op) {
+    fn remove_op(&mut self, op: Op2<'_>) {
         // Why are we using saturating_sub here? Shouldn't this always be greater than 0?
         //
         // In the case of objects which are _not_ `Text` we may end up subtracting more than the
@@ -169,7 +155,7 @@ impl Index {
             old_vis,
             new_vis,
             op,
-        } = &change_vis;
+        } = change_vis;
         let key = op.elemid_or_key();
         match (old_vis, new_vis) {
             (true, false) => match self.visible.get(&key).copied() {
@@ -195,20 +181,20 @@ impl Index {
         change_vis
     }
 
-    pub(crate) fn insert(&mut self, op: &Op) {
-        self.never_seen_puts &= op.insert;
+    pub(crate) fn insert(&mut self, op: Op2<'_>) {
+        self.never_seen_puts &= op.insert();
 
         // opids
-        self.ops.insert(op.id);
+        self.ops.insert(*op.id());
 
         // marks
-        match &op.action {
+        match op.action() {
             OpType::MarkBegin(_, data) => {
-                self.mark_begin.insert(op.id, data.clone());
+                self.mark_begin.insert(*op.id(), data.clone());
             }
             OpType::MarkEnd(_) => {
-                if self.mark_begin.remove(&op.id.prev()).is_none() {
-                    self.mark_end.push(op.id)
+                if self.mark_begin.remove(&op.id().prev()).is_none() {
+                    self.mark_end.push(*op.id())
                 }
             }
             _ => {}
@@ -226,17 +212,17 @@ impl Index {
         }
     }
 
-    pub(crate) fn remove(&mut self, op: &Op) {
+    pub(crate) fn remove(&mut self, op: Op2<'_>) {
         // op ids
-        self.ops.remove(&op.id);
+        self.ops.remove(op.id());
 
         // marks
-        match op.action {
+        match op.action() {
             OpType::MarkBegin(_, _) => {
-                self.mark_begin.remove(&op.id);
+                self.mark_begin.remove(op.id());
             }
             OpType::MarkEnd(_) => {
-                self.mark_end.retain(|id| id != &op.id);
+                self.mark_end.retain(|id| id != op.id());
             }
             _ => {}
         }

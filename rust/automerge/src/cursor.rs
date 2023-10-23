@@ -1,4 +1,4 @@
-use crate::op_set::OpSetMetadata;
+use crate::op_set::OpSetData;
 use crate::storage::parse;
 use crate::types::OpId;
 use crate::{ActorId, AutomergeError};
@@ -23,10 +23,10 @@ pub struct Cursor {
 const SERIALIZATION_VERSION_TAG: u8 = 0;
 
 impl Cursor {
-    pub(crate) fn new(id: OpId, m: &OpSetMetadata) -> Self {
+    pub(crate) fn new(id: OpId, osd: &OpSetData) -> Self {
         Self {
             ctr: id.counter(),
-            actor: m.actors.cache[id.actor()].clone(),
+            actor: osd.actors.cache[id.actor()].clone(),
         }
     }
 

@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
     patches::{PatchLog, TextRepresentation},
-    types::{Key, ListEncoding, ObjId, Op, OpId},
+    types::{Key, ListEncoding, ObjId, Op2, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
@@ -91,7 +91,7 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     }
 }
 
-fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_text_patches<'a, I: Iterator<Item = Op2<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -104,17 +104,17 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
         .into_iter()
         .fold(state, |mut state, (_key, key_ops)| {
             if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
-                match &o.action {
+                match o.action() {
                     OpType::Make(_) | OpType::Put(_) => {
-                        state.push_str(o.to_str(), o.width(encoding))
+                        state.push_str(o.as_str(), o.width(encoding))
                     }
                     OpType::MarkBegin(_, data) => {
-                        if state.marks.mark_begin(o.id, data, &doc.ops.m) {
+                        if state.marks.mark_begin(*o.id(), data, &doc.ops.osd) {
                             state.push_mark();
                         }
                     }
                     OpType::MarkEnd(_) => {
-                        if state.marks.mark_end(o.id, &doc.ops.m) {
+                        if state.marks.mark_end(*o.id(), &doc.ops.osd) {
                             state.push_mark();
                         }
                     }
@@ -130,7 +130,7 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
     }
 }
 
-fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_list_patches<'a, I: Iterator<Item = Op2<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -145,21 +145,21 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
         .filter_map(|(_key, key_ops)| {
             key_ops
                 .filter(|o| o.visible_or_mark(None))
-                .filter_map(|o| match &o.action {
+                .filter_map(|o| match o.action() {
                     OpType::Make(obj_type) => {
-                        Some((Value::Object(*obj_type), o.id, marks.current().cloned()))
+                        Some((Value::Object(*obj_type), *o.id(), marks.current().cloned()))
                     }
                     OpType::Put(value) => Some((
                         Value::Scalar(Cow::Borrowed(value)),
-                        o.id,
+                        *o.id(),
                         marks.current().cloned(),
                     )),
                     OpType::MarkBegin(_, data) => {
-                        marks.mark_begin(o.id, data, &doc.ops.m);
+                        marks.mark_begin(*o.id(), data, &doc.ops.osd);
                         None
                     }
                     OpType::MarkEnd(_) => {
-                        marks.mark_end(o.id, &doc.ops.m);
+                        marks.mark_end(*o.id(), &doc.ops.osd);
                         None
                     }
                     _ => None,
@@ -178,18 +178,18 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
         });
 }
 
-fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_key_patches<'a, I: Iterator<Item = Op2<'a>>>(
     (key, key_ops): (Key, I),
 ) -> Option<(usize, Put<'a>)> {
     key_ops
         .filter(|o| o.visible())
-        .filter_map(|o| match &o.action {
+        .filter_map(|o| match o.action() {
             OpType::Make(obj_type) => {
                 let value = Value::Object(*obj_type);
                 Some(Put {
                     value,
                     key,
-                    id: o.id,
+                    id: *o.id(),
                 })
             }
             OpType::Put(value) => {
@@ -197,7 +197,7 @@ fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
                 Some(Put {
                     value,
                     key,
-                    id: o.id,
+                    id: *o.id(),
                 })
             }
             _ => None,
@@ -206,19 +206,19 @@ fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
         .last()
 }
 
-fn log_map_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_patches<'a, I: Iterator<Item = Op2<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| o.key);
+    let ops_by_key = ops.group_by(|o| *o.key());
     ops_by_key
         .into_iter()
         .filter_map(log_map_key_patches)
         .for_each(|(i, put)| {
             if let Some(prop_index) = put.key.prop_index() {
-                if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
+                if let Some(key) = doc.ops().osd.props.safe_get(prop_index) {
                     let conflict = i > 0;
                     patch_log.put_map(*obj, key, put.value.into(), put.id, conflict, false);
                 }

@@ -7,7 +7,7 @@ use crate::{
     storage::{
         change::DEFLATE_MIN_SIZE, convert::op_as_docop, AsChangeMeta, CompressConfig, Document,
     },
-    types::{ActorId, ObjId, Op},
+    types::{ActorId, ObjId, Op2},
     Change, ChangeHash,
 };
 
@@ -28,10 +28,10 @@ pub(crate) fn save_document<'a, I, O>(
 ) -> Vec<u8>
 where
     I: Iterator<Item = &'a Change> + Clone + 'a,
-    O: Iterator<Item = (&'a ObjId, &'a Op)> + Clone + ExactSizeIterator,
+    O: Iterator<Item = (&'a ObjId, Op2<'a>)> + Clone + ExactSizeIterator,
 {
     let actor_lookup = actors.encode_index();
-    let doc_ops = ops.map(|(obj, op)| op_as_docop(&actor_lookup, props, obj, op));
+    let doc_ops = ops.map(|(obj, op)| op_as_docop(&actor_lookup, props, obj, op.as_op1()));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {
