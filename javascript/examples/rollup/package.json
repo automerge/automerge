@@ -1,0 +1,24 @@
+{
+  "name": "rollup-automerge-example",
+  "version": "0.1.0",
+  "description": "",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "prestart": "yarn build",
+    "start": "serve public",
+    "test": "node dist/node.js"
+  },
+  "author": "",
+  "devDependencies": {
+    "@automerge/automerge": "2.1.0-alpha.11",
+    "@rollup/plugin-alias": "^5.0.1",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-replace": "^5.0.4",
+    "@rollup/plugin-wasm": "^6.2.2",
+    "rollup": "^4.1.4",
+    "rollup-plugin-tla": "^0.0.2",
+    "serve": "^13.0.2"
+  }
+}

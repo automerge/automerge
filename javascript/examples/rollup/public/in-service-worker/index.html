@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Automerge running inside a Service Worker</title>
+</head>
+<body>
+	<h1>Automerge running inside a Service Worker</h1>
+	<label for="counter-value">Counter value:</label>
+	<output id="counter-value" >Service Worker not ready yet!</output>
+	<div>
+	<button data-value="+1">Increment counter</button><button data-value="-1">Decrement counter</button>
+	</div>
+
+	<style>label {font-weight: bold;}</style>
+	<script>
+		/**
+		 * A little debugging help for Firefox, where `console.log` calls
+		 * from inside the service worker don't appear in the page's console
+		 */
+		const channel = new BroadcastChannel('service-worker-log');
+		channel.addEventListener('message', event => {
+			console.log(...event.data)
+		})
+	</script>
+	<script type="module" src="/in-service-worker/page.js"></script>
+</body>
+</html>
