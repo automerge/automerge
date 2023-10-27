@@ -235,11 +235,18 @@
 <a href="#235" id="235">235</a>
 <a href="#236" id="236">236</a>
 <a href="#237" id="237">237</a>
+<a href="#238" id="238">238</a>
+<a href="#239" id="239">239</a>
+<a href="#240" id="240">240</a>
+<a href="#241" id="241">241</a>
+<a href="#242" id="242">242</a>
+<a href="#243" id="243">243</a>
+<a href="#244" id="244">244</a>
 </pre></div><pre class="rust"><code><span class="kw">use crate</span>::{
     error::AutomergeError,
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
-    marks::Mark,
+    marks::{Mark, MarkSet},
     parents::Parents,
     Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
@@ -377,6 +384,13 @@
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt;;
+
+    <span class="kw">fn </span>get_marks&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt;;
 
     <span class="doccomment">/// Get the string represented by the given text object.
     </span><span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt;;

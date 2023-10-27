@@ -1022,13 +1022,24 @@
 <a href="#1022" id="1022">1022</a>
 <a href="#1023" id="1023">1023</a>
 <a href="#1024" id="1024">1024</a>
+<a href="#1025" id="1025">1025</a>
+<a href="#1026" id="1026">1026</a>
+<a href="#1027" id="1027">1027</a>
+<a href="#1028" id="1028">1028</a>
+<a href="#1029" id="1029">1029</a>
+<a href="#1030" id="1030">1030</a>
+<a href="#1031" id="1031">1031</a>
+<a href="#1032" id="1032">1032</a>
+<a href="#1033" id="1033">1033</a>
+<a href="#1034" id="1034">1034</a>
+<a href="#1035" id="1035">1035</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
 <span class="kw">use </span><span class="kw">crate</span>::automerge::{current_state, diff};
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
-<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark, MarkSet};
 <span class="kw">use </span><span class="kw">crate</span>::patches::{PatchLog, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
@@ -1742,6 +1753,16 @@
             .marks_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
+    <span class="kw">fn </span>get_marks&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt; {
+        <span class="self">self</span>.doc
+            .get_marks_for(obj.as_ref(), index, <span class="self">self</span>.get_scope(heads))
+    }
+
     <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
         <span class="self">self</span>.doc.text_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">None</span>))
     }
@@ -1917,7 +1938,8 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
         <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), pos, del, text)
+        tx.splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), pos, del, text)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(

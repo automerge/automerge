@@ -1835,6 +1835,37 @@
 <a href="#1835" id="1835">1835</a>
 <a href="#1836" id="1836">1836</a>
 <a href="#1837" id="1837">1837</a>
+<a href="#1838" id="1838">1838</a>
+<a href="#1839" id="1839">1839</a>
+<a href="#1840" id="1840">1840</a>
+<a href="#1841" id="1841">1841</a>
+<a href="#1842" id="1842">1842</a>
+<a href="#1843" id="1843">1843</a>
+<a href="#1844" id="1844">1844</a>
+<a href="#1845" id="1845">1845</a>
+<a href="#1846" id="1846">1846</a>
+<a href="#1847" id="1847">1847</a>
+<a href="#1848" id="1848">1848</a>
+<a href="#1849" id="1849">1849</a>
+<a href="#1850" id="1850">1850</a>
+<a href="#1851" id="1851">1851</a>
+<a href="#1852" id="1852">1852</a>
+<a href="#1853" id="1853">1853</a>
+<a href="#1854" id="1854">1854</a>
+<a href="#1855" id="1855">1855</a>
+<a href="#1856" id="1856">1856</a>
+<a href="#1857" id="1857">1857</a>
+<a href="#1858" id="1858">1858</a>
+<a href="#1859" id="1859">1859</a>
+<a href="#1860" id="1860">1860</a>
+<a href="#1861" id="1861">1861</a>
+<a href="#1862" id="1862">1862</a>
+<a href="#1863" id="1863">1863</a>
+<a href="#1864" id="1864">1864</a>
+<a href="#1865" id="1865">1865</a>
+<a href="#1866" id="1866">1866</a>
+<a href="#1867" id="1867">1867</a>
+<a href="#1868" id="1868">1868</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1847,10 +1878,11 @@
 <span class="kw">use </span><span class="kw">crate</span>::columnar::Key <span class="kw">as </span>EncodedKey;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
-<span class="kw">use </span><span class="kw">crate</span>::marks::{Mark, MarkAccumulator, MarkStateMachine};
+<span class="kw">use </span><span class="kw">crate</span>::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::patches::{Patch, PatchLog, TextRepresentation};
+<span class="kw">use </span><span class="kw">crate</span>::query;
 <span class="kw">use </span><span class="kw">crate</span>::storage::{<span class="self">self</span>, load, CompressConfig, VerificationMode};
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{
     <span class="self">self</span>, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
@@ -3401,6 +3433,26 @@
         <span class="prelude-val">Ok</span>(values)
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_marks_for&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>result = <span class="self">self
+            </span>.ops
+            .search(
+                <span class="kw-2">&amp;</span>obj.id,
+                query::Nth::new(index, obj.encoding, clock).with_marks(),
+            )
+            .marks(<span class="kw-2">&amp;</span><span class="self">self</span>.ops.m)
+            .as_deref()
+            .cloned()
+            .unwrap_or_default();
+        <span class="prelude-val">Ok</span>(result)
+    }
+
     <span class="kw">fn </span>convert_scalar_strings_to_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">struct </span>Conversion {
             obj_id: ExId,
@@ -3568,6 +3620,16 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
         <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads);
         <span class="self">self</span>.marks_for(obj.as_ref(), <span class="prelude-val">Some</span>(clock))
+    }
+
+    <span class="kw">fn </span>get_marks&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt; {
+        <span class="kw">let </span>clock = heads.map(|h| <span class="self">self</span>.clock_at(h));
+        <span class="self">self</span>.get_marks_for(obj.as_ref(), index, clock)
     }
 
     <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(

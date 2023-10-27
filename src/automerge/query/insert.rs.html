@@ -158,12 +158,17 @@
 <a href="#158" id="158">158</a>
 <a href="#159" id="159">159</a>
 <a href="#160" id="160">160</a>
+<a href="#161" id="161">161</a>
+<a href="#162" id="162">162</a>
+<a href="#163" id="163">163</a>
+<a href="#164" id="164">164</a>
+<a href="#165" id="165">165</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkStateMachine;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
 <span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpType, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
 
@@ -172,32 +177,32 @@
     idx: ListState,
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     last_visible_key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
-    candidates: Vec&lt;Loc&gt;,
+    candidates: Vec&lt;Loc&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     marks: MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
-</span><span class="kw">struct </span>Loc {
+</span><span class="kw">struct </span>Loc&lt;<span class="lifetime">&#39;a</span>&gt; {
     key: Key,
     pos: usize,
-    id: <span class="prelude-ty">Option</span>&lt;OpId&gt;,
+    id: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
 }
 
-<span class="kw">impl </span>Loc {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Loc&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>new(pos: usize, key: Key) -&gt; <span class="self">Self </span>{
         Loc { key, pos, id: <span class="prelude-val">None </span>}
     }
 
-    <span class="kw">fn </span>mark(pos: usize, key: Key, id: OpId) -&gt; <span class="self">Self </span>{
+    <span class="kw">fn </span>mark(pos: usize, key: Key, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; <span class="self">Self </span>{
         Loc {
             key,
             pos,
-            id: <span class="prelude-val">Some</span>(id),
+            id: <span class="prelude-val">Some</span>(op),
         }
     }
 
     <span class="kw">fn </span>matches(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) -&gt; bool {
-        <span class="self">self</span>.id == <span class="prelude-val">Some</span>(op.id.prev())
+        <span class="self">self</span>.id.map(|o| o.id) == <span class="prelude-val">Some</span>(op.id.prev())
     }
 }
 
@@ -273,7 +278,7 @@
                 OpType::MarkBegin(<span class="bool-val">true</span>, <span class="kw">_</span>) | OpType::MarkEnd(<span class="bool-val">false</span>)
             ) {
                 <span class="self">self</span>.candidates
-                    .push(Loc::mark(<span class="self">self</span>.idx.pos() + <span class="number">1</span>, <span class="kw-2">*</span>key, op.id));
+                    .push(Loc::mark(<span class="self">self</span>.idx.pos() + <span class="number">1</span>, <span class="kw-2">*</span>key, op));
             }
         }
     }
@@ -304,12 +309,17 @@
     }
 
     <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; QueryResult {
-        <span class="self">self</span>.marks.process(op);
+        <span class="kw">if </span>!<span class="self">self</span>.idx.done() {
+            <span class="self">self</span>.marks.process(op);
+        }
         <span class="kw">let </span>key = op.elemid_or_key();
         <span class="kw">let </span>visible = op.visible_at(<span class="self">self</span>.clock.as_ref());
         <span class="self">self</span>.identify_valid_insertion_spot(op, <span class="kw-2">&amp;</span>key);
         <span class="kw">if </span>visible {
             <span class="kw">if </span>!<span class="self">self</span>.candidates.is_empty() {
+                <span class="kw">for </span>op <span class="kw">in </span><span class="self">self</span>.candidates.iter().filter_map(|c| c.id) {
+                    <span class="self">self</span>.marks.process(op);
+                }
                 <span class="kw">return </span>QueryResult::Finish;
             }
             <span class="self">self</span>.last_visible_key = <span class="prelude-val">Some</span>(key);

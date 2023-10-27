@@ -1416,6 +1416,27 @@
 <a href="#1416" id="1416">1416</a>
 <a href="#1417" id="1417">1417</a>
 <a href="#1418" id="1418">1418</a>
+<a href="#1419" id="1419">1419</a>
+<a href="#1420" id="1420">1420</a>
+<a href="#1421" id="1421">1421</a>
+<a href="#1422" id="1422">1422</a>
+<a href="#1423" id="1423">1423</a>
+<a href="#1424" id="1424">1424</a>
+<a href="#1425" id="1425">1425</a>
+<a href="#1426" id="1426">1426</a>
+<a href="#1427" id="1427">1427</a>
+<a href="#1428" id="1428">1428</a>
+<a href="#1429" id="1429">1429</a>
+<a href="#1430" id="1430">1430</a>
+<a href="#1431" id="1431">1431</a>
+<a href="#1432" id="1432">1432</a>
+<a href="#1433" id="1433">1433</a>
+<a href="#1434" id="1434">1434</a>
+<a href="#1435" id="1435">1435</a>
+<a href="#1436" id="1436">1436</a>
+<a href="#1437" id="1437">1437</a>
+<a href="#1438" id="1438">1438</a>
+<a href="#1439" id="1439">1439</a>
 </pre></div><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -2353,6 +2374,27 @@
             result.push(<span class="kw-2">&amp;</span>mark.into());
         }
         <span class="prelude-val">Ok</span>(result.into())
+    }
+
+    <span class="attr">#[wasm_bindgen(js_name = marksAt)]
+    </span><span class="kw">pub fn </span>marks_at(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        index: f64,
+        heads: <span class="prelude-ty">Option</span>&lt;Array&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>(obj, <span class="kw">_</span>) = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>heads = get_heads(heads)<span class="question-mark">?</span>;
+        <span class="kw">let </span>marks = <span class="self">self
+            </span>.doc
+            .get_marks(obj, index <span class="kw">as </span>usize, heads.as_deref())
+            .map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="kw">let </span>result = Object::new();
+        <span class="kw">for </span>(mark, value) <span class="kw">in </span>marks.iter() {
+            <span class="kw">let </span>(_datatype, value) = alloc(<span class="kw-2">&amp;</span>value.into(), <span class="self">self</span>.text_rep);
+            js_set(<span class="kw-2">&amp;</span>result, mark, value)<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(result)
     }
 }
 

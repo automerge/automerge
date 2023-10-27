@@ -424,11 +424,23 @@
 <a href="#424" id="424">424</a>
 <a href="#425" id="425">425</a>
 <a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
-<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark, MarkSet};
 <span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
 <span class="kw">use </span><span class="kw">crate</span>::types::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::AutomergeError;
@@ -662,6 +674,16 @@
             .marks_for(obj.as_ref(), <span class="self">self</span>.get_scope(<span class="prelude-val">Some</span>(heads)))
     }
 
+    <span class="kw">fn </span>get_marks&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt; {
+        <span class="self">self</span>.doc
+            .get_marks_for(obj.as_ref(), index, <span class="self">self</span>.get_scope(heads))
+    }
+
     <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         obj: O,
@@ -798,7 +820,8 @@
         del: isize,
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
+        <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">fn </span>splice_text&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -808,7 +831,8 @@
         del: isize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))
+        <span class="self">self</span>.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(

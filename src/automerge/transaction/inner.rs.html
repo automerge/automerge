@@ -1420,7 +1420,8 @@
                 values,
                 splice_type: SpliceType::List,
             },
-        )
+        )<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 
     <span class="doccomment">/// Splice string into a text object
@@ -1544,7 +1545,7 @@
                     SpliceType::Text(text)
                         <span class="kw">if </span><span class="macro">matches!</span>(patch_log.text_rep(), TextRepresentation::String) =&gt;
                     {
-                        patch_log.splice(obj, index, text, marks);
+                        patch_log.splice(obj, index, text, marks.clone());
                     }
                     SpliceType::List | SpliceType::Text(..) =&gt; {
                         <span class="kw">let </span>start = <span class="self">self</span>.operations.len() - values.len();
@@ -1563,7 +1564,6 @@
                 }
             }
         }
-
         <span class="prelude-val">Ok</span>(())
     }
 

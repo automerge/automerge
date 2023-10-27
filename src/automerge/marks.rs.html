@@ -329,6 +329,8 @@
 <a href="#329" id="329">329</a>
 <a href="#330" id="330">330</a>
 <a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>smol_str::SmolStr;
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::fmt::Display;
@@ -431,9 +433,11 @@
     <span class="kw">fn </span>inner(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>BTreeMap&lt;SmolStr, ScalarValue&gt; {
         <span class="kw-2">&amp;</span><span class="self">self</span>.marks
     }
-}
 
-<span class="kw">impl </span>MarkSet {
+    <span class="kw">pub fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.marks.len()
+    }
+
     <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: SmolStr, value: ScalarValue) {
         <span class="self">self</span>.marks.insert(name, value);
     }
@@ -442,7 +446,7 @@
         <span class="self">self</span>.marks.remove(name);
     }
 
-    <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+    <span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.inner().is_empty()
     }
 

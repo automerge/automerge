@@ -1292,6 +1292,16 @@
 <a href="#1292" id="1292">1292</a>
 <a href="#1293" id="1293">1293</a>
 <a href="#1294" id="1294">1294</a>
+<a href="#1295" id="1295">1295</a>
+<a href="#1296" id="1296">1296</a>
+<a href="#1297" id="1297">1297</a>
+<a href="#1298" id="1298">1298</a>
+<a href="#1299" id="1299">1299</a>
+<a href="#1300" id="1300">1300</a>
+<a href="#1301" id="1301">1301</a>
+<a href="#1302" id="1302">1302</a>
+<a href="#1303" id="1303">1303</a>
+<a href="#1304" id="1304">1304</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::ops::Deref;
 <span class="kw">use </span>std::ops::RangeBounds;
@@ -1704,6 +1714,16 @@
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
         <span class="self">self</span>.doc.marks_at(obj, heads)
+    }
+
+    <span class="kw">fn </span>get_marks&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;MarkSet, AutomergeError&gt; {
+        <span class="self">self</span>.doc
+            .get_marks(obj, index, <span class="prelude-val">Some</span>(heads.unwrap_or(<span class="self">self</span>.heads)))
     }
 
     <span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(

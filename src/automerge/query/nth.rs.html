@@ -93,12 +93,40 @@
 <a href="#93" id="93">93</a>
 <a href="#94" id="94">94</a>
 <a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
+<span class="kw">use </span><span class="kw">crate</span>::marks::{MarkSet, MarkStateMachine};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpTree, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetMetadata, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpIds};
 <span class="kw">use </span>std::fmt::Debug;
+<span class="kw">use </span>std::sync::Arc;
 
 <span class="doccomment">/// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
 /// that the nth node can not be in them
@@ -106,6 +134,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
     idx: ListState,
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
+    marks: <span class="prelude-ty">Option</span>&lt;MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
 }
@@ -115,9 +144,25 @@
         Nth {
             idx: ListState::new(encoding, target + <span class="number">1</span>),
             clock,
+            marks: <span class="prelude-val">None</span>,
             ops: <span class="macro">vec!</span>[],
             ops_pos: <span class="macro">vec!</span>[],
         }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_marks(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">self</span>.marks = <span class="prelude-val">Some</span>(Default::default());
+        <span class="self">self
+    </span>}
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, meta: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = <span class="kw-2">&amp;</span><span class="self">self</span>.marks {
+            <span class="kw">for </span>(id, mark_data) <span class="kw">in </span>m.iter() {
+                marks.mark_begin(<span class="kw-2">*</span>id, mark_data, meta);
+            }
+        }
+        marks.current().cloned()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>, ops: <span class="kw-2">&amp;</span>OpSet) -&gt; OpIds {
@@ -151,6 +196,10 @@
     }
 
     <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree) -&gt; bool {
+        <span class="kw">if </span><span class="self">self</span>.marks.is_some() {
+            <span class="comment">// we could cache marks data but we&#39;re not now
+            </span><span class="kw">return </span><span class="bool-val">false</span>;
+        }
         <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = <span class="kw-2">&amp;</span>tree.last_insert {
             <span class="kw">if </span>last.index == <span class="self">self</span>.idx.target().saturating_sub(<span class="number">1</span>) {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = tree.internal.get(last.pos) {
@@ -164,10 +213,10 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
         <span class="self">self</span>.idx.check_if_node_is_clean(child);
         <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
-            <span class="self">self</span>.idx.process_node(child, ops, <span class="prelude-val">None</span>)
+            <span class="self">self</span>.idx.process_node(child, ops, <span class="self">self</span>.marks.as_mut())
         } <span class="kw">else </span>{
             QueryResult::Descend
         }
@@ -177,6 +226,9 @@
         <span class="kw">if </span>element.insert &amp;&amp; <span class="self">self</span>.idx.done() {
             QueryResult::Finish
         } <span class="kw">else </span>{
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = <span class="self">self</span>.marks.as_mut() {
+                m.process(element)
+            }
             <span class="kw">let </span>visible = element.visible_at(<span class="self">self</span>.clock.as_ref());
             <span class="kw">let </span>key = element.elemid_or_key();
             <span class="self">self</span>.idx.process_op(element, key, visible);
