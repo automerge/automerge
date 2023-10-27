@@ -33,6 +33,13 @@ target_link_libraries(${LIBRARY_NAME}_test PRIVATE ${CMOCKA} ${LIBRARY_NAME})
 
 add_dependencies(${LIBRARY_NAME}_test ${BINDINGS_NAME}_artifacts)
 
+add_custom_command(
+    TARGET ${LIBRARY_NAME}_test
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_CURRENT_SOURCE_DIR}/files ${CMAKE_CURRENT_BINARY_DIR}/files
+    COMMENT "Copying the test input files into the tests directory..."
+)
+
 if(BUILD_SHARED_LIBS AND WIN32)
     add_custom_command(
         TARGET ${LIBRARY_NAME}_test
