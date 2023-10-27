@@ -412,6 +412,16 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.marks_at(obj, heads)
     }
 
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<MarkSet, AutomergeError> {
+        self.doc
+            .get_marks(obj, index, Some(heads.unwrap_or(self.heads)))
+    }
+
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,

@@ -4,7 +4,7 @@ use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{ExpandMark, Mark};
+use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -718,6 +718,16 @@ impl ReadDoc for AutoCommit {
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<MarkSet, AutomergeError> {
+        self.doc
+            .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
+    }
+
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text_for(obj.as_ref(), self.get_scope(None))
     }
@@ -893,7 +903,8 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.splice_text(&mut self.doc, patch_log, obj.as_ref(), pos, del, text)
+        tx.splice_text(&mut self.doc, patch_log, obj.as_ref(), pos, del, text)?;
+        Ok(())
     }
 
     fn mark<O: AsRef<ExId>>(

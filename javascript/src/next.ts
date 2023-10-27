@@ -44,6 +44,7 @@ export {
   type Patch,
   type PatchCallback,
   type Mark,
+  type MarkSet,
   type MarkRange,
   type MarkValue,
   type AutomergeValue,
@@ -52,7 +53,7 @@ export {
   type PatchInfo,
 } from "./next_types.js"
 
-import type { Cursor, Mark, MarkRange, MarkValue } from "./next_types.js"
+import type { Cursor, Mark, MarkSet, MarkRange, MarkValue } from "./next_types.js"
 
 import { type PatchCallback } from "./stable.js"
 
@@ -439,7 +440,7 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {
-    throw new RangeError("invalid object for unmark")
+    throw new RangeError("invalid object for marks")
   }
   path.unshift(objectId)
   const obj = path.join("/")
@@ -447,6 +448,21 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
     return state.handle.marks(obj)
   } catch (e) {
     throw new RangeError(`Cannot call marks(): ${e}`)
+  }
+}
+
+export function marksAt<T>(doc: Doc<T>, path: stable.Prop[], index: number): MarkSet {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for marksAt")
+  }
+  path.unshift(objectId)
+  const obj = path.join("/")
+  try {
+    return state.handle.marksAt(obj, index)
+  } catch (e) {
+    throw new RangeError(`Cannot call marksAt(): ${e}`)
   }
 }
 

@@ -1,9 +1,11 @@
 use crate::error::AutomergeError;
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set::OpSet;
 use crate::op_tree::{OpTree, OpTreeNode};
-use crate::query::{ListState, QueryResult, TreeQuery};
+use crate::query::{ListState, MarkMap, OpSetMetadata, QueryResult, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding, Op, OpIds};
 use std::fmt::Debug;
+use std::sync::Arc;
 
 /// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
 /// that the nth node can not be in them
@@ -11,6 +13,7 @@ use std::fmt::Debug;
 pub(crate) struct Nth<'a> {
     idx: ListState,
     clock: Option<Clock>,
+    marks: Option<MarkMap<'a>>,
     pub(crate) ops: Vec<&'a Op>,
     pub(crate) ops_pos: Vec<usize>,
 }
@@ -20,9 +23,25 @@ impl<'a> Nth<'a> {
         Nth {
             idx: ListState::new(encoding, target + 1),
             clock,
+            marks: None,
             ops: vec![],
             ops_pos: vec![],
         }
+    }
+
+    pub(crate) fn with_marks(mut self) -> Self {
+        self.marks = Some(Default::default());
+        self
+    }
+
+    pub(crate) fn marks(&self, meta: &OpSetMetadata) -> Option<Arc<MarkSet>> {
+        let mut marks = MarkStateMachine::default();
+        if let Some(m) = &self.marks {
+            for (id, mark_data) in m.iter() {
+                marks.mark_begin(*id, mark_data, meta);
+            }
+        }
+        marks.current().cloned()
     }
 
     pub(crate) fn pred(&self, ops: &OpSet) -> OpIds {
@@ -56,6 +75,10 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
     }
 
     fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
+        if self.marks.is_some() {
+            // we could cache marks data but we're not now
+            return false;
+        }
         if let Some(last) = &tree.last_insert {
             if last.index == self.idx.target().saturating_sub(1) {
                 if let Some(op) = tree.internal.get(last.pos) {
@@ -69,10 +92,10 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         false
     }
 
-    fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
+    fn query_node(&mut self, child: &'a OpTreeNode, ops: &[Op]) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
         if self.clock.is_none() {
-            self.idx.process_node(child, ops, None)
+            self.idx.process_node(child, ops, self.marks.as_mut())
         } else {
             QueryResult::Descend
         }
@@ -82,6 +105,9 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         if element.insert && self.idx.done() {
             QueryResult::Finish
         } else {
+            if let Some(m) = self.marks.as_mut() {
+                m.process(element)
+            }
             let visible = element.visible_at(self.clock.as_ref());
             let key = element.elemid_or_key();
             self.idx.process_op(element, key, visible);

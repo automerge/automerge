@@ -936,6 +936,27 @@ impl Automerge {
         }
         Ok(result.into())
     }
+
+    #[wasm_bindgen(js_name = marksAt)]
+    pub fn marks_at(
+        &mut self,
+        obj: JsValue,
+        index: f64,
+        heads: Option<Array>,
+    ) -> Result<Object, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let heads = get_heads(heads)?;
+        let marks = self
+            .doc
+            .get_marks(obj, index as usize, heads.as_deref())
+            .map_err(to_js_err)?;
+        let result = Object::new();
+        for (mark, value) in marks.iter() {
+            let (_datatype, value) = alloc(&value.into(), self.text_rep);
+            js_set(&result, mark, value)?;
+        }
+        Ok(result)
+    }
 }
 
 #[wasm_bindgen(js_name = create)]

@@ -566,7 +566,8 @@ impl TransactionInner {
                 values,
                 splice_type: SpliceType::List,
             },
-        )
+        )?;
+        Ok(())
     }
 
     /// Splice string into a text object
@@ -690,7 +691,7 @@ impl TransactionInner {
                     SpliceType::Text(text)
                         if matches!(patch_log.text_rep(), TextRepresentation::String) =>
                     {
-                        patch_log.splice(obj, index, text, marks);
+                        patch_log.splice(obj, index, text, marks.clone());
                     }
                     SpliceType::List | SpliceType::Text(..) => {
                         let start = self.operations.len() - values.len();
@@ -709,7 +710,6 @@ impl TransactionInner {
                 }
             }
         }
-
         Ok(())
     }
 

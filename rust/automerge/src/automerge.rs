@@ -10,10 +10,11 @@ use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{Mark, MarkAccumulator, MarkStateMachine};
+use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
+use crate::query;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
@@ -1564,6 +1565,26 @@ impl Automerge {
         Ok(values)
     }
 
+    pub(crate) fn get_marks_for<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        clock: Option<Clock>,
+    ) -> Result<MarkSet, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let result = self
+            .ops
+            .search(
+                &obj.id,
+                query::Nth::new(index, obj.encoding, clock).with_marks(),
+            )
+            .marks(&self.ops.m)
+            .as_deref()
+            .cloned()
+            .unwrap_or_default();
+        Ok(result)
+    }
+
     fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
         struct Conversion {
             obj_id: ExId,
@@ -1731,6 +1752,16 @@ impl ReadDoc for Automerge {
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let clock = self.clock_at(heads);
         self.marks_for(obj.as_ref(), Some(clock))
+    }
+
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<MarkSet, AutomergeError> {
+        let clock = heads.map(|h| self.clock_at(h));
+        self.get_marks_for(obj.as_ref(), index, clock)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
