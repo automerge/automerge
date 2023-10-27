@@ -629,5 +629,27 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.text(text), "The!editor")
       assert.deepEqual(doc1.marks(text), [])
     })
+
+    it('markAt() can be used to read the marks at a given index', () => {
+      let doc = create()
+      let text = doc.putObject("_root", "text", "aabbcc")
+
+      doc.mark(text, { start: 0, end: 4, expand: "both" }, "bold" , true)
+      doc.mark(text, { start: 2, end: 4, expand: "both" }, "underline" , true)
+
+      doc.splice(text, 4, 0, ">")
+      doc.splice(text, 2, 0, "<")
+
+      assert.deepEqual(doc.marksAt(text, 0), { "bold": true })
+      assert.deepEqual(doc.marksAt(text, 1), { "bold": true })
+
+      assert.deepEqual(doc.marksAt(text, 2), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 3), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 4), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 5), { "bold": true, "underline": true })
+
+      assert.deepEqual(doc.marksAt(text, 6), { })
+      assert.deepEqual(doc.marksAt(text, 7), { })
+    })
   })
 })

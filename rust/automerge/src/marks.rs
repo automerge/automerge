@@ -100,9 +100,11 @@ impl MarkSet {
     fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
         &self.marks
     }
-}
 
-impl MarkSet {
+    pub fn len(&self) -> usize {
+        self.marks.len()
+    }
+
     fn insert(&mut self, name: SmolStr, value: ScalarValue) {
         self.marks.insert(name, value);
     }
@@ -111,7 +113,7 @@ impl MarkSet {
         self.marks.remove(name);
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.inner().is_empty()
     }
 

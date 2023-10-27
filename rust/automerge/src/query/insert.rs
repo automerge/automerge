@@ -3,7 +3,7 @@ use crate::marks::MarkSet;
 use crate::marks::MarkStateMachine;
 use crate::op_tree::OpTreeNode;
 use crate::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
-use crate::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
+use crate::types::{Clock, Key, ListEncoding, Op, OpType, HEAD};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -12,32 +12,32 @@ pub(crate) struct InsertNth<'a> {
     idx: ListState,
     clock: Option<Clock>,
     last_visible_key: Option<Key>,
-    candidates: Vec<Loc>,
+    candidates: Vec<Loc<'a>>,
     marks: MarkMap<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Loc {
+struct Loc<'a> {
     key: Key,
     pos: usize,
-    id: Option<OpId>,
+    id: Option<&'a Op>,
 }
 
-impl Loc {
+impl<'a> Loc<'a> {
     fn new(pos: usize, key: Key) -> Self {
         Loc { key, pos, id: None }
     }
 
-    fn mark(pos: usize, key: Key, id: OpId) -> Self {
+    fn mark(pos: usize, key: Key, op: &'a Op) -> Self {
         Loc {
             key,
             pos,
-            id: Some(id),
+            id: Some(op),
         }
     }
 
     fn matches(&self, op: &Op) -> bool {
-        self.id == Some(op.id.prev())
+        self.id.map(|o| o.id) == Some(op.id.prev())
     }
 }
 
@@ -113,7 +113,7 @@ impl<'a> InsertNth<'a> {
                 OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
             ) {
                 self.candidates
-                    .push(Loc::mark(self.idx.pos() + 1, *key, op.id));
+                    .push(Loc::mark(self.idx.pos() + 1, *key, op));
             }
         }
     }
@@ -144,12 +144,17 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
     }
 
     fn query_element(&mut self, op: &'a Op) -> QueryResult {
-        self.marks.process(op);
+        if !self.idx.done() {
+            self.marks.process(op);
+        }
         let key = op.elemid_or_key();
         let visible = op.visible_at(self.clock.as_ref());
         self.identify_valid_insertion_spot(op, &key);
         if visible {
             if !self.candidates.is_empty() {
+                for op in self.candidates.iter().filter_map(|c| c.id) {
+                    self.marks.process(op);
+                }
                 return QueryResult::Finish;
             }
             self.last_visible_key = Some(key);

@@ -9,6 +9,7 @@ export {
   type Patch,
   type PatchCallback,
   type Mark,
+  type MarkSet,
   type MarkRange,
   type MarkValue,
   type Cursor,
