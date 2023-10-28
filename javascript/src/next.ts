@@ -53,7 +53,13 @@ export {
   type PatchInfo,
 } from "./next_types.js"
 
-import type { Cursor, Mark, MarkSet, MarkRange, MarkValue } from "./next_types.js"
+import type {
+  Cursor,
+  Mark,
+  MarkSet,
+  MarkRange,
+  MarkValue,
+} from "./next_types.js"
 
 import { type PatchCallback } from "./stable.js"
 
@@ -451,7 +457,11 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
   }
 }
 
-export function marksAt<T>(doc: Doc<T>, path: stable.Prop[], index: number): MarkSet {
+export function marksAt<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number,
+): MarkSet {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {
