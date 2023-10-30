@@ -76,6 +76,9 @@ impl TryFrom<&AMmarkExpand> for ExpandMark {
     }
 }
 
+/// \struct AMmark
+/// \installed_headerfile
+/// \brief An association of out-of-bound information with a sequence.
 pub struct AMmark<'a>(Mark<'a>);
 
 impl<'a> AMmark<'a> {
