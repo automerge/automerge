@@ -24,10 +24,14 @@ static void test_AMlistIncrement(void** state) {
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
                                 cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMlistPutCounter(doc_state->doc, list, 0, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMitem const* const item =
+        AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER));
+    assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);
+    uint64_t pos;
+    assert_true(AMitemPos(item, &pos));
+    assert_int_equal(pos, 0);
     int64_t counter;
-    assert_true(AMitemToCounter(
-        AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
-        &counter));
+    assert_true(AMitemToCounter(item, &counter));
     assert_int_equal(counter, 0);
     AMresultFree(AMstackPop(stack_ptr, NULL));
     AMstackItem(NULL, AMlistIncrement(doc_state->doc, list, 0, 3), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
@@ -40,21 +44,25 @@ static void test_AMlistIncrement(void** state) {
 
 #define test_AMlistPut(suffix, mode) test_AMlistPut##suffix##_##mode
 
-#define static_void_test_AMlistPut(suffix, mode, type, scalar_value)                                             \
-    static void test_AMlistPut##suffix##_##mode(void** state) {                                                  \
-        DocState* doc_state = *state;                                                                            \
-        AMstack** stack_ptr = &doc_state->base_state->stack;                                                     \
-        AMobjId const* const list = AMitemObjId(                                                                 \
-            AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),     \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
-        AMstackItem(NULL, AMlistPut##suffix(doc_state->doc, list, 0, !strcmp(#mode, "insert"), scalar_value),    \
-                    cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                      \
-        type value;                                                                                              \
-        assert_true(AMitemTo##suffix(AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, \
-                                                 AMexpect(suffix_to_val_type(#suffix))),                         \
-                                     &value));                                                                   \
-        assert_true(value == scalar_value);                                                                      \
-        AMresultFree(AMstackPop(stack_ptr, NULL));                                                               \
+#define static_void_test_AMlistPut(suffix, mode, type, scalar_value)                                           \
+    static void test_AMlistPut##suffix##_##mode(void** state) {                                                \
+        DocState* doc_state = *state;                                                                          \
+        AMstack** stack_ptr = &doc_state->base_state->stack;                                                   \
+        AMobjId const* const list = AMitemObjId(                                                               \
+            AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),   \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                           \
+        AMstackItem(NULL, AMlistPut##suffix(doc_state->doc, list, 0, !strcmp(#mode, "insert"), scalar_value),  \
+                    cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                    \
+        AMitem const* const item = AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, \
+                                               AMexpect(suffix_to_val_type(#suffix)));                         \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);                                                \
+        uint64_t pos;                                                                                          \
+        assert_true(AMitemPos(item, &pos));                                                                    \
+        assert_int_equal(pos, 0);                                                                              \
+        type value;                                                                                            \
+        assert_true(AMitemTo##suffix(item, &value));                                                           \
+        assert_true(value == scalar_value);                                                                    \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                             \
     }
 
 #define test_AMlistPutBytes(mode) test_AMlistPutBytes##_##mode
@@ -71,10 +79,14 @@ static void test_AMlistIncrement(void** state) {
         AMstackItem(                                                                                                   \
             NULL, AMlistPutBytes(doc_state->doc, list, 0, !strcmp(#mode, "insert"), AMbytes(bytes_value, BYTES_SIZE)), \
             cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                                    \
+        AMitem const* const item =                                                                                     \
+            AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES));  \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);                                                        \
+        uint64_t pos;                                                                                                  \
+        assert_true(AMitemPos(item, &pos));                                                                            \
+        assert_int_equal(pos, 0);                                                                                      \
         AMbyteSpan bytes;                                                                                              \
-        assert_true(AMitemToBytes(                                                                                     \
-            AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)),  \
-            &bytes));                                                                                                  \
+        assert_true(AMitemToBytes(item, &bytes));                                                                      \
         assert_int_equal(bytes.count, BYTES_SIZE);                                                                     \
         assert_memory_equal(bytes.src, bytes_value, BYTES_SIZE);                                                       \
         AMresultFree(AMstackPop(stack_ptr, NULL));                                                                     \
@@ -96,7 +108,12 @@ static void test_AMlistIncrement(void** state) {
             fail_msg_view("%s", AMresultError(result));                                                      \
         }                                                                                                    \
         assert_int_equal(AMresultSize(result), 1);                                                           \
-        assert_int_equal(AMitemValType(AMresultItem(result)), AM_VAL_TYPE_NULL);                             \
+        AMitem const* const item = AMresultItem(result);                                                     \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);                                              \
+        uint64_t pos;                                                                                        \
+        assert_true(AMitemPos(item, &pos));                                                                  \
+        assert_int_equal(pos, 0);                                                                            \
+        assert_int_equal(AMitemValType(item), AM_VAL_TYPE_NULL);                                             \
         AMresultFree(AMstackPop(stack_ptr, NULL));                                                           \
     }
 
@@ -110,9 +127,14 @@ static void test_AMlistIncrement(void** state) {
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),     \
                         cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
         AMobjType const obj_type = suffix_to_obj_type(#label);                                                   \
-        AMobjId const* const obj_id = AMitemObjId(                                                               \
+        AMitem const* const item =                                                                               \
             AMstackItem(stack_ptr, AMlistPutObject(doc_state->doc, list, 0, !strcmp(#mode, "insert"), obj_type), \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE));                                              \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);                                                  \
+        uint64_t pos;                                                                                            \
+        assert_true(AMitemPos(item, &pos));                                                                      \
+        assert_int_equal(pos, 0);                                                                                \
+        AMobjId const* const obj_id = AMitemObjId(item);                                                         \
         assert_non_null(obj_id);                                                                                 \
         assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
         assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
@@ -130,10 +152,14 @@ static void test_AMlistIncrement(void** state) {
                         cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                                \
         AMstackItem(NULL, AMlistPutStr(doc_state->doc, list, 0, !strcmp(#mode, "insert"), AMstr(str_value)),        \
                     cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                         \
+        AMitem const* const item =                                                                                  \
+            AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)); \
+        assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);                                                     \
+        uint64_t pos;                                                                                               \
+        assert_true(AMitemPos(item, &pos));                                                                         \
+        assert_int_equal(pos, 0);                                                                                   \
         AMbyteSpan str;                                                                                             \
-        assert_true(AMitemToStr(                                                                                    \
-            AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), \
-            &str));                                                                                                 \
+        assert_true(AMitemToStr(item, &str));                                                                       \
         assert_int_equal(str.count, strlen(str_value));                                                             \
         assert_memory_equal(str.src, str_value, str.count);                                                         \
         AMresultFree(AMstackPop(stack_ptr, NULL));                                                                  \
