@@ -546,7 +546,7 @@ pub(crate) struct FoundOpId<'a> {
 #[cfg(test)]
 mod tests {
     use crate::op_set::{OpIdx, OpSetData};
-    use crate::types::{Op, OpId, OpType};
+    use crate::types::{Op, OpId, OpType, ROOT};
 
     use super::*;
 
@@ -560,7 +560,7 @@ mod tests {
             pred: Default::default(),
             insert: false,
         };
-        osd.push(op)
+        osd.push(ROOT.into(), op)
     }
 
     #[test]

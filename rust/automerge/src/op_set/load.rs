@@ -31,7 +31,7 @@ impl DocObserver for OpSetBuilder {
     fn object_loaded(&mut self, loaded: LoadedObject, osd: &mut OpSetData) {
         let mut internal = OpTreeInternal::new();
         for (index, op) in loaded.ops.into_iter().enumerate() {
-            let idx = osd.push(op);
+            let idx = osd.push(loaded.id, op);
             internal.insert(index, idx, osd);
         }
         let tree = OpTree {

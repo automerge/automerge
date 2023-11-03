@@ -331,11 +331,12 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
-
+        let idx_range = self.osd().start_range();
         TransactionArgs {
             actor_index,
             seq,
             start_op,
+            idx_range,
             deps,
             scope,
         }
@@ -1267,7 +1268,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let is_delete = op.is_delete();
-        let idx = self.ops.load(op);
+        let idx = self.ops.load(*obj, op);
         let op = idx.as_op2(&self.ops.osd);
 
         let (pos, succ) = if patch_log.is_active() {

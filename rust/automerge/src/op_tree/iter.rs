@@ -208,7 +208,7 @@ impl<'a> Iterator for Inner<'a> {
 mod tests {
     use super::super::OpTreeInternal;
     use crate::op_set::{OpIdx, OpSetData};
-    use crate::types::{Key, Op, OpId, OpType, ScalarValue};
+    use crate::types::{Key, Op, OpId, OpType, ScalarValue, ROOT};
     use proptest::prelude::*;
 
     #[derive(Clone)]
@@ -265,7 +265,7 @@ mod tests {
             pred: Default::default(),
             insert: false,
         };
-        osd.push(op)
+        osd.push(ROOT.into(), op)
     }
 
     /// A model for a property based test of the OpTreeIter. We generate a set of actions, each

@@ -8,6 +8,7 @@ use crate::op_tree::{
 };
 use crate::parents::Parents;
 use crate::query::{ChangeVisibility, TreeQuery};
+use crate::text_value::TextValue;
 use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, OpId, OpIds, OpType, Prop,
 };
@@ -22,9 +23,21 @@ mod load;
 mod op;
 
 pub(crate) use load::OpSetBuilder;
-pub(crate) use op::{Op, Op2, OpIdx};
+pub(crate) use op::{Op, Op2, OpPlus, OpIdx};
 
 pub(crate) type OpSet = OpSetInternal;
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct OpIdxRange {
+    start: u32,
+    end: u32,
+}
+
+impl OpIdxRange {
+    pub(crate) fn len(&self) -> usize {
+        (self.end - self.start) as usize
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSetInternal {
@@ -288,8 +301,16 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn load(&mut self, op: Op) -> OpIdx {
-        self.osd.push(op)
+    pub(crate) fn load(&mut self, obj: ObjId, op: Op) -> OpIdx {
+        self.osd.push(obj, op)
+    }
+
+    // want to move to this everywhere
+    pub(crate) fn load2(&mut self, obj: ObjId, op: Op, range: &mut OpIdxRange) -> OpIdx {
+        let idx = self.osd.push(obj, op);
+        range.end += 1;
+        assert!(idx.get() >= range.start as usize && idx.get() < range.end as usize);
+        idx
     }
 
     #[tracing::instrument(skip(self, index))]
@@ -479,7 +500,7 @@ impl<'a> ExactSizeIterator for Iter<'a> {
 pub(crate) struct OpSetData {
     pub(crate) actors: IndexedCache<ActorId>,
     pub(crate) props: IndexedCache<String>,
-    ops: Vec<Op>,
+    ops: Vec<OpPlus>,
 }
 
 impl Default for OpSetData {
@@ -509,13 +530,50 @@ impl<'a> Iterator for OpIter<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ChangeOpIter<'a> {
+    osd: &'a OpSetData,
+    range: OpIdxRange,
+    current: u32,
+}
+
+impl<'a> Iterator for ChangeOpIter<'a> {
+    type Item = Op2<'a>;
+    fn next(&mut self) -> Option<Op2<'a>> {
+        assert!(self.current >= self.range.start);
+        if self.current < self.range.end {
+            let idx = OpIdx::new(self.current as usize);
+            self.current += 1;
+            Some(idx.as_op2(self.osd))
+        } else {
+            None
+        }
+    }
+}
+
 impl OpSetData {
+    pub(crate) fn start_range(&self) -> OpIdxRange {
+        let len = self.ops.len() as u32;
+        OpIdxRange {
+            start: len,
+            end: len,
+        }
+    }
+
+    pub(crate) fn get_ops(&self, range: OpIdxRange) -> ChangeOpIter<'_> {
+        ChangeOpIter {
+            osd: self,
+            current: range.start,
+            range,
+        }
+    }
+
     pub(crate) fn add_succ(&mut self, old_op: OpIdx, new_op: OpIdx) {
         // this gets trucky b/c we're reading and writing to the same array
         let new_op = new_op.as_op2(self);
         let new_op_id = *new_op.id();
         let new_op_inc = new_op.get_increment_value();
-        let old_op = &mut self.ops[usize::from(&old_op)];
+        let old_op = &mut self.ops[old_op.get()].op;
 
         old_op
             .succ
@@ -526,14 +584,15 @@ impl OpSetData {
         }
     }
 
-    pub(crate) fn push(&mut self, op: Op) -> OpIdx {
+    pub(crate) fn push(&mut self, obj: ObjId, op: Op) -> OpIdx {
         let index = self.ops.len();
-        self.ops.push(op);
+        let width = TextValue::width(op.to_str()) as u32; // TODO faster
+        self.ops.push(OpPlus { obj, width, op });
         OpIdx::new(index)
     }
 
     pub(crate) fn get_mut(&mut self, id: OpIdx) -> &mut Op {
-        &mut self.ops[usize::from(&id)]
+        &mut self.ops[id.get()].op
     }
 
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
@@ -583,7 +642,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, Op, OpId},
+        types::{Key, ObjId, ObjMeta, Op, OpId, ROOT},
         ActorId, ScalarValue,
     };
 
@@ -663,7 +722,7 @@ pub(crate) mod tests {
                     pred,
                     insert: false,
                 };
-                let idx = set.load(op);
+                let idx = set.load(ROOT.into(), op);
                 set.insert(counter as usize, &ObjId::root(), idx);
                 counter += 1;
             }
@@ -687,7 +746,7 @@ pub(crate) mod tests {
     fn seek_on_page_boundary() {
         let (mut set, new_op) = optree_with_only_internally_visible_ops();
 
-        let new_op = set.load(new_op).as_op2(&set.osd);
+        let new_op = set.load(ROOT.into(), new_op).as_op2(&set.osd);
 
         let q1 = set.find_op_without_patch_log(&ObjId::root(), new_op);
         let q2 = set.find_op_with_patch_log(&ObjMeta::root(), new_op);
