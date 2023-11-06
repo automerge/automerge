@@ -202,8 +202,8 @@ impl<'a> Op2<'a> {
         &self.op().succ
     }
 
-    pub(crate) fn pred(&self) -> &OpIds {
-        &self.op().pred
+    pub(crate) fn pred(&self) -> impl Iterator<Item = &OpId> {
+        self.op().pred.iter()
     }
 }
 
@@ -271,17 +271,17 @@ impl Op {
         }
     }
 
-    pub(crate) fn remove_succ(&mut self, op: &Op) {
-        self.succ.retain(|id| id != &op.id);
+    pub(crate) fn remove_succ(&mut self, opid: &OpId, action: &OpType) {
+        self.succ.retain(|id| id != opid);
         if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
             ..
         })) = &mut self.action
         {
-            if let OpType::Increment(n) = &op.action {
+            if let OpType::Increment(n) = action {
                 *current -= *n;
-                increments.retain(|(id, _)| id != &op.id);
+                increments.retain(|(id, _)| id != opid);
             }
         }
     }

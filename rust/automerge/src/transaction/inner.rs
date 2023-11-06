@@ -168,21 +168,30 @@ impl TransactionInner {
         let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
         let ops: Vec<_> = self
             .operations(doc.osd())
-            .map(|op| (*op.obj(), op.as_op1().clone()))
+            .rev()
+            .map(|op| {
+                (
+                    *op.obj(),
+                    *op.id(),
+                    op.action().clone(),
+                    op.pred().cloned().collect::<Vec<_>>(),
+                )
+            })
             .collect();
-        for (obj, op) in ops.into_iter().rev() {
-            for pred_id in &op.pred {
+        for (obj, opid, action, pred) in ops.into_iter() {
+            for pred_id in &pred {
                 if let Some(p) = doc
                     .ops()
                     .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
                     .found()
                 {
-                    doc.ops_mut().change_vis(&obj, p, |o| o.remove_succ(&op));
+                    doc.ops_mut()
+                        .change_vis(&obj, p, |o| o.remove_succ(&opid, &action));
                 }
             }
             if let Some(pos) = doc
                 .ops()
-                .search(&obj, OpIdSearch::opid(op.id, encoding, None))
+                .search(&obj, OpIdSearch::opid(opid, encoding, None))
                 .found()
             {
                 doc.ops_mut().remove(&obj, pos);

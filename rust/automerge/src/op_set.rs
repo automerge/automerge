@@ -23,7 +23,7 @@ mod load;
 mod op;
 
 pub(crate) use load::OpSetBuilder;
-pub(crate) use op::{Op, Op2, OpPlus, OpIdx};
+pub(crate) use op::{Op, Op2, OpIdx, OpPlus};
 
 pub(crate) type OpSet = OpSetInternal;
 
@@ -535,15 +535,40 @@ pub(crate) struct ChangeOpIter<'a> {
     osd: &'a OpSetData,
     range: OpIdxRange,
     current: u32,
+    current_back: u32,
+}
+
+impl<'a> ChangeOpIter<'a> {
+    fn new(osd: &'a OpSetData, range: OpIdxRange) -> Self {
+        Self {
+            osd,
+            current: range.start,
+            current_back: range.end,
+            range,
+        }
+    }
 }
 
 impl<'a> Iterator for ChangeOpIter<'a> {
     type Item = Op2<'a>;
-    fn next(&mut self) -> Option<Op2<'a>> {
+    fn next(&mut self) -> Option<Self::Item> {
         assert!(self.current >= self.range.start);
-        if self.current < self.range.end {
+        if self.current < self.current_back {
             let idx = OpIdx::new(self.current as usize);
             self.current += 1;
+            Some(idx.as_op2(self.osd))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for ChangeOpIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        assert!(self.current_back <= self.range.end);
+        if self.current_back > self.current {
+            self.current_back -= 1;
+            let idx = OpIdx::new(self.current_back as usize);
             Some(idx.as_op2(self.osd))
         } else {
             None
@@ -561,11 +586,7 @@ impl OpSetData {
     }
 
     pub(crate) fn get_ops(&self, range: OpIdxRange) -> ChangeOpIter<'_> {
-        ChangeOpIter {
-            osd: self,
-            current: range.start,
-            range,
-        }
+        ChangeOpIter::new(self, range)
     }
 
     pub(crate) fn add_succ(&mut self, old_op: OpIdx, new_op: OpIdx) {

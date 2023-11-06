@@ -1219,7 +1219,6 @@ impl Automerge {
             };
             let pred: Vec<_> = op
                 .pred()
-                .iter()
                 .map(|id| self.to_short_string(*id))
                 .collect();
             let succ: Vec<_> = op
