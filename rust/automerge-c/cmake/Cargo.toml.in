@@ -16,7 +16,7 @@ doc = false
 ${${PROJECT_NAME}-LIBRARY_NAME} = { path = "../${${PROJECT_NAME}-LIBRARY_NAME}" }
 hex = "^0.4.3"
 libc = "^0.2"
-smol_str = "^0.1.21"
+smol_str = "0.2"
 
 [build-dependencies]
 cbindgen = "^0.24"
