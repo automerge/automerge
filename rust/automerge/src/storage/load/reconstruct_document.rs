@@ -173,7 +173,7 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
                 tracing::error!(?op, previous_obj=?current_object.id, "op referenced an object ID which was smaller than the previous object ID");
                 return Err(Error::OpsOutOfOrder);
             } else {
-                let loaded = current_object.finish(&mut collector, &osd)?;
+                let loaded = current_object.finish(&mut collector, &mut osd)?;
                 objs_loaded.insert(loaded.id);
                 observer.object_loaded(loaded, &mut osd);
                 current_object =
@@ -182,7 +182,7 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
             }
         }
     }
-    let loaded = current_object.finish(&mut collector, &osd)?;
+    let loaded = current_object.finish(&mut collector, &mut osd)?;
     objs_loaded.insert(loaded.id);
     observer.object_loaded(loaded, &mut osd);
 
@@ -294,7 +294,7 @@ impl LoadingObject {
     fn finish(
         mut self,
         collector: &mut ChangeCollector<'_>,
-        osd: &OpSetData,
+        osd: &mut OpSetData,
     ) -> Result<LoadedObject, Error> {
         let mut ops = Vec::new();
         for mut op in self.ops.into_iter() {
@@ -310,7 +310,7 @@ impl LoadingObject {
                     c.increment(inc, id);
                 }
             }
-            collector.collect(self.id, op.clone())?;
+            collector.collect(self.id, op.clone(), osd)?;
             ops.push(op)
         }
         // Any remaining pred ops must be delete operations
@@ -330,6 +330,7 @@ impl LoadingObject {
                     key: *key,
                     action: OpType::Delete,
                 },
+                osd,
             )?;
         }
         Ok(LoadedObject {

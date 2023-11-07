@@ -356,6 +356,10 @@ mod tests {
                 .unwrap()
                 .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
+            let ops = ops
+                .into_iter()
+                .map(|op| osd.push(root, op))
+                .collect::<Vec<_>>();
             let change = Change::new(
                 ChangeBuilder::new()
                     .with_dependencies(parents.to_vec())
@@ -363,7 +367,10 @@ mod tests {
                     .with_actor(actor.clone())
                     .with_seq(*seq)
                     .with_timestamp(timestamp)
-                    .build(ops.iter().map(|op| op_as_actor_id(&root, op, &osd)))
+                    .build(
+                        ops.iter()
+                            .map(|op| op_as_actor_id(&root, op.as_op2(&osd), &osd)),
+                    )
                     .unwrap(),
             );
             *seq = seq.checked_add(1).unwrap();

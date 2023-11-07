@@ -341,11 +341,11 @@ impl From<&Change> for crate::ExpandedChange {
 pub(crate) mod gen {
     use super::Change;
     use crate::{
-        op_set::OpSetData,
+        op_set::{OpIdx, OpSetData},
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
         types::{
             gen::{gen_hash, gen_op},
-            ObjId, Op, OpId,
+            ObjId, OpId,
         },
         ActorId,
     };
@@ -364,7 +364,7 @@ pub(crate) mod gen {
     fn gen_ops(
         this_actor: ActorId,
         other_actors: Vec<ActorId>,
-    ) -> impl Strategy<Value = (Vec<(ObjId, Op)>, OpSetData)> {
+    ) -> impl Strategy<Value = (Vec<(ObjId, OpIdx)>, OpSetData)> {
         let mut all_actors = vec![this_actor];
         all_actors.extend(other_actors);
         let mut osd = OpSetData::from_actors(all_actors);
@@ -390,7 +390,14 @@ pub(crate) mod gen {
                 }
                 strat
             })
-            .prop_map(move |ops| (ops, osd.clone()))
+            .prop_map(move |ops| {
+                let mut osd = osd.clone();
+                let ops = ops
+                    .into_iter()
+                    .map(|(obj, op)| (obj, osd.push(obj, op)))
+                    .collect();
+                (ops, osd)
+            })
     }
 
     prop_compose! {
@@ -403,7 +410,7 @@ pub(crate) mod gen {
                 message in proptest::option::of("[a-z]{200}"),
                 this_actor in Just(this_actor),
             ) -> Change {
-            let ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op, &osd));
+            let ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op.as_op2(&osd), &osd));
             Change::new(ChangeBuilder::new()
                 .with_dependencies(deps)
                 .with_start_op(start_op.try_into().unwrap())

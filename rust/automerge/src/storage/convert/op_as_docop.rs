@@ -4,7 +4,7 @@ use crate::{
     convert,
     indexed_cache::IndexedCache,
     storage::AsDocOp,
-    types::{ElemId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
+    types::{ElemId, Key, MarkData, Op2, OpId, OpType, ScalarValue},
 };
 
 /// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
@@ -23,20 +23,17 @@ use crate::{
 pub(crate) fn op_as_docop<'a>(
     actors: &'a [usize],
     props: &'a IndexedCache<String>,
-    obj: &'a ObjId,
-    op: &'a Op,
+    op: Op2<'a>,
 ) -> OpAsDocOp<'a> {
     OpAsDocOp {
         op,
-        obj,
         actor_lookup: actors,
         props,
     }
 }
 
 pub(crate) struct OpAsDocOp<'a> {
-    op: &'a Op,
-    obj: &'a ObjId,
+    op: Op2<'a>,
     actor_lookup: &'a [usize],
     props: &'a IndexedCache<String>,
 }
@@ -65,29 +62,29 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     type SuccIter = OpAsDocOpSuccIter<'a>;
 
     fn id(&self) -> Self::OpId {
-        translate(self.actor_lookup, &self.op.id)
+        translate(self.actor_lookup, self.op.id())
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.obj.is_root() {
+        if self.op.obj().is_root() {
             convert::ObjId::Root
         } else {
-            convert::ObjId::Op(translate(self.actor_lookup, self.obj.opid()))
+            convert::ObjId::Op(translate(self.actor_lookup, self.op.obj().opid()))
         }
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match self.op.key {
-            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(idx).into())),
+        match self.op.key() {
+            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(*idx).into())),
             Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
             Key::Seq(ElemId(o)) => {
-                convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, &o)))
+                convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, o)))
             }
         }
     }
 
     fn val(&self) -> Cow<'a, crate::ScalarValue> {
-        match &self.op.action {
+        match &self.op.action() {
             OpType::Put(v) => Cow::Borrowed(v),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
@@ -104,15 +101,15 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 
     fn insert(&self) -> bool {
-        self.op.insert
+        self.op.insert()
     }
 
     fn action(&self) -> u64 {
-        self.op.action.action_index()
+        self.op.action().action_index()
     }
 
     fn expand(&self) -> bool {
-        if let OpType::MarkBegin(expand, _) | OpType::MarkEnd(expand) = &self.op.action {
+        if let OpType::MarkBegin(expand, _) | OpType::MarkEnd(expand) = &self.op.action() {
             *expand
         } else {
             false
@@ -120,7 +117,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action {
+        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action() {
             Some(Cow::Owned(name.clone()))
         } else {
             None
@@ -129,7 +126,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
 }
 
 pub(crate) struct OpAsDocOpSuccIter<'a> {
-    op: &'a Op,
+    op: Op2<'a>,
     offset: usize,
     actor_index: &'a [usize],
 }
@@ -138,7 +135,7 @@ impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
     type Item = DocOpId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(s) = self.op.succ.get(self.offset) {
+        if let Some(s) = self.op.succ().get(self.offset) {
             self.offset += 1;
             Some(translate(self.actor_index, s))
         } else {
@@ -149,7 +146,7 @@ impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
 
 impl<'a> ExactSizeIterator for OpAsDocOpSuccIter<'a> {
     fn len(&self) -> usize {
-        self.op.succ.len()
+        self.op.succ().len()
     }
 }
 

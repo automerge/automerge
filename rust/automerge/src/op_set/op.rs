@@ -67,10 +67,6 @@ impl<'a> Op2<'a> {
         &self.osd.ops[self.idx].op
     }
 
-    pub(crate) fn as_op1(&self) -> &'a Op {
-        self.op()
-    }
-
     pub(crate) fn action(&self) -> &'a OpType {
         &self.op().action
     }
@@ -202,7 +198,7 @@ impl<'a> Op2<'a> {
         &self.op().succ
     }
 
-    pub(crate) fn pred(&self) -> impl Iterator<Item = &OpId> {
+    pub(crate) fn pred(&self) -> impl Iterator<Item = &OpId> + ExactSizeIterator {
         self.op().pred.iter()
     }
 }

@@ -1,4 +1,4 @@
-use crate::types::ObjId;
+use crate::types::{ObjId, Op2};
 use fxhash::FxHasher;
 use std::fmt::Write;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
@@ -173,7 +173,7 @@ impl OpTable {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(osd.get(*e), obj, osd, actor_shorthands))
+            .map(|e| OpTableRow::create(e.as_op2(osd), obj, osd, actor_shorthands))
             .collect();
         OpTable { rows }
     }
@@ -232,12 +232,12 @@ impl OpTableRow {
 
 impl OpTableRow {
     fn create(
-        op: &super::types::Op,
+        op: Op2<'_>,
         obj: &ObjId,
         osd: &crate::op_set::OpSetData,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
-        let op_description = match &op.action {
+        let op_description = match &op.action() {
             crate::OpType::Delete => "del".to_string(),
             crate::OpType::Put(crate::ScalarValue::F64(v)) => format!("set {:.2}", v),
             crate::OpType::Put(v) => format!("set {}", v),
@@ -246,22 +246,22 @@ impl OpTableRow {
             crate::OpType::MarkBegin(_, m) => format!("markEnd {}", m),
             crate::OpType::MarkEnd(m) => format!("markEnd {}", m),
         };
-        let prop = match op.key {
-            crate::types::Key::Map(k) => osd.props[k].clone(),
+        let prop = match op.key() {
+            crate::types::Key::Map(k) => osd.props[*k].clone(),
             crate::types::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
-        let succ = op.succ.iter().fold(String::new(), |mut output, s| {
+        let succ = op.succ().iter().fold(String::new(), |mut output, s| {
             let _ = write!(output, ",{}", print_opid(s, actor_shorthands));
             output
         });
-        let pred = op.pred.iter().fold(String::new(), |mut output, p| {
+        let pred = op.pred().fold(String::new(), |mut output, p| {
             let _ = write!(output, ",{}", print_opid(p, actor_shorthands));
             output
         });
         OpTableRow {
             op_description,
             obj_id: print_opid(&obj.0, actor_shorthands),
-            op_id: print_opid(&op.id, actor_shorthands),
+            op_id: print_opid(op.id(), actor_shorthands),
             prop,
             succ,
             pred,

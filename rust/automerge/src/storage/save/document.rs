@@ -31,7 +31,7 @@ where
     O: Iterator<Item = (&'a ObjId, Op2<'a>)> + Clone + ExactSizeIterator,
 {
     let actor_lookup = actors.encode_index();
-    let doc_ops = ops.map(|(obj, op)| op_as_docop(&actor_lookup, props, obj, op.as_op1()));
+    let doc_ops = ops.map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {

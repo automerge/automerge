@@ -142,7 +142,7 @@ impl TransactionInner {
             .with_timestamp(self.time)
             .build(
                 self.operations(osd)
-                    .map(|op| op_as_actor_id(op.obj(), op.as_op1(), osd)),
+                    .map(|op| op_as_actor_id(op.obj(), op, osd)),
             ) {
             Ok(s) => s,
             Err(PredOutOfOrder) => {

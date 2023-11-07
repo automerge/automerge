@@ -1217,10 +1217,7 @@ impl Automerge {
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
-            let pred: Vec<_> = op
-                .pred()
-                .map(|id| self.to_short_string(*id))
-                .collect();
+            let pred: Vec<_> = op.pred().map(|id| self.to_short_string(*id)).collect();
             let succ: Vec<_> = op
                 .succ()
                 .into_iter()
