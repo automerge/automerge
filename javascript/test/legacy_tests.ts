@@ -500,16 +500,16 @@ describe("Automerge", () => {
         Automerge.change(s1, doc => {
           assert.throws(() => {
             doc.foo = undefined
-          }, /Unsupported type of value: undefined/)
+          }, /Unsupported type undefined for path \/foo/)
           assert.throws(() => {
             doc.foo = { prop: undefined }
-          }, /Unsupported type of value: undefined/)
+          }, /Unsupported type undefined for path \/foo\/prop/)
           assert.throws(() => {
             doc.foo = () => {}
-          }, /Unsupported type of value: function/)
+          }, /Unsupported type function for path \/foo/)
           assert.throws(() => {
             doc.foo = Symbol("foo")
-          }, /Unsupported type of value: symbol/)
+          }, /Unsupported type symbol for path \/foo/)
         })
       })
     })
