@@ -108,6 +108,12 @@
 <a href="#108" id="108">108</a>
 <a href="#109" id="109">109</a>
 <a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeSet;
 
 <span class="kw">use super</span>::{encode_hashes, BloomFilter};
@@ -160,6 +166,11 @@
     /// there are in fact changes to send). If it is `true` then we don&#39;t. This flag is cleared
     /// in `receive_sync_message`.
     </span><span class="kw">pub </span>in_flight: bool,
+
+    <span class="doccomment">/// Whether we have ever responded to the other end. This is used to ensure that we always send
+    /// at least on sync message to the other end, even if we have no changes to send, which is
+    /// necessary because we want the other end to know what our heads are.
+    </span><span class="kw">pub </span>have_responded: bool,
 }
 
 <span class="doccomment">/// A summary of the changes that the sender of the message already has.
@@ -214,6 +225,7 @@
                 their_have: <span class="prelude-val">Some</span>(Vec::new()),
                 sent_hashes: BTreeSet::new(),
                 in_flight: <span class="bool-val">false</span>,
+                have_responded: <span class="bool-val">false</span>,
             },
         ))
     }

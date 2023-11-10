@@ -1015,6 +1015,40 @@
 <a href="#1015" id="1015">1015</a>
 <a href="#1016" id="1016">1016</a>
 <a href="#1017" id="1017">1017</a>
+<a href="#1018" id="1018">1018</a>
+<a href="#1019" id="1019">1019</a>
+<a href="#1020" id="1020">1020</a>
+<a href="#1021" id="1021">1021</a>
+<a href="#1022" id="1022">1022</a>
+<a href="#1023" id="1023">1023</a>
+<a href="#1024" id="1024">1024</a>
+<a href="#1025" id="1025">1025</a>
+<a href="#1026" id="1026">1026</a>
+<a href="#1027" id="1027">1027</a>
+<a href="#1028" id="1028">1028</a>
+<a href="#1029" id="1029">1029</a>
+<a href="#1030" id="1030">1030</a>
+<a href="#1031" id="1031">1031</a>
+<a href="#1032" id="1032">1032</a>
+<a href="#1033" id="1033">1033</a>
+<a href="#1034" id="1034">1034</a>
+<a href="#1035" id="1035">1035</a>
+<a href="#1036" id="1036">1036</a>
+<a href="#1037" id="1037">1037</a>
+<a href="#1038" id="1038">1038</a>
+<a href="#1039" id="1039">1039</a>
+<a href="#1040" id="1040">1040</a>
+<a href="#1041" id="1041">1041</a>
+<a href="#1042" id="1042">1042</a>
+<a href="#1043" id="1043">1043</a>
+<a href="#1044" id="1044">1044</a>
+<a href="#1045" id="1045">1045</a>
+<a href="#1046" id="1046">1046</a>
+<a href="#1047" id="1047">1047</a>
+<a href="#1048" id="1048">1048</a>
+<a href="#1049" id="1049">1049</a>
+<a href="#1050" id="1050">1050</a>
+<a href="#1051" id="1051">1051</a>
 </pre></div><pre class="rust"><code><span class="doccomment">//! # Sync Protocol
 //!
 //! The sync protocol is based on this paper:
@@ -1212,7 +1246,7 @@
             })
             .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-        <span class="kw">if </span>heads_unchanged {
+        <span class="kw">if </span>heads_unchanged &amp;&amp; sync_state.have_responded {
             <span class="kw">if </span>heads_equal &amp;&amp; changes_to_send.is_empty() {
                 <span class="kw">return </span><span class="prelude-val">None</span>;
             }
@@ -1221,6 +1255,7 @@
             }
         }
 
+        sync_state.have_responded = <span class="bool-val">true</span>;
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
             .sent_hashes
@@ -1687,7 +1722,32 @@
     }
 
     <span class="attr">#[test]
-    </span><span class="kw">fn </span>should_not_reply_if_we_have_no_data() {
+    </span><span class="kw">fn </span>first_response_is_some_even_if_no_changes() {
+        <span class="comment">// The first time we generate a sync message for a given peer we should always send a
+        // response so that they know what our heads are, even if we are at the same heads as them
+
+        </span><span class="kw">let </span><span class="kw-2">mut </span>doc1 = <span class="kw">crate</span>::AutoCommit::new();
+        doc1.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value&quot;</span>).unwrap();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc2 = doc1.fork();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>s1 = State::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>s2 = State::new();
+
+        <span class="kw">let </span>m1 = doc1
+            .sync()
+            .generate_sync_message(<span class="kw-2">&amp;mut </span>s1)
+            .expect(<span class="string">&quot;message was none&quot;</span>);
+
+        doc2.sync().receive_sync_message(<span class="kw-2">&amp;mut </span>s2, m1).unwrap();
+
+        <span class="kw">let </span>_m2 = doc2
+            .sync()
+            .generate_sync_message(<span class="kw-2">&amp;mut </span>s2)
+            .expect(<span class="string">&quot;response was none&quot;</span>);
+    }
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>should_not_reply_if_we_have_no_data_after_first_round() {
         <span class="kw">let </span><span class="kw-2">mut </span>doc1 = <span class="kw">crate</span>::AutoCommit::new();
         <span class="kw">let </span><span class="kw-2">mut </span>doc2 = <span class="kw">crate</span>::AutoCommit::new();
         <span class="kw">let </span><span class="kw-2">mut </span>s1 = State::new();
@@ -1698,6 +1758,14 @@
             .expect(<span class="string">&quot;message was none&quot;</span>);
 
         doc2.sync().receive_sync_message(<span class="kw-2">&amp;mut </span>s2, m1).unwrap();
+        <span class="kw">let </span>_m2 = doc2
+            .sync()
+            .generate_sync_message(<span class="kw-2">&amp;mut </span>s2)
+            .expect(<span class="string">&quot;first round message was none&quot;</span>);
+
+        <span class="kw">let </span>m1 = doc1.sync().generate_sync_message(<span class="kw-2">&amp;mut </span>s1);
+        <span class="macro">assert!</span>(m1.is_none());
+
         <span class="kw">let </span>m2 = doc2.sync().generate_sync_message(<span class="kw-2">&amp;mut </span>s2);
         <span class="macro">assert!</span>(m2.is_none());
     }

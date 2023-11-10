@@ -1662,6 +1662,13 @@
 <a href="#1662" id="1662">1662</a>
 <a href="#1663" id="1663">1663</a>
 <a href="#1664" id="1664">1664</a>
+<a href="#1665" id="1665">1665</a>
+<a href="#1666" id="1666">1666</a>
+<a href="#1667" id="1667">1667</a>
+<a href="#1668" id="1668">1668</a>
+<a href="#1669" id="1669">1669</a>
+<a href="#1670" id="1670">1670</a>
+<a href="#1671" id="1671">1671</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
@@ -1725,6 +1732,7 @@
         } <span class="kw">else </span>{
             JsValue::null()
         };
+        <span class="kw">let </span>have_responded = state.have_responded.into();
         <span class="kw">let </span>result: JsValue = Object::new().into();
         <span class="comment">// we can unwrap here b/c we made the object and know its not frozen
         </span>Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;sharedHeads&quot;</span>.into(), <span class="kw-2">&amp;</span>shared_heads.<span class="number">0</span>).unwrap();
@@ -1734,6 +1742,7 @@
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirHave&quot;</span>.into(), <span class="kw-2">&amp;</span>their_have).unwrap();
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;sentHashes&quot;</span>.into(), <span class="kw-2">&amp;</span>sent_hashes.<span class="number">0</span>).unwrap();
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;inFlight&quot;</span>.into(), <span class="kw-2">&amp;</span>state.in_flight.into()).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;haveResponded&quot;</span>.into(), <span class="kw-2">&amp;</span>have_responded).unwrap();
         JS(result)
     }
 }
@@ -1952,6 +1961,10 @@
             </span>.<span class="number">0
             </span>.as_bool()
             .ok_or(error::BadSyncState::InFlightNotBoolean)<span class="question-mark">?</span>;
+        <span class="kw">let </span>have_responded = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;haveResponded&quot;</span>)<span class="question-mark">?
+            </span>.<span class="number">0
+            </span>.as_bool()
+            .unwrap_or(<span class="bool-val">false</span>);
         <span class="prelude-val">Ok</span>(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -1960,6 +1973,7 @@
             their_have,
             sent_hashes,
             in_flight,
+            have_responded,
         })
     }
 }
