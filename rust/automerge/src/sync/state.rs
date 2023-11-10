@@ -50,6 +50,11 @@ pub struct State {
     /// there are in fact changes to send). If it is `true` then we don't. This flag is cleared
     /// in `receive_sync_message`.
     pub in_flight: bool,
+
+    /// Whether we have ever responded to the other end. This is used to ensure that we always send
+    /// at least on sync message to the other end, even if we have no changes to send, which is
+    /// necessary because we want the other end to know what our heads are.
+    pub have_responded: bool,
 }
 
 /// A summary of the changes that the sender of the message already has.
@@ -104,6 +109,7 @@ impl State {
                 their_have: Some(Vec::new()),
                 sent_hashes: BTreeSet::new(),
                 in_flight: false,
+                have_responded: false,
             },
         ))
     }

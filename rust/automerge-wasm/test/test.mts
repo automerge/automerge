@@ -995,17 +995,27 @@ describe('Automerge', () => {
       assert.deepStrictEqual(message.changes, [])
     })
 
-    it('should not reply if we have no data as well', () => {
+    it('should not reply if we have no data as well after the first round', () => {
       const n1 = create(), n2 = create()
       const s1 = initSyncState(), s2 = initSyncState()
-      const m1 = n1.generateSyncMessage(s1)
+      let m1 = n1.generateSyncMessage(s1)
       if (m1 === null) { throw new RangeError("message should not be null") }
       n2.receiveSyncMessage(s2, m1)
-      const m2 = n2.generateSyncMessage(s2)
+      let m2 = n2.generateSyncMessage(s2)
+      // We should always send a message on the first round to advertise our heads
+      assert.notStrictEqual(m2, null)
+      n2.receiveSyncMessage(s2, m2!)   
+
+      // now make a change on n1 so we generate another sync message to send
+      n1.put("_root", "x", 1)
+      m1 = n1.generateSyncMessage(s1)
+      n2.receiveSyncMessage(s2, m2!)
+
+      m2 = n2.generateSyncMessage(s2)
       assert.deepStrictEqual(m2, null)
     })
 
-    it('repos with equal heads do not need a reply message', () => {
+    it('repos with equal heads do not need a reply message after the first round', () => {
       const n1 = create(), n2 = create()
       const s1 = initSyncState(), s2 = initSyncState()
 
@@ -1020,14 +1030,19 @@ describe('Automerge', () => {
       assert.deepStrictEqual(n1.materialize(), n2.materialize())
 
       // generate a naive sync message
-      const m1 = n1.generateSyncMessage(s1)
+      let m1 = n1.generateSyncMessage(s1)
       if (m1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads())
 
-      // heads are equal so this message should be null
+      // process the first response (which is always generated so we know the other ends heads)
       n2.receiveSyncMessage(s2, m1)
       const m2 = n2.generateSyncMessage(s2)
-      assert.strictEqual(m2, null)
+      n1.receiveSyncMessage(s1, m2!)
+
+      // heads are equal so this message should be null
+      m1 = n1.generateSyncMessage(s2)
+      assert.strictEqual(m1, null)
+        
     })
 
     it('n1 should offer all changes to n2 when starting from nothing', () => {
@@ -1898,6 +1913,11 @@ describe('Automerge', () => {
         }
 
         n2.applyChanges(n1.getChanges([]))
+        // n2 will always generate at least one sync message to advertise it's
+        // heads so we generate that message now. This means that we should
+        // not generate a message responding to the request for a nonexistent
+        // change because we already sent the first message
+        n2.generateSyncMessage(s2)
         message = n1.generateSyncMessage(s1)
         if (message === null) { throw new RangeError("message should not be null") }
         message = decodeSyncMessage(message)

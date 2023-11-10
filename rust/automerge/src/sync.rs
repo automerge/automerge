@@ -195,7 +195,7 @@ impl SyncDoc for Automerge {
             })
             .collect::<Vec<_>>();
 
-        if heads_unchanged {
+        if heads_unchanged && sync_state.have_responded {
             if heads_equal && changes_to_send.is_empty() {
                 return None;
             }
@@ -204,6 +204,7 @@ impl SyncDoc for Automerge {
             }
         }
 
+        sync_state.have_responded = true;
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
             .sent_hashes
@@ -670,7 +671,32 @@ mod tests {
     }
 
     #[test]
-    fn should_not_reply_if_we_have_no_data() {
+    fn first_response_is_some_even_if_no_changes() {
+        // The first time we generate a sync message for a given peer we should always send a
+        // response so that they know what our heads are, even if we are at the same heads as them
+
+        let mut doc1 = crate::AutoCommit::new();
+        doc1.put(crate::ROOT, "key", "value").unwrap();
+        let mut doc2 = doc1.fork();
+
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        let m1 = doc1
+            .sync()
+            .generate_sync_message(&mut s1)
+            .expect("message was none");
+
+        doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
+
+        let _m2 = doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .expect("response was none");
+    }
+
+    #[test]
+    fn should_not_reply_if_we_have_no_data_after_first_round() {
         let mut doc1 = crate::AutoCommit::new();
         let mut doc2 = crate::AutoCommit::new();
         let mut s1 = State::new();
@@ -681,6 +707,14 @@ mod tests {
             .expect("message was none");
 
         doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
+        let _m2 = doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .expect("first round message was none");
+
+        let m1 = doc1.sync().generate_sync_message(&mut s1);
+        assert!(m1.is_none());
+
         let m2 = doc2.sync().generate_sync_message(&mut s2);
         assert!(m2.is_none());
     }
