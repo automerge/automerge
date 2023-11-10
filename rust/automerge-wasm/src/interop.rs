@@ -61,6 +61,7 @@ impl From<am::sync::State> for JS {
         } else {
             JsValue::null()
         };
+        let have_responded = state.have_responded.into();
         let result: JsValue = Object::new().into();
         // we can unwrap here b/c we made the object and know its not frozen
         Reflect::set(&result, &"sharedHeads".into(), &shared_heads.0).unwrap();
@@ -70,6 +71,7 @@ impl From<am::sync::State> for JS {
         Reflect::set(&result, &"theirHave".into(), &their_have).unwrap();
         Reflect::set(&result, &"sentHashes".into(), &sent_hashes.0).unwrap();
         Reflect::set(&result, &"inFlight".into(), &state.in_flight.into()).unwrap();
+        Reflect::set(&result, &"haveResponded".into(), &have_responded).unwrap();
         JS(result)
     }
 }
@@ -288,6 +290,10 @@ impl TryFrom<JS> for am::sync::State {
             .0
             .as_bool()
             .ok_or(error::BadSyncState::InFlightNotBoolean)?;
+        let have_responded = js_get(&value, "haveResponded")?
+            .0
+            .as_bool()
+            .unwrap_or(false);
         Ok(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -296,6 +302,7 @@ impl TryFrom<JS> for am::sync::State {
             their_have,
             sent_hashes,
             in_flight,
+            have_responded,
         })
     }
 }
