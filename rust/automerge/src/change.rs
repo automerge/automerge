@@ -211,6 +211,7 @@ impl From<crate::ExpandedChange> for Change {
 mod convert_expanded {
     use std::borrow::Cow;
 
+    use crate::convert::ObjId;
     use crate::{convert, legacy, storage::AsChangeOp, types::ActorId, ScalarValue};
 
     impl<'a> AsChangeOp<'a> for &'a legacy::Op {
@@ -266,6 +267,14 @@ mod convert_expanded {
             } else {
                 None
             }
+        }
+
+        fn move_from(&self) -> Option<ObjId<Self::OpId>> {
+            None
+        }
+
+        fn move_id(&self) -> Option<ObjId<Self::OpId>> {
+            None
         }
     }
 

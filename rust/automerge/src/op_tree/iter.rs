@@ -273,6 +273,8 @@ mod tests {
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
+            move_from: None,
+            move_id: None,
         }
     }
 
@@ -376,7 +378,9 @@ mod tests {
         let mut optree = OpTreeInternal::new();
         for action in actions {
             match action {
-                Action::Insert(index, op) => optree.insert(*index, op.clone()),
+                Action::Insert(index, op) => {
+                    optree.insert(*index, op.clone());
+                }
                 Action::Delete(index) => {
                     optree.remove(*index);
                 }

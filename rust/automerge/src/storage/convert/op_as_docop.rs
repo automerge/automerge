@@ -126,6 +126,26 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
             None
         }
     }
+
+    fn move_from(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.op.move_from.map(|id| {
+            if id.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(translate(self.actor_lookup, id.opid()))
+            }
+        })
+    }
+
+    fn move_id(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.op.move_id.map(|id| {
+            if id.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(translate(self.actor_lookup, id.opid()))
+            }
+        })
+    }
 }
 
 pub(crate) struct OpAsDocOpSuccIter<'a> {

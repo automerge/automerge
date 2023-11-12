@@ -118,7 +118,7 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op>>(
                             state.push_mark();
                         }
                     }
-                    OpType::Increment(_) | OpType::Delete => {}
+                    OpType::Increment(_) | OpType::Delete | OpType::Move(_, _) => {}
                 }
             }
             state

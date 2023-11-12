@@ -30,6 +30,8 @@ const VAL_COL_ID: ColumnId = ColumnId::new(5);
 const SUCC_COL_ID: ColumnId = ColumnId::new(8);
 const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
 const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
+const MOVE_FROM_COL_ID: ColumnId = ColumnId::new(11);
+const MOVE_ID_COL_ID: ColumnId = ColumnId::new(12);
 
 /// The form operations take in the compressed document format.
 #[derive(Debug)]
@@ -43,6 +45,8 @@ pub(crate) struct DocOp {
     pub(crate) succ: Vec<OpId>,
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) move_from: Option<ObjId>,
+    pub(crate) move_id: Option<ObjId>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +62,8 @@ pub(crate) struct DocOpColumns {
     other: Columns,
     expand: MaybeBooleanRange,
     mark_name: RleRange<smol_str::SmolStr>,
+    move_from: Option<ObjIdRange>,
+    move_id: Option<ObjIdRange>,
 }
 
 struct DocId {
@@ -98,6 +104,8 @@ pub(crate) trait AsDocOp<'a> {
     fn succ(&self) -> Self::SuccIter;
     fn expand(&self) -> bool;
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+    fn move_from(&self) -> Option<convert::ObjId<Self::OpId>>;
+    fn move_id(&self) -> Option<convert::ObjId<Self::OpId>>;
 }
 
 impl DocOpColumns {
@@ -128,7 +136,17 @@ impl DocOpColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let succ = OpIdListRange::encode(ops.clone().map(|o| o.succ()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_name = RleRange::encode(ops.map(|o| o.mark_name()), out);
+        let mark_name = RleRange::encode(ops.clone().map(|o| o.mark_name()), out);
+        let move_from = ObjIdRange::encode(
+            ops.clone()
+                .map(|o| o.move_from().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
+        let move_id = ObjIdRange::encode(
+            ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
+
         Self {
             obj,
             key,
@@ -139,6 +157,8 @@ impl DocOpColumns {
             succ,
             expand,
             mark_name,
+            move_from,
+            move_id,
             other: Columns::empty(),
         }
     }
@@ -158,6 +178,8 @@ impl DocOpColumns {
         let mut succ = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
         let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut move_from = ObjIdEncoder::new();
+        let mut move_id = ObjIdEncoder::new();
         for op in ops {
             obj.append(op.obj());
             key.append(op.key());
@@ -168,6 +190,8 @@ impl DocOpColumns {
             succ.append(op.succ());
             expand.append(op.expand());
             mark_name.append(op.mark_name());
+            move_from.append(op.move_from().unwrap_or(convert::ObjId::Root));
+            move_id.append(op.move_id().unwrap_or(convert::ObjId::Root));
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -196,6 +220,9 @@ impl DocOpColumns {
         out.extend(mark_name_out);
         let mark_name = RleRange::from(mark_name_start..out.len());
 
+        let move_from = move_from.finish(out);
+        let move_id = move_id.finish(out);
+
         DocOpColumns {
             obj,
             key,
@@ -206,6 +233,8 @@ impl DocOpColumns {
             succ,
             expand,
             mark_name,
+            move_id,
+            move_from,
             other: Columns::empty(),
         }
     }
@@ -221,6 +250,8 @@ impl DocOpColumns {
             succ: self.succ.iter(data),
             expand: self.expand.decoder(data),
             mark_name: self.mark_name.decoder(data),
+            move_id: self.move_id.as_ref().map(|m| m.iter(data)),
+            move_from: self.move_from.as_ref().map(|m| m.iter(data)),
         }
     }
 
@@ -272,6 +303,34 @@ impl DocOpColumns {
                 ColumnSpec::new(VAL_COL_ID, ColumnType::ValueMetadata, false),
                 self.val.meta_range().clone().into(),
             ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_ID_COL_ID, ColumnType::Actor, false),
+                self.move_id
+                    .as_ref()
+                    .map(|m| m.actor_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_ID_COL_ID, ColumnType::DeltaInteger, false),
+                self.move_id
+                    .as_ref()
+                    .map(|m| m.counter_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_FROM_COL_ID, ColumnType::Actor, false),
+                self.move_from
+                    .as_ref()
+                    .map(|m| m.actor_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_FROM_COL_ID, ColumnType::DeltaInteger, false),
+                self.move_from
+                    .as_ref()
+                    .map(|m| m.counter_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
         ];
         if !self.val.raw_range().is_empty() {
             cols.push(RawColumn::new(
@@ -322,6 +381,8 @@ pub(crate) struct DocOpColumnIter<'a> {
     succ: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
+    move_from: Option<ObjIdIter<'a>>,
+    move_id: Option<ObjIdIter<'a>>,
 }
 
 impl<'a> DocOpColumnIter<'a> {
@@ -368,6 +429,21 @@ impl<'a> DocOpColumnIter<'a> {
             let insert = self.insert.next_in_col("insert")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
+            // TODO: distinguish between root and None
+            let move_from = if let Some(ref mut move_from) = self.move_from {
+                Some(move_from.next_in_col("move_from")?)
+            } else if action == 8 {
+                Some(ObjId::root())
+            } else {
+                None
+            };
+
+            let move_id = if let Some(ref mut move_id) = self.move_id {
+                Some(move_id.next_in_col("move_id")?)
+            } else {
+                None
+            };
+
             Ok(Some(DocOp {
                 id,
                 value,
@@ -378,6 +454,8 @@ impl<'a> DocOpColumnIter<'a> {
                 insert,
                 expand,
                 mark_name,
+                move_from,
+                move_id,
             }))
         }
     }
@@ -414,6 +492,10 @@ impl TryFrom<Columns> for DocOpColumns {
         let mut succ_ctr: Option<DeltaRange> = None;
         let mut expand: Option<MaybeBooleanRange> = None;
         let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
+        let mut move_from_actor: Option<RleRange<u64>> = None;
+        let mut move_from_ctr: Option<RleRange<u64>> = None;
+        let mut move_id_actor: Option<RleRange<u64>> = None;
+        let mut move_id_ctr: Option<RleRange<u64>> = None;
         let mut other = Columns::empty();
 
         for (index, col) in columns.into_iter().enumerate() {
@@ -469,6 +551,10 @@ impl TryFrom<Columns> for DocOpColumns {
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
                 (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
+                (MOVE_FROM_COL_ID, ColumnType::Actor) => move_from_actor = Some(col.range().into()),
+                (MOVE_FROM_COL_ID, ColumnType::Integer) => move_from_ctr = Some(col.range().into()),
+                (MOVE_ID_COL_ID, ColumnType::Actor) => move_id_actor = Some(col.range().into()),
+                (MOVE_ID_COL_ID, ColumnType::Integer) => move_id_ctr = Some(col.range().into()),
                 (other_col, other_type) => {
                     tracing::warn!(id=?other_col, typ=?other_type, "unknown column type");
                     other.append(col)
@@ -499,6 +585,14 @@ impl TryFrom<Columns> for DocOpColumns {
             ),
             expand: expand.unwrap_or_else(|| (0..0).into()),
             mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
+            move_from: ObjIdRange::new(
+                move_from_actor.unwrap_or_else(|| (0..0).into()),
+                move_from_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
+            move_id: ObjIdRange::new(
+                move_id_actor.unwrap_or_else(|| (0..0).into()),
+                move_id_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
             other,
         })
     }

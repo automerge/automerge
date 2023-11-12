@@ -112,4 +112,13 @@ pub trait Transactable: ReadDoc {
 
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
+
+    /// move element from one location to another
+    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        src: O,
+        dst: O,
+        src_prop: P,
+        dst_prop: P,
+    ) -> Result<(), AutomergeError>;
 }

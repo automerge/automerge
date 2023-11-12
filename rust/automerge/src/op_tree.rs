@@ -5,7 +5,7 @@ use crate::patches::PatchLog;
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
-    Automerge,
+    Automerge, ScalarValue,
 };
 use crate::{
     types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
@@ -390,6 +390,29 @@ impl OpTreeInternal {
         }
     }
 
+    pub(crate) fn seek_move_ops_by_prop<'a>(
+        &'a self,
+        meta: &'a OpSetMetadata,
+        prop: Prop,
+    ) -> Option<MoveSrcFound<'a>> {
+        match prop {
+            Prop::Map(key_name) => {
+                let key = Key::Map(meta.props.lookup(&key_name)?);
+                let query = self.search(query::MapMove::new(key), meta);
+                let src_pred = query.src_pred;
+                let target_move_id = query.target_move_id?;
+                let scalar_value = query.scalar_value;
+                Some(MoveSrcFound {
+                    src_pred,
+                    move_id: ObjId(target_move_id),
+                    scalar_value: scalar_value.unwrap_or(ScalarValue::Null),
+                    src_pred_pos: query.src_pred_pos,
+                })
+            }
+            Prop::Seq(_) => None,
+        }
+    }
+
     fn binary_search_by<F>(&self, f: F) -> usize
     where
         F: Fn(&Op) -> Ordering,
@@ -430,7 +453,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub(crate) fn insert(&mut self, index: usize, op: Op) {
+    pub(crate) fn insert(&mut self, index: usize, op: Op) -> usize {
         assert!(
             index <= self.len(),
             "tried to insert at {} but len is {}",
@@ -480,6 +503,7 @@ impl OpTreeInternal {
             self.root_node = Some(root)
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
+        element
     }
 
     /// Get the `element` at `index` in the sequence.
@@ -563,6 +587,14 @@ pub(crate) struct FoundOpId<'a> {
     pub(crate) visible: bool,
 }
 
+#[derive(Default, Debug, Clone, PartialEq)]
+pub(crate) struct MoveSrcFound<'a> {
+    pub(crate) src_pred: Vec<&'a Op>,
+    pub(crate) move_id: ObjId,
+    pub(crate) scalar_value: ScalarValue,
+    pub(crate) src_pred_pos: Vec<usize>,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::types::{Op, OpId, OpType};
@@ -578,6 +610,8 @@ mod tests {
             succ: Default::default(),
             pred: Default::default(),
             insert: false,
+            move_from: None,
+            move_id: None,
         }
     }
 

@@ -59,6 +59,14 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
+    #[error("move operation source not found")]
+    MoveSourceNotFound,
+    #[error("move operation source not supported")]
+    MoveSourceNotSupported,
+    #[error("move operation destination not supported")]
+    MoveDestinationNotSupported,
+    #[error("invalid move property")]
+    InvalidMoveProperty,
 }
 
 impl PartialEq for AutomergeError {

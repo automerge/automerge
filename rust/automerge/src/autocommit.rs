@@ -946,6 +946,25 @@ impl Transactable for AutoCommit {
             self.doc.get_heads()
         }
     }
+
+    fn move_element<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        src: O,
+        dst: O,
+        src_prop: P,
+        dst_prop: P,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.move_element(
+            &mut self.doc,
+            patch_log,
+            src.as_ref(),
+            dst.as_ref(),
+            src_prop,
+            dst_prop,
+        )
+    }
 }
 
 // A wrapper we return from `AutoCommit::sync` to ensure that transactions are closed before we

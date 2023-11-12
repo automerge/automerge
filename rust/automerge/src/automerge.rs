@@ -542,7 +542,10 @@ impl Automerge {
     }
 
     pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExId) {
-        (op.value_at(clock), self.id_to_exid(op.id))
+        match &op.action {
+            OpType::Move(_, _) => (op.value_at(clock), self.id_to_exid(op.move_id.unwrap().0)),
+            _ => (op.value_at(clock), self.id_to_exid(op.id)),
+        }
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
@@ -893,6 +896,14 @@ impl Automerge {
                     .pred
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
+
+                let move_from = c
+                    .move_from
+                    .map(|m| ObjId(OpId::new(m.opid().counter(), actors[m.opid().actor()])));
+                let move_id = c
+                    .move_id
+                    .map(|m| ObjId(OpId::new(m.opid().counter(), actors[m.opid().actor()])));
+
                 let pred = self.ops.m.sorted_opids(pred);
                 (
                     obj,
@@ -908,6 +919,8 @@ impl Automerge {
                         succ: Default::default(),
                         pred,
                         insert: c.insert,
+                        move_from,
+                        move_id,
                     },
                 )
             })
@@ -1215,6 +1228,7 @@ impl Automerge {
                     format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
+                OpType::Move(value, _) => format!("move({})", value),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_short_string(*id)).collect();
             let succ: Vec<_> = op
@@ -1262,21 +1276,35 @@ impl Automerge {
         op: Op,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let (pos, succ) = if patch_log.is_active() {
+        let (pos, succ_list) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj)?;
             let found = self.ops.find_op_with_patch_log(&obj, &op);
             found.log_patches(&obj, &op, self, patch_log);
-            (found.pos, found.succ)
+            (found.pos, vec![found.succ])
         } else {
-            let found = self.ops.find_op_without_patch_log(obj, &op);
-            (found.pos, found.succ)
+            match op.action {
+                OpType::Move(_, _) => {
+                    let found1 = self.ops.find_op_without_patch_log(obj, &op);
+                    let found2 = self
+                        .ops
+                        .find_op_without_patch_log(&op.move_from.unwrap(), &op);
+                    (found1.pos, vec![found1.succ, found2.succ])
+                }
+                _ => {
+                    let found = self.ops.find_op_without_patch_log(obj, &op);
+                    (found.pos, vec![found.succ])
+                }
+            }
         };
 
-        self.ops.add_succ(obj, &succ, &op);
+        for succ in succ_list {
+            self.ops.add_succ(obj, &succ, &op);
+        }
 
         if !op.is_delete() {
-            self.ops.insert(pos, obj, op);
+            self.ops.insert(pos, obj, op.clone());
         }
+
         Ok(())
     }
 
@@ -1403,7 +1431,7 @@ impl Automerge {
                     OpType::MarkEnd(_) => {
                         marks.mark_end(o.id, &self.ops.m);
                     }
-                    OpType::Increment(_) | OpType::Delete => {}
+                    OpType::Increment(_) | OpType::Delete | OpType::Move(_, _) => {}
                 }
             }
         }

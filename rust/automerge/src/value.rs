@@ -471,6 +471,12 @@ pub enum ScalarValue {
     Null,
 }
 
+impl Default for ScalarValue {
+    fn default() -> Self {
+        ScalarValue::Null
+    }
+}
+
 impl PartialEq for Counter {
     fn eq(&self, other: &Self) -> bool {
         self.current == other.current

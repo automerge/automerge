@@ -99,6 +99,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
             OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::Move(v, _) => Cow::Borrowed(v),
         }
     }
 
@@ -142,5 +143,31 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
         } else {
             None
         }
+    }
+
+    fn move_id(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.op.move_id.as_ref().map(|id| {
+            if id.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(OpIdWithMetadata {
+                    opid: id.opid(),
+                    metadata: self.metadata,
+                })
+            }
+        })
+    }
+
+    fn move_from(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.op.move_from.as_ref().map(|id| {
+            if id.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(OpIdWithMetadata {
+                    opid: id.opid(),
+                    metadata: self.metadata,
+                })
+            }
+        })
     }
 }

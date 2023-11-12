@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::op_tree::MoveSrcFound;
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
@@ -264,6 +265,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            move_id: None,
+            move_from: None,
         }
     }
 
@@ -275,6 +278,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None,
         }
     }
 
@@ -373,6 +378,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            move_id: None,
+            move_from: None,
         };
 
         doc.ops_mut().insert(pos, &obj, op.clone());
@@ -442,6 +449,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None,
         };
 
         let pos = query.end_pos;
@@ -484,6 +493,8 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            move_id: None,
+            move_from: None,
         };
 
         let pos = query.pos();
@@ -752,6 +763,99 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
         self.mark(doc, patch_log, ex_obj, mark, expand)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn move_element<P: Into<Prop>>(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        src: &ExId,
+        dst: &ExId,
+        src_prop: P,
+        dst_prop: P,
+    ) -> Result<(), AutomergeError> {
+        let id = self.next_id();
+        let src_obj = doc.exid_to_obj(src)?;
+        let dst_obj = doc.exid_to_obj(dst)?;
+        let src_prop = src_prop.into();
+        let dst_prop = dst_prop.into();
+
+        let move_src_query = match src_obj.typ {
+            ObjType::Map => match src_prop {
+                Prop::Map(_) => self.move_from_map(doc, src_obj.id, src_prop),
+                Prop::Seq(_) => Err(AutomergeError::InvalidMoveProperty),
+            },
+            ObjType::List => Err(AutomergeError::MoveSourceNotSupported),
+            _ => return Err(AutomergeError::MoveSourceNotSupported),
+        }?;
+
+        let MoveSrcFound {
+            src_pred,
+            src_pred_pos,
+            move_id,
+            scalar_value,
+        } = move_src_query;
+        match dst_obj.typ {
+            ObjType::Map => match dst_prop.clone() {
+                Prop::Map(prop) => {
+                    let move_dst_query = doc.ops().seek_ops_by_prop(
+                        &dst_obj.id.clone(),
+                        dst_prop,
+                        ListEncoding::List,
+                        None,
+                    );
+                    let src_ids = src_pred.iter().map(|o| o.id);
+                    let dst_ids = move_dst_query.ops.iter().map(|o| o.id);
+                    let pred = doc.ops().m.sorted_two_opids(src_ids, dst_ids);
+                    let pos = move_dst_query.end_pos;
+
+                    let ops_pos = move_dst_query.ops_pos;
+                    let prop_index = doc.ops_mut().m.props.cache(prop.to_string());
+                    let key = Key::Map(prop_index);
+
+                    let op = Op {
+                        id,
+                        action: OpType::Move(scalar_value, true),
+                        key,
+                        succ: Default::default(),
+                        pred,
+                        insert: false,
+                        move_id: Some(move_id),
+                        move_from: Some(src_obj.id),
+                    };
+
+                    doc.ops_mut().add_succ(&src_obj.id, &src_pred_pos, &op);
+                    self.insert_local_op(
+                        doc,
+                        patch_log,
+                        prop.into(),
+                        op,
+                        pos,
+                        dst_obj.id,
+                        &ops_pos,
+                    );
+                    Ok(())
+                }
+                Prop::Seq(_) => Err(AutomergeError::InvalidMoveProperty),
+            },
+            ObjType::List => Err(AutomergeError::MoveDestinationNotSupported),
+            _ => Err(AutomergeError::MoveDestinationNotSupported),
+        }
+    }
+
+    fn move_from_map<'a>(
+        &'a self,
+        doc: &'a Automerge,
+        obj: ObjId,
+        prop: Prop,
+    ) -> Result<MoveSrcFound<'a>, AutomergeError> {
+        let res = doc.ops().seek_move_ops_by_prop(&obj, prop);
+        if res.src_pred.is_empty() {
+            Err(AutomergeError::MoveSourceNotFound)
+        } else {
+            Ok(res)
+        }
     }
 
     fn finalize_op(

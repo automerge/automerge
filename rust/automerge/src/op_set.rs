@@ -2,10 +2,10 @@ use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
-use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
+use crate::op_tree::{MoveSrcFound, OpTreeIter};
 use crate::parents::Parents;
 use crate::query::TreeQuery;
 use crate::types::{
@@ -14,12 +14,16 @@ use crate::types::{
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
+use move_manager::MoveManager;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 mod load;
+mod move_manager;
+
+use crate::op_set::move_manager::LogEntry;
 pub(crate) use load::OpSetBuilder;
 
 pub(crate) type OpSet = OpSetInternal;
@@ -32,6 +36,10 @@ pub(crate) struct OpSetInternal {
     length: usize,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
+    /// Manages the validity of move operations
+    move_manager: MoveManager,
+    /// Store delete operations for validity check
+    delete_ops: HashMap<OpId, Op>,
 }
 
 impl OpSetInternal {
@@ -49,6 +57,8 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
+            move_manager: MoveManager::new(),
+            delete_ops: HashMap::new(),
         }
     }
 
@@ -134,6 +144,13 @@ impl OpSetInternal {
                 tree.internal
                     .seek_ops_by_prop(&self.m, prop, encoding, clock)
             })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn seek_move_ops_by_prop<'a>(&'a self, obj: &ObjId, prop: Prop) -> MoveSrcFound<'a> {
+        self.trees
+            .get(obj)
+            .and_then(|tree| tree.internal.seek_move_ops_by_prop(&self.m, prop))
             .unwrap_or_default()
     }
 
@@ -245,8 +262,13 @@ impl OpSetInternal {
 
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            tree.internal.insert(index, element);
+            let pos = tree.internal.insert(index, element.clone());
             self.length += 1;
+            if !element.is_delete() {
+                self.update_validity(&element, Some(*obj), Some(pos));
+            } else {
+                self.update_validity(&element, None, None);
+            }
         } else {
             tracing::warn!("attempting to insert op for unknown object");
         }
@@ -348,9 +370,56 @@ impl OpSetInternal {
         }
     }
 
-    //    pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExI
-    //        (op.value_at(clock), self.id_to_exid(op.id))
-    //    }
+    pub(crate) fn insert_delete_op(&mut self, op: Op) {
+        self.delete_ops.insert(op.id, op);
+    }
+
+    pub(crate) fn update_validity(
+        &mut self,
+        new_op: &Op,
+        op_tree_id: Option<ObjId>,
+        index: Option<usize>,
+    ) -> HashMap<OpId, bool> {
+        if new_op.is_delete() {
+            self.insert_delete_op(new_op.clone());
+        }
+        let mut checker = self.move_manager.start_validity_check(new_op.id, &self.m);
+        let mut ops_with_greater_ids = Vec::new();
+        let logs = checker.get_logs_with_greater_ids();
+        for log in &logs {
+            let op = match log.op_tree_id {
+                Some(id) => {
+                    let tree = self.trees.get(&id).expect("op tree not found");
+                    &tree.internal.ops[log.op_tree_index.unwrap()]
+                }
+                None => self.delete_ops.get(&log.id).expect("delete op not found"),
+            };
+            ops_with_greater_ids.push(op);
+        }
+
+        let new_log = LogEntry::new(new_op.id, op_tree_id, index, new_op.move_id);
+        let validity_changes_internal =
+            checker.update_validity(ops_with_greater_ids, new_op, new_log);
+        let mut validity_changes = HashMap::new();
+        for ((op_tree_id, index), v) in validity_changes_internal {
+            let op = &mut self
+                .trees
+                .get_mut(&op_tree_id)
+                .expect("op tree not found")
+                .internal
+                .ops[index];
+            match op.action {
+                OpType::Move(_, ref mut validity) => {
+                    if *validity != v {
+                        *validity = v;
+                        validity_changes.insert(op.id, v);
+                    }
+                }
+                _ => panic!("expected move op"),
+            }
+        }
+        validity_changes
+    }
 }
 
 impl Default for OpSetInternal {
@@ -457,6 +526,16 @@ impl OpSetMetadata {
         OpIds::new(opids, |left, right| self.lamport_cmp(*left, *right))
     }
 
+    pub(crate) fn sorted_two_opids<I: Iterator<Item = OpId>, T: Iterator<Item = OpId>>(
+        &self,
+        opids1: I,
+        opids2: T,
+    ) -> OpIds {
+        OpIds::from_two_opids(opids1, opids2, |left, right| {
+            self.lamport_cmp(*left, *right)
+        })
+    }
+
     /// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
     /// this `OpSetMetadata` then this returns `Some(OpIds)`, otherwise returns `None`.
     pub(crate) fn try_sorted_opids(&self, opids: Vec<OpId>) -> Option<OpIds> {
@@ -559,6 +638,8 @@ pub(crate) mod tests {
                     succ,
                     pred,
                     insert: false,
+                    move_from: None,
+                    move_id: None,
                 };
                 set.insert(counter as usize, &ObjId::root(), op);
                 counter += 1;
@@ -575,6 +656,8 @@ pub(crate) mod tests {
                 .m
                 .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
             insert: false,
+            move_from: None,
+            move_id: None,
         };
         (set, new_op)
     }

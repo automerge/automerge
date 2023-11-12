@@ -34,6 +34,8 @@ const VAL_COL_ID: ColumnId = ColumnId::new(5);
 const PRED_COL_ID: ColumnId = ColumnId::new(7);
 const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
 const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
+const MOVE_FROM_COL_ID: ColumnId = ColumnId::new(11);
+const MOVE_ID_COL_ID: ColumnId = ColumnId::new(12);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ChangeOp {
@@ -45,6 +47,8 @@ pub(crate) struct ChangeOp {
     pub(crate) obj: ObjId,
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) move_from: Option<ObjId>,
+    pub(crate) move_id: Option<ObjId>,
 }
 
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
@@ -65,6 +69,16 @@ impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
             action: a.action(),
             expand: a.expand(),
             mark_name: a.mark_name().map(|n| n.into_owned()),
+            move_from: match a.move_from() {
+                Some(convert::ObjId::Root) => Some(ObjId::root()),
+                Some(convert::ObjId::Op(o)) => Some(ObjId(o)),
+                None => None,
+            },
+            move_id: match a.move_id() {
+                Some(convert::ObjId::Root) => Some(ObjId::root()),
+                Some(convert::ObjId::Op(o)) => Some(ObjId(o)),
+                None => None,
+            },
         }
     }
 }
@@ -113,6 +127,26 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         self.mark_name.as_ref().map(Cow::Borrowed)
     }
+
+    fn move_from(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.move_from.as_ref().map(|o| {
+            if o.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(o.opid())
+            }
+        })
+    }
+
+    fn move_id(&self) -> Option<convert::ObjId<Self::OpId>> {
+        self.move_id.as_ref().map(|o| {
+            if o.is_root() {
+                convert::ObjId::Root
+            } else {
+                convert::ObjId::Op(o.opid())
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,6 +159,8 @@ pub(crate) struct ChangeOpsColumns {
     pred: OpIdListRange,
     expand: MaybeBooleanRange,
     mark_name: RleRange<smol_str::SmolStr>,
+    move_from: Option<ObjIdRange>,
+    move_id: Option<ObjIdRange>,
 }
 
 impl ChangeOpsColumns {
@@ -139,6 +175,8 @@ impl ChangeOpsColumns {
             pred: self.pred.iter(data),
             expand: self.expand.decoder(data),
             mark_name: self.mark_name.decoder(data),
+            move_id: self.move_id.as_ref().map(|o| o.iter(data)),
+            move_from: self.move_from.as_ref().map(|o| o.iter(data)),
         }
     }
 
@@ -173,8 +211,21 @@ impl ChangeOpsColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let pred = OpIdListRange::encode(ops.clone().map(|o| o.pred()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_name =
-            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.map(|o| o.mark_name()), out);
+        let mark_name = RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(
+            ops.clone().map(|o| o.mark_name()),
+            out,
+        );
+
+        // TODO: distinguish between root and None
+        let move_from = ObjIdRange::encode(
+            ops.clone()
+                .map(|o| o.move_from().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
+        let move_id = ObjIdRange::encode(
+            ops.map(|o| o.move_id().unwrap_or(convert::ObjId::Root)),
+            out,
+        );
         Self {
             obj,
             key,
@@ -184,6 +235,8 @@ impl ChangeOpsColumns {
             pred,
             expand,
             mark_name,
+            move_id,
+            move_from,
         }
     }
 
@@ -201,6 +254,10 @@ impl ChangeOpsColumns {
         let mut pred = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
         let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut move_from = ObjIdEncoder::new();
+        let mut move_id = ObjIdEncoder::new();
+
+        // TODO: distinguish between root and None
         for op in ops {
             tracing::trace!(expand=?op.expand(), "expand");
             obj.append(op.obj());
@@ -211,6 +268,8 @@ impl ChangeOpsColumns {
             pred.append(op.pred());
             expand.append(op.expand());
             mark_name.append(op.mark_name());
+            move_from.append(op.move_from().unwrap_or(convert::ObjId::Root));
+            move_id.append(op.move_id().unwrap_or(convert::ObjId::Root));
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -238,6 +297,9 @@ impl ChangeOpsColumns {
         out.extend(mark_name);
         let mark_name = RleRange::from(mark_name_start..out.len());
 
+        let move_from = move_from.finish(out);
+        let move_id = move_id.finish(out);
+
         Self {
             obj,
             key,
@@ -247,6 +309,8 @@ impl ChangeOpsColumns {
             pred,
             expand,
             mark_name,
+            move_id,
+            move_from,
         }
     }
 
@@ -289,6 +353,34 @@ impl ChangeOpsColumns {
             RawColumn::new(
                 ColumnSpec::new(VAL_COL_ID, ColumnType::ValueMetadata, false),
                 self.val.meta_range().clone().into(),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_ID_COL_ID, ColumnType::Actor, false),
+                self.move_id
+                    .as_ref()
+                    .map(|o| o.actor_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_ID_COL_ID, ColumnType::Integer, false),
+                self.move_id
+                    .as_ref()
+                    .map(|o| o.counter_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_FROM_COL_ID, ColumnType::Actor, false),
+                self.move_from
+                    .as_ref()
+                    .map(|o| o.actor_range().clone().into())
+                    .unwrap_or(0..0),
+            ),
+            RawColumn::new(
+                ColumnSpec::new(MOVE_FROM_COL_ID, ColumnType::Integer, false),
+                self.move_from
+                    .as_ref()
+                    .map(|o| o.counter_range().clone().into())
+                    .unwrap_or(0..0),
             ),
         ];
         if !self.val.raw_range().is_empty() {
@@ -351,6 +443,8 @@ pub(crate) struct ChangeOpsIter<'a> {
     pred: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
+    move_from: Option<ObjIdIter<'a>>,
+    move_id: Option<ObjIdIter<'a>>,
 }
 
 impl<'a> ChangeOpsIter<'a> {
@@ -374,6 +468,22 @@ impl<'a> ChangeOpsIter<'a> {
             let pred = self.pred.next_in_col("pred")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
+            // TODO: distinguish between root and None
+            let move_from = if let Some(ref mut objs) = self.move_from {
+                Some(objs.next_in_col("move_from")?)
+            } else if action == 8 {
+                // if it is a move operation, we treat `None` as root
+                Some(ObjId::root())
+            } else {
+                None
+            };
+
+            let move_id = if let Some(ref mut objs) = self.move_id {
+                Some(objs.next_in_col("move_id")?)
+            } else {
+                // if the action column is Move, this column will never be None
+                None
+            };
 
             // This check is necessary to ensure that OpType::from_action_and_value
             // cannot panic later in the process.
@@ -388,6 +498,8 @@ impl<'a> ChangeOpsIter<'a> {
                 pred,
                 expand,
                 mark_name,
+                move_from,
+                move_id,
             }))
         }
     }
@@ -437,6 +549,10 @@ impl TryFrom<Columns> for ChangeOpsColumns {
         let mut expand: Option<MaybeBooleanRange> = None;
         let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
         let mut other = Columns::empty();
+        let mut move_from_actor: Option<RleRange<u64>> = None;
+        let mut move_from_ctr: Option<RleRange<u64>> = None;
+        let mut move_id_actor: Option<RleRange<u64>> = None;
+        let mut move_id_ctr: Option<RleRange<u64>> = None;
 
         for (index, col) in columns.into_iter().enumerate() {
             match (col.id(), col.col_type()) {
@@ -492,6 +608,10 @@ impl TryFrom<Columns> for ChangeOpsColumns {
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
                 (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
+                (MOVE_ID_COL_ID, ColumnType::Actor) => move_id_actor = Some(col.range().into()),
+                (MOVE_ID_COL_ID, ColumnType::Integer) => move_id_ctr = Some(col.range().into()),
+                (MOVE_FROM_COL_ID, ColumnType::Actor) => move_from_actor = Some(col.range().into()),
+                (MOVE_FROM_COL_ID, ColumnType::Integer) => move_from_ctr = Some(col.range().into()),
                 (other_type, other_col) => {
                     tracing::warn!(typ=?other_type, id=?other_col, "unknown column");
                     other.append(col);
@@ -519,6 +639,14 @@ impl TryFrom<Columns> for ChangeOpsColumns {
             pred,
             expand: expand.unwrap_or_else(|| (0..0).into()),
             mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
+            move_from: ObjIdRange::new(
+                move_from_actor.unwrap_or_else(|| (0..0).into()),
+                move_from_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
+            move_id: ObjIdRange::new(
+                move_id_actor.unwrap_or_else(|| (0..0).into()),
+                move_id_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
         })
     }
 }
@@ -552,6 +680,8 @@ mod tests {
                 insert,
                 expand,
                 mark_name,
+                move_id: None,
+                move_from: None,
             }
         }
     }

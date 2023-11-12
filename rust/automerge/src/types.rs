@@ -214,6 +214,7 @@ pub enum OpType {
     Put(ScalarValue),
     MarkBegin(bool, MarkData),
     MarkEnd(bool),
+    Move(ScalarValue, bool), // (scalar value, validity)
 }
 
 impl OpType {
@@ -230,6 +231,7 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            Self::Move(_, _) => 8,
         }
     }
 
@@ -245,6 +247,7 @@ impl OpType {
             },
             6 => Ok(()),
             7 => Ok(()),
+            8 => Ok(()),
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }
@@ -271,6 +274,7 @@ impl OpType {
                 Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
+            8 => Self::Move(value, true),
             _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
@@ -630,6 +634,8 @@ pub(crate) struct Op {
     pub(crate) succ: OpIds,
     pub(crate) pred: OpIds,
     pub(crate) insert: bool,
+    pub(crate) move_from: Option<ObjId>,
+    pub(crate) move_id: Option<ObjId>,
 }
 
 pub(crate) enum SuccIter<'a> {
@@ -709,11 +715,21 @@ impl Op {
         self.action.to_str()
     }
 
+    pub(crate) fn is_valid(&self) -> bool {
+        match self.action {
+            OpType::Move(_, v) => v,
+            _ => true,
+        }
+    }
+
     pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
+        } else if self.is_move() {
+            // TODO: handle invalid successors
+            self.is_valid() // && !self.succ_iter().any(|i| {})
         } else {
             self.succ.is_empty()
         }
@@ -775,6 +791,10 @@ impl Op {
         matches!(&self.key, Key::Seq(_))
     }
 
+    pub(crate) fn is_move(&self) -> bool {
+        matches!(&self.action, OpType::Move(_, _))
+    }
+
     pub(crate) fn overwrites(&self, other: &Op) -> bool {
         self.pred.iter().any(|i| i == &other.id)
     }
@@ -817,6 +837,7 @@ impl Op {
     pub(crate) fn scalar_value(&self) -> Option<&ScalarValue> {
         match &self.action {
             OpType::Put(scalar) => Some(scalar),
+            OpType::Move(scalar, _) => Some(scalar),
             _ => None,
         }
     }
@@ -829,6 +850,10 @@ impl Op {
                 Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
             }
             OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
+            OpType::Move(scalar, _) => match scalar {
+                ScalarValue::Null => Value::Object(ObjType::Map),
+                other => Value::Scalar(Cow::Borrowed(other)),
+            },
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -843,6 +868,7 @@ impl Op {
             OpType::Delete => "del".to_string(),
             OpType::MarkBegin(_, _) => "markBegin".to_string(),
             OpType::MarkEnd(_) => "markEnd".to_string(),
+            OpType::Move(v, _) => format!("move:{}", v),
         }
     }
 
@@ -1014,6 +1040,8 @@ pub(crate) mod gen {
                 action,
                 succ: OpIds::empty(),
                 pred: OpIds::empty(),
+                move_id: None,
+                move_from: None,
             },
         )
     }

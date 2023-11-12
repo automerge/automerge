@@ -347,6 +347,8 @@ mod tests {
                     succ: OpIds::empty(),
                     pred: OpIds::empty(),
                     insert: false,
+                    move_from: None,
+                    move_id: None,
                 })
                 .collect::<Vec<_>>();
 
