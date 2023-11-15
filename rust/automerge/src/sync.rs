@@ -78,7 +78,12 @@ use crate::{
 };
 
 mod bloom;
+mod message_builder;
 mod state;
+use message_builder::MessageBuilder;
+
+#[cfg(test)]
+mod v1_compat_test;
 
 pub use bloom::{BloomFilter, DecodeError as DecodeBloomError};
 pub use state::DecodeError as DecodeStateError;
@@ -129,6 +134,37 @@ pub trait SyncDoc {
 }
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
+const MESSAGE_TYPE_SYNC_V2: u8 = 0x43; // first byte of a sync message, for identification
+
+#[derive(Debug)]
+enum MessageVersion {
+    V1,
+    V2,
+}
+
+impl MessageVersion {
+    fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
+        let (i, first_byte) = parse::take1(input)?;
+        match first_byte {
+            MESSAGE_TYPE_SYNC => Ok((i, Self::V1)),
+            MESSAGE_TYPE_SYNC_V2 => Ok((i, Self::V2)),
+            _ => Err(parse::ParseError::Error(ReadMessageError::WrongType {
+                expected_one_of: vec![MESSAGE_TYPE_SYNC, MESSAGE_TYPE_SYNC_V2],
+                found: first_byte,
+            })),
+        }
+    }
+
+    fn encode(&self) -> u8 {
+        match self {
+            Self::V1 => MESSAGE_TYPE_SYNC,
+            Self::V2 => MESSAGE_TYPE_SYNC_V2,
+        }
+    }
+}
+
+const CHANGE_LIST: u8 = 0x00;
+const CHANGE_WHOLE_DOC: u8 = 0x01;
 
 impl SyncDoc for Automerge {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
@@ -154,25 +190,72 @@ impl SyncDoc for Automerge {
                     .iter()
                     .all(|hash| self.get_change_by_hash(hash).is_some())
                 {
-                    let reset_msg = Message {
+                    let reset_msg = Message::V1 {
                         heads: our_heads,
                         need: Vec::new(),
                         have: vec![Have::default()],
                         changes: Vec::new(),
+                        supported_capabilities: Some(vec![
+                            Capability::MessageV1,
+                            Capability::MessageV2,
+                        ]),
                     };
                     return Some(reset_msg);
                 }
             }
         }
 
-        let changes_to_send = if let (Some(their_have), Some(their_need)) = (
+        let (message_builder, sent_hashes) = if let (Some(their_have), Some(their_need)) = (
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
-            self.get_changes_to_send(their_have, their_need)
-                .expect("Should have only used hashes that are in the document")
+            let send_doc = sync_state
+                .their_heads
+                .as_ref()
+                .map(|h| h.is_empty())
+                .unwrap_or(false)
+                && !sync_state.have_responded
+                && sync_state.supports_v2_messages();
+
+            if send_doc {
+                let hashes = self
+                    .get_changes(&[])
+                    .iter()
+                    .map(|c| c.hash())
+                    .collect::<Vec<_>>();
+                (
+                    MessageBuilder::new_v2(Changes::WholeDoc(self.save())),
+                    hashes,
+                )
+            } else {
+                let all_changes = self
+                    .get_changes_to_send(their_have, their_need)
+                    .expect("Should have only used hashes that are in the document");
+                // deduplicate the changes to send with those we have already sent and clone it now
+                let changes = all_changes
+                    .into_iter()
+                    .filter_map(|change| {
+                        if !sync_state.sent_hashes.contains(&change.hash()) {
+                            Some(change.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let hashes = changes.iter().map(|c| c.hash()).collect::<Vec<_>>();
+                if sync_state.supports_v2_messages() {
+                    (MessageBuilder::new_v2(Changes::ChangeList(changes)), hashes)
+                } else {
+                    (MessageBuilder::new_v1(changes), hashes)
+                }
+            }
+        } else if sync_state.supports_v2_messages() {
+            (
+                MessageBuilder::new_v2(Changes::ChangeList(Vec::new())),
+                Vec::new(),
+            )
         } else {
-            Vec::new()
+            (MessageBuilder::new_v1(Vec::new()), Vec::new())
         };
 
         let heads_unchanged = sync_state.last_sent_heads == our_heads;
@@ -183,20 +266,8 @@ impl SyncDoc for Automerge {
             false
         };
 
-        // deduplicate the changes to send with those we have already sent and clone it now
-        let changes_to_send = changes_to_send
-            .into_iter()
-            .filter_map(|change| {
-                if !sync_state.sent_hashes.contains(&change.hash()) {
-                    Some(change.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
         if heads_unchanged && sync_state.have_responded {
-            if heads_equal && changes_to_send.is_empty() {
+            if heads_equal && !message_builder.has_changes_to_send() {
                 return None;
             }
             if sync_state.in_flight {
@@ -204,18 +275,24 @@ impl SyncDoc for Automerge {
             }
         }
 
+        // Only send the supported capabilities in the first message, the other end will store them
+        // in it's sync state and use them for subsequent messages
+        let supported_capabilities = if sync_state.have_responded {
+            None
+        } else {
+            Some(vec![Capability::MessageV1, Capability::MessageV2])
+        };
+
         sync_state.have_responded = true;
         sync_state.last_sent_heads = our_heads.clone();
-        sync_state
-            .sent_hashes
-            .extend(changes_to_send.iter().map(|c| c.hash()));
+        sync_state.sent_hashes.extend(sent_hashes);
 
-        let sync_message = Message {
-            heads: our_heads,
-            have: our_have,
-            need: our_need,
-            changes: changes_to_send,
-        };
+        let sync_message = message_builder
+            .heads(our_heads)
+            .have(our_have)
+            .need(our_need)
+            .supported_capabilities(supported_capabilities)
+            .build();
 
         sync_state.in_flight = true;
         Some(sync_message)
@@ -324,27 +401,42 @@ impl Automerge {
     pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,
-        message: Message,
+        mut message: Message,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
 
-        let Message {
-            heads: message_heads,
-            changes: message_changes,
-            need: message_need,
-            have: message_have,
-        } = message;
+        let message_heads = message.take_heads();
+        let message_need = message.take_need();
+        let message_have = message.take_have();
 
-        let changes_is_empty = message_changes.is_empty();
-        if !changes_is_empty {
-            self.apply_changes_log_patches(message_changes, patch_log)?;
-            sync_state.shared_heads = advance_heads(
-                &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
-                &sync_state.shared_heads,
-            );
+        if let Some(caps) = message.take_supported_capabilities() {
+            sync_state.their_capabilities = Some(caps);
+        }
+
+        let changes_is_empty = message.changes_are_empty();
+        match message {
+            Message::V1 { changes, .. }
+            | Message::V2 {
+                changes: Changes::ChangeList(changes),
+                ..
+            } => {
+                if !changes.is_empty() {
+                    self.apply_changes_log_patches(changes, patch_log)?;
+                    sync_state.shared_heads = advance_heads(
+                        &before_heads.iter().collect(),
+                        &self.get_heads().into_iter().collect(),
+                        &sync_state.shared_heads,
+                    );
+                }
+            }
+            Message::V2 {
+                changes: Changes::WholeDoc(doc),
+                ..
+            } => {
+                self.load_incremental_log_patches(&doc, patch_log)?;
+            }
         }
 
         // trim down the sent hashes to those that we know they haven't seen
@@ -430,16 +522,47 @@ impl From<parse::ParseError<ReadMessageError>> for ReadMessageError {
 }
 
 /// The sync message to be sent.
+///
+/// ## Notes about encoding
+///
+/// There are two versions of the sync message, V1 and V2. The V1 message is the original message
+/// which automerge shipped with and V2 is an extension which allows for encoding the changes as
+/// either a list of changes or as a compressed document format. This makes syncing up for the
+/// first time faster.
+///
+/// Encoding this in a backwards compatible way is a bit tricky. The wire format of the v1 message
+/// didn't allow for any forwards compatible changes. In order to accomodate this the first message
+/// a peer sends is a V1 message with a length previxed `Vec<Capability>` appended to it. For old
+/// implementations this appended data is just ignored but new implementations read it and store
+/// the advertised capabilities on the sync state. This allows new implementations to discover if
+/// the remote peer supports the V2 message format (the `Capability::MessageV2` capability) and if
+/// so send a V2 message.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Message {
-    /// The heads of the sender.
-    pub heads: Vec<ChangeHash>,
-    /// The hashes of any changes that are being explicitly requested from the recipient.
-    pub need: Vec<ChangeHash>,
-    /// A summary of the changes that the sender already has.
-    pub have: Vec<Have>,
-    /// The changes for the recipient to apply.
-    pub changes: Vec<Change>,
+pub enum Message {
+    V1 {
+        /// The heads of the sender.
+        heads: Vec<ChangeHash>,
+        /// The hashes of any changes that are being explicitly requested from the recipient.
+        need: Vec<ChangeHash>,
+        /// A summary of the changes that the sender already has.
+        have: Vec<Have>,
+        /// The changes for the recipient to apply.
+        changes: Vec<Change>,
+        /// The capabilities the sender supports
+        supported_capabilities: Option<Vec<Capability>>,
+    },
+    V2 {
+        /// The heads of the sender.
+        heads: Vec<ChangeHash>,
+        /// The hashes of any changes that are being explicitly requested from the recipient.
+        need: Vec<ChangeHash>,
+        /// A summary of the changes that the sender already has.
+        have: Vec<Have>,
+        /// The changes for the recipient to apply.
+        changes: Changes,
+        /// The capabilities the sender supports
+        supported_capabilities: Option<Vec<Capability>>,
+    },
 }
 
 impl serde::Serialize for Message {
@@ -448,17 +571,34 @@ impl serde::Serialize for Message {
         S: serde::Serializer,
     {
         let mut map = serializer.serialize_map(Some(4))?;
-        map.serialize_entry("heads", &self.heads)?;
-        map.serialize_entry("need", &self.need)?;
-        map.serialize_entry("have", &self.have)?;
-        map.serialize_entry(
-            "changes",
-            &self
-                .changes
-                .iter()
-                .map(crate::ExpandedChange::from)
-                .collect::<Vec<_>>(),
-        )?;
+        map.serialize_entry("heads", &self.heads())?;
+        map.serialize_entry("need", &self.need())?;
+        map.serialize_entry("have", &self.have())?;
+        match self {
+            Self::V1 { changes, .. } => {
+                map.serialize_entry(
+                    "changes",
+                    &changes
+                        .iter()
+                        .map(crate::ExpandedChange::from)
+                        .collect::<Vec<_>>(),
+                )?;
+            }
+            Self::V2 { changes, .. } => match &changes {
+                Changes::ChangeList(changes) => {
+                    map.serialize_entry(
+                        "changes",
+                        &changes
+                            .iter()
+                            .map(crate::ExpandedChange::from)
+                            .collect::<Vec<_>>(),
+                    )?;
+                }
+                Changes::WholeDoc(bytes) => {
+                    map.serialize_entry("whole_doc", &bytes)?;
+                }
+            },
+        }
         map.end()
     }
 }
@@ -471,6 +611,81 @@ fn parse_have(input: parse::Input<'_>) -> parse::ParseResult<'_, Have, ReadMessa
 }
 
 impl Message {
+    pub fn heads(&self) -> &[ChangeHash] {
+        match self {
+            Self::V1 { heads, .. } => heads,
+            Self::V2 { heads, .. } => heads,
+        }
+    }
+
+    fn take_heads(&mut self) -> Vec<ChangeHash> {
+        match self {
+            Self::V1 { heads, .. } => std::mem::take(heads),
+            Self::V2 { heads, .. } => std::mem::take(heads),
+        }
+    }
+
+    pub fn need(&self) -> &[ChangeHash] {
+        match self {
+            Self::V1 { need, .. } => need,
+            Self::V2 { need, .. } => need,
+        }
+    }
+
+    fn take_need(&mut self) -> Vec<ChangeHash> {
+        match self {
+            Self::V1 { need, .. } => std::mem::take(need),
+            Self::V2 { need, .. } => std::mem::take(need),
+        }
+    }
+
+    pub fn have(&self) -> &[Have] {
+        match self {
+            Self::V1 { have, .. } => have,
+            Self::V2 { have, .. } => have,
+        }
+    }
+
+    fn take_have(&mut self) -> Vec<Have> {
+        match self {
+            Self::V1 { have, .. } => std::mem::take(have),
+            Self::V2 { have, .. } => std::mem::take(have),
+        }
+    }
+
+    pub fn changes_are_empty(&self) -> bool {
+        match self {
+            Self::V1 { changes, .. } => changes.is_empty(),
+            Self::V2 { changes, .. } => changes.is_empty(),
+        }
+    }
+
+    pub fn supported_capabilities(&self) -> Option<&[Capability]> {
+        match self {
+            Self::V1 {
+                supported_capabilities,
+                ..
+            } => supported_capabilities.as_deref(),
+            Self::V2 {
+                supported_capabilities,
+                ..
+            } => supported_capabilities.as_deref(),
+        }
+    }
+
+    fn take_supported_capabilities(&mut self) -> Option<Vec<Capability>> {
+        match self {
+            Self::V1 {
+                supported_capabilities,
+                ..
+            } => supported_capabilities.take(),
+            Self::V2 {
+                supported_capabilities,
+                ..
+            } => supported_capabilities.take(),
+        }
+    }
+
     pub fn decode(input: &[u8]) -> Result<Self, ReadMessageError> {
         let input = parse::Input::new(input);
         match Self::parse(input) {
@@ -481,66 +696,166 @@ impl Message {
     }
 
     pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
-        let (i, message_type) = parse::take1(input)?;
-        if message_type != MESSAGE_TYPE_SYNC {
-            return Err(parse::ParseError::Error(ReadMessageError::WrongType {
-                expected_one_of: vec![MESSAGE_TYPE_SYNC],
-                found: message_type,
-            }));
-        }
+        let (i, message_version) = MessageVersion::parse(input)?;
 
         let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
         let (i, need) = parse::length_prefixed(parse::change_hash)(i)?;
         let (i, have) = parse::length_prefixed(parse_have)(i)?;
 
-        let change_parser = |i| {
-            let (i, bytes) = parse::length_prefixed_bytes(i)?;
-            let (_, change) =
-                StoredChange::parse(parse::Input::new(bytes)).map_err(|e| e.lift())?;
-            Ok((i, change))
-        };
-        let (i, stored_changes) = parse::length_prefixed(change_parser)(i)?;
-        let changes_len = stored_changes.len();
-        let changes: Vec<Change> = stored_changes
-            .into_iter()
-            .try_fold::<_, _, Result<_, ReadMessageError>>(
-                Vec::with_capacity(changes_len),
-                |mut acc, stored| {
-                    let change = Change::new_from_unverified(stored.into_owned(), None)
-                        .map_err(ReadMessageError::ReadChangeOps)?;
-                    acc.push(change);
-                    Ok(acc)
-                },
-            )?;
-
-        Ok((
-            i,
-            Message {
-                heads,
-                need,
-                have,
-                changes,
-            },
-        ))
+        match message_version {
+            MessageVersion::V1 => {
+                let (i, changes) = parse_change_list(i)?;
+                let (i, supported_capabilities) = if !i.is_empty() {
+                    let (i, caps) = parse::length_prefixed(Capability::parse)(i)?;
+                    (i, Some(caps))
+                } else {
+                    (i, None)
+                };
+                Ok((
+                    i,
+                    Message::V1 {
+                        heads,
+                        need,
+                        have,
+                        changes,
+                        supported_capabilities,
+                    },
+                ))
+            }
+            MessageVersion::V2 => {
+                let (i, changes) = Changes::parse(i)?;
+                let (i, supported_capabilities) = if !i.is_empty() {
+                    let (i, caps) = parse::length_prefixed(Capability::parse)(i)?;
+                    (i, Some(caps))
+                } else {
+                    (i, None)
+                };
+                Ok((
+                    i,
+                    Message::V2 {
+                        heads,
+                        need,
+                        have,
+                        changes,
+                        supported_capabilities,
+                    },
+                ))
+            }
+        }
     }
 
     pub fn encode(mut self) -> Vec<u8> {
-        let mut buf = vec![MESSAGE_TYPE_SYNC];
+        let mut buf = match self {
+            Self::V1 { .. } => vec![MessageVersion::V1.encode()],
+            Self::V2 { .. } => vec![MessageVersion::V2.encode()],
+        };
 
-        encode_hashes(&mut buf, &self.heads);
-        encode_hashes(&mut buf, &self.need);
-        encode_many(&mut buf, self.have.iter(), |buf, h| {
+        encode_hashes(&mut buf, self.heads());
+        encode_hashes(&mut buf, self.need());
+        encode_many(&mut buf, self.have().iter(), |buf, h| {
             encode_hashes(buf, &h.last_sync);
             leb128::write::unsigned(buf, h.bloom.to_bytes().len() as u64).unwrap();
             buf.extend(h.bloom.to_bytes());
         });
 
-        encode_many(&mut buf, self.changes.iter_mut(), |buf, change| {
-            leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
-            buf.extend::<&[u8]>(change.raw_bytes().as_ref())
-        });
+        let supported_capabilities = self.take_supported_capabilities();
+
+        match self {
+            Self::V1 { changes, .. } => {
+                encode_many(&mut buf, changes.iter(), |buf, change| {
+                    leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
+                    buf.extend::<&[u8]>(change.raw_bytes().as_ref())
+                });
+            }
+            Self::V2 { changes, .. } => changes.encode(&mut buf),
+        }
+
+        if let Some(supported_capabilities) = supported_capabilities {
+            encode_many(&mut buf, supported_capabilities.iter(), |buf, cap| {
+                cap.encode(buf);
+            });
+        }
 
         buf
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub enum Capability {
+    #[default]
+    MessageV1,
+    MessageV2,
+    Unknown(u8),
+}
+
+impl Capability {
+    fn encode(&self, out: &mut Vec<u8>) {
+        match self {
+            Capability::MessageV1 => out.push(0x01),
+            Capability::MessageV2 => out.push(0x02),
+            Capability::Unknown(v) => out.push(*v),
+        }
+    }
+
+    fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
+        let (i, v) = parse::take1(input)?;
+        match v {
+            0x01 => Ok((i, Self::MessageV1)),
+            0x02 => Ok((i, Self::MessageV2)),
+            _ => Ok((i, Self::Unknown(v))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Changes {
+    ChangeList(Vec<Change>),
+    WholeDoc(Vec<u8>),
+}
+
+impl Changes {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::ChangeList(changes) => changes.is_empty(),
+            Self::WholeDoc(bytes) => bytes.is_empty(),
+        }
+    }
+
+    fn encode(self, buf: &mut Vec<u8>) {
+        match self {
+            Changes::ChangeList(mut changes) => {
+                buf.push(CHANGE_LIST);
+                encode_many(buf, changes.iter_mut(), |buf, change| {
+                    leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
+                    buf.extend::<&[u8]>(change.raw_bytes().as_ref())
+                });
+            }
+            Changes::WholeDoc(doc) => {
+                buf.push(CHANGE_WHOLE_DOC);
+                leb128::write::unsigned(buf, doc.len() as u64).unwrap();
+                buf.extend::<&[u8]>(&doc);
+            }
+        }
+    }
+
+    fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
+        let (i, change_type) = parse::take1(input)?;
+        match change_type {
+            CHANGE_LIST => {
+                let (i, changes) = parse_change_list(i)?;
+                Ok((i, Self::ChangeList(changes)))
+            }
+            CHANGE_WHOLE_DOC => Self::parse_whole_doc(i),
+            _ => Err(parse::ParseError::Error(ReadMessageError::WrongType {
+                expected_one_of: vec![CHANGE_LIST, CHANGE_WHOLE_DOC],
+                found: change_type,
+            })),
+        }
+    }
+
+    fn parse_whole_doc(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
+        let (i, bytes) = parse::length_prefixed_bytes(input)?;
+        Ok((i, Self::WholeDoc(bytes.to_vec())))
     }
 }
 
@@ -589,6 +904,28 @@ fn advance_heads(
     advanced_heads
 }
 
+fn parse_change_list(i: parse::Input<'_>) -> parse::ParseResult<'_, Vec<Change>, ReadMessageError> {
+    let change_parser = |i| {
+        let (i, bytes) = parse::length_prefixed_bytes(i)?;
+        let (_, change) = StoredChange::parse(parse::Input::new(bytes)).map_err(|e| e.lift())?;
+        Ok((i, change))
+    };
+    let (i, stored_changes) = parse::length_prefixed(change_parser)(i)?;
+    let changes_len = stored_changes.len();
+    let changes: Vec<Change> = stored_changes
+        .into_iter()
+        .try_fold::<_, _, Result<_, ReadMessageError>>(
+            Vec::with_capacity(changes_len),
+            |mut acc, stored| {
+                let change = Change::new_from_unverified(stored.into_owned(), None)
+                    .map_err(ReadMessageError::ReadChangeOps)?;
+                acc.push(change);
+                Ok(acc)
+            },
+        )?;
+    Ok((i, changes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,6 +935,12 @@ mod tests {
     use crate::types::gen::gen_hash;
     use crate::ActorId;
     use proptest::prelude::*;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum EncodeAs {
+        V1,
+        V2,
+    }
 
     prop_compose! {
         fn gen_bloom()(hashes in gen_sorted_hashes(0..10)) -> BloomFilter {
@@ -621,18 +964,52 @@ mod tests {
         })
     }
 
+    fn gen_changes() -> impl Strategy<Value = (Changes, EncodeAs)> {
+        prop_oneof![
+            proptest::collection::vec(gen_change(), 0..10)
+                .prop_map(Changes::ChangeList)
+                .prop_flat_map(|c| {
+                    prop_oneof![Just((c.clone(), EncodeAs::V1)), Just((c, EncodeAs::V2)),]
+                }),
+            proptest::collection::vec(any::<u8>(), 0..10)
+                .prop_map(Changes::WholeDoc)
+                .prop_map(|c| (c, EncodeAs::V2))
+        ]
+    }
+
     prop_compose! {
         fn gen_sync_message()(
             heads in gen_sorted_hashes(0..10),
             need in gen_sorted_hashes(0..10),
             have in proptest::collection::vec(gen_have(), 0..10),
-            changes in proptest::collection::vec(gen_change(), 0..10),
+            (changes, encode_as) in gen_changes(),
+            supported_capabilities in prop_oneof![
+                Just(None),
+                Just(Some(vec![Capability::MessageV1])),
+                Just(Some(vec![Capability::MessageV2])),
+                Just(Some(vec![Capability::MessageV1, Capability::MessageV2])),
+            ],
         ) -> Message {
-            Message {
-                heads,
-                need,
-                have,
-                changes,
+            match (encode_as, changes) {
+                (EncodeAs::V1, Changes::ChangeList(changes)) => {
+                    Message::V1 {
+                        heads,
+                        need,
+                        have,
+                        changes,
+                        supported_capabilities,
+                    }
+                }
+                (EncodeAs::V1, Changes::WholeDoc(_)) => unreachable!(),
+                (EncodeAs::V2, changes) => {
+                    Message::V2 {
+                        heads,
+                        need,
+                        have,
+                        changes,
+                        supported_capabilities,
+                    }
+                }
             }
         }
 
@@ -640,11 +1017,12 @@ mod tests {
 
     #[test]
     fn encode_decode_empty_message() {
-        let msg = Message {
+        let msg = Message::V2 {
             heads: vec![],
             need: vec![],
             have: vec![],
-            changes: vec![],
+            changes: Changes::ChangeList(vec![]),
+            supported_capabilities: None,
         };
         let encoded = msg.encode();
         Message::parse(Input::new(&encoded)).unwrap();
@@ -746,10 +1124,24 @@ mod tests {
             .sync()
             .generate_sync_message(&mut s2)
             .expect("initial sync message from 2 to 1 was None");
-        assert_eq!(msg1to2.changes.len(), 0);
-        assert_eq!(msg1to2.have[0].last_sync.len(), 0);
-        assert_eq!(msg2to1.changes.len(), 0);
-        assert_eq!(msg2to1.have[0].last_sync.len(), 0);
+        let Message::V1 {
+            changes: changes1to2,
+            ..
+        } = &msg1to2
+        else {
+            panic!("expected a changelist");
+        };
+        assert_eq!(changes1to2.len(), 0);
+        assert_eq!(msg1to2.have()[0].last_sync.len(), 0);
+        let Message::V1 {
+            changes: changes2to1,
+            ..
+        } = &msg2to1
+        else {
+            panic!("expected a changelist");
+        };
+        assert_eq!(changes2to1.len(), 0);
+        assert_eq!(msg2to1.have()[0].last_sync.len(), 0);
 
         //// doc1 and doc2 receive that message and update sync state
         doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
@@ -761,13 +1153,27 @@ mod tests {
             .sync()
             .generate_sync_message(&mut s1)
             .expect("first reply from 1 to 2 was None");
-        assert_eq!(msg1to2.changes.len(), 5);
+        let Message::V2 {
+            changes: Changes::ChangeList(changes1to2),
+            ..
+        } = &msg1to2
+        else {
+            panic!("expected change list");
+        };
+        assert_eq!(changes1to2.len(), 5);
 
         let msg2to1 = doc2
             .sync()
             .generate_sync_message(&mut s2)
             .expect("first reply from 2 to 1 was None");
-        assert_eq!(msg2to1.changes.len(), 5);
+        let Message::V2 {
+            changes: Changes::ChangeList(changes2to1),
+            ..
+        } = &msg2to1
+        else {
+            panic!("expected change list");
+        };
+        assert_eq!(changes2to1.len(), 5);
 
         //// both should now apply the changes
         doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
@@ -781,12 +1187,26 @@ mod tests {
             .sync()
             .generate_sync_message(&mut s1)
             .expect("second reply from 1 to 2 was None");
-        assert_eq!(msg1to2.changes.len(), 0);
+        let Message::V2 {
+            changes: Changes::ChangeList(changes1to2),
+            ..
+        } = &msg1to2
+        else {
+            panic!("expected change list");
+        };
+        assert_eq!(changes1to2.len(), 0);
         let msg2to1 = doc2
             .sync()
             .generate_sync_message(&mut s2)
             .expect("second reply from 2 to 1 was None");
-        assert_eq!(msg2to1.changes.len(), 0);
+        let Message::V2 {
+            changes: Changes::ChangeList(changes2to1),
+            ..
+        } = &msg2to1
+        else {
+            panic!("expected change list");
+        };
+        assert_eq!(changes2to1.len(), 0);
 
         //// After receiving acknowledgements, their shared heads should be equal
         doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
@@ -807,7 +1227,7 @@ mod tests {
             .expect("third reply from 1 to 2 was None");
         let mut expected_heads = vec![head1, head2];
         expected_heads.sort();
-        let mut actual_heads = msg1to2.have[0].last_sync.clone();
+        let mut actual_heads = msg1to2.have()[0].last_sync.clone();
         actual_heads.sort();
         assert_eq!(actual_heads, expected_heads);
     }
@@ -1047,5 +1467,37 @@ mod tests {
             }
             iterations += 1;
         }
+    }
+
+    #[test]
+    fn if_first_message_has_no_heads_and_supports_v2_message_send_whole_doc() {
+        let mut doc1 = crate::AutoCommit::new();
+        let mut doc2 = crate::AutoCommit::new();
+        doc2.put(crate::ROOT, "foo", "bar").unwrap();
+
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        let outgoing = doc1
+            .sync()
+            .generate_sync_message(&mut s1)
+            .expect("message was none");
+
+        println!("{:?}", outgoing);
+
+        doc2.sync().receive_sync_message(&mut s2, outgoing).unwrap();
+
+        let response = doc2
+            .sync()
+            .generate_sync_message(&mut s2)
+            .expect("response was none");
+
+        assert!(matches!(
+            response,
+            Message::V2 {
+                changes: Changes::WholeDoc(_),
+                ..
+            }
+        ));
     }
 }

@@ -59,7 +59,17 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage) -> *mut AMresult {
     to_result(match sync_message.as_ref() {
-        Some(sync_message) => sync_message.body.changes.as_slice(),
+        Some(sync_message) => match &sync_message.body {
+            am::sync::Message::V1 { changes, .. }
+            | am::sync::Message::V2 {
+                changes: am::sync::Changes::ChangeList(changes),
+                ..
+            } => changes.as_slice(),
+            am::sync::Message::V2 {
+                changes: am::sync::Changes::WholeDoc(_),
+                ..
+            } => todo!(),
+        },
         None => Default::default(),
     })
 }
@@ -119,7 +129,7 @@ pub unsafe extern "C" fn AMsyncMessageEncode(sync_message: *const AMsyncMessage)
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) -> *mut AMresult {
     to_result(match sync_message.as_ref() {
-        Some(sync_message) => sync_message.as_ref().have.as_slice(),
+        Some(sync_message) => sync_message.as_ref().have(),
         None => Default::default(),
     })
 }
@@ -139,7 +149,7 @@ pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) 
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) -> *mut AMresult {
     to_result(match sync_message.as_ref() {
-        Some(sync_message) => sync_message.as_ref().heads.as_slice(),
+        Some(sync_message) => sync_message.as_ref().heads(),
         None => Default::default(),
     })
 }
@@ -160,7 +170,7 @@ pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) 
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageNeeds(sync_message: *const AMsyncMessage) -> *mut AMresult {
     to_result(match sync_message.as_ref() {
-        Some(sync_message) => sync_message.as_ref().need.as_slice(),
+        Some(sync_message) => sync_message.as_ref().need(),
         None => Default::default(),
     })
 }
