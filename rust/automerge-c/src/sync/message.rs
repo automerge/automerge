@@ -45,26 +45,6 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 }
 
 /// \memberof AMsyncMessage
-/// \brief Gets the changes for the recipient to apply.
-///
-/// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
-/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
-/// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to
-///          `AMresultFree()` in order to avoid a memory leak.
-/// \internal
-///
-/// # Safety
-/// sync_message must be a valid pointer to an AMsyncMessage
-#[no_mangle]
-pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage) -> *mut AMresult {
-    to_result(match sync_message.as_ref() {
-        Some(sync_message) => sync_message.body.changes.as_slice(),
-        None => Default::default(),
-    })
-}
-
-/// \memberof AMsyncMessage
 /// \brief Decodes an array of bytes into a synchronization message.
 ///
 /// \param[in] src A pointer to an array of bytes.
