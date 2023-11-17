@@ -261,8 +261,6 @@ mod tests {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
             key: Key::Map(0),
-            succ: Default::default(),
-            pred: Default::default(),
             insert: false,
         };
         osd.push(ROOT.into(), op)
@@ -377,7 +375,7 @@ mod tests {
     }
 
     fn make_optree(actions: &[Action], osd: &OpSetData) -> super::OpTreeInternal {
-        let mut optree = OpTreeInternal::new();
+        let mut optree = OpTreeInternal::default();
         for action in actions {
             match action {
                 Action::Insert(index, idx) => {

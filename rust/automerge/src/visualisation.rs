@@ -173,7 +173,7 @@ impl OpTable {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(e.as_op2(osd), obj, osd, actor_shorthands))
+            .map(|e| OpTableRow::create(e.as_op(osd), obj, osd, actor_shorthands))
             .collect();
         OpTable { rows }
     }
@@ -250,12 +250,12 @@ impl OpTableRow {
             crate::types::Key::Map(k) => osd.props[*k].clone(),
             crate::types::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
-        let succ = op.succ().iter().fold(String::new(), |mut output, s| {
-            let _ = write!(output, ",{}", print_opid(s, actor_shorthands));
+        let succ = op.succ().fold(String::new(), |mut output, s| {
+            let _ = write!(output, ",{}", print_opid(s.id(), actor_shorthands));
             output
         });
         let pred = op.pred().fold(String::new(), |mut output, p| {
-            let _ = write!(output, ",{}", print_opid(p, actor_shorthands));
+            let _ = write!(output, ",{}", print_opid(p.id(), actor_shorthands));
             output
         });
         OpTableRow {

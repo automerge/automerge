@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::exid::ExId;
-use crate::types::{OpId, Prop};
+use crate::types::Prop;
 use crate::{PatchAction, ScalarValue, SequenceTree};
 
 use super::{HydrateError, Value};
@@ -81,7 +81,7 @@ impl List {
 impl ListValue {
     pub(crate) fn increment(&mut self, n: i64) -> Result<(), HydrateError> {
         if let Value::Scalar(ScalarValue::Counter(c)) = &mut self.value {
-            c.increment(n, OpId::new(0, 0));
+            c.increment(n);
             Ok(())
         } else {
             Err(HydrateError::BadIncrement)

@@ -135,7 +135,8 @@ impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
     type Item = DocOpId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(s) = self.op.succ().get(self.offset) {
+        // FIXME
+        if let Some(s) = self.op.succ().nth(self.offset).map(|op| op.id()) {
             self.offset += 1;
             Some(translate(self.actor_index, s))
         } else {
