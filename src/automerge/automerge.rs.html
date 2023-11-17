@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge.rs`."><title>automerge.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge.rs`."><title>automerge.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -1866,6 +1866,13 @@
 <a href="#1866" id="1866">1866</a>
 <a href="#1867" id="1867">1867</a>
 <a href="#1868" id="1868">1868</a>
+<a href="#1869" id="1869">1869</a>
+<a href="#1870" id="1870">1870</a>
+<a href="#1871" id="1871">1871</a>
+<a href="#1872" id="1872">1872</a>
+<a href="#1873" id="1873">1873</a>
+<a href="#1874" id="1874">1874</a>
+<a href="#1875" id="1875">1875</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1879,7 +1886,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
 <span class="kw">use </span><span class="kw">crate</span>::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
-<span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
+<span class="kw">use </span><span class="kw">crate</span>::op_set::{OpSet, OpSetData};
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::patches::{Patch, PatchLog, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::query;
@@ -1888,8 +1895,8 @@
     <span class="self">self</span>, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 <span class="kw">use </span><span class="kw">crate</span>::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
+    OpBuilder, OpId, OpType, Value,
 };
 <span class="kw">use crate</span>::{hydrate, ScalarValue};
 <span class="kw">use crate</span>::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -2077,6 +2084,10 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>.ops
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>osd(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>OpSetData {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd
+    }
+
     <span class="doccomment">/// Whether this document has any operations
     </span><span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.history.is_empty() &amp;&amp; <span class="self">self</span>.queue.is_empty()
@@ -2085,7 +2096,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ActorId {
         <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.actor {
             Actor::Unused(id) =&gt; id.clone(),
-            Actor::Cached(idx) =&gt; <span class="self">self</span>.ops.m.actors[<span class="kw-2">*</span>idx].clone(),
+            Actor::Cached(idx) =&gt; <span class="self">self</span>.ops.osd.actors[<span class="kw-2">*</span>idx].clone(),
         }
     }
 
@@ -2101,9 +2112,9 @@
     /// If the last actor in the OpSet is not the actor ID of this document
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>rollback_last_actor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="kw">if let </span>Actor::Cached(actor_idx) = <span class="self">self</span>.actor {
-            <span class="kw">if </span><span class="self">self</span>.states.get(<span class="kw-2">&amp;</span>actor_idx).is_none() &amp;&amp; <span class="self">self</span>.ops.m.actors.len() &gt; <span class="number">0 </span>{
-                <span class="macro">assert!</span>(<span class="self">self</span>.ops.m.actors.len() == actor_idx + <span class="number">1</span>);
-                <span class="kw">let </span>actor = <span class="self">self</span>.ops.m.actors.remove_last();
+            <span class="kw">if </span><span class="self">self</span>.states.get(<span class="kw-2">&amp;</span>actor_idx).is_none() &amp;&amp; <span class="self">self</span>.ops.osd.actors.len() &gt; <span class="number">0 </span>{
+                <span class="macro">assert!</span>(<span class="self">self</span>.ops.osd.actors.len() == actor_idx + <span class="number">1</span>);
+                <span class="kw">let </span>actor = <span class="self">self</span>.ops.osd.actors.remove_last();
                 <span class="self">self</span>.actor = Actor::Unused(actor);
             }
         }
@@ -2125,7 +2136,7 @@
     </span><span class="kw">pub fn </span>get_actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ActorId {
         <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.actor {
             Actor::Unused(actor) =&gt; actor,
-            Actor::Cached(index) =&gt; <span class="self">self</span>.ops.m.actors.get(<span class="kw-2">*</span>index),
+            Actor::Cached(index) =&gt; <span class="self">self</span>.ops.osd.actors.get(<span class="kw-2">*</span>index),
         }
     }
 
@@ -2134,7 +2145,7 @@
             Actor::Unused(actor) =&gt; {
                 <span class="kw">let </span>index = <span class="self">self
                     </span>.ops
-                    .m
+                    .osd
                     .actors
                     .cache(std::mem::replace(actor, ActorId::from(<span class="kw-2">&amp;</span>[][..])));
                 <span class="self">self</span>.actor = Actor::Cached(index);
@@ -2195,11 +2206,12 @@
 
         <span class="comment">// SAFETY: this unwrap is safe as we always add 1
         </span><span class="kw">let </span>start_op = NonZeroU64::new(<span class="self">self</span>.max_op + <span class="number">1</span>).unwrap();
-
+        <span class="kw">let </span>idx_range = <span class="self">self</span>.osd().start_range();
         TransactionArgs {
             actor_index,
             seq,
             start_op,
+            idx_range,
             deps,
             scope,
         }
@@ -2363,9 +2375,9 @@
         <span class="kw">match </span>id {
             ExId::Root =&gt; <span class="prelude-val">Ok</span>(OpId::new(<span class="number">0</span>, <span class="number">0</span>)),
             ExId::Id(ctr, actor, idx) =&gt; {
-                <span class="kw">let </span>opid = <span class="kw">if </span><span class="self">self</span>.ops.m.actors.cache.get(<span class="kw-2">*</span>idx) == <span class="prelude-val">Some</span>(actor) {
+                <span class="kw">let </span>opid = <span class="kw">if </span><span class="self">self</span>.ops.osd.actors.cache.get(<span class="kw-2">*</span>idx) == <span class="prelude-val">Some</span>(actor) {
                     OpId::new(<span class="kw-2">*</span>ctr, <span class="kw-2">*</span>idx)
-                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(backup_idx) = <span class="self">self</span>.ops.m.actors.lookup(actor) {
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(backup_idx) = <span class="self">self</span>.ops.osd.actors.lookup(actor) {
                     OpId::new(<span class="kw-2">*</span>ctr, backup_idx)
                 } <span class="kw">else </span>{
                     <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidObjId(id.to_string()));
@@ -2390,7 +2402,7 @@
         cursor: <span class="kw-2">&amp;</span>Cursor,
         clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, AutomergeError&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = <span class="self">self</span>.ops.m.actors.lookup(cursor.actor()) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = <span class="self">self</span>.ops.osd.actors.lookup(cursor.actor()) {
             <span class="kw">let </span>opid = OpId::new(cursor.ctr(), idx);
             <span class="kw">match </span>clock {
                 <span class="prelude-val">Some</span>(clock) <span class="kw">if </span>!clock.covers(<span class="kw-2">&amp;</span>opid) =&gt; {
@@ -2407,10 +2419,6 @@
         <span class="kw">let </span>opid = <span class="self">self</span>.exid_to_opid(id)<span class="question-mark">?</span>;
         <span class="kw">let </span>obj = ObjId(opid);
         <span class="self">self</span>.get_obj_meta(obj)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_value&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;) -&gt; (Value&lt;<span class="lifetime">&#39;a</span>&gt;, ExId) {
-        (op.value_at(clock), <span class="self">self</span>.id_to_exid(op.id))
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>id_to_exid(<span class="kw-2">&amp;</span><span class="self">self</span>, id: OpId) -&gt; ExId {
@@ -2505,7 +2513,7 @@
                 <span class="kw">for </span>(index, change) <span class="kw">in </span>changes.iter().enumerate() {
                     <span class="comment">// SAFETY: This should be fine because we just constructed an opset containing
                     // all the changes
-                    </span><span class="kw">let </span>actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
+                    </span><span class="kw">let </span>actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
                     actor_to_history.entry(actor_index).or_default().push(index);
                     hashes_by_index.insert(index, change.hash());
                     change_graph.add_change(change, actor_index)<span class="question-mark">?</span>;
@@ -2639,7 +2647,7 @@
 
     <span class="kw">fn </span>duplicate_seq(<span class="kw-2">&amp;</span><span class="self">self</span>, change: <span class="kw-2">&amp;</span>Change) -&gt; bool {
         <span class="kw">let </span><span class="kw-2">mut </span>dup = <span class="bool-val">false</span>;
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(actor_index) = <span class="self">self</span>.ops.m.actors.lookup(change.actor_id()) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(actor_index) = <span class="self">self</span>.ops.osd.actors.lookup(change.actor_id()) {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self</span>.states.get(<span class="kw-2">&amp;</span>actor_index) {
                 dup = s.len() &gt;= change.seq() <span class="kw">as </span>usize;
             }
@@ -2726,15 +2734,15 @@
         <span class="prelude-val">None
     </span>}
 
-    <span class="kw">fn </span>import_ops(<span class="kw-2">&amp;mut </span><span class="self">self</span>, change: <span class="kw-2">&amp;</span>Change) -&gt; Vec&lt;(ObjId, Op)&gt; {
-        <span class="kw">let </span>actor = <span class="self">self</span>.ops.m.actors.cache(change.actor_id().clone());
+    <span class="kw">fn </span>import_ops(<span class="kw-2">&amp;mut </span><span class="self">self</span>, change: <span class="kw-2">&amp;</span>Change) -&gt; Vec&lt;(ObjId, OpBuilder)&gt; {
+        <span class="kw">let </span>actor = <span class="self">self</span>.ops.osd.actors.cache(change.actor_id().clone());
         <span class="kw">let </span><span class="kw-2">mut </span>actors = Vec::with_capacity(change.other_actor_ids().len() + <span class="number">1</span>);
         actors.push(actor);
         actors.extend(
             change
                 .other_actor_ids()
                 .iter()
-                .map(|a| <span class="self">self</span>.ops.m.actors.cache(a.clone()))
+                .map(|a| <span class="self">self</span>.ops.osd.actors.cache(a.clone()))
                 .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
         );
         change
@@ -2743,7 +2751,7 @@
             .map(|(i, c)| {
                 <span class="kw">let </span>id = OpId::new(change.start_op().get() + i <span class="kw">as </span>u64, actor);
                 <span class="kw">let </span>key = <span class="kw">match </span><span class="kw-2">&amp;</span>c.key {
-                    EncodedKey::Prop(n) =&gt; Key::Map(<span class="self">self</span>.ops.m.props.cache(n.to_string())),
+                    EncodedKey::Prop(n) =&gt; Key::Map(<span class="self">self</span>.ops.osd.props.cache(n.to_string())),
                     EncodedKey::Elem(e) <span class="kw">if </span>e.is_head() =&gt; Key::Seq(ElemId::head()),
                     EncodedKey::Elem(ElemId(o)) =&gt; {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
@@ -2761,10 +2769,10 @@
                     .pred
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
-                <span class="kw">let </span>pred = <span class="self">self</span>.ops.m.sorted_opids(pred);
+                <span class="kw">let </span>pred = <span class="self">self</span>.ops.osd.sorted_opids(pred);
                 (
                     obj,
-                    Op {
+                    OpBuilder {
                         id,
                         action: OpType::from_action_and_value(
                             c.action,
@@ -2820,8 +2828,8 @@
         <span class="kw">let </span><span class="kw-2">mut </span>bytes = <span class="kw">crate</span>::storage::save::save_document(
             c,
             <span class="self">self</span>.ops.iter().map(|(objid, <span class="kw">_</span>, op)| (objid, op)),
-            <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m.actors,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m.props,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd.actors,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd.props,
             <span class="kw-2">&amp;</span>heads,
             compress,
         );
@@ -2934,7 +2942,7 @@
         } <span class="kw">else </span>{
             <span class="kw">let </span>base_actor = <span class="self">self</span>.get_actor();
             <span class="kw">let </span>new_actor = base_actor.with_concurrency(level);
-            <span class="self">self</span>.ops.m.actors.cache(new_actor)
+            <span class="self">self</span>.ops.osd.actors.cache(new_actor)
         }
     }
 
@@ -2985,7 +2993,7 @@
 
         <span class="kw">let </span>history_index = <span class="self">self</span>.history.len();
 
-        <span class="kw">let </span>actor_index = <span class="self">self</span>.ops.m.actors.cache(change.actor_id().clone());
+        <span class="kw">let </span>actor_index = <span class="self">self</span>.ops.osd.actors.cache(change.actor_id().clone());
         <span class="self">self</span>.states
             .entry(actor_index)
             .or_default()
@@ -3035,11 +3043,11 @@
             <span class="kw">let </span>actor = ActorId::from(hex::decode(<span class="kw-2">&amp;</span>s[(n + <span class="number">1</span>)..]).unwrap());
             <span class="kw">let </span>actor = <span class="self">self
                 </span>.ops
-                .m
+                .osd
                 .actors
                 .lookup(<span class="kw-2">&amp;</span>actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))<span class="question-mark">?</span>;
-            <span class="kw">let </span>obj = ExId::Id(counter, <span class="self">self</span>.ops.m.actors.cache[actor].clone(), actor);
+            <span class="kw">let </span>obj = ExId::Id(counter, <span class="self">self</span>.ops.osd.actors.cache[actor].clone(), actor);
             <span class="prelude-val">Ok</span>(obj)
         }
     }
@@ -3047,11 +3055,11 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_short_string&lt;E: Exportable&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, id: E) -&gt; String {
         <span class="kw">match </span>id.export() {
             Export::Id(id) =&gt; {
-                <span class="kw">let </span><span class="kw-2">mut </span>actor = <span class="self">self</span>.ops.m.actors[id.actor()].to_string();
+                <span class="kw">let </span><span class="kw-2">mut </span>actor = <span class="self">self</span>.ops.osd.actors[id.actor()].to_string();
                 actor.truncate(<span class="number">6</span>);
                 <span class="macro">format!</span>(<span class="string">&quot;{}@{}&quot;</span>, id.counter(), actor)
             }
-            Export::Prop(index) =&gt; <span class="self">self</span>.ops.m.props[index].clone(),
+            Export::Prop(index) =&gt; <span class="self">self</span>.ops.osd.props[index].clone(),
             Export::Special(s) =&gt; s,
         }
     }
@@ -3068,13 +3076,13 @@
             <span class="string">&quot;succ&quot;
         </span>);
         <span class="kw">for </span>(obj, <span class="kw">_</span>, op) <span class="kw">in </span><span class="self">self</span>.ops.iter() {
-            <span class="kw">let </span>id = <span class="self">self</span>.to_short_string(op.id);
+            <span class="kw">let </span>id = <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>op.id());
             <span class="kw">let </span>obj = <span class="self">self</span>.to_short_string(obj);
-            <span class="kw">let </span>key = <span class="kw">match </span>op.key {
-                Key::Map(n) =&gt; <span class="self">self</span>.ops.m.props[n].clone(),
+            <span class="kw">let </span>key = <span class="kw">match </span><span class="kw-2">*</span>op.key() {
+                Key::Map(n) =&gt; <span class="self">self</span>.ops.osd.props[n].clone(),
                 Key::Seq(n) =&gt; <span class="self">self</span>.to_short_string(n),
             };
-            <span class="kw">let </span>value: String = <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
+            <span class="kw">let </span>value: String = <span class="kw">match </span>op.action() {
                 OpType::Put(value) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, value),
                 OpType::Make(obj) =&gt; <span class="macro">format!</span>(<span class="string">&quot;make({})&quot;</span>, obj),
                 OpType::Increment(obj) =&gt; <span class="macro">format!</span>(<span class="string">&quot;inc({})&quot;</span>, obj),
@@ -3084,13 +3092,13 @@
                 }
                 OpType::MarkEnd(<span class="kw">_</span>) =&gt; <span class="string">&quot;/mark&quot;</span>.to_string(),
             };
-            <span class="kw">let </span>pred: Vec&lt;<span class="kw">_</span>&gt; = op.pred.iter().map(|id| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>id)).collect();
+            <span class="kw">let </span>pred: Vec&lt;<span class="kw">_</span>&gt; = op.pred().map(|id| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>id)).collect();
             <span class="kw">let </span>succ: Vec&lt;<span class="kw">_</span>&gt; = op
-                .succ
+                .succ()
                 .into_iter()
                 .map(|id| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>id))
                 .collect();
-            <span class="kw">let </span>insert = <span class="kw">match </span>op.insert {
+            <span class="kw">let </span>insert = <span class="kw">match </span>op.insert() {
                 <span class="bool-val">true </span>=&gt; <span class="string">&quot;t&quot;</span>,
                 <span class="bool-val">false </span>=&gt; <span class="string">&quot;f&quot;</span>,
             };
@@ -3127,23 +3135,27 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_op(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: <span class="kw-2">&amp;</span>ObjId,
-        op: Op,
+        op: OpBuilder,
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">let </span>is_delete = op.is_delete();
+        <span class="kw">let </span>idx = <span class="self">self</span>.ops.load(<span class="kw-2">*</span>obj, op);
+        <span class="kw">let </span>op = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd);
+
         <span class="kw">let </span>(pos, succ) = <span class="kw">if </span>patch_log.is_active() {
             <span class="kw">let </span>obj = <span class="self">self</span>.get_obj_meta(<span class="kw-2">*</span>obj)<span class="question-mark">?</span>;
-            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_with_patch_log(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>op);
-            found.log_patches(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>op, <span class="self">self</span>, patch_log);
+            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_with_patch_log(<span class="kw-2">&amp;</span>obj, op);
+            found.log_patches(<span class="kw-2">&amp;</span>obj, op, <span class="self">self</span>, patch_log);
             (found.pos, found.succ)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_without_patch_log(obj, <span class="kw-2">&amp;</span>op);
+            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_without_patch_log(obj, op);
             (found.pos, found.succ)
         };
 
-        <span class="self">self</span>.ops.add_succ(obj, <span class="kw-2">&amp;</span>succ, <span class="kw-2">&amp;</span>op);
+        <span class="self">self</span>.ops.add_succ(obj, <span class="kw-2">&amp;</span>succ, idx);
 
-        <span class="kw">if </span>!op.is_delete() {
-            <span class="self">self</span>.ops.insert(pos, obj, op);
+        <span class="kw">if </span>!is_delete {
+            <span class="self">self</span>.ops.insert(pos, obj, idx);
         }
         <span class="prelude-val">Ok</span>(())
     }
@@ -3251,12 +3263,13 @@
         <span class="kw">let </span><span class="kw-2">mut </span>mark_index = <span class="number">0</span>;
         <span class="kw">for </span>(_key, key_ops) <span class="kw">in </span>ops_by_key.into_iter() {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
-                <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
+                <span class="kw">match </span>o.action() {
                     OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
                         <span class="kw">let </span>len = o.width(obj.encoding);
                         <span class="kw">if </span>last_marks.as_ref() != marks.current() {
-                            <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>&amp;&amp; last_marks.is_some() {
-                                acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+                            <span class="kw">match </span>last_marks.as_ref() {
+                                <span class="prelude-val">Some</span>(m) <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>=&gt; acc.add(mark_index, mark_len, m),
+                                <span class="kw">_ </span>=&gt; (),
                             }
                             last_marks = marks.current().cloned();
                             mark_index = index;
@@ -3266,17 +3279,18 @@
                         index += len;
                     }
                     OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
-                        marks.mark_begin(o.id, data, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m);
+                        marks.mark_begin(<span class="kw-2">*</span>o.id(), data, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd);
                     }
                     OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
-                        marks.mark_end(o.id, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m);
+                        marks.mark_end(<span class="kw-2">*</span>o.id(), <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd);
                     }
                     OpType::Increment(<span class="kw">_</span>) | OpType::Delete =&gt; {}
                 }
             }
         }
-        <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>&amp;&amp; last_marks.is_some() {
-            acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+        <span class="kw">match </span>last_marks.as_ref() {
+            <span class="prelude-val">Some</span>(m) <span class="kw">if </span>mark_len &gt; <span class="number">0 </span>=&gt; acc.add(mark_index, mark_len, m),
+            <span class="kw">_ </span>=&gt; (),
         }
         <span class="prelude-val">Ok</span>(acc.into_iter_no_unmark().collect())
     }
@@ -3331,7 +3345,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>values_for(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ExId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
         <span class="self">self</span>.exid_to_obj(obj)
             .ok()
-            .map(|obj| Values::new(<span class="self">self</span>.ops.top_ops(<span class="kw-2">&amp;</span>obj.id, clock.clone()), <span class="self">self</span>, clock))
+            .map(|obj| Values::new(<span class="self">self</span>.ops.top_ops(<span class="kw-2">&amp;</span>obj.id, clock.clone()), clock))
             .unwrap_or_default()
     }
 
@@ -3364,7 +3378,7 @@
                 <span class="self">self</span>.ops
                     .seek_ops_by_prop(<span class="kw-2">&amp;</span>obj.id, position.into(), obj.encoding, clock.as_ref());
             <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = found.ops.last() {
-                <span class="prelude-val">Ok</span>(Cursor::new(op.id, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.m))
+                <span class="prelude-val">Ok</span>(Cursor::new(<span class="kw-2">*</span>op.id(), <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd))
             } <span class="kw">else </span>{
                 <span class="prelude-val">Err</span>(AutomergeError::InvalidIndex(position))
             }
@@ -3407,7 +3421,7 @@
             .ops
             .into_iter()
             .last()
-            .map(|op| <span class="self">self</span>.export_value(op, clock.as_ref())))
+            .map(|op| op.tagged_value(clock.as_ref())))
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_all_for&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -3423,7 +3437,7 @@
             .seek_ops_by_prop(<span class="kw-2">&amp;</span>obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
-            .map(|op| <span class="self">self</span>.export_value(op, clock.as_ref()))
+            .map(|op| op.tagged_value(clock.as_ref()))
             .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
         <span class="comment">// this is a test to make sure opid and exid are always sorting the same way
         </span><span class="macro">assert_eq!</span>(
@@ -3444,9 +3458,9 @@
             </span>.ops
             .search(
                 <span class="kw-2">&amp;</span>obj.id,
-                query::Nth::new(index, obj.encoding, clock).with_marks(),
+                query::Nth::new(index, obj.encoding, clock, <span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd).with_marks(),
             )
-            .marks(<span class="kw-2">&amp;</span><span class="self">self</span>.ops.m)
+            .marks()
             .as_deref()
             .cloned()
             .unwrap_or_default();
@@ -3467,11 +3481,11 @@
                         <span class="kw">if </span>!op.visible() {
                             <span class="kw">continue</span>;
                         }
-                        <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = <span class="kw-2">&amp;</span>op.action {
-                            <span class="kw">let </span>prop = <span class="kw">match </span>op.key {
-                                Key::Map(prop) =&gt; Prop::Map(<span class="self">self</span>.ops.m.props.get(prop).clone()),
+                        <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = op.action() {
+                            <span class="kw">let </span>prop = <span class="kw">match </span><span class="kw-2">*</span>op.key() {
+                                Key::Map(prop) =&gt; Prop::Map(<span class="self">self</span>.ops.osd.props.get(prop).clone()),
                                 Key::Seq(<span class="kw">_</span>) =&gt; {
-                                    <span class="kw">let </span><span class="prelude-val">Some</span>(found) = <span class="self">self</span>.ops.seek_opid(obj_id, op.id, <span class="prelude-val">None</span>)
+                                    <span class="kw">let </span><span class="prelude-val">Some</span>(found) = <span class="self">self</span>.ops.seek_opid(obj_id, <span class="kw-2">*</span>op.id(), <span class="prelude-val">None</span>)
                                     <span class="kw">else </span>{
                                         <span class="kw">continue</span>;
                                     };

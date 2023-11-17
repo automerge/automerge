@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/node.rs`."><title>node.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/node.rs`."><title>node.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -464,23 +464,20 @@
 <a href="#464" id="464">464</a>
 <a href="#465" id="465">465</a>
 <a href="#466" id="466">466</a>
-<a href="#467" id="467">467</a>
-<a href="#468" id="468">468</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::{min, Ordering},
     fmt::Debug,
     mem,
 };
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::{OpIdx, OpSetData};
 <span class="kw">use </span><span class="kw">crate</span>::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::Op;
 <span class="kw">pub const </span>B: usize = <span class="number">16</span>;
 
 <span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTreeNode {
     <span class="kw">pub</span>(<span class="kw">crate</span>) children: Vec&lt;OpTreeNode&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) elements: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) elements: Vec&lt;OpIdx&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: Index,
     <span class="kw">pub</span>(<span class="kw">crate</span>) length: usize,
 }
@@ -498,33 +495,27 @@
     <span class="kw">fn </span>search_element&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>,
         query: <span class="kw-2">&amp;mut </span>Q,
-        m: <span class="kw-2">&amp;</span>OpSetMetadata,
-        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
+        m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
         index: usize,
     ) -&gt; bool
     <span class="kw">where
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="self">self</span>.elements.get(index) {
-            <span class="kw">if </span>query.query_element_with_metadata(<span class="kw-2">&amp;</span>ops[<span class="kw-2">*</span>e], m) == QueryResult::Finish {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = <span class="self">self</span>.elements.get(index) {
+            <span class="kw">if </span>query.query_element(idx.as_op2(m)) == QueryResult::Finish {
                 <span class="kw">return </span><span class="bool-val">true</span>;
             }
         }
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>,
-        query: <span class="kw-2">&amp;mut </span>Q,
-        m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
-        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
-    ) -&gt; bool
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, query: <span class="kw-2">&amp;mut </span>Q, m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; bool
     <span class="kw">where
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
-            <span class="kw">for </span>e <span class="kw">in </span><span class="self">self</span>.elements.iter() {
-                <span class="kw">if </span>query.query_element_with_metadata(<span class="kw-2">&amp;</span>ops[<span class="kw-2">*</span>e], m) == QueryResult::Finish {
+            <span class="kw">for </span>idx <span class="kw">in </span><span class="self">self</span>.elements.iter() {
+                <span class="kw">if </span>query.query_element(idx.as_op2(m)) == QueryResult::Finish {
                     <span class="kw">return </span><span class="bool-val">true</span>;
                 }
             }
@@ -532,16 +523,16 @@
         </span>} <span class="kw">else </span>{
             <span class="kw">for </span>(child_index, child) <span class="kw">in </span><span class="self">self</span>.children.iter().enumerate() {
                 <span class="comment">// descend and try find it
-                </span><span class="kw">match </span>query.query_node_with_metadata(child, m, ops) {
+                </span><span class="kw">match </span>query.query_node(child, m) {
                     QueryResult::Descend =&gt; {
-                        <span class="kw">if </span>child.search(query, m, ops) {
+                        <span class="kw">if </span>child.search(query, m) {
                             <span class="kw">return </span><span class="bool-val">true</span>;
                         }
                     }
                     QueryResult::Finish =&gt; <span class="kw">return </span><span class="bool-val">true</span>,
                     QueryResult::Next =&gt; (),
                 }
-                <span class="kw">if </span><span class="self">self</span>.search_element(query, m, ops, child_index) {
+                <span class="kw">if </span><span class="self">self</span>.search_element(query, m, child_index) {
                     <span class="kw">return </span><span class="bool-val">true</span>;
                 }
             }
@@ -553,13 +544,13 @@
         <span class="self">self</span>.length
     }
 
-    <span class="kw">fn </span>reindex(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ops: <span class="kw-2">&amp;</span>[Op]) {
+    <span class="kw">fn </span>reindex(<span class="kw-2">&amp;mut </span><span class="self">self</span>, osd: <span class="kw-2">&amp;</span>OpSetData) {
         <span class="kw">let </span><span class="kw-2">mut </span>index = Index::new();
         <span class="kw">for </span>c <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.children {
             index.merge(<span class="kw-2">&amp;</span>c.index);
         }
         <span class="kw">for </span>i <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.elements {
-            index.insert(<span class="kw-2">&amp;</span>ops[<span class="kw-2">*</span>i]);
+            index.insert(i.as_op2(osd));
         }
         <span class="self">self</span>.index = index
     }
@@ -586,10 +577,15 @@
         <span class="macro">panic!</span>(<span class="string">&quot;index {} not found in node with len {}&quot;</span>, index, <span class="self">self</span>.len())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_into_non_full_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, element: usize, ops: <span class="kw-2">&amp;</span>[Op]) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_into_non_full_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        index: usize,
+        element: OpIdx,
+        m: <span class="kw-2">&amp;</span>OpSetData,
+    ) {
         <span class="macro">assert!</span>(!<span class="self">self</span>.is_full());
 
-        <span class="self">self</span>.index.insert(<span class="kw-2">&amp;</span>ops[element]);
+        <span class="self">self</span>.index.insert(element.as_op2(m));
 
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
             <span class="self">self</span>.length += <span class="number">1</span>;
@@ -599,14 +595,14 @@
             <span class="kw">let </span>child = <span class="kw-2">&amp;mut </span><span class="self">self</span>.children[child_index];
 
             <span class="kw">if </span>child.is_full() {
-                <span class="self">self</span>.split_child(child_index, ops);
+                <span class="self">self</span>.split_child(child_index, m);
 
                 <span class="comment">// child structure has changed so we need to find the index again
                 </span><span class="kw">let </span>(child_index, sub_index) = <span class="self">self</span>.find_child_index(index);
                 <span class="kw">let </span>child = <span class="kw-2">&amp;mut </span><span class="self">self</span>.children[child_index];
-                child.insert_into_non_full_node(sub_index, element, ops);
+                child.insert_into_non_full_node(sub_index, element, m);
             } <span class="kw">else </span>{
-                child.insert_into_non_full_node(sub_index, element, ops);
+                child.insert_into_non_full_node(sub_index, element, m);
             }
             <span class="self">self</span>.length += <span class="number">1</span>;
         }
@@ -614,7 +610,7 @@
 
     <span class="comment">// A utility function to split the child `full_child_index` of this node
     // Note that `full_child_index` must be full when this function is called.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>split_child(<span class="kw-2">&amp;mut </span><span class="self">self</span>, full_child_index: usize, ops: <span class="kw-2">&amp;</span>[Op]) {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>split_child(<span class="kw-2">&amp;mut </span><span class="self">self</span>, full_child_index: usize, m: <span class="kw-2">&amp;</span>OpSetData) {
         <span class="kw">let </span>original_len_self = <span class="self">self</span>.len();
 
         <span class="kw">let </span>full_child = <span class="kw-2">&amp;mut </span><span class="self">self</span>.children[full_child_index];
@@ -648,8 +644,8 @@
 
         <span class="kw">let </span>full_child_len = full_child.len();
 
-        full_child.reindex(ops);
-        successor_sibling.reindex(ops);
+        full_child.reindex(m);
+        successor_sibling.reindex(m);
 
         <span class="self">self</span>.children
             .insert(full_child_index + <span class="number">1</span>, successor_sibling);
@@ -661,7 +657,7 @@
         <span class="macro">assert_eq!</span>(original_len_self, <span class="self">self</span>.len());
     }
 
-    <span class="kw">fn </span>remove_from_leaf(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize) -&gt; usize {
+    <span class="kw">fn </span>remove_from_leaf(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize) -&gt; OpIdx {
         <span class="self">self</span>.length -= <span class="number">1</span>;
         <span class="self">self</span>.elements.remove(index)
     }
@@ -670,28 +666,28 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         index: usize,
         element_index: usize,
-        ops: <span class="kw-2">&amp;</span>[Op],
-    ) -&gt; usize {
+        m: <span class="kw-2">&amp;</span>OpSetData,
+    ) -&gt; OpIdx {
         <span class="self">self</span>.length -= <span class="number">1</span>;
         <span class="kw">if </span><span class="self">self</span>.children[element_index].elements.len() &gt;= B {
             <span class="kw">let </span>total_index = <span class="self">self</span>.cumulative_index(element_index);
             <span class="comment">// recursively delete index - 1 in predecessor_node
-            </span><span class="kw">let </span>predecessor = <span class="self">self</span>.children[element_index].remove(index - <span class="number">1 </span>- total_index, ops);
+            </span><span class="kw">let </span>predecessor = <span class="self">self</span>.children[element_index].remove(index - <span class="number">1 </span>- total_index, m);
             <span class="comment">// replace element with that one
             </span>mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.elements[element_index], predecessor)
         } <span class="kw">else if </span><span class="self">self</span>.children[element_index + <span class="number">1</span>].elements.len() &gt;= B {
             <span class="comment">// recursively delete index + 1 in successor_node
             </span><span class="kw">let </span>total_index = <span class="self">self</span>.cumulative_index(element_index + <span class="number">1</span>);
-            <span class="kw">let </span>successor = <span class="self">self</span>.children[element_index + <span class="number">1</span>].remove(index + <span class="number">1 </span>- total_index, ops);
+            <span class="kw">let </span>successor = <span class="self">self</span>.children[element_index + <span class="number">1</span>].remove(index + <span class="number">1 </span>- total_index, m);
             <span class="comment">// replace element with that one
             </span>mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.elements[element_index], successor)
         } <span class="kw">else </span>{
             <span class="kw">let </span>middle_element = <span class="self">self</span>.elements.remove(element_index);
             <span class="kw">let </span>successor_child = <span class="self">self</span>.children.remove(element_index + <span class="number">1</span>);
-            <span class="self">self</span>.children[element_index].merge(middle_element, successor_child, ops);
+            <span class="self">self</span>.children[element_index].merge(middle_element, successor_child, m);
 
             <span class="kw">let </span>total_index = <span class="self">self</span>.cumulative_index(element_index);
-            <span class="self">self</span>.children[element_index].remove(index - total_index, ops)
+            <span class="self">self</span>.children[element_index].remove(index - total_index, m)
         }
     }
 
@@ -706,8 +702,8 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         index: usize,
         <span class="kw-2">mut </span>child_index: usize,
-        ops: <span class="kw-2">&amp;</span>[Op],
-    ) -&gt; usize {
+        osd: <span class="kw-2">&amp;</span>OpSetData,
+    ) -&gt; OpIdx {
         <span class="kw">if </span><span class="self">self</span>.children[child_index].elements.len() &lt; B
             &amp;&amp; <span class="kw">if </span>child_index &gt; <span class="number">0 </span>{
                 <span class="self">self</span>.children[child_index - <span class="number">1</span>].elements.len() &lt; B
@@ -731,14 +727,14 @@
                 </span><span class="kw">let </span>successor = <span class="self">self</span>.children.remove(child_index);
                 child_index -= <span class="number">1</span>;
 
-                <span class="self">self</span>.children[child_index].merge(middle, successor, ops);
+                <span class="self">self</span>.children[child_index].merge(middle, successor, osd);
             } <span class="kw">else </span>{
                 <span class="kw">let </span>middle = <span class="self">self</span>.elements.remove(child_index);
 
                 <span class="comment">// use the sucessor sibling
                 </span><span class="kw">let </span>successor = <span class="self">self</span>.children.remove(child_index + <span class="number">1</span>);
 
-                <span class="self">self</span>.children[child_index].merge(middle, successor, ops);
+                <span class="self">self</span>.children[child_index].merge(middle, successor, osd);
             }
         } <span class="kw">else if </span><span class="self">self</span>.children[child_index].elements.len() &lt; B {
             <span class="kw">if </span>child_index &gt; <span class="number">0
@@ -752,14 +748,14 @@
                 <span class="self">self</span>.children[child_index - <span class="number">1</span>].length -= <span class="number">1</span>;
                 <span class="self">self</span>.children[child_index - <span class="number">1</span>]
                     .index
-                    .remove(<span class="kw-2">&amp;</span>ops[last_element]);
+                    .remove(last_element.as_op2(osd));
 
                 <span class="kw">let </span>parent_element =
                     mem::replace(<span class="kw-2">&amp;mut </span><span class="self">self</span>.elements[child_index - <span class="number">1</span>], last_element);
 
                 <span class="self">self</span>.children[child_index]
                     .index
-                    .insert(<span class="kw-2">&amp;</span>ops[parent_element]);
+                    .insert(parent_element.as_op2(osd));
                 <span class="self">self</span>.children[child_index]
                     .elements
                     .insert(<span class="number">0</span>, parent_element);
@@ -767,10 +763,10 @@
 
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(last_child) = <span class="self">self</span>.children[child_index - <span class="number">1</span>].children.pop() {
                     <span class="self">self</span>.children[child_index - <span class="number">1</span>].length -= last_child.len();
-                    <span class="self">self</span>.children[child_index - <span class="number">1</span>].reindex(ops);
+                    <span class="self">self</span>.children[child_index - <span class="number">1</span>].reindex(osd);
                     <span class="self">self</span>.children[child_index].length += last_child.len();
                     <span class="self">self</span>.children[child_index].children.insert(<span class="number">0</span>, last_child);
-                    <span class="self">self</span>.children[child_index].reindex(ops);
+                    <span class="self">self</span>.children[child_index].reindex(osd);
                 }
             } <span class="kw">else if </span><span class="self">self
                 </span>.children
@@ -780,7 +776,7 @@
                 <span class="kw">let </span>first_element = <span class="self">self</span>.children[child_index + <span class="number">1</span>].elements.remove(<span class="number">0</span>);
                 <span class="self">self</span>.children[child_index + <span class="number">1</span>]
                     .index
-                    .remove(<span class="kw-2">&amp;</span>ops[first_element]);
+                    .remove(first_element.as_op2(osd));
                 <span class="self">self</span>.children[child_index + <span class="number">1</span>].length -= <span class="number">1</span>;
 
                 <span class="macro">assert!</span>(!<span class="self">self</span>.children[child_index + <span class="number">1</span>].elements.is_empty());
@@ -790,23 +786,23 @@
                 <span class="self">self</span>.children[child_index].length += <span class="number">1</span>;
                 <span class="self">self</span>.children[child_index]
                     .index
-                    .insert(<span class="kw-2">&amp;</span>ops[parent_element]);
+                    .insert(parent_element.as_op2(osd));
                 <span class="self">self</span>.children[child_index].elements.push(parent_element);
 
                 <span class="kw">if </span>!<span class="self">self</span>.children[child_index + <span class="number">1</span>].is_leaf() {
                     <span class="kw">let </span>first_child = <span class="self">self</span>.children[child_index + <span class="number">1</span>].children.remove(<span class="number">0</span>);
                     <span class="self">self</span>.children[child_index + <span class="number">1</span>].length -= first_child.len();
-                    <span class="self">self</span>.children[child_index + <span class="number">1</span>].reindex(ops);
+                    <span class="self">self</span>.children[child_index + <span class="number">1</span>].reindex(osd);
                     <span class="self">self</span>.children[child_index].length += first_child.len();
 
                     <span class="self">self</span>.children[child_index].children.push(first_child);
-                    <span class="self">self</span>.children[child_index].reindex(ops);
+                    <span class="self">self</span>.children[child_index].reindex(osd);
                 }
             }
         }
         <span class="self">self</span>.length -= <span class="number">1</span>;
         <span class="kw">let </span>total_index = <span class="self">self</span>.cumulative_index(child_index);
-        <span class="self">self</span>.children[child_index].remove(index - total_index, ops)
+        <span class="self">self</span>.children[child_index].remove(index - total_index, osd)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
@@ -816,11 +812,11 @@
         l
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; usize {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; OpIdx {
         <span class="kw">let </span>original_len = <span class="self">self</span>.len();
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
             <span class="kw">let </span>v = <span class="self">self</span>.remove_from_leaf(index);
-            <span class="self">self</span>.index.remove(<span class="kw-2">&amp;</span>ops[v]);
+            <span class="self">self</span>.index.remove(v.as_op2(osd));
             <span class="macro">assert_eq!</span>(original_len, <span class="self">self</span>.len() + <span class="number">1</span>);
             <span class="macro">debug_assert_eq!</span>(<span class="self">self</span>.check(), <span class="self">self</span>.len());
             v
@@ -837,16 +833,16 @@
                         <span class="kw">let </span>v = <span class="self">self</span>.remove_element_from_non_leaf(
                             index,
                             min(child_index, <span class="self">self</span>.elements.len() - <span class="number">1</span>),
-                            ops,
+                            osd,
                         );
-                        <span class="self">self</span>.index.remove(<span class="kw-2">&amp;</span>ops[v]);
+                        <span class="self">self</span>.index.remove(v.as_op2(osd));
                         <span class="macro">assert_eq!</span>(original_len, <span class="self">self</span>.len() + <span class="number">1</span>);
                         <span class="macro">debug_assert_eq!</span>(<span class="self">self</span>.check(), <span class="self">self</span>.len());
                         <span class="kw">return </span>v;
                     }
                     Ordering::Greater =&gt; {
-                        <span class="kw">let </span>v = <span class="self">self</span>.remove_from_internal_child(index, child_index, ops);
-                        <span class="self">self</span>.index.remove(<span class="kw-2">&amp;</span>ops[v]);
+                        <span class="kw">let </span>v = <span class="self">self</span>.remove_from_internal_child(index, child_index, osd);
+                        <span class="self">self</span>.index.remove(v.as_op2(osd));
                         <span class="macro">assert_eq!</span>(original_len, <span class="self">self</span>.len() + <span class="number">1</span>);
                         <span class="macro">debug_assert_eq!</span>(<span class="self">self</span>.check(), <span class="self">self</span>.len());
                         <span class="kw">return </span>v;
@@ -863,8 +859,8 @@
         }
     }
 
-    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, middle: usize, successor_sibling: OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) {
-        <span class="self">self</span>.index.insert(<span class="kw-2">&amp;</span>ops[middle]);
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, middle: OpIdx, successor_sibling: OpTreeNode, osd: <span class="kw-2">&amp;</span>OpSetData) {
+        <span class="self">self</span>.index.insert(middle.as_op2(osd));
         <span class="self">self</span>.index.merge(<span class="kw-2">&amp;</span>successor_sibling.index);
         <span class="self">self</span>.elements.push(middle);
         <span class="self">self</span>.elements.extend(successor_sibling.elements);
@@ -904,7 +900,7 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>last(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>last(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; OpIdx {
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
             <span class="comment">// node is never empty so this is safe
             </span><span class="kw-2">*</span><span class="self">self</span>.elements.last().unwrap()
@@ -914,7 +910,7 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;OpIdx&gt; {
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
             <span class="kw">return </span><span class="self">self</span>.elements.get(index).copied();
         } <span class="kw">else </span>{

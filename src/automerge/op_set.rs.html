@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_set.rs`."><title>op_set.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_set.rs`."><title>op_set.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -591,6 +591,197 @@
 <a href="#591" id="591">591</a>
 <a href="#592" id="592">592</a>
 <a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
+<a href="#619" id="619">619</a>
+<a href="#620" id="620">620</a>
+<a href="#621" id="621">621</a>
+<a href="#622" id="622">622</a>
+<a href="#623" id="623">623</a>
+<a href="#624" id="624">624</a>
+<a href="#625" id="625">625</a>
+<a href="#626" id="626">626</a>
+<a href="#627" id="627">627</a>
+<a href="#628" id="628">628</a>
+<a href="#629" id="629">629</a>
+<a href="#630" id="630">630</a>
+<a href="#631" id="631">631</a>
+<a href="#632" id="632">632</a>
+<a href="#633" id="633">633</a>
+<a href="#634" id="634">634</a>
+<a href="#635" id="635">635</a>
+<a href="#636" id="636">636</a>
+<a href="#637" id="637">637</a>
+<a href="#638" id="638">638</a>
+<a href="#639" id="639">639</a>
+<a href="#640" id="640">640</a>
+<a href="#641" id="641">641</a>
+<a href="#642" id="642">642</a>
+<a href="#643" id="643">643</a>
+<a href="#644" id="644">644</a>
+<a href="#645" id="645">645</a>
+<a href="#646" id="646">646</a>
+<a href="#647" id="647">647</a>
+<a href="#648" id="648">648</a>
+<a href="#649" id="649">649</a>
+<a href="#650" id="650">650</a>
+<a href="#651" id="651">651</a>
+<a href="#652" id="652">652</a>
+<a href="#653" id="653">653</a>
+<a href="#654" id="654">654</a>
+<a href="#655" id="655">655</a>
+<a href="#656" id="656">656</a>
+<a href="#657" id="657">657</a>
+<a href="#658" id="658">658</a>
+<a href="#659" id="659">659</a>
+<a href="#660" id="660">660</a>
+<a href="#661" id="661">661</a>
+<a href="#662" id="662">662</a>
+<a href="#663" id="663">663</a>
+<a href="#664" id="664">664</a>
+<a href="#665" id="665">665</a>
+<a href="#666" id="666">666</a>
+<a href="#667" id="667">667</a>
+<a href="#668" id="668">668</a>
+<a href="#669" id="669">669</a>
+<a href="#670" id="670">670</a>
+<a href="#671" id="671">671</a>
+<a href="#672" id="672">672</a>
+<a href="#673" id="673">673</a>
+<a href="#674" id="674">674</a>
+<a href="#675" id="675">675</a>
+<a href="#676" id="676">676</a>
+<a href="#677" id="677">677</a>
+<a href="#678" id="678">678</a>
+<a href="#679" id="679">679</a>
+<a href="#680" id="680">680</a>
+<a href="#681" id="681">681</a>
+<a href="#682" id="682">682</a>
+<a href="#683" id="683">683</a>
+<a href="#684" id="684">684</a>
+<a href="#685" id="685">685</a>
+<a href="#686" id="686">686</a>
+<a href="#687" id="687">687</a>
+<a href="#688" id="688">688</a>
+<a href="#689" id="689">689</a>
+<a href="#690" id="690">690</a>
+<a href="#691" id="691">691</a>
+<a href="#692" id="692">692</a>
+<a href="#693" id="693">693</a>
+<a href="#694" id="694">694</a>
+<a href="#695" id="695">695</a>
+<a href="#696" id="696">696</a>
+<a href="#697" id="697">697</a>
+<a href="#698" id="698">698</a>
+<a href="#699" id="699">699</a>
+<a href="#700" id="700">700</a>
+<a href="#701" id="701">701</a>
+<a href="#702" id="702">702</a>
+<a href="#703" id="703">703</a>
+<a href="#704" id="704">704</a>
+<a href="#705" id="705">705</a>
+<a href="#706" id="706">706</a>
+<a href="#707" id="707">707</a>
+<a href="#708" id="708">708</a>
+<a href="#709" id="709">709</a>
+<a href="#710" id="710">710</a>
+<a href="#711" id="711">711</a>
+<a href="#712" id="712">712</a>
+<a href="#713" id="713">713</a>
+<a href="#714" id="714">714</a>
+<a href="#715" id="715">715</a>
+<a href="#716" id="716">716</a>
+<a href="#717" id="717">717</a>
+<a href="#718" id="718">718</a>
+<a href="#719" id="719">719</a>
+<a href="#720" id="720">720</a>
+<a href="#721" id="721">721</a>
+<a href="#722" id="722">722</a>
+<a href="#723" id="723">723</a>
+<a href="#724" id="724">724</a>
+<a href="#725" id="725">725</a>
+<a href="#726" id="726">726</a>
+<a href="#727" id="727">727</a>
+<a href="#728" id="728">728</a>
+<a href="#729" id="729">729</a>
+<a href="#730" id="730">730</a>
+<a href="#731" id="731">731</a>
+<a href="#732" id="732">732</a>
+<a href="#733" id="733">733</a>
+<a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
+<a href="#779" id="779">779</a>
+<a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -600,10 +791,10 @@
     <span class="self">self</span>, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
-<span class="kw">use </span><span class="kw">crate</span>::query::TreeQuery;
+<span class="kw">use </span><span class="kw">crate</span>::query::{ChangeVisibility, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::text_value::TextValue;
 <span class="kw">use </span><span class="kw">crate</span>::types::{
-    <span class="self">self</span>, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
-    Prop,
+    <span class="self">self</span>, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, OpId, OpIds, OpType, Prop,
 };
 <span class="kw">use </span><span class="kw">crate</span>::ObjType;
 <span class="kw">use </span>fxhash::FxBuildHasher;
@@ -613,18 +804,33 @@
 <span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">mod </span>load;
+<span class="kw">mod </span>op;
+
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>load::OpSetBuilder;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>op::{Op, OpBuilder, OpIdx, OpPlus};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type </span>OpSet = OpSetInternal;
 
-<span class="attr">#[derive(Debug, Clone, PartialEq)]
+<span class="attr">#[derive(Debug, Copy, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIdxRange {
+    start: u32,
+    end: u32,
+}
+
+<span class="kw">impl </span>OpIdxRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        (<span class="self">self</span>.end - <span class="self">self</span>.start) <span class="kw">as </span>usize
+    }
+}
+
+<span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpSetInternal {
     <span class="doccomment">/// The map of objects to their type and ops.
     </span>trees: HashMap&lt;ObjId, OpTree, FxBuildHasher&gt;,
     <span class="doccomment">/// The number of operations in the opset.
     </span>length: usize,
     <span class="doccomment">/// Metadata about the operations in this opset.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) m: OpSetMetadata,
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) osd: OpSetData,
 }
 
 <span class="kw">impl </span>OpSetInternal {
@@ -638,9 +844,10 @@
         OpSetInternal {
             trees,
             length: <span class="number">0</span>,
-            m: OpSetMetadata {
+            osd: OpSetData {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
+                ops: Vec::new(),
             },
         }
     }
@@ -651,7 +858,7 @@
         } <span class="kw">else </span>{
             ExId::Id(
                 id.counter(),
-                <span class="self">self</span>.m.actors.cache[id.actor()].clone(),
+                <span class="self">self</span>.osd.actors.cache[id.actor()].clone(),
                 id.actor(),
             )
         }
@@ -659,25 +866,44 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Iter&lt;<span class="lifetime">&#39;_</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.trees.iter().map(|t| (t.<span class="number">0</span>, t.<span class="number">1</span>.objtype, t.<span class="number">1</span>)).collect();
-        objs.sort_by(|a, b| <span class="self">self</span>.m.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
+        objs.sort_by(|a, b| <span class="self">self</span>.osd.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
         Iter {
             opset: <span class="self">self</span>,
             trees: objs.into_iter(),
             current: <span class="prelude-val">None</span>,
+            osd: <span class="kw-2">&amp;</span><span class="self">self</span>.osd,
         }
     }
 
     <span class="doccomment">/// Iterate over objects in the opset in causal order
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_objs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span>ObjId, ObjType, OpTreeIter&lt;<span class="lifetime">&#39;_</span>&gt;)&gt; + <span class="lifetime">&#39;_ </span>{
-        <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.trees.iter().map(|t| (t.<span class="number">0</span>, t.<span class="number">1</span>.objtype, t.<span class="number">1</span>)).collect();
-        objs.sort_by(|a, b| <span class="self">self</span>.m.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_objs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span>ObjId, ObjType, OpIter&lt;<span class="lifetime">&#39;_</span>&gt;)&gt; + <span class="lifetime">&#39;_ </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self
+            </span>.trees
+            .iter()
+            .map(|t| {
+                (
+                    t.<span class="number">0</span>,
+                    t.<span class="number">1</span>.objtype,
+                    OpIter {
+                        iter: t.<span class="number">1</span>.iter(),
+                        osd: <span class="kw-2">&amp;</span><span class="self">self</span>.osd,
+                    },
+                )
+            })
+            .collect();
+        objs.sort_by(|a, b| <span class="self">self</span>.osd.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
         IterObjs {
             trees: objs.into_iter(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Op&gt; {
-        <span class="self">self</span>.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="kw">impl </span>Iterator&lt;Item = Op&lt;<span class="lifetime">&#39;_</span>&gt;&gt; {
+        <span class="self">self</span>.trees
+            .get(obj)
+            .map(|o| o.iter())
+            .into_iter()
+            .flatten()
+            .map(|idx| idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd))
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parents(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; Parents&lt;<span class="lifetime">&#39;_</span>&gt; {
@@ -697,14 +923,18 @@
         <span class="kw">let </span>(_typ, encoding) = <span class="self">self</span>.type_and_encoding(obj)<span class="question-mark">?</span>;
         <span class="self">self</span>.trees
             .get(obj)
-            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, <span class="kw-2">&amp;</span><span class="self">self</span>.m))
+            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, <span class="kw-2">&amp;</span><span class="self">self</span>.osd))
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parent_object(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Parent&gt; {
         <span class="kw">let </span>parent = <span class="self">self</span>.trees.get(obj)<span class="question-mark">?</span>.parent<span class="question-mark">?</span>;
         <span class="kw">let </span>found = <span class="self">self</span>.seek_opid(<span class="kw-2">&amp;</span>parent, obj.<span class="number">0</span>, clock)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = <span class="kw">match </span>found.op.elemid_or_key() {
-            Key::Map(m) =&gt; <span class="self">self</span>.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))<span class="question-mark">?</span>,
+            Key::Map(m) =&gt; <span class="self">self
+                </span>.osd
+                .props
+                .safe_get(m)
+                .map(|s| Prop::Map(s.to_string()))<span class="question-mark">?</span>,
             Key::Seq(<span class="kw">_</span>) =&gt; Prop::Seq(found.index),
         };
         <span class="prelude-val">Some</span>(Parent {
@@ -725,34 +955,44 @@
             .get(obj)
             .and_then(|tree| {
                 tree.internal
-                    .seek_ops_by_prop(<span class="kw-2">&amp;</span><span class="self">self</span>.m, prop, encoding, clock)
+                    .seek_ops_by_prop(<span class="kw-2">&amp;</span><span class="self">self</span>.osd, prop, encoding, clock)
             })
             .unwrap_or_default()
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="prelude-ty">Option</span>&lt;OpIter&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        <span class="self">self</span>.trees.get(obj).map(|tree| OpIter {
+            iter: tree.iter(),
+            osd: <span class="kw-2">&amp;</span><span class="self">self</span>.osd,
+        })
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
-        <span class="self">self</span>.trees
-            .get(obj)
-            .map(|tree| tree.internal.top_ops(clock, <span class="kw-2">&amp;</span><span class="self">self</span>.m))
+        <span class="self">self</span>.op_iter(obj)
+            .map(|iter| TopOps::new(iter, clock))
             .unwrap_or_default()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_patch_log&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         obj: <span class="kw-2">&amp;</span>ObjMeta,
-        op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+        op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
     ) -&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get(<span class="kw-2">&amp;</span>obj.id) {
             tree.internal
-                .find_op_with_patch_log(op, obj.encoding, <span class="kw-2">&amp;</span><span class="self">self</span>.m)
+                .find_op_with_patch_log(op, obj.encoding, <span class="kw-2">&amp;</span><span class="self">self</span>.osd)
         } <span class="kw">else </span>{
             Default::default()
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_patch_log(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, op: <span class="kw-2">&amp;</span>Op) -&gt; FoundOpWithoutPatchLog {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_patch_log(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        op: Op&lt;<span class="lifetime">&#39;_</span>&gt;,
+    ) -&gt; FoundOpWithoutPatchLog {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get(obj) {
-            tree.internal.find_op_without_patch_log(op, <span class="kw-2">&amp;</span><span class="self">self</span>.m)
+            tree.internal.find_op_without_patch_log(op, <span class="kw-2">&amp;</span><span class="self">self</span>.osd)
         } <span class="kw">else </span>{
             Default::default()
         }
@@ -763,10 +1003,10 @@
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get(obj) {
-            <span class="kw">if </span>query.can_shortcut_search(tree) {
+            <span class="kw">if </span>query.can_shortcut_search(tree, <span class="kw-2">&amp;</span><span class="self">self</span>.osd) {
                 query
             } <span class="kw">else </span>{
-                tree.internal.search(query, <span class="kw-2">&amp;</span><span class="self">self</span>.m)
+                tree.internal.search(query, <span class="kw-2">&amp;</span><span class="self">self</span>.osd)
             }
         } <span class="kw">else </span>{
             query
@@ -775,36 +1015,59 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>change_vis&lt;F&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, index: usize, f: F)
     <span class="kw">where
-        </span>F: Fn(<span class="kw-2">&amp;mut </span>Op),
+        </span>F: Fn(<span class="kw-2">&amp;mut </span>OpBuilder),
     {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get_mut(obj) {
             tree.last_insert = <span class="prelude-val">None</span>;
-            tree.internal.update(index, f)
-        }
-    }
-
-    <span class="doccomment">/// Add `op` as a successor to each op at `op_indices` in `obj`
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_succ(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, op_indices: <span class="kw-2">&amp;</span>[usize], op: <span class="kw-2">&amp;</span>Op) {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get_mut(obj) {
-            tree.last_insert = <span class="prelude-val">None</span>;
-            <span class="kw">for </span>i <span class="kw">in </span>op_indices {
-                tree.internal.update(<span class="kw-2">*</span>i, |old_op| {
-                    old_op.add_succ(op, |left, right| <span class="self">self</span>.m.lamport_cmp(<span class="kw-2">*</span>left, <span class="kw-2">*</span>right))
-                });
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = tree.internal.get(index) {
+                <span class="kw">let </span>op = <span class="self">self</span>.osd.get_mut(idx);
+                <span class="kw">let </span>old_vis = op.visible();
+                f(op);
+                <span class="kw">let </span>new_vis = op.visible();
+                tree.internal.update(
+                    index,
+                    ChangeVisibility {
+                        old_vis,
+                        new_vis,
+                        op: idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd),
+                    },
+                )
             }
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, index: usize) -&gt; Op {
+    <span class="doccomment">/// Add `op` as a successor to each op at `op_indices` in `obj`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_succ(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, op_indices: <span class="kw-2">&amp;</span>[usize], op: OpIdx) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get_mut(obj) {
+            tree.last_insert = <span class="prelude-val">None</span>;
+            <span class="kw">for </span>i <span class="kw">in </span>op_indices {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = tree.internal.get(<span class="kw-2">*</span>i) {
+                    <span class="kw">let </span>old_vis = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd).visible();
+                    <span class="self">self</span>.osd.add_succ(idx, op);
+                    <span class="kw">let </span>new_vis = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd).visible();
+                    tree.internal.update(
+                        <span class="kw-2">*</span>i,
+                        ChangeVisibility {
+                            old_vis,
+                            new_vis,
+                            op: idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, index: usize) {
         <span class="comment">// this happens on rollback - be sure to go back to the old state
         </span><span class="kw">let </span>tree = <span class="self">self</span>.trees.get_mut(obj).unwrap();
         <span class="self">self</span>.length -= <span class="number">1</span>;
         tree.last_insert = <span class="prelude-val">None</span>;
-        <span class="kw">let </span>op = tree.internal.remove(index);
-        <span class="kw">if let </span>OpType::Make(<span class="kw">_</span>) = <span class="kw-2">&amp;</span>op.action {
-            <span class="self">self</span>.trees.remove(<span class="kw-2">&amp;</span>op.id.into());
+        <span class="kw">let </span>idx = tree.internal.remove(index, <span class="kw-2">&amp;</span><span class="self">self</span>.osd);
+        <span class="kw">let </span>op = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd);
+        <span class="kw">if let </span>OpType::Make(<span class="kw">_</span>) = op.action() {
+            <span class="self">self</span>.trees.remove(<span class="kw-2">&amp;</span>op.id().into());
         }
-        op
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
@@ -822,14 +1085,32 @@
         }
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>load(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: ObjId, op: OpBuilder) -&gt; OpIdx {
+        <span class="self">self</span>.osd.push(obj, op)
+    }
+
+    <span class="comment">// want to move to this everywhere
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>load_with_range(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: ObjId,
+        op: OpBuilder,
+        range: <span class="kw-2">&amp;mut </span>OpIdxRange,
+    ) -&gt; OpIdx {
+        <span class="kw">let </span>idx = <span class="self">self</span>.osd.push(obj, op);
+        range.end += <span class="number">1</span>;
+        <span class="macro">assert!</span>(idx.get() &gt;= range.start <span class="kw">as </span>usize &amp;&amp; idx.get() &lt; range.end <span class="kw">as </span>usize);
+        idx
+    }
+
     <span class="attr">#[tracing::instrument(skip(<span class="self">self</span>, index))]
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, obj: <span class="kw-2">&amp;</span>ObjId, element: Op) {
-        <span class="kw">if let </span>OpType::Make(typ) = element.action {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, obj: <span class="kw-2">&amp;</span>ObjId, idx: OpIdx) {
+        <span class="kw">let </span>op = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.osd);
+        <span class="kw">if let </span>OpType::Make(typ) = op.action() {
             <span class="self">self</span>.trees.insert(
-                element.id.into(),
+                op.id().into(),
                 OpTree {
                     internal: Default::default(),
-                    objtype: typ,
+                    objtype: <span class="kw-2">*</span>typ,
                     last_insert: <span class="prelude-val">None</span>,
                     parent: <span class="prelude-val">Some</span>(<span class="kw-2">*</span>obj),
                 },
@@ -838,7 +1119,7 @@
 
         <span class="kw">if let </span><span class="prelude-val">Some</span>(tree) = <span class="self">self</span>.trees.get_mut(obj) {
             tree.last_insert = <span class="prelude-val">None</span>;
-            tree.internal.insert(index, element);
+            tree.internal.insert(index, idx, <span class="kw-2">&amp;</span><span class="self">self</span>.osd);
             <span class="self">self</span>.length += <span class="number">1</span>;
         } <span class="kw">else </span>{
             <span class="macro">tracing::warn!</span>(<span class="string">&quot;attempting to insert op for unknown object&quot;</span>);
@@ -872,7 +1153,7 @@
         } <span class="kw">else </span>{
             Cow::Borrowed(<span class="kw-2">&amp;</span><span class="self">self</span>.trees)
         };
-        <span class="kw">let </span>graph = <span class="kw">super</span>::visualisation::GraphVisualisation::construct(<span class="kw-2">&amp;</span>trees, <span class="kw-2">&amp;</span><span class="self">self</span>.m);
+        <span class="kw">let </span>graph = <span class="kw">super</span>::visualisation::GraphVisualisation::construct(<span class="kw-2">&amp;</span>trees, <span class="kw-2">&amp;</span><span class="self">self</span>.osd);
         dot::render(<span class="kw-2">&amp;</span>graph, <span class="kw-2">&amp;mut </span>out).unwrap();
         String::from_utf8_lossy(<span class="kw-2">&amp;</span>out[..]).to_string()
     }
@@ -899,7 +1180,7 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>text(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; String {
         <span class="self">self</span>.top_ops(obj, clock)
-            .map(|top| top.op.to_str())
+            .map(|top| top.op.as_str())
             .collect()
     }
 
@@ -916,13 +1197,7 @@
         encoding: ListEncoding,
         clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        ListRange::new(
-            <span class="self">self</span>.top_ops(obj, clock.clone()),
-            <span class="self">self</span>,
-            encoding,
-            range,
-            clock,
-        )
+        ListRange::new(<span class="self">self</span>.top_ops(obj, clock.clone()), encoding, range, clock)
     }
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>map_range&lt;R: RangeBounds&lt;String&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
@@ -935,16 +1210,12 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_string&lt;E: Exportable&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, id: E) -&gt; String {
         <span class="kw">match </span>id.export() {
-            Export::Id(id) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}@{}&quot;</span>, id.counter(), <span class="kw-2">&amp;</span><span class="self">self</span>.m.actors[id.actor()]),
-            Export::Prop(index) =&gt; <span class="self">self</span>.m.props[index].clone(),
+            Export::Id(id) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}@{}&quot;</span>, id.counter(), <span class="kw-2">&amp;</span><span class="self">self</span>.osd.actors[id.actor()]),
+            Export::Prop(index) =&gt; <span class="self">self</span>.osd.props[index].clone(),
             Export::Special(s) =&gt; s,
         }
     }
-
-    <span class="comment">//    pub(crate) fn export_value&lt;&#39;a&gt;(&amp;self, op: &amp;&#39;a Op, clock: Option&lt;&amp;Clock&gt;) -&gt; (Value&lt;&#39;a&gt;, ExI
-    //        (op.value_at(clock), self.id_to_exid(op.id))
-    //    }
-</span>}
+}
 
 <span class="kw">impl </span>Default <span class="kw">for </span>OpSetInternal {
     <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
@@ -953,7 +1224,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; IntoIterator <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetInternal {
-    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, Op&lt;<span class="lifetime">&#39;a</span>&gt;);
 
     <span class="kw">type </span>IntoIter = Iter&lt;<span class="lifetime">&#39;a</span>&gt;;
 
@@ -963,17 +1234,16 @@
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>IterObjs&lt;<span class="lifetime">&#39;a</span>&gt; {
-    trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>op_tree::OpTree)&gt;,
+    trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, OpIter&lt;<span class="lifetime">&#39;a</span>&gt;)&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>IterObjs&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;);
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, OpIter&lt;<span class="lifetime">&#39;a</span>&gt;);
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="self">self</span>.trees
-            .next()
-            .map(|(id, typ, tree)| (id, typ, tree.iter()))
-    }
+        <span class="self">self</span>.trees.next()
+        <span class="comment">//            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+    </span>}
 }
 
 <span class="attr">#[derive(Clone)]
@@ -981,13 +1251,16 @@
     opset: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSet,
     trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>op_tree::OpTree)&gt;,
     current: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;)&gt;,
+    osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
 }
+
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>Iter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, Op&lt;<span class="lifetime">&#39;a</span>&gt;);
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>((id, typ, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(next) = tree.next() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = tree.next() {
+                <span class="kw">let </span>next = idx.as_op2(<span class="self">self</span>.osd);
                 <span class="kw">return </span><span class="prelude-val">Some</span>((id, <span class="kw-2">*</span>typ, next));
             }
         }
@@ -995,7 +1268,8 @@
         <span class="kw">loop </span>{
             <span class="self">self</span>.current = <span class="self">self</span>.trees.next().map(|o| (o.<span class="number">0</span>, o.<span class="number">1</span>, o.<span class="number">2</span>.iter()));
             <span class="kw">if let </span><span class="prelude-val">Some</span>((obj, typ, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(next) = tree.next() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = tree.next() {
+                    <span class="kw">let </span>next = idx.as_op2(<span class="self">self</span>.osd);
                     <span class="kw">return </span><span class="prelude-val">Some</span>((obj, <span class="kw-2">*</span>typ, next));
                 }
             } <span class="kw">else </span>{
@@ -1011,26 +1285,131 @@
     }
 }
 
-<span class="attr">#[derive(Clone, Debug, PartialEq)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpSetMetadata {
+<span class="attr">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpSetData {
     <span class="kw">pub</span>(<span class="kw">crate</span>) actors: IndexedCache&lt;ActorId&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) props: IndexedCache&lt;String&gt;,
+    ops: Vec&lt;OpPlus&gt;,
 }
 
-<span class="kw">impl </span>Default <span class="kw">for </span>OpSetMetadata {
+<span class="kw">impl </span>Default <span class="kw">for </span>OpSetData {
     <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             actors: IndexedCache::new(),
             props: IndexedCache::new(),
+            ops: Vec::new(),
         }
     }
 }
 
-<span class="kw">impl </span>OpSetMetadata {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    iter: OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>OpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = Op&lt;<span class="lifetime">&#39;a</span>&gt;;
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.iter.next().map(|idx| idx.as_op2(<span class="self">self</span>.osd))
+    }
+
+    <span class="kw">fn </span>nth(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.iter.nth(n).map(|idx| idx.as_op2(<span class="self">self</span>.osd))
+    }
+}
+
+<span class="attr">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeOpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+    range: OpIdxRange,
+    current: u32,
+    current_back: u32,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ChangeOpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>new(osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData, range: OpIdxRange) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            osd,
+            current: range.start,
+            current_back: range.end,
+            range,
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>ChangeOpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = Op&lt;<span class="lifetime">&#39;a</span>&gt;;
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="macro">assert!</span>(<span class="self">self</span>.current &gt;= <span class="self">self</span>.range.start);
+        <span class="kw">if </span><span class="self">self</span>.current &lt; <span class="self">self</span>.current_back {
+            <span class="kw">let </span>idx = OpIdx::new(<span class="self">self</span>.current <span class="kw">as </span>usize);
+            <span class="self">self</span>.current += <span class="number">1</span>;
+            <span class="prelude-val">Some</span>(idx.as_op2(<span class="self">self</span>.osd))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DoubleEndedIterator <span class="kw">for </span>ChangeOpIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>next_back(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="macro">assert!</span>(<span class="self">self</span>.current_back &lt;= <span class="self">self</span>.range.end);
+        <span class="kw">if </span><span class="self">self</span>.current_back &gt; <span class="self">self</span>.current {
+            <span class="self">self</span>.current_back -= <span class="number">1</span>;
+            <span class="kw">let </span>idx = OpIdx::new(<span class="self">self</span>.current_back <span class="kw">as </span>usize);
+            <span class="prelude-val">Some</span>(idx.as_op2(<span class="self">self</span>.osd))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+}
+
+<span class="kw">impl </span>OpSetData {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; OpIdxRange {
+        <span class="kw">let </span>len = <span class="self">self</span>.ops.len() <span class="kw">as </span>u32;
+        OpIdxRange {
+            start: len,
+            end: len,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, range: OpIdxRange) -&gt; ChangeOpIter&lt;<span class="lifetime">&#39;_</span>&gt; {
+        ChangeOpIter::new(<span class="self">self</span>, range)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_succ(<span class="kw-2">&amp;mut </span><span class="self">self</span>, old_op: OpIdx, new_op: OpIdx) {
+        <span class="comment">// this gets trucky b/c we&#39;re reading and writing to the same array
+        </span><span class="kw">let </span>new_op = new_op.as_op2(<span class="self">self</span>);
+        <span class="kw">let </span>new_op_id = <span class="kw-2">*</span>new_op.id();
+        <span class="kw">let </span>new_op_inc = new_op.get_increment_value();
+        <span class="kw">let </span>old_op = <span class="kw-2">&amp;mut </span><span class="self">self</span>.ops[old_op.get()].op;
+
+        old_op
+            .succ
+            .add(new_op_id, |l, r| l.lamport_cmp(r, <span class="kw-2">&amp;</span><span class="self">self</span>.actors.cache));
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = new_op_inc {
+            old_op.increment(n, new_op_id);
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: ObjId, op: OpBuilder) -&gt; OpIdx {
+        <span class="kw">let </span>index = <span class="self">self</span>.ops.len();
+        <span class="kw">let </span>width = TextValue::width(op.to_str()) <span class="kw">as </span>u32; <span class="comment">// TODO faster
+        </span><span class="self">self</span>.ops.push(OpPlus { obj, width, op });
+        OpIdx::new(index)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, id: OpIdx) -&gt; <span class="kw-2">&amp;mut </span>OpBuilder {
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>.ops[id.get()].op
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_actors(actors: Vec&lt;ActorId&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             props: IndexedCache::new(),
             actors: actors.into_iter().collect(),
+            ops: Vec::new(),
         }
     }
 
@@ -1051,7 +1430,7 @@
     }
 
     <span class="doccomment">/// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
-    /// this `OpSetMetadata` then this returns `Some(OpIds)`, otherwise returns `None`.
+    /// this `OpSetData` then this returns `Some(OpIds)`, otherwise returns `None`.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>try_sorted_opids(<span class="kw-2">&amp;</span><span class="self">self</span>, opids: Vec&lt;OpId&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;OpIds&gt; {
         OpIds::new_if_sorted(opids, |a, b| <span class="self">self</span>.lamport_cmp(<span class="kw-2">*</span>a, <span class="kw-2">*</span>b))
     }
@@ -1073,7 +1452,7 @@
     <span class="kw">use crate</span>::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, Op, OpId},
+        types::{Key, ObjId, ObjMeta, OpBuilder, OpId, ROOT},
         ActorId, ScalarValue,
     };
 
@@ -1113,12 +1492,12 @@
     ///
     /// The opset in question and an op which should be inserted at the next position after the
     /// internally visible ops.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>optree_with_only_internally_visible_ops() -&gt; (OpSet, Op) {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>optree_with_only_internally_visible_ops() -&gt; (OpSet, OpBuilder) {
         <span class="kw">let </span><span class="kw-2">mut </span>set = OpSet::new();
-        <span class="kw">let </span>actor = set.m.actors.cache(ActorId::random());
-        <span class="kw">let </span>a = set.m.props.cache(<span class="string">&quot;a&quot;</span>.to_string());
-        <span class="kw">let </span>b = set.m.props.cache(<span class="string">&quot;b&quot;</span>.to_string());
-        <span class="kw">let </span>c = set.m.props.cache(<span class="string">&quot;c&quot;</span>.to_string());
+        <span class="kw">let </span>actor = set.osd.actors.cache(ActorId::random());
+        <span class="kw">let </span>a = set.osd.props.cache(<span class="string">&quot;a&quot;</span>.to_string());
+        <span class="kw">let </span>b = set.osd.props.cache(<span class="string">&quot;b&quot;</span>.to_string());
+        <span class="kw">let </span>c = set.osd.props.cache(<span class="string">&quot;c&quot;</span>.to_string());
 
         <span class="kw">let </span><span class="kw-2">mut </span>counter = <span class="number">0</span>;
         <span class="comment">// For each key insert `B` operations with the `pred` and `succ` setup such that the final
@@ -1126,14 +1505,14 @@
         </span><span class="kw">for </span>key <span class="kw">in </span>[a, b, c] {
             <span class="kw">for </span>iteration <span class="kw">in </span><span class="number">0</span>..B {
                 <span class="comment">// Generate a value to insert
-                </span><span class="kw">let </span>keystr = set.m.props.get(key);
+                </span><span class="kw">let </span>keystr = set.osd.props.get(key);
                 <span class="kw">let </span>val = keystr.repeat(iteration + <span class="number">1</span>);
 
                 <span class="comment">// Only the last op is visible
                 </span><span class="kw">let </span>pred = <span class="kw">if </span>iteration == <span class="number">0 </span>{
                     Default::default()
                 } <span class="kw">else </span>{
-                    set.m
+                    set.osd
                         .sorted_opids(<span class="macro">vec!</span>[OpId::new(counter - <span class="number">1</span>, actor)].into_iter())
                 };
 
@@ -1141,11 +1520,11 @@
                 </span><span class="kw">let </span>succ = <span class="kw">if </span>iteration == B - <span class="number">1 </span>{
                     Default::default()
                 } <span class="kw">else </span>{
-                    set.m
+                    set.osd
                         .sorted_opids(<span class="macro">vec!</span>[OpId::new(counter, actor)].into_iter())
                 };
 
-                <span class="kw">let </span>op = Op {
+                <span class="kw">let </span>op = OpBuilder {
                     id: OpId::new(counter, actor),
                     action: <span class="kw">crate</span>::OpType::Put(ScalarValue::Str(val.into())),
                     key: Key::Map(key),
@@ -1153,19 +1532,20 @@
                     pred,
                     insert: <span class="bool-val">false</span>,
                 };
-                set.insert(counter <span class="kw">as </span>usize, <span class="kw-2">&amp;</span>ObjId::root(), op);
+                <span class="kw">let </span>idx = set.load(ROOT.into(), op);
+                set.insert(counter <span class="kw">as </span>usize, <span class="kw-2">&amp;</span>ObjId::root(), idx);
                 counter += <span class="number">1</span>;
             }
         }
 
         <span class="comment">// Now try and create an op which inserts at the next index of &#39;a&#39;
-        </span><span class="kw">let </span>new_op = Op {
+        </span><span class="kw">let </span>new_op = OpBuilder {
             id: OpId::new(counter, actor),
             action: <span class="kw">crate</span>::OpType::Put(ScalarValue::Str(<span class="string">&quot;test&quot;</span>.into())),
             key: Key::Map(a),
             succ: Default::default(),
             pred: set
-                .m
+                .osd
                 .sorted_opids(std::iter::once(OpId::new(B <span class="kw">as </span>u64 - <span class="number">1</span>, actor))),
             insert: <span class="bool-val">false</span>,
         };
@@ -1174,10 +1554,12 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>seek_on_page_boundary() {
-        <span class="kw">let </span>(set, new_op) = optree_with_only_internally_visible_ops();
+        <span class="kw">let </span>(<span class="kw-2">mut </span>set, new_op) = optree_with_only_internally_visible_ops();
 
-        <span class="kw">let </span>q1 = set.find_op_without_patch_log(<span class="kw-2">&amp;</span>ObjId::root(), <span class="kw-2">&amp;</span>new_op);
-        <span class="kw">let </span>q2 = set.find_op_with_patch_log(<span class="kw-2">&amp;</span>ObjMeta::root(), <span class="kw-2">&amp;</span>new_op);
+        <span class="kw">let </span>new_op = set.load(ROOT.into(), new_op).as_op2(<span class="kw-2">&amp;</span>set.osd);
+
+        <span class="kw">let </span>q1 = set.find_op_without_patch_log(<span class="kw-2">&amp;</span>ObjId::root(), new_op);
+        <span class="kw">let </span>q2 = set.find_op_with_patch_log(<span class="kw-2">&amp;</span>ObjMeta::root(), new_op);
 
         <span class="comment">// we&#39;ve inserted `B - 1` elements for &quot;a&quot;, so the index should be `B`
         </span><span class="macro">assert_eq!</span>(q1.pos, B);

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/iter.rs`."><title>iter.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/iter.rs`."><title>iter.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -446,20 +446,23 @@
 <a href="#446" id="446">446</a>
 <a href="#447" id="447">447</a>
 <a href="#448" id="448">448</a>
+<a href="#449" id="449">449</a>
+<a href="#450" id="450">450</a>
+<a href="#451" id="451">451</a>
+<a href="#452" id="452">452</a>
+<a href="#453" id="453">453</a>
+<a href="#454" id="454">454</a>
+<a href="#455" id="455">455</a>
+<a href="#456" id="456">456</a>
+<a href="#457" id="457">457</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 
-<span class="kw">use </span><span class="kw">crate</span>::types::Op;
+<span class="kw">use </span><span class="kw">crate</span>::op_set::OpIdx;
 
 <span class="kw">use super</span>::{OpTreeInternal, OpTreeNode};
 
 <span class="attr">#[derive(Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;(Inner&lt;<span class="lifetime">&#39;a</span>&gt;);
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Default <span class="kw">for </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-        OpTreeIter(Inner::Empty)
-    }
-}
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal) -&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -475,7 +478,6 @@
                     },
                     cumulative_index: <span class="number">0</span>,
                     root_node: root,
-                    ops: <span class="kw-2">&amp;</span>tree.ops,
                 })
                 .unwrap_or(Inner::Empty),
         )
@@ -483,7 +485,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
+    <span class="kw">type </span>Item = OpIdx;
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="self">self</span>.<span class="number">0</span>.next()
@@ -505,7 +507,6 @@
         <span class="comment">// How far through the whole optree we are
         </span>cumulative_index: usize,
         root_node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
-        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
     },
 }
 
@@ -524,14 +525,13 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>Inner&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
+    <span class="kw">type </span>Item = OpIdx;
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">match </span><span class="self">self </span>{
             Inner::Empty =&gt; <span class="prelude-val">None</span>,
             Inner::NonEmpty {
                 ancestors,
-                ops,
                 current,
                 cumulative_index,
                 ..
@@ -543,7 +543,7 @@
                         <span class="kw">let </span>result = current.node.elements[current.index];
                         current.index += <span class="number">1</span>;
                         <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[result])
+                        <span class="prelude-val">Some</span>(result)
                     } <span class="kw">else </span>{
                         <span class="comment">// We&#39;ve exhausted the leaf node, we must find the nearest non-exhausted parent (lol)
                         </span><span class="kw">let </span>node_iter = <span class="kw">loop </span>{
@@ -573,7 +573,7 @@
                         <span class="kw">let </span>result = current.node.elements[current.index];
                         current.index += <span class="number">1</span>;
                         <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[result])
+                        <span class="prelude-val">Some</span>(result)
                     }
                 } <span class="kw">else </span>{
                     <span class="comment">// If we&#39;re in a non-leaf node then the last iteration returned an element from the
@@ -604,7 +604,6 @@
             <span class="self">Self</span>::Empty =&gt; <span class="prelude-val">None</span>,
             <span class="self">Self</span>::NonEmpty {
                 root_node,
-                ops,
                 cumulative_index,
                 current,
                 ancestors,
@@ -635,7 +634,7 @@
                                 Ordering::Equal =&gt; {
                                     <span class="kw-2">*</span>cumulative_index += child.len() + <span class="number">1</span>;
                                     current.index = child_index + <span class="number">1</span>;
-                                    <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[current.node.elements[child_index]]);
+                                    <span class="kw">return </span><span class="prelude-val">Some</span>(current.node.elements[child_index]);
                                 }
                                 Ordering::Greater =&gt; {
                                     current.index = child_index;
@@ -655,7 +654,7 @@
                     <span class="comment">// we&#39;re in a leaf node and we kept track of the cumulative index as we went,
                     </span><span class="kw">let </span>index_in_this_node = n.saturating_sub(<span class="kw-2">*</span>cumulative_index);
                     current.index = index_in_this_node + <span class="number">1</span>;
-                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[current.node.elements[index_in_this_node]])
+                    <span class="prelude-val">Some</span>(current.node.elements[index_in_this_node])
                 }
             }
         }
@@ -665,12 +664,13 @@
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span><span class="kw">super</span>::<span class="kw">super</span>::OpTreeInternal;
-    <span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, OpId, OpType, ScalarValue};
+    <span class="kw">use </span><span class="kw">crate</span>::op_set::{OpIdx, OpSetData};
+    <span class="kw">use </span><span class="kw">crate</span>::types::{Key, OpBuilder, OpId, OpType, ScalarValue, ROOT};
     <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
     <span class="attr">#[derive(Clone)]
     </span><span class="kw">enum </span>Action {
-        Insert(usize, Op),
+        Insert(usize, OpIdx),
         Delete(usize),
     }
 
@@ -685,7 +685,7 @@
 
     <span class="comment">// A struct which impls Debug by only printing the counters of the IDs of the  ops it wraps.
     // This is useful because the only difference between the ops that we generate is the counter
-    // of their IDs. Wrapping a Vec&lt;Op&gt; in DebugOps will result in output from assert! etc. which
+    // of their IDs. Wrapping a Vec&lt;OpBuilder&gt; in DebugOps will result in output from assert! etc. which
     // only shows the counters. For example, the output of a failing assert_eq! like this
     //
     //     assert_eq!(DebugOps(&amp;ops1), DebugOps(&amp;ops2))
@@ -697,42 +697,44 @@
     //
     // i.e. all the other details of the ops are elided
     </span><span class="attr">#[derive(PartialEq)]
-    </span><span class="kw">struct </span>DebugOps&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]);
+    </span><span class="kw">struct </span>DebugOps&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[OpIdx]);
 
     <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; std::fmt::Debug <span class="kw">for </span>DebugOps&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
             <span class="macro">write!</span>(f, <span class="string">&quot;[&quot;</span>)<span class="question-mark">?</span>;
             <span class="kw">for </span>(index, op) <span class="kw">in </span><span class="self">self</span>.<span class="number">0</span>.iter().enumerate() {
                 <span class="kw">if </span>index &lt; <span class="self">self</span>.<span class="number">0</span>.len() - <span class="number">1 </span>{
-                    <span class="macro">write!</span>(f, <span class="string">&quot;{},&quot;</span>, op.id.counter())<span class="question-mark">?</span>;
+                    <span class="macro">write!</span>(f, <span class="string">&quot;{:?},&quot;</span>, op)<span class="question-mark">?</span>;
                 } <span class="kw">else </span>{
-                    <span class="macro">write!</span>(f, <span class="string">&quot;{}]&quot;</span>, op.id.counter())<span class="question-mark">?
+                    <span class="macro">write!</span>(f, <span class="string">&quot;{:?}]&quot;</span>, op)<span class="question-mark">?
                 </span>}
             }
             <span class="prelude-val">Ok</span>(())
         }
     }
 
-    <span class="kw">fn </span>op(counter: u64) -&gt; Op {
-        Op {
+    <span class="kw">fn </span>op(counter: u64, osd: <span class="kw-2">&amp;mut </span>OpSetData) -&gt; OpIdx {
+        <span class="kw">let </span>op = OpBuilder {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, <span class="number">0</span>),
             key: Key::Map(<span class="number">0</span>),
             succ: Default::default(),
             pred: Default::default(),
             insert: <span class="bool-val">false</span>,
-        }
+        };
+        osd.push(ROOT.into(), op)
     }
 
     <span class="doccomment">/// A model for a property based test of the OpTreeIter. We generate a set of actions, each
-    /// action pertaining to a `model` - which is just a `Vec&lt;Op&gt;`. As we generate each action we
+    /// action pertaining to a `model` - which is just a `Vec&lt;OpBuilder&gt;`. As we generate each action we
     /// apply it to the model and record the action we took. In the property test we replay the
     /// same actions against an `OpTree` and check that the iterator returns the same result as the
     /// `model`.
     </span><span class="attr">#[derive(Clone)]
     </span><span class="kw">struct </span>Model {
         actions: Vec&lt;Action&gt;,
-        model: Vec&lt;Op&gt;,
+        model: Vec&lt;OpIdx&gt;,
+        osd: OpSetData,
     }
 
     <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>Model {
@@ -747,19 +749,29 @@
     <span class="kw">impl </span>Model {
         <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize, next_op_counter: u64) -&gt; <span class="self">Self </span>{
             <span class="kw">let </span><span class="kw-2">mut </span>actions = <span class="self">self</span>.actions.clone();
-            <span class="kw">let </span>op = op(next_op_counter);
-            actions.push(Action::Insert(index, op.clone()));
+            <span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::default();
+            <span class="kw">let </span>op = op(next_op_counter, <span class="kw-2">&amp;mut </span>osd);
+            actions.push(Action::Insert(index, op));
             <span class="kw">let </span><span class="kw-2">mut </span>model = <span class="self">self</span>.model.clone();
             model.insert(index, op);
-            <span class="self">Self </span>{ actions, model }
+            <span class="self">Self </span>{
+                actions,
+                model,
+                osd,
+            }
         }
 
         <span class="kw">fn </span>delete(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="self">Self </span>{
             <span class="kw">let </span><span class="kw-2">mut </span>actions = <span class="self">self</span>.actions.clone();
             actions.push(Action::Delete(index));
             <span class="kw">let </span><span class="kw-2">mut </span>model = <span class="self">self</span>.model.clone();
+            <span class="kw">let </span>osd = <span class="self">self</span>.osd.clone();
             model.remove(index);
-            <span class="self">Self </span>{ actions, model }
+            <span class="self">Self </span>{
+                actions,
+                model,
+                osd,
+            }
         }
 
         <span class="kw">fn </span>next(<span class="self">self</span>, next_op_counter: u64) -&gt; <span class="kw">impl </span>Strategy&lt;Value = Model&gt; {
@@ -800,6 +812,7 @@
                 Model {
                     actions: Vec::new(),
                     model: Vec::new(),
+                    osd: OpSetData::default(),
                 },
             ))
             .boxed();
@@ -820,13 +833,15 @@
         })
     }
 
-    <span class="kw">fn </span>make_optree(actions: <span class="kw-2">&amp;</span>[Action]) -&gt; <span class="kw">super</span>::OpTreeInternal {
+    <span class="kw">fn </span>make_optree(actions: <span class="kw-2">&amp;</span>[Action], osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; <span class="kw">super</span>::OpTreeInternal {
         <span class="kw">let </span><span class="kw-2">mut </span>optree = OpTreeInternal::new();
         <span class="kw">for </span>action <span class="kw">in </span>actions {
             <span class="kw">match </span>action {
-                Action::Insert(index, op) =&gt; optree.insert(<span class="kw-2">*</span>index, op.clone()),
+                Action::Insert(index, idx) =&gt; {
+                    optree.insert(<span class="kw-2">*</span>index, <span class="kw-2">*</span>idx, osd);
+                }
                 Action::Delete(index) =&gt; {
-                    optree.remove(<span class="kw-2">*</span>index);
+                    optree.remove(<span class="kw-2">*</span>index, osd);
                 }
             }
         }
@@ -836,8 +851,9 @@
     <span class="doccomment">/// A model for calls to `nth`. `NthModel::n` is guarnateed to be in `(0..model.len())`
     </span><span class="attr">#[derive(Clone)]
     </span><span class="kw">struct </span>NthModel {
-        model: Vec&lt;Op&gt;,
+        model: Vec&lt;OpIdx&gt;,
         actions: Vec&lt;Action&gt;,
+        osd: OpSetData,
         n: usize,
     }
 
@@ -857,6 +873,7 @@
                 Just(NthModel {
                     model: model.model,
                     actions: model.actions,
+                    osd: model.osd,
                     n: <span class="number">0</span>,
                 })
                 .boxed()
@@ -865,6 +882,7 @@
                     .prop_map(|(index, model)| NthModel {
                         model: model.model,
                         actions: model.actions,
+                        osd: model.osd,
                         n: index,
                     })
                     .boxed()
@@ -875,20 +893,20 @@
     <span class="macro">proptest! </span>{
         <span class="attr">#[test]
         </span><span class="kw">fn </span>optree_iter_proptest(model <span class="kw">in </span>model()) {
-            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions);
+            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions, <span class="kw-2">&amp;</span>model.osd);
             <span class="kw">let </span>iter = <span class="kw">super</span>::OpTreeIter::new(<span class="kw-2">&amp;</span>optree);
-            <span class="kw">let </span>iterated = iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">let </span>iterated = iter.collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
             <span class="macro">assert_eq!</span>(DebugOps(<span class="kw-2">&amp;</span>model.model), DebugOps(<span class="kw-2">&amp;</span>iterated))
         }
 
         <span class="attr">#[test]
         </span><span class="kw">fn </span>optree_iter_nth(model <span class="kw">in </span>nth_model()) {
-            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions);
+            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions, <span class="kw-2">&amp;</span>model.osd);
             <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="kw">super</span>::OpTreeIter::new(<span class="kw-2">&amp;</span>optree);
             <span class="kw">let </span><span class="kw-2">mut </span>model_iter = model.model.iter();
-            <span class="macro">assert_eq!</span>(model_iter.nth(model.n), iter.nth(model.n));
+            <span class="macro">assert_eq!</span>(model_iter.nth(model.n).cloned(), iter.nth(model.n));
 
-            <span class="kw">let </span>tail = iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">let </span>tail = iter.collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
             <span class="kw">let </span>expected_tail = model_iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
             <span class="macro">assert_eq!</span>(DebugOps(tail.as_slice()), DebugOps(expected_tail.as_slice()));
         }

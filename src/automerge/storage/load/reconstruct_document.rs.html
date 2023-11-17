@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/load/reconstruct_document.rs`."><title>reconstruct_document.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/load/reconstruct_document.rs`."><title>reconstruct_document.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -373,6 +373,9 @@
 <a href="#373" id="373">373</a>
 <a href="#374" id="374">374</a>
 <a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::change_collector::ChangeCollector;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap};
 <span class="kw">use </span>tracing::instrument;
@@ -380,9 +383,9 @@
 <span class="kw">use crate</span>::{
     change::Change,
     columnar::Key <span class="kw">as </span>DocOpKey,
-    op_tree::OpSetMetadata,
+    op_tree::OpSetData,
     storage::{change::Verified, Change <span class="kw">as </span>StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, OpBuilder, OpId, OpIds, OpType},
     ScalarValue,
 };
 
@@ -429,7 +432,7 @@
     <span class="doccomment">/// The id of the parent object, if any
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) parent: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
     <span class="doccomment">/// The operations for this object
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw">crate</span>::types::Op&gt;,
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw">crate</span>::types::OpBuilder&gt;,
     <span class="doccomment">/// The type of the object
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) obj_type: ObjType,
 }
@@ -440,10 +443,10 @@
     <span class="kw">type </span>Output;
 
     <span class="doccomment">/// The operations for an object have been loaded
-    </span><span class="kw">fn </span>object_loaded(<span class="kw-2">&amp;mut </span><span class="self">self</span>, object: LoadedObject);
-    <span class="doccomment">/// The document has finished loading. The `metadata` is the `OpSetMetadata` which was used to
+    </span><span class="kw">fn </span>object_loaded(<span class="kw-2">&amp;mut </span><span class="self">self</span>, object: LoadedObject, osd: <span class="kw-2">&amp;mut </span>OpSetData);
+    <span class="doccomment">/// The document has finished loading. The `osd` is the `OpSetData` which was used to
     /// create the indices in the operations which were passed to `object_loaded`
-    </span><span class="kw">fn </span>finish(<span class="self">self</span>, metadata: OpSetMetadata) -&gt; <span class="self">Self</span>::Output;
+    </span><span class="kw">fn </span>finish(<span class="self">self</span>, osd: OpSetData) -&gt; <span class="self">Self</span>::Output;
 }
 
 <span class="doccomment">/// The result of reconstructing the change history from a document
@@ -491,8 +494,8 @@
     // if we were directly applying the reconstructed change graph. This is the purpose of the
     // `DocObserver`, which we pass operations to as we complete the processing of each object.
 
-    // The metadata which we create from the doc and which we will pass to the observer
-    </span><span class="kw">let </span><span class="kw-2">mut </span>metadata = OpSetMetadata::from_actors(doc.actors().to_vec());
+    // The op set data which we create from the doc and which we will pass to the observer
+    </span><span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::from_actors(doc.actors().to_vec());
     <span class="comment">// The object we are currently loading, starts with the root
     </span><span class="kw">let </span><span class="kw-2">mut </span>current_object = LoadingObject::root();
     <span class="comment">// The changes we are collecting to later construct the change graph from
@@ -518,8 +521,8 @@
         }
 
         <span class="kw">let </span>obj = doc_op.object;
-        check_opid(<span class="kw-2">&amp;</span>metadata, <span class="kw-2">*</span>obj.opid())<span class="question-mark">?</span>;
-        <span class="kw">let </span>op = import_op(<span class="kw-2">&amp;mut </span>metadata, doc_op)<span class="question-mark">?</span>;
+        check_opid(<span class="kw-2">&amp;</span>osd, <span class="kw-2">*</span>obj.opid())<span class="question-mark">?</span>;
+        <span class="kw">let </span>op = import_op(<span class="kw-2">&amp;mut </span>osd, doc_op)<span class="question-mark">?</span>;
         <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>op, <span class="question-mark">?</span>obj, <span class="string">&quot;loading document op&quot;</span>);
 
         <span class="kw">if let </span>OpType::Make(obj_type) = op.action {
@@ -548,18 +551,18 @@
                 <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>op, previous_obj=<span class="question-mark">?</span>current_object.id, <span class="string">&quot;op referenced an object ID which was smaller than the previous object ID&quot;</span>);
                 <span class="kw">return </span><span class="prelude-val">Err</span>(Error::OpsOutOfOrder);
             } <span class="kw">else </span>{
-                <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;</span>metadata)<span class="question-mark">?</span>;
+                <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;mut </span>osd)<span class="question-mark">?</span>;
                 objs_loaded.insert(loaded.id);
-                observer.object_loaded(loaded);
+                observer.object_loaded(loaded, <span class="kw-2">&amp;mut </span>osd);
                 current_object =
                     LoadingObject::new(obj, <span class="prelude-val">Some</span>(create_op.parent_id), create_op.obj_type);
                 current_object.append_op(op.clone())<span class="question-mark">?</span>;
             }
         }
     }
-    <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;</span>metadata)<span class="question-mark">?</span>;
+    <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;mut </span>osd)<span class="question-mark">?</span>;
     objs_loaded.insert(loaded.id);
-    observer.object_loaded(loaded);
+    observer.object_loaded(loaded, <span class="kw-2">&amp;mut </span>osd);
 
     <span class="comment">// If an op created an object but no operation targeting that object was ever made then the
     // object will only exist in the create_ops map. We collect all such objects here.
@@ -572,17 +575,19 @@
     ) <span class="kw">in </span>create_ops.into_iter()
     {
         <span class="kw">if </span>!objs_loaded.contains(<span class="kw-2">&amp;</span>obj_id) {
-            observer.object_loaded(LoadedObject {
-                parent: <span class="prelude-val">Some</span>(parent_id),
-                id: obj_id,
-                ops: Vec::new(),
-                obj_type,
-            })
+            observer.object_loaded(
+                LoadedObject {
+                    parent: <span class="prelude-val">Some</span>(parent_id),
+                    id: obj_id,
+                    ops: Vec::new(),
+                    obj_type,
+                },
+                <span class="kw-2">&amp;mut </span>osd,
+            )
         }
     }
 
-    <span class="kw">let </span><span class="kw">super</span>::change_collector::CollectedChanges { history, heads } =
-        collector.finish(<span class="kw-2">&amp;</span>metadata)<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw">super</span>::change_collector::CollectedChanges { history, heads } = collector.finish(<span class="kw-2">&amp;</span>osd)<span class="question-mark">?</span>;
     <span class="kw">if </span><span class="macro">matches!</span>(mode, VerificationMode::Check) {
         <span class="kw">let </span>expected_heads: BTreeSet&lt;<span class="kw">_</span>&gt; = doc.heads().iter().cloned().collect();
         <span class="kw">if </span>expected_heads != heads {
@@ -594,7 +599,7 @@
             }));
         }
     }
-    <span class="kw">let </span>result = observer.finish(metadata);
+    <span class="kw">let </span>result = observer.finish(osd);
 
     <span class="prelude-val">Ok</span>(Reconstructed {
         result,
@@ -611,7 +616,7 @@
 <span class="kw">struct </span>LoadingObject {
     id: ObjId,
     parent_id: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
-    ops: Vec&lt;Op&gt;,
+    ops: Vec&lt;OpBuilder&gt;,
     obj_type: ObjType,
     preds: HashMap&lt;OpId, Vec&lt;OpId&gt;&gt;,
     <span class="doccomment">/// Operations which set a value, stored to later lookup keys when reconstructing delete events
@@ -639,7 +644,7 @@
         }
     }
 
-    <span class="kw">fn </span>append_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
+    <span class="kw">fn </span>append_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: OpBuilder) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
         <span class="comment">// Collect set and make operations so we can find the keys which delete operations refer to
         // in `finish`
         </span><span class="kw">if </span><span class="macro">matches!</span>(op.action, OpType::Put(<span class="kw">_</span>) | OpType::Make(<span class="kw">_</span>)) {
@@ -667,12 +672,12 @@
     <span class="kw">fn </span>finish(
         <span class="kw-2">mut </span><span class="self">self</span>,
         collector: <span class="kw-2">&amp;mut </span>ChangeCollector&lt;<span class="lifetime">&#39;_</span>&gt;,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        osd: <span class="kw-2">&amp;mut </span>OpSetData,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;LoadedObject, Error&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>ops = Vec::new();
         <span class="kw">for </span><span class="kw-2">mut </span>op <span class="kw">in </span><span class="self">self</span>.ops.into_iter() {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(preds) = <span class="self">self</span>.preds.remove(<span class="kw-2">&amp;</span>op.id) {
-                op.pred = meta.sorted_opids(preds.into_iter());
+                op.pred = osd.sorted_opids(preds.into_iter());
             }
             <span class="kw">if let </span>OpType::Put(ScalarValue::Counter(c)) = <span class="kw-2">&amp;mut </span>op.action {
                 <span class="kw">for </span>(id, inc) <span class="kw">in </span>op
@@ -683,7 +688,7 @@
                     c.increment(inc, id);
                 }
             }
-            collector.collect(<span class="self">self</span>.id, op.clone())<span class="question-mark">?</span>;
+            collector.collect(<span class="self">self</span>.id, op.clone(), osd)<span class="question-mark">?</span>;
             ops.push(op)
         }
         <span class="comment">// Any remaining pred ops must be delete operations
@@ -695,14 +700,15 @@
             })<span class="question-mark">?</span>;
             collector.collect(
                 <span class="self">self</span>.id,
-                Op {
+                OpBuilder {
                     id: opid,
-                    pred: meta.sorted_opids(preds.into_iter()),
+                    pred: osd.sorted_opids(preds.into_iter()),
                     insert: <span class="bool-val">false</span>,
                     succ: OpIds::empty(),
                     key: <span class="kw-2">*</span>key,
                     action: OpType::Delete,
                 },
+                osd,
             )<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(LoadedObject {
@@ -714,33 +720,33 @@
     }
 }
 
-<span class="kw">fn </span>import_op(m: <span class="kw-2">&amp;mut </span>OpSetMetadata, op: DocOp) -&gt; <span class="prelude-ty">Result</span>&lt;Op, Error&gt; {
+<span class="kw">fn </span>import_op(osd: <span class="kw-2">&amp;mut </span>OpSetData, op: DocOp) -&gt; <span class="prelude-ty">Result</span>&lt;OpBuilder, Error&gt; {
     <span class="kw">let </span>key = <span class="kw">match </span>op.key {
-        DocOpKey::Prop(s) =&gt; Key::Map(m.import_prop(s)),
-        DocOpKey::Elem(ElemId(op)) =&gt; Key::Seq(ElemId(check_opid(m, op)<span class="question-mark">?</span>)),
+        DocOpKey::Prop(s) =&gt; Key::Map(osd.import_prop(s)),
+        DocOpKey::Elem(ElemId(op)) =&gt; Key::Seq(ElemId(check_opid(osd, op)<span class="question-mark">?</span>)),
     };
     <span class="kw">for </span>opid <span class="kw">in </span><span class="kw-2">&amp;</span>op.succ {
-        <span class="kw">if </span>m.actors.safe_get(opid.actor()).is_none() {
+        <span class="kw">if </span>osd.actors.safe_get(opid.actor()).is_none() {
             <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>opid, <span class="string">&quot;missing actor&quot;</span>);
             <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MissingActor);
         }
     }
     <span class="kw">let </span>action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    <span class="prelude-val">Ok</span>(Op {
-        id: check_opid(m, op.id)<span class="question-mark">?</span>,
+    <span class="prelude-val">Ok</span>(OpBuilder {
+        id: check_opid(osd, op.id)<span class="question-mark">?</span>,
         action,
         key,
-        succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)<span class="question-mark">?</span>,
+        succ: osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)<span class="question-mark">?</span>,
         pred: OpIds::empty(),
         insert: op.insert,
     })
 }
 
-<span class="doccomment">/// We construct the OpSetMetadata directly from the vector of actors which are encoded in the
+<span class="doccomment">/// We construct the OpSetData directly from the vector of actors which are encoded in the
 /// start of the document. Therefore we need to check for each opid in the docuemnt that the actor
-/// ID which it references actually exists in the metadata.
-</span><span class="kw">fn </span>check_opid(m: <span class="kw-2">&amp;</span>OpSetMetadata, opid: OpId) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, Error&gt; {
-    <span class="kw">match </span>m.actors.safe_get(opid.actor()) {
+/// ID which it references actually exists in the op set data.
+</span><span class="kw">fn </span>check_opid(osd: <span class="kw-2">&amp;</span>OpSetData, opid: OpId) -&gt; <span class="prelude-ty">Result</span>&lt;OpId, Error&gt; {
+    <span class="kw">match </span>osd.actors.safe_get(opid.actor()) {
         <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(opid),
         <span class="prelude-val">None </span>=&gt; {
             <span class="macro">tracing::error!</span>(<span class="string">&quot;missing actor&quot;</span>);

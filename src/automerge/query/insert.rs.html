@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/insert.rs`."><title>insert.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/insert.rs`."><title>insert.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -163,18 +163,21 @@
 <a href="#163" id="163">163</a>
 <a href="#164" id="164">164</a>
 <a href="#165" id="165">165</a>
+<a href="#166" id="166">166</a>
+<a href="#167" id="167">167</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkStateMachine;
+<span class="kw">use </span><span class="kw">crate</span>::op_set::Op;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetMetadata, OpTree, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpType, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetData, OpTree, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, OpType, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>InsertNth&lt;<span class="lifetime">&#39;a</span>&gt; {
-    idx: ListState,
+    list_state: ListState,
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     last_visible_key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
     candidates: Vec&lt;Loc&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
@@ -185,7 +188,7 @@
 </span><span class="kw">struct </span>Loc&lt;<span class="lifetime">&#39;a</span>&gt; {
     key: Key,
     pos: usize,
-    id: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    id: <span class="prelude-ty">Option</span>&lt;Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Loc&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -193,7 +196,7 @@
         Loc { key, pos, id: <span class="prelude-val">None </span>}
     }
 
-    <span class="kw">fn </span>mark(pos: usize, key: Key, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; <span class="self">Self </span>{
+    <span class="kw">fn </span>mark(pos: usize, key: Key, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="self">Self </span>{
         Loc {
             key,
             pos,
@@ -201,17 +204,17 @@
         }
     }
 
-    <span class="kw">fn </span>matches(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) -&gt; bool {
-        <span class="self">self</span>.id.map(|o| o.id) == <span class="prelude-val">Some</span>(op.id.prev())
+    <span class="kw">fn </span>matches(<span class="kw-2">&amp;</span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; bool {
+        <span class="self">self</span>.id.map(|o| o.id()) == <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>op.id().prev())
     }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; InsertNth&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span>idx = ListState::new(encoding, target);
+        <span class="kw">let </span>list_state = ListState::new(encoding, target);
         <span class="kw">if </span>target == <span class="number">0 </span>{
             InsertNth {
-                idx,
+                list_state,
                 last_visible_key: <span class="prelude-val">None</span>,
                 candidates: <span class="macro">vec!</span>[Loc::new(<span class="number">0</span>, Key::Seq(HEAD))],
                 clock,
@@ -219,7 +222,7 @@
             }
         } <span class="kw">else </span>{
             InsertNth {
-                idx,
+                list_state,
                 last_visible_key: <span class="prelude-val">None</span>,
                 candidates: <span class="macro">vec!</span>[],
                 clock,
@@ -228,10 +231,10 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>marks(<span class="kw-2">&amp;</span><span class="self">self</span>, osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
         <span class="kw">for </span>(id, mark_data) <span class="kw">in </span><span class="self">self</span>.marks.iter() {
-            marks.mark_begin(<span class="kw-2">*</span>id, mark_data, m);
+            marks.mark_begin(<span class="kw-2">*</span>id, mark_data, osd);
         }
         marks.current().cloned()
     }
@@ -240,7 +243,7 @@
         <span class="self">self</span>.candidates
             .last()
             .map(|loc| loc.pos)
-            .unwrap_or(<span class="self">self</span>.idx.pos())
+            .unwrap_or(<span class="self">self</span>.list_state.pos())
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Key, AutomergeError&gt; {
@@ -248,25 +251,25 @@
             .last()
             .map(|loc| loc.key)
             .or(<span class="self">self</span>.last_visible_key)
-            .ok_or(AutomergeError::InvalidIndex(<span class="self">self</span>.idx.target()))
+            .ok_or(AutomergeError::InvalidIndex(<span class="self">self</span>.list_state.target()))
     }
 
-    <span class="kw">fn </span>identify_valid_insertion_spot(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, key: <span class="kw-2">&amp;</span>Key) {
-        <span class="kw">if </span>!<span class="self">self</span>.idx.done() {
+    <span class="kw">fn </span>identify_valid_insertion_spot(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;, key: <span class="kw-2">&amp;</span>Key) {
+        <span class="kw">if </span>!<span class="self">self</span>.list_state.done() {
             <span class="kw">return</span>;
         }
 
-        <span class="comment">// first insert we see after idx.done()
-        </span><span class="kw">if </span>op.insert &amp;&amp; <span class="self">self</span>.candidates.is_empty() &amp;&amp; <span class="self">self</span>.last_visible_key.is_some() {
+        <span class="comment">// first insert we see after list_state.done()
+        </span><span class="kw">if </span>op.insert() &amp;&amp; <span class="self">self</span>.candidates.is_empty() &amp;&amp; <span class="self">self</span>.last_visible_key.is_some() {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(key) = <span class="self">self</span>.last_visible_key {
-                <span class="self">self</span>.candidates.push(Loc::new(<span class="self">self</span>.idx.pos(), key))
+                <span class="self">self</span>.candidates.push(Loc::new(<span class="self">self</span>.list_state.pos(), key))
             }
         }
 
         <span class="comment">// sticky marks
         </span><span class="kw">if </span>!<span class="self">self</span>.candidates.is_empty() {
             <span class="comment">// if we find a begin/end pair - ignore them
-            </span><span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = <span class="kw-2">&amp;</span>op.action {
+            </span><span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action() {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(pos) = <span class="self">self</span>.candidates.iter().position(|loc| loc.matches(op)) {
                     <span class="comment">// mark points between begin and end are invalid
                     </span><span class="self">self</span>.candidates.truncate(pos);
@@ -274,11 +277,11 @@
                 }
             }
             <span class="kw">if </span><span class="macro">matches!</span>(
-                op.action,
+                op.action(),
                 OpType::MarkBegin(<span class="bool-val">true</span>, <span class="kw">_</span>) | OpType::MarkEnd(<span class="bool-val">false</span>)
             ) {
                 <span class="self">self</span>.candidates
-                    .push(Loc::mark(<span class="self">self</span>.idx.pos() + <span class="number">1</span>, <span class="kw-2">*</span>key, op));
+                    .push(Loc::mark(<span class="self">self</span>.list_state.pos() + <span class="number">1</span>, <span class="kw-2">*</span>key, op));
             }
         }
     }
@@ -289,9 +292,9 @@
         <span class="self">self</span>.pos() == other.pos() &amp;&amp; <span class="self">self</span>.key() == other.key()
     }
 
-    <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree) -&gt; bool {
+    <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree, _osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; bool {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = <span class="kw-2">&amp;</span>tree.last_insert {
-            <span class="kw">if </span>last.index + last.width == <span class="self">self</span>.idx.target() {
+            <span class="kw">if </span>last.index + last.width == <span class="self">self</span>.list_state.target() {
                 <span class="self">self</span>.candidates.push(Loc::new(last.pos + <span class="number">1</span>, last.key));
                 <span class="kw">return </span><span class="bool-val">true</span>;
             }
@@ -299,17 +302,18 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]) -&gt; QueryResult {
-        <span class="self">self</span>.idx.check_if_node_is_clean(child);
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; QueryResult {
+        <span class="self">self</span>.list_state.check_if_node_is_clean(child);
         <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
-            <span class="self">self</span>.idx.process_node(child, ops, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks))
+            <span class="self">self</span>.list_state
+                .process_node(child, osd, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks))
         } <span class="kw">else </span>{
             QueryResult::Descend
         }
     }
 
-    <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; QueryResult {
-        <span class="kw">if </span>!<span class="self">self</span>.idx.done() {
+    <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; QueryResult {
+        <span class="kw">if </span>!<span class="self">self</span>.list_state.done() {
             <span class="self">self</span>.marks.process(op);
         }
         <span class="kw">let </span>key = op.elemid_or_key();
@@ -324,7 +328,7 @@
             }
             <span class="self">self</span>.last_visible_key = <span class="prelude-val">Some</span>(key);
         }
-        <span class="self">self</span>.idx.process_op(op, key, visible);
+        <span class="self">self</span>.list_state.process_op(op, key, visible);
         QueryResult::Next
     }
 }

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree.rs`."><title>op_tree.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree.rs`."><title>op_tree.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -602,23 +602,9 @@
 <a href="#602" id="602">602</a>
 <a href="#603" id="603">603</a>
 <a href="#604" id="604">604</a>
-<a href="#605" id="605">605</a>
-<a href="#606" id="606">606</a>
-<a href="#607" id="607">607</a>
-<a href="#608" id="608">608</a>
-<a href="#609" id="609">609</a>
-<a href="#610" id="610">610</a>
-<a href="#611" id="611">611</a>
-<a href="#612" id="612">612</a>
-<a href="#613" id="613">613</a>
-<a href="#614" id="614">614</a>
-<a href="#615" id="615">615</a>
-<a href="#616" id="616">616</a>
-<a href="#617" id="617">617</a>
-<a href="#618" id="618">618</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
-<span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
+</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::{Op, OpSetData};
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::node::OpIdx;
 <span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
 <span class="kw">use crate</span>::{
     clock::Clock,
@@ -626,7 +612,7 @@
     Automerge,
 };
 <span class="kw">use crate</span>::{
-    types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
+    types::{Key, ListEncoding, ObjId, ObjMeta, OpId, Prop},
     ObjType, OpType,
 };
 <span class="kw">use </span>std::cmp::Ordering;
@@ -641,7 +627,7 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>node::OpTreeNode;
 <span class="kw">pub use </span>node::B;
 
-<span class="attr">#[derive(Debug, Clone, PartialEq)]
+<span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTree {
     <span class="kw">pub</span>(<span class="kw">crate</span>) internal: OpTreeInternal,
     <span class="kw">pub</span>(<span class="kw">crate</span>) objtype: ObjType,
@@ -698,10 +684,10 @@
 
 <span class="attr">#[derive(Default, Clone, Debug)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) before: <span class="prelude-ty">Option</span>&lt;Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) num_before: usize,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) overwritten: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) after: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) overwritten: <span class="prelude-ty">Option</span>&lt;Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) after: <span class="prelude-ty">Option</span>&lt;Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
@@ -712,16 +698,16 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>log_patches(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         obj: <span class="kw-2">&amp;</span>ObjMeta,
-        op: <span class="kw-2">&amp;</span>Op,
+        op: Op&lt;<span class="lifetime">&#39;_</span>&gt;,
         doc: <span class="kw-2">&amp;</span>Automerge,
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     ) {
-        <span class="kw">if </span>op.insert {
+        <span class="kw">if </span>op.insert() {
             <span class="kw">if </span>op.is_mark() {
-                <span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action {
+                <span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action() {
                     <span class="kw">let </span>q = doc.ops().search(
                         <span class="kw-2">&amp;</span>obj.id,
-                        query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
+                        query::SeekMark::new(op.id().prev(), <span class="self">self</span>.pos, obj.encoding),
                     );
                     <span class="kw">for </span>mark <span class="kw">in </span>q.finish() {
                         <span class="kw">let </span>index = mark.start;
@@ -731,13 +717,13 @@
                     }
                 }
             } <span class="kw">else if </span>obj.typ == ObjType::Text {
-                patch_log.splice(obj.id, <span class="self">self</span>.index, op.to_str(), <span class="self">self</span>.marks.clone());
+                patch_log.splice(obj.id, <span class="self">self</span>.index, op.as_str(), <span class="self">self</span>.marks.clone());
             } <span class="kw">else </span>{
                 patch_log.insert(
                     obj.id,
                     <span class="self">self</span>.index,
                     op.value().into(),
-                    op.id,
+                    <span class="kw-2">*</span>op.id(),
                     <span class="bool-val">false</span>,
                     <span class="self">self</span>.marks.clone(),
                 );
@@ -745,8 +731,8 @@
             <span class="kw">return</span>;
         }
 
-        <span class="kw">let </span>key: Prop = <span class="kw">match </span>op.key {
-            Key::Map(i) =&gt; doc.ops().m.props[i].clone().into(),
+        <span class="kw">let </span>key: Prop = <span class="kw">match </span><span class="kw-2">*</span>op.key() {
+            Key::Map(i) =&gt; doc.ops().osd.props[i].clone().into(),
             Key::Seq(<span class="kw">_</span>) =&gt; <span class="self">self</span>.index.into(),
         };
 
@@ -764,7 +750,7 @@
                         obj.id,
                         <span class="kw-2">&amp;</span>key,
                         before.value().into(),
-                        before.id,
+                        <span class="kw-2">*</span>before.id(),
                         conflict,
                         <span class="bool-val">true</span>,
                     );
@@ -775,25 +761,31 @@
             <span class="kw">if </span><span class="self">self</span>.after.is_none() {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(counter) = <span class="self">self</span>.overwritten {
                     <span class="kw">if </span>op.overwrites(counter) {
-                        patch_log.increment(obj.id, <span class="kw-2">&amp;</span>key, value, op.id);
+                        patch_log.increment(obj.id, <span class="kw-2">&amp;</span>key, value, <span class="kw-2">*</span>op.id());
                     }
                 }
             }
         } <span class="kw">else </span>{
             <span class="kw">let </span>conflict = <span class="self">self</span>.before.is_some();
-            <span class="comment">//let value = (op.value(), doc.ops().id_to_exid(op.id));
-            </span><span class="kw">if </span>op.is_list_op()
+            <span class="kw">if </span>op.is_list_op()
                 &amp;&amp; <span class="self">self</span>.overwritten.is_none()
                 &amp;&amp; <span class="self">self</span>.before.is_none()
                 &amp;&amp; <span class="self">self</span>.after.is_none()
             {
-                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict, <span class="prelude-val">None</span>);
+                patch_log.insert(
+                    obj.id,
+                    <span class="self">self</span>.index,
+                    op.value().into(),
+                    <span class="kw-2">*</span>op.id(),
+                    conflict,
+                    <span class="prelude-val">None</span>,
+                );
             } <span class="kw">else if </span><span class="self">self</span>.after.is_some() {
                 <span class="kw">if </span><span class="self">self</span>.before.is_none() {
                     patch_log.flag_conflict(obj.id, <span class="kw-2">&amp;</span>key);
                 }
             } <span class="kw">else </span>{
-                patch_log.put(obj.id, <span class="kw-2">&amp;</span>key, op.value().into(), op.id, conflict, <span class="bool-val">false</span>);
+                patch_log.put(obj.id, <span class="kw-2">&amp;</span>key, op.value().into(), <span class="kw-2">*</span>op.id(), conflict, <span class="bool-val">false</span>);
             }
         }
     }
@@ -802,16 +794,12 @@
 <span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTreeInternal {
     <span class="kw">pub</span>(<span class="kw">crate</span>) root_node: <span class="prelude-ty">Option</span>&lt;OpTreeNode&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;Op&gt;,
 }
 
 <span class="kw">impl </span>OpTreeInternal {
     <span class="doccomment">/// Construct a new, empty, sequence.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
-        <span class="self">Self </span>{
-            root_node: <span class="prelude-val">None</span>,
-            ops: <span class="macro">vec!</span>[],
-        }
+        <span class="self">Self </span>{ root_node: <span class="prelude-val">None </span>}
     }
 
     <span class="doccomment">/// Get the length of the sequence.
@@ -819,29 +807,22 @@
         <span class="self">self</span>.root_node.as_ref().map_or(<span class="number">0</span>, |n| n.len())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops&lt;<span class="lifetime">&#39;a</span>&gt;(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
-        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
-    ) -&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
-        TopOps::new(OpTreeIter::new(<span class="self">self</span>), clock, meta)
-    }
-
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_without_patch_log(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
-        op: <span class="kw-2">&amp;</span>Op,
+        osd: <span class="kw-2">&amp;</span>OpSetData,
+        op: Op&lt;<span class="lifetime">&#39;_</span>&gt;,
         <span class="kw-2">mut </span>pos: usize,
     ) -&gt; FoundOpWithoutPatchLog {
         <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
         <span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="macro">vec!</span>[];
         <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(pos);
-        <span class="kw">while let </span><span class="prelude-val">Some</span>(e) = next {
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(idx) = next {
+            <span class="kw">let </span>e = idx.as_op2(osd);
             <span class="kw">if </span>e.elemid_or_key() != op.elemid_or_key() {
                 <span class="kw">break</span>;
             }
 
-            <span class="kw">if </span>meta.lamport_cmp(e.id, op.id) == Ordering::Greater {
+            <span class="kw">if </span>e.lamport_cmp(<span class="kw-2">*</span>op.id()) == Ordering::Greater {
                 <span class="kw">break</span>;
             }
 
@@ -858,8 +839,8 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_with_patch_log&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
-        op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+        op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
         <span class="kw-2">mut </span>pos: usize,
         index: usize,
         marks: <span class="prelude-ty">Option</span>&lt;Arc&lt;MarkSet&gt;&gt;,
@@ -872,12 +853,13 @@
         <span class="kw">let </span><span class="kw-2">mut </span>after = <span class="prelude-val">None</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="macro">vec!</span>[];
         <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(pos);
-        <span class="kw">while let </span><span class="prelude-val">Some</span>(e) = next {
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(idx) = next {
+            <span class="kw">let </span>e = idx.as_op2(osd);
             <span class="kw">if </span>e.elemid_or_key() != op.elemid_or_key() {
                 <span class="kw">break</span>;
             }
 
-            <span class="kw">if </span>found.is_none() &amp;&amp; meta.lamport_cmp(e.id, op.id) == Ordering::Greater {
+            <span class="kw">if </span>found.is_none() &amp;&amp; e.lamport_cmp(<span class="kw-2">*</span>op.id()) == Ordering::Greater {
                 found = <span class="prelude-val">Some</span>(pos);
             }
 
@@ -919,11 +901,11 @@
         opid: OpId,
         encoding: ListEncoding,
         clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;FoundOpId&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-        <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::opid(opid, encoding, clock), meta);
+        <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::opid(opid, encoding, clock), osd);
         <span class="kw">let </span>pos = query.found()<span class="question-mark">?</span>;
-        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter().map(|idx| idx.as_op2(osd));
         <span class="kw">let </span>op = iter.nth(pos)<span class="question-mark">?</span>;
         <span class="kw">let </span>index = query.index_for(op);
         <span class="kw">for </span>e <span class="kw">in </span>iter {
@@ -948,48 +930,48 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_patch_log&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+        op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
         encoding: ListEncoding,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
     ) -&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
-        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
-            <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::op(op, encoding), meta);
+        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = <span class="kw-2">*</span>op.key() {
+            <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::op(op, encoding), osd);
             <span class="kw">let </span>pos = query.pos();
             <span class="kw">let </span>index = query.index();
-            <span class="kw">let </span>marks = query.marks(meta);
-            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, index, marks)
+            <span class="kw">let </span>marks = query.marks(osd);
+            <span class="self">self</span>.found_op_with_patch_log(osd, op, pos, index, marks)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
-            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, <span class="number">0</span>, <span class="prelude-val">None</span>)
+            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(osd, |o| o.key_cmp(op.key()));
+            <span class="self">self</span>.found_op_with_patch_log(osd, op, pos, <span class="number">0</span>, <span class="prelude-val">None</span>)
         }
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_patch_log(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        op: <span class="kw-2">&amp;</span>Op,
-        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        op: Op&lt;<span class="lifetime">&#39;_</span>&gt;,
+        osd: <span class="kw-2">&amp;</span>OpSetData,
     ) -&gt; FoundOpWithoutPatchLog {
-        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
-            <span class="kw">let </span>query = <span class="self">self</span>.search(query::SimpleOpIdSearch::op(op), meta);
+        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = <span class="kw-2">*</span>op.key() {
+            <span class="kw">let </span>query = <span class="self">self</span>.search(query::SimpleOpIdSearch::op(op), osd);
             <span class="kw">let </span>pos = query.pos;
-            <span class="self">self</span>.found_op_without_patch_log(meta, op, pos)
+            <span class="self">self</span>.found_op_without_patch_log(osd, op, pos)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
-            <span class="self">self</span>.found_op_without_patch_log(meta, op, pos)
+            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(osd, |o| o.key_cmp(op.key()));
+            <span class="self">self</span>.found_op_without_patch_log(osd, op, pos)
         }
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seek_ops_by_prop&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
         prop: Prop,
         encoding: ListEncoding,
         clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;OpsFound&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
         <span class="kw">match </span>prop {
             Prop::Map(key_name) =&gt; {
-                <span class="kw">let </span>key = Key::Map(meta.props.lookup(<span class="kw-2">&amp;</span>key_name)<span class="question-mark">?</span>);
-                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Prop::new(key, clock.cloned()), meta);
+                <span class="kw">let </span>key = Key::Map(osd.props.lookup(<span class="kw-2">&amp;</span>key_name)<span class="question-mark">?</span>);
+                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Prop::new(key, clock.cloned()), osd);
                 <span class="prelude-val">Some</span>(OpsFound {
                     ops: query.ops,
                     ops_pos: query.ops_pos,
@@ -997,7 +979,7 @@
                 })
             }
             Prop::Seq(index) =&gt; {
-                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Nth::new(index, encoding, clock.cloned()), meta);
+                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Nth::new(index, encoding, clock.cloned(), osd), osd);
                 <span class="kw">let </span>end_pos = query.pos();
                 <span class="prelude-val">Some</span>(OpsFound {
                     ops: query.ops,
@@ -1008,15 +990,15 @@
         }
     }
 
-    <span class="kw">fn </span>binary_search_by&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, f: F) -&gt; usize
+    <span class="kw">fn </span>binary_search_by&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, osd: <span class="kw-2">&amp;</span>OpSetData, f: F) -&gt; usize
     <span class="kw">where
-        </span>F: Fn(<span class="kw-2">&amp;</span>Op) -&gt; Ordering,
+        </span>F: Fn(Op&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; Ordering,
     {
         <span class="kw">let </span><span class="kw-2">mut </span>right = <span class="self">self</span>.len();
         <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="number">0</span>;
         <span class="kw">while </span>left &lt; right {
             <span class="kw">let </span>seq = (left + right) / <span class="number">2</span>;
-            <span class="kw">if </span>f(<span class="self">self</span>.get(seq).unwrap()) == Ordering::Less {
+            <span class="kw">if </span>f(<span class="self">self</span>.get(seq).unwrap().as_op2(osd)) == Ordering::Less {
                 left = seq + <span class="number">1</span>;
             } <span class="kw">else </span>{
                 right = seq;
@@ -1025,16 +1007,16 @@
         left
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, <span class="kw-2">mut </span>query: Q, m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata) -&gt; Q
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, <span class="kw-2">mut </span>query: Q, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; Q
     <span class="kw">where
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {
-        <span class="self">self</span>.root_node.as_ref().map(|root| {
-            <span class="kw">match </span>query.query_node_with_metadata(root, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops) {
-                QueryResult::Descend =&gt; root.search(<span class="kw-2">&amp;mut </span>query, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops),
+        <span class="self">self</span>.root_node
+            .as_ref()
+            .map(|root| <span class="kw">match </span>query.query_node(root, osd) {
+                QueryResult::Descend =&gt; root.search(<span class="kw-2">&amp;mut </span>query, osd),
                 <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
-            }
-        });
+            });
         query
     }
 
@@ -1048,16 +1030,13 @@
     /// # Panics
     ///
     /// Panics if `index &gt; len`.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, op: Op) {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, element: OpIdx, osd: <span class="kw-2">&amp;</span>OpSetData) {
         <span class="macro">assert!</span>(
             index &lt;= <span class="self">self</span>.len(),
             <span class="string">&quot;tried to insert at {} but len is {}&quot;</span>,
             index,
             <span class="self">self</span>.len()
         );
-
-        <span class="kw">let </span>element = <span class="self">self</span>.ops.len();
-        <span class="self">self</span>.ops.push(op);
 
         <span class="kw">let </span>old_len = <span class="self">self</span>.len();
         <span class="kw">if let </span><span class="prelude-val">Some</span>(root) = <span class="self">self</span>.root_node.as_mut() {
@@ -1074,7 +1053,7 @@
                 root.length += old_root.len();
                 root.index = old_root.index.clone();
                 root.children.push(old_root);
-                root.split_child(<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.ops);
+                root.split_child(<span class="number">0</span>, osd);
 
                 <span class="macro">assert_eq!</span>(original_len, root.len());
 
@@ -1087,42 +1066,27 @@
                     (<span class="kw-2">&amp;mut </span>root.children[<span class="number">0</span>], index)
                 };
                 root.length += <span class="number">1</span>;
-                root.index.insert(<span class="kw-2">&amp;</span><span class="self">self</span>.ops[element]);
-                child.insert_into_non_full_node(insertion_index, element, <span class="kw-2">&amp;</span><span class="self">self</span>.ops)
+                root.index.insert(element.as_op2(osd));
+                child.insert_into_non_full_node(insertion_index, element, osd)
             } <span class="kw">else </span>{
-                root.insert_into_non_full_node(index, element, <span class="kw-2">&amp;</span><span class="self">self</span>.ops)
+                root.insert_into_non_full_node(index, element, osd)
             }
         } <span class="kw">else </span>{
             <span class="kw">let </span><span class="kw-2">mut </span>root = OpTreeNode::new();
-            root.insert_into_non_full_node(index, element, <span class="kw-2">&amp;</span><span class="self">self</span>.ops);
+            root.insert_into_non_full_node(index, element, osd);
             <span class="self">self</span>.root_node = <span class="prelude-val">Some</span>(root)
         }
         <span class="macro">assert_eq!</span>(<span class="self">self</span>.len(), old_len + <span class="number">1</span>, <span class="string">&quot;{:#?}&quot;</span>, <span class="self">self</span>);
     }
 
     <span class="doccomment">/// Get the `element` at `index` in the sequence.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Op&gt; {
-        <span class="self">self</span>.root_node
-            .as_ref()
-            .and_then(|n| n.get(index))
-            .map(|n| <span class="kw-2">&amp;</span><span class="self">self</span>.ops[n])
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;OpIdx&gt; {
+        <span class="self">self</span>.root_node.as_ref().and_then(|n| n.get(index))
     }
 
     <span class="comment">// this replaces get_mut() because it allows the indexes to update correctly
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>update&lt;F&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, f: F)
-    <span class="kw">where
-        </span>F: FnOnce(<span class="kw-2">&amp;mut </span>Op),
-    {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>update(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, vis: ChangeVisibility&lt;<span class="lifetime">&#39;_</span>&gt;) {
         <span class="kw">if </span><span class="self">self</span>.len() &gt; index {
-            <span class="kw">let </span>n = <span class="self">self</span>.root_node.as_ref().unwrap().get(index).unwrap();
-            <span class="kw">let </span>new_element = <span class="self">self</span>.ops.get_mut(n).unwrap();
-            <span class="kw">let </span>old_vis = new_element.visible();
-            f(new_element);
-            <span class="kw">let </span>vis = ChangeVisibility {
-                old_vis,
-                new_vis: new_element.visible(),
-                op: new_element,
-            };
             <span class="self">self</span>.root_node.as_mut().unwrap().update(index, vis);
         }
     }
@@ -1132,11 +1096,11 @@
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize) -&gt; Op {
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; OpIdx {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(root) = <span class="self">self</span>.root_node.as_mut() {
             <span class="attr">#[cfg(debug_assertions)]
             </span><span class="kw">let </span>len = root.check();
-            <span class="kw">let </span>old = root.remove(index, <span class="kw-2">&amp;</span><span class="self">self</span>.ops);
+            <span class="kw">let </span>old = root.remove(index, osd);
 
             <span class="kw">if </span>root.elements.is_empty() {
                 <span class="kw">if </span>root.is_leaf() {
@@ -1148,7 +1112,7 @@
 
             <span class="attr">#[cfg(debug_assertions)]
             </span><span class="macro">debug_assert_eq!</span>(len, <span class="self">self</span>.root_node.as_ref().map_or(<span class="number">0</span>, |r| r.check()) + <span class="number">1</span>);
-            <span class="self">self</span>.ops[old].clone()
+            old
         } <span class="kw">else </span>{
             <span class="macro">panic!</span>(<span class="string">&quot;remove from empty tree&quot;</span>)
         }
@@ -1161,63 +1125,69 @@
     }
 }
 
-<span class="kw">impl </span>PartialEq <span class="kw">for </span>OpTreeInternal {
-    <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
-        <span class="self">self</span>.len() == other.len() &amp;&amp; <span class="self">self</span>.iter().zip(other.iter()).all(|(a, b)| a == b)
+<span class="comment">/*
+impl PartialEq for OpTreeInternal {
+    fn eq(&amp;self, other: &amp;Self) -&gt; bool {
+        self.len() == other.len() &amp;&amp; self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
+*/
 
-<span class="attr">#[derive(Default, Debug, Clone, PartialEq)]
+</span><span class="attr">#[derive(Default, Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpsFound&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) end_pos: usize,
 }
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpId&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) visible: bool,
 }
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span><span class="kw">crate</span>::types::{Op, OpId, OpType};
+    <span class="kw">use </span><span class="kw">crate</span>::op_set::{OpIdx, OpSetData};
+    <span class="kw">use </span><span class="kw">crate</span>::types::{OpBuilder, OpId, OpType, ROOT};
 
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
 
-    <span class="kw">fn </span>op() -&gt; Op {
+    <span class="kw">fn </span>op(osd: <span class="kw-2">&amp;mut </span>OpSetData) -&gt; OpIdx {
         <span class="kw">let </span>zero = OpId::new(<span class="number">0</span>, <span class="number">0</span>);
-        Op {
+        <span class="kw">let </span>op = OpBuilder {
             id: zero,
             action: OpType::Put(<span class="number">0</span>.into()),
             key: zero.into(),
             succ: Default::default(),
             pred: Default::default(),
             insert: <span class="bool-val">false</span>,
-        }
+        };
+        osd.push(ROOT.into(), op)
     }
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>insert() {
         <span class="kw">let </span><span class="kw-2">mut </span>t: OpTree = OpTree::new();
-
-        t.internal.insert(<span class="number">0</span>, op());
-        t.internal.insert(<span class="number">1</span>, op());
-        t.internal.insert(<span class="number">0</span>, op());
-        t.internal.insert(<span class="number">0</span>, op());
-        t.internal.insert(<span class="number">0</span>, op());
-        t.internal.insert(<span class="number">3</span>, op());
-        t.internal.insert(<span class="number">4</span>, op());
+        <span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::default();
+        <span class="kw">let </span>d = <span class="kw-2">&amp;mut </span>osd;
+        t.internal.insert(<span class="number">0</span>, op(d), d);
+        t.internal.insert(<span class="number">1</span>, op(d), d);
+        t.internal.insert(<span class="number">0</span>, op(d), d);
+        t.internal.insert(<span class="number">0</span>, op(d), d);
+        t.internal.insert(<span class="number">0</span>, op(d), d);
+        t.internal.insert(<span class="number">3</span>, op(d), d);
+        t.internal.insert(<span class="number">4</span>, op(d), d);
     }
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>insert_book() {
         <span class="kw">let </span><span class="kw-2">mut </span>t: OpTree = OpTree::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::default();
 
         <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">100 </span>{
-            t.internal.insert(i % <span class="number">2</span>, op());
+            t.internal.insert(i % <span class="number">2</span>, op(<span class="kw-2">&amp;mut </span>osd), <span class="kw-2">&amp;</span>osd);
         }
     }
 
@@ -1226,11 +1196,13 @@
         <span class="kw">let </span><span class="kw-2">mut </span>t: OpTree = OpTree::new();
         <span class="kw">let </span><span class="kw-2">mut </span>v = Vec::new();
 
+        <span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::default();
         <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">100 </span>{
-            t.internal.insert(i % <span class="number">3</span>, op());
-            v.insert(i % <span class="number">3</span>, op());
+            <span class="kw">let </span>idx = op(<span class="kw-2">&amp;mut </span>osd);
+            t.internal.insert(i % <span class="number">3</span>, idx, <span class="kw-2">&amp;</span>osd);
+            v.insert(i % <span class="number">3</span>, idx);
 
-            <span class="macro">assert_eq!</span>(v, t.internal.iter().cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;())
+            <span class="macro">assert_eq!</span>(v, t.internal.iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;())
         }
     }
 }

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/diff.rs`."><title>diff.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-cb6f1f67f1bcd037.css" id="mainThemeStyle"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.73.0 (cc66ad468 2023-10-03)" data-channel="1.73.0" data-search-js="search-6dfdfced5eff6596.js" data-settings-js="settings-de11bff964e9d4e5.js" data-settings-css="settings-8c76f75bfb6bd192.css" data-theme-light-css="light-1596385f77d47ef2.css" data-theme-dark-css="dark-0a43001d3fc2282c.css" data-theme-ayu-css="ayu-fd19013d6ce078bf.css" ><script src="../../../static.files/storage-db41da1a38ea3cb8.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-0795b7d26be81095.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-1596385f77d47ef2.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-0a43001d3fc2282c.css"><link rel="stylesheet" href="../../../static.files/noscript-cffde32267a19fd6.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/diff.rs`."><title>diff.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -1302,8 +1302,11 @@
 <a href="#1302" id="1302">1302</a>
 <a href="#1303" id="1303">1303</a>
 <a href="#1304" id="1304">1304</a>
+<a href="#1305" id="1305">1305</a>
+<a href="#1306" id="1306">1306</a>
+<a href="#1307" id="1307">1307</a>
+<a href="#1308" id="1308">1308</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
-<span class="kw">use </span>std::ops::Deref;
 <span class="kw">use </span>std::ops::RangeBounds;
 <span class="kw">use </span>std::sync::Arc;
 
@@ -1320,21 +1323,23 @@
 
 <span class="attr">#[derive(Clone, Debug)]
 </span><span class="kw">struct </span>Winner&lt;<span class="lifetime">&#39;a</span>&gt; {
-    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
     clock: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock,
     cross_visible: bool,
     conflict: bool,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Deref <span class="kw">for </span>Winner&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Target = Op;
+<span class="comment">/*
+impl&lt;&#39;a&gt; Deref for Winner&lt;&#39;a&gt; {
+    type Target = Op&lt;&#39;a&gt;;
 
-    <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">Self</span>::Target {
-        <span class="self">self</span>.op
+    fn deref(&amp;self) -&gt; &amp;&#39;a Self::Target {
+        &amp;self.op
     }
 }
+*/
 
-<span class="kw">fn </span>process&lt;<span class="lifetime">&#39;a</span>, T: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+</span><span class="kw">fn </span>process&lt;<span class="lifetime">&#39;a</span>, T: Iterator&lt;Item = Op&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
     ops: T,
     before: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock,
     after: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock,
@@ -1358,8 +1363,8 @@
     resolve(before_op, after_op, diff)
 }
 
-<span class="kw">fn </span>push_top&lt;<span class="lifetime">&#39;a</span>&gt;(top: <span class="kw-2">&amp;mut </span><span class="prelude-ty">Option</span>&lt;Winner&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, cross_visible: bool, clock: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock) {
-    <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
+<span class="kw">fn </span>push_top&lt;<span class="lifetime">&#39;a</span>&gt;(top: <span class="kw-2">&amp;mut </span><span class="prelude-ty">Option</span>&lt;Winner&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;, cross_visible: bool, clock: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Clock) {
+    <span class="kw">match </span>op.action() {
         OpType::Increment(<span class="kw">_</span>) =&gt; {} <span class="comment">// can ignore - info captured inside Counter
         </span><span class="kw">_ </span>=&gt; {
             top.replace(Winner {
@@ -1378,17 +1383,17 @@
     diff: <span class="kw-2">&amp;mut </span>MarkDiff&lt;<span class="lifetime">&#39;a</span>&gt;,
 ) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
     <span class="kw">match </span>(before, after) {
-        (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>after.is_mark() =&gt; diff.process_after(after.op),
+        (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>after.op.is_mark() =&gt; diff.process_after(after.op),
         (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(after)) =&gt; <span class="prelude-val">Some</span>(Patch::New(after, diff.after.current().cloned())),
-        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">None</span>) <span class="kw">if </span>before.is_mark() =&gt; diff.process_before(before.op),
+        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">None</span>) <span class="kw">if </span>before.op.is_mark() =&gt; diff.process_before(before.op),
         (<span class="prelude-val">Some</span>(before), <span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Some</span>(Patch::Delete(before)),
-        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>after.is_mark() =&gt; diff.process(after.op),
-        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>before.op.id == after.op.id =&gt; <span class="prelude-val">Some</span>(Patch::Old {
+        (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>after.op.is_mark() =&gt; diff.process(after.op),
+        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>before.op.id() == after.op.id() =&gt; <span class="prelude-val">Some</span>(Patch::Old {
             before,
             after,
             marks: diff.current(),
         }),
-        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>before.op.id != after.op.id =&gt; <span class="prelude-val">Some</span>(Patch::Update {
+        (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(after)) <span class="kw">if </span>before.op.id() != after.op.id() =&gt; <span class="prelude-val">Some</span>(Patch::Update {
             before,
             after,
             marks: diff.after.current().cloned(),
@@ -1414,12 +1419,12 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Patch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>op(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op {
+    <span class="kw">fn </span>op(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Op&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">match </span><span class="self">self </span>{
-            Patch::New(op, <span class="kw">_</span>) =&gt; op,
-            Patch::Update { after, .. } =&gt; after,
-            Patch::Old { after, .. } =&gt; after,
-            Patch::Delete(op) =&gt; op,
+            Patch::New(winner, <span class="kw">_</span>) =&gt; winner.op,
+            Patch::Update { after, .. } =&gt; after.op,
+            Patch::Old { after, .. } =&gt; after.op,
+            Patch::Delete(winner) =&gt; winner.op,
         }
     }
 }
@@ -1448,19 +1453,19 @@
     patches: I,
 ) {
     patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span>patch {
-        Patch::New(op, marks) =&gt; {
-            <span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
-            patch_log.insert(<span class="kw-2">*</span>obj, index, value, op.id, op.conflict, marks);
+        Patch::New(winner, marks) =&gt; {
+            <span class="kw">let </span>value = winner.op.value_at(<span class="prelude-val">Some</span>(winner.clock)).into();
+            patch_log.insert(<span class="kw-2">*</span>obj, index, value, <span class="kw-2">*</span>winner.op.id(), winner.conflict, marks);
             index + <span class="number">1
         </span>}
         Patch::Update { before, after, .. } =&gt; {
             <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
             <span class="kw">if </span>after.cross_visible {
-                <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">true</span>)
+                <span class="kw">let </span>value = after.op.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, <span class="kw-2">*</span>after.op.id(), conflict, <span class="bool-val">true</span>)
             } <span class="kw">else </span>{
-                <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">false</span>)
+                <span class="kw">let </span>value = after.op.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, <span class="kw-2">*</span>after.op.id(), conflict, <span class="bool-val">false</span>)
             }
             index + <span class="number">1
         </span>}
@@ -1473,7 +1478,7 @@
                 patch_log.flag_conflict_seq(<span class="kw-2">*</span>obj, index);
             }
             <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                patch_log.increment_seq(<span class="kw-2">*</span>obj, index, n, after.id);
+                patch_log.increment_seq(<span class="kw-2">*</span>obj, index, n, <span class="kw-2">*</span>after.op.id());
             }
             <span class="kw">if let </span><span class="prelude-val">Some</span>(marks) = <span class="kw-2">&amp;</span>marks {
                 patch_log.mark(<span class="kw-2">*</span>obj, index, <span class="number">1</span>, marks)
@@ -1494,54 +1499,54 @@
 ) {
     <span class="kw">let </span>encoding = ListEncoding::Text;
     patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span><span class="kw-2">&amp;</span>patch {
-        Patch::New(op, marks) =&gt; {
-            patch_log.splice(<span class="kw-2">*</span>obj, index, op.to_str(), marks.clone());
-            index + op.width(encoding)
+        Patch::New(winner, marks) =&gt; {
+            patch_log.splice(<span class="kw-2">*</span>obj, index, winner.op.as_str(), marks.clone());
+            index + winner.op.width(encoding)
         }
         Patch::Update {
             before,
             after,
             marks,
         } =&gt; {
-            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
-            patch_log.splice(<span class="kw-2">*</span>obj, index, after.to_str(), marks.clone());
-            index + after.width(encoding)
+            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.op.width(encoding));
+            patch_log.splice(<span class="kw-2">*</span>obj, index, after.op.as_str(), marks.clone());
+            index + after.op.width(encoding)
         }
         Patch::Old { after, marks, .. } =&gt; {
-            <span class="kw">let </span>len = after.width(encoding);
+            <span class="kw">let </span>len = after.op.width(encoding);
             <span class="kw">if let </span><span class="prelude-val">Some</span>(marks) = marks {
                 patch_log.mark(<span class="kw-2">*</span>obj, index, len, marks)
             }
             index + len
         }
         Patch::Delete(before) =&gt; {
-            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
+            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.op.width(encoding));
             index
         }
     });
 }
 
 <span class="kw">fn </span>log_map_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
-    doc: <span class="kw-2">&amp;</span>Automerge,
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
     patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
-    obj: <span class="kw-2">&amp;</span>ObjId,
+    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
     diffs: I,
 ) {
     diffs
         .filter_map(|patch| <span class="prelude-val">Some</span>((get_prop(doc, patch.op())<span class="question-mark">?</span>, patch)))
         .for_each(|(key, patch)| <span class="kw">match </span>patch {
-            Patch::New(op, <span class="kw">_</span>) =&gt; {
-                <span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
-                patch_log.put_map(<span class="kw-2">*</span>obj, key, value, op.id, op.conflict, <span class="bool-val">false</span>)
+            Patch::New(winner, <span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>value = winner.op.value_at(<span class="prelude-val">Some</span>(winner.clock)).into();
+                patch_log.put_map(<span class="kw-2">*</span>obj, key, value, <span class="kw-2">*</span>winner.op.id(), winner.conflict, <span class="bool-val">false</span>)
             }
             Patch::Update { before, after, .. } =&gt; {
                 <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
                 <span class="kw">if </span>after.cross_visible {
-                    <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">true</span>)
+                    <span class="kw">let </span>value = after.op.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, <span class="kw-2">*</span>after.op.id(), conflict, <span class="bool-val">true</span>)
                 } <span class="kw">else </span>{
-                    <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">false</span>)
+                    <span class="kw">let </span>value = after.op.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, <span class="kw-2">*</span>after.op.id(), conflict, <span class="bool-val">false</span>)
                 }
             }
             Patch::Old { before, after, .. } =&gt; {
@@ -1549,20 +1554,21 @@
                     patch_log.flag_conflict_map(<span class="kw-2">*</span>obj, key);
                 }
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                    patch_log.increment_map(<span class="kw-2">*</span>obj, key, n, after.id);
+                    patch_log.increment_map(<span class="kw-2">*</span>obj, key, n, <span class="kw-2">*</span>after.op.id());
                 }
             }
             Patch::Delete(<span class="kw">_</span>) =&gt; patch_log.delete_map(<span class="kw-2">*</span>obj, key),
         });
 }
 
-<span class="kw">fn </span>get_prop&lt;<span class="lifetime">&#39;a</span>&gt;(doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge, op: <span class="kw-2">&amp;</span>Op) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str&gt; {
-    <span class="prelude-val">Some</span>(doc.ops().m.props.safe_get(op.key.prop_index()<span class="question-mark">?</span>)<span class="question-mark">?</span>)
+<span class="comment">// FIXME
+</span><span class="kw">fn </span>get_prop&lt;<span class="lifetime">&#39;a</span>&gt;(doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str&gt; {
+    <span class="prelude-val">Some</span>(doc.ops().osd.props.safe_get(op.key().prop_index()<span class="question-mark">?</span>)<span class="question-mark">?</span>)
 }
 
 <span class="kw">fn </span>get_inc(before: <span class="kw-2">&amp;</span>Winner&lt;<span class="lifetime">&#39;_</span>&gt;, after: <span class="kw-2">&amp;</span>Winner&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
     <span class="kw">if let </span>(<span class="prelude-val">Some</span>(ScalarValue::Counter(before_c)), <span class="prelude-val">Some</span>(ScalarValue::Counter(after_c))) =
-        (before.scalar_value(), after.scalar_value())
+        (before.op.scalar_value(), after.op.scalar_value())
     {
         <span class="kw">let </span>n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
         <span class="kw">if </span>n != <span class="number">0 </span>{
@@ -1600,19 +1606,21 @@
         </span>}
     }
 
-    <span class="kw">fn </span>process(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
-        <span class="self">self</span>.before.process(op, <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.m);
-        <span class="self">self</span>.after.process(op, <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.m);
+    <span class="kw">fn </span>process(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="self">self</span>.before
+            .process(<span class="kw-2">*</span>op.id(), op.action(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.osd);
+        <span class="self">self</span>.after.process(<span class="kw-2">*</span>op.id(), op.action(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.osd);
         <span class="prelude-val">None
     </span>}
 
-    <span class="kw">fn </span>process_before(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
-        <span class="self">self</span>.before.process(op, <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.m);
+    <span class="kw">fn </span>process_before(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="self">self</span>.before
+            .process(<span class="kw-2">*</span>op.id(), op.action(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.osd);
         <span class="prelude-val">None
     </span>}
 
-    <span class="kw">fn </span>process_after(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
-        <span class="self">self</span>.after.process(op, <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.m);
+    <span class="kw">fn </span>process_after(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Patch&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="self">self</span>.after.process(<span class="kw-2">*</span>op.id(), op.action(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc.ops.osd);
         <span class="prelude-val">None
     </span>}
 }
