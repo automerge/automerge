@@ -5,9 +5,9 @@ use tracing::instrument;
 use crate::{
     change::Change,
     columnar::Key as DocOpKey,
-    op_tree::OpSetMetadata,
+    op_tree::OpSetData,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, OpBuilder, OpId, OpIds, OpType},
     ScalarValue,
 };
 
@@ -54,7 +54,7 @@ pub(crate) struct LoadedObject {
     /// The id of the parent object, if any
     pub(crate) parent: Option<ObjId>,
     /// The operations for this object
-    pub(crate) ops: Vec<crate::types::Op>,
+    pub(crate) ops: Vec<crate::types::OpBuilder>,
     /// The type of the object
     pub(crate) obj_type: ObjType,
 }
@@ -65,10 +65,10 @@ pub(crate) trait DocObserver {
     type Output;
 
     /// The operations for an object have been loaded
-    fn object_loaded(&mut self, object: LoadedObject);
-    /// The document has finished loading. The `metadata` is the `OpSetMetadata` which was used to
+    fn object_loaded(&mut self, object: LoadedObject, osd: &mut OpSetData);
+    /// The document has finished loading. The `osd` is the `OpSetData` which was used to
     /// create the indices in the operations which were passed to `object_loaded`
-    fn finish(self, metadata: OpSetMetadata) -> Self::Output;
+    fn finish(self, osd: OpSetData) -> Self::Output;
 }
 
 /// The result of reconstructing the change history from a document
@@ -116,8 +116,8 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
     // if we were directly applying the reconstructed change graph. This is the purpose of the
     // `DocObserver`, which we pass operations to as we complete the processing of each object.
 
-    // The metadata which we create from the doc and which we will pass to the observer
-    let mut metadata = OpSetMetadata::from_actors(doc.actors().to_vec());
+    // The op set data which we create from the doc and which we will pass to the observer
+    let mut osd = OpSetData::from_actors(doc.actors().to_vec());
     // The object we are currently loading, starts with the root
     let mut current_object = LoadingObject::root();
     // The changes we are collecting to later construct the change graph from
@@ -143,8 +143,8 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
         }
 
         let obj = doc_op.object;
-        check_opid(&metadata, *obj.opid())?;
-        let op = import_op(&mut metadata, doc_op)?;
+        check_opid(&osd, *obj.opid())?;
+        let op = import_op(&mut osd, doc_op)?;
         tracing::trace!(?op, ?obj, "loading document op");
 
         if let OpType::Make(obj_type) = op.action {
@@ -173,18 +173,18 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
                 tracing::error!(?op, previous_obj=?current_object.id, "op referenced an object ID which was smaller than the previous object ID");
                 return Err(Error::OpsOutOfOrder);
             } else {
-                let loaded = current_object.finish(&mut collector, &metadata)?;
+                let loaded = current_object.finish(&mut collector, &mut osd)?;
                 objs_loaded.insert(loaded.id);
-                observer.object_loaded(loaded);
+                observer.object_loaded(loaded, &mut osd);
                 current_object =
                     LoadingObject::new(obj, Some(create_op.parent_id), create_op.obj_type);
                 current_object.append_op(op.clone())?;
             }
         }
     }
-    let loaded = current_object.finish(&mut collector, &metadata)?;
+    let loaded = current_object.finish(&mut collector, &mut osd)?;
     objs_loaded.insert(loaded.id);
-    observer.object_loaded(loaded);
+    observer.object_loaded(loaded, &mut osd);
 
     // If an op created an object but no operation targeting that object was ever made then the
     // object will only exist in the create_ops map. We collect all such objects here.
@@ -197,17 +197,19 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
     ) in create_ops.into_iter()
     {
         if !objs_loaded.contains(&obj_id) {
-            observer.object_loaded(LoadedObject {
-                parent: Some(parent_id),
-                id: obj_id,
-                ops: Vec::new(),
-                obj_type,
-            })
+            observer.object_loaded(
+                LoadedObject {
+                    parent: Some(parent_id),
+                    id: obj_id,
+                    ops: Vec::new(),
+                    obj_type,
+                },
+                &mut osd,
+            )
         }
     }
 
-    let super::change_collector::CollectedChanges { history, heads } =
-        collector.finish(&metadata)?;
+    let super::change_collector::CollectedChanges { history, heads } = collector.finish(&osd)?;
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
         if expected_heads != heads {
@@ -219,7 +221,7 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
             }));
         }
     }
-    let result = observer.finish(metadata);
+    let result = observer.finish(osd);
 
     Ok(Reconstructed {
         result,
@@ -236,7 +238,7 @@ struct CreateOp {
 struct LoadingObject {
     id: ObjId,
     parent_id: Option<ObjId>,
-    ops: Vec<Op>,
+    ops: Vec<OpBuilder>,
     obj_type: ObjType,
     preds: HashMap<OpId, Vec<OpId>>,
     /// Operations which set a value, stored to later lookup keys when reconstructing delete events
@@ -264,7 +266,7 @@ impl LoadingObject {
         }
     }
 
-    fn append_op(&mut self, op: Op) -> Result<(), Error> {
+    fn append_op(&mut self, op: OpBuilder) -> Result<(), Error> {
         // Collect set and make operations so we can find the keys which delete operations refer to
         // in `finish`
         if matches!(op.action, OpType::Put(_) | OpType::Make(_)) {
@@ -292,12 +294,12 @@ impl LoadingObject {
     fn finish(
         mut self,
         collector: &mut ChangeCollector<'_>,
-        meta: &OpSetMetadata,
+        osd: &mut OpSetData,
     ) -> Result<LoadedObject, Error> {
         let mut ops = Vec::new();
         for mut op in self.ops.into_iter() {
             if let Some(preds) = self.preds.remove(&op.id) {
-                op.pred = meta.sorted_opids(preds.into_iter());
+                op.pred = osd.sorted_opids(preds.into_iter());
             }
             if let OpType::Put(ScalarValue::Counter(c)) = &mut op.action {
                 for (id, inc) in op
@@ -308,7 +310,7 @@ impl LoadingObject {
                     c.increment(inc, id);
                 }
             }
-            collector.collect(self.id, op.clone())?;
+            collector.collect(self.id, op.clone(), osd)?;
             ops.push(op)
         }
         // Any remaining pred ops must be delete operations
@@ -320,14 +322,15 @@ impl LoadingObject {
             })?;
             collector.collect(
                 self.id,
-                Op {
+                OpBuilder {
                     id: opid,
-                    pred: meta.sorted_opids(preds.into_iter()),
+                    pred: osd.sorted_opids(preds.into_iter()),
                     insert: false,
                     succ: OpIds::empty(),
                     key: *key,
                     action: OpType::Delete,
                 },
+                osd,
             )?;
         }
         Ok(LoadedObject {
@@ -339,33 +342,33 @@ impl LoadingObject {
     }
 }
 
-fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
+fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<OpBuilder, Error> {
     let key = match op.key {
-        DocOpKey::Prop(s) => Key::Map(m.import_prop(s)),
-        DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(m, op)?)),
+        DocOpKey::Prop(s) => Key::Map(osd.import_prop(s)),
+        DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(osd, op)?)),
     };
     for opid in &op.succ {
-        if m.actors.safe_get(opid.actor()).is_none() {
+        if osd.actors.safe_get(opid.actor()).is_none() {
             tracing::error!(?opid, "missing actor");
             return Err(Error::MissingActor);
         }
     }
     let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    Ok(Op {
-        id: check_opid(m, op.id)?,
+    Ok(OpBuilder {
+        id: check_opid(osd, op.id)?,
         action,
         key,
-        succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
+        succ: osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
         insert: op.insert,
     })
 }
 
-/// We construct the OpSetMetadata directly from the vector of actors which are encoded in the
+/// We construct the OpSetData directly from the vector of actors which are encoded in the
 /// start of the document. Therefore we need to check for each opid in the docuemnt that the actor
-/// ID which it references actually exists in the metadata.
-fn check_opid(m: &OpSetMetadata, opid: OpId) -> Result<OpId, Error> {
-    match m.actors.safe_get(opid.actor()) {
+/// ID which it references actually exists in the op set data.
+fn check_opid(osd: &OpSetData, opid: OpId) -> Result<OpId, Error> {
+    match osd.actors.safe_get(opid.actor()) {
         Some(_) => Ok(opid),
         None => {
             tracing::error!("missing actor");

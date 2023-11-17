@@ -7,10 +7,10 @@ use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
-use crate::query::TreeQuery;
+use crate::query::{ChangeVisibility, TreeQuery};
+use crate::text_value::TextValue;
 use crate::types::{
-    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
-    Prop,
+    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, OpId, OpIds, OpType, Prop,
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -20,18 +20,33 @@ use std::collections::HashMap;
 use std::ops::RangeBounds;
 
 mod load;
+mod op;
+
 pub(crate) use load::OpSetBuilder;
+pub(crate) use op::{Op, OpBuilder, OpIdx, OpPlus};
 
 pub(crate) type OpSet = OpSetInternal;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct OpIdxRange {
+    start: u32,
+    end: u32,
+}
+
+impl OpIdxRange {
+    pub(crate) fn len(&self) -> usize {
+        (self.end - self.start) as usize
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct OpSetInternal {
     /// The map of objects to their type and ops.
     trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
-    pub(crate) m: OpSetMetadata,
+    pub(crate) osd: OpSetData,
 }
 
 impl OpSetInternal {
@@ -45,9 +60,10 @@ impl OpSetInternal {
         OpSetInternal {
             trees,
             length: 0,
-            m: OpSetMetadata {
+            osd: OpSetData {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
+                ops: Vec::new(),
             },
         }
     }
@@ -58,7 +74,7 @@ impl OpSetInternal {
         } else {
             ExId::Id(
                 id.counter(),
-                self.m.actors.cache[id.actor()].clone(),
+                self.osd.actors.cache[id.actor()].clone(),
                 id.actor(),
             )
         }
@@ -66,25 +82,44 @@ impl OpSetInternal {
 
     pub(crate) fn iter(&self) -> Iter<'_> {
         let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
+        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).0, (b.0).0));
         Iter {
             opset: self,
             trees: objs.into_iter(),
             current: None,
+            osd: &self.osd,
         }
     }
 
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpTreeIter<'_>)> + '_ {
-        let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpIter<'_>)> + '_ {
+        let mut objs: Vec<_> = self
+            .trees
+            .iter()
+            .map(|t| {
+                (
+                    t.0,
+                    t.1.objtype,
+                    OpIter {
+                        iter: t.1.iter(),
+                        osd: &self.osd,
+                    },
+                )
+            })
+            .collect();
+        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).0, (b.0).0));
         IterObjs {
             trees: objs.into_iter(),
         }
     }
 
-    pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = &Op> {
-        self.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
+    pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = Op<'_>> {
+        self.trees
+            .get(obj)
+            .map(|o| o.iter())
+            .into_iter()
+            .flatten()
+            .map(|idx| idx.as_op2(&self.osd))
     }
 
     pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
@@ -104,14 +139,18 @@ impl OpSetInternal {
         let (_typ, encoding) = self.type_and_encoding(obj)?;
         self.trees
             .get(obj)
-            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
+            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.osd))
     }
 
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let parent = self.trees.get(obj)?.parent?;
         let found = self.seek_opid(&parent, obj.0, clock)?;
         let prop = match found.op.elemid_or_key() {
-            Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
+            Key::Map(m) => self
+                .osd
+                .props
+                .safe_get(m)
+                .map(|s| Prop::Map(s.to_string()))?,
             Key::Seq(_) => Prop::Seq(found.index),
         };
         Some(Parent {
@@ -132,34 +171,44 @@ impl OpSetInternal {
             .get(obj)
             .and_then(|tree| {
                 tree.internal
-                    .seek_ops_by_prop(&self.m, prop, encoding, clock)
+                    .seek_ops_by_prop(&self.osd, prop, encoding, clock)
             })
             .unwrap_or_default()
     }
 
+    pub(crate) fn op_iter<'a>(&'a self, obj: &ObjId) -> Option<OpIter<'a>> {
+        self.trees.get(obj).map(|tree| OpIter {
+            iter: tree.iter(),
+            osd: &self.osd,
+        })
+    }
+
     pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
-        self.trees
-            .get(obj)
-            .map(|tree| tree.internal.top_ops(clock, &self.m))
+        self.op_iter(obj)
+            .map(|iter| TopOps::new(iter, clock))
             .unwrap_or_default()
     }
 
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
         obj: &ObjMeta,
-        op: &'a Op,
+        op: Op<'a>,
     ) -> FoundOpWithPatchLog<'a> {
         if let Some(tree) = self.trees.get(&obj.id) {
             tree.internal
-                .find_op_with_patch_log(op, obj.encoding, &self.m)
+                .find_op_with_patch_log(op, obj.encoding, &self.osd)
         } else {
             Default::default()
         }
     }
 
-    pub(crate) fn find_op_without_patch_log(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutPatchLog {
+    pub(crate) fn find_op_without_patch_log(
+        &self,
+        obj: &ObjId,
+        op: Op<'_>,
+    ) -> FoundOpWithoutPatchLog {
         if let Some(tree) = self.trees.get(obj) {
-            tree.internal.find_op_without_patch_log(op, &self.m)
+            tree.internal.find_op_without_patch_log(op, &self.osd)
         } else {
             Default::default()
         }
@@ -170,10 +219,10 @@ impl OpSetInternal {
         Q: TreeQuery<'a>,
     {
         if let Some(tree) = self.trees.get(obj) {
-            if query.can_shortcut_search(tree) {
+            if query.can_shortcut_search(tree, &self.osd) {
                 query
             } else {
-                tree.internal.search(query, &self.m)
+                tree.internal.search(query, &self.osd)
             }
         } else {
             query
@@ -182,36 +231,59 @@ impl OpSetInternal {
 
     pub(crate) fn change_vis<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
-        F: Fn(&mut Op),
+        F: Fn(&mut OpBuilder),
     {
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            tree.internal.update(index, f)
-        }
-    }
-
-    /// Add `op` as a successor to each op at `op_indices` in `obj`
-    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: &Op) {
-        if let Some(tree) = self.trees.get_mut(obj) {
-            tree.last_insert = None;
-            for i in op_indices {
-                tree.internal.update(*i, |old_op| {
-                    old_op.add_succ(op, |left, right| self.m.lamport_cmp(*left, *right))
-                });
+            if let Some(idx) = tree.internal.get(index) {
+                let op = self.osd.get_mut(idx);
+                let old_vis = op.visible();
+                f(op);
+                let new_vis = op.visible();
+                tree.internal.update(
+                    index,
+                    ChangeVisibility {
+                        old_vis,
+                        new_vis,
+                        op: idx.as_op2(&self.osd),
+                    },
+                )
             }
         }
     }
 
-    pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
+    /// Add `op` as a successor to each op at `op_indices` in `obj`
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpIdx) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.last_insert = None;
+            for i in op_indices {
+                if let Some(idx) = tree.internal.get(*i) {
+                    let old_vis = idx.as_op2(&self.osd).visible();
+                    self.osd.add_succ(idx, op);
+                    let new_vis = idx.as_op2(&self.osd).visible();
+                    tree.internal.update(
+                        *i,
+                        ChangeVisibility {
+                            old_vis,
+                            new_vis,
+                            op: idx.as_op2(&self.osd),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) {
         // this happens on rollback - be sure to go back to the old state
         let tree = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
         tree.last_insert = None;
-        let op = tree.internal.remove(index);
-        if let OpType::Make(_) = &op.action {
-            self.trees.remove(&op.id.into());
+        let idx = tree.internal.remove(index, &self.osd);
+        let op = idx.as_op2(&self.osd);
+        if let OpType::Make(_) = op.action() {
+            self.trees.remove(&op.id().into());
         }
-        op
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -229,14 +301,32 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn load(&mut self, obj: ObjId, op: OpBuilder) -> OpIdx {
+        self.osd.push(obj, op)
+    }
+
+    // want to move to this everywhere
+    pub(crate) fn load_with_range(
+        &mut self,
+        obj: ObjId,
+        op: OpBuilder,
+        range: &mut OpIdxRange,
+    ) -> OpIdx {
+        let idx = self.osd.push(obj, op);
+        range.end += 1;
+        assert!(idx.get() >= range.start as usize && idx.get() < range.end as usize);
+        idx
+    }
+
     #[tracing::instrument(skip(self, index))]
-    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
-        if let OpType::Make(typ) = element.action {
+    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, idx: OpIdx) {
+        let op = idx.as_op2(&self.osd);
+        if let OpType::Make(typ) = op.action() {
             self.trees.insert(
-                element.id.into(),
+                op.id().into(),
                 OpTree {
                     internal: Default::default(),
-                    objtype: typ,
+                    objtype: *typ,
                     last_insert: None,
                     parent: Some(*obj),
                 },
@@ -245,7 +335,7 @@ impl OpSetInternal {
 
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            tree.internal.insert(index, element);
+            tree.internal.insert(index, idx, &self.osd);
             self.length += 1;
         } else {
             tracing::warn!("attempting to insert op for unknown object");
@@ -279,7 +369,7 @@ impl OpSetInternal {
         } else {
             Cow::Borrowed(&self.trees)
         };
-        let graph = super::visualisation::GraphVisualisation::construct(&trees, &self.m);
+        let graph = super::visualisation::GraphVisualisation::construct(&trees, &self.osd);
         dot::render(&graph, &mut out).unwrap();
         String::from_utf8_lossy(&out[..]).to_string()
     }
@@ -306,7 +396,7 @@ impl OpSetInternal {
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
         self.top_ops(obj, clock)
-            .map(|top| top.op.to_str())
+            .map(|top| top.op.as_str())
             .collect()
     }
 
@@ -323,13 +413,7 @@ impl OpSetInternal {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange::new(
-            self.top_ops(obj, clock.clone()),
-            self,
-            encoding,
-            range,
-            clock,
-        )
+        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
     }
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
@@ -342,15 +426,11 @@ impl OpSetInternal {
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
-            Export::Id(id) => format!("{}@{}", id.counter(), &self.m.actors[id.actor()]),
-            Export::Prop(index) => self.m.props[index].clone(),
+            Export::Id(id) => format!("{}@{}", id.counter(), &self.osd.actors[id.actor()]),
+            Export::Prop(index) => self.osd.props[index].clone(),
             Export::Special(s) => s,
         }
     }
-
-    //    pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExI
-    //        (op.value_at(clock), self.id_to_exid(op.id))
-    //    }
 }
 
 impl Default for OpSetInternal {
@@ -360,7 +440,7 @@ impl Default for OpSetInternal {
 }
 
 impl<'a> IntoIterator for &'a OpSetInternal {
-    type Item = (&'a ObjId, ObjType, &'a Op);
+    type Item = (&'a ObjId, ObjType, Op<'a>);
 
     type IntoIter = Iter<'a>;
 
@@ -370,16 +450,15 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
+    trees: std::vec::IntoIter<(&'a ObjId, ObjType, OpIter<'a>)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, OpTreeIter<'a>);
+    type Item = (&'a ObjId, ObjType, OpIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees
-            .next()
-            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+        self.trees.next()
+        //            .map(|(id, typ, tree)| (id, typ, tree.iter()))
     }
 }
 
@@ -388,13 +467,16 @@ pub(crate) struct Iter<'a> {
     opset: &'a OpSet,
     trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
     current: Option<(&'a ObjId, ObjType, OpTreeIter<'a>)>,
+    osd: &'a OpSetData,
 }
+
 impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a ObjId, ObjType, &'a Op);
+    type Item = (&'a ObjId, ObjType, Op<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((id, typ, tree)) = &mut self.current {
-            if let Some(next) = tree.next() {
+            if let Some(idx) = tree.next() {
+                let next = idx.as_op2(self.osd);
                 return Some((id, *typ, next));
             }
         }
@@ -402,7 +484,8 @@ impl<'a> Iterator for Iter<'a> {
         loop {
             self.current = self.trees.next().map(|o| (o.0, o.1, o.2.iter()));
             if let Some((obj, typ, tree)) = &mut self.current {
-                if let Some(next) = tree.next() {
+                if let Some(idx) = tree.next() {
+                    let next = idx.as_op2(self.osd);
                     return Some((obj, *typ, next));
                 }
             } else {
@@ -418,26 +501,131 @@ impl<'a> ExactSizeIterator for Iter<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct OpSetMetadata {
+#[derive(Clone, Debug)]
+pub(crate) struct OpSetData {
     pub(crate) actors: IndexedCache<ActorId>,
     pub(crate) props: IndexedCache<String>,
+    ops: Vec<OpPlus>,
 }
 
-impl Default for OpSetMetadata {
+impl Default for OpSetData {
     fn default() -> Self {
         Self {
             actors: IndexedCache::new(),
             props: IndexedCache::new(),
+            ops: Vec::new(),
         }
     }
 }
 
-impl OpSetMetadata {
+pub(crate) struct OpIter<'a> {
+    iter: OpTreeIter<'a>,
+    pub(crate) osd: &'a OpSetData,
+}
+
+impl<'a> Iterator for OpIter<'a> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|idx| idx.as_op2(self.osd))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.iter.nth(n).map(|idx| idx.as_op2(self.osd))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChangeOpIter<'a> {
+    osd: &'a OpSetData,
+    range: OpIdxRange,
+    current: u32,
+    current_back: u32,
+}
+
+impl<'a> ChangeOpIter<'a> {
+    fn new(osd: &'a OpSetData, range: OpIdxRange) -> Self {
+        Self {
+            osd,
+            current: range.start,
+            current_back: range.end,
+            range,
+        }
+    }
+}
+
+impl<'a> Iterator for ChangeOpIter<'a> {
+    type Item = Op<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        assert!(self.current >= self.range.start);
+        if self.current < self.current_back {
+            let idx = OpIdx::new(self.current as usize);
+            self.current += 1;
+            Some(idx.as_op2(self.osd))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> DoubleEndedIterator for ChangeOpIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        assert!(self.current_back <= self.range.end);
+        if self.current_back > self.current {
+            self.current_back -= 1;
+            let idx = OpIdx::new(self.current_back as usize);
+            Some(idx.as_op2(self.osd))
+        } else {
+            None
+        }
+    }
+}
+
+impl OpSetData {
+    pub(crate) fn start_range(&self) -> OpIdxRange {
+        let len = self.ops.len() as u32;
+        OpIdxRange {
+            start: len,
+            end: len,
+        }
+    }
+
+    pub(crate) fn get_ops(&self, range: OpIdxRange) -> ChangeOpIter<'_> {
+        ChangeOpIter::new(self, range)
+    }
+
+    pub(crate) fn add_succ(&mut self, old_op: OpIdx, new_op: OpIdx) {
+        // this gets trucky b/c we're reading and writing to the same array
+        let new_op = new_op.as_op2(self);
+        let new_op_id = *new_op.id();
+        let new_op_inc = new_op.get_increment_value();
+        let old_op = &mut self.ops[old_op.get()].op;
+
+        old_op
+            .succ
+            .add(new_op_id, |l, r| l.lamport_cmp(r, &self.actors.cache));
+
+        if let Some(n) = new_op_inc {
+            old_op.increment(n, new_op_id);
+        }
+    }
+
+    pub(crate) fn push(&mut self, obj: ObjId, op: OpBuilder) -> OpIdx {
+        let index = self.ops.len();
+        let width = TextValue::width(op.to_str()) as u32; // TODO faster
+        self.ops.push(OpPlus { obj, width, op });
+        OpIdx::new(index)
+    }
+
+    pub(crate) fn get_mut(&mut self, id: OpIdx) -> &mut OpBuilder {
+        &mut self.ops[id.get()].op
+    }
+
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         Self {
             props: IndexedCache::new(),
             actors: actors.into_iter().collect(),
+            ops: Vec::new(),
         }
     }
 
@@ -458,7 +646,7 @@ impl OpSetMetadata {
     }
 
     /// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
-    /// this `OpSetMetadata` then this returns `Some(OpIds)`, otherwise returns `None`.
+    /// this `OpSetData` then this returns `Some(OpIds)`, otherwise returns `None`.
     pub(crate) fn try_sorted_opids(&self, opids: Vec<OpId>) -> Option<OpIds> {
         OpIds::new_if_sorted(opids, |a, b| self.lamport_cmp(*a, *b))
     }
@@ -480,7 +668,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, Op, OpId},
+        types::{Key, ObjId, ObjMeta, OpBuilder, OpId, ROOT},
         ActorId, ScalarValue,
     };
 
@@ -520,12 +708,12 @@ pub(crate) mod tests {
     ///
     /// The opset in question and an op which should be inserted at the next position after the
     /// internally visible ops.
-    pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, Op) {
+    pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, OpBuilder) {
         let mut set = OpSet::new();
-        let actor = set.m.actors.cache(ActorId::random());
-        let a = set.m.props.cache("a".to_string());
-        let b = set.m.props.cache("b".to_string());
-        let c = set.m.props.cache("c".to_string());
+        let actor = set.osd.actors.cache(ActorId::random());
+        let a = set.osd.props.cache("a".to_string());
+        let b = set.osd.props.cache("b".to_string());
+        let c = set.osd.props.cache("c".to_string());
 
         let mut counter = 0;
         // For each key insert `B` operations with the `pred` and `succ` setup such that the final
@@ -533,14 +721,14 @@ pub(crate) mod tests {
         for key in [a, b, c] {
             for iteration in 0..B {
                 // Generate a value to insert
-                let keystr = set.m.props.get(key);
+                let keystr = set.osd.props.get(key);
                 let val = keystr.repeat(iteration + 1);
 
                 // Only the last op is visible
                 let pred = if iteration == 0 {
                     Default::default()
                 } else {
-                    set.m
+                    set.osd
                         .sorted_opids(vec![OpId::new(counter - 1, actor)].into_iter())
                 };
 
@@ -548,11 +736,11 @@ pub(crate) mod tests {
                 let succ = if iteration == B - 1 {
                     Default::default()
                 } else {
-                    set.m
+                    set.osd
                         .sorted_opids(vec![OpId::new(counter, actor)].into_iter())
                 };
 
-                let op = Op {
+                let op = OpBuilder {
                     id: OpId::new(counter, actor),
                     action: crate::OpType::Put(ScalarValue::Str(val.into())),
                     key: Key::Map(key),
@@ -560,19 +748,20 @@ pub(crate) mod tests {
                     pred,
                     insert: false,
                 };
-                set.insert(counter as usize, &ObjId::root(), op);
+                let idx = set.load(ROOT.into(), op);
+                set.insert(counter as usize, &ObjId::root(), idx);
                 counter += 1;
             }
         }
 
         // Now try and create an op which inserts at the next index of 'a'
-        let new_op = Op {
+        let new_op = OpBuilder {
             id: OpId::new(counter, actor),
             action: crate::OpType::Put(ScalarValue::Str("test".into())),
             key: Key::Map(a),
             succ: Default::default(),
             pred: set
-                .m
+                .osd
                 .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
             insert: false,
         };
@@ -581,10 +770,12 @@ pub(crate) mod tests {
 
     #[test]
     fn seek_on_page_boundary() {
-        let (set, new_op) = optree_with_only_internally_visible_ops();
+        let (mut set, new_op) = optree_with_only_internally_visible_ops();
 
-        let q1 = set.find_op_without_patch_log(&ObjId::root(), &new_op);
-        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), &new_op);
+        let new_op = set.load(ROOT.into(), new_op).as_op2(&set.osd);
+
+        let q1 = set.find_op_without_patch_log(&ObjId::root(), new_op);
+        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), new_op);
 
         // we've inserted `B - 1` elements for "a", so the index should be `B`
         assert_eq!(q1.pos, B);

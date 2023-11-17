@@ -51,13 +51,13 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
             for top in inner.iter.by_ref() {
-                if let Key::Map(n) = &top.op.key {
-                    if let Some(prop) = inner.op_set.m.props.safe_get(*n) {
+                if let Key::Map(n) = top.op.key() {
+                    if let Some(prop) = inner.op_set.osd.props.safe_get(*n) {
                         if inner.range.contains(prop) {
                             return Some(MapRangeItem {
                                 key: prop.as_str(),
                                 value: top.op.value_at(inner.clock.as_ref()),
-                                id: inner.op_set.id_to_exid(top.op.id),
+                                id: top.op.exid(),
                                 conflict: top.conflict,
                             });
                         }

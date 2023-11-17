@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use std::ops::Deref;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -16,21 +15,23 @@ use crate::{
 
 #[derive(Clone, Debug)]
 struct Winner<'a> {
-    op: &'a Op,
+    op: Op<'a>,
     clock: &'a Clock,
     cross_visible: bool,
     conflict: bool,
 }
 
+/*
 impl<'a> Deref for Winner<'a> {
-    type Target = Op;
+    type Target = Op<'a>;
 
     fn deref(&self) -> &'a Self::Target {
-        self.op
+        &self.op
     }
 }
+*/
 
-fn process<'a, T: Iterator<Item = &'a Op>>(
+fn process<'a, T: Iterator<Item = Op<'a>>>(
     ops: T,
     before: &'a Clock,
     after: &'a Clock,
@@ -54,8 +55,8 @@ fn process<'a, T: Iterator<Item = &'a Op>>(
     resolve(before_op, after_op, diff)
 }
 
-fn push_top<'a>(top: &mut Option<Winner<'a>>, op: &'a Op, cross_visible: bool, clock: &'a Clock) {
-    match &op.action {
+fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
+    match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
             top.replace(Winner {
@@ -74,17 +75,17 @@ fn resolve<'a>(
     diff: &mut MarkDiff<'a>,
 ) -> Option<Patch<'a>> {
     match (before, after) {
-        (None, Some(after)) if after.is_mark() => diff.process_after(after.op),
+        (None, Some(after)) if after.op.is_mark() => diff.process_after(after.op),
         (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
-        (Some(before), None) if before.is_mark() => diff.process_before(before.op),
+        (Some(before), None) if before.op.is_mark() => diff.process_before(before.op),
         (Some(before), None) => Some(Patch::Delete(before)),
-        (Some(_), Some(after)) if after.is_mark() => diff.process(after.op),
-        (Some(before), Some(after)) if before.op.id == after.op.id => Some(Patch::Old {
+        (Some(_), Some(after)) if after.op.is_mark() => diff.process(after.op),
+        (Some(before), Some(after)) if before.op.id() == after.op.id() => Some(Patch::Old {
             before,
             after,
             marks: diff.current(),
         }),
-        (Some(before), Some(after)) if before.op.id != after.op.id => Some(Patch::Update {
+        (Some(before), Some(after)) if before.op.id() != after.op.id() => Some(Patch::Update {
             before,
             after,
             marks: diff.after.current().cloned(),
@@ -110,12 +111,12 @@ enum Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-    fn op(&'a self) -> &'a Op {
+    fn op(&self) -> Op<'a> {
         match self {
-            Patch::New(op, _) => op,
-            Patch::Update { after, .. } => after,
-            Patch::Old { after, .. } => after,
-            Patch::Delete(op) => op,
+            Patch::New(winner, _) => winner.op,
+            Patch::Update { after, .. } => after.op,
+            Patch::Old { after, .. } => after.op,
+            Patch::Delete(winner) => winner.op,
         }
     }
 }
@@ -144,19 +145,19 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patches: I,
 ) {
     patches.fold(0, |index, patch| match patch {
-        Patch::New(op, marks) => {
-            let value = op.value_at(Some(op.clock)).into();
-            patch_log.insert(*obj, index, value, op.id, op.conflict, marks);
+        Patch::New(winner, marks) => {
+            let value = winner.op.value_at(Some(winner.clock)).into();
+            patch_log.insert(*obj, index, value, *winner.op.id(), winner.conflict, marks);
             index + 1
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
-                let value = after.value_at(Some(after.clock)).into();
-                patch_log.put_seq(*obj, index, value, after.id, conflict, true)
+                let value = after.op.value_at(Some(after.clock)).into();
+                patch_log.put_seq(*obj, index, value, *after.op.id(), conflict, true)
             } else {
-                let value = after.value_at(Some(after.clock)).into();
-                patch_log.put_seq(*obj, index, value, after.id, conflict, false)
+                let value = after.op.value_at(Some(after.clock)).into();
+                patch_log.put_seq(*obj, index, value, *after.op.id(), conflict, false)
             }
             index + 1
         }
@@ -169,7 +170,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                patch_log.increment_seq(*obj, index, n, after.id);
+                patch_log.increment_seq(*obj, index, n, *after.op.id());
             }
             if let Some(marks) = &marks {
                 patch_log.mark(*obj, index, 1, marks)
@@ -190,54 +191,54 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
-        Patch::New(op, marks) => {
-            patch_log.splice(*obj, index, op.to_str(), marks.clone());
-            index + op.width(encoding)
+        Patch::New(winner, marks) => {
+            patch_log.splice(*obj, index, winner.op.as_str(), marks.clone());
+            index + winner.op.width(encoding)
         }
         Patch::Update {
             before,
             after,
             marks,
         } => {
-            patch_log.delete_seq(*obj, index, before.width(encoding));
-            patch_log.splice(*obj, index, after.to_str(), marks.clone());
-            index + after.width(encoding)
+            patch_log.delete_seq(*obj, index, before.op.width(encoding));
+            patch_log.splice(*obj, index, after.op.as_str(), marks.clone());
+            index + after.op.width(encoding)
         }
         Patch::Old { after, marks, .. } => {
-            let len = after.width(encoding);
+            let len = after.op.width(encoding);
             if let Some(marks) = marks {
                 patch_log.mark(*obj, index, len, marks)
             }
             index + len
         }
         Patch::Delete(before) => {
-            patch_log.delete_seq(*obj, index, before.width(encoding));
+            patch_log.delete_seq(*obj, index, before.op.width(encoding));
             index
         }
     });
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &Automerge,
+    doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjId,
+    obj: &'a ObjId,
     diffs: I,
 ) {
     diffs
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
-            Patch::New(op, _) => {
-                let value = op.value_at(Some(op.clock)).into();
-                patch_log.put_map(*obj, key, value, op.id, op.conflict, false)
+            Patch::New(winner, _) => {
+                let value = winner.op.value_at(Some(winner.clock)).into();
+                patch_log.put_map(*obj, key, value, *winner.op.id(), winner.conflict, false)
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
-                    let value = after.value_at(Some(after.clock)).into();
-                    patch_log.put_map(*obj, key, value, after.id, conflict, true)
+                    let value = after.op.value_at(Some(after.clock)).into();
+                    patch_log.put_map(*obj, key, value, *after.op.id(), conflict, true)
                 } else {
-                    let value = after.value_at(Some(after.clock)).into();
-                    patch_log.put_map(*obj, key, value, after.id, conflict, false)
+                    let value = after.op.value_at(Some(after.clock)).into();
+                    patch_log.put_map(*obj, key, value, *after.op.id(), conflict, false)
                 }
             }
             Patch::Old { before, after, .. } => {
@@ -245,20 +246,21 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                     patch_log.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    patch_log.increment_map(*obj, key, n, after.id);
+                    patch_log.increment_map(*obj, key, n, *after.op.id());
                 }
             }
             Patch::Delete(_) => patch_log.delete_map(*obj, key),
         });
 }
 
-fn get_prop<'a>(doc: &'a Automerge, op: &Op) -> Option<&'a str> {
-    Some(doc.ops().m.props.safe_get(op.key.prop_index()?)?)
+// FIXME
+fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
+    Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if let (Some(ScalarValue::Counter(before_c)), Some(ScalarValue::Counter(after_c))) =
-        (before.scalar_value(), after.scalar_value())
+        (before.op.scalar_value(), after.op.scalar_value())
     {
         let n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
         if n != 0 {
@@ -296,19 +298,21 @@ impl<'a> MarkDiff<'a> {
         }
     }
 
-    fn process(&mut self, op: &'a Op) -> Option<Patch<'static>> {
-        self.before.process(op, &self.doc.ops.m);
-        self.after.process(op, &self.doc.ops.m);
+    fn process(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.before
+            .process(*op.id(), op.action(), &self.doc.ops.osd);
+        self.after.process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
 
-    fn process_before(&mut self, op: &'a Op) -> Option<Patch<'static>> {
-        self.before.process(op, &self.doc.ops.m);
+    fn process_before(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.before
+            .process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
 
-    fn process_after(&mut self, op: &'a Op) -> Option<Patch<'static>> {
-        self.after.process(op, &self.doc.ops.m);
+    fn process_after(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.after.process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
 }

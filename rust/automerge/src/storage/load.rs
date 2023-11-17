@@ -2,6 +2,7 @@ use tracing::instrument;
 
 use crate::{
     change::Change,
+    op_set::OpSetData,
     storage::{self, parse},
 };
 
@@ -116,6 +117,6 @@ fn load_next_change<'a>(
 struct NullObserver;
 impl DocObserver for NullObserver {
     type Output = ();
-    fn finish(self, _metadata: crate::op_tree::OpSetMetadata) -> Self::Output {}
-    fn object_loaded(&mut self, _object: LoadedObject) {}
+    fn finish(self, _metadata: crate::op_tree::OpSetData) -> Self::Output {}
+    fn object_loaded(&mut self, _object: LoadedObject, _osd: &mut OpSetData) {}
 }

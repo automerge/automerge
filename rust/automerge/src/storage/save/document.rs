@@ -28,10 +28,10 @@ pub(crate) fn save_document<'a, I, O>(
 ) -> Vec<u8>
 where
     I: Iterator<Item = &'a Change> + Clone + 'a,
-    O: Iterator<Item = (&'a ObjId, &'a Op)> + Clone + ExactSizeIterator,
+    O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
     let actor_lookup = actors.encode_index();
-    let doc_ops = ops.map(|(obj, op)| op_as_docop(&actor_lookup, props, obj, op));
+    let doc_ops = ops.map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {

@@ -1,29 +1,37 @@
 use crate::error::AutomergeError;
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set::OpSet;
+use crate::op_set::Op;
 use crate::op_tree::{OpTree, OpTreeNode};
-use crate::query::{ListState, MarkMap, OpSetMetadata, QueryResult, TreeQuery};
-use crate::types::{Clock, Key, ListEncoding, Op, OpIds};
+use crate::query::{ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
+use crate::types::{Clock, Key, ListEncoding, OpIds};
 use std::fmt::Debug;
 use std::sync::Arc;
 
 /// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
 /// that the nth node can not be in them
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) struct Nth<'a> {
-    idx: ListState,
+    list_state: ListState,
     clock: Option<Clock>,
     marks: Option<MarkMap<'a>>,
-    pub(crate) ops: Vec<&'a Op>,
+    // TODO: put osd in all queries - take out of API
+    osd: &'a OpSetData,
+    pub(crate) ops: Vec<Op<'a>>,
     pub(crate) ops_pos: Vec<usize>,
 }
 
 impl<'a> Nth<'a> {
-    pub(crate) fn new(target: usize, encoding: ListEncoding, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(
+        target: usize,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+        osd: &'a OpSetData,
+    ) -> Self {
         Nth {
-            idx: ListState::new(encoding, target + 1),
+            list_state: ListState::new(encoding, target + 1),
             clock,
             marks: None,
+            osd,
             ops: vec![],
             ops_pos: vec![],
         }
@@ -34,18 +42,18 @@ impl<'a> Nth<'a> {
         self
     }
 
-    pub(crate) fn marks(&self, meta: &OpSetMetadata) -> Option<Arc<MarkSet>> {
+    pub(crate) fn marks(&self) -> Option<Arc<MarkSet>> {
         let mut marks = MarkStateMachine::default();
         if let Some(m) = &self.marks {
             for (id, mark_data) in m.iter() {
-                marks.mark_begin(*id, mark_data, meta);
+                marks.mark_begin(*id, mark_data, self.osd);
             }
         }
         marks.current().cloned()
     }
 
-    pub(crate) fn pred(&self, ops: &OpSet) -> OpIds {
-        ops.m.sorted_opids(self.ops.iter().map(|o| o.id))
+    pub(crate) fn pred(&self) -> OpIds {
+        self.osd.sorted_opids(self.ops.iter().map(|op| *op.id()))
     }
 
     /// Get the key
@@ -55,35 +63,37 @@ impl<'a> Nth<'a> {
             Ok(Key::Seq(e))
         } else {
             Err(AutomergeError::InvalidIndex(
-                self.idx.target().saturating_sub(1),
+                self.list_state.target().saturating_sub(1),
             ))
         }
     }
 
     pub(crate) fn index(&self) -> usize {
-        self.idx.last_index()
+        self.list_state.last_index()
     }
 
     pub(crate) fn pos(&self) -> usize {
-        self.idx.pos()
+        self.list_state.pos()
     }
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
-    fn equiv(&mut self, other: &Self) -> bool {
-        self.index() == other.index() && self.key() == other.key()
-    }
+    /*
+        fn equiv(&mut self, other: &Self) -> bool {
+            self.index() == other.index() && self.key() == other.key()
+        }
+    */
 
-    fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
+    fn can_shortcut_search(&mut self, tree: &'a OpTree, osd: &'a OpSetData) -> bool {
         if self.marks.is_some() {
             // we could cache marks data but we're not now
             return false;
         }
         if let Some(last) = &tree.last_insert {
-            if last.index == self.idx.target().saturating_sub(1) {
-                if let Some(op) = tree.internal.get(last.pos) {
-                    self.idx.seek(last);
-                    self.ops.push(op);
+            if last.index == self.list_state.target().saturating_sub(1) {
+                if let Some(idx) = tree.internal.get(last.pos) {
+                    self.list_state.seek(last);
+                    self.ops.push(idx.as_op2(osd));
                     self.ops_pos.push(last.pos);
                     return true;
                 }
@@ -92,28 +102,29 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         false
     }
 
-    fn query_node(&mut self, child: &'a OpTreeNode, ops: &[Op]) -> QueryResult {
-        self.idx.check_if_node_is_clean(child);
+    fn query_node(&mut self, child: &'a OpTreeNode, osd: &OpSetData) -> QueryResult {
+        self.list_state.check_if_node_is_clean(child);
         if self.clock.is_none() {
-            self.idx.process_node(child, ops, self.marks.as_mut())
+            self.list_state
+                .process_node(child, osd, self.marks.as_mut())
         } else {
             QueryResult::Descend
         }
     }
 
-    fn query_element(&mut self, element: &'a Op) -> QueryResult {
-        if element.insert && self.idx.done() {
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
+        if op.insert() && self.list_state.done() {
             QueryResult::Finish
         } else {
             if let Some(m) = self.marks.as_mut() {
-                m.process(element)
+                m.process(op)
             }
-            let visible = element.visible_at(self.clock.as_ref());
-            let key = element.elemid_or_key();
-            self.idx.process_op(element, key, visible);
-            if visible && self.idx.done() {
-                self.ops.push(element);
-                self.ops_pos.push(self.idx.pos().saturating_sub(1));
+            let visible = op.visible_at(self.clock.as_ref());
+            let key = op.elemid_or_key();
+            self.list_state.process_op(op, key, visible);
+            if visible && self.list_state.done() {
+                self.ops.push(op);
+                self.ops_pos.push(self.list_state.pos().saturating_sub(1));
             }
             QueryResult::Next
         }

@@ -235,9 +235,9 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_tree::OpSetMetadata,
+        op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
-        types::{Key, ObjId, Op, OpId, OpIds},
+        types::{Key, ObjId, OpBuilder, OpId, OpIds},
         ActorId,
     };
 
@@ -322,8 +322,8 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut meta = OpSetMetadata::from_actors(self.actors.clone());
-            let key = meta.props.cache("key".to_string());
+            let mut osd = OpSetData::from_actors(self.actors.clone());
+            let key = osd.props.cache("key".to_string());
 
             let start_op = parents
                 .iter()
@@ -340,7 +340,7 @@ mod tests {
 
             let actor_idx = self.index(actor);
             let ops = (0..num_new_ops)
-                .map(|opnum| Op {
+                .map(|opnum| OpBuilder {
                     id: OpId::new(start_op + opnum as u64, actor_idx),
                     action: crate::OpType::Put("value".into()),
                     key: Key::Map(key),
@@ -356,6 +356,10 @@ mod tests {
                 .unwrap()
                 .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
+            let ops = ops
+                .into_iter()
+                .map(|op| osd.push(root, op))
+                .collect::<Vec<_>>();
             let change = Change::new(
                 ChangeBuilder::new()
                     .with_dependencies(parents.to_vec())
@@ -363,7 +367,10 @@ mod tests {
                     .with_actor(actor.clone())
                     .with_seq(*seq)
                     .with_timestamp(timestamp)
-                    .build(ops.iter().map(|op| op_as_actor_id(&root, op, &meta)))
+                    .build(
+                        ops.iter()
+                            .map(|op| op_as_actor_id(&root, op.as_op2(&osd), &osd)),
+                    )
                     .unwrap(),
             );
             *seq = seq.checked_add(1).unwrap();

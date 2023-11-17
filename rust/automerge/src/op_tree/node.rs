@@ -4,15 +4,14 @@ use std::{
     mem,
 };
 
-pub(crate) use crate::op_set::OpSetMetadata;
+pub(crate) use crate::op_set::{OpIdx, OpSetData};
 use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
-use crate::types::Op;
 pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeNode {
     pub(crate) children: Vec<OpTreeNode>,
-    pub(crate) elements: Vec<usize>,
+    pub(crate) elements: Vec<OpIdx>,
     pub(crate) index: Index,
     pub(crate) length: usize,
 }
@@ -30,33 +29,27 @@ impl OpTreeNode {
     fn search_element<'a, 'b: 'a, Q>(
         &'b self,
         query: &mut Q,
-        m: &OpSetMetadata,
-        ops: &'a [Op],
+        m: &'a OpSetData,
         index: usize,
     ) -> bool
     where
         Q: TreeQuery<'a>,
     {
-        if let Some(e) = self.elements.get(index) {
-            if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish {
+        if let Some(idx) = self.elements.get(index) {
+            if query.query_element(idx.as_op2(m)) == QueryResult::Finish {
                 return true;
             }
         }
         false
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(
-        &'b self,
-        query: &mut Q,
-        m: &'a OpSetMetadata,
-        ops: &'a [Op],
-    ) -> bool
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &'a OpSetData) -> bool
     where
         Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
-            for e in self.elements.iter() {
-                if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish {
+            for idx in self.elements.iter() {
+                if query.query_element(idx.as_op2(m)) == QueryResult::Finish {
                     return true;
                 }
             }
@@ -64,16 +57,16 @@ impl OpTreeNode {
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
                 // descend and try find it
-                match query.query_node_with_metadata(child, m, ops) {
+                match query.query_node(child, m) {
                     QueryResult::Descend => {
-                        if child.search(query, m, ops) {
+                        if child.search(query, m) {
                             return true;
                         }
                     }
                     QueryResult::Finish => return true,
                     QueryResult::Next => (),
                 }
-                if self.search_element(query, m, ops, child_index) {
+                if self.search_element(query, m, child_index) {
                     return true;
                 }
             }
@@ -85,13 +78,13 @@ impl OpTreeNode {
         self.length
     }
 
-    fn reindex(&mut self, ops: &[Op]) {
+    fn reindex(&mut self, osd: &OpSetData) {
         let mut index = Index::new();
         for c in &self.children {
             index.merge(&c.index);
         }
         for i in &self.elements {
-            index.insert(&ops[*i]);
+            index.insert(i.as_op2(osd));
         }
         self.index = index
     }
@@ -118,10 +111,15 @@ impl OpTreeNode {
         panic!("index {} not found in node with len {}", index, self.len())
     }
 
-    pub(crate) fn insert_into_non_full_node(&mut self, index: usize, element: usize, ops: &[Op]) {
+    pub(crate) fn insert_into_non_full_node(
+        &mut self,
+        index: usize,
+        element: OpIdx,
+        m: &OpSetData,
+    ) {
         assert!(!self.is_full());
 
-        self.index.insert(&ops[element]);
+        self.index.insert(element.as_op2(m));
 
         if self.is_leaf() {
             self.length += 1;
@@ -131,14 +129,14 @@ impl OpTreeNode {
             let child = &mut self.children[child_index];
 
             if child.is_full() {
-                self.split_child(child_index, ops);
+                self.split_child(child_index, m);
 
                 // child structure has changed so we need to find the index again
                 let (child_index, sub_index) = self.find_child_index(index);
                 let child = &mut self.children[child_index];
-                child.insert_into_non_full_node(sub_index, element, ops);
+                child.insert_into_non_full_node(sub_index, element, m);
             } else {
-                child.insert_into_non_full_node(sub_index, element, ops);
+                child.insert_into_non_full_node(sub_index, element, m);
             }
             self.length += 1;
         }
@@ -146,7 +144,7 @@ impl OpTreeNode {
 
     // A utility function to split the child `full_child_index` of this node
     // Note that `full_child_index` must be full when this function is called.
-    pub(crate) fn split_child(&mut self, full_child_index: usize, ops: &[Op]) {
+    pub(crate) fn split_child(&mut self, full_child_index: usize, m: &OpSetData) {
         let original_len_self = self.len();
 
         let full_child = &mut self.children[full_child_index];
@@ -180,8 +178,8 @@ impl OpTreeNode {
 
         let full_child_len = full_child.len();
 
-        full_child.reindex(ops);
-        successor_sibling.reindex(ops);
+        full_child.reindex(m);
+        successor_sibling.reindex(m);
 
         self.children
             .insert(full_child_index + 1, successor_sibling);
@@ -193,7 +191,7 @@ impl OpTreeNode {
         assert_eq!(original_len_self, self.len());
     }
 
-    fn remove_from_leaf(&mut self, index: usize) -> usize {
+    fn remove_from_leaf(&mut self, index: usize) -> OpIdx {
         self.length -= 1;
         self.elements.remove(index)
     }
@@ -202,28 +200,28 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         element_index: usize,
-        ops: &[Op],
-    ) -> usize {
+        m: &OpSetData,
+    ) -> OpIdx {
         self.length -= 1;
         if self.children[element_index].elements.len() >= B {
             let total_index = self.cumulative_index(element_index);
             // recursively delete index - 1 in predecessor_node
-            let predecessor = self.children[element_index].remove(index - 1 - total_index, ops);
+            let predecessor = self.children[element_index].remove(index - 1 - total_index, m);
             // replace element with that one
             mem::replace(&mut self.elements[element_index], predecessor)
         } else if self.children[element_index + 1].elements.len() >= B {
             // recursively delete index + 1 in successor_node
             let total_index = self.cumulative_index(element_index + 1);
-            let successor = self.children[element_index + 1].remove(index + 1 - total_index, ops);
+            let successor = self.children[element_index + 1].remove(index + 1 - total_index, m);
             // replace element with that one
             mem::replace(&mut self.elements[element_index], successor)
         } else {
             let middle_element = self.elements.remove(element_index);
             let successor_child = self.children.remove(element_index + 1);
-            self.children[element_index].merge(middle_element, successor_child, ops);
+            self.children[element_index].merge(middle_element, successor_child, m);
 
             let total_index = self.cumulative_index(element_index);
-            self.children[element_index].remove(index - total_index, ops)
+            self.children[element_index].remove(index - total_index, m)
         }
     }
 
@@ -238,8 +236,8 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         mut child_index: usize,
-        ops: &[Op],
-    ) -> usize {
+        osd: &OpSetData,
+    ) -> OpIdx {
         if self.children[child_index].elements.len() < B
             && if child_index > 0 {
                 self.children[child_index - 1].elements.len() < B
@@ -263,14 +261,14 @@ impl OpTreeNode {
                 let successor = self.children.remove(child_index);
                 child_index -= 1;
 
-                self.children[child_index].merge(middle, successor, ops);
+                self.children[child_index].merge(middle, successor, osd);
             } else {
                 let middle = self.elements.remove(child_index);
 
                 // use the sucessor sibling
                 let successor = self.children.remove(child_index + 1);
 
-                self.children[child_index].merge(middle, successor, ops);
+                self.children[child_index].merge(middle, successor, osd);
             }
         } else if self.children[child_index].elements.len() < B {
             if child_index > 0
@@ -284,14 +282,14 @@ impl OpTreeNode {
                 self.children[child_index - 1].length -= 1;
                 self.children[child_index - 1]
                     .index
-                    .remove(&ops[last_element]);
+                    .remove(last_element.as_op2(osd));
 
                 let parent_element =
                     mem::replace(&mut self.elements[child_index - 1], last_element);
 
                 self.children[child_index]
                     .index
-                    .insert(&ops[parent_element]);
+                    .insert(parent_element.as_op2(osd));
                 self.children[child_index]
                     .elements
                     .insert(0, parent_element);
@@ -299,10 +297,10 @@ impl OpTreeNode {
 
                 if let Some(last_child) = self.children[child_index - 1].children.pop() {
                     self.children[child_index - 1].length -= last_child.len();
-                    self.children[child_index - 1].reindex(ops);
+                    self.children[child_index - 1].reindex(osd);
                     self.children[child_index].length += last_child.len();
                     self.children[child_index].children.insert(0, last_child);
-                    self.children[child_index].reindex(ops);
+                    self.children[child_index].reindex(osd);
                 }
             } else if self
                 .children
@@ -312,7 +310,7 @@ impl OpTreeNode {
                 let first_element = self.children[child_index + 1].elements.remove(0);
                 self.children[child_index + 1]
                     .index
-                    .remove(&ops[first_element]);
+                    .remove(first_element.as_op2(osd));
                 self.children[child_index + 1].length -= 1;
 
                 assert!(!self.children[child_index + 1].elements.is_empty());
@@ -322,23 +320,23 @@ impl OpTreeNode {
                 self.children[child_index].length += 1;
                 self.children[child_index]
                     .index
-                    .insert(&ops[parent_element]);
+                    .insert(parent_element.as_op2(osd));
                 self.children[child_index].elements.push(parent_element);
 
                 if !self.children[child_index + 1].is_leaf() {
                     let first_child = self.children[child_index + 1].children.remove(0);
                     self.children[child_index + 1].length -= first_child.len();
-                    self.children[child_index + 1].reindex(ops);
+                    self.children[child_index + 1].reindex(osd);
                     self.children[child_index].length += first_child.len();
 
                     self.children[child_index].children.push(first_child);
-                    self.children[child_index].reindex(ops);
+                    self.children[child_index].reindex(osd);
                 }
             }
         }
         self.length -= 1;
         let total_index = self.cumulative_index(child_index);
-        self.children[child_index].remove(index - total_index, ops)
+        self.children[child_index].remove(index - total_index, osd)
     }
 
     pub(crate) fn check(&self) -> usize {
@@ -348,11 +346,11 @@ impl OpTreeNode {
         l
     }
 
-    pub(crate) fn remove(&mut self, index: usize, ops: &[Op]) -> usize {
+    pub(crate) fn remove(&mut self, index: usize, osd: &OpSetData) -> OpIdx {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
-            self.index.remove(&ops[v]);
+            self.index.remove(v.as_op2(osd));
             assert_eq!(original_len, self.len() + 1);
             debug_assert_eq!(self.check(), self.len());
             v
@@ -369,16 +367,16 @@ impl OpTreeNode {
                         let v = self.remove_element_from_non_leaf(
                             index,
                             min(child_index, self.elements.len() - 1),
-                            ops,
+                            osd,
                         );
-                        self.index.remove(&ops[v]);
+                        self.index.remove(v.as_op2(osd));
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
                     }
                     Ordering::Greater => {
-                        let v = self.remove_from_internal_child(index, child_index, ops);
-                        self.index.remove(&ops[v]);
+                        let v = self.remove_from_internal_child(index, child_index, osd);
+                        self.index.remove(v.as_op2(osd));
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -395,8 +393,8 @@ impl OpTreeNode {
         }
     }
 
-    fn merge(&mut self, middle: usize, successor_sibling: OpTreeNode, ops: &[Op]) {
-        self.index.insert(&ops[middle]);
+    fn merge(&mut self, middle: OpIdx, successor_sibling: OpTreeNode, osd: &OpSetData) {
+        self.index.insert(middle.as_op2(osd));
         self.index.merge(&successor_sibling.index);
         self.elements.push(middle);
         self.elements.extend(successor_sibling.elements);
@@ -436,7 +434,7 @@ impl OpTreeNode {
         }
     }
 
-    pub(crate) fn last(&self) -> usize {
+    pub(crate) fn last(&self) -> OpIdx {
         if self.is_leaf() {
             // node is never empty so this is safe
             *self.elements.last().unwrap()
@@ -446,7 +444,7 @@ impl OpTreeNode {
         }
     }
 
-    pub(crate) fn get(&self, index: usize) -> Option<usize> {
+    pub(crate) fn get(&self, index: usize) -> Option<OpIdx> {
         if self.is_leaf() {
             return self.elements.get(index).copied();
         } else {

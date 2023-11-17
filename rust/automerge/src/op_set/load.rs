@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use fxhash::FxBuildHasher;
 
 use super::{OpSet, OpTree};
+use crate::op_tree::OpSetData;
 use crate::{
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
@@ -27,10 +28,11 @@ impl OpSetBuilder {
 impl DocObserver for OpSetBuilder {
     type Output = OpSet;
 
-    fn object_loaded(&mut self, loaded: LoadedObject) {
+    fn object_loaded(&mut self, loaded: LoadedObject, osd: &mut OpSetData) {
         let mut internal = OpTreeInternal::new();
         for (index, op) in loaded.ops.into_iter().enumerate() {
-            internal.insert(index, op);
+            let idx = osd.push(loaded.id, op);
+            internal.insert(index, idx, osd);
         }
         let tree = OpTree {
             internal,
@@ -41,12 +43,12 @@ impl DocObserver for OpSetBuilder {
         self.completed_objects.insert(loaded.id, tree);
     }
 
-    fn finish(self, metadata: super::OpSetMetadata) -> Self::Output {
-        let len = self.completed_objects.values().map(|t| t.len()).sum();
+    fn finish(self, osd: super::OpSetData) -> Self::Output {
+        let length = self.completed_objects.values().map(|t| t.len()).sum();
         OpSet {
             trees: self.completed_objects,
-            length: len,
-            m: metadata,
+            length,
+            osd,
         }
     }
 }

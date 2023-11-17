@@ -3,41 +3,41 @@ use std::borrow::Cow;
 
 use crate::{
     convert,
-    op_set::OpSetMetadata,
+    op_set::OpSetData,
     storage::AsChangeOp,
     types::{ActorId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
 /// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
-/// the actor ID stored in the metadata.
+/// the actor ID stored in the opset data.
 ///
-/// Note that the methods of `AsChangeOp` will panic if the actor is missing from the metadata
+/// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSetData
 pub(crate) fn op_as_actor_id<'a>(
     obj: &'a ObjId,
-    op: &'a Op,
-    metadata: &'a OpSetMetadata,
+    op: Op<'a>,
+    osd: &'a OpSetData,
 ) -> OpWithMetadata<'a> {
-    OpWithMetadata { obj, op, metadata }
+    OpWithMetadata { obj, op, osd }
 }
 
 pub(crate) struct OpWithMetadata<'a> {
     obj: &'a ObjId,
-    op: &'a Op,
-    metadata: &'a OpSetMetadata,
+    op: Op<'a>,
+    osd: &'a OpSetData,
 }
 
 impl<'a> OpWithMetadata<'a> {
-    fn wrap(&self, opid: &'a OpId) -> OpIdWithMetadata<'a> {
+    fn wrap(&self, opid: OpId) -> OpIdWithMetadata<'a> {
         OpIdWithMetadata {
             opid,
-            metadata: self.metadata,
+            osd: self.osd,
         }
     }
 }
 
 pub(crate) struct OpIdWithMetadata<'a> {
-    opid: &'a OpId,
-    metadata: &'a OpSetMetadata,
+    opid: OpId,
+    osd: &'a OpSetData,
 }
 
 impl<'a> convert::OpId<&'a ActorId> for OpIdWithMetadata<'a> {
@@ -46,19 +46,19 @@ impl<'a> convert::OpId<&'a ActorId> for OpIdWithMetadata<'a> {
     }
 
     fn actor(&self) -> &'a ActorId {
-        self.metadata.actors.get(self.opid.actor())
+        self.osd.actors.get(self.opid.actor())
     }
 }
 
 pub(crate) struct PredWithMetadata<'a> {
-    op: &'a Op,
+    op: Op<'a>,
     offset: usize,
-    metadata: &'a OpSetMetadata,
+    osd: &'a OpSetData,
 }
 
 impl<'a> ExactSizeIterator for PredWithMetadata<'a> {
     fn len(&self) -> usize {
-        self.op.pred.len()
+        self.op.pred().len()
     }
 }
 
@@ -66,11 +66,11 @@ impl<'a> Iterator for PredWithMetadata<'a> {
     type Item = OpIdWithMetadata<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(op) = self.op.pred.get(self.offset) {
+        if let Some(op) = self.op.pred().nth(self.offset) {
             self.offset += 1;
             Some(OpIdWithMetadata {
-                opid: op,
-                metadata: self.metadata,
+                opid: *op,
+                osd: self.osd,
             })
         } else {
             None
@@ -84,15 +84,15 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     type PredIter = PredWithMetadata<'a>;
 
     fn action(&self) -> u64 {
-        self.op.action.action_index()
+        self.op.action().action_index()
     }
 
     fn insert(&self) -> bool {
-        self.op.insert
+        self.op.insert()
     }
 
     fn val(&self) -> Cow<'a, ScalarValue> {
-        match &self.op.action {
+        match &self.op.action() {
             OpType::Make(..) | OpType::Delete | OpType::MarkEnd(..) => {
                 Cow::Owned(ScalarValue::Null)
             }
@@ -107,8 +107,8 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             convert::ObjId::Root
         } else {
             convert::ObjId::Op(OpIdWithMetadata {
-                opid: self.obj.opid(),
-                metadata: self.metadata,
+                opid: *self.obj.opid(),
+                osd: self.osd,
             })
         }
     }
@@ -117,27 +117,27 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
         PredWithMetadata {
             op: self.op,
             offset: 0,
-            metadata: self.metadata,
+            osd: self.osd,
         }
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match &self.op.key {
-            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.metadata.props.get(*idx).into())),
+        match &self.op.key() {
+            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.osd.props.get(*idx).into())),
             Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(&e.0))),
+            Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(e.0))),
         }
     }
 
     fn expand(&self) -> bool {
         matches!(
-            self.op.action,
+            self.op.action(),
             OpType::MarkBegin(true, _) | OpType::MarkEnd(true)
         )
     }
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action {
+        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action() {
             Some(Cow::Owned(name.clone()))
         } else {
             None
