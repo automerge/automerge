@@ -237,7 +237,7 @@ mod tests {
         clock::ClockData,
         op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
-        types::{Key, ObjId, Op, OpId, OpIds},
+        types::{Key, ObjId, OpBuilder, OpId, OpIds},
         ActorId,
     };
 
@@ -340,7 +340,7 @@ mod tests {
 
             let actor_idx = self.index(actor);
             let ops = (0..num_new_ops)
-                .map(|opnum| Op {
+                .map(|opnum| OpBuilder {
                     id: OpId::new(start_op + opnum as u64, actor_idx),
                     action: crate::OpType::Put("value".into()),
                     key: Key::Map(key),

@@ -23,7 +23,7 @@ mod load;
 mod op;
 
 pub(crate) use load::OpSetBuilder;
-pub(crate) use op::{Op, Op2, OpIdx, OpPlus};
+pub(crate) use op::{Op, OpBuilder, OpIdx, OpPlus};
 
 pub(crate) type OpSet = OpSetInternal;
 
@@ -113,7 +113,7 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = Op2<'_>> {
+    pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = Op<'_>> {
         self.trees
             .get(obj)
             .map(|o| o.iter())
@@ -192,7 +192,7 @@ impl OpSetInternal {
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
         obj: &ObjMeta,
-        op: Op2<'a>,
+        op: Op<'a>,
     ) -> FoundOpWithPatchLog<'a> {
         if let Some(tree) = self.trees.get(&obj.id) {
             tree.internal
@@ -205,7 +205,7 @@ impl OpSetInternal {
     pub(crate) fn find_op_without_patch_log(
         &self,
         obj: &ObjId,
-        op: Op2<'_>,
+        op: Op<'_>,
     ) -> FoundOpWithoutPatchLog {
         if let Some(tree) = self.trees.get(obj) {
             tree.internal.find_op_without_patch_log(op, &self.osd)
@@ -231,7 +231,7 @@ impl OpSetInternal {
 
     pub(crate) fn change_vis<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
-        F: Fn(&mut Op),
+        F: Fn(&mut OpBuilder),
     {
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
@@ -301,12 +301,17 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn load(&mut self, obj: ObjId, op: Op) -> OpIdx {
+    pub(crate) fn load(&mut self, obj: ObjId, op: OpBuilder) -> OpIdx {
         self.osd.push(obj, op)
     }
 
     // want to move to this everywhere
-    pub(crate) fn load2(&mut self, obj: ObjId, op: Op, range: &mut OpIdxRange) -> OpIdx {
+    pub(crate) fn load_with_range(
+        &mut self,
+        obj: ObjId,
+        op: OpBuilder,
+        range: &mut OpIdxRange,
+    ) -> OpIdx {
         let idx = self.osd.push(obj, op);
         range.end += 1;
         assert!(idx.get() >= range.start as usize && idx.get() < range.end as usize);
@@ -435,7 +440,7 @@ impl Default for OpSetInternal {
 }
 
 impl<'a> IntoIterator for &'a OpSetInternal {
-    type Item = (&'a ObjId, ObjType, Op2<'a>);
+    type Item = (&'a ObjId, ObjType, Op<'a>);
 
     type IntoIter = Iter<'a>;
 
@@ -466,7 +471,7 @@ pub(crate) struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = (&'a ObjId, ObjType, Op2<'a>);
+    type Item = (&'a ObjId, ObjType, Op<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((id, typ, tree)) = &mut self.current {
@@ -519,7 +524,7 @@ pub(crate) struct OpIter<'a> {
 }
 
 impl<'a> Iterator for OpIter<'a> {
-    type Item = Op2<'a>;
+    type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|idx| idx.as_op2(self.osd))
@@ -550,7 +555,7 @@ impl<'a> ChangeOpIter<'a> {
 }
 
 impl<'a> Iterator for ChangeOpIter<'a> {
-    type Item = Op2<'a>;
+    type Item = Op<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         assert!(self.current >= self.range.start);
         if self.current < self.current_back {
@@ -605,14 +610,14 @@ impl OpSetData {
         }
     }
 
-    pub(crate) fn push(&mut self, obj: ObjId, op: Op) -> OpIdx {
+    pub(crate) fn push(&mut self, obj: ObjId, op: OpBuilder) -> OpIdx {
         let index = self.ops.len();
         let width = TextValue::width(op.to_str()) as u32; // TODO faster
         self.ops.push(OpPlus { obj, width, op });
         OpIdx::new(index)
     }
 
-    pub(crate) fn get_mut(&mut self, id: OpIdx) -> &mut Op {
+    pub(crate) fn get_mut(&mut self, id: OpIdx) -> &mut OpBuilder {
         &mut self.ops[id.get()].op
     }
 
@@ -663,7 +668,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, Op, OpId, ROOT},
+        types::{Key, ObjId, ObjMeta, OpBuilder, OpId, ROOT},
         ActorId, ScalarValue,
     };
 
@@ -703,7 +708,7 @@ pub(crate) mod tests {
     ///
     /// The opset in question and an op which should be inserted at the next position after the
     /// internally visible ops.
-    pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, Op) {
+    pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, OpBuilder) {
         let mut set = OpSet::new();
         let actor = set.osd.actors.cache(ActorId::random());
         let a = set.osd.props.cache("a".to_string());
@@ -735,7 +740,7 @@ pub(crate) mod tests {
                         .sorted_opids(vec![OpId::new(counter, actor)].into_iter())
                 };
 
-                let op = Op {
+                let op = OpBuilder {
                     id: OpId::new(counter, actor),
                     action: crate::OpType::Put(ScalarValue::Str(val.into())),
                     key: Key::Map(key),
@@ -750,7 +755,7 @@ pub(crate) mod tests {
         }
 
         // Now try and create an op which inserts at the next index of 'a'
-        let new_op = Op {
+        let new_op = OpBuilder {
             id: OpId::new(counter, actor),
             action: crate::OpType::Put(ScalarValue::Str("test".into())),
             key: Key::Map(a),

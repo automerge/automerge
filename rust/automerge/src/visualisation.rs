@@ -1,4 +1,4 @@
-use crate::types::{ObjId, Op2};
+use crate::types::{ObjId, Op};
 use fxhash::FxHasher;
 use std::fmt::Write;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
@@ -232,7 +232,7 @@ impl OpTableRow {
 
 impl OpTableRow {
     fn create(
-        op: Op2<'_>,
+        op: Op<'_>,
         obj: &ObjId,
         osd: &crate::op_set::OpSetData,
         actor_shorthands: &HashMap<usize, String>,

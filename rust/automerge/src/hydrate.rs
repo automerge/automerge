@@ -1,4 +1,4 @@
-use crate::types::{Clock, ObjId, Op2, OpType};
+use crate::types::{Clock, ObjId, Op, OpType};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -154,7 +154,7 @@ impl Automerge {
         Value::Text(Text::new(text.into()))
     }
 
-    pub(crate) fn hydrate_op(&self, op: Op2<'_>, clock: Option<&Clock>) -> Value {
+    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
         match op.action() {
             OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
             OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),

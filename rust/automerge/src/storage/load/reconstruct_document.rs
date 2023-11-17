@@ -7,7 +7,7 @@ use crate::{
     columnar::Key as DocOpKey,
     op_tree::OpSetData,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, OpBuilder, OpId, OpIds, OpType},
     ScalarValue,
 };
 
@@ -54,7 +54,7 @@ pub(crate) struct LoadedObject {
     /// The id of the parent object, if any
     pub(crate) parent: Option<ObjId>,
     /// The operations for this object
-    pub(crate) ops: Vec<crate::types::Op>,
+    pub(crate) ops: Vec<crate::types::OpBuilder>,
     /// The type of the object
     pub(crate) obj_type: ObjType,
 }
@@ -238,7 +238,7 @@ struct CreateOp {
 struct LoadingObject {
     id: ObjId,
     parent_id: Option<ObjId>,
-    ops: Vec<Op>,
+    ops: Vec<OpBuilder>,
     obj_type: ObjType,
     preds: HashMap<OpId, Vec<OpId>>,
     /// Operations which set a value, stored to later lookup keys when reconstructing delete events
@@ -266,7 +266,7 @@ impl LoadingObject {
         }
     }
 
-    fn append_op(&mut self, op: Op) -> Result<(), Error> {
+    fn append_op(&mut self, op: OpBuilder) -> Result<(), Error> {
         // Collect set and make operations so we can find the keys which delete operations refer to
         // in `finish`
         if matches!(op.action, OpType::Put(_) | OpType::Make(_)) {
@@ -322,7 +322,7 @@ impl LoadingObject {
             })?;
             collector.collect(
                 self.id,
-                Op {
+                OpBuilder {
                     id: opid,
                     pred: osd.sorted_opids(preds.into_iter()),
                     insert: false,
@@ -342,7 +342,7 @@ impl LoadingObject {
     }
 }
 
-fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<Op, Error> {
+fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<OpBuilder, Error> {
     let key = match op.key {
         DocOpKey::Prop(s) => Key::Map(osd.import_prop(s)),
         DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(osd, op)?)),
@@ -354,7 +354,7 @@ fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<Op, Error> {
         }
     }
     let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    Ok(Op {
+    Ok(OpBuilder {
         id: check_opid(osd, op.id)?,
         action,
         key,

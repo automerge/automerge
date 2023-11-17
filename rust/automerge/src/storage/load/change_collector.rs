@@ -14,7 +14,7 @@ use crate::{
         convert::op_as_actor_id,
         Change as StoredChange, ChangeMetadata,
     },
-    types::{ChangeHash, ObjId, Op},
+    types::{ChangeHash, ObjId, OpBuilder},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -79,7 +79,12 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn collect(&mut self, obj: ObjId, op: Op, osd: &mut OpSetData) -> Result<(), Error> {
+    pub(crate) fn collect(
+        &mut self,
+        obj: ObjId,
+        op: OpBuilder,
+        osd: &mut OpSetData,
+    ) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
             .get_mut(&op.id.actor())
@@ -206,7 +211,7 @@ impl<'a> PartialChange<'a> {
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
-                // SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted
+                // SAFETY: types::OpBuilder::preds is `types::OpIds` which ensures ops are always sorted
                 panic!("preds out of order");
             }
         };

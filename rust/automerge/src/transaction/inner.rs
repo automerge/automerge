@@ -8,7 +8,7 @@ use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjId, OpId, OpIds};
-use crate::{op_tree::OpSetData, types::Op, Automerge, Change, ChangeHash, Prop};
+use crate::{op_tree::OpSetData, types::OpBuilder, Automerge, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
@@ -273,8 +273,8 @@ impl TransactionInner {
         OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
-    fn next_insert(&mut self, key: Key, value: ScalarValue) -> Op {
-        Op {
+    fn next_insert(&mut self, key: Key, value: ScalarValue) -> OpBuilder {
+        OpBuilder {
             id: self.next_id(),
             action: OpType::Put(value),
             key,
@@ -284,8 +284,8 @@ impl TransactionInner {
         }
     }
 
-    fn next_delete(&mut self, key: Key, pred: OpIds) -> Op {
-        Op {
+    fn next_delete(&mut self, key: Key, pred: OpIds) -> OpBuilder {
+        OpBuilder {
             id: self.next_id(),
             action: OpType::Delete,
             key,
@@ -383,7 +383,7 @@ impl TransactionInner {
         let pos = query.pos();
         let key = query.key()?;
 
-        let op = Op {
+        let op = OpBuilder {
             id,
             action,
             key,
@@ -392,7 +392,9 @@ impl TransactionInner {
             insert: true,
         };
 
-        let idx = doc.ops_mut().load2(obj, op.clone(), &mut self.idx_range);
+        let idx = doc
+            .ops_mut()
+            .load_with_range(obj, op.clone(), &mut self.idx_range);
         doc.ops_mut().insert(pos, &obj, idx);
 
         self.finalize_op(doc, patch_log, obj, Prop::Seq(index), idx, marks);
@@ -453,7 +455,7 @@ impl TransactionInner {
             .osd
             .sorted_opids(query.ops.iter().map(|o| *o.id()));
 
-        let op = Op {
+        let op = OpBuilder {
             id,
             action,
             key,
@@ -465,7 +467,7 @@ impl TransactionInner {
         let ops_pos = query.ops_pos;
 
         let is_delete = op.is_delete();
-        let idx = doc.ops_mut().load2(obj, op, &mut self.idx_range);
+        let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
 
         self.insert_local_op(doc, patch_log, prop, idx, is_delete, pos, obj, &ops_pos);
 
@@ -501,7 +503,7 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let op = Op {
+        let op = OpBuilder {
             id,
             action,
             key,
@@ -512,7 +514,7 @@ impl TransactionInner {
         let pos = query.pos();
         let ops_pos = query.ops_pos;
         let is_delete = op.is_delete();
-        let idx = doc.ops_mut().load2(obj, op, &mut self.idx_range);
+        let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
 
         self.insert_local_op(
             doc,
@@ -683,7 +685,7 @@ impl TransactionInner {
             let query_pred = query.pred();
             let ops_pos = query.ops_pos;
             let op = self.next_delete(query_key, query_pred);
-            let idx = doc.ops_mut().load2(obj, op, &mut self.idx_range);
+            let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
 
             doc.ops_mut().add_succ(&obj, &ops_pos, idx);
 
@@ -713,7 +715,7 @@ impl TransactionInner {
                 width = op.width(encoding);
                 key = op.id.into();
 
-                let idx = doc.ops_mut().load2(obj, op, &mut self.idx_range);
+                let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
                 doc.ops_mut().insert(pos, &obj, idx);
 
                 cursor += width;

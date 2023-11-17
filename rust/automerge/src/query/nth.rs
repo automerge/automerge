@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set::Op2;
+use crate::op_set::Op;
 use crate::op_tree::{OpTree, OpTreeNode};
 use crate::query::{ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding, OpIds};
@@ -16,7 +16,7 @@ pub(crate) struct Nth<'a> {
     marks: Option<MarkMap<'a>>,
     // TODO: put osd in all queries - take out of API
     osd: &'a OpSetData,
-    pub(crate) ops: Vec<Op2<'a>>,
+    pub(crate) ops: Vec<Op<'a>>,
     pub(crate) ops_pos: Vec<usize>,
 }
 
@@ -112,7 +112,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         }
     }
 
-    fn query_element(&mut self, op: Op2<'a>) -> QueryResult {
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         if op.insert() && self.list_state.done() {
             QueryResult::Finish
         } else {

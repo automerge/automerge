@@ -4,7 +4,7 @@ use crate::{
     convert,
     indexed_cache::IndexedCache,
     storage::AsDocOp,
-    types::{ElemId, Key, MarkData, Op2, OpId, OpType, ScalarValue},
+    types::{ElemId, Key, MarkData, Op, OpId, OpType, ScalarValue},
 };
 
 /// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
@@ -23,7 +23,7 @@ use crate::{
 pub(crate) fn op_as_docop<'a>(
     actors: &'a [usize],
     props: &'a IndexedCache<String>,
-    op: Op2<'a>,
+    op: Op<'a>,
 ) -> OpAsDocOp<'a> {
     OpAsDocOp {
         op,
@@ -33,7 +33,7 @@ pub(crate) fn op_as_docop<'a>(
 }
 
 pub(crate) struct OpAsDocOp<'a> {
-    op: Op2<'a>,
+    op: Op<'a>,
     actor_lookup: &'a [usize],
     props: &'a IndexedCache<String>,
 }
@@ -126,7 +126,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
 }
 
 pub(crate) struct OpAsDocOpSuccIter<'a> {
-    op: Op2<'a>,
+    op: Op<'a>,
     offset: usize,
     actor_index: &'a [usize],
 }

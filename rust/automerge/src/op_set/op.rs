@@ -20,25 +20,25 @@ impl OpIdx {
         self.0 as usize
     }
 
-    pub(crate) fn as_op2(self, osd: &OpSetData) -> Op2<'_> {
-        Op2::new(self.0 as usize, osd)
+    pub(crate) fn as_op2(self, osd: &OpSetData) -> Op<'_> {
+        Op::new(self.0 as usize, osd)
     }
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct Op2<'a> {
+pub(crate) struct Op<'a> {
     idx: usize,
     osd: &'a OpSetData,
 }
 
 // lamport compare with PartialEq! =D
-impl<'a> PartialEq for Op2<'a> {
+impl<'a> PartialEq for Op<'a> {
     fn eq(&self, other: &Self) -> bool {
         (std::ptr::eq(self.osd, other.osd) && self.idx == other.idx) || self.op() == other.op()
     }
 }
 
-impl<'a> PartialOrd for Op2<'a> {
+impl<'a> PartialOrd for Op<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let c1 = self.id().counter();
         let c2 = other.id().counter();
@@ -46,7 +46,7 @@ impl<'a> PartialOrd for Op2<'a> {
     }
 }
 
-impl<'a> Op2<'a> {
+impl<'a> Op<'a> {
     pub(crate) fn new(idx: usize, osd: &'a OpSetData) -> Self {
         Self { idx, osd }
     }
@@ -63,7 +63,7 @@ impl<'a> Op2<'a> {
         &self.osd.ops[self.idx]
     }
 
-    fn op(&self) -> &'a Op {
+    fn op(&self) -> &'a OpBuilder {
         &self.osd.ops[self.idx].op
     }
 
@@ -95,7 +95,7 @@ impl<'a> Op2<'a> {
         self.op().visible()
     }
 
-    pub(crate) fn overwrites(&self, other: Op2<'_>) -> bool {
+    pub(crate) fn overwrites(&self, other: Op<'_>) -> bool {
         self.op().overwrites(other.op())
     }
 
@@ -189,7 +189,7 @@ impl<'a> Op2<'a> {
     }
 
     /*
-        pub(crate) fn succ2(&self) -> impl Iterator<Item = Op2<'a>> {
+        pub(crate) fn succ2(&self) -> impl Iterator<Item = Op<'a>> {
           todo!()
         }
     */
@@ -201,16 +201,6 @@ impl<'a> Op2<'a> {
     pub(crate) fn pred(&self) -> impl Iterator<Item = &OpId> + ExactSizeIterator {
         self.op().pred.iter()
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Op {
-    pub(crate) id: OpId,
-    pub(crate) action: OpType,
-    pub(crate) key: Key,
-    pub(crate) succ: OpIds,
-    pub(crate) pred: OpIds,
-    pub(crate) insert: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,7 +236,7 @@ impl<'a> Iterator for SuccIter<'a> {
     }
 }
 
-impl Op {
+impl OpBuilder {
     pub(crate) fn succ_iter(&self) -> SuccIter<'_> {
         if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
             let set = c
@@ -359,7 +349,7 @@ impl Op {
         matches!(&self.key, Key::Seq(_))
     }
 
-    pub(crate) fn overwrites(&self, other: &Op) -> bool {
+    pub(crate) fn overwrites(&self, other: &OpBuilder) -> bool {
         self.pred.iter().any(|i| i == &other.id)
     }
 
@@ -456,5 +446,5 @@ pub(crate) struct OpPlus {
     pub(crate) width: u32,
     //pub(crate) pred: Option<OpLinkIdx>,
     //pub(crate) succ: Option<OpLinkIdx>,
-    pub(crate) op: Op,
+    pub(crate) op: OpBuilder,
 }

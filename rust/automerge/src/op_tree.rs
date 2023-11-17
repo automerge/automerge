@@ -1,5 +1,5 @@
 use crate::marks::MarkSet;
-pub(crate) use crate::op_set::{Op2, OpSetData};
+pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
 use crate::patches::PatchLog;
 use crate::{
@@ -80,10 +80,10 @@ pub(crate) struct FoundOpWithoutPatchLog {
 
 #[derive(Default, Clone, Debug)]
 pub(crate) struct FoundOpWithPatchLog<'a> {
-    pub(crate) before: Option<Op2<'a>>,
+    pub(crate) before: Option<Op<'a>>,
     pub(crate) num_before: usize,
-    pub(crate) overwritten: Option<Op2<'a>>,
-    pub(crate) after: Option<Op2<'a>>,
+    pub(crate) overwritten: Option<Op<'a>>,
+    pub(crate) after: Option<Op<'a>>,
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
@@ -94,7 +94,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
     pub(crate) fn log_patches(
         &self,
         obj: &ObjMeta,
-        op: Op2<'_>,
+        op: Op<'_>,
         doc: &Automerge,
         patch_log: &mut PatchLog,
     ) {
@@ -206,7 +206,7 @@ impl OpTreeInternal {
     pub(crate) fn found_op_without_patch_log(
         &self,
         osd: &OpSetData,
-        op: Op2<'_>,
+        op: Op<'_>,
         mut pos: usize,
     ) -> FoundOpWithoutPatchLog {
         let mut iter = self.iter();
@@ -236,7 +236,7 @@ impl OpTreeInternal {
     pub(crate) fn found_op_with_patch_log<'a>(
         &'a self,
         osd: &'a OpSetData,
-        op: Op2<'a>,
+        op: Op<'a>,
         mut pos: usize,
         index: usize,
         marks: Option<Arc<MarkSet>>,
@@ -326,7 +326,7 @@ impl OpTreeInternal {
 
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
-        op: Op2<'a>,
+        op: Op<'a>,
         encoding: ListEncoding,
         osd: &'a OpSetData,
     ) -> FoundOpWithPatchLog<'a> {
@@ -344,7 +344,7 @@ impl OpTreeInternal {
 
     pub(crate) fn find_op_without_patch_log(
         &self,
-        op: Op2<'_>,
+        op: Op<'_>,
         osd: &OpSetData,
     ) -> FoundOpWithoutPatchLog {
         if let Key::Seq(_) = *op.key() {
@@ -388,7 +388,7 @@ impl OpTreeInternal {
 
     fn binary_search_by<F>(&self, osd: &OpSetData, f: F) -> usize
     where
-        F: Fn(Op2<'_>) -> Ordering,
+        F: Fn(Op<'_>) -> Ordering,
     {
         let mut right = self.len();
         let mut left = 0;
@@ -531,14 +531,14 @@ impl PartialEq for OpTreeInternal {
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct OpsFound<'a> {
-    pub(crate) ops: Vec<Op2<'a>>,
+    pub(crate) ops: Vec<Op<'a>>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) end_pos: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FoundOpId<'a> {
-    pub(crate) op: Op2<'a>,
+    pub(crate) op: Op<'a>,
     pub(crate) index: usize,
     pub(crate) visible: bool,
 }
@@ -546,13 +546,13 @@ pub(crate) struct FoundOpId<'a> {
 #[cfg(test)]
 mod tests {
     use crate::op_set::{OpIdx, OpSetData};
-    use crate::types::{Op, OpId, OpType, ROOT};
+    use crate::types::{OpBuilder, OpId, OpType, ROOT};
 
     use super::*;
 
     fn op(osd: &mut OpSetData) -> OpIdx {
         let zero = OpId::new(0, 0);
-        let op = Op {
+        let op = OpBuilder {
             id: zero,
             action: OpType::Put(0.into()),
             key: zero.into(),

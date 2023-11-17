@@ -1,7 +1,7 @@
 use crate::error::AutomergeError;
 use crate::marks::MarkSet;
 use crate::marks::MarkStateMachine;
-use crate::op_set::Op2;
+use crate::op_set::Op;
 use crate::op_tree::OpTreeNode;
 use crate::query::{ListState, MarkMap, OpSetData, OpTree, QueryResult, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding, OpType, HEAD};
@@ -21,7 +21,7 @@ pub(crate) struct InsertNth<'a> {
 struct Loc<'a> {
     key: Key,
     pos: usize,
-    id: Option<Op2<'a>>,
+    id: Option<Op<'a>>,
 }
 
 impl<'a> Loc<'a> {
@@ -29,7 +29,7 @@ impl<'a> Loc<'a> {
         Loc { key, pos, id: None }
     }
 
-    fn mark(pos: usize, key: Key, op: Op2<'a>) -> Self {
+    fn mark(pos: usize, key: Key, op: Op<'a>) -> Self {
         Loc {
             key,
             pos,
@@ -37,7 +37,7 @@ impl<'a> Loc<'a> {
         }
     }
 
-    fn matches(&self, op: Op2<'a>) -> bool {
+    fn matches(&self, op: Op<'a>) -> bool {
         self.id.map(|o| o.id()) == Some(&op.id().prev())
     }
 }
@@ -87,7 +87,7 @@ impl<'a> InsertNth<'a> {
             .ok_or(AutomergeError::InvalidIndex(self.list_state.target()))
     }
 
-    fn identify_valid_insertion_spot(&mut self, op: Op2<'a>, key: &Key) {
+    fn identify_valid_insertion_spot(&mut self, op: Op<'a>, key: &Key) {
         if !self.list_state.done() {
             return;
         }
@@ -145,7 +145,7 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         }
     }
 
-    fn query_element(&mut self, op: Op2<'a>) -> QueryResult {
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         if !self.list_state.done() {
             self.marks.process(op);
         }

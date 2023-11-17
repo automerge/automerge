@@ -1,5 +1,5 @@
 use crate::marks::MarkData;
-use crate::op_set::{Op2, OpSetData};
+use crate::op_set::{Op, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::QueryResult;
 use crate::types::{Key, ListEncoding, OpId, OpType};
@@ -12,7 +12,7 @@ pub(crate) struct MarkMap<'a> {
 }
 
 impl<'a> MarkMap<'a> {
-    pub(crate) fn process(&mut self, op: Op2<'a>) {
+    pub(crate) fn process(&mut self, op: Op<'a>) {
         match op.action() {
             OpType::MarkBegin(_, data) => {
                 self.map.insert(*op.id(), data);
@@ -164,7 +164,7 @@ impl ListState {
         QueryResult::Next
     }
 
-    pub(crate) fn process_op(&mut self, op: Op2<'_>, current: Key, visible: bool) {
+    pub(crate) fn process_op(&mut self, op: Op<'_>, current: Key, visible: bool) {
         if visible {
             if self.never_seen_puts {
                 // clean sequnces are simple - only insert and deletes

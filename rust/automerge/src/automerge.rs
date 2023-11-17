@@ -20,8 +20,8 @@ use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
+    OpBuilder, OpId, OpType, Value,
 };
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -859,7 +859,7 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder)> {
         let actor = self.ops.osd.actors.cache(change.actor_id().clone());
         let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
         actors.push(actor);
@@ -897,7 +897,7 @@ impl Automerge {
                 let pred = self.ops.osd.sorted_opids(pred);
                 (
                     obj,
-                    Op {
+                    OpBuilder {
                         id,
                         action: OpType::from_action_and_value(
                             c.action,
@@ -1260,7 +1260,7 @@ impl Automerge {
     pub(crate) fn insert_op(
         &mut self,
         obj: &ObjId,
-        op: Op,
+        op: OpBuilder,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let is_delete = op.is_delete();
@@ -1392,8 +1392,9 @@ impl Automerge {
                     OpType::Make(_) | OpType::Put(_) => {
                         let len = o.width(obj.encoding);
                         if last_marks.as_ref() != marks.current() {
-                            if mark_len > 0 && last_marks.is_some() {
-                                acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+                            match last_marks.as_ref() {
+                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                                _ => (),
                             }
                             last_marks = marks.current().cloned();
                             mark_index = index;
@@ -1412,8 +1413,9 @@ impl Automerge {
                 }
             }
         }
-        if mark_len > 0 && last_marks.is_some() {
-            acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+        match last_marks.as_ref() {
+            Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+            _ => (),
         }
         Ok(acc.into_iter_no_unmark().collect())
     }

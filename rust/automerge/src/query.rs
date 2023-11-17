@@ -1,7 +1,7 @@
 use crate::marks::MarkData;
-use crate::op_set::Op2;
+use crate::op_set::Op;
 use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
-use crate::types::{Key, ListEncoding, Op, OpId, OpType};
+use crate::types::{Key, ListEncoding, OpBuilder, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -25,7 +25,7 @@ pub(crate) use seek_mark::SeekMark;
 pub(crate) struct ChangeVisibility<'a> {
     pub(crate) old_vis: bool,
     pub(crate) new_vis: bool,
-    pub(crate) op: Op2<'a>,
+    pub(crate) op: Op<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,7 +33,7 @@ pub(crate) struct CounterData {
     pos: usize,
     val: i64,
     succ: HashSet<OpId>,
-    op: Op,
+    op: OpBuilder,
 }
 
 pub(crate) trait TreeQuery<'a>: Clone + Debug {
@@ -49,7 +49,7 @@ pub(crate) trait TreeQuery<'a>: Clone + Debug {
         QueryResult::Descend
     }
 
-    fn query_element(&mut self, _op: Op2<'a>) -> QueryResult {
+    fn query_element(&mut self, _op: Op<'a>) -> QueryResult {
         panic!("invalid element query")
     }
 }
@@ -67,11 +67,11 @@ struct TextWidth {
 }
 
 impl TextWidth {
-    fn add_op(&mut self, op: Op2<'_>) {
+    fn add_op(&mut self, op: Op<'_>) {
         self.width += op.width(ListEncoding::Text);
     }
 
-    fn remove_op(&mut self, op: Op2<'_>) {
+    fn remove_op(&mut self, op: Op<'_>) {
         // Why are we using saturating_sub here? Shouldn't this always be greater than 0?
         //
         // In the case of objects which are _not_ `Text` we may end up subtracting more than the
@@ -181,7 +181,7 @@ impl Index {
         change_vis
     }
 
-    pub(crate) fn insert(&mut self, op: Op2<'_>) {
+    pub(crate) fn insert(&mut self, op: Op<'_>) {
         self.never_seen_puts &= op.insert();
 
         // opids
@@ -212,7 +212,7 @@ impl Index {
         }
     }
 
-    pub(crate) fn remove(&mut self, op: Op2<'_>) {
+    pub(crate) fn remove(&mut self, op: Op<'_>) {
         // op ids
         self.ops.remove(op.id());
 

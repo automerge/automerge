@@ -5,7 +5,7 @@ use crate::{
     convert,
     op_set::OpSetData,
     storage::AsChangeOp,
-    types::{ActorId, Key, MarkData, ObjId, Op2, OpId, OpType, ScalarValue},
+    types::{ActorId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
 /// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
@@ -14,7 +14,7 @@ use crate::{
 /// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSetData
 pub(crate) fn op_as_actor_id<'a>(
     obj: &'a ObjId,
-    op: Op2<'a>,
+    op: Op<'a>,
     osd: &'a OpSetData,
 ) -> OpWithMetadata<'a> {
     OpWithMetadata { obj, op, osd }
@@ -22,7 +22,7 @@ pub(crate) fn op_as_actor_id<'a>(
 
 pub(crate) struct OpWithMetadata<'a> {
     obj: &'a ObjId,
-    op: Op2<'a>,
+    op: Op<'a>,
     osd: &'a OpSetData,
 }
 
@@ -51,7 +51,7 @@ impl<'a> convert::OpId<&'a ActorId> for OpIdWithMetadata<'a> {
 }
 
 pub(crate) struct PredWithMetadata<'a> {
-    op: Op2<'a>,
+    op: Op<'a>,
     offset: usize,
     osd: &'a OpSetData,
 }

@@ -1,5 +1,5 @@
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set::{Op2, OpIter};
+use crate::op_set::{Op, OpIter};
 use crate::types::{Clock, Key};
 use std::sync::Arc;
 
@@ -27,13 +27,13 @@ pub(crate) struct TopOpsInner<'a> {
     num_ops: usize,
     clock: Option<Clock>,
     key: Option<Key>,
-    last_op: Option<(usize, Op2<'a>, Option<Arc<MarkSet>>)>,
+    last_op: Option<(usize, Op<'a>, Option<Arc<MarkSet>>)>,
     marks: MarkStateMachine<'a>,
 }
 
 #[derive(Debug)]
 pub(crate) struct TopOp<'a> {
-    pub(crate) op: Op2<'a>,
+    pub(crate) op: Op<'a>,
     pub(crate) conflict: bool,
     pub(crate) marks: Option<Arc<MarkSet>>,
 }

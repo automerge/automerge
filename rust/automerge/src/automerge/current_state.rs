@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
     patches::{PatchLog, TextRepresentation},
-    types::{Key, ListEncoding, ObjId, Op2, OpId},
+    types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
@@ -91,7 +91,7 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     }
 }
 
-fn log_text_patches<'a, I: Iterator<Item = Op2<'a>>>(
+fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -130,7 +130,7 @@ fn log_text_patches<'a, I: Iterator<Item = Op2<'a>>>(
     }
 }
 
-fn log_list_patches<'a, I: Iterator<Item = Op2<'a>>>(
+fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,
@@ -178,7 +178,7 @@ fn log_list_patches<'a, I: Iterator<Item = Op2<'a>>>(
         });
 }
 
-fn log_map_key_patches<'a, I: Iterator<Item = Op2<'a>>>(
+fn log_map_key_patches<'a, I: Iterator<Item = Op<'a>>>(
     (key, key_ops): (Key, I),
 ) -> Option<(usize, Put<'a>)> {
     key_ops
@@ -206,7 +206,7 @@ fn log_map_key_patches<'a, I: Iterator<Item = Op2<'a>>>(
         .last()
 }
 
-fn log_map_patches<'a, I: Iterator<Item = Op2<'a>>>(
+fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjId,

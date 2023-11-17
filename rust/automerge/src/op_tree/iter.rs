@@ -208,7 +208,7 @@ impl<'a> Iterator for Inner<'a> {
 mod tests {
     use super::super::OpTreeInternal;
     use crate::op_set::{OpIdx, OpSetData};
-    use crate::types::{Key, Op, OpId, OpType, ScalarValue, ROOT};
+    use crate::types::{Key, OpBuilder, OpId, OpType, ScalarValue, ROOT};
     use proptest::prelude::*;
 
     #[derive(Clone)]
@@ -228,7 +228,7 @@ mod tests {
 
     // A struct which impls Debug by only printing the counters of the IDs of the  ops it wraps.
     // This is useful because the only difference between the ops that we generate is the counter
-    // of their IDs. Wrapping a Vec<Op> in DebugOps will result in output from assert! etc. which
+    // of their IDs. Wrapping a Vec<OpBuilder> in DebugOps will result in output from assert! etc. which
     // only shows the counters. For example, the output of a failing assert_eq! like this
     //
     //     assert_eq!(DebugOps(&ops1), DebugOps(&ops2))
@@ -257,7 +257,7 @@ mod tests {
     }
 
     fn op(counter: u64, osd: &mut OpSetData) -> OpIdx {
-        let op = Op {
+        let op = OpBuilder {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
             key: Key::Map(0),
@@ -269,7 +269,7 @@ mod tests {
     }
 
     /// A model for a property based test of the OpTreeIter. We generate a set of actions, each
-    /// action pertaining to a `model` - which is just a `Vec<Op>`. As we generate each action we
+    /// action pertaining to a `model` - which is just a `Vec<OpBuilder>`. As we generate each action we
     /// apply it to the model and record the action we took. In the property test we replay the
     /// same actions against an `OpTree` and check that the iterator returns the same result as the
     /// `model`.

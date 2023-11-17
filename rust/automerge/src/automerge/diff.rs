@@ -8,14 +8,14 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjId, Op2, Prop, ScalarValue},
+    types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
 
 #[derive(Clone, Debug)]
 struct Winner<'a> {
-    op: Op2<'a>,
+    op: Op<'a>,
     clock: &'a Clock,
     cross_visible: bool,
     conflict: bool,
@@ -23,7 +23,7 @@ struct Winner<'a> {
 
 /*
 impl<'a> Deref for Winner<'a> {
-    type Target = Op2<'a>;
+    type Target = Op<'a>;
 
     fn deref(&self) -> &'a Self::Target {
         &self.op
@@ -31,7 +31,7 @@ impl<'a> Deref for Winner<'a> {
 }
 */
 
-fn process<'a, T: Iterator<Item = Op2<'a>>>(
+fn process<'a, T: Iterator<Item = Op<'a>>>(
     ops: T,
     before: &'a Clock,
     after: &'a Clock,
@@ -55,7 +55,7 @@ fn process<'a, T: Iterator<Item = Op2<'a>>>(
     resolve(before_op, after_op, diff)
 }
 
-fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op2<'a>, cross_visible: bool, clock: &'a Clock) {
+fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
     match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
@@ -111,7 +111,7 @@ enum Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-    fn op(&self) -> Op2<'a> {
+    fn op(&self) -> Op<'a> {
         match self {
             Patch::New(winner, _) => winner.op,
             Patch::Update { after, .. } => after.op,
@@ -254,7 +254,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 // FIXME
-fn get_prop<'a>(doc: &'a Automerge, op: Op2<'a>) -> Option<&'a str> {
+fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
     Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
 
@@ -298,20 +298,20 @@ impl<'a> MarkDiff<'a> {
         }
     }
 
-    fn process(&mut self, op: Op2<'a>) -> Option<Patch<'static>> {
+    fn process(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
         self.before
             .process(*op.id(), op.action(), &self.doc.ops.osd);
         self.after.process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
 
-    fn process_before(&mut self, op: Op2<'a>) -> Option<Patch<'static>> {
+    fn process_before(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
         self.before
             .process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
 
-    fn process_after(&mut self, op: Op2<'a>) -> Option<Patch<'static>> {
+    fn process_after(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
         self.after.process(*op.id(), op.action(), &self.doc.ops.osd);
         None
     }
