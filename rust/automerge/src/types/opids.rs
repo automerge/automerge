@@ -1,3 +1,4 @@
+#[cfg(test)]
 use itertools::Itertools;
 
 use super::OpId;
@@ -19,8 +20,8 @@ impl<'a> IntoIterator for &'a OpIds {
 }
 
 impl OpIds {
-    pub(crate) fn empty() -> Self {
-        Self(Vec::new())
+    pub(crate) fn overwrites(&self, other: &OpId) -> bool {
+        self.iter().any(|i| i == other)
     }
 
     pub(crate) fn new<I: Iterator<Item = OpId>, F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(
@@ -48,6 +49,7 @@ impl OpIds {
 
     /// Add an op to this set of OpIds. The `comparator` must provide a
     /// consistent ordering between successive calls to `add`.
+    #[cfg(test)]
     pub(crate) fn add<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(
         &mut self,
         opid: OpId,
@@ -73,24 +75,13 @@ impl OpIds {
         }
     }
 
-    pub(crate) fn retain<F: Fn(&OpId) -> bool>(&mut self, f: F) {
-        self.0.retain(f)
-    }
-
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, OpId> {
         self.0.iter()
-    }
-
-    pub(crate) fn get(&self, idx: usize) -> Option<&OpId> {
-        self.0.get(idx)
     }
 }
 

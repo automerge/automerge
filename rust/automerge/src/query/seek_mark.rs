@@ -1,7 +1,7 @@
 use crate::marks::Mark;
 use crate::op_set::Op;
 use crate::op_tree::OpSetData;
-use crate::query::{ListState, OpTreeNode, QueryResult, TreeQuery};
+use crate::query::{Index, ListState, OpTreeNode, QueryResult, TreeQuery};
 use crate::types::{ListEncoding, OpId, OpType};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -56,15 +56,20 @@ impl<'a> SeekMark<'a> {
 }
 
 impl<'a> TreeQuery<'a> for SeekMark<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, _osd: &'a OpSetData) -> QueryResult {
-        self.idx.check_if_node_is_clean(child);
+    fn query_node(
+        &mut self,
+        _child: &OpTreeNode,
+        index: &Index,
+        _osd: &'a OpSetData,
+    ) -> QueryResult {
+        self.idx.check_if_node_is_clean(index);
         QueryResult::Descend
     }
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         match op.action() {
             OpType::MarkBegin(_, data) if op.id() == &self.id => {
-                if !op.succ().is_empty() {
+                if op.succ().len() > 0 {
                     return QueryResult::Finish;
                 }
                 self.found_begin = true;

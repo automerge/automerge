@@ -8,7 +8,7 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
+    types::{Clock, ListEncoding, ObjId, Op, Prop},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
@@ -259,10 +259,8 @@ fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
 }
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
-    if let (Some(ScalarValue::Counter(before_c)), Some(ScalarValue::Counter(after_c))) =
-        (before.op.scalar_value(), after.op.scalar_value())
-    {
-        let n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
+    if before.op.is_counter() && after.op.is_counter() {
+        let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
         if n != 0 {
             return Some(n);
         }
