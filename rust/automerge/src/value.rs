@@ -8,7 +8,7 @@ use std::fmt;
 /// The type of values in an automerge document
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
-    /// An composite object of type `ObjType`
+    /// A composite object of type [`ObjType`]
     Object(ObjType),
     /// A non composite value
     // TODO: if we don't have to store this in patches any more then it might be able to be just a

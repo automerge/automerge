@@ -139,15 +139,15 @@ impl std::default::Default for LoadOptions<'static> {
 ///
 /// ## Creating, loading, merging and forking documents
 ///
-/// A new document can be created with [`Self::new`], which will create a document with a random
-/// [`ActorId`]. Existing documents can be loaded with [`Self::load`], or [`Self::load_with`].
+/// A new document can be created with [`Self::new()`], which will create a document with a random
+/// [`ActorId`]. Existing documents can be loaded with [`Self::load()`], or [`Self::load_with()`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
-/// [`Self::merge`] or [`Self::merge_and_log_patches`].
+/// [`Self::merge()`] or [`Self::merge_and_log_patches()`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
-/// [`Self::fork`]. If you want to split a document from ealier in its history you can use
-/// [`Self::fork_at`].
+/// [`Self::fork()`]. If you want to split a document from ealier in its history you can use
+/// [`Self::fork_at()`].
 ///
 /// ## Reading values
 ///
@@ -156,8 +156,8 @@ impl std::default::Default for LoadOptions<'static> {
 /// ## Modifying a document (Transactions)
 ///
 /// [`Automerge`] provides an interface for viewing and modifying automerge documents which does
-/// not manage transactions for you. To create changes you use either [`Automerge::transaction`] or
-/// [`Automerge::transact`] (or the `_with` variants).
+/// not manage transactions for you. To create changes you use either [`Automerge::transaction()`] or
+/// [`Automerge::transact()`] (or the `_with` variants).
 ///
 /// ## Sync
 ///
@@ -234,7 +234,7 @@ impl Automerge {
     ///
     /// # Panics
     ///
-    /// If the last actor in the OpSet is not the actor ID of this document
+    /// If the last actor in the [`OpSet`] is not the actor ID of this document
     pub(crate) fn rollback_last_actor(&mut self) {
         if let Actor::Cached(actor_idx) = self.actor {
             if self.states.get(&actor_idx).is_none() && self.ops.osd.actors.len() > 0 {
@@ -351,7 +351,7 @@ impl Automerge {
         self.transact_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
-    /// Like [`Self::transact`] but with a function for generating the commit options.
+    /// Like [`Self::transact()`] but with a function for generating the commit options.
     pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
@@ -392,7 +392,7 @@ impl Automerge {
     /// Run a transaction on this document in a closure, collecting patches, automatically handling commit or rollback
     /// afterwards.
     ///
-    /// The collected patches are available in the return value of [`Transaction::commit`]
+    /// The collected patches are available in the return value of [`Transaction::commit()`]
     pub fn transact_and_log_patches<F, O, E>(
         &mut self,
         text_rep: TextRepresentation,
@@ -404,7 +404,7 @@ impl Automerge {
         self.transact_and_log_patches_with_impl(text_rep, None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
 
-    /// Like [`Self::transact_and_log_patches`] but with a function for generating the commit options
+    /// Like [`Self::transact_and_log_patches()`] but with a function for generating the commit options
     pub fn transact_and_log_patches_with<F, O, E, C>(
         &mut self,
         text_rep: TextRepresentation,
@@ -687,7 +687,9 @@ impl Automerge {
 
     /// Get a set of [`Patch`]es which materialize the current state of the document
     ///
-    /// This is a convienence method for `doc.diff(&[], current_heads)`
+    /// This is a convienence method for [`doc.diff(&[], current_heads)`][diff]
+    ///
+    /// [diff]: Self::diff()
     pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
         let mut patch_log = PatchLog::active(text_rep);
         current_state::log_current_state_patches(self, &mut patch_log);
@@ -696,8 +698,8 @@ impl Automerge {
 
     /// Load an incremental save of a document.
     ///
-    /// Unlike `load` this imports changes into an existing document. It will work with both the
-    /// output of [`Self::save`] and [`Self::save_after`]
+    /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with
+    /// both the output of [`Self::save()`] and [`Self::save_after()`]
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
@@ -708,8 +710,8 @@ impl Automerge {
         )
     }
 
-    /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
-    /// [`PatchLog`]
+    /// Like [`Self::load_incremental()`] but log the changes to the current state of the document
+    /// to [`PatchLog`]
     pub fn load_incremental_log_patches(
         &mut self,
         data: &[u8],
@@ -754,7 +756,7 @@ impl Automerge {
 
     /// Apply changes to this document.
     ///
-    /// This is idemptotent in the sense that if a change has already been applied it will be
+    /// This is idempotent in the sense that if a change has already been applied it will be
     /// ignored.
     pub fn apply_changes(
         &mut self,
@@ -766,7 +768,7 @@ impl Automerge {
         )
     }
 
-    /// Like [`Self::apply_changes`] but log the resulting changes to the current state of the
+    /// Like [`Self::apply_changes()`] but log the resulting changes to the current state of the
     /// document to `patch_log`
     pub fn apply_changes_log_patches<I: IntoIterator<Item = Change>>(
         &mut self,
@@ -949,7 +951,7 @@ impl Automerge {
         Ok(bytes)
     }
 
-    /// Save this document, but don't run it through DEFLATE afterwards
+    /// Save this document, but don't run it through `DEFLATE` afterwards
     pub fn save_nocompress(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions {
             deflate: false,
@@ -960,9 +962,9 @@ impl Automerge {
     /// Save the changes since the given heads
     ///
     /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last `save`
-    /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
-    /// text object).
+    /// changes. This is useful if you know you have only made a small change since the last
+    /// [`Self::save()`] and you want to immediately send it somewhere (e.g. you've inserted a
+    /// single character in a text object).
     pub fn save_after(&self, heads: &[ChangeHash]) -> Vec<u8> {
         let changes = self.get_changes(heads);
         let mut bytes = vec![];
@@ -1254,7 +1256,7 @@ impl Automerge {
     }
 
     /// Create patches representing the change in the current state of the document between the
-    /// 'before' and 'after' heads.  If the arguments are reverse it will observe the same changes
+    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
     pub fn diff(
         &self,
@@ -1281,7 +1283,7 @@ impl Automerge {
         self.get_changes_clock(have_deps)
     }
 
-    /// Get changes in `other` that are not in `self
+    /// Get changes in `other` that are not in `self`
     pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
@@ -1307,9 +1309,9 @@ impl Automerge {
             .collect()
     }
 
-    /// Get the hash of the change that contains the given opid.
+    /// Get the hash of the change that contains the given `opid`.
     ///
-    /// Returns none if the opid:
+    /// Returns [`None`] if the `opid`:
     /// - is the root object id
     /// - does not exist in this document
     pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
@@ -1818,7 +1820,7 @@ impl Default for Automerge {
     }
 }
 
-/// Options to pass to `[Automerge::save_with_options]` and [`crate::AutoCommit::save_with_options`]
+/// Options to pass to [`Automerge::save_with_options()`] and [`crate::AutoCommit::save_with_options()`]
 #[derive(Debug)]
 pub struct SaveOptions {
     /// Whether to apply DEFLATE compression to the RLE encoded columns in the document

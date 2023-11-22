@@ -33,7 +33,7 @@ pub trait ReadDoc {
 
     /// Get the parents of the object `obj` as at `heads`
     ///
-    /// See [`Self::parents`]
+    /// See [`Self::parents()`]
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -48,7 +48,7 @@ pub trait ReadDoc {
 
     /// Get the keys of the object `obj` as at `heads`
     ///
-    /// See [`Self::keys`]
+    /// See [`Self::keys()`]
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
     /// Iterate over the keys and values of the map `obj` in the given range.
@@ -71,7 +71,7 @@ pub trait ReadDoc {
     /// The returned iterator yields `(key, value, exid)` tuples, where the
     /// third element is the ID of the operation which created the value.
     ///
-    /// See [`Self::map_range`]
+    /// See [`Self::map_range()`]
     fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
@@ -94,7 +94,7 @@ pub trait ReadDoc {
     /// The returned iterator yields `(index, value, exid)` tuples, where the third
     /// element is the ID of the operation which created the value.
     ///
-    /// See [`Self::list_range`]
+    /// See [`Self::list_range()`]
     fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,
@@ -113,7 +113,7 @@ pub trait ReadDoc {
     /// The returned iterator yields `(value, exid)` tuples, where the second element
     /// is the ID of the operation which created the value.
     ///
-    /// See [`Self::values`]
+    /// See [`Self::values()`]
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
 
     /// Get the length of the given object.
@@ -125,7 +125,7 @@ pub trait ReadDoc {
     ///
     /// If the given object is not in this document this method will return `0`
     ///
-    /// See [`Self::length`]
+    /// See [`Self::length()`]
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get the type of this object, if it is an object.
@@ -152,20 +152,20 @@ pub trait ReadDoc {
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
 
     /// Get the string represented by the given text object as at `heads`, see
-    /// [`Self::text`]
+    /// [`Self::text()`]
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
 
-    /// Obtain the stable address (Cursor) for a `usize` position in a Sequence (either `Self::List` or `Self::Text`).
+    /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
     /// Example use cases:
     /// 1. User cursor tracking, to maintain contextual position while merging remote changes.
     /// 2. Indexing sentences in a text field.
     ///
-    /// To reverse the operation, see [`Self::get_cursor_position`].
+    /// To reverse the operation, see [`Self::get_cursor_position()`].
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -173,11 +173,11 @@ pub trait ReadDoc {
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError>;
 
-    /// Translate Cursor in a Sequence into an absolute position of type `usize`.
+    /// Translate Cursor in a Sequence into an absolute position of type [`usize`].
     ///
-    /// Applicable only for Sequences (either `Self::List` or `Self::Text`).
+    /// Applicable only for Sequences (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
-    /// To reverse the operation, see [`Self::get_cursor`].
+    /// To reverse the operation, see [`Self::get_cursor()`].
     fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -189,7 +189,7 @@ pub trait ReadDoc {
     ///
     /// This returns a tuple of `(value, object ID)`. This is for two reasons:
     ///
-    /// 1. If `value` is an object (represented by `Value::Object`) then the ID
+    /// 1. If `value` is an object (represented by [`Value::Object`]) then the ID
     ///    is the ID of that object. This can then be used to retrieve nested
     ///    values from the document.
     /// 2. Even if `value` is a scalar, the ID represents the operation which
@@ -199,14 +199,14 @@ pub trait ReadDoc {
     /// In the case of a key which has conflicting values, this method will
     /// return a single arbitrarily chosen value. This value will be chosen
     /// deterministically on all nodes. If you want to get all the values for a
-    /// key use [`Self::get_all`].
+    /// key use [`Self::get_all()`].
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
-    /// Get the value of the given key as at `heads`, see `[Self::get]`
+    /// Get the value of the given key as at `heads`, see [`Self::get()`]
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -227,7 +227,7 @@ pub trait ReadDoc {
 
     /// Get all possibly conflicting values for a key as at `heads`
     ///
-    /// See `[Self::get_all]`
+    /// See [`Self::get_all()`]
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,

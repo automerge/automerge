@@ -10,12 +10,12 @@
 //! can take part in the sync protocol. The flow goes something like this:
 //!
 //! * The initiating peer creates an empty [`State`] and then calls
-//!   [`SyncDoc::generate_sync_message`] to generate new sync message and sends
+//!   [`SyncDoc::generate_sync_message()`] to generate new sync message and sends
 //!   it to the receiving peer.
 //! * The receiving peer receives a message from the initiator, creates a new
-//!   [`State`], and calls [`SyncDoc::receive_sync_message`] on it's view of the
+//!   [`State`], and calls [`SyncDoc::receive_sync_message()`] on it's view of the
 //!   document
-//! * The receiving peer then calls [`SyncDoc::generate_sync_message`] to generate
+//! * The receiving peer then calls [`SyncDoc::generate_sync_message()`] to generate
 //!   a new sync message and send it back to the initiator
 //! * From this point on each peer operates in a loop, receiving a sync message
 //!   from the other peer and then generating a new message to send back.
@@ -95,7 +95,7 @@ pub use state::{Have, State};
 pub trait SyncDoc {
     /// Generate a sync message for the remote peer represented by `sync_state`
     ///
-    /// If this returns `None` then there are no new messages to send, either because we are
+    /// If this returns [`None`] then there are no new messages to send, either because we are
     /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
     /// date.
     ///
@@ -115,7 +115,7 @@ pub trait SyncDoc {
     /// Apply a received sync message to this document and `sync_state`, logging any changes that
     /// are made to `patch_log`
     ///
-    /// If this returns `None` then there are no new messages to send, either because we are
+    /// If this returns [`None`] then there are no new messages to send, either because we are
     /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
     /// date.
     ///
@@ -540,7 +540,7 @@ pub struct Message {
     pub version: MessageVersion,
 }
 
-/// An array of changes, each of which should be passed to [`Automerge::load_incremental`]
+/// An array of changes, each of which should be passed to [`Automerge::load_incremental()`]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChunkList(Vec<Vec<u8>>);
 

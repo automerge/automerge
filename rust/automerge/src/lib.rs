@@ -2,7 +2,7 @@
 //!
 //! Automerge is a library of data structures for building collaborative,
 //! [local-first](https://www.inkandswitch.com/local-first/) applications. The
-//! idea of automerge is to provide a data structure which is quite general,
+//! idea of automerge is to provide a data structure which is quite general
 //! \- consisting of nested key/value maps and/or lists - which can be modified
 //! entirely locally but which can at any time be merged with other instances of
 //! the same data structure.
@@ -23,7 +23,7 @@
 //!
 //! NOTE: The API this library provides for modifying data is quite low level
 //! (somewhat analogous to directly creating JSON values rather than using
-//! `serde` derive macros or equivalent). If you're writing a Rust application which uses automerge
+//! [`serde`] derive macros or equivalent). If you're writing a Rust application which uses automerge
 //! you may want to look at [autosurgeon](https://github.com/automerge/autosurgeon).
 //!
 //! ## Data Model
@@ -56,19 +56,19 @@
 //! There are some things automerge cannot merge sensibly. For example, two
 //! actors concurrently setting the key "name" to different values. In this case
 //! automerge will pick a winning value in a random but deterministic way, but
-//! the conflicting value is still available via the [`ReadDoc::get_all`] method.
+//! the conflicting value is still available via the [`ReadDoc::get_all()`] method.
 //!
 //! ### Change hashes and historical values
 //!
 //! Like git, points in the history of a document are identified by hash. Unlike
 //! git there can be multiple hashes representing a particular point (because
 //! automerge supports concurrent changes). These hashes can be obtained using
-//! either [`Automerge::get_heads`] or [`AutoCommit::get_heads`] (note these
+//! either [`Automerge::get_heads()`] or [`AutoCommit::get_heads()`] (note these
 //! methods are not part of [`ReadDoc`] because in the case of [`AutoCommit`] it
 //! requires a mutable reference to the document).
 //!
 //! These hashes can be used to read values from the document at a particular
-//! point in history using the various `*_at` methods on [`ReadDoc`] which take a
+//! point in history using the various `*_at()` methods on [`ReadDoc`] which take a
 //! slice of [`ChangeHash`] as an argument.
 //!
 //! ### Actor IDs
@@ -83,7 +83,7 @@
 //!
 //! ### Text Encoding
 //!
-//! Text is encoded in utf8 by default but uses Utf16 when using the wasm target.
+//! Text is encoded in UTF-8 by default but uses UTF-16 when using the wasm target.
 //!
 //! ## Sync Protocol
 //!
@@ -94,17 +94,17 @@
 //! Often you will have some state which represents the "current" state of the document. E.g. some
 //! text in a UI which is a view of a text object in the document. Rather than re-rendering this
 //! text every single time a change comes in you can use a [`PatchLog`] to capture incremental
-//! changes made to the document and then use [`Automerge::make_patches`] to get a set of patches
+//! changes made to the document and then use [`Automerge::make_patches()`] to get a set of patches
 //! to apply to the materialized state.
 //!
 //! Many of the methods on [`Automerge`], [`crate::sync::SyncDoc`] and
-//! [`crate::transaction::Transactable`] have a `*_log_patches` variant which allow you to pass in
+//! [`crate::transaction::Transactable`] have a `*_log_patches()` variant which allow you to pass in
 //! a [`PatchLog`] to collect these incremental changes.
 //!
 //! ## Serde serialization
 //!
 //! Sometimes you just want to get the JSON value of an automerge document. For
-//! this you can use [`AutoSerde`], which implements `serde::Serialize` for an
+//! this you can use [`AutoSerde`], which implements [`serde::Serialize`] for an
 //! automerge document.
 //!
 //! ## Example
@@ -197,10 +197,10 @@
 //! When working with text or other sequences it is often useful to be able to
 //! refer to a specific position within the sequence whilst merging remote
 //! changes. You can manually do this by maintaining your own offsets and
-//! observing patches, but this is error prone. The `Cursor` type provides
+//! observing patches, but this is error prone. The [`Cursor`] type provides
 //! an API for allowing automerge to do the index translations for you. Cursors
-//! are created with [`ReadDoc::get_cursor`] and dereferneced with
-//! [`ReadDoc::get_cursor_position`].
+//! are created with [`ReadDoc::get_cursor()`] and dereferenced with
+//! [`ReadDoc::get_cursor_position()`].
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",
