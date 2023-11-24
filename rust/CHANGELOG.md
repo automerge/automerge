@@ -1,3 +1,12 @@
+# 0.5.3
+
+* numerous performance improvements
+* Add `ReadDoc::get_marks` to get the marks active at a particular index in a
+  sequence
+* make `generate_sync_message` always return at least one sync message so that
+  even if you are already if the other end has no changes to send you, they
+  still tell you that.
+
 # 0.5.2
 
 * Fix a bug where sync messages were not generated even though sync was not
