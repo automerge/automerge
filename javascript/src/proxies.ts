@@ -906,7 +906,7 @@ function textMethods(target: Target) {
   const { context, objectId } = target
   const methods = {
     set(index: number, value: any) {
-      return (this[index] = value)
+      context.splice(objectId, index, 1, value)
     },
     get(index: number): AutomergeValue {
       return this[index]

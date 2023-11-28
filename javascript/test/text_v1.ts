@@ -331,4 +331,19 @@ describe("Automerge.Text", () => {
   it("should support slice", () => {
     assert.strictEqual(s1.text.slice(0).toString(), s1.text.toString())
   })
+
+  it("should be able to move insert, delete and set changes to a new document", () => {
+    let doc = Automerge.from({ text: new Automerge.Text("") })
+    doc = Automerge.change(doc, d => {
+      const multipleOpNodes = new Array(32).fill("0").join("")
+      d.text.insertAt(0, multipleOpNodes)
+      d.text.set(0, "1")
+      d.text.set(15, "2")
+    })
+    const [newDoc] = Automerge.applyChanges(
+      Automerge.init<{ text: Automerge.Text }>(),
+      Automerge.getAllChanges(doc),
+    )
+    assert.strictEqual(doc.text.toString(), newDoc.text.toString())
+  })
 })
