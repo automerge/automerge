@@ -5,3 +5,4 @@ build/
 .vim/*
 /target
 .DS_Store
+**/.idea/*
