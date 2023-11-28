@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 
-use super::{encode_hashes, BloomFilter, Capability};
+use super::{encode_hashes, BloomFilter};
 use crate::storage::parse;
 use crate::ChangeHash;
 
+#[allow(dead_code)]
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
-pub enum DecodeError {
+pub(crate) enum DecodeError {
     #[error("{0:?}")]
     Parse(String),
     #[error("wrong type: expected one of {expected_one_of:?} but found {found}")]
@@ -28,19 +30,19 @@ impl From<parse::leb128::Error> for DecodeError {
 /// same peer in multiple sessions. [`Self::encode`] only encodes state which should be reused
 /// across connections.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct State {
+pub(crate) struct State {
     /// The hashes which we know both peers have
-    pub shared_heads: Vec<ChangeHash>,
+    pub(crate) shared_heads: Vec<ChangeHash>,
     /// The heads we last sent
-    pub last_sent_heads: Vec<ChangeHash>,
+    pub(crate) last_sent_heads: Vec<ChangeHash>,
     /// The heads we last received from them
-    pub their_heads: Option<Vec<ChangeHash>>,
+    pub(crate) their_heads: Option<Vec<ChangeHash>>,
     /// Any specific changes they last said they needed
-    pub their_need: Option<Vec<ChangeHash>>,
+    pub(crate) their_need: Option<Vec<ChangeHash>>,
     /// The bloom filters summarising what they said they have
-    pub their_have: Option<Vec<Have>>,
+    pub(crate) their_have: Option<Vec<Have>>,
     /// The hashes we have sent in this session
-    pub sent_hashes: BTreeSet<ChangeHash>,
+    pub(crate) sent_hashes: BTreeSet<ChangeHash>,
 
     /// `generate_sync_message` should return `None` if there are no new changes to send. In
     /// particular, if there are changes in flight which the other end has not yet acknowledged we
@@ -49,41 +51,40 @@ pub struct State {
     /// `in_flight` is `false` then `generate_sync_message` will return a new message (provided
     /// there are in fact changes to send). If it is `true` then we don't. This flag is cleared
     /// in `receive_sync_message`.
-    pub in_flight: bool,
+    pub(crate) in_flight: bool,
 
     /// Whether we have ever responded to the other end. This is used to ensure that we always send
     /// at least on sync message to the other end, even if we have no changes to send, which is
     /// necessary because we want the other end to know what our heads are.
-    pub have_responded: bool,
-
-    /// The capabilities the other side has said they have
-    pub their_capabilities: Option<Vec<Capability>>,
+    pub(crate) have_responded: bool,
 }
 
 /// A summary of the changes that the sender of the message already has.
 /// This is implicitly a request to the recipient to send all changes that the
 /// sender does not already have.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
-pub struct Have {
+pub(crate) struct Have {
     /// The heads at the time of the last successful sync with this recipient.
-    pub last_sync: Vec<ChangeHash>,
+    pub(crate) last_sync: Vec<ChangeHash>,
     /// A bloom filter summarising all of the changes that the sender of the message has added
     /// since the last sync.
-    pub bloom: BloomFilter,
+    pub(crate) bloom: BloomFilter,
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Default::default()
     }
 
-    pub fn encode(&self) -> Vec<u8> {
+    #[allow(dead_code)]
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let mut buf = vec![SYNC_STATE_TYPE];
         encode_hashes(&mut buf, &self.shared_heads);
         buf
     }
 
-    pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
+    #[allow(dead_code)]
+    pub(crate) fn decode(input: &[u8]) -> Result<Self, DecodeError> {
         let input = parse::Input::new(input);
         match Self::parse(input) {
             Ok((_, state)) => Ok(state),
@@ -113,15 +114,7 @@ impl State {
                 sent_hashes: BTreeSet::new(),
                 in_flight: false,
                 have_responded: false,
-                their_capabilities: None,
             },
         ))
-    }
-
-    pub(crate) fn supports_v2_messages(&self) -> bool {
-        self.their_capabilities
-            .as_ref()
-            .map(|caps| caps.contains(&Capability::MessageV2))
-            .unwrap_or(false)
     }
 }

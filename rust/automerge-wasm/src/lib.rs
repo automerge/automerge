@@ -25,6 +25,7 @@
 )]
 #![allow(clippy::unused_unit)]
 use am::marks::Mark;
+use am::sync::Changes;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
 use am::OnPartialLoad;
@@ -1093,16 +1094,45 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, interop::erro
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMessage> {
     let data = msg.to_vec();
     let msg = am::sync::Message::decode(&data)?;
-    let heads = AR::from(msg.heads.as_slice());
-    let need = AR::from(msg.need.as_slice());
-    let changes = AR::from(msg.changes.as_slice());
-    let have = AR::from(msg.have.as_slice());
+    let heads = AR::from(msg.heads());
+    let need = AR::from(msg.need());
+    let have = AR::from(msg.have());
     let obj = Object::new().into();
     // SAFETY: we just created this object
     js_set(&obj, "heads", heads).unwrap();
     js_set(&obj, "need", need).unwrap();
     js_set(&obj, "have", have).unwrap();
-    js_set(&obj, "changes", changes).unwrap();
+
+    match msg {
+        am::sync::Message::V1 { .. } => {
+            js_set(&obj, "type", JsValue::from_str("v1")).unwrap();
+        }
+        am::sync::Message::V2 { .. } => {
+            js_set(&obj, "type", JsValue::from_str("v2")).unwrap();
+        }
+    };
+
+    if let Some(caps) = msg.supported_capabilities() {
+        let caps = AR::from(caps);
+        js_set(&obj, "supportedCapabilities", caps).unwrap();
+    }
+
+    match msg {
+        am::sync::Message::V1 { changes, .. }
+        | am::sync::Message::V2 {
+            changes: Changes::ChangeList(changes),
+            ..
+        } => {
+            let changes = AR::from(changes.as_slice());
+            js_set(&obj, "changes", changes).unwrap();
+        }
+        am::sync::Message::V2 {
+            changes: Changes::WholeDoc(bytes),
+            ..
+        } => {
+            js_set(&obj, "wholeDoc", Uint8Array::from(bytes.as_slice())).unwrap();
+        }
+    }
     Ok(obj)
 }
 

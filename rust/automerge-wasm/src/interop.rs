@@ -1,6 +1,7 @@
 use crate::error::InsertObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation};
+use am::sync::{Capability, Changes};
 use automerge as am;
 use automerge::ReadDoc;
 use automerge::ROOT;
@@ -181,6 +182,14 @@ impl From<am::sync::State> for JS {
         Reflect::set(&result, &"sentHashes".into(), &sent_hashes.0).unwrap();
         Reflect::set(&result, &"inFlight".into(), &state.in_flight.into()).unwrap();
         Reflect::set(&result, &"haveResponded".into(), &have_responded).unwrap();
+        if let Some(caps) = state.their_capabilities {
+            Reflect::set(
+                &result,
+                &"theirCapabilities".into(),
+                &AR::from(&caps[..]).into(),
+            )
+            .unwrap();
+        }
         JS(result)
     }
 }
@@ -372,6 +381,18 @@ impl TryFrom<JS> for Vec<Change> {
     }
 }
 
+impl TryFrom<JS> for Vec<u8> {
+    type Error = error::BadUint8Array;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Uint8Array>()
+            .map_err(|_| error::BadUint8Array)?;
+        Ok(value.to_vec())
+    }
+}
+
 impl TryFrom<JS> for am::sync::State {
     type Error = error::BadSyncState;
 
@@ -403,6 +424,16 @@ impl TryFrom<JS> for am::sync::State {
             .0
             .as_bool()
             .unwrap_or(false);
+        let their_capabilities = {
+            let caps_obj = js_get(&value, "theirCapabilities")?;
+            if !caps_obj.is_undefined() {
+                caps_obj
+                    .try_into()
+                    .map_err(error::BadSyncState::BadTheirCapabilities)?
+            } else {
+                None
+            }
+        };
         Ok(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -412,6 +443,7 @@ impl TryFrom<JS> for am::sync::State {
             sent_hashes,
             in_flight,
             have_responded,
+            their_capabilities,
         })
     }
 }
@@ -483,13 +515,71 @@ impl TryFrom<JS> for am::sync::Message {
         let need = js_get(&value.0, "need")?
             .try_into()
             .map_err(error::BadSyncMessage::BadNeed)?;
-        let changes = js_get(&value.0, "changes")?.try_into()?;
+        let changes = {
+            let changes_obj = js_get(&value.0, "changes")?;
+            if !changes_obj.is_undefined() {
+                Changes::ChangeList(changes_obj.try_into()?)
+            } else {
+                let wholedoc_obj = js_get(&value.0, "wholeDoc")?;
+                if !wholedoc_obj.is_undefined() {
+                    Changes::WholeDoc(
+                        wholedoc_obj
+                            .try_into()
+                            .map_err(error::BadSyncMessage::BadWholeDoc)?,
+                    )
+                } else {
+                    return Err(error::BadSyncMessage::MissingChanges);
+                }
+            }
+        };
         let have = js_get(&value.0, "have")?.try_into()?;
-        Ok(am::sync::Message {
-            heads,
-            need,
-            have,
-            changes,
+
+        let supported_capabilities = {
+            let caps_obj = js_get(&value.0, "supportedCapabilities")?;
+            if !caps_obj.is_undefined() {
+                caps_obj
+                    .try_into()
+                    .map_err(error::BadSyncMessage::BadSupportedCapabilities)?
+            } else {
+                None
+            }
+        };
+
+        enum EncodeAs {
+            V1,
+            V2,
+        }
+
+        let encode_as = match js_get(&value.0, "type")?.as_string() {
+            Some(s) => match s.as_str() {
+                "v1" => EncodeAs::V1,
+                "v2" => EncodeAs::V2,
+                _ => EncodeAs::V1,
+            },
+            None => EncodeAs::V1,
+        };
+
+        Ok(match encode_as {
+            EncodeAs::V1 => {
+                if let Changes::ChangeList(changes) = changes {
+                    am::sync::Message::V1 {
+                        heads,
+                        need,
+                        have,
+                        changes,
+                        supported_capabilities,
+                    }
+                } else {
+                    return Err(error::BadSyncMessage::WholeDocInV1);
+                }
+            }
+            EncodeAs::V2 => am::sync::Message::V2 {
+                heads,
+                need,
+                have,
+                changes,
+                supported_capabilities,
+            },
         })
     }
 }
@@ -540,6 +630,57 @@ impl From<&[am::sync::Have]> for AR {
                 obj
             })
             .collect())
+    }
+}
+
+impl From<&[am::sync::Capability]> for AR {
+    fn from(value: &[am::sync::Capability]) -> Self {
+        AR(value
+            .iter()
+            .filter_map(|c| match c {
+                am::sync::Capability::MessageV1 => Some(JsValue::from_str("message-v1")),
+                am::sync::Capability::MessageV2 => Some(JsValue::from_str("message-v2")),
+                am::sync::Capability::Unknown(_) => None,
+            })
+            .collect())
+    }
+}
+
+impl TryFrom<JS> for Option<Vec<Capability>> {
+    type Error = error::BadCapabilities;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.0.is_null() {
+            Ok(None)
+        } else {
+            Vec::<Capability>::try_from(value).map(Some)
+        }
+    }
+}
+
+impl TryFrom<JS> for Vec<Capability> {
+    type Error = error::BadCapabilities;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| error::BadCapabilities::NotArray)?;
+        let value = value
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let as_str = v
+                    .as_string()
+                    .ok_or(error::BadCapabilities::ElemNotString(i))?;
+                match as_str.as_str() {
+                    "message-v1" => Ok(Capability::MessageV1),
+                    "message-v2" => Ok(Capability::MessageV2),
+                    other => Err(error::BadCapabilities::ElemNotValid(i, other.to_string())),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(value)
     }
 }
 
@@ -1620,6 +1761,8 @@ pub(crate) mod error {
         BadSentHashes(BadChangeHashSet),
         #[error("inFlight not a boolean")]
         InFlightNotBoolean,
+        #[error("bad theirCapabilities: {0}")]
+        BadTheirCapabilities(BadCapabilities),
     }
 
     impl From<BadSyncState> for JsValue {
@@ -1760,10 +1903,18 @@ pub(crate) mod error {
         BadHaves(#[from] BadHaves),
         #[error("could not read changes: {0}")]
         BadJSChanges(#[from] BadJSChanges),
+        #[error("could not read wholeDoc: {0}")]
+        BadWholeDoc(BadUint8Array),
         #[error("could not read heads: {0}")]
         BadHeads(BadChangeHashes),
         #[error("could not read need: {0}")]
         BadNeed(BadChangeHashes),
+        #[error("no 'changes' or 'wholeDoc' property")]
+        MissingChanges,
+        #[error("bad supported_capabilities: {0}")]
+        BadSupportedCapabilities(BadCapabilities),
+        #[error("wholeDoc cannot be used in a type: v1 message")]
+        WholeDocInV1,
     }
 
     impl From<BadSyncMessage> for JsValue {
@@ -1815,4 +1966,18 @@ pub(crate) mod error {
     #[derive(Debug, thiserror::Error)]
     #[error("given property was not a string or integer")]
     pub struct InvalidValue;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("not a Uint8Array")]
+    pub struct BadUint8Array;
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum BadCapabilities {
+        #[error("capabilities was not an array")]
+        NotArray,
+        #[error("element {0} was not a string")]
+        ElemNotString(usize),
+        #[error("element {0} was not a valid capability: {1}")]
+        ElemNotValid(usize, String),
+    }
 }
