@@ -2,16 +2,13 @@ use tracing::instrument;
 
 use crate::{
     change::Change,
-    op_set::OpSetData,
     storage::{self, parse},
 };
 
-mod change_collector;
+pub(crate) mod change_collector;
 mod reconstruct_document;
 pub use reconstruct_document::VerificationMode;
-pub(crate) use reconstruct_document::{
-    reconstruct_document, DocObserver, LoadedObject, Reconstructed,
-};
+pub(crate) use reconstruct_document::{reconstruct_opset, ReconOpSet};
 
 #[derive(Debug, thiserror::Error)]
 #[allow(unreachable_pub)]
@@ -83,11 +80,9 @@ fn load_next_change<'a>(
     match chunk {
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
-            let Reconstructed {
-                changes: new_changes,
-                ..
-            } = reconstruct_document(&d, VerificationMode::DontCheck, NullObserver)
-                .map_err(|e| Error::InflateDocument(Box::new(e)))?;
+            let new_changes = reconstruct_opset(&d, VerificationMode::DontCheck)
+                .map_err(|e| Error::InflateDocument(Box::new(e)))?
+                .changes;
             changes.extend(new_changes);
         }
         storage::Chunk::Change(change) => {
@@ -112,11 +107,4 @@ fn load_next_change<'a>(
         }
     };
     Ok(remaining)
-}
-
-struct NullObserver;
-impl DocObserver for NullObserver {
-    type Output = ();
-    fn finish(self, _metadata: crate::op_tree::OpSetData) -> Self::Output {}
-    fn object_loaded(&mut self, _object: LoadedObject, _osd: &mut OpSetData) {}
 }

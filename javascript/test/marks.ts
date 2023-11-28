@@ -148,8 +148,6 @@ describe("Automerge", () => {
       marks: { bold: true },
     })
 
-    Automerge.dump(doc)
-
     assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 2), {}) // a
     assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 3), { bold: true }) // <
     assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 5), { bold: true }) // b

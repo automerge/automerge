@@ -18,7 +18,7 @@ pub(crate) enum CompressConfig {
     Threshold(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Document<'a> {
     bytes: Cow<'a, [u8]>,
     #[allow(dead_code)]

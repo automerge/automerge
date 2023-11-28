@@ -1,7 +1,7 @@
 use crate::marks::MarkData;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
-use crate::query::QueryResult;
+use crate::query::{Index, QueryResult};
 use crate::types::{Key, ListEncoding, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
@@ -72,21 +72,22 @@ impl ListState {
 
     // lists that have never seen puts (only inserts and deletes)
     // can take advantage of a faster codepath
-    pub(crate) fn check_if_node_is_clean(&mut self, node: &OpTreeNode) {
-        self.never_seen_puts &= node.index.has_never_seen_puts();
+    pub(crate) fn check_if_node_is_clean(&mut self, index: &Index) {
+        self.never_seen_puts &= index.has_never_seen_puts();
     }
 
     pub(crate) fn process_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
+        index: &'a Index,
         osd: &OpSetData,
         marks: Option<&mut MarkMap<'a>>,
     ) -> QueryResult {
         if self.encoding == ListEncoding::List {
-            self.process_list_node(node, osd, marks)
+            self.process_list_node(node, index, osd, marks)
         } else if self.never_seen_puts {
             // text node is clean - use the indexes
-            self.process_text_node(node, marks)
+            self.process_text_node(node, index, marks)
         } else {
             // text nodes are intended to only be interacted with splice()
             // meaning all ops are inserts or deleted inserts
@@ -97,12 +98,12 @@ impl ListState {
         }
     }
 
-    fn process_marks<'a>(&mut self, node: &'a OpTreeNode, marks: Option<&mut MarkMap<'a>>) {
+    fn process_marks<'a>(&mut self, index: &'a Index, marks: Option<&mut MarkMap<'a>>) {
         if let Some(marks) = marks {
-            for (id, data) in node.index.mark_begin.iter() {
+            for (id, data) in index.mark_begin.iter() {
                 marks.insert(*id, data);
             }
-            for id in node.index.mark_end.iter() {
+            for id in index.mark_end.iter() {
                 marks.remove(id);
             }
         }
@@ -111,30 +112,32 @@ impl ListState {
     fn process_text_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
+        index: &'a Index,
         marks: Option<&mut MarkMap<'a>>,
     ) -> QueryResult {
-        let num_vis = node.index.visible_len(self.encoding);
+        let num_vis = index.visible_len(self.encoding);
         if self.index + num_vis >= self.target {
             return QueryResult::Descend;
         }
         self.index += num_vis;
         self.pos += node.len();
-        self.process_marks(node, marks);
+        self.process_marks(index, marks);
         QueryResult::Next
     }
 
     fn process_list_node<'a>(
         &mut self,
         node: &'a OpTreeNode,
+        index: &'a Index,
         osd: &OpSetData,
         marks: Option<&mut MarkMap<'a>>,
     ) -> QueryResult {
-        let mut num_vis = node.index.visible.len();
+        let mut num_vis = index.visible.len();
         if let Some(last_seen) = self.last_seen {
             // the elemid `last_seen` is counted in this node's index
             // but since we've already seen it we dont want to count it again
             // as this is only for lists we can subtract 1
-            if node.index.has_visible(&last_seen) {
+            if index.has_visible(&last_seen) {
                 num_vis -= 1;
             }
         }
@@ -154,13 +157,13 @@ impl ListState {
         //              node boundary
         // scenario 2b: it is the same as the previous last_seen - do nothing
 
-        let last_elemid = node.last().as_op2(osd).elemid_or_key();
-        if node.index.has_visible(&last_elemid) {
+        let last_elemid = node.last().as_op(osd).elemid_or_key();
+        if index.has_visible(&last_elemid) {
             self.last_seen = Some(last_elemid);
         } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
             self.last_seen = None;
         }
-        self.process_marks(node, marks);
+        self.process_marks(index, marks);
         QueryResult::Next
     }
 

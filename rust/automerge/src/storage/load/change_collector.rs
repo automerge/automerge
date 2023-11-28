@@ -14,7 +14,7 @@ use crate::{
         convert::op_as_actor_id,
         Change as StoredChange, ChangeMetadata,
     },
-    types::{ChangeHash, ObjId, OpBuilder},
+    types::{ChangeHash, OpId},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -79,26 +79,20 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn collect(
-        &mut self,
-        obj: ObjId,
-        op: OpBuilder,
-        osd: &mut OpSetData,
-    ) -> Result<(), Error> {
+    pub(crate) fn collect(&mut self, opid: OpId, idx: OpIdx) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
-            .get_mut(&op.id.actor())
+            .get_mut(&opid.actor())
             .ok_or_else(|| {
-                tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
+                tracing::error!(missing_actor = opid.actor(), "missing actor for op");
                 Error::MissingActor
             })?;
-        let change_index = actor_changes.partition_point(|c| c.max_op < op.id.counter());
+        let change_index = actor_changes.partition_point(|c| c.max_op < opid.counter());
         let change = actor_changes.get_mut(change_index).ok_or_else(|| {
             tracing::error!(missing_change_index = change_index, "missing change for op");
             Error::MissingChange
         })?;
-        let idx = osd.push(obj, op);
-        change.ops.push((obj, idx));
+        change.ops.push(idx);
         Ok(())
     }
 
@@ -150,7 +144,7 @@ struct PartialChange<'a> {
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
-    ops: Vec<(ObjId, OpIdx)>,
+    ops: Vec<OpIdx>,
 }
 
 impl<'a> PartialChange<'a> {
@@ -181,11 +175,8 @@ impl<'a> PartialChange<'a> {
         )?;
         deps.sort();
         let num_ops = self.ops.len() as u64;
-        self.ops.sort_by_key(|(_, o)| o.as_op2(osd).id());
-        let converted_ops = self
-            .ops
-            .iter()
-            .map(|(obj, op)| op_as_actor_id(obj, op.as_op2(osd), osd));
+        self.ops.sort_by_key(|o| o.as_op(osd).id().counter());
+        let converted_ops = self.ops.iter().map(|idx| op_as_actor_id(idx.as_op(osd)));
         let actor = osd
             .actors
             .safe_get(self.actor)

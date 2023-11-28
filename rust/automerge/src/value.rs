@@ -1,5 +1,5 @@
 use crate::error;
-use crate::types::{Clock, ObjType, OpId};
+use crate::types::ObjType;
 use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
 use std::borrow::Cow;
@@ -369,26 +369,11 @@ pub(crate) enum DataType {
 pub struct Counter {
     pub(crate) start: i64,
     pub(crate) current: i64,
-    pub(crate) increments: Vec<(OpId, i64)>,
 }
 
 impl Counter {
-    pub(crate) fn increment(&mut self, inc: i64, id: OpId) {
+    pub(crate) fn increment(&mut self, inc: i64) {
         self.current += inc;
-        self.increments.push((id, inc));
-    }
-
-    pub(crate) fn value_at(&self, clock: &Clock) -> i64 {
-        self.increments.iter().fold(
-            self.start,
-            |acc, (id, inc)| {
-                if clock.covers(id) {
-                    acc + inc
-                } else {
-                    acc
-                }
-            },
-        )
     }
 }
 
@@ -403,7 +388,7 @@ impl Serialize for Counter {
 
 impl fmt::Display for Counter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &self.current)
+        write!(f, "{}", self.current)
     }
 }
 
@@ -412,7 +397,6 @@ impl From<i64> for Counter {
         Counter {
             start: n,
             current: n,
-            increments: Vec::new(),
         }
     }
 }
@@ -422,7 +406,6 @@ impl From<&i64> for Counter {
         Counter {
             start: *n,
             current: *n,
-            increments: Vec::new(),
         }
     }
 }

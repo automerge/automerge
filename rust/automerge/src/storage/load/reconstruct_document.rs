@@ -1,14 +1,13 @@
 use super::change_collector::ChangeCollector;
 use std::collections::{BTreeSet, HashMap};
-use tracing::instrument;
 
+use crate::storage::document::ReadDocOpError;
 use crate::{
     change::Change,
     columnar::Key as DocOpKey,
-    op_tree::OpSetData,
+    op_set::{OpIdx, OpSet, OpSetData},
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, OpBuilder, OpId, OpIds, OpType},
-    ScalarValue,
+    types::{ChangeHash, ElemId, Key, ObjId, OpBuilder, OpId, OpIds, OpType},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -23,8 +22,6 @@ pub(crate) enum Error {
     InvalidChanges(#[from] super::change_collector::Error),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
-    #[error("missing operations")]
-    MissingOps,
     #[error("succ out of order")]
     SuccOutOfOrder,
     #[error(transparent)]
@@ -47,169 +44,141 @@ impl std::fmt::Debug for MismatchedHeads {
     }
 }
 
-/// All the operations loaded from an object in the document format
-pub(crate) struct LoadedObject {
-    /// The id of the object
-    pub(crate) id: ObjId,
-    /// The id of the parent object, if any
-    pub(crate) parent: Option<ObjId>,
-    /// The operations for this object
-    pub(crate) ops: Vec<crate::types::OpBuilder>,
-    /// The type of the object
-    pub(crate) obj_type: ObjType,
-}
-
-/// An observer which will be notified of each object as it completes and which can produce a
-/// result once all the operations are loaded and the change graph is verified.
-pub(crate) trait DocObserver {
-    type Output;
-
-    /// The operations for an object have been loaded
-    fn object_loaded(&mut self, object: LoadedObject, osd: &mut OpSetData);
-    /// The document has finished loading. The `osd` is the `OpSetData` which was used to
-    /// create the indices in the operations which were passed to `object_loaded`
-    fn finish(self, osd: OpSetData) -> Self::Output;
-}
-
-/// The result of reconstructing the change history from a document
-pub(crate) struct Reconstructed<Output> {
-    /// The maximum op counter that was found in the document
-    pub(crate) max_op: u64,
-    /// The changes in the document, in the order they were encoded in the document
-    pub(crate) changes: Vec<Change>,
-    /// The result produced by the `DocObserver` which was watching the reconstruction
-    pub(crate) result: Output,
-    /// The heads of the document
-    pub(crate) heads: BTreeSet<ChangeHash>,
-}
-
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum VerificationMode {
     Check,
     DontCheck,
 }
 
-#[instrument(skip(doc, observer))]
-pub(crate) fn reconstruct_document<'a, O: DocObserver>(
+#[derive(Clone, Debug)]
+struct NextDocOp {
+    op: OpBuilder,
+    succ: OpIds,
+    key: Key,
+    opid: OpId,
+    obj: ObjId,
+}
+
+fn next_op<'a, I>(iter: &mut I, op_set: &mut OpSet) -> Result<Option<NextDocOp>, Error>
+where
+    I: Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a,
+{
+    let op_res = iter.next();
+    if let Some(op_res) = op_res {
+        let doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))?;
+        let obj = doc_op.object;
+        check_opid(&op_set.osd, *obj.opid())?;
+        let (op, succ) = import_op(&mut op_set.osd, doc_op)?;
+        let opid = op.id;
+        let key = op.elemid_or_key();
+        Ok(Some(NextDocOp {
+            op,
+            succ,
+            opid,
+            key,
+            obj,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+struct ReconstructionState<'a> {
+    op_set: OpSet,
+    max_op: u64,
+    last_obj: Option<ObjId>,
+    last_key: Option<Key>,
+    pred: HashMap<OpId, Vec<OpIdx>>,
+    ops_collecter: Vec<OpIdx>,
+    change_collector: ChangeCollector<'a>,
+}
+
+impl<'a> ReconstructionState<'a> {
+    fn new(doc: &'a Document<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            op_set: OpSet::from_actors(doc.actors().to_vec()),
+            max_op: 0,
+            last_obj: None,
+            last_key: None,
+            pred: HashMap::default(),
+            ops_collecter: Vec::default(),
+            change_collector: ChangeCollector::new(doc.iter_changes())?,
+        })
+    }
+}
+
+pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
-    mut observer: O,
-) -> Result<Reconstructed<O::Output>, Error> {
-    // The document format does not contain the bytes of the changes which are encoded in it
-    // directly. Instead the metadata about the changes (the actor, the start op, etc.) are all
-    // encoded separately to all the ops in the document. We need to reconstruct the changes in
-    // order to verify the heads of the document. To do this we iterate over the document
-    // operations adding each operation to a `ChangeCollector`. Once we've collected all the
-    // changes, the `ChangeCollector` knows how to group all the operations together to produce the
-    // change graph.
-    //
-    // Some of the work involved in reconstructing the changes could in principle be quite costly.
-    // For example, delete operations dont appear in the document at all, instead the delete
-    // operations are recorded as `succ` operations on the operations which they delete. This means
-    // that to reconstruct delete operations we have to first collect all the operations, then look
-    // for succ operations which we have not seen a concrete operation for. Happily we can take
-    // advantage of the fact that operations are encoded in the order of the object they apply to.
-    // This is the purpose of `LoadingObject`.
-    //
-    // Finally, when constructing an OpSet from this data we want to process the operations in the
-    // order they appear in the document, this allows us to create the OpSet more efficiently than
-    // if we were directly applying the reconstructed change graph. This is the purpose of the
-    // `DocObserver`, which we pass operations to as we complete the processing of each object.
-
-    // The op set data which we create from the doc and which we will pass to the observer
-    let mut osd = OpSetData::from_actors(doc.actors().to_vec());
-    // The object we are currently loading, starts with the root
-    let mut current_object = LoadingObject::root();
-    // The changes we are collecting to later construct the change graph from
-    let mut collector = ChangeCollector::new(doc.iter_changes())?;
-    // A map where we record the create operations so that when the object ID the incoming
-    // operations refer to switches we can lookup the object type for the new object. We also
-    // need it so we can pass the parent object ID to the observer
-    let mut create_ops = HashMap::new();
-    // The max op we've seen
-    let mut max_op = 0;
-    // The objects we have finished loaded
-    let mut objs_loaded = BTreeSet::new();
-
-    for op_res in doc.iter_ops() {
-        let doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))?;
-        max_op = std::cmp::max(max_op, doc_op.id.counter());
-
-        // Delete ops only appear as succ values in the document operations, so if a delete
-        // operation is the max op we will only see it here. Therefore we step through the document
-        // operations succs checking for max op
-        for succ in &doc_op.succ {
-            max_op = std::cmp::max(max_op, succ.counter());
-        }
-
-        let obj = doc_op.object;
-        check_opid(&osd, *obj.opid())?;
-        let op = import_op(&mut osd, doc_op)?;
-        tracing::trace!(?op, ?obj, "loading document op");
-
-        if let OpType::Make(obj_type) = op.action {
-            create_ops.insert(
-                ObjId::from(op.id),
-                CreateOp {
-                    obj_type,
-                    parent_id: obj,
-                },
-            );
-        };
-        if obj == current_object.id {
-            current_object.append_op(op.clone())?;
-        } else {
-            let create_op = match create_ops.get(&obj) {
-                Some(t) => Ok(t),
-                None => {
-                    tracing::error!(
-                        ?op,
-                        "operation referenced an object which we haven't seen a create op for yet"
-                    );
-                    Err(Error::OpsOutOfOrder)
-                }
-            }?;
-            if obj < current_object.id {
-                tracing::error!(?op, previous_obj=?current_object.id, "op referenced an object ID which was smaller than the previous object ID");
-                return Err(Error::OpsOutOfOrder);
-            } else {
-                let loaded = current_object.finish(&mut collector, &mut osd)?;
-                objs_loaded.insert(loaded.id);
-                observer.object_loaded(loaded, &mut osd);
-                current_object =
-                    LoadingObject::new(obj, Some(create_op.parent_id), create_op.obj_type);
-                current_object.append_op(op.clone())?;
-            }
-        }
-    }
-    let loaded = current_object.finish(&mut collector, &mut osd)?;
-    objs_loaded.insert(loaded.id);
-    observer.object_loaded(loaded, &mut osd);
-
-    // If an op created an object but no operation targeting that object was ever made then the
-    // object will only exist in the create_ops map. We collect all such objects here.
-    for (
-        obj_id,
-        CreateOp {
-            parent_id,
-            obj_type,
-        },
-    ) in create_ops.into_iter()
+) -> Result<ReconOpSet, Error> {
+    let mut state = ReconstructionState::new(doc)?;
+    let mut iter_ops = doc.iter_ops();
+    let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
+    while let Some(NextDocOp {
+        op,
+        succ,
+        key,
+        opid,
+        obj,
+    }) = next
     {
-        if !objs_loaded.contains(&obj_id) {
-            observer.object_loaded(
-                LoadedObject {
-                    parent: Some(parent_id),
-                    id: obj_id,
-                    ops: Vec::new(),
-                    obj_type,
-                },
-                &mut osd,
-            )
+        state.max_op = std::cmp::max(state.max_op, opid.counter());
+
+        let idx = state.op_set.load(obj, op);
+
+        for id in &succ {
+            state
+                .pred
+                .entry(*id)
+                .and_modify(|v| v.push(idx))
+                .or_insert_with(|| vec![idx]);
         }
+
+        if let Some(pred_idxs) = state.pred.get(&opid) {
+            for p in pred_idxs {
+                state.op_set.osd.add_pred(*p, idx);
+            }
+            state.pred.remove(&opid);
+        }
+
+        state.ops_collecter.push(idx);
+        state.change_collector.collect(opid, idx)?;
+
+        state.last_key = Some(key);
+        state.last_obj = Some(obj);
+
+        next = next_op(&mut iter_ops, &mut state.op_set)?;
+
+        flush_ops(&obj, next.as_ref(), &mut state)?;
     }
 
-    let super::change_collector::CollectedChanges { history, heads } = collector.finish(&osd)?;
+    state.op_set.add_indexes();
+
+    let op_set = state.op_set;
+    let change_collector = state.change_collector;
+    let max_op = state.max_op;
+
+    let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set.osd)?;
+
+    Ok(ReconOpSet {
+        changes,
+        max_op,
+        op_set,
+        heads,
+    })
+}
+
+// create all binary changes
+// look for mismatched heads
+
+fn flush_changes(
+    change_collector: ChangeCollector<'_>,
+    doc: &Document<'_>,
+    mode: VerificationMode,
+    osd: &OpSetData,
+) -> Result<(Vec<Change>, BTreeSet<ChangeHash>), Error> {
+    let super::change_collector::CollectedChanges { history, heads } =
+        change_collector.finish(osd)?;
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
         if expected_heads != heads {
@@ -221,128 +190,62 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
             }));
         }
     }
-    let result = observer.finish(osd);
-
-    Ok(Reconstructed {
-        result,
-        changes: history.into_iter().map(Change::new).collect(),
-        heads,
-        max_op,
-    })
+    let changes = history.into_iter().map(Change::new).collect();
+    Ok((changes, heads))
 }
 
-struct CreateOp {
-    parent_id: ObjId,
-    obj_type: ObjType,
-}
-struct LoadingObject {
-    id: ObjId,
-    parent_id: Option<ObjId>,
-    ops: Vec<OpBuilder>,
-    obj_type: ObjType,
-    preds: HashMap<OpId, Vec<OpId>>,
-    /// Operations which set a value, stored to later lookup keys when reconstructing delete events
-    set_ops: HashMap<OpId, Key>,
-    /// To correctly load the values of the `Counter` struct in the value of op IDs we need to
-    /// lookup the various increment operations which have been applied by the succesors of the
-    /// initial operation which creates the counter.
-    inc_ops: HashMap<OpId, i64>,
-}
+// after we see all ops for a given obj/key we can detect delets (this is more complex with MOVE)
+// also visibility for counters requires all ops to be observed before pushing them into op_tree because of visibility calculations
 
-impl LoadingObject {
-    fn root() -> Self {
-        Self::new(ObjId::root(), None, ObjType::Map)
+fn flush_ops(
+    obj: &ObjId,
+    next: Option<&NextDocOp>,
+    state: &mut ReconstructionState<'_>,
+) -> Result<(), Error> {
+    let next_key = next.map(|n| n.key);
+    let next_obj = next.map(|n| n.obj);
+
+    if next_obj.is_some() && next_obj < state.last_obj {
+        return Err(Error::OpsOutOfOrder);
     }
 
-    fn new(id: ObjId, parent_id: Option<ObjId>, obj_type: ObjType) -> Self {
-        LoadingObject {
-            id,
-            parent_id,
-            ops: Vec::new(),
-            obj_type,
-            preds: HashMap::new(),
-            set_ops: HashMap::new(),
-            inc_ops: HashMap::new(),
-        }
-    }
-
-    fn append_op(&mut self, op: OpBuilder) -> Result<(), Error> {
-        // Collect set and make operations so we can find the keys which delete operations refer to
-        // in `finish`
-        if matches!(op.action, OpType::Put(_) | OpType::Make(_)) {
-            match op.key {
-                Key::Map(_) => {
-                    self.set_ops.insert(op.id, op.key);
-                }
-                Key::Seq(ElemId(o)) => {
-                    let elem_opid = if op.insert { op.id } else { o };
-                    self.set_ops.insert(op.id, Key::Seq(ElemId(elem_opid)));
-                }
+    if next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
+        for (opid, preds) in &state.pred {
+            let del = OpBuilder {
+                id: *opid,
+                insert: false,
+                key: state.last_key.unwrap(),
+                action: OpType::Delete,
             };
+            state.max_op = std::cmp::max(state.max_op, opid.counter());
+            let del_idx = state.op_set.load(state.last_obj.unwrap(), del);
+            for p in preds {
+                state.op_set.osd.add_dep(*p, del_idx);
+            }
+            state.change_collector.collect(*opid, del_idx)?;
         }
-        // Collect increment operations so we can reconstruct counters properly in `finish`
-        if let OpType::Increment(inc) = op.action {
-            self.inc_ops.insert(op.id, inc);
-        }
-        for succ in &op.succ {
-            self.preds.entry(*succ).or_default().push(op.id);
-        }
-        self.ops.push(op);
-        Ok(())
-    }
+        state.pred.clear();
 
-    fn finish(
-        mut self,
-        collector: &mut ChangeCollector<'_>,
-        osd: &mut OpSetData,
-    ) -> Result<LoadedObject, Error> {
-        let mut ops = Vec::new();
-        for mut op in self.ops.into_iter() {
-            if let Some(preds) = self.preds.remove(&op.id) {
-                op.pred = osd.sorted_opids(preds.into_iter());
-            }
-            if let OpType::Put(ScalarValue::Counter(c)) = &mut op.action {
-                for (id, inc) in op
-                    .succ
-                    .iter()
-                    .filter_map(|s| self.inc_ops.get(s).map(|inc| (*s, *inc)))
-                {
-                    c.increment(inc, id);
-                }
-            }
-            collector.collect(self.id, op.clone(), osd)?;
-            ops.push(op)
+        for idx in &state.ops_collecter {
+            state
+                .op_set
+                .load_idx(obj, *idx)
+                .map_err(|e| Error::ReadOp(Box::new(e)))?;
         }
-        // Any remaining pred ops must be delete operations
-        // TODO (alex): Figure out what index these should be inserted at. Does it even matter?
-        for (opid, preds) in self.preds.into_iter() {
-            let key = self.set_ops.get(&preds[0]).ok_or_else(|| {
-                tracing::error!(?opid, ?preds, "no delete operation found");
-                Error::MissingOps
-            })?;
-            collector.collect(
-                self.id,
-                OpBuilder {
-                    id: opid,
-                    pred: osd.sorted_opids(preds.into_iter()),
-                    insert: false,
-                    succ: OpIds::empty(),
-                    key: *key,
-                    action: OpType::Delete,
-                },
-                osd,
-            )?;
-        }
-        Ok(LoadedObject {
-            id: self.id,
-            parent: self.parent_id,
-            ops,
-            obj_type: self.obj_type,
-        })
+
+        state.ops_collecter.truncate(0)
     }
+    Ok(())
 }
 
-fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<OpBuilder, Error> {
+pub(crate) struct ReconOpSet {
+    pub(crate) changes: Vec<Change>,
+    pub(crate) max_op: u64,
+    pub(crate) op_set: OpSet,
+    pub(crate) heads: BTreeSet<ChangeHash>,
+}
+
+fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<(OpBuilder, OpIds), Error> {
     let key = match op.key {
         DocOpKey::Prop(s) => Key::Map(osd.import_prop(s)),
         DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(osd, op)?)),
@@ -354,14 +257,16 @@ fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<OpBuilder, Error> {
         }
     }
     let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    Ok(OpBuilder {
-        id: check_opid(osd, op.id)?,
-        action,
-        key,
-        succ: osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
-        pred: OpIds::empty(),
-        insert: op.insert,
-    })
+    let succ = osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?;
+    Ok((
+        OpBuilder {
+            id: check_opid(osd, op.id)?,
+            action,
+            key,
+            insert: op.insert,
+        },
+        succ,
+    ))
 }
 
 /// We construct the OpSetData directly from the vector of actors which are encoded in the

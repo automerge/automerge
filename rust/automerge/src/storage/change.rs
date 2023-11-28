@@ -56,6 +56,7 @@ pub(crate) struct Change<'a, O: OpReadState> {
     /// The range in `Self::bytes` where the ops column data is
     ops_data: Range<usize>,
     extra_bytes: Range<usize>,
+    num_ops: usize,
     _phantom: PhantomData<O>,
 }
 
@@ -150,6 +151,7 @@ impl<'a> Change<'a, Unverified> {
                 ops_meta,
                 ops_data,
                 extra_bytes,
+                num_ops: 0,
                 _phantom: PhantomData,
             },
         ))
@@ -174,8 +176,10 @@ impl<'a> Change<'a, Unverified> {
         self,
         mut f: F,
     ) -> Result<Change<'a, Verified>, ReadChangeOpError> {
+        let mut num_ops = 0;
         for op in self.iter_ops() {
             f(op?);
+            num_ops += 1;
         }
         if u32::try_from(u64::from(self.start_op)).is_err() {
             return Err(ReadChangeOpError::CounterTooLarge);
@@ -193,12 +197,17 @@ impl<'a> Change<'a, Unverified> {
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
             extra_bytes: self.extra_bytes,
+            num_ops,
             _phantom: PhantomData,
         })
     }
 }
 
 impl<'a> Change<'a, Verified> {
+    pub(crate) fn len(&self) -> usize {
+        self.num_ops
+    }
+
     pub(crate) fn builder() -> ChangeBuilder<Unset, Unset, Unset, Unset> {
         ChangeBuilder::new()
     }
@@ -279,6 +288,7 @@ impl<'a, O: OpReadState> Change<'a, O> {
             message: self.message,
             ops_meta: self.ops_meta,
             ops_data: self.ops_data,
+            num_ops: self.num_ops,
             extra_bytes: self.extra_bytes,
             _phantom: PhantomData,
         }
@@ -449,8 +459,9 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
     where
         A: AsChangeOp<'a, OpId = O> + 'a,
         O: convert::OpId<&'a ActorId> + 'a,
-        I: Iterator<Item = A> + Clone + 'a,
+        I: Iterator<Item = A> + Clone + 'a + ExactSizeIterator,
     {
+        let num_ops = ops.len();
         let mut col_data = Vec::new();
         let actors = change_actors::ChangeActors::new(self.actor.value, ops)?;
         let cols = ChangeOpsColumns::encode(actors.iter(), &mut col_data);
@@ -507,6 +518,7 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
             ops_meta: cols,
             ops_data,
             extra_bytes,
+            num_ops,
             _phantom: PhantomData,
         })
     }
