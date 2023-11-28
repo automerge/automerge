@@ -595,18 +595,28 @@ impl Automerge {
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
 
+        let shortcut = self.doc.diff_cursor().is_empty();
         let patches = self.doc.diff_incremental();
+
+        let mut cache = interop::ExportCache::new()?;
+
+        if shortcut {
+            let value = self.export_object(&ROOT, am::ObjType::Map.into(), None, &meta, &cache)?;
+            return Ok((value, patches));
+        }
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
         if patches.is_empty() && !meta.is_undefined() {
-            let (obj, datatype, id) = self.unwrap_object(&object)?;
-            object = Object::assign(&Object::new(), &obj);
-            object = self.wrap_object(object, datatype, &id, &meta)?;
+            let (_, cached_obj) = self.unwrap_object(&object, &mut cache, &meta)?;
+            object = cached_obj.inner;
+            if self.freeze {
+                Object::freeze(&object);
+            }
         }
 
         for p in &patches {
-            object = self.apply_patch(object, p, 0, &meta)?;
+            object = self.apply_patch(object, p, &meta, &mut cache)?;
         }
 
         Ok((object.into(), patches))
@@ -811,7 +821,8 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = toJS)]
     pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
-        self.export_object(&ROOT, Datatype::Map, None, &meta)
+        let cache = interop::ExportCache::new()?;
+        self.export_object(&ROOT, Datatype::Map, None, &meta, &cache)
     }
 
     pub fn materialize(
@@ -822,8 +833,9 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
+        let cache = interop::ExportCache::new()?;
         self.doc.update_diff_cursor();
-        Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
+        Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta, &cache)?)
     }
 
     #[wasm_bindgen(js_name = getCursor)]

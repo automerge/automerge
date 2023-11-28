@@ -7,6 +7,7 @@ use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
@@ -19,6 +20,114 @@ const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
 const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
 const META_SYMBOL: &str = "_am_meta";
+
+#[derive(Debug, Clone)]
+pub(crate) struct ExportCache {
+    objs: HashMap<ObjId, CachedObject>,
+    definition: Object,
+    value_key: JsValue,
+    meta_sym: Symbol,
+    datatype_sym: Symbol,
+    raw_obj_sym: Symbol,
+    raw_data_sym: Symbol,
+}
+
+impl ExportCache {
+    pub(crate) fn new() -> Result<Self, error::Export> {
+        let definition = Object::new();
+        Reflect::set(&definition, &"writable".into(), &false.into())
+            .map_err(|_| error::Export::SetHidden("writable"))?;
+        Reflect::set(&definition, &"enumerable".into(), &false.into())
+            .map_err(|_| error::Export::SetHidden("enumerable"))?;
+        Reflect::set(&definition, &"configurable".into(), &false.into())
+            .map_err(|_| error::Export::SetHidden("configurable"))?;
+        let raw_obj_sym = Symbol::for_(RAW_OBJECT_SYMBOL);
+        let datatype_sym = Symbol::for_(DATATYPE_SYMBOL);
+        let meta_sym = Symbol::for_(META_SYMBOL);
+        let raw_data_sym = Symbol::for_(RAW_DATA_SYMBOL);
+        let value_key = "value".into();
+        Ok(Self {
+            objs: HashMap::new(),
+            definition,
+            raw_obj_sym,
+            datatype_sym,
+            meta_sym,
+            value_key,
+            raw_data_sym,
+        })
+    }
+
+    pub(crate) fn set_meta(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
+        self.set_value(obj, &self.meta_sym, value)
+    }
+
+    pub(crate) fn get_raw_data(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
+        self.get_value(obj, &self.raw_data_sym)
+    }
+
+    pub(crate) fn set_raw_data(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
+        self.set_value(obj, &self.raw_data_sym, value)
+    }
+
+    pub(crate) fn get_raw_object(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
+        self.get_value(obj, &self.raw_obj_sym)
+    }
+
+    pub(crate) fn set_raw_object(
+        &self,
+        obj: &Object,
+        value: &JsValue,
+    ) -> Result<(), error::Export> {
+        self.set_value(obj, &self.raw_obj_sym, value)
+    }
+
+    pub(crate) fn get_datatype(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
+        self.get_value(obj, &self.datatype_sym)
+    }
+
+    pub(crate) fn set_datatype(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
+        self.set_value(obj, &self.datatype_sym, value)
+    }
+
+    pub(crate) fn get_value(&self, obj: &JsValue, key: &Symbol) -> Result<JsValue, error::GetProp> {
+        Reflect::get(obj, key).map_err(|error| error::GetProp {
+            property: key.to_string().into(),
+            error,
+        })
+    }
+
+    pub(crate) fn set_value(
+        &self,
+        obj: &Object,
+        key: &JsValue,
+        value: &JsValue,
+    ) -> Result<(), error::Export> {
+        Reflect::set(&self.definition, &self.value_key, value)
+            .map_err(|_| error::Export::SetHidden("value"))?;
+        Object::define_property(obj, key, &self.definition);
+        Ok(())
+    }
+
+    pub(crate) fn set_hidden(
+        &self,
+        obj: &Object,
+        raw_obj: &JsValue,
+        datatype: &JsValue,
+        meta: &JsValue,
+    ) -> Result<(), error::Export> {
+        self.set_value(obj, &self.raw_obj_sym, raw_obj)?;
+        self.set_value(obj, &self.datatype_sym, datatype)?;
+        self.set_value(obj, &self.meta_sym, meta)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CachedObject {
+    pub(crate) id: ObjId,
+    pub(crate) inner: Object,
+    pub(crate) outer: Object,
+}
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
@@ -453,23 +562,11 @@ pub(crate) fn js_get<J: Into<JsValue>, S: std::fmt::Debug + Into<JsValue>>(
 
 pub(crate) fn js_set<V: Into<JsValue>, S: std::fmt::Debug + Into<JsValue>>(
     obj: &JsValue,
-    prop: S,
+    property: S,
     val: V,
 ) -> Result<bool, error::SetProp> {
-    let prop = prop.into();
-    Reflect::set(obj, &prop, &val.into()).map_err(|e| error::SetProp {
-        property: prop,
-        error: e,
-    })
-}
-
-pub(crate) fn js_get_symbol<J: Into<JsValue>>(obj: J, prop: &Symbol) -> Result<JS, error::GetProp> {
-    Ok(JS(Reflect::get(&obj.into(), &prop.into()).map_err(
-        |e| error::GetProp {
-            property: format!("{}", prop.to_string()),
-            error: e,
-        },
-    )?))
+    let property = property.into();
+    Reflect::set(obj, &property, &val.into()).map_err(|error| error::SetProp { property, error })
 }
 
 pub(crate) fn to_prop(p: JsValue) -> Result<Prop, error::InvalidProp> {
@@ -615,6 +712,7 @@ impl Automerge {
         datatype: Datatype,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
+        cache: &ExportCache,
     ) -> Result<JsValue, error::Export> {
         let result = match datatype {
             Datatype::Text => match self.text_rep {
@@ -626,14 +724,32 @@ impl Automerge {
                     }
                 }
                 TextRepresentation::Array => self
-                    .wrap_object(self.export_list(obj, heads, meta)?, datatype, obj, meta)?
+                    .wrap_object(
+                        &self.export_list(obj, heads, meta, cache)?,
+                        datatype,
+                        obj,
+                        meta,
+                        cache,
+                    )?
                     .into(),
             },
             Datatype::List => self
-                .wrap_object(self.export_list(obj, heads, meta)?, datatype, obj, meta)?
+                .wrap_object(
+                    &self.export_list(obj, heads, meta, cache)?,
+                    datatype,
+                    obj,
+                    meta,
+                    cache,
+                )?
                 .into(),
             _ => self
-                .wrap_object(self.export_map(obj, heads, meta)?, datatype, obj, meta)?
+                .wrap_object(
+                    &self.export_map(obj, heads, meta, cache)?,
+                    datatype,
+                    obj,
+                    meta,
+                    cache,
+                )?
                 .into(),
         };
         Ok(result)
@@ -644,6 +760,7 @@ impl Automerge {
         obj: &ObjId,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
+        cache: &ExportCache,
     ) -> Result<Object, error::Export> {
         let map = Object::new();
         let items = if let Some(heads) = heads {
@@ -653,10 +770,13 @@ impl Automerge {
         };
         for item in items {
             let subval = match item.value {
-                Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta)?,
-                Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep))?,
+                Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta, cache)?,
+                Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep), cache)?,
             };
-            js_set(&map, item.key, &subval)?;
+            Reflect::set(&map, &item.key.into(), &subval).map_err(|error| error::SetProp {
+                property: item.key.into(),
+                error,
+            })?;
         }
         Ok(map)
     }
@@ -666,6 +786,7 @@ impl Automerge {
         obj: &ObjId,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
+        cache: &ExportCache,
     ) -> Result<Object, error::Export> {
         if let Some(heads) = heads {
             self.doc.list_range_at(obj, .., heads)
@@ -673,8 +794,8 @@ impl Automerge {
             self.doc.list_range(obj, ..)
         }
         .map(|item| match &item.value {
-            Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta),
-            Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep)),
+            Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta, cache),
+            Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep), cache),
         })
         .collect::<Result<Array, _>>()
         .map(|array| array.into())
@@ -683,16 +804,15 @@ impl Automerge {
     pub(crate) fn export_value(
         &self,
         (datatype, raw_value): (Datatype, JsValue),
+        cache: &ExportCache,
     ) -> Result<JsValue, error::Export> {
         if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function
                 .call1(&JsValue::undefined(), &raw_value)
                 .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
             if let Ok(o) = wrapped_value.dyn_into::<Object>() {
-                let key = Symbol::for_(RAW_DATA_SYMBOL);
-                set_hidden_value(&o, &key, &raw_value)?;
-                let key = Symbol::for_(DATATYPE_SYMBOL);
-                set_hidden_value(&o, &key, datatype)?;
+                cache.set_raw_data(&o, &raw_value)?;
+                cache.set_datatype(&o, &datatype.into())?;
                 Ok(o.into())
             } else {
                 Err(error::Export::InvalidDataHandler(datatype.to_string()))
@@ -705,19 +825,24 @@ impl Automerge {
     pub(crate) fn unwrap_object(
         &self,
         ext_val: &Object,
-    ) -> Result<(Object, Datatype, ObjId), error::Export> {
-        let inner = js_get_symbol(ext_val, &Symbol::for_(RAW_DATA_SYMBOL))?.0;
-
-        let datatype = js_get_symbol(ext_val, &Symbol::for_(DATATYPE_SYMBOL))?
-            .0
-            .try_into();
-
-        let id_val = js_get_symbol(ext_val, &Symbol::for_(RAW_OBJECT_SYMBOL))?.0;
+        cache: &mut ExportCache,
+        meta: &JsValue,
+    ) -> Result<(bool, CachedObject), error::Export> {
+        let id_val = cache.get_raw_object(ext_val)?;
         let id = if id_val.is_undefined() {
             am::ROOT
         } else {
             self.doc.import(&id_val.as_string().unwrap_or_default())?.0
         };
+
+        if let Some(result) = cache.objs.get(&id) {
+            return Ok((true, result.clone()));
+        }
+
+        let inner = cache.get_raw_data(ext_val)?;
+
+        let datatype_raw = cache.get_datatype(ext_val)?;
+        let datatype = datatype_raw.clone().try_into();
 
         let inner = inner
             .dyn_into::<Object>()
@@ -729,11 +854,30 @@ impl Automerge {
                 Datatype::Map
             }
         });
-        Ok((inner, datatype, id))
+
+        let inner = shallow_copy(&inner);
+
+        let outer = self.wrap_object_mini(&inner, datatype, cache)?;
+
+        cache.set_hidden(&outer, &id_val, &datatype_raw, meta)?;
+
+        let cached_object = CachedObject {
+            inner,
+            outer,
+            id: id.clone(),
+        };
+
+        cache.objs.insert(id, cached_object.clone());
+
+        Ok((false, cached_object))
     }
 
-    pub(crate) fn unwrap_scalar(&self, ext_val: JsValue) -> Result<JsValue, error::Export> {
-        let inner = js_get_symbol(&ext_val, &Symbol::for_(RAW_DATA_SYMBOL))?.0;
+    pub(crate) fn unwrap_scalar(
+        &self,
+        ext_val: JsValue,
+        cache: &ExportCache,
+    ) -> Result<JsValue, error::Export> {
+        let inner = cache.get_raw_data(&ext_val)?;
         if !inner.is_undefined() {
             Ok(inner)
         } else {
@@ -746,45 +890,63 @@ impl Automerge {
         (datatype, raw_value): (Datatype, JsValue),
         id: &ObjId,
         meta: &JsValue,
+        cache: &ExportCache,
     ) -> Result<JsValue, error::Export> {
         if let Ok(obj) = raw_value.clone().dyn_into::<Object>() {
-            let result = self.wrap_object(obj, datatype, id, meta)?;
+            let result = self.wrap_object(&obj, datatype, id, meta, cache)?;
             Ok(result.into())
         } else {
-            self.export_value((datatype, raw_value))
+            self.export_value((datatype, raw_value), cache)
+        }
+    }
+
+    pub(crate) fn wrap_object_mini(
+        &self,
+        value: &Object,
+        datatype: Datatype,
+        cache: &ExportCache,
+    ) -> Result<Object, error::Export> {
+        if let Some(function) = self.external_types.get(&datatype) {
+            let wrapped_value = function
+                .call1(&JsValue::undefined(), value)
+                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+            let wrapped_object = wrapped_value
+                .dyn_into::<Object>()
+                .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
+            cache.set_raw_data(&wrapped_object, value)?;
+            Ok(wrapped_object)
+        } else {
+            Ok(value.clone())
         }
     }
 
     pub(crate) fn wrap_object(
         &self,
-        value: Object,
+        value: &Object,
         datatype: Datatype,
         id: &ObjId,
         meta: &JsValue,
+        cache: &ExportCache,
     ) -> Result<Object, error::Export> {
         let value = if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function
-                .call1(&JsValue::undefined(), &value)
+                .call1(&JsValue::undefined(), value)
                 .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
             let wrapped_object = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
-            set_hidden_value(&wrapped_object, &Symbol::for_(RAW_DATA_SYMBOL), value)?;
+            cache.set_raw_data(&wrapped_object, value)?;
             wrapped_object
         } else {
-            value
+            value.clone()
         };
         if matches!(datatype, Datatype::Map | Datatype::List)
             || (datatype == Datatype::Text && self.text_rep == TextRepresentation::Array)
         {
-            set_hidden_value(
-                &value,
-                &Symbol::for_(RAW_OBJECT_SYMBOL),
-                &JsValue::from(&id.to_string()),
-            )?;
+            cache.set_raw_object(&value, &JsValue::from(&id.to_string()))?;
         }
-        set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
-        set_hidden_value(&value, &Symbol::for_(META_SYMBOL), meta)?;
+        cache.set_datatype(&value, &datatype.into())?;
+        cache.set_meta(&value, meta)?;
         if self.freeze {
             Object::freeze(&value);
         }
@@ -793,38 +955,38 @@ impl Automerge {
 
     pub(crate) fn apply_patch_to_array(
         &self,
-        array: &Object,
+        array: &Array,
         patch: &Patch,
         meta: &JsValue,
-    ) -> Result<Object, error::ApplyPatch> {
-        let result = Array::from(array); // shallow copy
+        cache: &ExportCache,
+    ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutSeq { index, value, .. } => {
                 let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
-                js_set(&result, *index as f64, &sub_val)?;
-                Ok(result.into())
+                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                js_set(array, *index as f64, &sub_val)?;
+                Ok(())
             }
             PatchAction::DeleteSeq { index, length, .. } => {
-                Ok(self.sub_splice(result, *index, *length, vec![], meta)?)
+                self.sub_splice(array, *index, *length, vec![], meta, cache)
             }
             PatchAction::Insert { index, values, .. } => {
-                Ok(self.sub_splice(result, *index, 0, values, meta)?)
+                self.sub_splice(array, *index, 0, values, meta, cache)
             }
             PatchAction::Increment { prop, value, .. } => {
                 if let Prop::Seq(index) = prop {
                     let index = *index as f64;
-                    let old_val = js_get(&result, index)?.0;
-                    let old_val = self.unwrap_scalar(old_val)?;
+                    let old_val = js_get(array, index)?.0;
+                    let old_val = self.unwrap_scalar(old_val, cache)?;
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
                         js_set(
-                            &result,
+                            array,
                             index,
-                            &self.export_value(alloc(&new_value, self.text_rep))?,
+                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
                         )?;
-                        Ok(result.into())
+                        Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
                     }
@@ -852,12 +1014,12 @@ impl Automerge {
                                 )
                             })
                             .collect::<Vec<_>>();
-                        Ok(self.sub_splice(result, *index, 0, &elems, meta)?)
+                        self.sub_splice(array, *index, 0, &elems, meta, cache)
                     }
                 }
             }
-            PatchAction::Mark { .. } => Ok(result.into()),
-            PatchAction::Conflict { .. } => Ok(result.into()),
+            PatchAction::Mark { .. } => Ok(()),
+            PatchAction::Conflict { .. } => Ok(()),
         }
     }
 
@@ -866,37 +1028,38 @@ impl Automerge {
         map: &Object,
         patch: &Patch,
         meta: &JsValue,
-    ) -> Result<Object, error::ApplyPatch> {
-        let result = Object::assign(&Object::new(), map); // shallow copy
+        cache: &ExportCache,
+    ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutMap { key, value, .. } => {
                 let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
-                js_set(&result, key, &sub_val)?;
-                Ok(result)
+                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                js_set(map, key, &sub_val)?;
+                //Ok(result)
+                Ok(())
             }
             PatchAction::DeleteMap { key, .. } => {
-                Reflect::delete_property(&result, &key.into()).map_err(|e| {
-                    error::Export::Delete {
-                        prop: key.to_string(),
-                        err: e,
-                    }
+                Reflect::delete_property(map, &key.into()).map_err(|e| error::Export::Delete {
+                    prop: key.to_string(),
+                    err: e,
                 })?;
-                Ok(result)
+                //Ok(result)
+                Ok(())
             }
             PatchAction::Increment { prop, value, .. } => {
                 if let Prop::Map(key) = prop {
-                    let old_val = js_get(&result, key)?.0;
-                    let old_val = self.unwrap_scalar(old_val)?;
+                    let old_val = js_get(map, key)?.0;
+                    let old_val = self.unwrap_scalar(old_val, cache)?;
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
                         js_set(
-                            &result,
+                            map,
                             key,
-                            &self.export_value(alloc(&new_value, self.text_rep))?,
+                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
                         )?;
-                        Ok(result)
+                        //Ok(result)
+                        Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
                     }
@@ -904,7 +1067,7 @@ impl Automerge {
                     Err(error::ApplyPatch::IncrementIndexInMap)
                 }
             }
-            PatchAction::Conflict { .. } => Ok(result),
+            PatchAction::Conflict { .. } => Ok(()),
             PatchAction::Insert { .. } => Err(error::ApplyPatch::InsertInMap),
             PatchAction::DeleteSeq { .. } => Err(error::ApplyPatch::SpliceInMap),
             PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
@@ -915,49 +1078,45 @@ impl Automerge {
 
     pub(crate) fn apply_patch(
         &self,
-        obj: Object,
+        root: Object,
         patch: &Patch,
-        depth: usize,
         meta: &JsValue,
+        cache: &mut ExportCache,
     ) -> Result<Object, error::ApplyPatch> {
-        let (inner, datatype, id) = self.unwrap_object(&obj)?;
-        let prop = patch.path.get(depth).map(|p| prop_to_js(&p.1));
-        let result = if let Some(prop) = prop {
-            let subval = js_get(&inner, &prop)?.0;
-            if subval.is_string() && patch.path.len() - 1 == depth {
-                if let Ok(s) = subval.dyn_into::<JsString>() {
-                    let new_value = self.apply_patch_to_text(&s, patch)?;
-                    let result = shallow_copy(&inner);
-                    js_set(&result, &prop, &new_value)?;
-                    Ok(result)
-                } else {
-                    // bad patch - short circuit
-                    Ok(obj)
+        let (_, root_cache) = self.unwrap_object(&root, cache, meta)?;
+        let mut current = root_cache.clone();
+        for (i, p) in patch.path.iter().enumerate() {
+            let prop = prop_to_js(&p.1);
+            let subval = js_get(&current.inner, &prop)?.0;
+            if subval.is_string() && patch.path.len() - 1 == i {
+                let s = subval.dyn_into::<JsString>().unwrap();
+                let new_text = self.apply_patch_to_text(&s, patch)?;
+                js_set(&current.inner, &prop, &new_text)?;
+                return Ok(root_cache.outer);
+            } else if subval.is_object() {
+                let subval = subval.dyn_into::<Object>().unwrap();
+                let (cache_hit, cached_obj) = self.unwrap_object(&subval, cache, meta)?;
+                if !cache_hit {
+                    js_set(&current.inner, &prop, &cached_obj.outer)?;
                 }
-            } else if let Ok(sub_obj) = js_get(&inner, &prop)?.0.dyn_into::<Object>() {
-                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta)?;
-                let result = shallow_copy(&inner);
-                js_set(&result, &prop, &new_value)?;
-                Ok(result)
+                current = cached_obj;
             } else {
-                // if a patch is trying to access a deleted object make no change
-                // short circuit the wrap process
-                return Ok(obj);
+                return Ok(root); // invalid patch
             }
-        } else if Array::is_array(&inner) {
-            if id == patch.obj {
-                self.apply_patch_to_array(&inner, patch, meta)
-            } else {
-                Ok(Array::from(&inner).into())
-            }
-        } else if id == patch.obj {
-            self.apply_patch_to_map(&inner, patch, meta)
+        }
+        if current.id != patch.obj {
+            return Ok(root);
+        }
+        if current.inner.is_array() {
+            let inner_array = current
+                .inner
+                .dyn_into::<Array>()
+                .map_err(|_| error::ApplyPatch::NotArray)?;
+            self.apply_patch_to_array(&inner_array, patch, meta, cache)?;
         } else {
-            Ok(Object::assign(&Object::new(), &inner))
-        }?;
-
-        self.wrap_object(result, datatype, &id, meta)
-            .map_err(|e| e.into())
+            self.apply_patch_to_map(&current.inner, patch, meta, cache)?;
+        }
+        Ok(root_cache.outer)
     }
 
     fn apply_patch_to_text(
@@ -987,24 +1146,25 @@ impl Automerge {
 
     fn sub_splice<'a, I: IntoIterator<Item = &'a (Value<'a>, ObjId, bool)>>(
         &self,
-        o: Array,
+        o: &Array,
         index: usize,
         num_del: usize,
         values: I,
         meta: &JsValue,
-    ) -> Result<Object, error::Export> {
+        cache: &ExportCache,
+    ) -> Result<(), error::ApplyPatch> {
         let args: Array = values
             .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0, self.text_rep), &v.1, meta))
+            .map(|v| self.maybe_wrap_object(alloc(&v.0, self.text_rep), &v.1, meta, cache))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
         args.unshift(&(index as u32).into());
-        let method = js_get(&o, "splice")?
+        let method = js_get(o, "splice")?
             .0
             .dyn_into::<Function>()
             .map_err(error::Export::GetSplice)?;
-        Reflect::apply(&method, &o, &args).map_err(error::Export::CallSplice)?;
-        Ok(o.into())
+        Reflect::apply(&method, o, &args).map_err(error::Export::CallSplice)?;
+        Ok(())
     }
 
     pub(crate) fn import(&self, id: JsValue) -> Result<(ObjId, am::ObjType), error::ImportObj> {
@@ -1187,21 +1347,6 @@ pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatyp
             ),
         },
     }
-}
-
-fn set_hidden_value<V: Into<JsValue>>(
-    o: &Object,
-    key: &Symbol,
-    value: V,
-) -> Result<(), error::Export> {
-    let definition = Object::new();
-    js_set(&definition, "value", &value.into()).map_err(|_| error::Export::SetHidden("value"))?;
-    js_set(&definition, "writable", false).map_err(|_| error::Export::SetHidden("writable"))?;
-    js_set(&definition, "enumerable", false).map_err(|_| error::Export::SetHidden("enumerable"))?;
-    js_set(&definition, "configurable", false)
-        .map_err(|_| error::Export::SetHidden("configurable"))?;
-    Object::define_property(o, &key.into(), &definition);
-    Ok(())
 }
 
 pub(crate) struct JsPatch(pub(crate) Patch);
@@ -1591,6 +1736,8 @@ pub(crate) mod error {
         PutIdxInMap,
         #[error("cannot mark a span in a map")]
         MarkInMap,
+        #[error("array patch applied to non array")]
+        NotArray,
         #[error(transparent)]
         GetProp(#[from] GetProp),
         #[error(transparent)]
