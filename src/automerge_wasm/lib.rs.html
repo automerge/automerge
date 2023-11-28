@@ -1436,6 +1436,18 @@
 <a href="#1436" id="1436">1436</a>
 <a href="#1437" id="1437">1437</a>
 <a href="#1438" id="1438">1438</a>
+<a href="#1439" id="1439">1439</a>
+<a href="#1440" id="1440">1440</a>
+<a href="#1441" id="1441">1441</a>
+<a href="#1442" id="1442">1442</a>
+<a href="#1443" id="1443">1443</a>
+<a href="#1444" id="1444">1444</a>
+<a href="#1445" id="1445">1445</a>
+<a href="#1446" id="1446">1446</a>
+<a href="#1447" id="1447">1447</a>
+<a href="#1448" id="1448">1448</a>
+<a href="#1449" id="1449">1449</a>
+<a href="#1450" id="1450">1450</a>
 </pre></div><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -2033,18 +2045,28 @@
             .dyn_into::&lt;Object&gt;()
             .map_err(|<span class="kw">_</span>| error::ApplyPatch::NotObjectd)<span class="question-mark">?</span>;
 
+        <span class="kw">let </span>shortcut = <span class="self">self</span>.doc.diff_cursor().is_empty();
         <span class="kw">let </span>patches = <span class="self">self</span>.doc.diff_incremental();
+
+        <span class="kw">let </span><span class="kw-2">mut </span>cache = interop::ExportCache::new()<span class="question-mark">?</span>;
+
+        <span class="kw">if </span>shortcut {
+            <span class="kw">let </span>value = <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>ROOT, am::ObjType::Map.into(), <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;</span>cache)<span class="question-mark">?</span>;
+            <span class="kw">return </span><span class="prelude-val">Ok</span>((value, patches));
+        }
 
         <span class="comment">// even if there are no patches we may need to update the meta object
         // which requires that we update the object too
         </span><span class="kw">if </span>patches.is_empty() &amp;&amp; !meta.is_undefined() {
-            <span class="kw">let </span>(obj, datatype, id) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>object)<span class="question-mark">?</span>;
-            object = Object::assign(<span class="kw-2">&amp;</span>Object::new(), <span class="kw-2">&amp;</span>obj);
-            object = <span class="self">self</span>.wrap_object(object, datatype, <span class="kw-2">&amp;</span>id, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
+            <span class="kw">let </span>(<span class="kw">_</span>, cached_obj) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>object, <span class="kw-2">&amp;mut </span>cache, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
+            object = cached_obj.inner;
+            <span class="kw">if </span><span class="self">self</span>.freeze {
+                Object::freeze(<span class="kw-2">&amp;</span>object);
+            }
         }
 
         <span class="kw">for </span>p <span class="kw">in </span><span class="kw-2">&amp;</span>patches {
-            object = <span class="self">self</span>.apply_patch(object, p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
+            object = <span class="self">self</span>.apply_patch(object, p, <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;mut </span>cache)<span class="question-mark">?</span>;
         }
 
         <span class="prelude-val">Ok</span>((object.into(), patches))
@@ -2249,7 +2271,8 @@
 
     <span class="attr">#[wasm_bindgen(js_name = toJS)]
     </span><span class="kw">pub fn </span>to_js(<span class="kw-2">&amp;mut </span><span class="self">self</span>, meta: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, interop::error::Export&gt; {
-        <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>ROOT, Datatype::Map, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>meta)
+        <span class="kw">let </span>cache = interop::ExportCache::new()<span class="question-mark">?</span>;
+        <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>ROOT, Datatype::Map, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;</span>cache)
     }
 
     <span class="kw">pub fn </span>materialize(
@@ -2260,8 +2283,9 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Materialize&gt; {
         <span class="kw">let </span>(obj, obj_type) = <span class="self">self</span>.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         <span class="kw">let </span>heads = get_heads(heads)<span class="question-mark">?</span>;
+        <span class="kw">let </span>cache = interop::ExportCache::new()<span class="question-mark">?</span>;
         <span class="self">self</span>.doc.update_diff_cursor();
-        <span class="prelude-val">Ok</span>(<span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), heads.as_ref(), <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>)
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), heads.as_ref(), <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;</span>cache)<span class="question-mark">?</span>)
     }
 
     <span class="attr">#[wasm_bindgen(js_name = getCursor)]

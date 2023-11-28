@@ -162,7 +162,7 @@
 </pre></div><pre class="rust"><code><span class="kw">use </span>automerge::{ObjType, ScalarValue, Value};
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
-<span class="attr">#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+<span class="attr">#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Datatype {
     Map,
     Table,
@@ -205,7 +205,7 @@
 
 <span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>Datatype {
     <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), std::fmt::Error&gt; {
-        <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, String::from(<span class="self">self</span>.clone()))
+        <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, String::from(<span class="kw-2">*</span><span class="self">self</span>))
     }
 }
 
