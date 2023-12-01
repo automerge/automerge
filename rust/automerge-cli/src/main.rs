@@ -1,11 +1,10 @@
-use std::{fs::File, path::PathBuf, str::FromStr};
+use std::{fs::File, io::IsTerminal, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use clap::{
     builder::{BoolishValueParser, TypedValueParser, ValueParserFactory},
     Parser,
 };
-use is_terminal::IsTerminal;
 
 mod color_json;
 mod examine;
