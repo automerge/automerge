@@ -100,7 +100,7 @@ where
         let mut other_actors = other_actors.into_iter().cloned().collect::<Vec<_>>();
         other_actors.sort();
         let index = std::iter::once(actor.clone())
-            .chain(other_actors.clone().into_iter())
+            .chain(other_actors.clone())
             .enumerate()
             .map(|(idx, actor)| (actor, idx))
             .collect();

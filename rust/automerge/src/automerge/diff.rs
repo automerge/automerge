@@ -1,32 +1,38 @@
 use itertools::Itertools;
-use std::ops::Deref;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use crate::iter::{Keys, ListRange, MapRange, Values};
+use crate::marks::Mark;
 use crate::patches::TextRepresentation;
+use crate::types::ObjId;
 use crate::{
     marks::{RichText, RichTextStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjMeta, Op, ScalarValue},
+    types::{Clock, ListEncoding, Op, ScalarValue},
     Automerge, ObjType, OpType,
 };
+use crate::{AutomergeError, ChangeHash, Cursor, ObjId as ExId, Prop, ReadDoc, Value};
 
 #[derive(Clone, Debug)]
 struct Winner<'a> {
-    op: &'a Op,
+    op: Op<'a>,
     clock: &'a Clock,
     cross_visible: bool,
     conflict: bool,
 }
 
+/*
 impl<'a> Deref for Winner<'a> {
-    type Target = Op;
+    type Target = Op<'a>;
 
     fn deref(&self) -> &'a Self::Target {
-        self.op
+        &self.op
     }
 }
+*/
 
-fn process<'a, T: Iterator<Item = &'a Op>>(
+fn process<'a, T: Iterator<Item = Op<'a>>>(
     ops: T,
     before: &'a Clock,
     after: &'a Clock,
@@ -50,8 +56,8 @@ fn process<'a, T: Iterator<Item = &'a Op>>(
     resolve(before_op, after_op, diff)
 }
 
-fn push_top<'a>(top: &mut Option<Winner<'a>>, op: &'a Op, cross_visible: bool, clock: &'a Clock) {
-    match &op.action {
+fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
+    match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
             top.replace(Winner {
@@ -69,18 +75,18 @@ fn resolve<'a>(
     after: Option<Winner<'a>>,
     diff: &mut RichTextDiff<'a>,
 ) -> Option<Patch<'a>> {
-    diff.process(&before, &after);
     match (before, after) {
-        (_, Some(after)) if after.is_mark() => None,
-        (Some(before), _) if before.is_mark() => None,
+        (None, Some(after)) if after.op.is_mark() => diff.process_after(after.op),
         (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
+        (Some(before), None) if before.op.is_mark() => diff.process_before(before.op),
         (Some(before), None) => Some(Patch::Delete(before)),
-        (Some(before), Some(after)) if before.op.id == after.op.id => Some(Patch::Old {
+        (Some(_), Some(after)) if after.op.is_mark() => diff.process(after.op),
+        (Some(before), Some(after)) if before.op.id() == after.op.id() => Some(Patch::Old {
             before,
             after,
             marks: diff.current(),
         }),
-        (Some(before), Some(after)) if before.op.id != after.op.id => Some(Patch::Update {
+        (Some(before), Some(after)) if before.op.id() != after.op.id() => Some(Patch::Update {
             before,
             after,
             marks: diff.after.current().cloned(),
@@ -106,53 +112,53 @@ enum Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-    fn op(&'a self) -> &'a Op {
+    fn op(&self) -> Op<'a> {
         match self {
-            Patch::New(op, _) => op,
-            Patch::Update { after, .. } => after,
-            Patch::Old { after, .. } => after,
-            Patch::Delete(op) => op,
+            Patch::New(winner, _) => winner.op,
+            Patch::Update { after, .. } => after.op,
+            Patch::Old { after, .. } => after.op,
+            Patch::Delete(winner) => winner.op,
         }
     }
 }
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
-    for (obj, ops) in doc.ops().iter_objs() {
+    for (obj, obj_typ, ops) in doc.ops().iter_objs() {
         let mut diff = RichTextDiff::new(doc);
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
 
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_diff(patch_log, &obj, diffs)
-        } else if obj.typ.is_sequence() {
-            log_list_diff(patch_log, &obj, diffs);
+        if obj_typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_diff(patch_log, *obj, diffs)
+        } else if obj_typ.is_sequence() {
+            log_list_diff(patch_log, *obj, diffs);
         } else {
-            log_map_diff(doc, patch_log, &obj, diffs);
+            log_map_diff(doc, patch_log, obj, diffs);
         }
     }
 }
 
 fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: ObjId,
     patches: I,
 ) {
     patches.fold(0, |index, patch| match patch {
-        Patch::New(op, _) => {
-            let value = op.value_at(Some(op.clock)).into();
-            patch_log.insert(obj, index, value, op.id, op.conflict);
+        Patch::New(winner, _marks) => {
+            let value = winner.op.value_at(Some(winner.clock)).into();
+            patch_log.insert(obj, index, value, *winner.op.id(), winner.conflict);
             index + 1
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
-                let value = after.value_at(Some(after.clock)).into();
-                patch_log.put_seq(obj, index, value, after.id, conflict, true)
+                let value = after.op.value_at(Some(after.clock)).into();
+                patch_log.put_seq(obj, index, value, *after.op.id(), conflict, true)
             } else {
-                let value = after.value_at(Some(after.clock)).into();
-                patch_log.put_seq(obj, index, value, after.id, conflict, false)
+                let value = after.op.value_at(Some(after.clock)).into();
+                patch_log.put_seq(obj, index, value, *after.op.id(), conflict, false)
             }
             index + 1
         }
@@ -165,7 +171,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.flag_conflict_seq(obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                patch_log.increment_seq(obj, index, n, after.id);
+                patch_log.increment_seq(obj, index, n, *after.op.id());
             }
             if let Some(marks) = &marks {
                 patch_log.mark(obj, index, 1, marks)
@@ -181,86 +187,87 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: ObjId,
     patches: I,
 ) {
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
-        Patch::New(op, marks) => {
-            if op.is_put() {
-                patch_log.splice(obj, index, op.to_str(), marks.clone());
+        Patch::New(winner, marks) => {
+            if winner.op.is_put() {
+                patch_log.splice(obj, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = op.value_at(Some(op.clock)).into();
-                patch_log.insert(obj, index, value, op.id, op.conflict);
+                let value = winner.op.value_at(Some(winner.clock)).into();
+                patch_log.insert(obj, index, value, *winner.op.id(), winner.conflict);
             }
-            index + op.width(encoding)
+            index + winner.op.width(encoding)
         }
         Patch::Update {
             before,
             after,
             marks,
         } => {
-            patch_log.delete_seq(obj, index, before.width(encoding));
-            patch_log.splice(obj, index, after.to_str(), marks.clone());
-            index + after.width(encoding)
+            patch_log.delete_seq(obj, index, before.op.width(encoding));
+            patch_log.splice(obj, index, after.op.as_str(), marks.clone());
+            index + after.op.width(encoding)
         }
         Patch::Old { after, marks, .. } => {
-            let len = after.width(encoding);
+            let len = after.op.width(encoding);
             if let Some(marks) = marks {
                 patch_log.mark(obj, index, len, marks)
             }
             index + len
         }
         Patch::Delete(before) => {
-            patch_log.delete_seq(obj, index, before.width(encoding));
+            patch_log.delete_seq(obj, index, before.op.width(encoding));
             index
         }
     });
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &Automerge,
+    doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: &'a ObjId,
     diffs: I,
 ) {
     diffs
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
-            Patch::New(op, _) => {
-                let value = op.value_at(Some(op.clock)).into();
-                patch_log.put_map(obj, key, value, op.id, op.conflict, false)
+            Patch::New(winner, _) => {
+                let value = winner.op.value_at(Some(winner.clock)).into();
+                patch_log.put_map(*obj, key, value, *winner.op.id(), winner.conflict, false)
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
-                    let value = after.value_at(Some(after.clock)).into();
-                    patch_log.put_map(obj, key, value, after.id, conflict, true)
+                    let value = after.op.value_at(Some(after.clock)).into();
+                    patch_log.put_map(*obj, key, value, *after.op.id(), conflict, true)
                 } else {
-                    let value = after.value_at(Some(after.clock)).into();
-                    patch_log.put_map(obj, key, value, after.id, conflict, false)
+                    let value = after.op.value_at(Some(after.clock)).into();
+                    patch_log.put_map(*obj, key, value, *after.op.id(), conflict, false)
                 }
             }
             Patch::Old { before, after, .. } => {
                 if !before.conflict && after.conflict {
-                    patch_log.flag_conflict_map(obj, key);
+                    patch_log.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    patch_log.increment_map(obj, key, n, after.id);
+                    patch_log.increment_map(*obj, key, n, *after.op.id());
                 }
             }
-            Patch::Delete(_) => patch_log.delete_map(obj, key),
+            Patch::Delete(_) => patch_log.delete_map(*obj, key),
         });
 }
 
-fn get_prop<'a>(doc: &'a Automerge, op: &Op) -> Option<&'a str> {
-    Some(doc.ops().m.props.safe_get(op.key.prop_index()?)?)
+// FIXME
+fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
+    Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if let (Some(ScalarValue::Counter(before_c)), Some(ScalarValue::Counter(after_c))) =
-        (before.scalar_value(), after.scalar_value())
+        (before.op.scalar_value(), after.op.scalar_value())
     {
         let n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
         if n != 0 {
@@ -298,13 +305,225 @@ impl<'a> RichTextDiff<'a> {
         }
     }
 
-    fn process(&mut self, before: &Option<Winner<'a>>, after: &Option<Winner<'a>>) {
-        if let Some(w) = &before {
-            self.before.process(w.op, &self.doc.ops.m);
-        }
-        if let Some(w) = &after {
-            self.after.process(w.op, &self.doc.ops.m);
-        }
+    fn process(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.before.process(op, &self.doc.ops.osd);
+        self.after.process(op, &self.doc.ops.osd);
+        None
+    }
+
+    fn process_before(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.before.process(op, &self.doc.ops.osd);
+        None
+    }
+
+    fn process_after(&mut self, op: Op<'a>) -> Option<Patch<'static>> {
+        self.after.process(op, &self.doc.ops.osd);
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ReadDocAt<'a, 'b> {
+    pub(crate) doc: &'a Automerge,
+    pub(crate) heads: &'b [ChangeHash],
+}
+
+impl<'a, 'b> AsRef<Automerge> for ReadDocAt<'a, 'b> {
+    fn as_ref(&self) -> &Automerge {
+        self.doc
+    }
+}
+
+impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
+        self.doc.keys_at(obj, self.heads)
+    }
+
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
+        self.doc.keys_at(obj, heads)
+    }
+
+    fn map_range<'c, O: AsRef<ExId>, R: RangeBounds<String> + 'c>(
+        &'c self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'c, R> {
+        self.doc.map_range_at(obj, range, self.heads)
+    }
+
+    fn map_range_at<'c, O: AsRef<ExId>, R: RangeBounds<String> + 'c>(
+        &'c self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> MapRange<'c, R> {
+        self.doc.map_range_at(obj, range, heads)
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.doc.list_range_at(obj, range, self.heads)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRange<'_, R> {
+        self.doc.list_range_at(obj, range, heads)
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+        self.doc.values_at(obj, self.heads)
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
+        self.doc.values_at(obj, heads)
+    }
+
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
+        self.doc.length_at(obj, self.heads)
+    }
+
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+        self.doc.length_at(obj, heads)
+    }
+
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        self.doc.object_type(obj)
+    }
+
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+        self.doc.text_at(obj, self.heads)
+    }
+
+    fn text_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError> {
+        self.doc.text_at(obj, heads)
+    }
+
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks_at(obj, self.heads)
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks_at(obj, heads)
+    }
+
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<RichText, AutomergeError> {
+        self.doc
+            .get_marks(obj, index, Some(heads.unwrap_or(self.heads)))
+    }
+
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor(obj, position, at)
+    }
+
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError> {
+        self.doc.get_cursor_position(obj, cursor, at)
+    }
+
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        self.doc.get_at(obj, prop, self.heads)
+    }
+
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
+        self.doc.get_at(obj, prop, heads)
+    }
+
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        self.doc.get_all_at(obj, prop, self.heads)
+    }
+
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
+        &self,
+        obj: O,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
+        self.doc.get_all_at(obj, prop, heads)
+    }
+
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
+        self.doc.parents_at(obj, self.heads)
+    }
+
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<crate::Parents<'_>, AutomergeError> {
+        self.doc.parents_at(obj, heads)
+    }
+
+    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+        self.doc.get_missing_deps(heads)
+    }
+
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+        self.doc.get_change_by_hash(hash)
+    }
+
+    fn spans<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+        self.doc.spans(obj)
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        _obj: O,
+        _heads: &[ChangeHash],
+    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+        todo!()
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        _obj: O,
+        _heads: Option<&[ChangeHash]>,
+    ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
+        todo!()
     }
 }
 

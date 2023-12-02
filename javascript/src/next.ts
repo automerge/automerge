@@ -44,28 +44,30 @@ export {
   type Patch,
   type PatchCallback,
   type Mark,
+  type MarkSet,
   type MarkRange,
   type MarkValue,
   type AutomergeValue,
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
-} from "./next_types"
+} from "./next_types.js"
 
 import type {
   MapObjType,
   Cursor,
   Mark,
+  MarkSet,
   MarkRange,
   MarkValue,
-} from "./next_types"
+} from "./next_types.js"
 
-import { type PatchCallback } from "./stable"
+import { type PatchCallback } from "./stable.js"
 
-import { type UnstableConflicts as Conflicts } from "./conflicts"
-import { unstableConflictAt } from "./conflicts"
-import { mapProxy } from "./proxies"
-import type { InternalState } from "./internal_state"
+import { type UnstableConflicts as Conflicts } from "./conflicts.js"
+import { unstableConflictAt } from "./conflicts.js"
+import { mapProxy } from "./proxies.js"
+import type { InternalState } from "./internal_state.js"
 
 export type {
   PutPatch,
@@ -78,7 +80,19 @@ export type {
   Cursor,
 } from "@automerge/automerge-wasm"
 
-export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"
+export type {
+  ActorId,
+  Change,
+  ChangeOptions,
+  Prop,
+  DecodedChange,
+  DecodedSyncMessage,
+  ApplyOptions,
+  ChangeFn,
+  ChangeAtResult,
+  MaterializeValue,
+  SyncState,
+} from "./stable.js"
 export {
   view,
   free,
@@ -114,7 +128,8 @@ export {
   diff,
   insertAt,
   deleteAt,
-} from "./stable"
+  saveSince,
+} from "./stable.js"
 
 export type InitOptions<T> = {
   /** The actor ID to use for this document, a random one will be generated if `null` is passed */
@@ -126,16 +141,26 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
+  /** Whether to convert raw string to text objects
+   *
+   * @remarks
+   * This is useful if you have some documents which were created using the older API which represented
+   * text as the `Text` class and you are migrating to the new API where text is just a `string`. In
+   * this case the strings from the old document will appear as `RawString`s in the new document. This
+   * option will convert those `RawString`s to `Text` objects. This conversion is achieved by rewriting
+   * all the old string fields to new text fields
+   **/
+  convertRawStringsToText?: boolean
 }
 
-import { ActorId, Doc } from "./stable"
-import * as stable from "./stable"
-export { RawString } from "./raw_string"
+import { ActorId, Doc } from "./stable.js"
+import * as stable from "./stable.js"
+export { RawString } from "./raw_string.js"
 
 /** @hidden */
 export const getBackend = stable.getBackend
 
-import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state"
+import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state.js"
 
 /**
  * Create a new automerge document
@@ -365,9 +390,9 @@ export function splitBlock<T>(
   index = cursorToIndex(state, value, index)
 
   try {
-    let id = state.handle.splitBlock(value, index, {})
-    let info = state.handle.objInfo(id)
-    let blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
+    const id = state.handle.splitBlock(value, index, {})
+    const info = state.handle.objInfo(id)
+    const blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
     Object.assign(blockProxy, block)
     return blockProxy
   } catch (e) {
@@ -499,7 +524,7 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {
-    throw new RangeError("invalid object for unmark")
+    throw new RangeError("invalid object for marks")
   }
   path.unshift(objectId)
   const obj = path.join("/")
@@ -507,6 +532,25 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
     return state.handle.marks(obj)
   } catch (e) {
     throw new RangeError(`Cannot call marks(): ${e}`)
+  }
+}
+
+export function marksAt<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number,
+): MarkSet {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for marksAt")
+  }
+  path.unshift(objectId)
+  const obj = path.join("/")
+  try {
+    return state.handle.marksAt(obj, index)
+  } catch (e) {
+    throw new RangeError(`Cannot call marksAt(): ${e}`)
   }
 }
 
@@ -551,7 +595,7 @@ export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
  * let conflicts = automerge.getConflicts(doc3.pets[0], "name")
  *
  * // The two conflicting values are the keys of the conflicts object
- * assert.deepEqual(Object.values(conflicts), ["Babe", Beethoven"])
+ * assert.deepEqual(Object.values(conflicts), ["Babe", "Beethoven"])
  * ```
  */
 export function getConflicts<T>(

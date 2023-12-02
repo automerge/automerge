@@ -1,4 +1,4 @@
-use crate::op_set::{OpSetInternal, OpSetMetadata};
+use crate::op_set::{OpSetData, OpSetInternal};
 use crate::Automerge;
 
 pub(crate) trait Exportable<T> {
@@ -11,63 +11,63 @@ pub(crate) trait Importable<T, M: HasMutMetadata> {
 }
 
 pub(crate) trait HasMetadata {
-    fn meta(&self) -> &OpSetMetadata;
+    fn meta(&self) -> &OpSetData;
 }
 
 pub(crate) trait HasMutMetadata {
-    fn mut_meta(&mut self) -> &mut OpSetMetadata;
+    fn mut_meta(&mut self) -> &mut OpSetData;
 }
 
-impl HasMetadata for OpSetMetadata {
-    fn meta(&self) -> &OpSetMetadata {
+impl HasMetadata for OpSetData {
+    fn meta(&self) -> &OpSetData {
         self
     }
 }
 
-impl HasMetadata for &OpSetMetadata {
-    fn meta(&self) -> &OpSetMetadata {
+impl HasMetadata for &OpSetData {
+    fn meta(&self) -> &OpSetData {
         self
     }
 }
 
-impl HasMutMetadata for OpSetMetadata {
-    fn mut_meta(&mut self) -> &mut OpSetMetadata {
+impl HasMutMetadata for OpSetData {
+    fn mut_meta(&mut self) -> &mut OpSetData {
         self
     }
 }
 
-impl HasMutMetadata for &mut OpSetMetadata {
-    fn mut_meta(&mut self) -> &mut OpSetMetadata {
+impl HasMutMetadata for &mut OpSetData {
+    fn mut_meta(&mut self) -> &mut OpSetData {
         self
     }
 }
 
 impl HasMetadata for OpSetInternal {
-    fn meta(&self) -> &OpSetMetadata {
-        &self.m
+    fn meta(&self) -> &OpSetData {
+        &self.osd
     }
 }
 
 impl HasMutMetadata for OpSetInternal {
-    fn mut_meta(&mut self) -> &mut OpSetMetadata {
-        &mut self.m
+    fn mut_meta(&mut self) -> &mut OpSetData {
+        &mut self.osd
     }
 }
 
 impl HasMetadata for Automerge {
-    fn meta(&self) -> &OpSetMetadata {
+    fn meta(&self) -> &OpSetData {
         self.ops().meta()
     }
 }
 
 impl HasMetadata for &Automerge {
-    fn meta(&self) -> &OpSetMetadata {
+    fn meta(&self) -> &OpSetData {
         self.ops().meta()
     }
 }
 
 impl HasMutMetadata for Automerge {
-    fn mut_meta(&mut self) -> &mut OpSetMetadata {
+    fn mut_meta(&mut self) -> &mut OpSetData {
         self.ops_mut().mut_meta()
     }
 }

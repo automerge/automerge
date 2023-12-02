@@ -24,18 +24,18 @@
     jsonpointer "^5.0.0"
     leven "^3.1.0"
 
-"@automerge/automerge-wasm@0.1.12":
-  version "0.1.12"
-  resolved "https://registry.yarnpkg.com/@automerge/automerge-wasm/-/automerge-wasm-0.1.12.tgz#8ce25255d95d4ed6fb387de6858f7b7b7e2ed4a9"
-  integrity sha512-/xjX1217QYJ+QaoT6iHQw4hGNUIoc3xc65c9eCnfX5v9J9BkTOl05p2Cnr51O2rPc/M6TqZLmlvpvNVdcH9JpA==
+"@automerge/automerge-wasm@^0.2.10":
+  version "0.2.10"
+  resolved "http://localhost:4873/@automerge%2fautomerge-wasm/-/automerge-wasm-0.2.10.tgz#d53fcb825a03722926cced04c9fbbe5cd1a24cb3"
+  integrity sha512-q8bxzbtzTF7gmAkth4pHxFxwJxvKfHAKhSPH3ufUwIBNfEERTMR4Pw/QNtsOkXmTX5uo7nEehSWrU2w/5yHeDA==
 
-"@automerge/automerge@2.0.0-alpha.7":
-  version "2.0.0-alpha.7"
-  resolved "https://registry.yarnpkg.com/@automerge/automerge/-/automerge-2.0.0-alpha.7.tgz#2ee220d51bcd796074a18af74eeabb5f177e1f36"
-  integrity sha512-Wd2/GNeqtBybUtXclEE7bWBmmEkhv3q2ITQmLh18V0VvMPbqMBpcOKYzQFnKCyiPyRe5XcYeQAyGyunhE5V0ug==
+"@automerge/automerge@2.1.0-alpha.11":
+  version "2.1.0-alpha.11"
+  resolved "http://localhost:4873/@automerge%2fautomerge/-/automerge-2.1.0-alpha.11.tgz#c61461e870f33a015b332578f33a67835e9bc339"
+  integrity sha512-yBhU8IU0Vu9Pz4trJQ4ah87BSzgBIy06Cjk1Nj4ZstuuGYc6aS9wwsNbmy5UvLs1g+9LP6DnsQkCKSGctwLuLQ==
   dependencies:
-    "@automerge/automerge-wasm" "0.1.12"
-    uuid "^8.3"
+    "@automerge/automerge-wasm" "^0.2.10"
+    uuid "^9.0.0"
 
 "@babel/code-frame@^7.0.0", "@babel/code-frame@^7.10.4", "@babel/code-frame@^7.12.13", "@babel/code-frame@^7.16.0", "@babel/code-frame@^7.18.6", "@babel/code-frame@^7.8.3":
   version "7.18.6"
@@ -8892,10 +8892,15 @@ utils-merge@1.0.1:
   resolved "https://registry.yarnpkg.com/utils-merge/-/utils-merge-1.0.1.tgz#9f95710f50a267947b2ccc124741c1028427e713"
   integrity sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==
 
-uuid@^8.3, uuid@^8.3.2:
+uuid@^8.3.2:
   version "8.3.2"
   resolved "https://registry.yarnpkg.com/uuid/-/uuid-8.3.2.tgz#80d5b5ced271bb9af6c445f21a1a04c606cefbe2"
   integrity sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==
+
+uuid@^9.0.0:
+  version "9.0.0"
+  resolved "http://localhost:4873/uuid/-/uuid-9.0.0.tgz#592f550650024a38ceb0c562f2f6aa435761efb5"
+  integrity sha512-MXcSTerfPa4uqyzStbRoTgt5XIe3x5+42+q1sDuy3R5MDk66URdLMOZe5aPX/SQd+kuYAh0FdP/pO28IkQyTeg==
 
 v8-compile-cache-lib@^3.0.1:
   version "3.0.1"

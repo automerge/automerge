@@ -1,8 +1,8 @@
 //use crate::exid::ExId;
 use crate::hydrate;
 use crate::marks::{RichText, RichTextStateMachine};
-//use crate::port::HasMetadata;
 use crate::op_tree::OpTreeIter;
+//use crate::port::HasMetadata;
 use crate::types::Clock;
 use crate::types::{Key, ListEncoding, ObjType, Op, OpId, OpType};
 use crate::Automerge;
@@ -12,20 +12,17 @@ use std::sync::Arc;
 #[derive(Default, Debug)]
 struct SpansState<'a> {
     key: Option<Key>,
-    last_op: Option<&'a Op>,
+    last_op: Option<Op<'a>>,
     current: Option<Arc<RichText>>,
     len: usize,
     index: usize,
     text: String,
-    block: Option<&'a Op>,
+    block: Option<Op<'a>>,
     marks: RichTextStateMachine<'a>,
 }
 
 #[derive(Debug)]
-pub(crate) struct SpansInternal<'a, I>
-where
-    I: Iterator<Item = &'a Op>,
-{
+pub(crate) struct SpansInternal<'a, I> {
     iter: I,
     doc: &'a Automerge,
     clock: Option<Clock>,
@@ -33,7 +30,7 @@ where
 }
 
 pub struct Spans<'a> {
-    internal: Option<SpansInternal<'a, OpTreeIter<'a>>>,
+    internal: Option<SpansInternal<'a, OpTreeOps<'a>>>,
 }
 
 // clippy made me do this :/
@@ -58,10 +55,7 @@ pub enum Span {
     Block(hydrate::Value),
 }
 
-impl<'a, I> SpansInternal<'a, I>
-where
-    I: Iterator<Item = &'a Op>,
-{
+impl<'a, I> SpansInternal<'a, I> {
     pub(crate) fn new(iter: I, doc: &'a Automerge, clock: Option<Clock>) -> Self {
         Self {
             iter,
@@ -73,18 +67,18 @@ where
 }
 
 impl<'a> SpansState<'a> {
-    fn process_op(&mut self, op: &'a Op, doc: &Automerge) -> Option<SpanInternal> {
-        if self.marks.process(op, doc) {
+    fn process_op(&mut self, op: Op<'a>, doc: &'a Automerge) -> Option<SpanInternal> {
+        if self.marks.process(op, &doc.ops().osd) {
             self.flush()
         } else {
-            match &op.action {
+            match op.action() {
                 OpType::Make(ObjType::Map) => {
                     self.block = Some(op);
                     self.flush()
                 }
                 OpType::Make(_) | OpType::Put(_) => {
                     self.len += op.width(ListEncoding::Text);
-                    self.text.push_str(op.to_str());
+                    self.text.push_str(op.as_str());
                     None
                 }
                 _ => None,
@@ -110,7 +104,7 @@ impl<'a> SpansState<'a> {
             Some(span)
         } else if let Some(block) = self.block.take() {
             let width = block.width(ListEncoding::Text);
-            let block = SpanInternal::Obj(block.id, self.index);
+            let block = SpanInternal::Obj(*block.id(), self.index);
             self.index += width;
             Some(block)
         } else {
@@ -122,18 +116,19 @@ impl<'a> SpansState<'a> {
 
 impl<'a, I> Iterator for SpansInternal<'a, I>
 where
-    I: Iterator<Item = &'a Op>,
+    I: Iterator<Item = Op<'a>>,
 {
     type Item = SpanInternal;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(block) = self.state.block.take() {
             let width = block.width(ListEncoding::Text);
-            let block = SpanInternal::Obj(block.id, self.state.index);
+            let block = SpanInternal::Obj(*block.id(), self.state.index);
             self.state.index += width;
             return Some(block);
         }
         for op in &mut self.iter {
+            //let op = idx.as_op2(self.doc.osd());
             if !(op.is_mark() || op.visible_at(self.clock.as_ref())) {
                 continue;
             }
@@ -170,7 +165,7 @@ impl<'a> Spans<'a> {
         clock: Option<Clock>,
     ) -> Self {
         Spans {
-            internal: iter.map(|i| SpansInternal::new(i, doc, clock)),
+            internal: iter.map(|i| SpansInternal::new(OpTreeOps { iter: i, doc }, doc, clock)),
         }
     }
 }
@@ -191,5 +186,18 @@ impl<'a> Iterator for Spans<'a> {
                 }
                 None => None,
             })
+    }
+}
+
+struct OpTreeOps<'a> {
+    iter: OpTreeIter<'a>,
+    doc: &'a Automerge,
+}
+
+impl<'a> Iterator for OpTreeOps<'a> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|idx| idx.as_op2(&self.doc.ops().osd))
     }
 }

@@ -207,7 +207,7 @@ export class Automerge {
   insertObject(obj: ObjID, index: number, value: ObjType): ObjID;
   push(obj: ObjID, value: Value, datatype?: Datatype): void;
   pushObject(obj: ObjID, value: ObjType): ObjID;
-  splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
+  splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): void;
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
 
@@ -215,6 +215,7 @@ export class Automerge {
   mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
   unmark(obj: ObjID, range: MarkRange, name: string): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
+  marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
   // blocks
   splitBlock(obj: ObjID, index: number, block: MapObjType): ObjID;
@@ -263,6 +264,7 @@ export class Automerge {
   saveNoCompress(): Uint8Array;
   saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
+  saveSince(heads: Heads): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 
   // sync over network
@@ -313,6 +315,7 @@ export type LoadOptions = {
   text_v1?: boolean,
   unchecked?: boolean,
   allowMissingDeps?: boolean,
+  convertRawStringsToText?: boolean,
 }
 
 export type InitOptions = {

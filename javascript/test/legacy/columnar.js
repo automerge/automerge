@@ -1,6 +1,6 @@
-const pako = require("pako")
-const { copyObject, parseOpId, equalBytes } = require("./common")
-const {
+import pako from "pako"
+import { copyObject, parseOpId, equalBytes } from "./common.js"
+import {
   utf8ToString,
   hexStringToBytes,
   bytesToHexString,
@@ -12,7 +12,7 @@ const {
   DeltaDecoder,
   BooleanEncoder,
   BooleanDecoder,
-} = require("./encoding")
+} from "./encoding.js"
 
 // Maybe we should be using the platform's built-in hash implementation?
 // Node has the crypto module: https://nodejs.org/api/crypto.html and browsers have
@@ -27,7 +27,7 @@ const {
 // - It does not need a secure source of random bits and does not need to be
 //   constant-time;
 // - I have reviewed the source code and it seems pretty reasonable.
-const { Hash } = require("fast-sha256")
+import { Hash } from "fast-sha256"
 
 // These bytes don't mean anything, they were generated randomly
 const MAGIC_BYTES = new Uint8Array([0x85, 0x6f, 0x4a, 0x83])
@@ -41,7 +41,7 @@ const CHUNK_TYPE_DEFLATE = 2 // like CHUNK_TYPE_CHANGE but with DEFLATE compress
 const DEFLATE_MIN_SIZE = 256
 
 // The least-significant 3 bits of a columnId indicate its datatype
-const COLUMN_TYPE = {
+export const COLUMN_TYPE = {
   GROUP_CARD: 0,
   ACTOR_ID: 1,
   INT_RLE: 2,
@@ -58,7 +58,7 @@ const COLUMN_TYPE_DEFLATE = 8
 // In the values in a column of type VALUE_LEN, the bottom four bits indicate the type of the value,
 // one of the following types in VALUE_TYPE. The higher bits indicate the length of the value in the
 // associated VALUE_RAW column (in bytes).
-const VALUE_TYPE = {
+export const VALUE_TYPE = {
   NULL: 0,
   FALSE: 1,
   TRUE: 2,
@@ -74,7 +74,7 @@ const VALUE_TYPE = {
 }
 
 // make* actions must be at even-numbered indexes in this list
-const ACTIONS = [
+export const ACTIONS = [
   "makeMap",
   "set",
   "makeList",
@@ -85,7 +85,7 @@ const ACTIONS = [
   "link",
 ]
 
-const OBJECT_TYPE = {
+export const OBJECT_TYPE = {
   makeMap: "map",
   makeList: "list",
   makeText: "text",
@@ -108,19 +108,19 @@ const COMMON_COLUMNS = [
   { columnName: "chldCtr", columnId: (6 << 4) | COLUMN_TYPE.INT_DELTA },
 ]
 
-const CHANGE_COLUMNS = COMMON_COLUMNS.concat([
+export const CHANGE_COLUMNS = COMMON_COLUMNS.concat([
   { columnName: "predNum", columnId: (7 << 4) | COLUMN_TYPE.GROUP_CARD },
   { columnName: "predActor", columnId: (7 << 4) | COLUMN_TYPE.ACTOR_ID },
   { columnName: "predCtr", columnId: (7 << 4) | COLUMN_TYPE.INT_DELTA },
 ])
 
-const DOC_OPS_COLUMNS = COMMON_COLUMNS.concat([
+export const DOC_OPS_COLUMNS = COMMON_COLUMNS.concat([
   { columnName: "succNum", columnId: (8 << 4) | COLUMN_TYPE.GROUP_CARD },
   { columnName: "succActor", columnId: (8 << 4) | COLUMN_TYPE.ACTOR_ID },
   { columnName: "succCtr", columnId: (8 << 4) | COLUMN_TYPE.INT_DELTA },
 ])
 
-const DOCUMENT_COLUMNS = [
+export const DOCUMENT_COLUMNS = [
   { columnName: "actor", columnId: (0 << 4) | COLUMN_TYPE.ACTOR_ID },
   { columnName: "seq", columnId: (0 << 4) | COLUMN_TYPE.INT_DELTA },
   { columnName: "maxOp", columnId: (1 << 4) | COLUMN_TYPE.INT_DELTA },
@@ -359,7 +359,7 @@ function encodeValue(op, columns) {
  * form `{value: value, datatype: datatypeTag}` where `value` is a JavaScript primitive datatype
  * corresponding to the value, and `datatypeTag` is a datatype annotation such as 'counter'.
  */
-function decodeValue(sizeTag, bytes) {
+export function decodeValue(sizeTag, bytes) {
   if (sizeTag === VALUE_TYPE.NULL) {
     return { value: null }
   } else if (sizeTag === VALUE_TYPE.FALSE) {
@@ -631,7 +631,7 @@ function checkSortedOpIds(opIds) {
   }
 }
 
-function encoderByColumnId(columnId) {
+export function encoderByColumnId(columnId) {
   if ((columnId & 7) === COLUMN_TYPE.INT_DELTA) {
     return new DeltaEncoder()
   } else if ((columnId & 7) === COLUMN_TYPE.BOOLEAN) {
@@ -645,7 +645,7 @@ function encoderByColumnId(columnId) {
   }
 }
 
-function decoderByColumnId(columnId, buffer) {
+export function decoderByColumnId(columnId, buffer) {
   if ((columnId & 7) === COLUMN_TYPE.INT_DELTA) {
     return new DeltaDecoder(buffer)
   } else if ((columnId & 7) === COLUMN_TYPE.BOOLEAN) {
@@ -659,7 +659,7 @@ function decoderByColumnId(columnId, buffer) {
   }
 }
 
-function makeDecoders(columns, columnSpec) {
+export function makeDecoders(columns, columnSpec) {
   const emptyBuf = new Uint8Array(0)
   let decoders = [],
     columnIndex = 0,
@@ -866,7 +866,7 @@ function decodeContainerHeader(decoder, computeHash) {
   return header
 }
 
-function encodeChange(changeObj) {
+export function encodeChange(changeObj) {
   const { changes, actorIds } = parseAllOpIds([changeObj], true)
   const change = changes[0]
 
@@ -899,7 +899,7 @@ function encodeChange(changeObj) {
   return bytes.byteLength >= DEFLATE_MIN_SIZE ? deflateChange(bytes) : bytes
 }
 
-function decodeChangeColumns(buffer) {
+export function decodeChangeColumns(buffer) {
   if (buffer[8] === CHUNK_TYPE_DEFLATE) buffer = inflateChange(buffer)
   const decoder = new Decoder(buffer)
   const header = decodeContainerHeader(decoder, true)
@@ -929,7 +929,7 @@ function decodeChangeColumns(buffer) {
 /**
  * Decodes one change in binary format into its JS object representation.
  */
-function decodeChange(buffer) {
+export function decodeChange(buffer) {
   const change = decodeChangeColumns(buffer)
   change.ops = decodeOps(
     decodeColumns(change.columns, change.actorIds, CHANGE_COLUMNS),
@@ -945,7 +945,7 @@ function decodeChange(buffer) {
  * the operations. Saves work when we only need to inspect the headers. Only
  * computes the hash of the change if `computeHash` is true.
  */
-function decodeChangeMeta(buffer, computeHash) {
+export function decodeChangeMeta(buffer, computeHash) {
   if (buffer[8] === CHUNK_TYPE_DEFLATE) buffer = inflateChange(buffer)
   const header = decodeContainerHeader(new Decoder(buffer), computeHash)
   if (header.chunkType !== CHUNK_TYPE_CHANGE) {
@@ -993,7 +993,7 @@ function inflateChange(buffer) {
  * Takes an Uint8Array that may contain multiple concatenated changes, and
  * returns an array of subarrays, each subarray containing one change.
  */
-function splitContainers(buffer) {
+export function splitContainers(buffer) {
   let decoder = new Decoder(buffer),
     chunks = [],
     startOffset = 0
@@ -1009,7 +1009,7 @@ function splitContainers(buffer) {
  * Decodes a list of changes from the binary format into JS objects.
  * `binaryChanges` is an array of `Uint8Array` objects.
  */
-function decodeChanges(binaryChanges) {
+export function decodeChanges(binaryChanges) {
   let decoded = []
   for (let binaryChange of binaryChanges) {
     for (let chunk of splitContainers(binaryChange)) {
@@ -1182,7 +1182,7 @@ function decodeDocumentChanges(changes, expectedHeads) {
   }
 }
 
-function encodeDocumentHeader(doc) {
+export function encodeDocumentHeader(doc) {
   const {
     changesColumns,
     opsColumns,
@@ -1213,7 +1213,7 @@ function encodeDocumentHeader(doc) {
   }).bytes
 }
 
-function decodeDocumentHeader(buffer) {
+export function decodeDocumentHeader(buffer) {
   const documentDecoder = new Decoder(buffer)
   const header = decodeContainerHeader(documentDecoder, true)
   const decoder = new Decoder(header.chunkData)
@@ -1261,7 +1261,7 @@ function decodeDocumentHeader(buffer) {
   }
 }
 
-function decodeDocument(buffer) {
+export function decodeDocument(buffer) {
   const { changesColumns, opsColumns, actorIds, heads } =
     decodeDocumentHeader(buffer)
   const changes = decodeColumns(changesColumns, actorIds, DOCUMENT_COLUMNS)
@@ -1292,27 +1292,4 @@ function inflateColumn(column) {
     column.buffer = pako.inflateRaw(column.buffer)
     column.columnId ^= COLUMN_TYPE_DEFLATE
   }
-}
-
-module.exports = {
-  COLUMN_TYPE,
-  VALUE_TYPE,
-  ACTIONS,
-  OBJECT_TYPE,
-  DOC_OPS_COLUMNS,
-  CHANGE_COLUMNS,
-  DOCUMENT_COLUMNS,
-  encoderByColumnId,
-  decoderByColumnId,
-  makeDecoders,
-  decodeValue,
-  splitContainers,
-  encodeChange,
-  decodeChangeColumns,
-  decodeChange,
-  decodeChangeMeta,
-  decodeChanges,
-  encodeDocumentHeader,
-  decodeDocumentHeader,
-  decodeDocument,
 }

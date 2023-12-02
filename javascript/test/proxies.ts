@@ -1,6 +1,6 @@
 import * as assert from "assert"
 import { beforeEach } from "mocha"
-import { type Doc, from, change } from "../src"
+import { type Doc, from, change } from "../src/index.js"
 
 type DocType = {
   list: string[]
@@ -86,6 +86,37 @@ describe("Proxies", () => {
       })
 
       assert.deepEqual(doc.list, ["a"])
+    })
+
+    it("should throw a useful RangeError when attempting to splice undefined values", () => {
+      const doc = from<{ list: (undefined | number)[] }>({ list: [] })
+      change(doc, d => {
+        assert.throws(() => {
+          d.list.splice(0, 0, 5, undefined)
+        }, /Unsupported type undefined for path \/list at index 1 in the input/)
+      })
+    })
+  })
+
+  describe("map proxy", () => {
+    it("should print the property path in the error when setting an undefined key", () => {
+      const doc = from({ map: {} })
+      change(doc, d => {
+        assert.throws(() => {
+          d.map["a"] = undefined
+        }, /map\/a/)
+      })
+    })
+  })
+
+  describe("list proxy", () => {
+    it("should print the property path in the error when setting an undefined key", () => {
+      const doc = from<{ list: undefined[] }>({ list: [] })
+      change(doc, d => {
+        assert.throws(() => {
+          d.list[0] = undefined
+        }, /list\/0/)
+      })
     })
   })
 })

@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import * as old from "../src"
-import { next } from "../src"
+import * as old from "../src/index.js"
+import { next } from "../src/index.js"
 
 describe("old/next interop", () => {
   it("should allow reading Text from old as strings in next", () => {
@@ -92,5 +92,25 @@ describe("old/next interop", () => {
       doc.list.splice(0, 0, "abc", "def")
     })
     assert.deepStrictEqual(doc.list, ["abc", "def"])
+  })
+
+  it("should allow converting scalar strings from old docs to text in new docs", () => {
+    type DocType = {
+      text: string
+      nested: { text: string }
+      list: [string]
+    }
+    const old_doc = old.from<DocType>({
+      text: "abc",
+      nested: { text: "def" },
+      list: ["ghi"],
+    })
+    const saved = old.save(old_doc)
+    const next_doc = next.load<DocType>(saved, {
+      convertRawStringsToText: true,
+    })
+    assert.deepStrictEqual(next_doc.text, "abc")
+    assert.deepStrictEqual(next_doc.nested.text, "def")
+    assert.deepStrictEqual(next_doc.list[0], "ghi")
   })
 })

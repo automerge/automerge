@@ -3,10 +3,7 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create } from '..'
-
-
-let util = require('util')
+import { create } from '../nodejs/automerge_wasm.cjs'
 
 describe('Automerge', () => {
   describe('isolate', () => {

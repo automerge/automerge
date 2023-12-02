@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "2.1.0-alpha.8",
+  "version": "2.1.7",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge/tree/main/javascript",
   "repository": "github:automerge/automerge",
@@ -14,17 +14,35 @@
     "package.json",
     "dist/index.d.ts",
     "dist/cjs/**/*.js",
+    "dist/cjs/**/*.cjs",
     "dist/mjs/**/*.js",
     "dist/*.d.ts"
   ],
+  "type": "module",
   "types": "./dist/index.d.ts",
   "module": "./dist/mjs/index.js",
-  "main": "./dist/cjs/index.js",
+  "main": "./dist/cjs/index.cjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/mjs/index.js",
+      "require": "./dist/cjs/index.cjs",
+      "default": "./dist/mjs/index.js"
+    },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "import": "./dist/mjs/next.js",
+      "require": "./dist/cjs/next.cjs",
+      "default": "./dist/mjs/next.js"
+    }
+  },
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
-    "test": "ts-mocha --type-check test/*.ts",
+    "check-fmt": "prettier -c .prettierrc --check",
+    "fmt": "prettier -c .prettierrc -w",
+    "build": "tsc -p config/mjs.json && node ./scripts/transpile-cjs.mjs && tsc -p config/declonly.json --emitDeclarationOnly",
+    "test": "ts-mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
     "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
     "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"
@@ -32,15 +50,17 @@
   "devDependencies": {
     "@types/expect": "^24.3.0",
     "@types/mocha": "^10.0.1",
+    "@types/node": "^20.5.7",
     "@types/uuid": "^9.0.0",
     "@typescript-eslint/eslint-plugin": "^5.46.0",
     "@typescript-eslint/parser": "^5.46.0",
     "denoify": "1.4.5",
+    "esbuild": "^0.19.2",
     "eslint": "^8.29.0",
     "fast-sha256": "^1.3.0",
     "mocha": "^10.2.0",
     "pako": "^2.1.0",
-    "prettier": "^3.0.0",
+    "prettier": "3.0.3",
     "ts-mocha": "^10.0.0",
     "ts-node": "^10.9.1",
     "typedoc": "^0.23.22",
@@ -50,7 +70,7 @@
     "denoify/evt": "2.4.18"
   },
   "dependencies": {
-    "@automerge/automerge-wasm": "^0.2.7",
+    "@automerge/automerge-wasm": "0.5.0",
     "uuid": "^9.0.0"
   }
 }

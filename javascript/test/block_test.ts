@@ -8,10 +8,9 @@ import { inspect } from "util"
 describe("Automerge", () => {
   describe("block", () => {
     it("can split a block", () => {
-      let tmp = Automerge.from({ hello: ["world", "zip"] })
-      let block = { parents: ["div"], type: "p" }
-      let callbacks: Automerge.Patch[][] = []
-      let patchCallback: any = (p, info) => {
+      const block = { parents: ["div"], type: "p" }
+      const callbacks: Automerge.Patch[][] = []
+      const patchCallback = p => {
         callbacks.push(p)
       }
       let doc = Automerge.from({ text: "aaabbbccc" })

@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src"
+import { next as Automerge } from "../src/index.js"
 import * as WASM from "@automerge/automerge-wasm"
 
 describe("Automerge", () => {
@@ -101,5 +101,59 @@ describe("Automerge", () => {
       )
     })
     assert.deepStrictEqual(Automerge.marks(doc, ["content"]), [])
+  })
+
+  // test thanks to @jjallaire
+  // https://github.com/automerge/automerge/issues/646
+  it("patches properly report marks on end of expand true", () => {
+    let patches: Automerge.Patch[] = []
+    let doc = Automerge.from(
+      { text: "aaabbbccc" },
+      { patchCallback: p => patches.push(...p) },
+    )
+
+    doc = Automerge.change(doc, doc => {
+      Automerge.mark(
+        doc,
+        ["text"],
+        { start: 3, end: 6, expand: "both" },
+        "bold",
+        true,
+      )
+      const marks = Automerge.marks(doc, ["text"])
+      assert.deepStrictEqual(marks, [
+        { name: "bold", value: true, start: 3, end: 6 },
+      ])
+    })
+
+    doc = Automerge.change(doc, doc => {
+      Automerge.splice(doc, ["text"], 6, 0, "<")
+      Automerge.splice(doc, ["text"], 3, 0, ">")
+      const marks = Automerge.marks(doc, ["text"])
+      assert.deepStrictEqual(marks, [
+        { name: "bold", value: true, start: 3, end: 8 },
+      ])
+    })
+
+    assert.deepStrictEqual(patches.pop(), {
+      action: "splice",
+      path: ["text", 3],
+      value: ">",
+      marks: { bold: true },
+    })
+    assert.deepStrictEqual(patches.pop(), {
+      action: "splice",
+      path: ["text", 6],
+      value: "<",
+      marks: { bold: true },
+    })
+
+    Automerge.dump(doc)
+
+    assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 2), {}) // a
+    assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 3), { bold: true }) // <
+    assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 5), { bold: true }) // b
+    assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 7), { bold: true }) // >
+    assert.deepStrictEqual(Automerge.marksAt(doc, ["text"], 8), {}) // c
   })
 })

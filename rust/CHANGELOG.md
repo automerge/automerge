@@ -1,3 +1,23 @@
+# 0.5.3
+
+* numerous performance improvements
+* Add `ReadDoc::get_marks` to get the marks active at a particular index in a
+  sequence
+* make `generate_sync_message` always return at least one sync message so that
+  even if you are already if the other end has no changes to send you, they
+  still tell you that.
+
+# 0.5.2
+
+* Fix a bug where sync messages were not generated even though sync was not
+  complete
+* Fix a bug where adding a mark to the last character in a text string failed
+  to produce a patch
+* Add `Automerge::load_with_options` and `AutoCommit::load_with_options` and 
+  deprecate `Automerge::load_with` and `AutoCommit::load_with`. Add an option
+  to convert `ScalarValue::Str` values to `ObjType::Text` on load
+* Expose `VerficationMode`
+
 # 0.5.1
 
 * Make `AutoCommit` and `PatchLog` `Send`

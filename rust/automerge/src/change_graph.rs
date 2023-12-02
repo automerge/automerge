@@ -16,7 +16,10 @@ pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
     nodes_by_hash: BTreeMap<ChangeHash, NodeIdx>,
+    clock_cache: Vec<Clock>,
 }
+
+const CACHE_STEP: u32 = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeIdx(u32);
@@ -51,6 +54,7 @@ impl ChangeGraph {
             edges: Vec::new(),
             nodes_by_hash: BTreeMap::new(),
             hashes: Vec::new(),
+            clock_cache: Vec::new(),
         }
     }
 
@@ -72,6 +76,11 @@ impl ChangeGraph {
         self.nodes_by_hash.insert(hash, node_idx);
         for parent_idx in parent_indices {
             self.add_parent(node_idx, parent_idx);
+        }
+        if let Some(cached_idx) = Self::node_to_cache(&node_idx, CACHE_STEP) {
+            assert_eq!(cached_idx, self.clock_cache.len());
+            let clock = self.calculate_clock(vec![node_idx]);
+            self.clock_cache.push(clock)
         }
         Ok(())
     }
@@ -125,10 +134,36 @@ impl ChangeGraph {
         })
     }
 
+    fn heads_to_nodes(&self, heads: &[ChangeHash]) -> Vec<NodeIdx> {
+        heads
+            .iter()
+            .filter_map(|h| self.nodes_by_hash.get(h))
+            .copied()
+            .collect()
+    }
+
     pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
+        let nodes = self.heads_to_nodes(heads);
+        assert_eq!(
+            self.clock_cache.len(),
+            self.nodes.len() / CACHE_STEP as usize
+        );
+        self.calculate_clock(nodes)
+    }
+
+    fn node_to_cache(idx: &NodeIdx, step: u32) -> Option<usize> {
+        assert!(step > 2);
+        if (idx.0 + 1) % step == 0 {
+            Some(((idx.0 + 1) / step - 1) as usize)
+        } else {
+            None
+        }
+    }
+
+    fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> Clock {
         let mut clock = Clock::new();
 
-        self.traverse_ancestors(heads, |node, _hash| {
+        self.traverse_ancestors(nodes, |node, idx| {
             clock.include(
                 node.actor_index,
                 ClockData {
@@ -136,6 +171,14 @@ impl ChangeGraph {
                     seq: node.seq,
                 },
             );
+            if let Some(cached_idx) = Self::node_to_cache(&idx, CACHE_STEP) {
+                if cached_idx < self.clock_cache.len() {
+                    let ancestor_clock = &self.clock_cache[cached_idx];
+                    clock = Clock::merge(&clock, ancestor_clock);
+                    return false; // dont look at ancestors
+                }
+            }
+            true // do look at ancestors
         });
 
         clock
@@ -146,8 +189,11 @@ impl ChangeGraph {
         changes: &mut BTreeSet<ChangeHash>,
         heads: &[ChangeHash],
     ) {
-        self.traverse_ancestors(heads, |_node, hash| {
+        let nodes = self.heads_to_nodes(heads);
+        self.traverse_ancestors(nodes, |node, _idx| {
+            let hash = &self.hashes[node.hash_idx.0 as usize];
             changes.remove(hash);
+            true
         });
     }
 
@@ -155,17 +201,11 @@ impl ChangeGraph {
     ///
     /// No guarantees are made about the order of traversal but each node will only be visited
     /// once.
-    fn traverse_ancestors<F: FnMut(&ChangeNode, &ChangeHash)>(
+    fn traverse_ancestors<F: FnMut(&ChangeNode, NodeIdx) -> bool>(
         &self,
-        heads: &[ChangeHash],
+        mut to_visit: Vec<NodeIdx>,
         mut f: F,
     ) {
-        let mut to_visit = heads
-            .iter()
-            .filter_map(|h| self.nodes_by_hash.get(h))
-            .copied()
-            .collect::<Vec<_>>();
-
         let mut visited = BTreeSet::new();
 
         while let Some(idx) = to_visit.pop() {
@@ -175,9 +215,9 @@ impl ChangeGraph {
                 visited.insert(idx);
             }
             let node = &self.nodes[idx.0 as usize];
-            let hash = &self.hashes[node.hash_idx.0 as usize];
-            f(node, hash);
-            to_visit.extend(self.parents(idx));
+            if f(node, idx) {
+                to_visit.extend(self.parents(idx));
+            }
         }
     }
 }
@@ -195,9 +235,9 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_tree::OpSetMetadata,
+        op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
-        types::{Key, ObjId, Op, OpId, OpIds},
+        types::{Key, ObjId, OpBuilder, OpId, OpIds},
         ActorId,
     };
 
@@ -282,8 +322,8 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut meta = OpSetMetadata::from_actors(self.actors.clone());
-            let key = meta.props.cache("key".to_string());
+            let mut osd = OpSetData::from_actors(self.actors.clone());
+            let key = osd.props.cache("key".to_string());
 
             let start_op = parents
                 .iter()
@@ -300,7 +340,7 @@ mod tests {
 
             let actor_idx = self.index(actor);
             let ops = (0..num_new_ops)
-                .map(|opnum| Op {
+                .map(|opnum| OpBuilder {
                     id: OpId::new(start_op + opnum as u64, actor_idx),
                     action: crate::OpType::Put("value".into()),
                     key: Key::Map(key),
@@ -316,6 +356,10 @@ mod tests {
                 .unwrap()
                 .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
+            let ops = ops
+                .into_iter()
+                .map(|op| osd.push(root, op))
+                .collect::<Vec<_>>();
             let change = Change::new(
                 ChangeBuilder::new()
                     .with_dependencies(parents.to_vec())
@@ -323,7 +367,10 @@ mod tests {
                     .with_actor(actor.clone())
                     .with_seq(*seq)
                     .with_timestamp(timestamp)
-                    .build(ops.iter().map(|op| op_as_actor_id(&root, op, &meta)))
+                    .build(
+                        ops.iter()
+                            .map(|op| op_as_actor_id(&root, op.as_op2(&osd), &osd)),
+                    )
                     .unwrap(),
             );
             *seq = seq.checked_add(1).unwrap();
@@ -340,5 +387,17 @@ mod tests {
             }
             graph
         }
+    }
+
+    #[test]
+    fn node_to_cache() {
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(0), 4));
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(1), 4));
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(2), 4));
+        assert_eq!(Some(0), ChangeGraph::node_to_cache(&NodeIdx(3), 4));
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(4), 4));
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(5), 4));
+        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(6), 4));
+        assert_eq!(Some(1), ChangeGraph::node_to_cache(&NodeIdx(7), 4));
     }
 }

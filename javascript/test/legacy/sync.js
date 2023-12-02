@@ -17,14 +17,14 @@
  */
 
 const Backend = null //require('./backend')
-const {
+import {
   hexStringToBytes,
   bytesToHexString,
   Encoder,
   Decoder,
-} = require("./encoding")
-const { decodeChangeMeta } = require("./columnar")
-const { copyObject } = require("./common")
+} from "./encoding"
+import { decodeChangeMeta } from "./columnar"
+import { copyObject } from "./common"
 
 const HASH_SIZE = 32 // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC = 0x42 // first byte of a sync message, for identification
@@ -41,7 +41,7 @@ const BITS_PER_ENTRY = 10,
  * over a network. The entries that are added are assumed to already be SHA-256 hashes,
  * so this implementation does not perform its own hashing.
  */
-class BloomFilter {
+export class BloomFilter {
   constructor(arg) {
     if (Array.isArray(arg)) {
       // arg is an array of SHA256 hashes in hexadecimal encoding
@@ -187,7 +187,7 @@ function decodeHashes(decoder) {
  * Takes a sync message of the form `{heads, need, have, changes}` and encodes it as a byte array for
  * transmission.
  */
-function encodeSyncMessage(message) {
+export function encodeSyncMessage(message) {
   const encoder = new Encoder()
   encoder.appendByte(MESSAGE_TYPE_SYNC)
   encodeHashes(encoder, message.heads)
@@ -207,7 +207,7 @@ function encodeSyncMessage(message) {
 /**
  * Takes a binary-encoded sync message and decodes it into the form `{heads, need, have, changes}`.
  */
-function decodeSyncMessage(bytes) {
+export function decodeSyncMessage(bytes) {
   const decoder = new Decoder(bytes)
   const messageType = decoder.readByte()
   if (messageType !== MESSAGE_TYPE_SYNC) {
@@ -236,7 +236,7 @@ function decodeSyncMessage(bytes) {
  * an application restart or disconnect and reconnect. The ephemeral parts of the state that should
  * be cleared on reconnect are not encoded.
  */
-function encodeSyncState(syncState) {
+export function encodeSyncState(syncState) {
   const encoder = new Encoder()
   encoder.appendByte(PEER_STATE_TYPE)
   encodeHashes(encoder, syncState.sharedHeads)
@@ -247,7 +247,7 @@ function encodeSyncState(syncState) {
  * Takes a persisted peer state as encoded by `encodeSyncState` and decodes it into a SyncState
  * object. The parts of the peer state that were not encoded are initialised with default values.
  */
-function decodeSyncState(bytes) {
+export function decodeSyncState(bytes) {
   const decoder = new Decoder(bytes)
   const recordType = decoder.readByte()
   if (recordType !== PEER_STATE_TYPE) {
@@ -345,7 +345,7 @@ function getChangesToSend(backend, have, need) {
   return changesToSend
 }
 
-function initSyncState() {
+export function initSyncState() {
   return {
     sharedHeads: [],
     lastSentHeads: [],
@@ -364,7 +364,7 @@ function compareArrays(a, b) {
  * Given a backend and what we believe to be the state of our peer, generate a message which tells
  * them about we have and includes any changes we believe they need
  */
-function generateSyncMessage(backend, syncState) {
+export function generateSyncMessage(backend, syncState) {
   if (!backend) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }
@@ -487,7 +487,7 @@ function advanceHeads(myOldHeads, myNewHeads, ourOldSharedHeads) {
  * Given a backend, a message message and the state of our peer, apply any changes, update what
  * we believe about the peer, and (if there were applied changes) produce a patch for the frontend
  */
-function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
+export function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
   if (!backend) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }
@@ -552,15 +552,4 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
     sentHashes,
   }
   return [backend, syncState, patch]
-}
-
-module.exports = {
-  receiveSyncMessage,
-  generateSyncMessage,
-  encodeSyncMessage,
-  decodeSyncMessage,
-  initSyncState,
-  encodeSyncState,
-  decodeSyncState,
-  BloomFilter, // BloomFilter is a private API, exported only for testing purposes
 }

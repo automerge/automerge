@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     AMitems changes = AMstackItems(&stack, AMgetChanges(doc1, NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     AMitem* item = NULL;
     while ((item = AMitemsNext(&changes, 1)) != NULL) {
-        AMchange const* change;
+        AMchange* change;
         AMitemToChange(item, &change);
         AMitems const heads = AMstackItems(&stack, AMitemFromChangeHash(AMchangeHash(change)), abort_cb,
                                            AMexpect(AM_VAL_TYPE_CHANGE_HASH));
@@ -79,14 +79,15 @@ static bool abort_cb(AMstack** stack, void* data) {
 
     char const* suffix = NULL;
     if (!stack) {
-        suffix = "Stack*";
+        suffix = "stack*";
     } else if (!*stack) {
-        suffix = "Stack";
+        suffix = "stack";
     } else if (!(*stack)->result) {
-        suffix = "";
+        suffix = "result";
     }
     if (suffix) {
-        fprintf(stderr, "Null `AMresult%s*`.\n", suffix);
+        fprintf(stderr, "Null `AM%s*`.\n", suffix);
+        free(data);
         AMstackFree(stack);
         exit(EXIT_FAILURE);
         return false;
@@ -108,6 +109,7 @@ static bool abort_cb(AMstack** stack, void* data) {
         char* const c_msg = AMstrdup(AMresultError((*stack)->result), NULL);
         fprintf(stderr, "%s; %s.\n", buffer, c_msg);
         free(c_msg);
+        free(data);
         AMstackFree(stack);
         exit(EXIT_FAILURE);
         return false;
@@ -118,7 +120,7 @@ static bool abort_cb(AMstack** stack, void* data) {
         if (tag != sc_data->bitmask) {
             fprintf(stderr, "Unexpected tag `%s` (%d) instead of `%s` at %s:%d.\n", AMvalTypeToString(tag), tag,
                     AMvalTypeToString(sc_data->bitmask), sc_data->file, sc_data->line);
-            free(sc_data);
+            free(data);
             AMstackFree(stack);
             exit(EXIT_FAILURE);
             return false;

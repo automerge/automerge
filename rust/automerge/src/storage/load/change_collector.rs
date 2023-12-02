@@ -7,13 +7,14 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_tree::OpSetMetadata,
+    op_set::OpIdx,
+    op_tree::OpSetData,
     storage::{
         change::{PredOutOfOrder, Verified},
         convert::op_as_actor_id,
         Change as StoredChange, ChangeMetadata,
     },
-    types::{ChangeHash, ObjId, Op},
+    types::{ChangeHash, ObjId, OpBuilder},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -24,7 +25,7 @@ pub(crate) enum Error {
     ChangesOutOfOrder,
     #[error("missing change")]
     MissingChange,
-    #[error("unable to read change metadata: {0}")]
+    #[error("unable to read change osd: {0}")]
     ReadChange(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("incorrect max op")]
     IncorrectMaxOp,
@@ -50,7 +51,7 @@ impl<'a> ChangeCollector<'a> {
     {
         let mut changes_by_actor: HashMap<usize, Vec<PartialChange<'_>>> = HashMap::new();
         for (index, change) in changes.into_iter().enumerate() {
-            tracing::trace!(?change, "importing change metadata");
+            tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
             let actor_changes = changes_by_actor.entry(change.actor).or_default();
             if let Some(prev) = actor_changes.last() {
@@ -78,7 +79,12 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn collect(&mut self, obj: ObjId, op: Op) -> Result<(), Error> {
+    pub(crate) fn collect(
+        &mut self,
+        obj: ObjId,
+        op: OpBuilder,
+        osd: &mut OpSetData,
+    ) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
             .get_mut(&op.id.actor())
@@ -91,15 +97,13 @@ impl<'a> ChangeCollector<'a> {
             tracing::error!(missing_change_index = change_index, "missing change for op");
             Error::MissingChange
         })?;
-        change.ops.push((obj, op));
+        let idx = osd.push(obj, op);
+        change.ops.push((obj, idx));
         Ok(())
     }
 
-    #[instrument(skip(self, metadata))]
-    pub(crate) fn finish(
-        self,
-        metadata: &OpSetMetadata,
-    ) -> Result<CollectedChanges<'static>, Error> {
+    #[instrument(skip(self, osd))]
+    pub(crate) fn finish(self, osd: &OpSetData) -> Result<CollectedChanges<'static>, Error> {
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
         for (_, changes) in self.changes_by_actor {
@@ -122,7 +126,7 @@ impl<'a> ChangeCollector<'a> {
         let mut history = Vec::new();
         let mut heads = BTreeSet::new();
         for (index, change) in changes_in_order.into_iter().enumerate() {
-            let finished = change.finish(&hashes_by_index, metadata)?;
+            let finished = change.finish(&hashes_by_index, osd)?;
             let hash = finished.hash();
             hashes_by_index.insert(index, hash);
             for dep in finished.dependencies() {
@@ -146,7 +150,7 @@ struct PartialChange<'a> {
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
-    ops: Vec<(ObjId, Op)>,
+    ops: Vec<(ObjId, OpIdx)>,
 }
 
 impl<'a> PartialChange<'a> {
@@ -154,11 +158,11 @@ impl<'a> PartialChange<'a> {
     ///
     /// * If any op references a property index which is not in `props`
     /// * If any op references an actor index which is not in `actors`
-    #[instrument(skip(self, known_changes, metadata))]
+    #[instrument(skip(self, known_changes, osd))]
     fn finish(
         mut self,
         known_changes: &HashMap<usize, ChangeHash>,
-        metadata: &OpSetMetadata,
+        osd: &OpSetData,
     ) -> Result<StoredChange<'a, Verified>, Error> {
         let deps_len = self.deps.len();
         let mut deps = self.deps.into_iter().try_fold::<_, _, Result<_, Error>>(
@@ -177,12 +181,12 @@ impl<'a> PartialChange<'a> {
         )?;
         deps.sort();
         let num_ops = self.ops.len() as u64;
-        self.ops.sort_by_key(|o| o.1.id);
+        self.ops.sort_by_key(|(_, o)| o.as_op2(osd).id());
         let converted_ops = self
             .ops
             .iter()
-            .map(|(obj, op)| op_as_actor_id(obj, op, metadata));
-        let actor = metadata
+            .map(|(obj, op)| op_as_actor_id(obj, op.as_op2(osd), osd));
+        let actor = osd
             .actors
             .safe_get(self.actor)
             .ok_or_else(|| {
@@ -207,7 +211,7 @@ impl<'a> PartialChange<'a> {
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
-                // SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted
+                // SAFETY: types::OpBuilder::preds is `types::OpIds` which ensures ops are always sorted
                 panic!("preds out of order");
             }
         };

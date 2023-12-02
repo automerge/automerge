@@ -2,9 +2,8 @@ use crate::{
     error::AutomergeError,
     exid::ExId,
     hydrate,
-    iter::Spans,
-    iter::{Keys, ListRange, MapRange, Values},
-    marks::Mark,
+    iter::{Keys, ListRange, MapRange, Spans, Values},
+    marks::{Mark, RichText},
     parents::Parents,
     Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
@@ -142,6 +141,13 @@ pub trait ReadDoc {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError>;
+
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<RichText, AutomergeError>;
 
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;

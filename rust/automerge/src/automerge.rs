@@ -9,18 +9,20 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
-use crate::marks::{Mark, MarkAccumulator, RichTextStateMachine};
-use crate::op_set::OpSet;
+use crate::marks::{Mark, MarkAccumulator, RichText, RichTextStateMachine};
+use crate::op_set::{OpSet, OpSetData};
 use crate::parents::Parents;
-use crate::patches::{Patch, PatchLog, TextRep};
+use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
-use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
-use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, Value,
+use crate::transaction::{
+    self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
+use crate::types::{
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
+    OpBuilder, OpId, OpType, Value,
+};
+use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
 pub(crate) mod current_state;
@@ -42,6 +44,94 @@ pub enum OnPartialLoad {
     Ignore,
     /// Fail the entire load
     Error,
+}
+
+/// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
+#[derive(Debug)]
+pub enum StringMigration {
+    /// Don't convert anything
+    NoMigration,
+    /// Convert all strings to text
+    ConvertToText,
+}
+
+#[derive(Debug)]
+pub struct LoadOptions<'a> {
+    on_partial_load: OnPartialLoad,
+    verification_mode: VerificationMode,
+    string_migration: StringMigration,
+    patch_log: Option<&'a mut PatchLog>,
+}
+
+impl<'a> LoadOptions<'a> {
+    pub fn new() -> LoadOptions<'static> {
+        LoadOptions::default()
+    }
+
+    /// What to do when loading a document partially succeeds
+    ///
+    /// The default is [`OnPartialLoad::Error`]
+    pub fn on_partial_load(self, on_partial_load: OnPartialLoad) -> Self {
+        Self {
+            on_partial_load,
+            ..self
+        }
+    }
+
+    /// Whether to verify the head hashes after loading
+    ///
+    /// The default is [`VerificationMode::Check`]
+    pub fn verification_mode(self, verification_mode: VerificationMode) -> Self {
+        Self {
+            verification_mode,
+            ..self
+        }
+    }
+
+    /// A [`PatchLog`] to log the changes required to materialize the current state of the
+    ///
+    /// The default is to not log patches
+    pub fn patch_log(self, patch_log: &'a mut PatchLog) -> Self {
+        Self {
+            patch_log: Some(patch_log),
+            ..self
+        }
+    }
+
+    /// Whether to convert [`ScalarValue::Str`]s in the loaded document to [`ObjType::Text`]
+    ///
+    /// Until version 2.1.0 of the javascript library strings (as in, the native string of the JS
+    /// runtime) were represented in the document as [`ScalarValue::Str`] and there was a special
+    /// JS class called `Text` which users were expected to use for [`ObjType::Text`]. In `2.1.0`
+    /// we changed this so that native strings were represented as [`ObjType::Text`] and
+    /// [`ScalarValue::Str`] was represented as a special `RawString` class. This means
+    /// that upgrading the application code to use the new API would require either
+    ///
+    /// a) Maintaining two code paths in the application to deal with both `string` and `RawString`
+    ///    types
+    /// b) Writing a migration script to convert all `RawString` types to `string`
+    ///
+    /// The latter is logic which is the same for all applications so we implement it in the
+    /// library for convenience. The way this works is that after loading the document we iterate
+    /// through all visible [`ScalarValue::Str`] values and emit a change which creates a new
+    /// [`ObjType::Text`] at the same path with the same content.
+    pub fn migrate_strings(self, migration: StringMigration) -> Self {
+        Self {
+            string_migration: migration,
+            ..self
+        }
+    }
+}
+
+impl std::default::Default for LoadOptions<'static> {
+    fn default() -> Self {
+        Self {
+            on_partial_load: OnPartialLoad::Error,
+            verification_mode: VerificationMode::Check,
+            patch_log: None,
+            string_migration: StringMigration::NoMigration,
+        }
+    }
 }
 
 /// An automerge document which does not manage transactions for you.
@@ -118,6 +208,10 @@ impl Automerge {
         &self.ops
     }
 
+    pub(crate) fn osd(&self) -> &OpSetData {
+        &self.ops.osd
+    }
+
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
         self.history.is_empty() && self.queue.is_empty()
@@ -126,7 +220,7 @@ impl Automerge {
     pub(crate) fn actor_id(&self) -> ActorId {
         match &self.actor {
             Actor::Unused(id) => id.clone(),
-            Actor::Cached(idx) => self.ops.m.actors[*idx].clone(),
+            Actor::Cached(idx) => self.ops.osd.actors[*idx].clone(),
         }
     }
 
@@ -142,9 +236,9 @@ impl Automerge {
     /// If the last actor in the OpSet is not the actor ID of this document
     pub(crate) fn rollback_last_actor(&mut self) {
         if let Actor::Cached(actor_idx) = self.actor {
-            if self.states.get(&actor_idx).is_none() && self.ops.m.actors.len() > 0 {
-                assert!(self.ops.m.actors.len() == actor_idx + 1);
-                let actor = self.ops.m.actors.remove_last();
+            if self.states.get(&actor_idx).is_none() && self.ops.osd.actors.len() > 0 {
+                assert!(self.ops.osd.actors.len() == actor_idx + 1);
+                let actor = self.ops.osd.actors.remove_last();
                 self.actor = Actor::Unused(actor);
             }
         }
@@ -166,7 +260,7 @@ impl Automerge {
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
             Actor::Unused(actor) => actor,
-            Actor::Cached(index) => self.ops.m.actors.get(*index),
+            Actor::Cached(index) => self.ops.osd.actors.get(*index),
         }
     }
 
@@ -175,7 +269,7 @@ impl Automerge {
             Actor::Unused(actor) => {
                 let index = self
                     .ops
-                    .m
+                    .osd
                     .actors
                     .cache(std::mem::replace(actor, ActorId::from(&[][..])));
                 self.actor = Actor::Cached(index);
@@ -188,7 +282,11 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args(None);
-        Transaction::new(self, args, PatchLog::inactive(TextRep::default()))
+        Transaction::new(
+            self,
+            args,
+            PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
@@ -232,11 +330,12 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
-
+        let idx_range = self.osd().start_range();
         TransactionArgs {
             actor_index,
             seq,
             start_op,
+            idx_range,
             deps,
             scope,
         }
@@ -295,7 +394,7 @@ impl Automerge {
     /// The collected patches are available in the return value of [`Transaction::commit`]
     pub fn transact_and_log_patches<F, O, E>(
         &mut self,
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
         f: F,
     ) -> transaction::Result<O, E>
     where
@@ -307,7 +406,7 @@ impl Automerge {
     /// Like [`Self::transact_and_log_patches`] but with a function for generating the commit options
     pub fn transact_and_log_patches_with<F, O, E, C>(
         &mut self,
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
         c: C,
         f: F,
     ) -> transaction::Result<O, E>
@@ -320,7 +419,7 @@ impl Automerge {
 
     fn transact_and_log_patches_with_impl<F, O, E, C>(
         &mut self,
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
         c: Option<C>,
         f: F,
     ) -> transaction::Result<O, E>
@@ -400,9 +499,9 @@ impl Automerge {
         match id {
             ExId::Root => Ok(OpId::new(0, 0)),
             ExId::Id(ctr, actor, idx) => {
-                let opid = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                let opid = if self.ops.osd.actors.cache.get(*idx) == Some(actor) {
                     OpId::new(*ctr, *idx)
-                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
+                } else if let Some(backup_idx) = self.ops.osd.actors.lookup(actor) {
                     OpId::new(*ctr, backup_idx)
                 } else {
                     return Err(AutomergeError::InvalidObjId(id.to_string()));
@@ -415,7 +514,7 @@ impl Automerge {
     pub(crate) fn get_obj_meta(
         &self,
         id: ObjId,
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
     ) -> Result<ObjMeta, AutomergeError> {
         if id.is_root() {
             Ok(ObjMeta::root())
@@ -431,7 +530,7 @@ impl Automerge {
         cursor: &Cursor,
         clock: Option<&Clock>,
     ) -> Result<OpId, AutomergeError> {
-        if let Some(idx) = self.ops.m.actors.lookup(cursor.actor()) {
+        if let Some(idx) = self.ops.osd.actors.lookup(cursor.actor()) {
             let opid = OpId::new(cursor.ctr(), idx);
             match clock {
                 Some(clock) if !clock.covers(&opid) => {
@@ -447,15 +546,11 @@ impl Automerge {
     pub(crate) fn exid_to_obj(
         &self,
         id: &ExId,
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
     ) -> Result<ObjMeta, AutomergeError> {
         let opid = self.exid_to_opid(id)?;
         let obj = ObjId(opid);
         self.get_obj_meta(obj, text_rep)
-    }
-
-    pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExId) {
-        (op.value_at(clock), self.id_to_exid(op.id))
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
@@ -464,23 +559,19 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with(
-            data,
-            OnPartialLoad::Error,
-            VerificationMode::Check,
-            &mut PatchLog::inactive(TextRep::default()),
-        )
+        Self::load_with_options(data, Default::default())
     }
 
     /// Load a document without verifying the head hashes
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with(
+        Self::load_with_options(
             data,
-            OnPartialLoad::Error,
-            VerificationMode::DontCheck,
-            &mut PatchLog::inactive(TextRep::default()),
+            LoadOptions {
+                verification_mode: VerificationMode::DontCheck,
+                ..Default::default()
+            },
         )
     }
 
@@ -493,12 +584,32 @@ impl Automerge {
     /// * `mode` - Whether to verify the head hashes after loading
     /// * `patch_log` - A [`PatchLog`] to log the changes required to materialize the current state of
     ///                 the document once loaded
+    #[deprecated(since = "0.5.2", note = "Use `load_with_options` instead")]
     #[tracing::instrument(skip(data), err)]
     pub fn load_with(
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
         patch_log: &mut PatchLog,
+    ) -> Result<Self, AutomergeError> {
+        Self::load_with_options(
+            data,
+            LoadOptions::new()
+                .on_partial_load(on_error)
+                .verification_mode(mode)
+                .patch_log(patch_log),
+        )
+    }
+
+    /// Load a document, with options
+    ///
+    /// # Arguments
+    /// * `data` - The data to load
+    /// * `options` - The options to use when loading
+    #[tracing::instrument(skip(data), err)]
+    pub fn load_with_options<'a, 'b>(
+        data: &'a [u8],
+        options: LoadOptions<'b>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -522,15 +633,19 @@ impl Automerge {
                     result: op_set,
                     changes,
                     heads,
-                } = storage::load::reconstruct_document(&d, mode, OpSet::builder())
-                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+                } = storage::load::reconstruct_document(
+                    &d,
+                    options.verification_mode,
+                    OpSet::builder(),
+                )
+                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
                 let mut hashes_by_index = HashMap::new();
                 let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
                 let mut change_graph = ChangeGraph::new();
                 for (index, change) in changes.iter().enumerate() {
                     // SAFETY: This should be fine because we just constructed an opset containing
                     // all the changes
-                    let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
+                    let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
                     actor_to_history.entry(actor_index).or_default().push(index);
                     hashes_by_index.insert(index, change.hash());
                     change_graph.add_change(change, actor_index)?;
@@ -574,19 +689,26 @@ impl Automerge {
                 am.apply_changes(change.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty() && !first_chunk_was_doc && on_error == OnPartialLoad::Error
+                if !am.queue.is_empty()
+                    && !first_chunk_was_doc
+                    && options.on_partial_load == OnPartialLoad::Error
                 {
                     return Err(AutomergeError::MissingDeps);
                 }
             }
             load::LoadedChanges::Partial { error, .. } => {
-                if on_error == OnPartialLoad::Error {
+                if options.on_partial_load == OnPartialLoad::Error {
                     return Err(error.into());
                 }
             }
         }
-        if patch_log.is_active() {
-            current_state::log_current_state_patches(&am, patch_log);
+        if let StringMigration::ConvertToText = options.string_migration {
+            am.convert_scalar_strings_to_text()?;
+        }
+        if let Some(patch_log) = options.patch_log {
+            if patch_log.is_active() {
+                current_state::log_current_state_patches(&am, patch_log);
+            }
         }
         Ok(am)
     }
@@ -601,7 +723,7 @@ impl Automerge {
     /// Get a set of [`Patch`]es which materialize the current state of the document
     ///
     /// This is a convienence method for `doc.diff(&[], current_heads)`
-    pub fn current_state(&self, text_rep: TextRep) -> Vec<Patch> {
+    pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
         let mut patch_log = PatchLog::active(text_rep);
         current_state::log_current_state_patches(self, &mut patch_log);
         patch_log.make_patches(self)
@@ -615,7 +737,10 @@ impl Automerge {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_log_patches(data, &mut PatchLog::inactive(TextRep::default()))
+        self.load_incremental_log_patches(
+            data,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Like [`Self::load_incremental`] but log the changes to the current state of the document to
@@ -626,11 +751,11 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc = Self::load_with(
+            let mut doc = Self::load_with_options(
                 data,
-                OnPartialLoad::Ignore,
-                VerificationMode::Check,
-                &mut PatchLog::inactive(TextRep::default()),
+                LoadOptions::new()
+                    .on_partial_load(OnPartialLoad::Ignore)
+                    .verification_mode(VerificationMode::Check),
             )?;
             doc = doc.with_actor(self.actor_id());
             if patch_log.is_active() {
@@ -654,7 +779,7 @@ impl Automerge {
 
     fn duplicate_seq(&self, change: &Change) -> bool {
         let mut dup = false;
-        if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
+        if let Some(actor_index) = self.ops.osd.actors.lookup(change.actor_id()) {
             if let Some(s) = self.states.get(&actor_index) {
                 dup = s.len() >= change.seq() as usize;
             }
@@ -670,7 +795,10 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_log_patches(changes, &mut PatchLog::inactive(TextRep::default()))
+        self.apply_changes_log_patches(
+            changes,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Like [`Self::apply_changes`] but log the resulting changes to the current state of the
@@ -738,15 +866,15 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
-        let actor = self.ops.m.actors.cache(change.actor_id().clone());
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder)> {
+        let actor = self.ops.osd.actors.cache(change.actor_id().clone());
         let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
         actors.push(actor);
         actors.extend(
             change
                 .other_actor_ids()
                 .iter()
-                .map(|a| self.ops.m.actors.cache(a.clone()))
+                .map(|a| self.ops.osd.actors.cache(a.clone()))
                 .collect::<Vec<_>>(),
         );
         change
@@ -755,7 +883,7 @@ impl Automerge {
             .map(|(i, c)| {
                 let id = OpId::new(change.start_op().get() + i as u64, actor);
                 let key = match &c.key {
-                    EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    EncodedKey::Prop(n) => Key::Map(self.ops.osd.props.cache(n.to_string())),
                     EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
                     EncodedKey::Elem(ElemId(o)) => {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
@@ -773,10 +901,10 @@ impl Automerge {
                     .pred
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
-                let pred = self.ops.m.sorted_opids(pred);
+                let pred = self.ops.osd.sorted_opids(pred);
                 (
                     obj,
-                    Op {
+                    OpBuilder {
                         id,
                         action: OpType::from_action_and_value(
                             c.action,
@@ -796,7 +924,10 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_and_log_patches(other, &mut PatchLog::inactive(TextRep::default()))
+        self.merge_and_log_patches(
+            other,
+            &mut PatchLog::inactive(TextRepresentation::default()),
+        )
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
@@ -829,8 +960,8 @@ impl Automerge {
         let mut bytes = crate::storage::save::save_document(
             c,
             self.ops.iter().map(|(objid, _, op)| (objid, op)),
-            &self.ops.m.actors,
-            &self.ops.m.props,
+            &self.ops.osd.actors,
+            &self.ops.osd.props,
             &heads,
             compress,
         );
@@ -943,7 +1074,7 @@ impl Automerge {
         } else {
             let base_actor = self.get_actor();
             let new_actor = base_actor.with_concurrency(level);
-            self.ops.m.actors.cache(new_actor)
+            self.ops.osd.actors.cache(new_actor)
         }
     }
 
@@ -994,7 +1125,7 @@ impl Automerge {
 
         let history_index = self.history.len();
 
-        let actor_index = self.ops.m.actors.cache(change.actor_id().clone());
+        let actor_index = self.ops.osd.actors.cache(change.actor_id().clone());
         self.states
             .entry(actor_index)
             .or_default()
@@ -1044,11 +1175,11 @@ impl Automerge {
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
-                .m
+                .osd
                 .actors
                 .lookup(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
-            let obj = ExId::Id(counter, self.ops.m.actors.cache[actor].clone(), actor);
+            let obj = ExId::Id(counter, self.ops.osd.actors.cache[actor].clone(), actor);
             Ok(obj)
         }
     }
@@ -1056,11 +1187,11 @@ impl Automerge {
     pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => {
-                let mut actor = self.ops.m.actors[id.actor()].to_string();
+                let mut actor = self.ops.osd.actors[id.actor()].to_string();
                 actor.truncate(6);
                 format!("{}@{}", id.counter(), actor)
             }
-            Export::Prop(index) => self.ops.m.props[index].clone(),
+            Export::Prop(index) => self.ops.osd.props[index].clone(),
             Export::Special(s) => s,
         }
     }
@@ -1077,13 +1208,13 @@ impl Automerge {
             "succ"
         );
         for (obj, _, op) in self.ops.iter() {
-            let id = self.to_short_string(op.id);
+            let id = self.to_short_string(*op.id());
             let obj = self.to_short_string(obj);
-            let key = match op.key {
-                Key::Map(n) => self.ops.m.props[n].clone(),
+            let key = match *op.key() {
+                Key::Map(n) => self.ops.osd.props[n].clone(),
                 Key::Seq(n) => self.to_short_string(n),
             };
-            let value: String = match &op.action {
+            let value: String = match op.action() {
                 OpType::Put(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
@@ -1093,13 +1224,13 @@ impl Automerge {
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
-            let pred: Vec<_> = op.pred.iter().map(|id| self.to_short_string(*id)).collect();
+            let pred: Vec<_> = op.pred().map(|id| self.to_short_string(*id)).collect();
             let succ: Vec<_> = op
-                .succ
+                .succ()
                 .into_iter()
                 .map(|id| self.to_short_string(*id))
                 .collect();
-            let insert = match op.insert {
+            let insert = match op.insert() {
                 true => "t",
                 false => "f",
             };
@@ -1126,7 +1257,7 @@ impl Automerge {
     pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
         let objects = objects.map(|os| {
             os.iter()
-                .filter_map(|o| self.exid_to_obj(o, TextRep::default()).ok())
+                .filter_map(|o| self.exid_to_obj(o, TextRepresentation::default()).ok())
                 .map(|o| o.id)
                 .collect()
         });
@@ -1136,23 +1267,27 @@ impl Automerge {
     pub(crate) fn insert_op(
         &mut self,
         obj: &ObjId,
-        op: Op,
+        op: OpBuilder,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        let is_delete = op.is_delete();
+        let idx = self.ops.load(*obj, op);
+        let op = idx.as_op2(&self.ops.osd);
+
         let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj, patch_log.text_rep())?;
-            let found = self.ops.find_op_with_patch_log(&obj, &op);
-            found.log_patches(&obj, &op, self, patch_log);
+            let found = self.ops.find_op_with_patch_log(&obj, op);
+            found.log_patches(&obj, op, self, patch_log);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.find_op_without_patch_log(obj, &op);
+            let found = self.ops.find_op_without_patch_log(obj, op);
             (found.pos, found.succ)
         };
 
-        self.ops.add_succ(obj, &succ, &op);
+        self.ops.add_succ(obj, &succ, idx);
 
-        if !op.is_delete() {
-            self.ops.insert(pos, obj, op);
+        if !is_delete {
+            self.ops.insert(pos, obj, idx);
         }
         Ok(())
     }
@@ -1164,7 +1299,7 @@ impl Automerge {
         &self,
         before_heads: &[ChangeHash],
         after_heads: &[ChangeHash],
-        text_rep: TextRep,
+        text_rep: TextRepresentation,
     ) -> Vec<Patch> {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
@@ -1250,7 +1385,7 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref(), TextRep::String)?;
+        let obj = self.exid_to_obj(obj.as_ref(), TextRepresentation::String)?;
         let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = RichTextStateMachine::default();
@@ -1260,12 +1395,13 @@ impl Automerge {
         let mut mark_index = 0;
         for (_key, key_ops) in ops_by_key.into_iter() {
             if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
-                match &o.action {
+                match o.action() {
                     OpType::Make(_) | OpType::Put(_) => {
                         let len = o.width(obj.encoding);
                         if last_marks.as_ref() != marks.current() {
-                            if mark_len > 0 && last_marks.is_some() {
-                                acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+                            match last_marks.as_ref() {
+                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                                _ => (),
                             }
                             last_marks = marks.current().cloned();
                             mark_index = index;
@@ -1275,17 +1411,18 @@ impl Automerge {
                         index += len;
                     }
                     OpType::MarkBegin(_, data) => {
-                        marks.mark_begin(o.id, data, &self.ops.m);
+                        marks.mark_begin(*o.id(), data, &self.ops.osd);
                     }
                     OpType::MarkEnd(_) => {
-                        marks.mark_end(o.id, &self.ops.m);
+                        marks.mark_end(*o.id(), &self.ops.osd);
                     }
                     OpType::Increment(_) | OpType::Delete => {}
                 }
             }
         }
-        if mark_len > 0 && last_marks.is_some() {
-            acc.add(mark_index, mark_len, last_marks.as_ref().unwrap());
+        match last_marks.as_ref() {
+            Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+            _ => (),
         }
         Ok(acc.into_iter_no_unmark().collect())
     }
@@ -1297,13 +1434,15 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::Array)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::Array)?;
         // FIXME - now that we have blocks a correct text_rep is relevent
-        Ok(self.ops.parents(obj.id, TextRep::default(), clock))
+        Ok(self
+            .ops
+            .parents(obj.id, TextRepresentation::default(), clock))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
-        self.exid_to_obj(obj, TextRep::Array)
+        self.exid_to_obj(obj, TextRepresentation::Array)
             .ok()
             .map(|obj| self.ops.keys(&obj.id, clock))
             .unwrap_or_default()
@@ -1315,7 +1454,7 @@ impl Automerge {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'a, R> {
-        self.exid_to_obj(obj, TextRep::Array)
+        self.exid_to_obj(obj, TextRepresentation::Array)
             .ok()
             .map(|obj| self.ops.map_range(&obj.id, range, clock))
             .unwrap_or_default()
@@ -1327,22 +1466,22 @@ impl Automerge {
         range: R,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        self.exid_to_obj(obj, TextRep::Array)
+        self.exid_to_obj(obj, TextRepresentation::Array)
             .ok()
             .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, clock))
             .unwrap_or_default()
     }
 
     pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
-        self.exid_to_obj(obj, TextRep::Array)
+        self.exid_to_obj(obj, TextRepresentation::Array)
             .ok()
-            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), self, clock))
+            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), clock))
             .unwrap_or_default()
     }
 
     pub(crate) fn length_for(&self, obj: &ExId, clock: Option<Clock>) -> usize {
         // FIXME - is doc.length() for a text always the string length?
-        self.exid_to_obj(obj, TextRep::String)
+        self.exid_to_obj(obj, TextRepresentation::String)
             .map(|obj| self.ops.length(&obj.id, obj.encoding, clock))
             .unwrap_or(0)
     }
@@ -1352,7 +1491,7 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::String)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::String)?;
         Ok(self.ops.text(&obj.id, clock))
     }
 
@@ -1361,7 +1500,7 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Spans<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::String)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::String)?;
         let iter = self.ops.iter_obj(&obj.id);
         Ok(Spans::new(iter, self, clock))
     }
@@ -1372,7 +1511,7 @@ impl Automerge {
         position: usize,
         clock: Option<Clock>,
     ) -> Result<Cursor, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::String)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::String)?;
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
@@ -1380,7 +1519,7 @@ impl Automerge {
                 self.ops
                     .seek_ops_by_prop(&obj.id, position.into(), obj.encoding, clock.as_ref());
             if let Some(op) = found.ops.last() {
-                Ok(Cursor::new(op.id, &self.ops.m))
+                Ok(Cursor::new(*op.id(), &self.ops.osd))
             } else {
                 Err(AutomergeError::InvalidIndex(position))
             }
@@ -1393,7 +1532,7 @@ impl Automerge {
         cursor: &Cursor,
         clock: Option<Clock>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::String)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::String)?;
         let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
         let found = self
             .ops
@@ -1416,14 +1555,14 @@ impl Automerge {
         prop: Prop,
         clock: Option<Clock>,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj, TextRep::Array)?;
+        let obj = self.exid_to_obj(obj, TextRepresentation::Array)?;
         Ok(self
             .ops
             .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .last()
-            .map(|op| self.export_value(op, clock.as_ref())))
+            .map(|op| op.tagged_value(clock.as_ref())))
     }
 
     pub(crate) fn get_all_for<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1433,13 +1572,13 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
-        let obj = self.exid_to_obj(obj.as_ref(), TextRep::Array)?;
+        let obj = self.exid_to_obj(obj.as_ref(), TextRepresentation::Array)?;
         let values = self
             .ops
             .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
-            .map(|op| self.export_value(op, clock.as_ref()))
+            .map(|op| op.tagged_value(clock.as_ref()))
             .collect::<Vec<_>>();
         // this is a test to make sure opid and exid are always sorting the same way
         assert_eq!(
@@ -1447,6 +1586,73 @@ impl Automerge {
             values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
         );
         Ok(values)
+    }
+
+    pub(crate) fn get_marks_for<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        clock: Option<Clock>,
+    ) -> Result<RichText, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref(), TextRepresentation::String)?;
+        let result = self
+            .ops
+            .search(
+                &obj.id,
+                crate::query::Nth::new(index, obj.encoding, clock, &self.ops.osd).with_marks(),
+            )
+            .marks()
+            .as_deref()
+            .cloned()
+            .unwrap_or_default();
+        Ok(result)
+    }
+
+    fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
+        struct Conversion {
+            obj_id: ExId,
+            prop: Prop,
+            text: smol_str::SmolStr,
+        }
+        let mut to_convert = Vec::new();
+        for (obj_id, obj_type, ops) in self.ops.iter_objs() {
+            let obj = self.get_obj_meta(*obj_id, TextRepresentation::String)?;
+            match obj_type {
+                ObjType::Map | ObjType::List => {
+                    for op in ops {
+                        if !op.visible() {
+                            continue;
+                        }
+                        if let OpType::Put(ScalarValue::Str(s)) = op.action() {
+                            let prop = match *op.key() {
+                                Key::Map(prop) => Prop::Map(self.ops.osd.props.get(prop).clone()),
+                                Key::Seq(_) => {
+                                    let Some(found) =
+                                        self.ops.seek_opid(obj_id, *op.id(), obj.encoding, None)
+                                    else {
+                                        continue;
+                                    };
+                                    Prop::Seq(found.index)
+                                }
+                            };
+                            to_convert.push(Conversion {
+                                obj_id: self.ops.id_to_exid(*(obj_id.as_ref())),
+                                prop,
+                                text: s.clone(),
+                            })
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut tx = self.transaction();
+        for Conversion { obj_id, prop, text } in to_convert {
+            let text_id = tx.put_object(obj_id, prop, ObjType::Text)?;
+            tx.splice_text(&text_id, 0, 0, &text)?;
+        }
+        tx.commit();
+        Ok(())
     }
 }
 
@@ -1591,13 +1797,23 @@ impl ReadDoc for Automerge {
         obj: O,
         heads: Option<&[ChangeHash]>,
     ) -> Result<hydrate::Value, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref(), TextRep::Array)?;
+        let obj = self.exid_to_obj(obj.as_ref(), TextRepresentation::Array)?;
         let clock = heads.map(|h| self.clock_at(h));
         Ok(match obj.typ {
             ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
             ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
             _ => self.hydrate_map(&obj.id, clock.as_ref()),
         })
+    }
+
+    fn get_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<RichText, AutomergeError> {
+        let clock = heads.map(|h| self.clock_at(h));
+        self.get_marks_for(obj.as_ref(), index, clock)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1637,10 +1853,10 @@ impl ReadDoc for Automerge {
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
-        let obj = obj.as_ref();
-        let opid = self.exid_to_opid(obj)?;
-        let typ = self.ops.object_type(&ObjId(opid));
-        typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
+        // TextRepresentation doesn't matter because it's only used to calculate the
+        // encoding of the ObjMeta returned from `exid_to_obj§, which we ignore.
+        self.exid_to_obj(obj.as_ref(), TextRepresentation::String)
+            .map(|obj| obj.typ)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {

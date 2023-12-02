@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
+import * as Automerge from "../src/index.js"
 
 const uuid = Automerge.uuid
 

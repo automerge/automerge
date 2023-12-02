@@ -1,16 +1,16 @@
 use crate::marks::RichText;
+use crate::op_set::{Op, OpSetData};
 use crate::op_tree::OpTreeNode;
-use crate::query::OpSetMetadata;
 use crate::query::{ListState, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::Clock;
-use crate::types::{ListEncoding, Op, OpId};
+use crate::types::{ListEncoding, OpId};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
 /// Search for an OpId in a tree.  /// Returns the index of the operation in the tree.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpIdSearch<'a> {
-    idx: ListState,
+    list_state: ListState,
     clock: Option<&'a Clock>,
     target: SearchTarget<'a>,
     marks: RichTextQueryState<'a>,
@@ -18,30 +18,33 @@ pub(crate) struct OpIdSearch<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 enum SearchTarget<'a> {
-    OpId(OpId, Option<&'a Op>),
-    Op(&'a Op),
+    OpId(OpId, Option<Op<'a>>),
+    Op(Op<'a>),
     Complete(usize),
 }
 
 impl<'a> OpIdSearch<'a> {
     pub(crate) fn opid(target: OpId, encoding: ListEncoding, clock: Option<&'a Clock>) -> Self {
         OpIdSearch {
-            idx: ListState::new(encoding, usize::MAX),
+            list_state: ListState::new(encoding, usize::MAX),
             clock,
             target: SearchTarget::OpId(target, None),
             marks: Default::default(),
         }
     }
 
-    pub(crate) fn op(op: &'a Op, encoding: ListEncoding) -> Self {
+    pub(crate) fn op(op: Op<'a>, encoding: ListEncoding) -> Self {
         // this will only be called with list ops
-        let elemid = op.key.elemid().expect("map op passed to query::OpIdSearch");
+        let elemid = op
+            .key()
+            .elemid()
+            .expect("map op passed to query::OpIdSearch");
         let target = match elemid.is_head() {
             true => SearchTarget::Op(op),
             false => SearchTarget::OpId(elemid.0, Some(op)),
         };
         OpIdSearch {
-            idx: ListState::new(encoding, usize::MAX),
+            list_state: ListState::new(encoding, usize::MAX),
             clock: None,
             target,
             marks: Default::default(),
@@ -57,35 +60,36 @@ impl<'a> OpIdSearch<'a> {
     }
 
     pub(crate) fn pos(&self) -> usize {
-        self.idx.pos()
+        self.list_state.pos()
     }
 
     pub(crate) fn index(&self) -> usize {
-        self.idx.index()
+        self.list_state.index()
     }
 
-    pub(crate) fn index_for(&self, op: &Op) -> usize {
-        if self.idx.was_last_seen(op.elemid_or_key()) {
-            self.idx.last_index()
+    pub(crate) fn index_for(&self, op: Op<'a>) -> usize {
+        if self.list_state.was_last_seen(op.elemid_or_key()) {
+            self.list_state.last_index()
         } else {
-            self.idx.index()
+            self.list_state.index()
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Arc<RichText>> {
-        RichText::from_query_state(&self.marks, m)
+    pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<RichText>> {
+        RichText::from_query_state(&self.marks, osd)
     }
 }
 
 impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
-    fn query_node(&mut self, child: &'a OpTreeNode, ops: &'a [Op]) -> QueryResult {
-        self.idx.check_if_node_is_clean(child);
+    fn query_node(&mut self, child: &'a OpTreeNode, osd: &'a OpSetData) -> QueryResult {
+        self.list_state.check_if_node_is_clean(child);
         if self.clock.is_some() {
             QueryResult::Descend
         } else {
             match &self.target {
                 SearchTarget::OpId(id, _) if !child.index.ops.contains(id) => {
-                    self.idx.process_node(child, ops, Some(&mut self.marks));
+                    self.list_state
+                        .process_node(child, osd, Some(&mut self.marks));
                     QueryResult::Next
                 }
                 _ => QueryResult::Descend,
@@ -93,38 +97,36 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
         }
     }
 
-    fn query_element_with_metadata(&mut self, element: &'a Op, m: &OpSetMetadata) -> QueryResult {
-        self.marks.process(element);
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
+        self.marks.process(op);
         match self.target {
             SearchTarget::OpId(target, None) => {
-                if element.id == target {
-                    self.target = SearchTarget::Complete(self.idx.pos());
+                if op.id() == &target {
+                    self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
             }
-            SearchTarget::OpId(target, Some(op)) => {
-                if element.id == target {
-                    if op.insert {
-                        self.target = SearchTarget::Op(op);
+            SearchTarget::OpId(target, Some(op2)) => {
+                if op.id() == &target {
+                    if op2.insert() {
+                        self.target = SearchTarget::Op(op2);
                     } else {
-                        self.target = SearchTarget::Complete(self.idx.pos());
+                        self.target = SearchTarget::Complete(self.list_state.pos());
                         return QueryResult::Finish;
                     }
                 }
             }
-            SearchTarget::Op(op) => {
-                if element.insert && m.lamport_cmp(element.id, op.id) == Ordering::Less {
-                    self.target = SearchTarget::Complete(self.idx.pos());
+            SearchTarget::Op(op2) => {
+                if op.insert() && op.lamport_cmp(*op2.id()) == Ordering::Less {
+                    self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
             }
             SearchTarget::Complete(_) => return QueryResult::Finish, // this should never happen
         }
-        self.idx.process_op(
-            element,
-            element.elemid_or_key(),
-            element.visible_at(self.clock),
-        );
+        let elemid_or_key = op.elemid_or_key();
+        let visible_at = op.visible_at(self.clock);
+        self.list_state.process_op(op, elemid_or_key, visible_at);
         QueryResult::Next
     }
 }
@@ -132,14 +134,17 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SimpleOpIdSearch<'a> {
     target: OpId,
-    op: &'a Op,
+    op: Op<'a>,
     pub(crate) pos: usize,
     found: bool,
 }
 
 impl<'a> SimpleOpIdSearch<'a> {
-    pub(crate) fn op(op: &'a Op) -> Self {
-        let elemid = op.key.elemid().expect("map op passed to query::OpIdSearch");
+    pub(crate) fn op(op: Op<'a>) -> Self {
+        let elemid = op
+            .key()
+            .elemid()
+            .expect("map op passed to query::OpIdSearch");
         //let target = match elemid.is_head() {
         //    true => SearchTarget::Op(op),
         //    false => SearchTarget::OpId(elemid.0, Some(op)),
@@ -154,7 +159,7 @@ impl<'a> SimpleOpIdSearch<'a> {
 }
 
 impl<'a> TreeQuery<'a> for SimpleOpIdSearch<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, _osd: &OpSetData) -> QueryResult {
         if self.found || child.index.ops.contains(&self.target) {
             QueryResult::Descend
         } else {
@@ -163,15 +168,15 @@ impl<'a> TreeQuery<'a> for SimpleOpIdSearch<'a> {
         }
     }
 
-    fn query_element_with_metadata(&mut self, element: &'a Op, m: &OpSetMetadata) -> QueryResult {
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         if !self.found {
-            if element.id == self.target {
+            if op.id() == &self.target {
                 self.found = true;
-                if !self.op.insert {
+                if !self.op.insert() {
                     return QueryResult::Finish;
                 }
             }
-        } else if element.insert && m.lamport_cmp(element.id, self.op.id) == Ordering::Less {
+        } else if op.insert() && op.lamport_cmp(*self.op.id()) == Ordering::Less {
             return QueryResult::Finish;
         }
         self.pos += 1;

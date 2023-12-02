@@ -1388,7 +1388,10 @@ fn load_broken_list() {
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);
     assert_eq!(doc.deps, doc2.deps);
-    assert_eq!(doc.ops, doc2.ops);
+    // dont to support PartialEq b/c it would have to use the iterator underdneath
+    let doc1_ops: Vec<_> = doc.ops.iter().collect();
+    let doc2_ops: Vec<_> = doc2.ops.iter().collect();
+    assert_eq!(doc1_ops, doc2_ops);
     assert_eq!(doc.max_op, doc2.max_op);
 
     assert_eq!(bytes, bytes2);
@@ -1437,10 +1440,12 @@ fn load_broken_list_short() {
     assert_eq!(doc.history_index, doc2.history_index);
     assert_eq!(doc.states, doc2.states);
     assert_eq!(doc.deps, doc2.deps);
-    assert_eq!(doc.ops, doc2.ops);
     assert_eq!(doc.max_op, doc2.max_op);
-
     assert_eq!(bytes, bytes2);
+    assert_eq!(doc.ops.len(), doc2.ops.len());
+    let doc1_ops: Vec<_> = doc.ops.iter().collect();
+    let doc2_ops: Vec<_> = doc2.ops.iter().collect();
+    assert_eq!(doc1_ops, doc2_ops);
 }
 
 #[test]

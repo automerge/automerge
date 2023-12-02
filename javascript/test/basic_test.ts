@@ -1,9 +1,9 @@
-import * as assert from "assert"
-import { next as Automerge } from "../src"
-import * as oldAutomerge from "../src/stable"
-import * as WASM from "@automerge/automerge-wasm"
-import { mismatched_heads } from "./helpers"
-import { PatchSource } from "../src/types"
+import { default as assert } from "assert"
+import { next as Automerge } from "../src/index.js"
+import * as oldAutomerge from "../src/stable.js"
+import { default as WASM } from "@automerge/automerge-wasm"
+import { mismatched_heads } from "./helpers.js"
+import { PatchSource } from "../src/types.js"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -721,6 +721,19 @@ describe("Automerge", () => {
         doc.anotherDate = originalDoc.date
         doc.dates[0] = originalDoc.dates[0]
       })
+    })
+  })
+  describe("saveSince", () => {
+    it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      Automerge.saveIncremental(doc)
+      const heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => (d.c = "d"))
+      let incremental = Automerge.saveIncremental(doc)
+      let since = Automerge.saveSince(doc, heads)
+      assert.deepEqual(incremental, since)
     })
   })
 })

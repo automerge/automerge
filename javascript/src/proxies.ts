@@ -1,14 +1,19 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
-import { Text } from "./text"
+import { Text } from "./text.js"
 import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
 
-import type { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
+import type {
+  AutomergeValue,
+  ScalarValue,
+  MapValue,
+  ListValue,
+} from "./types.js"
 import {
   type AutomergeValue as UnstableAutomergeValue,
   MapValue as UnstableMapValue,
   ListValue as UnstableListValue,
-} from "./next_types"
-import { Counter, getWriteableCounter } from "./counter"
+} from "./next_types.js"
+import { Counter, getWriteableCounter } from "./counter.js"
 import {
   STATE,
   TRACE,
@@ -19,8 +24,8 @@ import {
   INT,
   UINT,
   F64,
-} from "./constants"
-import { RawString } from "./raw_string"
+} from "./constants.js"
+import { RawString } from "./raw_string.js"
 
 type TargetCommon = {
   context: Automerge
@@ -133,7 +138,11 @@ type ImportedValue =
   | [Record<string, any>, "map"]
   | [boolean, "boolean"]
 
-function import_value(value: any, textV2: boolean): ImportedValue {
+function import_value(
+  value: any,
+  textV2: boolean,
+  path: Prop[],
+): ImportedValue {
   switch (typeof value) {
     case "object":
       if (value == null) {
@@ -149,7 +158,7 @@ function import_value(value: any, textV2: boolean): ImportedValue {
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
       } else if (value instanceof RawString) {
-        return [value.val, "str"]
+        return [value.toString(), "str"]
       } else if (value instanceof Text) {
         return [value, "text"]
       } else if (value instanceof Uint8Array) {
@@ -180,7 +189,9 @@ function import_value(value: any, textV2: boolean): ImportedValue {
         return [value, "str"]
       }
     default:
-      throw new RangeError(`Unsupported type of value: ${typeof value}`)
+      throw new RangeError(
+        `Unsupported type ${typeof value} for path ${printPath(path)}`,
+      )
   }
 }
 
@@ -244,7 +255,7 @@ const MapHandler = {
     if (key === CLEAR_CACHE) {
       return true
     }
-    const [value, datatype] = import_value(val, textV2)
+    const [value, datatype] = import_value(val, textV2, [...path, key])
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
@@ -353,6 +364,9 @@ const ListHandler = {
         "Cannot create a reference to an existing document object",
       )
     }
+    if (index === CLEAR_CACHE) {
+      return true
+    }
     if (index === TRACE) {
       target.trace = val
       return true
@@ -360,7 +374,7 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2)
+    const [value, datatype] = import_value(val, textV2, [...path, index])
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -574,7 +588,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2)
+      const [value, datatype] = import_value(val, textV2, [...path, start])
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
@@ -664,7 +678,17 @@ function listMethods<T extends Target>(target: T) {
         }
         context.delete(objectId, index)
       }
-      const values = vals.map(val => import_value(val, textV2))
+      const values = vals.map((val, index) => {
+        try {
+          return import_value(val, textV2, [...path])
+        } catch (e) {
+          if (e instanceof RangeError) {
+            throw new RangeError(`${e.message} at index ${index} in the input`)
+          } else {
+            throw e
+          }
+        }
+      })
       for (const [value, datatype] of values) {
         switch (datatype) {
           case "list": {
@@ -938,5 +962,23 @@ function assertText(value: Text | string): asserts value is Text {
 function assertString(value: Text | string): asserts value is string {
   if (typeof value !== "string") {
     throw new Error("value was not a string")
+  }
+}
+
+function printPath(path: Prop[]): string {
+  // print the path as a json pointer
+  const jsonPointerComponents = path.map(component => {
+    // if its a number just turn it into a string
+    if (typeof component === "number") {
+      return component.toString()
+    } else if (typeof component === "string") {
+      // otherwise we have to escape `/` and `~` characters
+      return component.replace(/~/g, "~0").replace(/\//g, "~1")
+    }
+  })
+  if (path.length === 0) {
+    return ""
+  } else {
+    return "/" + jsonPointerComponents.join("/")
   }
 }

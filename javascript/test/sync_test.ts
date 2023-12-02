@@ -1,6 +1,6 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
-import { BloomFilter } from "./legacy/sync"
+import * as Automerge from "../src/index.js"
+import { BloomFilter } from "./legacy/sync.js"
 import {
   decodeSyncMessage,
   encodeSyncMessage,
@@ -65,7 +65,7 @@ describe("Data sync protocol", () => {
         assert.deepStrictEqual(message.changes, [])
       })
 
-      it("should not reply if we have no data as well", () => {
+      it("should not reply after the first round if we have no data as well", () => {
         let n1 = Automerge.init(),
           n2 = Automerge.init()
         let s1 = initSyncState(),
@@ -76,6 +76,12 @@ describe("Data sync protocol", () => {
         if (m1 != null) {
           ;[n2, s2] = Automerge.receiveSyncMessage(n2, s2, m1)
         }
+        ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
+        if (m2 != null) {
+          ;[n1, s1] = Automerge.receiveSyncMessage(n1, s1, m2)
+        }
+        ;[s1, m1] = Automerge.generateSyncMessage(n1, s1)
+        assert.deepStrictEqual(m1, null)
         ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
         assert.deepStrictEqual(m2, null)
       })
@@ -101,10 +107,19 @@ describe("Data sync protocol", () => {
         ;[s1, m1] = Automerge.generateSyncMessage(n1, s1)
         assert.deepStrictEqual(s1.lastSentHeads, getHeads(n1))
 
-        // heads are equal so this message should be null
+        // Run one round of the sync protocol so each side has advertised their heads
         if (m1 != null) {
           ;[n2, s2] = Automerge.receiveSyncMessage(n2, s2, m1)
         }
+        ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
+        assert.deepStrictEqual(s2.lastSentHeads, getHeads(n2))
+        if (m2 != null) {
+          ;[n1, s1] = Automerge.receiveSyncMessage(n1, s1, m2)
+        }
+
+        // both sides should have the same heads, so no further messages are required
+        ;[s1, m1] = Automerge.generateSyncMessage(n1, s1)
+        assert.deepStrictEqual(m1, null)
         ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
         assert.strictEqual(m2, null)
       })
@@ -973,20 +988,36 @@ describe("Data sync protocol", () => {
         n2 = Automerge.init<any>("89abcdef")
       let s1 = initSyncState(),
         s2 = initSyncState()
-      let message: Automerge.SyncMessage | null = null
+
+      let m1: Automerge.SyncMessage | null = null
+      let m2: Automerge.SyncMessage | null = null
 
       for (let i = 0; i < 3; i++)
         n1 = Automerge.change(n1, { time: 0 }, doc => (doc.x = i))
       ;[n2] = Automerge.applyChanges(n2, Automerge.getAllChanges(n1))
-      ;[s1, message] = Automerge.generateSyncMessage(n1, s1)
-      const decoded = Automerge.decodeSyncMessage(message!)
+
+      // Run one round of sync protocol so both sides have advertised their heads
+      ;[s1, m1] = Automerge.generateSyncMessage(n1, s1)
+      if (m1 != null) {
+        ;[n2, s2] = Automerge.receiveSyncMessage(n2, s2, m1)
+      }
+      ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
+      if (m2 != null) {
+        ;[n1, s1] = Automerge.receiveSyncMessage(n1, s1, m2)
+      }
+
+      // Now hack the last m1 to need a nonexistent hash and send it again
+      const decoded = Automerge.decodeSyncMessage(m1!)
       decoded.need = [
         "0000000000000000000000000000000000000000000000000000000000000000",
       ]
-      message = Automerge.encodeSyncMessage(decoded)
-      ;[n2, s2] = Automerge.receiveSyncMessage(n2, s2, message!)
-      ;[s2, message] = Automerge.generateSyncMessage(n2, s2)
-      assert.strictEqual(message, null)
+      m1 = Automerge.encodeSyncMessage(decoded)
+      if (m1 == null) {
+        throw new Error("m1 is null")
+      }
+      ;[n2, s2] = Automerge.receiveSyncMessage(n2, s2, m1!)
+      ;[s2, m2] = Automerge.generateSyncMessage(n2, s2)
+      assert.strictEqual(m2, null)
     })
 
     it("should allow a subset of changes to be sent", () => {

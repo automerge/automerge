@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::marks::RichText;
-use crate::op_set::OpSet;
 use crate::types::Clock;
 use crate::types::ListEncoding;
 use crate::value::Value;
@@ -19,7 +18,6 @@ pub struct ListRange<'a, R: RangeBounds<usize>> {
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
     pub(crate) fn new(
         iter: TopOps<'a>,
-        op_set: &'a OpSet,
         encoding: ListEncoding,
         range: R,
         clock: Option<Clock>,
@@ -27,7 +25,6 @@ impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
         Self {
             iter: Some(ListRangeInner {
                 iter,
-                op_set,
                 state: 0,
                 encoding,
                 range,
@@ -39,7 +36,6 @@ impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
 
 struct ListRangeInner<'a, R: RangeBounds<usize>> {
     iter: TopOps<'a>,
-    op_set: &'a OpSet,
     state: usize,
     encoding: ListEncoding,
     range: R,
@@ -72,8 +68,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 let index = inner.state;
                 inner.state += op.width(inner.encoding);
                 let value = op.value_at(inner.clock.as_ref());
-                // FIXME
-                let id = inner.op_set.id_to_exid(op.id);
+                let id = op.exid();
                 if inner.range.contains(&index) {
                     return Some(ListRangeItem {
                         index,

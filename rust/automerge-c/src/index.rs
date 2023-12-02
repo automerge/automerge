@@ -56,7 +56,7 @@ impl TryFrom<&AMindex> for usize {
 /// \installed_headerfile
 /// \brief The type of an item's index.
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
+#[repr(C)]
 pub enum AMidxType {
     /// The default tag, not a type signifier.
     Default = 0,

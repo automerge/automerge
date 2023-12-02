@@ -219,7 +219,6 @@
     overflowing_literals,
     path_statements,
     patterns_in_fns_without_body,
-    private_in_public,
     unconditional_recursion,
     unused,
     unused_allocation,
@@ -291,7 +290,7 @@ mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
-pub use crate::automerge::{Automerge, OnPartialLoad, SaveOptions};
+pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};

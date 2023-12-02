@@ -1,7 +1,7 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src"
-import { assertEqualsOneOf } from "./helpers"
-import { decodeChange } from "./legacy/columnar"
+import { next as Automerge } from "../src/index.js"
+import { assertEqualsOneOf } from "./helpers.js"
+import { decodeChange } from "./legacy/columnar.js"
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@([0-9a-f][0-9a-f])*$/
@@ -500,16 +500,16 @@ describe("Automerge", () => {
         Automerge.change(s1, doc => {
           assert.throws(() => {
             doc.foo = undefined
-          }, /Unsupported type of value: undefined/)
+          }, /Unsupported type undefined for path \/foo/)
           assert.throws(() => {
             doc.foo = { prop: undefined }
-          }, /Unsupported type of value: undefined/)
+          }, /Unsupported type undefined for path \/foo\/prop/)
           assert.throws(() => {
             doc.foo = () => {}
-          }, /Unsupported type of value: function/)
+          }, /Unsupported type function for path \/foo/)
           assert.throws(() => {
             doc.foo = Symbol("foo")
-          }, /Unsupported type of value: symbol/)
+          }, /Unsupported type symbol for path \/foo/)
         })
       })
     })

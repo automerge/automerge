@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
-import { create, load, initSyncState } from '..'
+import { create, load, initSyncState } from '../nodejs/automerge_wasm.cjs'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {

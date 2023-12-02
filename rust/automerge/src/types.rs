@@ -1,11 +1,8 @@
 use crate::error;
 use crate::legacy as amp;
-use crate::text_value::TextValue;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::cmp::Eq;
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -19,7 +16,8 @@ pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
 pub(crate) use crate::marks::MarkData;
-pub(crate) use crate::value::{Counter, ScalarValue, Value};
+pub(crate) use crate::op_set::{Op, OpBuilder};
+pub(crate) use crate::value::{ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
 pub(crate) const ROOT: OpId = OpId(0, 0);
@@ -374,6 +372,12 @@ impl From<OpId> for ObjId {
     }
 }
 
+impl From<&OpId> for ObjId {
+    fn from(o: &OpId) -> Self {
+        ObjId(*o)
+    }
+}
+
 impl From<OpId> for ElemId {
     fn from(o: OpId) -> Self {
         ElemId(o)
@@ -530,6 +534,11 @@ impl OpId {
     }
 
     #[inline]
+    pub(crate) fn minus(&self, n: usize) -> OpId {
+        OpId(self.0 - n as u32, self.1)
+    }
+
+    #[inline]
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
     }
@@ -572,11 +581,6 @@ pub(crate) struct ObjMeta {
 }
 
 impl ObjMeta {
-    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
-        let encoding = typ.into();
-        ObjMeta { id, typ, encoding }
-    }
-
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -630,262 +634,6 @@ impl ElemId {
 
     pub(crate) fn head() -> Self {
         Self(OpId(0, 0))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Op {
-    pub(crate) id: OpId,
-    pub(crate) action: OpType,
-    pub(crate) key: Key,
-    pub(crate) succ: OpIds,
-    pub(crate) pred: OpIds,
-    pub(crate) insert: bool,
-}
-
-pub(crate) enum SuccIter<'a> {
-    Counter(HashSet<&'a OpId>, std::slice::Iter<'a, OpId>),
-    NonCounter(std::slice::Iter<'a, OpId>),
-}
-
-impl<'a> Iterator for SuccIter<'a> {
-    type Item = &'a OpId;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Counter(set, iter) => {
-                for i in iter {
-                    if !set.contains(i) {
-                        return Some(i);
-                    }
-                }
-                None
-            }
-            Self::NonCounter(iter) => iter.next(),
-        }
-    }
-}
-
-impl Op {
-    pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
-        self.succ.add(op.id, cmp);
-        if let OpType::Increment(n) = &op.action {
-            self.increment(*n, op.id);
-        }
-    }
-
-    pub(crate) fn succ_iter(&self) -> SuccIter<'_> {
-        if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
-            let set = c
-                .increments
-                .iter()
-                .map(|(id, _)| id)
-                .collect::<HashSet<_>>();
-            SuccIter::Counter(set, self.succ.iter())
-        } else {
-            SuccIter::NonCounter(self.succ.iter())
-        }
-    }
-
-    pub(crate) fn increment(&mut self, n: i64, id: OpId) {
-        if let OpType::Put(ScalarValue::Counter(c)) = &mut self.action {
-            c.current += n;
-            c.increments.push((id, n));
-        }
-    }
-
-    pub(crate) fn remove_succ(&mut self, op: &Op) {
-        self.succ.retain(|id| id != &op.id);
-        if let OpType::Put(ScalarValue::Counter(Counter {
-            current,
-            increments,
-            ..
-        })) = &mut self.action
-        {
-            if let OpType::Increment(n) = &op.action {
-                *current -= *n;
-                increments.retain(|(id, _)| id != &op.id);
-            }
-        }
-    }
-
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        match encoding {
-            ListEncoding::List => 1,
-            ListEncoding::Text => TextValue::width(self.to_str()),
-        }
-    }
-
-    pub(crate) fn to_str(&self) -> &str {
-        self.action.to_str()
-    }
-
-    pub(crate) fn visible_block(&self) -> Option<OpId> {
-        if self.visible() {
-            self.block_id()
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() || self.is_mark() {
-            false
-        } else if self.is_counter() {
-            self.succ.len() <= self.incs()
-        } else {
-            self.succ.is_empty()
-        }
-    }
-
-    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
-        if let Some(clock) = clock {
-            if self.is_inc() || self.is_mark() {
-                false
-            } else {
-                clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
-            }
-        } else {
-            self.visible()
-        }
-    }
-
-    pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
-        if self.is_inc() {
-            false
-        } else if let Some(clock) = clock {
-            clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
-        } else if self.is_counter() {
-            self.succ.len() <= self.incs()
-        } else {
-            self.succ.is_empty()
-        }
-    }
-
-    pub(crate) fn incs(&self) -> usize {
-        if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
-            increments.len()
-        } else {
-            0
-        }
-    }
-
-    pub(crate) fn is_put(&self) -> bool {
-        matches!(&self.action, OpType::Put(_))
-    }
-
-    pub(crate) fn is_delete(&self) -> bool {
-        matches!(&self.action, OpType::Delete)
-    }
-
-    pub(crate) fn is_inc(&self) -> bool {
-        matches!(&self.action, OpType::Increment(_))
-    }
-
-    pub(crate) fn is_counter(&self) -> bool {
-        matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
-    }
-
-    pub(crate) fn is_mark(&self) -> bool {
-        self.action.is_mark()
-    }
-
-    pub(crate) fn is_noop(&self, action: &OpType) -> bool {
-        matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
-    }
-
-    pub(crate) fn is_list_op(&self) -> bool {
-        matches!(&self.key, Key::Seq(_))
-    }
-
-    pub(crate) fn overwrites(&self, other: &Op) -> bool {
-        self.pred.iter().any(|i| i == &other.id)
-    }
-
-    pub(crate) fn elemid(&self) -> Option<ElemId> {
-        if self.insert {
-            Some(ElemId(self.id))
-        } else if let Key::Seq(e) = self.key {
-            Some(e)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn block_id(&self) -> Option<OpId> {
-        if self.action.is_block() {
-            if self.insert {
-                return Some(self.id);
-            } else if let Key::Seq(ElemId(id)) = &self.key {
-                return Some(*id);
-            }
-        }
-        None
-    }
-
-    pub(crate) fn elemid_or_key(&self) -> Key {
-        if self.insert {
-            Key::Seq(ElemId(self.id))
-        } else {
-            self.key
-        }
-    }
-
-    pub(crate) fn get_increment_value(&self) -> Option<i64> {
-        if let OpType::Increment(i) = self.action {
-            Some(i)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'_> {
-        if let Some(clock) = clock {
-            if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
-                return Value::counter(c.value_at(clock));
-            }
-        }
-        self.value()
-    }
-
-    pub(crate) fn scalar_value(&self) -> Option<&ScalarValue> {
-        match &self.action {
-            OpType::Put(scalar) => Some(scalar),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn value(&self) -> Value<'_> {
-        match &self.action {
-            OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
-            OpType::MarkBegin(_, mark) => {
-                Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
-            }
-            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
-            _ => panic!("cant convert op into a value - {:?}", self),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn dump(&self) -> String {
-        match &self.action {
-            OpType::Put(value) if self.insert => format!("i:{}", value),
-            OpType::Put(value) => format!("s:{}", value),
-            OpType::Make(obj) => format!("make{}", obj),
-            OpType::Increment(val) => format!("inc:{}", val),
-            OpType::Delete => "del".to_string(),
-            OpType::MarkBegin(_, _) => "markBegin".to_string(),
-            OpType::MarkEnd(_) => "markEnd".to_string(),
-        }
-    }
-
-    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
-        self.succ_iter().any(|i| clock.covers(i))
-    }
-
-    pub(crate) fn predates(&self, clock: &Clock) -> bool {
-        clock.covers(&self.id)
     }
 }
 
@@ -982,8 +730,10 @@ impl From<Prop> for wasm_bindgen::JsValue {
 #[cfg(test)]
 pub(crate) mod gen {
     use super::{
-        ChangeHash, Counter, ElemId, Key, ObjType, Op, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
+        ChangeHash, ElemId, Key, ObjType, OpBuilder, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
     };
+    use crate::value::Counter;
+
     use proptest::prelude::*;
 
     pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
@@ -1039,9 +789,12 @@ pub(crate) mod gen {
     /// * `id` - the OpId this op will be given
     /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
     ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
-    pub(crate) fn gen_op(id: OpId, key_prop_indices: Vec<usize>) -> impl Strategy<Value = Op> {
+    pub(crate) fn gen_op(
+        id: OpId,
+        key_prop_indices: Vec<usize>,
+    ) -> impl Strategy<Value = OpBuilder> {
         (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
-            move |(key, insert, action)| Op {
+            move |(key, insert, action)| OpBuilder {
                 id,
                 key,
                 insert,

@@ -12,4 +12,5 @@ yarn --cwd $E2E_PROJECT install;
 # repository, then run `yarn build` in the `javascript` directory with
 # the local registry
 yarn --cwd $E2E_PROJECT e2e buildjs;
+yarn --cwd $JS_PROJECT check-fmt
 yarn --cwd $JS_PROJECT test

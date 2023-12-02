@@ -1,8 +1,8 @@
 /** @hidden **/
-export { /** @hidden */ uuid } from "./uuid"
+export { /** @hidden */ uuid } from "./uuid.js"
 
-import { rootProxy } from "./proxies"
-import { STATE } from "./constants"
+import { rootProxy } from "./proxies.js"
+import { STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -11,7 +11,7 @@ import {
   type PatchCallback,
   type Patch,
   type PatchSource,
-} from "./types"
+} from "./types.js"
 export {
   type AutomergeValue,
   Counter,
@@ -24,10 +24,10 @@ export {
   type ScalarValue,
   type PatchInfo,
   type PatchSource,
-} from "./types"
+} from "./types.js"
 
-import { Text } from "./text"
-export { Text } from "./text"
+import { Text } from "./text.js"
+export { Text } from "./text.js"
 
 import type {
   API as WasmAPI,
@@ -59,17 +59,20 @@ const SyncStateSymbol = Symbol("_syncstate")
 /**
  * An opaque type tracking the state of sync with a remote peer
  */
-type SyncState = JsSyncState & { _opaque: typeof SyncStateSymbol }
+type SyncState = JsSyncState & {
+  /** @hidden */
+  _opaque: typeof SyncStateSymbol
+}
 
-import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level"
+import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
 
 import { Automerge } from "@automerge/automerge-wasm"
 
-import { RawString } from "./raw_string"
+import { RawString } from "./raw_string.js"
 
-import { _state, _is_proxy, _trace, _obj } from "./internal_state"
+import { _state, _is_proxy, _trace, _obj } from "./internal_state.js"
 
-import { stableConflictAt } from "./conflicts"
+import { stableConflictAt } from "./conflicts.js"
 
 /** Options passed to {@link change}, and {@link emptyChange}
  * @typeParam T - The type of value contained in the document
@@ -162,6 +165,8 @@ export type InitOptions<T> = {
   unchecked?: boolean
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
+  /** @hidden */
+  convertRawStringsToText?: boolean
 }
 
 /** @hidden */
@@ -469,19 +474,27 @@ function progressDocument<T>(
   }
   const state = _state(doc)
   const nextState = { ...state, heads: undefined }
-  let nextDoc
-  if (callback != null) {
-    const { value, patches } = state.handle.applyAndReturnPatches(
-      doc,
-      nextState,
-    )
-    if (patches.length > 0) {
-      callback(patches, { before: doc, after: value, source })
+
+  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches(
+    doc,
+    nextState,
+  )
+
+  if (patches.length > 0) {
+    if (callback != null) {
+      callback(patches, { before: doc, after: nextDoc, source })
     }
-    nextDoc = value
-  } else {
-    nextDoc = state.handle.applyPatches(doc, nextState)
+
+    const newState = _state(nextDoc)
+
+    newState.mostRecentPatch = {
+      before: _state(doc).heads,
+      after: newState.handle.getHeads(),
+      patches,
+      source,
+    }
   }
+
   state.heads = heads
   return nextDoc
 }
@@ -510,17 +523,21 @@ function _change<T>(
   if (_is_proxy(doc)) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
+  let heads = state.handle.getHeads()
+  if (scope && headsEqual(scope, heads)) {
+    scope = undefined
+  }
   if (scope) {
     state.handle.isolate(scope)
+    heads = scope
   }
-  const heads = state.handle.getHeads()
   try {
     state.heads = heads
     const root: T = rootProxy(state.handle, state.textV2)
     callback(root)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
-      if (scope != null) {
+      if (scope) {
         state.handle.integrate()
       }
       return {
@@ -610,11 +627,13 @@ export function load<T>(
   const text_v1 = !(opts.enableTextV2 || false)
   const unchecked = opts.unchecked || false
   const allowMissingDeps = opts.allowMissingChanges || false
+  const convertRawStringsToText = opts.convertRawStringsToText || false
   const handle = ApiHandler.load(data, {
     text_v1,
     actor,
     unchecked,
     allowMissingDeps,
+    convertRawStringsToText,
   })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
@@ -941,9 +960,36 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  *
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
-export function diff(doc: Doc<any>, before: Heads, after: Heads): Patch[] {
+export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
+  checkHeads(before, "before")
+  checkHeads(after, "after")
   const state = _state(doc)
+  if (
+    state.mostRecentPatch &&
+    equals(state.mostRecentPatch.before, before) &&
+    equals(state.mostRecentPatch.after, after)
+  ) {
+    return state.mostRecentPatch.patches
+  }
   return state.handle.diff(before, after)
+}
+
+function headsEqual(heads1: Heads, heads2: Heads): boolean {
+  if (heads1.length !== heads2.length) {
+    return false
+  }
+  for (let i = 0; i < heads1.length; i++) {
+    if (heads1[i] !== heads2[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+function checkHeads(heads: Heads, fieldname: string) {
+  if (!Array.isArray(heads)) {
+    throw new Error(`${fieldname} must be an array`)
+  }
 }
 
 /** @hidden */
@@ -1131,6 +1177,12 @@ export function isAutomerge(doc: unknown): boolean {
 
 function isObject(obj: unknown): obj is Record<string, unknown> {
   return typeof obj === "object" && obj !== null
+}
+
+export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
+  const state = _state(doc)
+  const result = state.handle.saveSince(heads)
+  return result
 }
 
 export type {

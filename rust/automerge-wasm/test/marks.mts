@@ -2,11 +2,8 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create, load, Automerge, encodeChange, decodeChange } from '..'
+import { create, load, Automerge, encodeChange, decodeChange } from '../nodejs/automerge_wasm.cjs'
 import { v4 as uuid } from "uuid"
-
-
-let util = require('util')
 
 describe('Automerge', () => {
   describe('marks', () => {
@@ -204,7 +201,6 @@ describe('Automerge', () => {
 
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
-      let util = require('util');
       let encoded = decoded.map((c) => encodeChange(c))
       let decoded2 = encoded.map((c) => decodeChange(c))
       let doc2 = create();
@@ -226,7 +222,6 @@ describe('Automerge', () => {
       doc.commit("marks");
       let h2 = doc.getHeads()
       let patches = doc.diffIncremental();
-      let util = require('util')
       assert.deepEqual(patches, [
         { action: 'put', path: [ 'list' ], value: '' },
         {
@@ -633,6 +628,28 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc1.text(text), "The!editor")
       assert.deepEqual(doc1.marks(text), [])
+    })
+
+    it('markAt() can be used to read the marks at a given index', () => {
+      let doc = create()
+      let text = doc.putObject("_root", "text", "aabbcc")
+
+      doc.mark(text, { start: 0, end: 4, expand: "both" }, "bold" , true)
+      doc.mark(text, { start: 2, end: 4, expand: "both" }, "underline" , true)
+
+      doc.splice(text, 4, 0, ">")
+      doc.splice(text, 2, 0, "<")
+
+      assert.deepEqual(doc.marksAt(text, 0), { "bold": true })
+      assert.deepEqual(doc.marksAt(text, 1), { "bold": true })
+
+      assert.deepEqual(doc.marksAt(text, 2), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 3), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 4), { "bold": true, "underline": true })
+      assert.deepEqual(doc.marksAt(text, 5), { "bold": true, "underline": true })
+
+      assert.deepEqual(doc.marksAt(text, 6), { })
+      assert.deepEqual(doc.marksAt(text, 7), { })
     })
   })
 })

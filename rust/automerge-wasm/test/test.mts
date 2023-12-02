@@ -1,10 +1,9 @@
 import { describe, it } from 'mocha';
 import assert from 'assert'
 // @ts-ignore
-import { BloomFilter } from './helpers/sync'
-import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
-import { Value, DecodedSyncMessage, Hash } from '..';
-import {kill} from 'process';
+import { BloomFilter } from './helpers/sync.mjs'
+import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../nodejs/automerge_wasm.cjs'
+import { DecodedSyncMessage, Hash } from '../nodejs/automerge_wasm.cjs';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
@@ -271,6 +270,21 @@ describe('Automerge', () => {
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
       assert.deepEqual(docA.save(), docC.save());
+    })
+
+    it("should be able to save since a given heads", () => {
+      const doc = create()
+
+      doc.put("_root", "foo", 1)
+      const heads = doc.getHeads()
+      doc.saveIncremental()
+
+      doc.put("_root", "bar", 2)
+
+      const saveIncremental = doc.saveIncremental()
+      const saveSince = doc.saveSince(heads)
+      assert.deepEqual(saveIncremental, saveSince)
+
     })
 
     it('should be able to splice text', () => {
@@ -981,17 +995,27 @@ describe('Automerge', () => {
       assert.deepStrictEqual(message.changes, [])
     })
 
-    it('should not reply if we have no data as well', () => {
+    it('should not reply if we have no data as well after the first round', () => {
       const n1 = create(), n2 = create()
       const s1 = initSyncState(), s2 = initSyncState()
-      const m1 = n1.generateSyncMessage(s1)
+      let m1 = n1.generateSyncMessage(s1)
       if (m1 === null) { throw new RangeError("message should not be null") }
       n2.receiveSyncMessage(s2, m1)
-      const m2 = n2.generateSyncMessage(s2)
+      let m2 = n2.generateSyncMessage(s2)
+      // We should always send a message on the first round to advertise our heads
+      assert.notStrictEqual(m2, null)
+      n2.receiveSyncMessage(s2, m2!)   
+
+      // now make a change on n1 so we generate another sync message to send
+      n1.put("_root", "x", 1)
+      m1 = n1.generateSyncMessage(s1)
+      n2.receiveSyncMessage(s2, m2!)
+
+      m2 = n2.generateSyncMessage(s2)
       assert.deepStrictEqual(m2, null)
     })
 
-    it('repos with equal heads do not need a reply message', () => {
+    it('repos with equal heads do not need a reply message after the first round', () => {
       const n1 = create(), n2 = create()
       const s1 = initSyncState(), s2 = initSyncState()
 
@@ -1006,14 +1030,19 @@ describe('Automerge', () => {
       assert.deepStrictEqual(n1.materialize(), n2.materialize())
 
       // generate a naive sync message
-      const m1 = n1.generateSyncMessage(s1)
+      let m1 = n1.generateSyncMessage(s1)
       if (m1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads())
 
-      // heads are equal so this message should be null
+      // process the first response (which is always generated so we know the other ends heads)
       n2.receiveSyncMessage(s2, m1)
       const m2 = n2.generateSyncMessage(s2)
-      assert.strictEqual(m2, null)
+      n1.receiveSyncMessage(s1, m2!)
+
+      // heads are equal so this message should be null
+      m1 = n1.generateSyncMessage(s2)
+      assert.strictEqual(m1, null)
+        
     })
 
     it('n1 should offer all changes to n2 when starting from nothing', () => {
@@ -1497,21 +1526,27 @@ describe('Automerge', () => {
       //                                                                      `-- n2
       // where n2 is a false positive in the Bloom filter containing {n1}.
       // lastSync is c9.
-      let n1 = create({ actor: '01234567'}), n2 = create({ actor: '89abcdef'})
-      let s1 = initSyncState(), s2 = initSyncState()
+      let n1 = create({ actor: '01234567'}), n2 = create({ actor: '89abcdef'});
+      let s1 = initSyncState(), s2 = initSyncState();
 
       for (let i = 0; i < 10; i++) {
-        n1.put("_root", "x", i); n1.commit("", 0)
+        n1.put("_root", "x", i); n1.commit("", 0);
       }
 
-      sync(n1, n2, s1, s2)
+      sync(n1, n2, s1, s2);
       for (let i = 1; ; i++) { // search for false positive; see comment above
         const n1up = n1.clone('01234567');
-        n1up.put("_root", "x", `${i} @ n1`); n1up.commit("", 0)
+        n1up.put("_root", "x", `${i} @ n1`);
+        n1up.commit("", 0);
+
         const n2up = n2.clone('89abcdef');
-        n2up.put("_root", "x", `${i} @ n2`); n2up.commit("", 0)
-        if (new BloomFilter(n1up.getHeads()).containsHash(n2up.getHeads()[0])) {
-          n1 = n1up; n2 = n2up; break
+        n2up.put("_root", "x", `${i} @ n2`);
+        n2up.commit("", 0);
+        const falsePositive = (new BloomFilter(n1up.getHeads())).containsHash(n2up.getHeads()[0]);
+        if (falsePositive) {
+          n1 = n1up;
+          n2 = n2up;
+          break;
         }
       }
       const allHeads = [...n1.getHeads(), ...n2.getHeads()].sort()
@@ -1878,6 +1913,11 @@ describe('Automerge', () => {
         }
 
         n2.applyChanges(n1.getChanges([]))
+        // n2 will always generate at least one sync message to advertise it's
+        // heads so we generate that message now. This means that we should
+        // not generate a message responding to the request for a nonexistent
+        // change because we already sent the first message
+        n2.generateSyncMessage(s2)
         message = n1.generateSyncMessage(s1)
         if (message === null) { throw new RangeError("message should not be null") }
         message = decodeSyncMessage(message)

@@ -1,51 +1,52 @@
 use crate::error::AutomergeError;
 use crate::marks::RichText;
+use crate::op_set::Op;
 use crate::op_tree::OpTreeNode;
-use crate::query::{ListState, OpSetMetadata, OpTree, QueryResult, RichTextQueryState, TreeQuery};
-use crate::types::{Clock, Key, ListEncoding, Op, OpId, OpType, HEAD};
+use crate::query::{ListState, OpSetData, OpTree, QueryResult, RichTextQueryState, TreeQuery};
+use crate::types::{Clock, Key, ListEncoding, OpType, HEAD};
 use std::fmt::Debug;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertNth<'a> {
-    idx: ListState,
+    list_state: ListState,
     clock: Option<Clock>,
     last_visible_key: Option<Key>,
-    candidates: Vec<Loc>,
+    candidates: Vec<Loc<'a>>,
     marks: RichTextQueryState<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Loc {
+struct Loc<'a> {
     key: Key,
     pos: usize,
-    id: Option<OpId>,
+    id: Option<Op<'a>>,
 }
 
-impl Loc {
+impl<'a> Loc<'a> {
     fn new(pos: usize, key: Key) -> Self {
         Loc { key, pos, id: None }
     }
 
-    fn mark(pos: usize, key: Key, id: OpId) -> Self {
+    fn mark(pos: usize, key: Key, op: Op<'a>) -> Self {
         Loc {
             key,
             pos,
-            id: Some(id),
+            id: Some(op),
         }
     }
 
-    fn matches(&self, op: &Op) -> bool {
-        self.id == Some(op.id.prev())
+    fn matches(&self, op: Op<'a>) -> bool {
+        self.id.map(|o| o.id()) == Some(&op.id().prev())
     }
 }
 
 impl<'a> InsertNth<'a> {
     pub(crate) fn new(target: usize, encoding: ListEncoding, clock: Option<Clock>) -> Self {
-        let idx = ListState::new(encoding, target);
+        let list_state = ListState::new(encoding, target);
         if target == 0 {
             InsertNth {
-                idx,
+                list_state,
                 last_visible_key: None,
                 candidates: vec![Loc::new(0, Key::Seq(HEAD))],
                 clock,
@@ -53,7 +54,7 @@ impl<'a> InsertNth<'a> {
             }
         } else {
             InsertNth {
-                idx,
+                list_state,
                 last_visible_key: None,
                 candidates: vec![],
                 clock,
@@ -62,15 +63,15 @@ impl<'a> InsertNth<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, m: &OpSetMetadata) -> Option<Arc<RichText>> {
-        RichText::from_query_state(&self.marks, m)
+    pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<RichText>> {
+        RichText::from_query_state(&self.marks, osd)
     }
 
     pub(crate) fn pos(&self) -> usize {
         self.candidates
             .last()
             .map(|loc| loc.pos)
-            .unwrap_or(self.idx.pos())
+            .unwrap_or(self.list_state.pos())
     }
 
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
@@ -78,25 +79,25 @@ impl<'a> InsertNth<'a> {
             .last()
             .map(|loc| loc.key)
             .or(self.last_visible_key)
-            .ok_or(AutomergeError::InvalidIndex(self.idx.target()))
+            .ok_or(AutomergeError::InvalidIndex(self.list_state.target()))
     }
 
-    fn identify_valid_insertion_spot(&mut self, op: &'a Op, key: &Key) {
-        if !self.idx.done() {
+    fn identify_valid_insertion_spot(&mut self, op: Op<'a>, key: &Key) {
+        if !self.list_state.done() {
             return;
         }
 
-        // first insert we see after idx.done()
-        if op.insert && self.candidates.is_empty() && self.last_visible_key.is_some() {
+        // first insert we see after list_state.done()
+        if op.insert() && self.candidates.is_empty() && self.last_visible_key.is_some() {
             if let Some(key) = self.last_visible_key {
-                self.candidates.push(Loc::new(self.idx.pos(), key))
+                self.candidates.push(Loc::new(self.list_state.pos(), key))
             }
         }
 
         // sticky marks
         if !self.candidates.is_empty() {
             // if we find a begin/end pair - ignore them
-            if let OpType::MarkEnd(_) = &op.action {
+            if let OpType::MarkEnd(_) = op.action() {
                 if let Some(pos) = self.candidates.iter().position(|loc| loc.matches(op)) {
                     // mark points between begin and end are invalid
                     self.candidates.truncate(pos);
@@ -104,11 +105,11 @@ impl<'a> InsertNth<'a> {
                 }
             }
             if matches!(
-                op.action,
+                op.action(),
                 OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
             ) {
                 self.candidates
-                    .push(Loc::mark(self.idx.pos() + 1, *key, op.id));
+                    .push(Loc::mark(self.list_state.pos() + 1, *key, op));
             }
         }
     }
@@ -119,9 +120,9 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         self.pos() == other.pos() && self.key() == other.key()
     }
 
-    fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
+    fn can_shortcut_search(&mut self, tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
         if let Some(last) = &tree.last_insert {
-            if last.index + last.width == self.idx.target() {
+            if last.index + last.width == self.list_state.target() {
                 self.candidates.push(Loc::new(last.pos + 1, last.key));
                 return true;
             }
@@ -129,27 +130,33 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         false
     }
 
-    fn query_node(&mut self, child: &'a OpTreeNode, ops: &'a [Op]) -> QueryResult {
-        self.idx.check_if_node_is_clean(child);
+    fn query_node(&mut self, child: &'a OpTreeNode, osd: &'a OpSetData) -> QueryResult {
+        self.list_state.check_if_node_is_clean(child);
         if self.clock.is_none() {
-            self.idx.process_node(child, ops, Some(&mut self.marks))
+            self.list_state
+                .process_node(child, osd, Some(&mut self.marks))
         } else {
             QueryResult::Descend
         }
     }
 
-    fn query_element(&mut self, op: &'a Op) -> QueryResult {
-        self.marks.process(op);
+    fn query_element(&mut self, op: Op<'a>) -> QueryResult {
+        if !self.list_state.done() {
+            self.marks.process(op);
+        }
         let key = op.elemid_or_key();
         let visible = op.visible_at(self.clock.as_ref());
         self.identify_valid_insertion_spot(op, &key);
         if visible {
             if !self.candidates.is_empty() {
+                for op in self.candidates.iter().filter_map(|c| c.id) {
+                    self.marks.process(op);
+                }
                 return QueryResult::Finish;
             }
             self.last_visible_key = Some(key);
         }
-        self.idx.process_op(op, key, visible);
+        self.list_state.process_op(op, key, visible);
         QueryResult::Next
     }
 }

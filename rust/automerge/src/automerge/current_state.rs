@@ -3,9 +3,10 @@ use std::borrow::Cow;
 use itertools::Itertools;
 
 use crate::iter::{SpanInternal, SpansInternal};
+use crate::types::ObjId;
 use crate::{
     patches::{PatchLog, TextRepresentation},
-    types::{Key, ObjMeta, Op, OpId},
+    types::{Key, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
 
@@ -32,21 +33,21 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
-    for (obj, ops) in doc.ops().iter_objs() {
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_patches(doc, patch_log, &obj, ops)
-        } else if obj.typ.is_sequence() {
-            log_list_patches(doc, patch_log, &obj, ops);
+    for (obj, obj_type, ops) in doc.ops().iter_objs() {
+        if obj_type == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_patches(doc, patch_log, *obj, ops)
+        } else if obj_type.is_sequence() {
+            log_list_patches(doc, patch_log, *obj, ops);
         } else {
-            log_map_patches(doc, patch_log, &obj, ops);
+            log_map_patches(doc, patch_log, *obj, ops);
         }
     }
 }
 
-fn log_text_patches<'a, I: Iterator<Item = &'a Op> + Clone>(
+fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: ObjId,
     ops: I,
 ) {
     let spans = SpansInternal::new(ops, doc, None);
@@ -63,10 +64,10 @@ fn log_text_patches<'a, I: Iterator<Item = &'a Op> + Clone>(
     }
 }
 
-fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
     _doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: ObjId,
     ops: I,
 ) {
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
@@ -76,9 +77,9 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
         .filter_map(|(_key, key_ops)| {
             key_ops
                 .filter(|o| o.visible_or_mark(None))
-                .filter_map(|o| match &o.action {
-                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id)),
-                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id)),
+                .filter_map(|o| match o.action() {
+                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id())),
+                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id())),
                     _ => None,
                 })
                 .enumerate()
@@ -91,22 +92,22 @@ fn log_list_patches<'a, I: Iterator<Item = &'a Op>>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            patch_log.insert(obj, index, value.clone().into(), opid, conflict);
+            patch_log.insert(obj, index, value.clone().into(), *opid, conflict);
         });
 }
 
-fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_key_patches<'a, I: Iterator<Item = Op<'a>>>(
     (key, key_ops): (Key, I),
 ) -> Option<(usize, Put<'a>)> {
     key_ops
         .filter(|o| o.visible())
-        .filter_map(|o| match &o.action {
+        .filter_map(|o| match o.action() {
             OpType::Make(obj_type) => {
                 let value = Value::Object(*obj_type);
                 Some(Put {
                     value,
                     key,
-                    id: o.id,
+                    id: *o.id(),
                 })
             }
             OpType::Put(value) => {
@@ -114,7 +115,7 @@ fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
                 Some(Put {
                     value,
                     key,
-                    id: o.id,
+                    id: *o.id(),
                 })
             }
             _ => None,
@@ -123,19 +124,19 @@ fn log_map_key_patches<'a, I: Iterator<Item = &'a Op>>(
         .last()
 }
 
-fn log_map_patches<'a, I: Iterator<Item = &'a Op>>(
+fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
+    obj: ObjId,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| o.key);
+    let ops_by_key = ops.group_by(|o| *o.key());
     ops_by_key
         .into_iter()
         .filter_map(log_map_key_patches)
         .for_each(|(i, put)| {
             if let Some(prop_index) = put.key.prop_index() {
-                if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
+                if let Some(key) = doc.ops().osd.props.safe_get(prop_index) {
                     let conflict = i > 0;
                     patch_log.put_map(obj, key, put.value.into(), put.id, conflict, false);
                 }
@@ -669,11 +670,12 @@ mod tests {
         }
 
         let mut patch_log = PatchLog::active(TextRepresentation::String);
-        let _doc = Automerge::load_with(
+        let _doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
-            crate::OnPartialLoad::Error,
-            crate::storage::VerificationMode::Check,
-            &mut patch_log,
+            crate::LoadOptions::new()
+                .on_partial_load(crate::OnPartialLoad::Error)
+                .verification_mode(crate::VerificationMode::Check)
+                .patch_log(&mut patch_log),
         )
         .unwrap();
         let p = _doc.make_patches(&mut patch_log);

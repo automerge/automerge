@@ -4,11 +4,11 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::exid::ExId;
-use crate::op_tree::OpSetMetadata;
+use crate::op_set::Op;
+use crate::op_tree::OpSetData;
 use crate::port::Exportable;
-use crate::port::HasMetadata;
 use crate::query::RichTextQueryState;
-use crate::types::{ObjType, Op, OpId, OpType};
+use crate::types::{ObjType, OpId, OpType};
 use crate::value::ScalarValue;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -120,6 +120,10 @@ impl RichText {
         &self.marks
     }
 
+    pub fn len(&self) -> usize {
+        self.marks.len()
+    }
+
     fn insert(&mut self, name: SmolStr, value: ScalarValue) {
         self.marks.insert(name, value);
     }
@@ -128,7 +132,7 @@ impl RichText {
         self.marks.remove(name);
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.inner().is_empty() && self.block.is_none()
     }
 
@@ -156,10 +160,7 @@ impl RichText {
         }
     }
 
-    pub(crate) fn from_query_state(
-        q: &RichTextQueryState<'_>,
-        m: &OpSetMetadata,
-    ) -> Option<Arc<Self>> {
+    pub(crate) fn from_query_state(q: &RichTextQueryState<'_>, m: &OpSetData) -> Option<Arc<Self>> {
         let mut marks = RichTextStateMachine::with_block(q.block().export(m));
         for (id, mark_data) in q.iter() {
             marks.mark_begin(*id, mark_data, m);
@@ -239,22 +240,22 @@ impl<'a> RichTextStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process<M: HasMetadata>(&mut self, op: &'a Op, m: &M) -> bool {
-        match &op.action {
-            OpType::MarkBegin(_, data) => self.mark_begin(op.id, data, m.meta()),
-            OpType::MarkEnd(_) => self.mark_end(op.id, m.meta()),
+    pub(crate) fn process(&mut self, op: Op<'a>, osd: &'a OpSetData) -> bool {
+        match op.action() {
+            OpType::MarkBegin(_, data) => self.mark_begin(*op.id(), data, osd),
+            OpType::MarkEnd(_) => self.mark_end(*op.id(), osd),
             OpType::Make(ObjType::Map) => {
-                Arc::make_mut(&mut self.current).block = Some(op.id.export(m));
+                Arc::make_mut(&mut self.current).block = Some(op.exid());
                 false
             }
             _ => false,
         }
     }
 
-    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, m: &OpSetMetadata) -> bool {
+    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {
         let mut result = false;
 
-        let index = match self.find(id.prev(), m).err() {
+        let index = match self.find(id.prev(), osd).err() {
             Some(index) => index,
             None => return false,
         };
@@ -277,9 +278,9 @@ impl<'a> RichTextStateMachine<'a> {
         result
     }
 
-    pub(crate) fn mark_end(&mut self, id: OpId, m: &OpSetMetadata) -> bool {
+    pub(crate) fn mark_end(&mut self, id: OpId, osd: &OpSetData) -> bool {
         let mut result = false;
-        let index = match self.find(id.prev(), m).ok() {
+        let index = match self.find(id.prev(), osd).ok() {
             Some(index) => index,
             None => return false,
         };
@@ -304,9 +305,9 @@ impl<'a> RichTextStateMachine<'a> {
         result
     }
 
-    fn find(&self, target: OpId, m: &OpSetMetadata) -> Result<usize, usize> {
+    fn find(&self, target: OpId, osd: &OpSetData) -> Result<usize, usize> {
         self.state
-            .binary_search_by(|probe| m.lamport_cmp(probe.0, target))
+            .binary_search_by(|probe| osd.lamport_cmp(probe.0, target))
     }
 
     fn mark_above<'b>(

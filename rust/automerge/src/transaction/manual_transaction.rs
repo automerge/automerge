@@ -4,7 +4,7 @@ use crate::exid::ExId;
 use crate::hydrate;
 use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{ExpandMark, Mark};
+use crate::marks::{ExpandMark, Mark, RichText};
 use crate::patches::PatchLog;
 use crate::types::Clock;
 use crate::AutomergeError;
@@ -251,12 +251,14 @@ impl<'a> ReadDoc for Transaction<'a> {
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
-    fn hydrate<O: AsRef<ExId>>(
+    fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,
+        index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<hydrate::Value, AutomergeError> {
-        self.doc.hydrate(obj, heads)
+    ) -> Result<RichText, AutomergeError> {
+        self.doc
+            .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -276,6 +278,14 @@ impl<'a> ReadDoc for Transaction<'a> {
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
             .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate(obj, heads)
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -395,7 +405,8 @@ impl<'a> Transactable for Transaction<'a> {
         del: isize,
         vals: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
+        self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))?;
+        Ok(())
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -405,7 +416,8 @@ impl<'a> Transactable for Transaction<'a> {
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))
+        self.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))?;
+        Ok(())
     }
 
     fn mark<O: AsRef<ExId>>(

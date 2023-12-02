@@ -1,5 +1,6 @@
 use crate::types::{ObjId, Op};
 use fxhash::FxHasher;
+use std::fmt::Write;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
 use rand::Rng;
@@ -20,13 +21,13 @@ pub(crate) struct Node<'a> {
     id: NodeId,
     children: Vec<NodeId>,
     node_type: NodeType<'a>,
-    metadata: &'a crate::op_set::OpSetMetadata,
+    osd: &'a crate::op_set::OpSetData,
 }
 
 #[derive(Clone)]
 pub(crate) enum NodeType<'a> {
     ObjRoot(crate::types::ObjId),
-    ObjTreeNode(ObjId, &'a crate::op_tree::OpTreeNode, &'a [Op]),
+    ObjTreeNode(ObjId, &'a crate::op_tree::OpTreeNode),
 }
 
 #[derive(Clone)]
@@ -47,18 +48,12 @@ impl<'a> GraphVisualisation<'a> {
             crate::op_tree::OpTree,
             BuildHasherDefault<FxHasher>,
         >,
-        metadata: &'a crate::op_set::OpSetMetadata,
+        osd: &'a crate::op_set::OpSetData,
     ) -> GraphVisualisation<'a> {
         let mut nodes = HashMap::new();
         for (obj_id, tree) in trees {
             if let Some(root_node) = &tree.internal.root_node {
-                let tree_id = Self::construct_nodes(
-                    root_node,
-                    &tree.internal.ops,
-                    obj_id,
-                    &mut nodes,
-                    metadata,
-                );
+                let tree_id = Self::construct_nodes(root_node, obj_id, &mut nodes, osd);
                 let obj_tree_id = NodeId::default();
                 nodes.insert(
                     obj_tree_id,
@@ -66,13 +61,13 @@ impl<'a> GraphVisualisation<'a> {
                         id: obj_tree_id,
                         children: vec![tree_id],
                         node_type: NodeType::ObjRoot(*obj_id),
-                        metadata,
+                        osd,
                     },
                 );
             }
         }
         let mut actor_shorthands = HashMap::new();
-        for actor in 0..metadata.actors.len() {
+        for actor in 0..osd.actors.len() {
             actor_shorthands.insert(actor, format!("actor{}", actor));
         }
         GraphVisualisation {
@@ -83,15 +78,14 @@ impl<'a> GraphVisualisation<'a> {
 
     fn construct_nodes(
         node: &'a crate::op_tree::OpTreeNode,
-        ops: &'a [Op],
         objid: &ObjId,
         nodes: &mut HashMap<NodeId, Node<'a>>,
-        m: &'a crate::op_set::OpSetMetadata,
+        osd: &'a crate::op_set::OpSetData,
     ) -> NodeId {
         let node_id = NodeId::default();
         let mut child_ids = Vec::new();
         for child in &node.children {
-            let child_id = Self::construct_nodes(child, ops, objid, nodes, m);
+            let child_id = Self::construct_nodes(child, objid, nodes, osd);
             child_ids.push(child_id);
         }
         nodes.insert(
@@ -99,8 +93,8 @@ impl<'a> GraphVisualisation<'a> {
             Node {
                 id: node_id,
                 children: child_ids,
-                node_type: NodeType::ObjTreeNode(*objid, node, ops),
-                metadata: m,
+                node_type: NodeType::ObjTreeNode(*objid, node),
+                osd,
             },
         );
         node_id
@@ -145,7 +139,7 @@ impl<'a> dot::Labeller<'a, &'a Node<'a>, Edge> for GraphVisualisation<'a> {
 
     fn node_shape(&'a self, node: &&'a Node<'a>) -> Option<dot::LabelText<'a>> {
         let shape = match node.node_type {
-            NodeType::ObjTreeNode(_, _, _) => dot::LabelText::label("none"),
+            NodeType::ObjTreeNode(_, _) => dot::LabelText::label("none"),
             NodeType::ObjRoot(_) => dot::LabelText::label("ellipse"),
         };
         Some(shape)
@@ -153,8 +147,8 @@ impl<'a> dot::Labeller<'a, &'a Node<'a>, Edge> for GraphVisualisation<'a> {
 
     fn node_label(&'a self, n: &&Node<'a>) -> dot::LabelText<'a> {
         match n.node_type {
-            NodeType::ObjTreeNode(objid, tree_node, ops) => dot::LabelText::HtmlStr(
-                OpTable::create(tree_node, ops, &objid, n.metadata, &self.actor_shorthands)
+            NodeType::ObjTreeNode(objid, tree_node) => dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, &objid, n.osd, &self.actor_shorthands)
                     .to_html()
                     .into(),
             ),
@@ -170,17 +164,16 @@ struct OpTable {
 }
 
 impl OpTable {
-    fn create<'a>(
-        node: &'a crate::op_tree::OpTreeNode,
-        ops: &'a [Op],
+    fn create(
+        node: &crate::op_tree::OpTreeNode,
         obj: &ObjId,
-        metadata: &crate::op_set::OpSetMetadata,
+        osd: &crate::op_set::OpSetData,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(&ops[*e], obj, metadata, actor_shorthands))
+            .map(|e| OpTableRow::create(e.as_op2(osd), obj, osd, actor_shorthands))
             .collect();
         OpTable { rows }
     }
@@ -229,22 +222,22 @@ impl OpTableRow {
             &self.succ,
             &self.pred,
         ];
-        let row = rows
-            .iter()
-            .map(|r| format!("<td>{}</td>", &r))
-            .collect::<String>();
+        let row = rows.iter().fold(String::new(), |mut output, r| {
+            let _ = write!(output, "<td>{}</td>", r);
+            output
+        });
         format!("<tr>{}</tr>", row)
     }
 }
 
 impl OpTableRow {
     fn create(
-        op: &super::types::Op,
+        op: Op<'_>,
         obj: &ObjId,
-        metadata: &crate::op_set::OpSetMetadata,
+        osd: &crate::op_set::OpSetData,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
-        let op_description = match &op.action {
+        let op_description = match &op.action() {
             crate::OpType::Delete => "del".to_string(),
             crate::OpType::Put(crate::ScalarValue::F64(v)) => format!("set {:.2}", v),
             crate::OpType::Put(v) => format!("set {}", v),
@@ -253,24 +246,22 @@ impl OpTableRow {
             crate::OpType::MarkBegin(_, m) => format!("markEnd {}", m),
             crate::OpType::MarkEnd(m) => format!("markEnd {}", m),
         };
-        let prop = match op.key {
-            crate::types::Key::Map(k) => metadata.props[k].clone(),
+        let prop = match op.key() {
+            crate::types::Key::Map(k) => osd.props[*k].clone(),
             crate::types::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
-        let succ = op
-            .succ
-            .iter()
-            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
-            .collect();
-        let pred = op
-            .pred
-            .iter()
-            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
-            .collect();
+        let succ = op.succ().iter().fold(String::new(), |mut output, s| {
+            let _ = write!(output, ",{}", print_opid(s, actor_shorthands));
+            output
+        });
+        let pred = op.pred().fold(String::new(), |mut output, p| {
+            let _ = write!(output, ",{}", print_opid(p, actor_shorthands));
+            output
+        });
         OpTableRow {
             op_description,
             obj_id: print_opid(&obj.0, actor_shorthands),
-            op_id: print_opid(&op.id, actor_shorthands),
+            op_id: print_opid(op.id(), actor_shorthands),
             prop,
             succ,
             pred,

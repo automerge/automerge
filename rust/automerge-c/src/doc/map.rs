@@ -70,9 +70,9 @@ pub unsafe extern "C" fn AMmapGet(
     let obj_id = to_obj_id!(obj_id);
     let key = to_str!(key);
     match heads.as_ref() {
-        None => to_result(doc.get(obj_id, key)),
+        None => to_result((doc.get(obj_id, key), key)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => to_result(doc.get_at(obj_id, key, &heads)),
+            Ok(heads) => to_result((doc.get_at(obj_id, key, &heads), key)),
             Err(e) => AMresult::error(&e.to_string()).into(),
         },
     }
@@ -309,7 +309,11 @@ pub unsafe extern "C" fn AMmapPutObject(
     let doc = to_doc_mut!(doc);
     let key = to_str!(key);
     let obj_type = to_obj_type!(obj_type);
-    to_result((doc.put_object(to_obj_id!(obj_id), key, obj_type), obj_type))
+    to_result((
+        doc.put_object(to_obj_id!(obj_id), key, obj_type),
+        key,
+        obj_type,
+    ))
 }
 
 /// \memberof AMdoc

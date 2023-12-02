@@ -1,6 +1,6 @@
 [package]
 name = "automerge-c"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
 edition = "2021"
 license = "MIT"
@@ -16,7 +16,7 @@ doc = false
 automerge = { path = "../automerge" }
 hex = "^0.4.3"
 libc = "^0.2"
-smol_str = "^0.1.21"
+smol_str = "0.2"
 
 [build-dependencies]
 cbindgen = "^0.24"

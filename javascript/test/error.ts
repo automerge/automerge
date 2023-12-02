@@ -1,5 +1,5 @@
-import * as Automerge from "../src"
-import * as assert from "assert"
+import * as Automerge from "../src/index.js"
+import { default as assert } from "assert"
 
 describe("Automerge errors", () => {
   it("proxy handler throws an error, not a string", () => {
