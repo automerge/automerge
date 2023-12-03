@@ -191,6 +191,8 @@ skip = [
 skip-tree = [
     # // We only ever use criterion in benchmarks
     { name = "criterion", version = "0.4.0", depth=10},
+
+    { name = "windows-sys", version = "0.48.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
