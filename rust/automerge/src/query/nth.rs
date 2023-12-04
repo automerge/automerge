@@ -2,8 +2,8 @@ use crate::error::AutomergeError;
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set::Op;
 use crate::op_tree::{OpTree, OpTreeNode};
-use crate::query::{ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
-use crate::types::{Clock, Key, ListEncoding, OpIds};
+use crate::query::{Index, ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
+use crate::types::{Clock, Key, ListEncoding};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -52,10 +52,6 @@ impl<'a> Nth<'a> {
         marks.current().cloned()
     }
 
-    pub(crate) fn pred(&self) -> OpIds {
-        self.osd.sorted_opids(self.ops.iter().map(|op| *op.id()))
-    }
-
     /// Get the key
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         // the query collects the ops so we can use that to get the key they all use
@@ -78,12 +74,6 @@ impl<'a> Nth<'a> {
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
-    /*
-        fn equiv(&mut self, other: &Self) -> bool {
-            self.index() == other.index() && self.key() == other.key()
-        }
-    */
-
     fn can_shortcut_search(&mut self, tree: &'a OpTree, osd: &'a OpSetData) -> bool {
         if self.marks.is_some() {
             // we could cache marks data but we're not now
@@ -93,7 +83,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             if last.index == self.list_state.target().saturating_sub(1) {
                 if let Some(idx) = tree.internal.get(last.pos) {
                     self.list_state.seek(last);
-                    self.ops.push(idx.as_op2(osd));
+                    self.ops.push(idx.as_op(osd));
                     self.ops_pos.push(last.pos);
                     return true;
                 }
@@ -102,11 +92,16 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         false
     }
 
-    fn query_node(&mut self, child: &'a OpTreeNode, osd: &OpSetData) -> QueryResult {
-        self.list_state.check_if_node_is_clean(child);
+    fn query_node(
+        &mut self,
+        child: &'a OpTreeNode,
+        index: &'a Index,
+        osd: &OpSetData,
+    ) -> QueryResult {
+        self.list_state.check_if_node_is_clean(index);
         if self.clock.is_none() {
             self.list_state
-                .process_node(child, osd, self.marks.as_mut())
+                .process_node(child, index, osd, self.marks.as_mut())
         } else {
             QueryResult::Descend
         }

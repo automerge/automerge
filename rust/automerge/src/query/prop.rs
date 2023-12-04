@@ -1,7 +1,6 @@
 use crate::op_set::Op;
 use crate::op_tree::OpTreeNode;
-use crate::query::OpSetData;
-use crate::query::{QueryResult, TreeQuery};
+use crate::query::{Index, OpSetData, QueryResult, TreeQuery};
 use crate::types::{Clock, Key};
 
 use std::cmp::Ordering;
@@ -29,12 +28,10 @@ impl<'a> Prop<'a> {
 }
 
 impl<'a> TreeQuery<'a> for Prop<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, osd: &OpSetData) -> QueryResult {
-        let cmp = child.last().as_op2(osd).key_cmp(&self.key);
+    fn query_node(&mut self, child: &OpTreeNode, index: &Index, osd: &OpSetData) -> QueryResult {
+        let cmp = child.last().as_op(osd).key_cmp(&self.key);
         if cmp == Ordering::Less
-            || (cmp == Ordering::Equal
-                && self.clock.is_none()
-                && !child.index.has_visible(&self.key))
+            || (cmp == Ordering::Equal && self.clock.is_none() && !index.has_visible(&self.key))
         {
             self.pos += child.len();
             QueryResult::Next

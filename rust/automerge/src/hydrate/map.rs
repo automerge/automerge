@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use crate::exid::ExId;
-use crate::types::{OpId, Prop};
+use crate::types::Prop;
 use crate::{PatchAction, ScalarValue};
 
 use super::{HydrateError, Value};
@@ -66,7 +66,7 @@ impl MapValue {
 
     pub(crate) fn increment(&mut self, n: i64) -> Result<(), HydrateError> {
         if let Value::Scalar(ScalarValue::Counter(c)) = &mut self.value {
-            c.increment(n, OpId::new(0, 0));
+            c.increment(n);
             Ok(())
         } else {
             Err(HydrateError::BadIncrement)
