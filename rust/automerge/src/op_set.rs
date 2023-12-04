@@ -52,7 +52,7 @@ pub(crate) struct OpSetInternal {
 impl OpSetInternal {
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), OpTree::new());
+        trees.insert(ObjId::root(), OpTree::new(ObjType::Map));
         OpSetInternal {
             trees,
             length: 0,
@@ -62,7 +62,7 @@ impl OpSetInternal {
 
     pub(crate) fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), OpTree::new());
+        trees.insert(ObjId::root(), OpTree::new(ObjType::Map));
         OpSetInternal {
             trees,
             length: 0,
@@ -338,7 +338,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(typ.is_sequence()),
+                    internal: OpTreeInternal::new(*typ),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),
@@ -361,7 +361,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(false),
+                    internal: OpTreeInternal::new(*typ),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),

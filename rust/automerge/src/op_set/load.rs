@@ -7,6 +7,5 @@ use crate::op_tree::OpSetData;
 use crate::{
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
-    types::ObjId,
 };
 

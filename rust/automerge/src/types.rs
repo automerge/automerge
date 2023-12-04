@@ -484,10 +484,6 @@ impl Display for Prop {
 }
 
 impl Key {
-    pub(crate) fn is_map_key(&self) -> bool {
-        matches!(self, Self::Map(_))
-    }
-
     pub(crate) fn prop_index(&self) -> Option<usize> {
         match self {
             Key::Map(n) => Some(*n),

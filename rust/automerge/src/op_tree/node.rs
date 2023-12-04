@@ -462,7 +462,6 @@ impl OpTreeNode {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
-                        //return self.index.change_vis(vis);
                         return self.index.as_mut().map(|index| index.change_vis(vis));
                     }
                     Ordering::Greater => {

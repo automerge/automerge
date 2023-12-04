@@ -45,10 +45,10 @@ pub(crate) struct LastInsert {
 }
 
 impl OpTree {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(objtype: ObjType) -> Self {
         Self {
-            internal: Default::default(),
-            objtype: ObjType::Map,
+            internal: OpTreeInternal::new(objtype),
+            objtype,
             parent: None,
             last_insert: None,
         }
@@ -204,7 +204,8 @@ pub(crate) struct OpTreeInternal {
 
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
-    pub(crate) fn new(has_index: bool) -> Self {
+    pub(crate) fn new(obj_type: ObjType) -> Self {
+        let has_index = obj_type.is_sequence();
         Self {
             root_node: None,
             has_index,
@@ -346,7 +347,7 @@ impl OpTreeInternal {
         osd: &'a OpSetData,
     ) -> Option<FoundOpId<'a>> {
         let op = idx.as_op(osd);
-        if op.key().is_map_key() {
+        if let Key::Map(_) = op.key() {
             self.seek_map_op(op, clock, osd)
         } else {
             self.seek_list_opid(*op.id(), encoding, clock, osd)
@@ -619,11 +620,13 @@ impl OpTreeInternal {
     }
 }
 
+/*
 impl Default for OpTreeInternal {
     fn default() -> Self {
         Self::new(true)
     }
 }
+*/
 
 /*
 impl PartialEq for OpTreeInternal {
@@ -667,7 +670,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t: OpTree = OpTree::new();
+        let mut t: OpTree = OpTree::new(ObjType::List);
         let mut osd = OpSetData::default();
         let d = &mut osd;
         t.internal.insert(0, op(d), d);
@@ -681,7 +684,7 @@ mod tests {
 
     #[test]
     fn insert_book() {
-        let mut t: OpTree = OpTree::new();
+        let mut t: OpTree = OpTree::new(ObjType::List);
         let mut osd = OpSetData::default();
 
         for i in 0..100 {
@@ -691,7 +694,7 @@ mod tests {
 
     #[test]
     fn insert_book_vec() {
-        let mut t: OpTree = OpTree::new();
+        let mut t: OpTree = OpTree::new(ObjType::List);
         let mut v = Vec::new();
 
         let mut osd = OpSetData::default();

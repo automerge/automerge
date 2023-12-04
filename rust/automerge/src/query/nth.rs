@@ -52,12 +52,6 @@ impl<'a> Nth<'a> {
         marks.current().cloned()
     }
 
-    /*
-        pub(crate) fn pred(&self) -> OpIds {
-            self.osd.sorted_opids(self.ops.iter().map(|op| *op.id()))
-        }
-    */
-
     /// Get the key
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         // the query collects the ops so we can use that to get the key they all use
@@ -80,12 +74,6 @@ impl<'a> Nth<'a> {
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
-    /*
-        fn equiv(&mut self, other: &Self) -> bool {
-            self.index() == other.index() && self.key() == other.key()
-        }
-    */
-
     fn can_shortcut_search(&mut self, tree: &'a OpTree, osd: &'a OpSetData) -> bool {
         if self.marks.is_some() {
             // we could cache marks data but we're not now
