@@ -113,7 +113,7 @@
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::HashMap;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::types::{OpId, Prop};
+<span class="kw">use </span><span class="kw">crate</span>::types::Prop;
 <span class="kw">use crate</span>::{PatchAction, ScalarValue, SequenceTree};
 
 <span class="kw">use super</span>::{HydrateError, Value};
@@ -193,7 +193,7 @@
 <span class="kw">impl </span>ListValue {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: i64) -&gt; <span class="prelude-ty">Result</span>&lt;(), HydrateError&gt; {
         <span class="kw">if let </span>Value::Scalar(ScalarValue::Counter(c)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.value {
-            c.increment(n, OpId::new(<span class="number">0</span>, <span class="number">0</span>));
+            c.increment(n);
             <span class="prelude-val">Ok</span>(())
         } <span class="kw">else </span>{
             <span class="prelude-val">Err</span>(HydrateError::BadIncrement)

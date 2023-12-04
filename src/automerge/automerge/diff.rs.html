@@ -1304,8 +1304,6 @@
 <a href="#1304" id="1304">1304</a>
 <a href="#1305" id="1305">1305</a>
 <a href="#1306" id="1306">1306</a>
-<a href="#1307" id="1307">1307</a>
-<a href="#1308" id="1308">1308</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::ops::RangeBounds;
 <span class="kw">use </span>std::sync::Arc;
@@ -1316,7 +1314,7 @@
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjId, Op, Prop, ScalarValue},
+    types::{Clock, ListEncoding, ObjId, Op, Prop},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
@@ -1567,10 +1565,8 @@ impl&lt;&#39;a&gt; Deref for Winner&lt;&#39;a&gt; {
 }
 
 <span class="kw">fn </span>get_inc(before: <span class="kw-2">&amp;</span>Winner&lt;<span class="lifetime">&#39;_</span>&gt;, after: <span class="kw-2">&amp;</span>Winner&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
-    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(ScalarValue::Counter(before_c)), <span class="prelude-val">Some</span>(ScalarValue::Counter(after_c))) =
-        (before.op.scalar_value(), after.op.scalar_value())
-    {
-        <span class="kw">let </span>n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
+    <span class="kw">if </span>before.op.is_counter() &amp;&amp; after.op.is_counter() {
+        <span class="kw">let </span>n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
         <span class="kw">if </span>n != <span class="number">0 </span>{
             <span class="kw">return </span><span class="prelude-val">Some</span>(n);
         }

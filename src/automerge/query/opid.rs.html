@@ -187,10 +187,15 @@
 <a href="#187" id="187">187</a>
 <a href="#188" id="188">188</a>
 <a href="#189" id="189">189</a>
+<a href="#190" id="190">190</a>
+<a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::{MarkSet, MarkStateMachine};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::{Op, OpSetData};
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::query::{Index, ListState, MarkMap, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, OpId};
 <span class="kw">use </span>std::cmp::Ordering;
@@ -274,15 +279,20 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>OpIdSearch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; QueryResult {
-        <span class="self">self</span>.list_state.check_if_node_is_clean(child);
+    <span class="kw">fn </span>query_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+    ) -&gt; QueryResult {
+        <span class="self">self</span>.list_state.check_if_node_is_clean(index);
         <span class="kw">if </span><span class="self">self</span>.clock.is_some() {
             QueryResult::Descend
         } <span class="kw">else </span>{
             <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.target {
-                SearchTarget::OpId(id, <span class="kw">_</span>) <span class="kw">if </span>!child.index.ops.contains(id) =&gt; {
+                SearchTarget::OpId(id, <span class="kw">_</span>) <span class="kw">if </span>!index.ops.contains(id) =&gt; {
                     <span class="self">self</span>.list_state
-                        .process_node(child, osd, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks));
+                        .process_node(child, index, osd, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks));
                     QueryResult::Next
                 }
                 <span class="kw">_ </span>=&gt; QueryResult::Descend,
@@ -352,8 +362,8 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>SimpleOpIdSearch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, _osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; QueryResult {
-        <span class="kw">if </span><span class="self">self</span>.found || child.index.ops.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.target) {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, index: <span class="kw-2">&amp;</span>Index, _osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; QueryResult {
+        <span class="kw">if </span><span class="self">self</span>.found || index.ops.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.target) {
             QueryResult::Descend
         } <span class="kw">else </span>{
             <span class="self">self</span>.pos += child.len();

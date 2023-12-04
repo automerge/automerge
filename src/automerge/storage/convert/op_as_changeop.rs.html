@@ -138,12 +138,6 @@
 <a href="#138" id="138">138</a>
 <a href="#139" id="139">139</a>
 <a href="#140" id="140">140</a>
-<a href="#141" id="141">141</a>
-<a href="#142" id="142">142</a>
-<a href="#143" id="143">143</a>
-<a href="#144" id="144">144</a>
-<a href="#145" id="145">145</a>
-<a href="#146" id="146">146</a>
 </pre></div><pre class="rust"><code><span class="doccomment">/// Types for converting an OpTree op into a `ChangeOp` or a `DocOp`
 </span><span class="kw">use </span>std::borrow::Cow;
 
@@ -151,32 +145,26 @@
     convert,
     op_set::OpSetData,
     storage::AsChangeOp,
-    types::{ActorId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
+    types::{ActorId, Key, MarkData, Op, OpId, OpType, ScalarValue},
 };
 
 <span class="doccomment">/// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
 /// the actor ID stored in the opset data.
 ///
 /// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSetData
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_as_actor_id&lt;<span class="lifetime">&#39;a</span>&gt;(
-    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
-    op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
-    osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
-) -&gt; OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
-    OpWithMetadata { obj, op, osd }
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_as_actor_id(op: Op&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; OpWithMetadata&lt;<span class="lifetime">&#39;_</span>&gt; {
+    OpWithMetadata { op }
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
-    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
     op: Op&lt;<span class="lifetime">&#39;a</span>&gt;,
-    osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>wrap(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: OpId) -&gt; OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
         OpIdWithMetadata {
             opid,
-            osd: <span class="self">self</span>.osd,
+            osd: <span class="self">self</span>.op.osd(),
         }
     }
 }
@@ -212,10 +200,10 @@
     <span class="kw">type </span>Item = OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt;;
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = <span class="self">self</span>.op.pred().nth(<span class="self">self</span>.offset) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(opid) = <span class="self">self</span>.op.pred().nth(<span class="self">self</span>.offset).map(|o| <span class="kw-2">*</span>o.id()) {
             <span class="self">self</span>.offset += <span class="number">1</span>;
             <span class="prelude-val">Some</span>(OpIdWithMetadata {
-                opid: <span class="kw-2">*</span>op,
+                opid,
                 osd: <span class="self">self</span>.osd,
             })
         } <span class="kw">else </span>{
@@ -249,12 +237,12 @@
     }
 
     <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt; {
-        <span class="kw">if </span><span class="self">self</span>.obj.is_root() {
+        <span class="kw">if </span><span class="self">self</span>.op.obj().is_root() {
             convert::ObjId::Root
         } <span class="kw">else </span>{
             convert::ObjId::Op(OpIdWithMetadata {
-                opid: <span class="kw-2">*</span><span class="self">self</span>.obj.opid(),
-                osd: <span class="self">self</span>.osd,
+                opid: <span class="kw-2">*</span><span class="self">self</span>.op.obj().opid(),
+                osd: <span class="self">self</span>.op.osd(),
             })
         }
     }
@@ -263,13 +251,13 @@
         PredWithMetadata {
             op: <span class="self">self</span>.op,
             offset: <span class="number">0</span>,
-            osd: <span class="self">self</span>.osd,
+            osd: <span class="self">self</span>.op.osd(),
         }
     }
 
     <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;a</span>, <span class="self">Self</span>::OpId&gt; {
         <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.op.key() {
-            Key::Map(idx) =&gt; convert::Key::Prop(Cow::Owned(<span class="self">self</span>.osd.props.get(<span class="kw-2">*</span>idx).into())),
+            Key::Map(idx) =&gt; convert::Key::Prop(Cow::Owned(<span class="self">self</span>.op.osd().props.get(<span class="kw-2">*</span>idx).into())),
             Key::Seq(e) <span class="kw">if </span>e.is_head() =&gt; convert::Key::Elem(convert::ElemId::Head),
             Key::Seq(e) =&gt; convert::Key::Elem(convert::ElemId::Op(<span class="self">self</span>.wrap(e.<span class="number">0</span>))),
         }

@@ -396,11 +396,6 @@
 <a href="#396" id="396">396</a>
 <a href="#397" id="397">397</a>
 <a href="#398" id="398">398</a>
-<a href="#399" id="399">399</a>
-<a href="#400" id="400">400</a>
-<a href="#401" id="401">401</a>
-<a href="#402" id="402">402</a>
-<a href="#403" id="403">403</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::collections::{BTreeMap, BTreeSet};
 
 <span class="kw">use crate</span>::{
@@ -640,7 +635,7 @@
         clock::ClockData,
         op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
-        types::{Key, ObjId, OpBuilder, OpId, OpIds},
+        types::{Key, ObjId, OpBuilder, OpId},
         ActorId,
     };
 
@@ -747,8 +742,6 @@
                     id: OpId::new(start_op + opnum <span class="kw">as </span>u64, actor_idx),
                     action: <span class="kw">crate</span>::OpType::Put(<span class="string">&quot;value&quot;</span>.into()),
                     key: Key::Map(key),
-                    succ: OpIds::empty(),
-                    pred: OpIds::empty(),
                     insert: <span class="bool-val">false</span>,
                 })
                 .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
@@ -770,10 +763,7 @@
                     .with_actor(actor.clone())
                     .with_seq(<span class="kw-2">*</span>seq)
                     .with_timestamp(timestamp)
-                    .build(
-                        ops.iter()
-                            .map(|op| op_as_actor_id(<span class="kw-2">&amp;</span>root, op.as_op2(<span class="kw-2">&amp;</span>osd), <span class="kw-2">&amp;</span>osd)),
-                    )
+                    .build(ops.iter().map(|op| op_as_actor_id(op.as_op(<span class="kw-2">&amp;</span>osd))))
                     .unwrap(),
             );
             <span class="kw-2">*</span>seq = seq.checked_add(<span class="number">1</span>).unwrap();

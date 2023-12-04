@@ -361,7 +361,7 @@
     Threshold(usize),
 }
 
-<span class="attr">#[derive(Debug)]
+<span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Document&lt;<span class="lifetime">&#39;a</span>&gt; {
     bytes: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
     <span class="attr">#[allow(dead_code)]

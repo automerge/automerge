@@ -125,17 +125,12 @@
 <a href="#125" id="125">125</a>
 <a href="#126" id="126">126</a>
 <a href="#127" id="127">127</a>
-<a href="#128" id="128">128</a>
-<a href="#129" id="129">129</a>
-<a href="#130" id="130">130</a>
-<a href="#131" id="131">131</a>
-<a href="#132" id="132">132</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::marks::{MarkSet, MarkStateMachine};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::Op;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpTree, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, OpIds};
+<span class="kw">use </span><span class="kw">crate</span>::query::{Index, ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
 
@@ -184,10 +179,6 @@
         marks.current().cloned()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; OpIds {
-        <span class="self">self</span>.osd.sorted_opids(<span class="self">self</span>.ops.iter().map(|op| <span class="kw-2">*</span>op.id()))
-    }
-
     <span class="doccomment">/// Get the key
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Key, AutomergeError&gt; {
         <span class="comment">// the query collects the ops so we can use that to get the key they all use
@@ -210,13 +201,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="comment">/*
-        fn equiv(&amp;mut self, other: &amp;Self) -&gt; bool {
-            self.index() == other.index() &amp;&amp; self.key() == other.key()
-        }
-    */
-
-    </span><span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; bool {
+    <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; bool {
         <span class="kw">if </span><span class="self">self</span>.marks.is_some() {
             <span class="comment">// we could cache marks data but we&#39;re not now
             </span><span class="kw">return </span><span class="bool-val">false</span>;
@@ -225,7 +210,7 @@
             <span class="kw">if </span>last.index == <span class="self">self</span>.list_state.target().saturating_sub(<span class="number">1</span>) {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(idx) = tree.internal.get(last.pos) {
                     <span class="self">self</span>.list_state.seek(last);
-                    <span class="self">self</span>.ops.push(idx.as_op2(osd));
+                    <span class="self">self</span>.ops.push(idx.as_op(osd));
                     <span class="self">self</span>.ops_pos.push(last.pos);
                     <span class="kw">return </span><span class="bool-val">true</span>;
                 }
@@ -234,11 +219,16 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; QueryResult {
-        <span class="self">self</span>.list_state.check_if_node_is_clean(child);
+    <span class="kw">fn </span>query_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
+        osd: <span class="kw-2">&amp;</span>OpSetData,
+    ) -&gt; QueryResult {
+        <span class="self">self</span>.list_state.check_if_node_is_clean(index);
         <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
             <span class="self">self</span>.list_state
-                .process_node(child, osd, <span class="self">self</span>.marks.as_mut())
+                .process_node(child, index, osd, <span class="self">self</span>.marks.as_mut())
         } <span class="kw">else </span>{
             QueryResult::Descend
         }

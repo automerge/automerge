@@ -157,6 +157,7 @@
 <a href="#157" id="157">157</a>
 <a href="#158" id="158">158</a>
 <a href="#159" id="159">159</a>
+<a href="#160" id="160">160</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use crate</span>::{
@@ -294,7 +295,8 @@
     <span class="kw">type </span>Item = DocOpId;
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self</span>.op.succ().get(<span class="self">self</span>.offset) {
+        <span class="comment">// FIXME - nth() is no longer fast - rewrite to replace offset with a Op iterator
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self</span>.op.succ().nth(<span class="self">self</span>.offset).map(|op| op.id()) {
             <span class="self">self</span>.offset += <span class="number">1</span>;
             <span class="prelude-val">Some</span>(translate(<span class="self">self</span>.actor_index, s))
         } <span class="kw">else </span>{

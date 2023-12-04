@@ -215,10 +215,13 @@
 <a href="#215" id="215">215</a>
 <a href="#216" id="216">216</a>
 <a href="#217" id="217">217</a>
+<a href="#218" id="218">218</a>
+<a href="#219" id="219">219</a>
+<a href="#220" id="220">220</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::MarkData;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::{Op, OpSetData};
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{LastInsert, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::query::QueryResult;
+<span class="kw">use </span><span class="kw">crate</span>::query::{Index, QueryResult};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, OpId, OpType};
 <span class="kw">use </span>fxhash::FxBuildHasher;
 <span class="kw">use </span>std::collections::HashMap;
@@ -289,21 +292,22 @@
 
     <span class="comment">// lists that have never seen puts (only inserts and deletes)
     // can take advantage of a faster codepath
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check_if_node_is_clean(<span class="kw-2">&amp;mut </span><span class="self">self</span>, node: <span class="kw-2">&amp;</span>OpTreeNode) {
-        <span class="self">self</span>.never_seen_puts &amp;= node.index.has_never_seen_puts();
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check_if_node_is_clean(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: <span class="kw-2">&amp;</span>Index) {
+        <span class="self">self</span>.never_seen_puts &amp;= index.has_never_seen_puts();
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>process_node&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
         osd: <span class="kw-2">&amp;</span>OpSetData,
         marks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     ) -&gt; QueryResult {
         <span class="kw">if </span><span class="self">self</span>.encoding == ListEncoding::List {
-            <span class="self">self</span>.process_list_node(node, osd, marks)
+            <span class="self">self</span>.process_list_node(node, index, osd, marks)
         } <span class="kw">else if </span><span class="self">self</span>.never_seen_puts {
             <span class="comment">// text node is clean - use the indexes
-            </span><span class="self">self</span>.process_text_node(node, marks)
+            </span><span class="self">self</span>.process_text_node(node, index, marks)
         } <span class="kw">else </span>{
             <span class="comment">// text nodes are intended to only be interacted with splice()
             // meaning all ops are inserts or deleted inserts
@@ -314,12 +318,12 @@
         }
     }
 
-    <span class="kw">fn </span>process_marks&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, marks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;) {
+    <span class="kw">fn </span>process_marks&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index, marks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;) {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(marks) = marks {
-            <span class="kw">for </span>(id, data) <span class="kw">in </span>node.index.mark_begin.iter() {
+            <span class="kw">for </span>(id, data) <span class="kw">in </span>index.mark_begin.iter() {
                 marks.insert(<span class="kw-2">*</span>id, data);
             }
-            <span class="kw">for </span>id <span class="kw">in </span>node.index.mark_end.iter() {
+            <span class="kw">for </span>id <span class="kw">in </span>index.mark_end.iter() {
                 marks.remove(id);
             }
         }
@@ -328,30 +332,32 @@
     <span class="kw">fn </span>process_text_node&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
         marks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     ) -&gt; QueryResult {
-        <span class="kw">let </span>num_vis = node.index.visible_len(<span class="self">self</span>.encoding);
+        <span class="kw">let </span>num_vis = index.visible_len(<span class="self">self</span>.encoding);
         <span class="kw">if </span><span class="self">self</span>.index + num_vis &gt;= <span class="self">self</span>.target {
             <span class="kw">return </span>QueryResult::Descend;
         }
         <span class="self">self</span>.index += num_vis;
         <span class="self">self</span>.pos += node.len();
-        <span class="self">self</span>.process_marks(node, marks);
+        <span class="self">self</span>.process_marks(index, marks);
         QueryResult::Next
     }
 
     <span class="kw">fn </span>process_list_node&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
         osd: <span class="kw-2">&amp;</span>OpSetData,
         marks: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>MarkMap&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     ) -&gt; QueryResult {
-        <span class="kw">let </span><span class="kw-2">mut </span>num_vis = node.index.visible.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>num_vis = index.visible.len();
         <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
             <span class="comment">// the elemid `last_seen` is counted in this node&#39;s index
             // but since we&#39;ve already seen it we dont want to count it again
             // as this is only for lists we can subtract 1
-            </span><span class="kw">if </span>node.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
+            </span><span class="kw">if </span>index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
                 num_vis -= <span class="number">1</span>;
             }
         }
@@ -371,13 +377,13 @@
         //              node boundary
         // scenario 2b: it is the same as the previous last_seen - do nothing
 
-        </span><span class="kw">let </span>last_elemid = node.last().as_op2(osd).elemid_or_key();
-        <span class="kw">if </span>node.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
+        </span><span class="kw">let </span>last_elemid = node.last().as_op(osd).elemid_or_key();
+        <span class="kw">if </span>index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
             <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
         } <span class="kw">else if </span><span class="self">self</span>.last_seen.is_some() &amp;&amp; <span class="prelude-val">Some</span>(last_elemid) != <span class="self">self</span>.last_seen {
             <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
         }
-        <span class="self">self</span>.process_marks(node, marks);
+        <span class="self">self</span>.process_marks(index, marks);
         QueryResult::Next
     }
 

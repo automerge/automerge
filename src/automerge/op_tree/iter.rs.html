@@ -453,8 +453,6 @@
 <a href="#453" id="453">453</a>
 <a href="#454" id="454">454</a>
 <a href="#455" id="455">455</a>
-<a href="#456" id="456">456</a>
-<a href="#457" id="457">457</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpIdx;
@@ -665,7 +663,7 @@
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span><span class="kw">super</span>::<span class="kw">super</span>::OpTreeInternal;
     <span class="kw">use </span><span class="kw">crate</span>::op_set::{OpIdx, OpSetData};
-    <span class="kw">use </span><span class="kw">crate</span>::types::{Key, OpBuilder, OpId, OpType, ScalarValue, ROOT};
+    <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, ROOT};
     <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
     <span class="attr">#[derive(Clone)]
@@ -718,8 +716,6 @@
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, <span class="number">0</span>),
             key: Key::Map(<span class="number">0</span>),
-            succ: Default::default(),
-            pred: Default::default(),
             insert: <span class="bool-val">false</span>,
         };
         osd.push(ROOT.into(), op)
@@ -834,7 +830,7 @@
     }
 
     <span class="kw">fn </span>make_optree(actions: <span class="kw-2">&amp;</span>[Action], osd: <span class="kw-2">&amp;</span>OpSetData) -&gt; <span class="kw">super</span>::OpTreeInternal {
-        <span class="kw">let </span><span class="kw-2">mut </span>optree = OpTreeInternal::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>optree = OpTreeInternal::new(ObjType::List);
         <span class="kw">for </span>action <span class="kw">in </span>actions {
             <span class="kw">match </span>action {
                 Action::Insert(index, idx) =&gt; {

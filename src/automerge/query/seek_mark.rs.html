@@ -135,10 +135,15 @@
 <a href="#135" id="135">135</a>
 <a href="#136" id="136">136</a>
 <a href="#137" id="137">137</a>
+<a href="#138" id="138">138</a>
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a>
+<a href="#142" id="142">142</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::Mark;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::Op;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetData;
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, OpTreeNode, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::query::{Index, ListState, OpTreeNode, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, OpId, OpType};
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::HashMap;
@@ -193,15 +198,20 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>SeekMark&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, _osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; QueryResult {
-        <span class="self">self</span>.idx.check_if_node_is_clean(child);
+    <span class="kw">fn </span>query_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _child: <span class="kw-2">&amp;</span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span>Index,
+        _osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+    ) -&gt; QueryResult {
+        <span class="self">self</span>.idx.check_if_node_is_clean(index);
         QueryResult::Descend
     }
 
     <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: Op&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; QueryResult {
         <span class="kw">match </span>op.action() {
             OpType::MarkBegin(<span class="kw">_</span>, data) <span class="kw">if </span>op.id() == <span class="kw-2">&amp;</span><span class="self">self</span>.id =&gt; {
-                <span class="kw">if </span>!op.succ().is_empty() {
+                <span class="kw">if </span>op.succ().len() &gt; <span class="number">0 </span>{
                     <span class="kw">return </span>QueryResult::Finish;
                 }
                 <span class="self">self</span>.found_begin = <span class="bool-val">true</span>;

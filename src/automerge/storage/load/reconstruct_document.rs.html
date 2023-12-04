@@ -281,112 +281,16 @@
 <a href="#281" id="281">281</a>
 <a href="#282" id="282">282</a>
 <a href="#283" id="283">283</a>
-<a href="#284" id="284">284</a>
-<a href="#285" id="285">285</a>
-<a href="#286" id="286">286</a>
-<a href="#287" id="287">287</a>
-<a href="#288" id="288">288</a>
-<a href="#289" id="289">289</a>
-<a href="#290" id="290">290</a>
-<a href="#291" id="291">291</a>
-<a href="#292" id="292">292</a>
-<a href="#293" id="293">293</a>
-<a href="#294" id="294">294</a>
-<a href="#295" id="295">295</a>
-<a href="#296" id="296">296</a>
-<a href="#297" id="297">297</a>
-<a href="#298" id="298">298</a>
-<a href="#299" id="299">299</a>
-<a href="#300" id="300">300</a>
-<a href="#301" id="301">301</a>
-<a href="#302" id="302">302</a>
-<a href="#303" id="303">303</a>
-<a href="#304" id="304">304</a>
-<a href="#305" id="305">305</a>
-<a href="#306" id="306">306</a>
-<a href="#307" id="307">307</a>
-<a href="#308" id="308">308</a>
-<a href="#309" id="309">309</a>
-<a href="#310" id="310">310</a>
-<a href="#311" id="311">311</a>
-<a href="#312" id="312">312</a>
-<a href="#313" id="313">313</a>
-<a href="#314" id="314">314</a>
-<a href="#315" id="315">315</a>
-<a href="#316" id="316">316</a>
-<a href="#317" id="317">317</a>
-<a href="#318" id="318">318</a>
-<a href="#319" id="319">319</a>
-<a href="#320" id="320">320</a>
-<a href="#321" id="321">321</a>
-<a href="#322" id="322">322</a>
-<a href="#323" id="323">323</a>
-<a href="#324" id="324">324</a>
-<a href="#325" id="325">325</a>
-<a href="#326" id="326">326</a>
-<a href="#327" id="327">327</a>
-<a href="#328" id="328">328</a>
-<a href="#329" id="329">329</a>
-<a href="#330" id="330">330</a>
-<a href="#331" id="331">331</a>
-<a href="#332" id="332">332</a>
-<a href="#333" id="333">333</a>
-<a href="#334" id="334">334</a>
-<a href="#335" id="335">335</a>
-<a href="#336" id="336">336</a>
-<a href="#337" id="337">337</a>
-<a href="#338" id="338">338</a>
-<a href="#339" id="339">339</a>
-<a href="#340" id="340">340</a>
-<a href="#341" id="341">341</a>
-<a href="#342" id="342">342</a>
-<a href="#343" id="343">343</a>
-<a href="#344" id="344">344</a>
-<a href="#345" id="345">345</a>
-<a href="#346" id="346">346</a>
-<a href="#347" id="347">347</a>
-<a href="#348" id="348">348</a>
-<a href="#349" id="349">349</a>
-<a href="#350" id="350">350</a>
-<a href="#351" id="351">351</a>
-<a href="#352" id="352">352</a>
-<a href="#353" id="353">353</a>
-<a href="#354" id="354">354</a>
-<a href="#355" id="355">355</a>
-<a href="#356" id="356">356</a>
-<a href="#357" id="357">357</a>
-<a href="#358" id="358">358</a>
-<a href="#359" id="359">359</a>
-<a href="#360" id="360">360</a>
-<a href="#361" id="361">361</a>
-<a href="#362" id="362">362</a>
-<a href="#363" id="363">363</a>
-<a href="#364" id="364">364</a>
-<a href="#365" id="365">365</a>
-<a href="#366" id="366">366</a>
-<a href="#367" id="367">367</a>
-<a href="#368" id="368">368</a>
-<a href="#369" id="369">369</a>
-<a href="#370" id="370">370</a>
-<a href="#371" id="371">371</a>
-<a href="#372" id="372">372</a>
-<a href="#373" id="373">373</a>
-<a href="#374" id="374">374</a>
-<a href="#375" id="375">375</a>
-<a href="#376" id="376">376</a>
-<a href="#377" id="377">377</a>
-<a href="#378" id="378">378</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::change_collector::ChangeCollector;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap};
-<span class="kw">use </span>tracing::instrument;
 
+<span class="kw">use </span><span class="kw">crate</span>::storage::document::ReadDocOpError;
 <span class="kw">use crate</span>::{
     change::Change,
     columnar::Key <span class="kw">as </span>DocOpKey,
-    op_tree::OpSetData,
+    op_set::{OpIdx, OpSet, OpSetData},
     storage::{change::Verified, Change <span class="kw">as </span>StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, OpBuilder, OpId, OpIds, OpType},
-    ScalarValue,
+    types::{ChangeHash, ElemId, Key, ObjId, OpBuilder, OpId, OpIds, OpType},
 };
 
 <span class="attr">#[derive(Debug, thiserror::Error)]
@@ -401,8 +305,6 @@
     </span>InvalidChanges(<span class="attr">#[from] </span><span class="kw">super</span>::change_collector::Error),
     <span class="attr">#[error(<span class="string">&quot;mismatching heads&quot;</span>)]
     </span>MismatchingHeads(MismatchedHeads),
-    <span class="attr">#[error(<span class="string">&quot;missing operations&quot;</span>)]
-    </span>MissingOps,
     <span class="attr">#[error(<span class="string">&quot;succ out of order&quot;</span>)]
     </span>SuccOutOfOrder,
     <span class="attr">#[error(transparent)]
@@ -425,169 +327,141 @@
     }
 }
 
-<span class="doccomment">/// All the operations loaded from an object in the document format
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>LoadedObject {
-    <span class="doccomment">/// The id of the object
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) id: ObjId,
-    <span class="doccomment">/// The id of the parent object, if any
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) parent: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
-    <span class="doccomment">/// The operations for this object
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw">crate</span>::types::OpBuilder&gt;,
-    <span class="doccomment">/// The type of the object
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) obj_type: ObjType,
-}
-
-<span class="doccomment">/// An observer which will be notified of each object as it completes and which can produce a
-/// result once all the operations are loaded and the change graph is verified.
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>DocObserver {
-    <span class="kw">type </span>Output;
-
-    <span class="doccomment">/// The operations for an object have been loaded
-    </span><span class="kw">fn </span>object_loaded(<span class="kw-2">&amp;mut </span><span class="self">self</span>, object: LoadedObject, osd: <span class="kw-2">&amp;mut </span>OpSetData);
-    <span class="doccomment">/// The document has finished loading. The `osd` is the `OpSetData` which was used to
-    /// create the indices in the operations which were passed to `object_loaded`
-    </span><span class="kw">fn </span>finish(<span class="self">self</span>, osd: OpSetData) -&gt; <span class="self">Self</span>::Output;
-}
-
-<span class="doccomment">/// The result of reconstructing the change history from a document
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Reconstructed&lt;Output&gt; {
-    <span class="doccomment">/// The maximum op counter that was found in the document
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) max_op: u64,
-    <span class="doccomment">/// The changes in the document, in the order they were encoded in the document
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) changes: Vec&lt;Change&gt;,
-    <span class="doccomment">/// The result produced by the `DocObserver` which was watching the reconstruction
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) result: Output,
-    <span class="doccomment">/// The heads of the document
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) heads: BTreeSet&lt;ChangeHash&gt;,
-}
-
-<span class="attr">#[derive(Debug)]
+<span class="attr">#[derive(Clone, Copy, Debug)]
 </span><span class="kw">pub enum </span>VerificationMode {
     Check,
     DontCheck,
 }
 
-<span class="attr">#[instrument(skip(doc, observer))]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>reconstruct_document&lt;<span class="lifetime">&#39;a</span>, O: DocObserver&gt;(
+<span class="attr">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>NextDocOp {
+    op: OpBuilder,
+    succ: OpIds,
+    key: Key,
+    opid: OpId,
+    obj: ObjId,
+}
+
+<span class="kw">fn </span>next_op&lt;<span class="lifetime">&#39;a</span>, I&gt;(iter: <span class="kw-2">&amp;mut </span>I, op_set: <span class="kw-2">&amp;mut </span>OpSet) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;NextDocOp&gt;, Error&gt;
+<span class="kw">where
+    </span>I: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;DocOp, ReadDocOpError&gt;&gt; + Clone + <span class="lifetime">&#39;a</span>,
+{
+    <span class="kw">let </span>op_res = iter.next();
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(op_res) = op_res {
+        <span class="kw">let </span>doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc_op.object;
+        check_opid(<span class="kw-2">&amp;</span>op_set.osd, <span class="kw-2">*</span>obj.opid())<span class="question-mark">?</span>;
+        <span class="kw">let </span>(op, succ) = import_op(<span class="kw-2">&amp;mut </span>op_set.osd, doc_op)<span class="question-mark">?</span>;
+        <span class="kw">let </span>opid = op.id;
+        <span class="kw">let </span>key = op.elemid_or_key();
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(NextDocOp {
+            op,
+            succ,
+            opid,
+            key,
+            obj,
+        }))
+    } <span class="kw">else </span>{
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
+    }
+}
+
+<span class="kw">struct </span>ReconstructionState&lt;<span class="lifetime">&#39;a</span>&gt; {
+    op_set: OpSet,
+    max_op: u64,
+    last_obj: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
+    last_key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
+    pred: HashMap&lt;OpId, Vec&lt;OpIdx&gt;&gt;,
+    ops_collecter: Vec&lt;OpIdx&gt;,
+    change_collector: ChangeCollector&lt;<span class="lifetime">&#39;a</span>&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ReconstructionState&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>new(doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Document&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, Error&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            op_set: OpSet::from_actors(doc.actors().to_vec()),
+            max_op: <span class="number">0</span>,
+            last_obj: <span class="prelude-val">None</span>,
+            last_key: <span class="prelude-val">None</span>,
+            pred: HashMap::default(),
+            ops_collecter: Vec::default(),
+            change_collector: ChangeCollector::new(doc.iter_changes())<span class="question-mark">?</span>,
+        })
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>reconstruct_opset&lt;<span class="lifetime">&#39;a</span>&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Document&lt;<span class="lifetime">&#39;a</span>&gt;,
     mode: VerificationMode,
-    <span class="kw-2">mut </span>observer: O,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Reconstructed&lt;O::Output&gt;, Error&gt; {
-    <span class="comment">// The document format does not contain the bytes of the changes which are encoded in it
-    // directly. Instead the metadata about the changes (the actor, the start op, etc.) are all
-    // encoded separately to all the ops in the document. We need to reconstruct the changes in
-    // order to verify the heads of the document. To do this we iterate over the document
-    // operations adding each operation to a `ChangeCollector`. Once we&#39;ve collected all the
-    // changes, the `ChangeCollector` knows how to group all the operations together to produce the
-    // change graph.
-    //
-    // Some of the work involved in reconstructing the changes could in principle be quite costly.
-    // For example, delete operations dont appear in the document at all, instead the delete
-    // operations are recorded as `succ` operations on the operations which they delete. This means
-    // that to reconstruct delete operations we have to first collect all the operations, then look
-    // for succ operations which we have not seen a concrete operation for. Happily we can take
-    // advantage of the fact that operations are encoded in the order of the object they apply to.
-    // This is the purpose of `LoadingObject`.
-    //
-    // Finally, when constructing an OpSet from this data we want to process the operations in the
-    // order they appear in the document, this allows us to create the OpSet more efficiently than
-    // if we were directly applying the reconstructed change graph. This is the purpose of the
-    // `DocObserver`, which we pass operations to as we complete the processing of each object.
-
-    // The op set data which we create from the doc and which we will pass to the observer
-    </span><span class="kw">let </span><span class="kw-2">mut </span>osd = OpSetData::from_actors(doc.actors().to_vec());
-    <span class="comment">// The object we are currently loading, starts with the root
-    </span><span class="kw">let </span><span class="kw-2">mut </span>current_object = LoadingObject::root();
-    <span class="comment">// The changes we are collecting to later construct the change graph from
-    </span><span class="kw">let </span><span class="kw-2">mut </span>collector = ChangeCollector::new(doc.iter_changes())<span class="question-mark">?</span>;
-    <span class="comment">// A map where we record the create operations so that when the object ID the incoming
-    // operations refer to switches we can lookup the object type for the new object. We also
-    // need it so we can pass the parent object ID to the observer
-    </span><span class="kw">let </span><span class="kw-2">mut </span>create_ops = HashMap::new();
-    <span class="comment">// The max op we&#39;ve seen
-    </span><span class="kw">let </span><span class="kw-2">mut </span>max_op = <span class="number">0</span>;
-    <span class="comment">// The objects we have finished loaded
-    </span><span class="kw">let </span><span class="kw-2">mut </span>objs_loaded = BTreeSet::new();
-
-    <span class="kw">for </span>op_res <span class="kw">in </span>doc.iter_ops() {
-        <span class="kw">let </span>doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))<span class="question-mark">?</span>;
-        max_op = std::cmp::max(max_op, doc_op.id.counter());
-
-        <span class="comment">// Delete ops only appear as succ values in the document operations, so if a delete
-        // operation is the max op we will only see it here. Therefore we step through the document
-        // operations succs checking for max op
-        </span><span class="kw">for </span>succ <span class="kw">in </span><span class="kw-2">&amp;</span>doc_op.succ {
-            max_op = std::cmp::max(max_op, succ.counter());
-        }
-
-        <span class="kw">let </span>obj = doc_op.object;
-        check_opid(<span class="kw-2">&amp;</span>osd, <span class="kw-2">*</span>obj.opid())<span class="question-mark">?</span>;
-        <span class="kw">let </span>op = import_op(<span class="kw-2">&amp;mut </span>osd, doc_op)<span class="question-mark">?</span>;
-        <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>op, <span class="question-mark">?</span>obj, <span class="string">&quot;loading document op&quot;</span>);
-
-        <span class="kw">if let </span>OpType::Make(obj_type) = op.action {
-            create_ops.insert(
-                ObjId::from(op.id),
-                CreateOp {
-                    obj_type,
-                    parent_id: obj,
-                },
-            );
-        };
-        <span class="kw">if </span>obj == current_object.id {
-            current_object.append_op(op.clone())<span class="question-mark">?</span>;
-        } <span class="kw">else </span>{
-            <span class="kw">let </span>create_op = <span class="kw">match </span>create_ops.get(<span class="kw-2">&amp;</span>obj) {
-                <span class="prelude-val">Some</span>(t) =&gt; <span class="prelude-val">Ok</span>(t),
-                <span class="prelude-val">None </span>=&gt; {
-                    <span class="macro">tracing::error!</span>(
-                        <span class="question-mark">?</span>op,
-                        <span class="string">&quot;operation referenced an object which we haven&#39;t seen a create op for yet&quot;
-                    </span>);
-                    <span class="prelude-val">Err</span>(Error::OpsOutOfOrder)
-                }
-            }<span class="question-mark">?</span>;
-            <span class="kw">if </span>obj &lt; current_object.id {
-                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>op, previous_obj=<span class="question-mark">?</span>current_object.id, <span class="string">&quot;op referenced an object ID which was smaller than the previous object ID&quot;</span>);
-                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::OpsOutOfOrder);
-            } <span class="kw">else </span>{
-                <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;mut </span>osd)<span class="question-mark">?</span>;
-                objs_loaded.insert(loaded.id);
-                observer.object_loaded(loaded, <span class="kw-2">&amp;mut </span>osd);
-                current_object =
-                    LoadingObject::new(obj, <span class="prelude-val">Some</span>(create_op.parent_id), create_op.obj_type);
-                current_object.append_op(op.clone())<span class="question-mark">?</span>;
-            }
-        }
-    }
-    <span class="kw">let </span>loaded = current_object.finish(<span class="kw-2">&amp;mut </span>collector, <span class="kw-2">&amp;mut </span>osd)<span class="question-mark">?</span>;
-    objs_loaded.insert(loaded.id);
-    observer.object_loaded(loaded, <span class="kw-2">&amp;mut </span>osd);
-
-    <span class="comment">// If an op created an object but no operation targeting that object was ever made then the
-    // object will only exist in the create_ops map. We collect all such objects here.
-    </span><span class="kw">for </span>(
-        obj_id,
-        CreateOp {
-            parent_id,
-            obj_type,
-        },
-    ) <span class="kw">in </span>create_ops.into_iter()
+) -&gt; <span class="prelude-ty">Result</span>&lt;ReconOpSet, Error&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>state = ReconstructionState::new(doc)<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>iter_ops = doc.iter_ops();
+    <span class="kw">let </span><span class="kw-2">mut </span>next = next_op(<span class="kw-2">&amp;mut </span>iter_ops, <span class="kw-2">&amp;mut </span>state.op_set)<span class="question-mark">?</span>;
+    <span class="kw">while let </span><span class="prelude-val">Some</span>(NextDocOp {
+        op,
+        succ,
+        key,
+        opid,
+        obj,
+    }) = next
     {
-        <span class="kw">if </span>!objs_loaded.contains(<span class="kw-2">&amp;</span>obj_id) {
-            observer.object_loaded(
-                LoadedObject {
-                    parent: <span class="prelude-val">Some</span>(parent_id),
-                    id: obj_id,
-                    ops: Vec::new(),
-                    obj_type,
-                },
-                <span class="kw-2">&amp;mut </span>osd,
-            )
+        state.max_op = std::cmp::max(state.max_op, opid.counter());
+
+        <span class="kw">let </span>idx = state.op_set.load(obj, op);
+
+        <span class="kw">for </span>id <span class="kw">in </span><span class="kw-2">&amp;</span>succ {
+            state
+                .pred
+                .entry(<span class="kw-2">*</span>id)
+                .and_modify(|v| v.push(idx))
+                .or_insert_with(|| <span class="macro">vec!</span>[idx]);
         }
+
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(pred_idxs) = state.pred.get(<span class="kw-2">&amp;</span>opid) {
+            <span class="kw">for </span>p <span class="kw">in </span>pred_idxs {
+                state.op_set.osd.add_pred(<span class="kw-2">*</span>p, idx);
+            }
+            state.pred.remove(<span class="kw-2">&amp;</span>opid);
+        }
+
+        state.ops_collecter.push(idx);
+        state.change_collector.collect(opid, idx)<span class="question-mark">?</span>;
+
+        state.last_key = <span class="prelude-val">Some</span>(key);
+        state.last_obj = <span class="prelude-val">Some</span>(obj);
+
+        next = next_op(<span class="kw-2">&amp;mut </span>iter_ops, <span class="kw-2">&amp;mut </span>state.op_set)<span class="question-mark">?</span>;
+
+        flush_ops(<span class="kw-2">&amp;</span>obj, next.as_ref(), <span class="kw-2">&amp;mut </span>state)<span class="question-mark">?</span>;
     }
 
-    <span class="kw">let </span><span class="kw">super</span>::change_collector::CollectedChanges { history, heads } = collector.finish(<span class="kw-2">&amp;</span>osd)<span class="question-mark">?</span>;
+    state.op_set.add_indexes();
+
+    <span class="kw">let </span>op_set = state.op_set;
+    <span class="kw">let </span>change_collector = state.change_collector;
+    <span class="kw">let </span>max_op = state.max_op;
+
+    <span class="kw">let </span>(changes, heads) = flush_changes(change_collector, doc, mode, <span class="kw-2">&amp;</span>op_set.osd)<span class="question-mark">?</span>;
+
+    <span class="prelude-val">Ok</span>(ReconOpSet {
+        changes,
+        max_op,
+        op_set,
+        heads,
+    })
+}
+
+<span class="comment">// create all binary changes
+// look for mismatched heads
+
+</span><span class="kw">fn </span>flush_changes(
+    change_collector: ChangeCollector&lt;<span class="lifetime">&#39;_</span>&gt;,
+    doc: <span class="kw-2">&amp;</span>Document&lt;<span class="lifetime">&#39;_</span>&gt;,
+    mode: VerificationMode,
+    osd: <span class="kw-2">&amp;</span>OpSetData,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(Vec&lt;Change&gt;, BTreeSet&lt;ChangeHash&gt;), Error&gt; {
+    <span class="kw">let </span><span class="kw">super</span>::change_collector::CollectedChanges { history, heads } =
+        change_collector.finish(osd)<span class="question-mark">?</span>;
     <span class="kw">if </span><span class="macro">matches!</span>(mode, VerificationMode::Check) {
         <span class="kw">let </span>expected_heads: BTreeSet&lt;<span class="kw">_</span>&gt; = doc.heads().iter().cloned().collect();
         <span class="kw">if </span>expected_heads != heads {
@@ -599,128 +473,62 @@
             }));
         }
     }
-    <span class="kw">let </span>result = observer.finish(osd);
-
-    <span class="prelude-val">Ok</span>(Reconstructed {
-        result,
-        changes: history.into_iter().map(Change::new).collect(),
-        heads,
-        max_op,
-    })
+    <span class="kw">let </span>changes = history.into_iter().map(Change::new).collect();
+    <span class="prelude-val">Ok</span>((changes, heads))
 }
 
-<span class="kw">struct </span>CreateOp {
-    parent_id: ObjId,
-    obj_type: ObjType,
-}
-<span class="kw">struct </span>LoadingObject {
-    id: ObjId,
-    parent_id: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
-    ops: Vec&lt;OpBuilder&gt;,
-    obj_type: ObjType,
-    preds: HashMap&lt;OpId, Vec&lt;OpId&gt;&gt;,
-    <span class="doccomment">/// Operations which set a value, stored to later lookup keys when reconstructing delete events
-    </span>set_ops: HashMap&lt;OpId, Key&gt;,
-    <span class="doccomment">/// To correctly load the values of the `Counter` struct in the value of op IDs we need to
-    /// lookup the various increment operations which have been applied by the succesors of the
-    /// initial operation which creates the counter.
-    </span>inc_ops: HashMap&lt;OpId, i64&gt;,
-}
+<span class="comment">// after we see all ops for a given obj/key we can detect delets (this is more complex with MOVE)
+// also visibility for counters requires all ops to be observed before pushing them into op_tree because of visibility calculations
 
-<span class="kw">impl </span>LoadingObject {
-    <span class="kw">fn </span>root() -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::new(ObjId::root(), <span class="prelude-val">None</span>, ObjType::Map)
+</span><span class="kw">fn </span>flush_ops(
+    obj: <span class="kw-2">&amp;</span>ObjId,
+    next: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>NextDocOp&gt;,
+    state: <span class="kw-2">&amp;mut </span>ReconstructionState&lt;<span class="lifetime">&#39;_</span>&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
+    <span class="kw">let </span>next_key = next.map(|n| n.key);
+    <span class="kw">let </span>next_obj = next.map(|n| n.obj);
+
+    <span class="kw">if </span>next_obj.is_some() &amp;&amp; next_obj &lt; state.last_obj {
+        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::OpsOutOfOrder);
     }
 
-    <span class="kw">fn </span>new(id: ObjId, parent_id: <span class="prelude-ty">Option</span>&lt;ObjId&gt;, obj_type: ObjType) -&gt; <span class="self">Self </span>{
-        LoadingObject {
-            id,
-            parent_id,
-            ops: Vec::new(),
-            obj_type,
-            preds: HashMap::new(),
-            set_ops: HashMap::new(),
-            inc_ops: HashMap::new(),
-        }
-    }
-
-    <span class="kw">fn </span>append_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: OpBuilder) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
-        <span class="comment">// Collect set and make operations so we can find the keys which delete operations refer to
-        // in `finish`
-        </span><span class="kw">if </span><span class="macro">matches!</span>(op.action, OpType::Put(<span class="kw">_</span>) | OpType::Make(<span class="kw">_</span>)) {
-            <span class="kw">match </span>op.key {
-                Key::Map(<span class="kw">_</span>) =&gt; {
-                    <span class="self">self</span>.set_ops.insert(op.id, op.key);
-                }
-                Key::Seq(ElemId(o)) =&gt; {
-                    <span class="kw">let </span>elem_opid = <span class="kw">if </span>op.insert { op.id } <span class="kw">else </span>{ o };
-                    <span class="self">self</span>.set_ops.insert(op.id, Key::Seq(ElemId(elem_opid)));
-                }
+    <span class="kw">if </span>next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
+        <span class="kw">for </span>(opid, preds) <span class="kw">in </span><span class="kw-2">&amp;</span>state.pred {
+            <span class="kw">let </span>del = OpBuilder {
+                id: <span class="kw-2">*</span>opid,
+                insert: <span class="bool-val">false</span>,
+                key: state.last_key.unwrap(),
+                action: OpType::Delete,
             };
+            state.max_op = std::cmp::max(state.max_op, opid.counter());
+            <span class="kw">let </span>del_idx = state.op_set.load(state.last_obj.unwrap(), del);
+            <span class="kw">for </span>p <span class="kw">in </span>preds {
+                state.op_set.osd.add_dep(<span class="kw-2">*</span>p, del_idx);
+            }
+            state.change_collector.collect(<span class="kw-2">*</span>opid, del_idx)<span class="question-mark">?</span>;
         }
-        <span class="comment">// Collect increment operations so we can reconstruct counters properly in `finish`
-        </span><span class="kw">if let </span>OpType::Increment(inc) = op.action {
-            <span class="self">self</span>.inc_ops.insert(op.id, inc);
-        }
-        <span class="kw">for </span>succ <span class="kw">in </span><span class="kw-2">&amp;</span>op.succ {
-            <span class="self">self</span>.preds.entry(<span class="kw-2">*</span>succ).or_default().push(op.id);
-        }
-        <span class="self">self</span>.ops.push(op);
-        <span class="prelude-val">Ok</span>(())
-    }
+        state.pred.clear();
 
-    <span class="kw">fn </span>finish(
-        <span class="kw-2">mut </span><span class="self">self</span>,
-        collector: <span class="kw-2">&amp;mut </span>ChangeCollector&lt;<span class="lifetime">&#39;_</span>&gt;,
-        osd: <span class="kw-2">&amp;mut </span>OpSetData,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;LoadedObject, Error&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>ops = Vec::new();
-        <span class="kw">for </span><span class="kw-2">mut </span>op <span class="kw">in </span><span class="self">self</span>.ops.into_iter() {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(preds) = <span class="self">self</span>.preds.remove(<span class="kw-2">&amp;</span>op.id) {
-                op.pred = osd.sorted_opids(preds.into_iter());
-            }
-            <span class="kw">if let </span>OpType::Put(ScalarValue::Counter(c)) = <span class="kw-2">&amp;mut </span>op.action {
-                <span class="kw">for </span>(id, inc) <span class="kw">in </span>op
-                    .succ
-                    .iter()
-                    .filter_map(|s| <span class="self">self</span>.inc_ops.get(s).map(|inc| (<span class="kw-2">*</span>s, <span class="kw-2">*</span>inc)))
-                {
-                    c.increment(inc, id);
-                }
-            }
-            collector.collect(<span class="self">self</span>.id, op.clone(), osd)<span class="question-mark">?</span>;
-            ops.push(op)
+        <span class="kw">for </span>idx <span class="kw">in </span><span class="kw-2">&amp;</span>state.ops_collecter {
+            state
+                .op_set
+                .load_idx(obj, <span class="kw-2">*</span>idx)
+                .map_err(|e| Error::ReadOp(Box::new(e)))<span class="question-mark">?</span>;
         }
-        <span class="comment">// Any remaining pred ops must be delete operations
-        // TODO (alex): Figure out what index these should be inserted at. Does it even matter?
-        </span><span class="kw">for </span>(opid, preds) <span class="kw">in </span><span class="self">self</span>.preds.into_iter() {
-            <span class="kw">let </span>key = <span class="self">self</span>.set_ops.get(<span class="kw-2">&amp;</span>preds[<span class="number">0</span>]).ok_or_else(|| {
-                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>opid, <span class="question-mark">?</span>preds, <span class="string">&quot;no delete operation found&quot;</span>);
-                Error::MissingOps
-            })<span class="question-mark">?</span>;
-            collector.collect(
-                <span class="self">self</span>.id,
-                OpBuilder {
-                    id: opid,
-                    pred: osd.sorted_opids(preds.into_iter()),
-                    insert: <span class="bool-val">false</span>,
-                    succ: OpIds::empty(),
-                    key: <span class="kw-2">*</span>key,
-                    action: OpType::Delete,
-                },
-                osd,
-            )<span class="question-mark">?</span>;
-        }
-        <span class="prelude-val">Ok</span>(LoadedObject {
-            id: <span class="self">self</span>.id,
-            parent: <span class="self">self</span>.parent_id,
-            ops,
-            obj_type: <span class="self">self</span>.obj_type,
-        })
+
+        state.ops_collecter.truncate(<span class="number">0</span>)
     }
+    <span class="prelude-val">Ok</span>(())
 }
 
-<span class="kw">fn </span>import_op(osd: <span class="kw-2">&amp;mut </span>OpSetData, op: DocOp) -&gt; <span class="prelude-ty">Result</span>&lt;OpBuilder, Error&gt; {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ReconOpSet {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) changes: Vec&lt;Change&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) max_op: u64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) op_set: OpSet,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) heads: BTreeSet&lt;ChangeHash&gt;,
+}
+
+<span class="kw">fn </span>import_op(osd: <span class="kw-2">&amp;mut </span>OpSetData, op: DocOp) -&gt; <span class="prelude-ty">Result</span>&lt;(OpBuilder, OpIds), Error&gt; {
     <span class="kw">let </span>key = <span class="kw">match </span>op.key {
         DocOpKey::Prop(s) =&gt; Key::Map(osd.import_prop(s)),
         DocOpKey::Elem(ElemId(op)) =&gt; Key::Seq(ElemId(check_opid(osd, op)<span class="question-mark">?</span>)),
@@ -732,14 +540,16 @@
         }
     }
     <span class="kw">let </span>action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    <span class="prelude-val">Ok</span>(OpBuilder {
-        id: check_opid(osd, op.id)<span class="question-mark">?</span>,
-        action,
-        key,
-        succ: osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)<span class="question-mark">?</span>,
-        pred: OpIds::empty(),
-        insert: op.insert,
-    })
+    <span class="kw">let </span>succ = osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((
+        OpBuilder {
+            id: check_opid(osd, op.id)<span class="question-mark">?</span>,
+            action,
+            key,
+            insert: op.insert,
+        },
+        succ,
+    ))
 }
 
 <span class="doccomment">/// We construct the OpSetData directly from the vector of actors which are encoded in the

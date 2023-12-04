@@ -1873,6 +1873,7 @@
 <a href="#1873" id="1873">1873</a>
 <a href="#1874" id="1874">1874</a>
 <a href="#1875" id="1875">1875</a>
+<a href="#1876" id="1876">1876</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1896,7 +1897,7 @@
 };
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
-    OpBuilder, OpId, OpType, Value,
+    OpBuilder, OpId, OpIds, OpType, Value,
 };
 <span class="kw">use crate</span>::{hydrate, ScalarValue};
 <span class="kw">use crate</span>::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -2496,41 +2497,8 @@
             storage::Chunk::Document(d) =&gt; {
                 <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk is document chunk, inflating&quot;</span>);
                 first_chunk_was_doc = <span class="bool-val">true</span>;
-                <span class="kw">let </span>storage::load::Reconstructed {
-                    max_op,
-                    result: op_set,
-                    changes,
-                    heads,
-                } = storage::load::reconstruct_document(
-                    <span class="kw-2">&amp;</span>d,
-                    options.verification_mode,
-                    OpSet::builder(),
-                )
-                .map_err(|e| load::Error::InflateDocument(Box::new(e)))<span class="question-mark">?</span>;
-                <span class="kw">let </span><span class="kw-2">mut </span>hashes_by_index = HashMap::new();
-                <span class="kw">let </span><span class="kw-2">mut </span>actor_to_history: HashMap&lt;usize, Vec&lt;usize&gt;&gt; = HashMap::new();
-                <span class="kw">let </span><span class="kw-2">mut </span>change_graph = ChangeGraph::new();
-                <span class="kw">for </span>(index, change) <span class="kw">in </span>changes.iter().enumerate() {
-                    <span class="comment">// SAFETY: This should be fine because we just constructed an opset containing
-                    // all the changes
-                    </span><span class="kw">let </span>actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
-                    actor_to_history.entry(actor_index).or_default().push(index);
-                    hashes_by_index.insert(index, change.hash());
-                    change_graph.add_change(change, actor_index)<span class="question-mark">?</span>;
-                }
-                <span class="kw">let </span>history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
-                <span class="self">Self </span>{
-                    queue: <span class="macro">vec!</span>[],
-                    history: changes,
-                    history_index,
-                    states: actor_to_history,
-                    change_graph,
-                    ops: op_set,
-                    deps: heads.into_iter().collect(),
-                    actor: Actor::Unused(ActorId::random()),
-                    max_op,
-                }
-            }
+                reconstruct_document(<span class="kw-2">&amp;</span>d, options.verification_mode)<span class="question-mark">?
+            </span>}
             storage::Chunk::Change(stored_change) =&gt; {
                 <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk is change chunk&quot;</span>);
                 change = <span class="prelude-val">Some</span>(
@@ -2710,8 +2678,8 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>ops = <span class="self">self</span>.import_ops(<span class="kw-2">&amp;</span>change);
         <span class="self">self</span>.update_history(change, ops.len());
-        <span class="kw">for </span>(obj, op) <span class="kw">in </span>ops {
-            <span class="self">self</span>.insert_op(<span class="kw-2">&amp;</span>obj, op, patch_log)<span class="question-mark">?</span>;
+        <span class="kw">for </span>(obj, op, pred) <span class="kw">in </span>ops {
+            <span class="self">self</span>.insert_op(<span class="kw-2">&amp;</span>obj, op, <span class="kw-2">&amp;</span>pred, patch_log)<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(())
     }
@@ -2734,7 +2702,7 @@
         <span class="prelude-val">None
     </span>}
 
-    <span class="kw">fn </span>import_ops(<span class="kw-2">&amp;mut </span><span class="self">self</span>, change: <span class="kw-2">&amp;</span>Change) -&gt; Vec&lt;(ObjId, OpBuilder)&gt; {
+    <span class="kw">fn </span>import_ops(<span class="kw-2">&amp;mut </span><span class="self">self</span>, change: <span class="kw-2">&amp;</span>Change) -&gt; Vec&lt;(ObjId, OpBuilder, OpIds)&gt; {
         <span class="kw">let </span>actor = <span class="self">self</span>.ops.osd.actors.cache(change.actor_id().clone());
         <span class="kw">let </span><span class="kw-2">mut </span>actors = Vec::with_capacity(change.other_actor_ids().len() + <span class="number">1</span>);
         actors.push(actor);
@@ -2781,10 +2749,9 @@
                             c.expand,
                         ),
                         key,
-                        succ: Default::default(),
-                        pred,
                         insert: c.insert,
                     },
+                    pred,
                 )
             })
             .collect()
@@ -3092,12 +3059,8 @@
                 }
                 OpType::MarkEnd(<span class="kw">_</span>) =&gt; <span class="string">&quot;/mark&quot;</span>.to_string(),
             };
-            <span class="kw">let </span>pred: Vec&lt;<span class="kw">_</span>&gt; = op.pred().map(|id| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>id)).collect();
-            <span class="kw">let </span>succ: Vec&lt;<span class="kw">_</span>&gt; = op
-                .succ()
-                .into_iter()
-                .map(|id| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>id))
-                .collect();
+            <span class="kw">let </span>pred: Vec&lt;<span class="kw">_</span>&gt; = op.pred().map(|op| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>op.id())).collect();
+            <span class="kw">let </span>succ: Vec&lt;<span class="kw">_</span>&gt; = op.succ().map(|op| <span class="self">self</span>.to_short_string(<span class="kw-2">*</span>op.id())).collect();
             <span class="kw">let </span>insert = <span class="kw">match </span>op.insert() {
                 <span class="bool-val">true </span>=&gt; <span class="string">&quot;t&quot;</span>,
                 <span class="bool-val">false </span>=&gt; <span class="string">&quot;f&quot;</span>,
@@ -3136,19 +3099,20 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         obj: <span class="kw-2">&amp;</span>ObjId,
         op: OpBuilder,
+        pred: <span class="kw-2">&amp;</span>OpIds,
         patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>is_delete = op.is_delete();
         <span class="kw">let </span>idx = <span class="self">self</span>.ops.load(<span class="kw-2">*</span>obj, op);
-        <span class="kw">let </span>op = idx.as_op2(<span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd);
+        <span class="kw">let </span>op = idx.as_op(<span class="kw-2">&amp;</span><span class="self">self</span>.ops.osd);
 
         <span class="kw">let </span>(pos, succ) = <span class="kw">if </span>patch_log.is_active() {
             <span class="kw">let </span>obj = <span class="self">self</span>.get_obj_meta(<span class="kw-2">*</span>obj)<span class="question-mark">?</span>;
-            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_with_patch_log(<span class="kw-2">&amp;</span>obj, op);
-            found.log_patches(<span class="kw-2">&amp;</span>obj, op, <span class="self">self</span>, patch_log);
+            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_with_patch_log(<span class="kw-2">&amp;</span>obj, op, pred);
+            found.log_patches(<span class="kw-2">&amp;</span>obj, op, pred, <span class="self">self</span>, patch_log);
             (found.pos, found.succ)
         } <span class="kw">else </span>{
-            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_without_patch_log(obj, op);
+            <span class="kw">let </span>found = <span class="self">self</span>.ops.find_op_without_patch_log(obj, op, pred);
             (found.pos, found.succ)
         };
 
@@ -3395,7 +3359,7 @@
         <span class="kw">let </span>opid = <span class="self">self</span>.cursor_to_opid(cursor, clock.as_ref())<span class="question-mark">?</span>;
         <span class="kw">let </span>found = <span class="self">self
             </span>.ops
-            .seek_opid(<span class="kw-2">&amp;</span>obj.id, opid, clock.as_ref())
+            .seek_list_opid(<span class="kw-2">&amp;</span>obj.id, opid, clock.as_ref())
             .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(found.index)
     }
@@ -3485,7 +3449,8 @@
                             <span class="kw">let </span>prop = <span class="kw">match </span><span class="kw-2">*</span>op.key() {
                                 Key::Map(prop) =&gt; Prop::Map(<span class="self">self</span>.ops.osd.props.get(prop).clone()),
                                 Key::Seq(<span class="kw">_</span>) =&gt; {
-                                    <span class="kw">let </span><span class="prelude-val">Some</span>(found) = <span class="self">self</span>.ops.seek_opid(obj_id, <span class="kw-2">*</span>op.id(), <span class="prelude-val">None</span>)
+                                    <span class="kw">let </span><span class="prelude-val">Some</span>(found) =
+                                        <span class="self">self</span>.ops.seek_list_opid(obj_id, <span class="kw-2">*</span>op.id(), <span class="prelude-val">None</span>)
                                     <span class="kw">else </span>{
                                         <span class="kw">continue</span>;
                                     };
@@ -3747,5 +3712,42 @@
     actor_index: usize,
     seq: u64,
     clock: Clock,
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>reconstruct_document&lt;<span class="lifetime">&#39;a</span>&gt;(
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>storage::Document&lt;<span class="lifetime">&#39;a</span>&gt;,
+    mode: VerificationMode,
+) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, AutomergeError&gt; {
+    <span class="kw">let </span>storage::load::ReconOpSet {
+        changes,
+        op_set,
+        heads,
+        max_op,
+    } = storage::load::reconstruct_opset(doc, mode)
+        .map_err(|e| load::Error::InflateDocument(Box::new(e)))<span class="question-mark">?</span>;
+
+    <span class="kw">let </span><span class="kw-2">mut </span>hashes_by_index = HashMap::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>actor_to_history: HashMap&lt;usize, Vec&lt;usize&gt;&gt; = HashMap::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>change_graph = ChangeGraph::new();
+    <span class="kw">for </span>(index, change) <span class="kw">in </span>changes.iter().enumerate() {
+        <span class="comment">// SAFETY: This should be fine because we just constructed an opset containing
+        // all the changes
+        </span><span class="kw">let </span>actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
+        actor_to_history.entry(actor_index).or_default().push(index);
+        hashes_by_index.insert(index, change.hash());
+        change_graph.add_change(change, actor_index)<span class="question-mark">?</span>;
+    }
+    <span class="kw">let </span>history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+    <span class="prelude-val">Ok</span>(Automerge {
+        queue: <span class="macro">vec!</span>[],
+        history: changes,
+        history_index,
+        states: actor_to_history,
+        change_graph,
+        ops: op_set,
+        deps: heads.into_iter().collect(),
+        actor: Actor::Unused(ActorId::random()),
+        max_op,
+    })
 }
 </code></pre></div></section></main></body></html>

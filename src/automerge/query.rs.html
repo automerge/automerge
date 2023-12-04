@@ -265,6 +265,9 @@
 <a href="#265" id="265">265</a>
 <a href="#266" id="266">266</a>
 <a href="#267" id="267">267</a>
+<a href="#268" id="268">268</a>
+<a href="#269" id="269">269</a>
+<a href="#270" id="270">270</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::MarkData;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::Op;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetData, OpTree, OpTreeNode};
@@ -277,14 +280,12 @@
 <span class="kw">mod </span>list_state;
 <span class="kw">mod </span>nth;
 <span class="kw">mod </span>opid;
-<span class="kw">mod </span>prop;
 <span class="kw">mod </span>seek_mark;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>insert::InsertNth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_state::{ListState, MarkMap};
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth::Nth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid::{OpIdSearch, SimpleOpIdSearch};
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop::Prop;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>seek_mark::SeekMark;
 
 <span class="comment">// use a struct for the args for clarity as they are passed up the update chain in the optree
@@ -312,7 +313,12 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, _osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        _index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
+        _osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+    ) -&gt; QueryResult {
         QueryResult::Descend
     }
 

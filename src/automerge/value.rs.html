@@ -746,25 +746,8 @@
 <a href="#746" id="746">746</a>
 <a href="#747" id="747">747</a>
 <a href="#748" id="748">748</a>
-<a href="#749" id="749">749</a>
-<a href="#750" id="750">750</a>
-<a href="#751" id="751">751</a>
-<a href="#752" id="752">752</a>
-<a href="#753" id="753">753</a>
-<a href="#754" id="754">754</a>
-<a href="#755" id="755">755</a>
-<a href="#756" id="756">756</a>
-<a href="#757" id="757">757</a>
-<a href="#758" id="758">758</a>
-<a href="#759" id="759">759</a>
-<a href="#760" id="760">760</a>
-<a href="#761" id="761">761</a>
-<a href="#762" id="762">762</a>
-<a href="#763" id="763">763</a>
-<a href="#764" id="764">764</a>
-<a href="#765" id="765">765</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ObjType, OpId};
+<span class="kw">use </span><span class="kw">crate</span>::types::ObjType;
 <span class="kw">use </span>serde::{Deserialize, Serialize, Serializer};
 <span class="kw">use </span>smol_str::SmolStr;
 <span class="kw">use </span>std::borrow::Cow;
@@ -1134,26 +1117,11 @@
 </span><span class="kw">pub struct </span>Counter {
     <span class="kw">pub</span>(<span class="kw">crate</span>) start: i64,
     <span class="kw">pub</span>(<span class="kw">crate</span>) current: i64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) increments: Vec&lt;(OpId, i64)&gt;,
 }
 
 <span class="kw">impl </span>Counter {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, inc: i64, id: OpId) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, inc: i64) {
         <span class="self">self</span>.current += inc;
-        <span class="self">self</span>.increments.push((id, inc));
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>value_at(<span class="kw-2">&amp;</span><span class="self">self</span>, clock: <span class="kw-2">&amp;</span>Clock) -&gt; i64 {
-        <span class="self">self</span>.increments.iter().fold(
-            <span class="self">self</span>.start,
-            |acc, (id, inc)| {
-                <span class="kw">if </span>clock.covers(id) {
-                    acc + inc
-                } <span class="kw">else </span>{
-                    acc
-                }
-            },
-        )
     }
 }
 
@@ -1168,7 +1136,7 @@
 
 <span class="kw">impl </span>fmt::Display <span class="kw">for </span>Counter {
     <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; fmt::Result {
-        <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.current)
+        <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, <span class="self">self</span>.current)
     }
 }
 
@@ -1177,7 +1145,6 @@
         Counter {
             start: n,
             current: n,
-            increments: Vec::new(),
         }
     }
 }
@@ -1187,7 +1154,6 @@
         Counter {
             start: <span class="kw-2">*</span>n,
             current: <span class="kw-2">*</span>n,
-            increments: Vec::new(),
         }
     }
 }

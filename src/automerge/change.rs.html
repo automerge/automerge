@@ -444,7 +444,7 @@
 
 <span class="kw">impl </span>Change {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(stored: StoredChange&lt;<span class="lifetime">&#39;static</span>, Verified&gt;) -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span>len = stored.iter_ops().count();
+        <span class="kw">let </span>len = stored.len();
         <span class="self">Self </span>{
             stored,
             len,
@@ -836,7 +836,7 @@
                 message <span class="kw">in </span>proptest::option::of(<span class="string">&quot;[a-z]{200}&quot;</span>),
                 this_actor <span class="kw">in </span>Just(this_actor),
             ) -&gt; Change {
-            <span class="kw">let </span>ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op.as_op2(<span class="kw-2">&amp;</span>osd), <span class="kw-2">&amp;</span>osd));
+            <span class="kw">let </span>ops = ops.iter().map(|(<span class="kw">_</span>, op)| op_as_actor_id(op.as_op(<span class="kw-2">&amp;</span>osd)));
             Change::new(ChangeBuilder::new()
                 .with_dependencies(deps)
                 .with_start_op(start_op.try_into().unwrap())

@@ -165,12 +165,17 @@
 <a href="#165" id="165">165</a>
 <a href="#166" id="166">166</a>
 <a href="#167" id="167">167</a>
+<a href="#168" id="168">168</a>
+<a href="#169" id="169">169</a>
+<a href="#170" id="170">170</a>
+<a href="#171" id="171">171</a>
+<a href="#172" id="172">172</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkSet;
 <span class="kw">use </span><span class="kw">crate</span>::marks::MarkStateMachine;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::Op;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
-<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, MarkMap, OpSetData, OpTree, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::query::{Index, ListState, MarkMap, OpSetData, OpTree, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, OpType, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::sync::Arc;
@@ -302,11 +307,16 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData) -&gt; QueryResult {
-        <span class="self">self</span>.list_state.check_if_node_is_clean(child);
+    <span class="kw">fn </span>query_node(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Index,
+        osd: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetData,
+    ) -&gt; QueryResult {
+        <span class="self">self</span>.list_state.check_if_node_is_clean(index);
         <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
             <span class="self">self</span>.list_state
-                .process_node(child, osd, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks))
+                .process_node(child, index, osd, <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.marks))
         } <span class="kw">else </span>{
             QueryResult::Descend
         }

@@ -183,16 +183,8 @@
 <a href="#183" id="183">183</a>
 <a href="#184" id="184">184</a>
 <a href="#185" id="185">185</a>
-<a href="#186" id="186">186</a>
-<a href="#187" id="187">187</a>
-<a href="#188" id="188">188</a>
-<a href="#189" id="189">189</a>
-<a href="#190" id="190">190</a>
-<a href="#191" id="191">191</a>
-<a href="#192" id="192">192</a>
-<a href="#193" id="193">193</a>
-<a href="#194" id="194">194</a>
-</pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
+</pre></div><pre class="rust"><code><span class="attr">#[cfg(test)]
+</span><span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use </span><span class="kw">super</span>::OpId;
 
@@ -213,8 +205,8 @@
 }
 
 <span class="kw">impl </span>OpIds {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty() -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>(Vec::new())
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>overwrites(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>OpId) -&gt; bool {
+        <span class="self">self</span>.iter().any(|i| i == other)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new&lt;I: Iterator&lt;Item = OpId&gt;, F: Fn(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering&gt;(
@@ -242,6 +234,7 @@
 
     <span class="doccomment">/// Add an op to this set of OpIds. The `comparator` must provide a
     /// consistent ordering between successive calls to `add`.
+    </span><span class="attr">#[cfg(test)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add&lt;F: Fn(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         opid: OpId,
@@ -267,24 +260,13 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>retain&lt;F: Fn(<span class="kw-2">&amp;</span>OpId) -&gt; bool&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: F) {
-        <span class="self">self</span>.<span class="number">0</span>.retain(f)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+    <span class="attr">#[cfg(test)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.<span class="number">0</span>.is_empty()
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.<span class="number">0</span>.len()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; std::slice::Iter&lt;<span class="lifetime">&#39;_</span>, OpId&gt; {
         <span class="self">self</span>.<span class="number">0</span>.iter()
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>OpId&gt; {
-        <span class="self">self</span>.<span class="number">0</span>.get(idx)
     }
 }
 

@@ -511,6 +511,18 @@
 <a href="#511" id="511">511</a>
 <a href="#512" id="512">512</a>
 <a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
+<a href="#517" id="517">517</a>
+<a href="#518" id="518">518</a>
+<a href="#519" id="519">519</a>
+<a href="#520" id="520">520</a>
+<a href="#521" id="521">521</a>
+<a href="#522" id="522">522</a>
+<a href="#523" id="523">523</a>
+<a href="#524" id="524">524</a>
+<a href="#525" id="525">525</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
 <span class="kw">use crate</span>::{convert, ActorId, ChangeHash, ScalarValue};
@@ -569,6 +581,7 @@
     <span class="doccomment">/// The range in `Self::bytes` where the ops column data is
     </span>ops_data: Range&lt;usize&gt;,
     extra_bytes: Range&lt;usize&gt;,
+    num_ops: usize,
     _phantom: PhantomData&lt;O&gt;,
 }
 
@@ -663,6 +676,7 @@
                 ops_meta,
                 ops_data,
                 extra_bytes,
+                num_ops: <span class="number">0</span>,
                 _phantom: PhantomData,
             },
         ))
@@ -687,8 +701,10 @@
         <span class="self">self</span>,
         <span class="kw-2">mut </span>f: F,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Change&lt;<span class="lifetime">&#39;a</span>, Verified&gt;, ReadChangeOpError&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>num_ops = <span class="number">0</span>;
         <span class="kw">for </span>op <span class="kw">in </span><span class="self">self</span>.iter_ops() {
             f(op<span class="question-mark">?</span>);
+            num_ops += <span class="number">1</span>;
         }
         <span class="kw">if </span>u32::try_from(u64::from(<span class="self">self</span>.start_op)).is_err() {
             <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeOpError::CounterTooLarge);
@@ -706,12 +722,17 @@
             ops_meta: <span class="self">self</span>.ops_meta,
             ops_data: <span class="self">self</span>.ops_data,
             extra_bytes: <span class="self">self</span>.extra_bytes,
+            num_ops,
             _phantom: PhantomData,
         })
     }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Change&lt;<span class="lifetime">&#39;a</span>, Verified&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.num_ops
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>builder() -&gt; ChangeBuilder&lt;Unset, Unset, Unset, Unset&gt; {
         ChangeBuilder::new()
     }
@@ -792,6 +813,7 @@
             message: <span class="self">self</span>.message,
             ops_meta: <span class="self">self</span>.ops_meta,
             ops_data: <span class="self">self</span>.ops_data,
+            num_ops: <span class="self">self</span>.num_ops,
             extra_bytes: <span class="self">self</span>.extra_bytes,
             _phantom: PhantomData,
         }
@@ -962,8 +984,9 @@
     <span class="kw">where
         </span>A: AsChangeOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt; + <span class="lifetime">&#39;a</span>,
         O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ActorId&gt; + <span class="lifetime">&#39;a</span>,
-        I: Iterator&lt;Item = A&gt; + Clone + <span class="lifetime">&#39;a</span>,
+        I: Iterator&lt;Item = A&gt; + Clone + <span class="lifetime">&#39;a </span>+ ExactSizeIterator,
     {
+        <span class="kw">let </span>num_ops = ops.len();
         <span class="kw">let </span><span class="kw-2">mut </span>col_data = Vec::new();
         <span class="kw">let </span>actors = change_actors::ChangeActors::new(<span class="self">self</span>.actor.value, ops)<span class="question-mark">?</span>;
         <span class="kw">let </span>cols = ChangeOpsColumns::encode(actors.iter(), <span class="kw-2">&amp;mut </span>col_data);
@@ -1020,6 +1043,7 @@
             ops_meta: cols,
             ops_data,
             extra_bytes,
+            num_ops,
             _phantom: PhantomData,
         })
     }
