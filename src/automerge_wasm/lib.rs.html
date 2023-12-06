@@ -1448,6 +1448,21 @@
 <a href="#1448" id="1448">1448</a>
 <a href="#1449" id="1449">1449</a>
 <a href="#1450" id="1450">1450</a>
+<a href="#1451" id="1451">1451</a>
+<a href="#1452" id="1452">1452</a>
+<a href="#1453" id="1453">1453</a>
+<a href="#1454" id="1454">1454</a>
+<a href="#1455" id="1455">1455</a>
+<a href="#1456" id="1456">1456</a>
+<a href="#1457" id="1457">1457</a>
+<a href="#1458" id="1458">1458</a>
+<a href="#1459" id="1459">1459</a>
+<a href="#1460" id="1460">1460</a>
+<a href="#1461" id="1461">1461</a>
+<a href="#1462" id="1462">1462</a>
+<a href="#1463" id="1463">1463</a>
+<a href="#1464" id="1464">1464</a>
+<a href="#1465" id="1465">1465</a>
 </pre></div><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -2545,7 +2560,7 @@
     <span class="kw">let </span>msg = am::sync::Message::decode(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>;
     <span class="kw">let </span>heads = AR::from(msg.heads.as_slice());
     <span class="kw">let </span>need = AR::from(msg.need.as_slice());
-    <span class="kw">let </span>changes = AR::from(msg.changes.as_slice());
+    <span class="kw">let </span>changes = AR::from(<span class="kw-2">&amp;</span>msg.changes);
     <span class="kw">let </span>have = AR::from(msg.have.as_slice());
     <span class="kw">let </span>obj = Object::new().into();
     <span class="comment">// SAFETY: we just created this object
@@ -2553,6 +2568,21 @@
     js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;need&quot;</span>, need).unwrap();
     js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;have&quot;</span>, have).unwrap();
     js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;changes&quot;</span>, changes).unwrap();
+
+    <span class="kw">match </span>msg.version {
+        am::sync::MessageVersion::V1 =&gt; {
+            js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;type&quot;</span>, JsValue::from_str(<span class="string">&quot;v1&quot;</span>)).unwrap();
+        }
+        am::sync::MessageVersion::V2 =&gt; {
+            js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;type&quot;</span>, JsValue::from_str(<span class="string">&quot;v2&quot;</span>)).unwrap();
+        }
+    };
+
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(caps) = msg.supported_capabilities {
+        <span class="kw">let </span>caps = AR::from(caps.as_slice());
+        js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;supportedCapabilities&quot;</span>, caps).unwrap();
+    }
+
     <span class="prelude-val">Ok</span>(obj)
 }
 
