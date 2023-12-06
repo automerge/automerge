@@ -42,18 +42,18 @@ export type Target = Text1Target | Text2Target
 export type ValueType<T extends Target> = T extends Text2Target
   ? UnstableAutomergeValue
   : T extends Text1Target
-  ? AutomergeValue
-  : never
+    ? AutomergeValue
+    : never
 type MapValueType<T extends Target> = T extends Text2Target
   ? UnstableMapValue
   : T extends Text1Target
-  ? MapValue
-  : never
+    ? MapValue
+    : never
 type ListValueType<T extends Target> = T extends Text2Target
   ? UnstableListValue
   : T extends Text1Target
-  ? ListValue
-  : never
+    ? ListValue
+    : never
 
 function parseListIndex(key: any) {
   if (typeof key === "string" && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
