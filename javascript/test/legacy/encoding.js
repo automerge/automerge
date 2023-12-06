@@ -639,8 +639,8 @@ export class RLEEncoder extends Encoder {
         value === null
           ? "nulls"
           : repetitions === 1
-          ? "loneValue"
-          : "repetition"
+            ? "loneValue"
+            : "repetition"
       this.lastValue = value
       this.count = repetitions
     } else if (this.state === "loneValue") {
