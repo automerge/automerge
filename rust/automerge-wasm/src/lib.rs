@@ -1095,7 +1095,7 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
     let msg = am::sync::Message::decode(&data)?;
     let heads = AR::from(msg.heads.as_slice());
     let need = AR::from(msg.need.as_slice());
-    let changes = AR::from(msg.changes.as_slice());
+    let changes = AR::from(&msg.changes);
     let have = AR::from(msg.have.as_slice());
     let obj = Object::new().into();
     // SAFETY: we just created this object
@@ -1103,6 +1103,21 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
     js_set(&obj, "need", need).unwrap();
     js_set(&obj, "have", have).unwrap();
     js_set(&obj, "changes", changes).unwrap();
+
+    match msg.version {
+        am::sync::MessageVersion::V1 => {
+            js_set(&obj, "type", JsValue::from_str("v1")).unwrap();
+        }
+        am::sync::MessageVersion::V2 => {
+            js_set(&obj, "type", JsValue::from_str("v2")).unwrap();
+        }
+    };
+
+    if let Some(caps) = msg.supported_capabilities {
+        let caps = AR::from(caps.as_slice());
+        js_set(&obj, "supportedCapabilities", caps).unwrap();
+    }
+
     Ok(obj)
 }
 
