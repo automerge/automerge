@@ -447,10 +447,14 @@ impl OpSetInternal {
         &self,
         obj: &ObjId,
         range: R,
-        encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
+        ListRange::new(
+            self.top_ops(obj, clock.clone()),
+            ListEncoding::List,
+            range,
+            clock,
+        )
     }
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
@@ -557,6 +561,7 @@ impl Default for OpSetData {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct OpIter<'a> {
     iter: OpTreeIter<'a>,
     pub(crate) osd: &'a OpSetData,

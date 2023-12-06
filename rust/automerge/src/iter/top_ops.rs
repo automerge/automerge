@@ -3,6 +3,7 @@ use crate::op_set::{Op, OpIter};
 use crate::types::{Clock, Key};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub(crate) enum TopOps<'a> {
     Empty,
     Ops(TopOpsInner<'a>),
@@ -20,6 +21,7 @@ impl<'a> TopOps<'a> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct TopOpsInner<'a> {
     iter: OpIter<'a>,
     pos: usize,

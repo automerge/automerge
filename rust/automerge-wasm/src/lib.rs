@@ -41,6 +41,7 @@ use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod export_cache;
 mod interop;
 mod sync;
 mod value;
@@ -70,6 +71,12 @@ pub enum TextRepresentation {
     Array,
     /// As a single JS string
     String,
+}
+
+impl TextRepresentation {
+    pub(crate) fn is_string(&self) -> bool {
+        matches!(self, Self::String)
+    }
 }
 
 impl std::default::Default for TextRepresentation {
@@ -598,10 +605,10 @@ impl Automerge {
         let shortcut = self.doc.diff_cursor().is_empty();
         let patches = self.doc.diff_incremental();
 
-        let mut cache = interop::ExportCache::new()?;
+        let mut cache = interop::ExportCache::new(self)?;
 
         if shortcut {
-            let value = self.export_object(&ROOT, am::ObjType::Map.into(), None, &meta, &cache)?;
+            let value = cache.materialize(ROOT, Datatype::Map, None, &meta)?;
             return Ok((value, patches));
         }
 
@@ -821,8 +828,8 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = toJS)]
     pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
-        let cache = interop::ExportCache::new()?;
-        self.export_object(&ROOT, Datatype::Map, None, &meta, &cache)
+        let mut cache = interop::ExportCache::new(self)?;
+        cache.materialize(ROOT, Datatype::Map, None, &meta)
     }
 
     pub fn materialize(
@@ -833,9 +840,9 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
-        let cache = interop::ExportCache::new()?;
         self.doc.update_diff_cursor();
-        Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta, &cache)?)
+        let mut cache = interop::ExportCache::new(self)?;
+        Ok(cache.materialize(obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
     #[wasm_bindgen(js_name = getCursor)]
@@ -967,6 +974,42 @@ impl Automerge {
             js_set(&result, mark, value)?;
         }
         Ok(result)
+    }
+
+    pub(crate) fn map_range_at(
+        &self,
+        obj: &am::ObjId,
+        heads: Option<&Vec<am::ChangeHash>>,
+    ) -> am::iter::MapRange<'_, std::ops::RangeFull> {
+        if let Some(heads) = heads {
+            self.doc.map_range_at(obj, .., heads)
+        } else {
+            self.doc.map_range(obj, ..)
+        }
+    }
+
+    pub(crate) fn list_range_at(
+        &self,
+        obj: &am::ObjId,
+        heads: Option<&Vec<am::ChangeHash>>,
+    ) -> am::iter::ListRange<'_, std::ops::RangeFull> {
+        if let Some(heads) = heads {
+            self.doc.list_range_at(obj, .., heads)
+        } else {
+            self.doc.list_range(obj, ..)
+        }
+    }
+
+    pub(crate) fn text_at(
+        &self,
+        obj: &am::ObjId,
+        heads: Option<&Vec<am::ChangeHash>>,
+    ) -> Result<String, am::AutomergeError> {
+        if let Some(heads) = heads {
+            Ok(self.doc.text_at(obj, heads)?)
+        } else {
+            Ok(self.doc.text(obj)?)
+        }
     }
 }
 

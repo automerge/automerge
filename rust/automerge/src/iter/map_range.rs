@@ -9,10 +9,12 @@ use crate::value::Value;
 use super::TopOps;
 
 /// Iterator created by the [`crate::ReadDoc::map_range()`] and [`crate::ReadDoc::map_range_at()`] methods
+#[derive(Clone)]
 pub struct MapRange<'a, R: RangeBounds<String>> {
     iter: Option<MapRangeInner<'a, R>>,
 }
 
+#[derive(Clone)]
 struct MapRangeInner<'a, R: RangeBounds<String>> {
     iter: TopOps<'a>,
     op_set: &'a OpSet,

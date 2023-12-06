@@ -17,6 +17,8 @@ use crate::{
     types::{ChangeHash, OpId},
 };
 
+use fxhash::FxBuildHasher;
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
     #[error("a change referenced an actor index we couldn't find")]
@@ -34,7 +36,7 @@ pub(crate) enum Error {
 }
 
 pub(crate) struct ChangeCollector<'a> {
-    changes_by_actor: HashMap<usize, Vec<PartialChange<'a>>>,
+    changes_by_actor: HashMap<usize, Vec<PartialChange<'a>>, FxBuildHasher>,
 }
 
 pub(crate) struct CollectedChanges<'a> {
@@ -49,7 +51,8 @@ impl<'a> ChangeCollector<'a> {
     where
         I: IntoIterator<Item = Result<ChangeMetadata<'a>, E>>,
     {
-        let mut changes_by_actor: HashMap<usize, Vec<PartialChange<'_>>> = HashMap::new();
+        let mut changes_by_actor: HashMap<usize, Vec<PartialChange<'_>>, FxBuildHasher> =
+            HashMap::default();
         for (index, change) in changes.into_iter().enumerate() {
             tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
@@ -116,7 +119,7 @@ impl<'a> ChangeCollector<'a> {
         }
         changes_in_order.sort_by_key(|c| c.index);
 
-        let mut hashes_by_index = HashMap::new();
+        let mut hashes_by_index = HashMap::default();
         let mut history = Vec::new();
         let mut heads = BTreeSet::new();
         for (index, change) in changes_in_order.into_iter().enumerate() {
@@ -155,7 +158,7 @@ impl<'a> PartialChange<'a> {
     #[instrument(skip(self, known_changes, osd))]
     fn finish(
         mut self,
-        known_changes: &HashMap<usize, ChangeHash>,
+        known_changes: &HashMap<usize, ChangeHash, FxBuildHasher>,
         osd: &OpSetData,
     ) -> Result<StoredChange<'a, Verified>, Error> {
         let deps_len = self.deps.len();

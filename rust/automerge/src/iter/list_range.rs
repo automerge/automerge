@@ -11,6 +11,7 @@ use crate::value::Value;
 use super::{TopOp, TopOps};
 
 /// Iterator created by the [`crate::ReadDoc::list_range()`] and [`crate::ReadDoc::list_range_at()`] methods
+#[derive(Clone)]
 pub struct ListRange<'a, R: RangeBounds<usize>> {
     iter: Option<ListRangeInner<'a, R>>,
 }
@@ -34,6 +35,7 @@ impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
     }
 }
 
+#[derive(Clone)]
 struct ListRangeInner<'a, R: RangeBounds<usize>> {
     iter: TopOps<'a>,
     state: usize,
