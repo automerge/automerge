@@ -1,9 +1,10 @@
+use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, RichText};
-use crate::types::{Clock, ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Patch};
+use crate::types::{ObjId, ObjType, OpId, Prop};
+use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -147,6 +148,13 @@ impl PatchLog {
 
     pub(crate) fn is_active(&self) -> bool {
         self.active
+    }
+
+    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
+        match prop {
+            Prop::Map(key) => self.delete_map(obj, key),
+            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
+        }
     }
 
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
@@ -305,21 +313,23 @@ impl PatchLog {
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        let clock = self.heads.as_ref().map(|heads| doc.clock_at(heads));
-        Self::make_patches_inner(&self.events, expose, doc, clock.as_ref(), self.text_rep)
+        if let Some(heads) = self.heads.as_ref() {
+            let read_doc = ReadDocAt { doc, heads };
+            Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
+        } else {
+            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
+        }
     }
 
-    fn make_patches_inner(
+    fn make_patches_inner<R: ReadDoc>(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read_doc: &R,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new();
+        let mut patch_builder = PatchBuilder::default();
         for (obj, event) in events {
-            // FIXME - adding a Cow::* to parents would let us not clone here
-            let parents = doc.ops().parents(*obj, text_rep, clock.cloned());
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
             // incremental updates are ignored and a observation
@@ -329,7 +339,7 @@ impl PatchLog {
                 continue;
             }
             // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock, text_rep);
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc, text_rep);
             match event {
                 Event::PutMap {
                     key,
@@ -338,17 +348,17 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.put(parents, exid, key.into(), (value.into(), opid), *conflict);
+                    patch_builder.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
                 }
                 Event::DeleteMap { key } => {
-                    patch_builder.delete_map(parents, exid, key);
+                    patch_builder.delete_map(read_doc, exid, key);
                 }
                 Event::IncrementMap { key, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(parents, exid, key.into(), (*n, opid));
+                    patch_builder.increment(read_doc, exid, key.into(), (*n, opid));
                 }
                 Event::FlagConflictMap { key } => {
-                    patch_builder.flag_conflict(parents, exid, key.into());
+                    patch_builder.flag_conflict(read_doc, exid, key.into());
                 }
                 Event::PutSeq {
                     index,
@@ -357,7 +367,13 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.put(parents, exid, index.into(), (value.into(), opid), *conflict);
+                    patch_builder.put(
+                        read_doc,
+                        exid,
+                        index.into(),
+                        (value.into(), opid),
+                        *conflict,
+                    );
                 }
                 Event::Insert {
                     index,
@@ -368,7 +384,7 @@ impl PatchLog {
                 } => {
                     let opid = doc.id_to_exid(*id);
                     patch_builder.insert(
-                        parents,
+                        read_doc,
                         exid,
                         *index,
                         (value.into(), opid),
@@ -377,25 +393,25 @@ impl PatchLog {
                     );
                 }
                 Event::DeleteSeq { index, num } => {
-                    patch_builder.delete_seq(parents, exid, *index, *num);
+                    patch_builder.delete_seq(read_doc, exid, *index, *num);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(parents, exid, index.into(), (*n, opid));
+                    patch_builder.increment(read_doc, exid, index.into(), (*n, opid));
                 }
                 Event::FlagConflictSeq { index } => {
-                    patch_builder.flag_conflict(parents, exid, index.into());
+                    patch_builder.flag_conflict(read_doc, exid, index.into());
                 }
                 Event::Splice { index, text, marks } => {
-                    patch_builder.splice_text(parents, exid, *index, text, marks.clone());
+                    patch_builder.splice_text(read_doc, exid, *index, text, marks.clone());
                 }
                 Event::Mark { marks } => {
-                    patch_builder.mark(parents, exid, marks.clone().into_iter())
+                    patch_builder.mark(read_doc, exid, marks.clone().into_iter())
                 }
             }
         }
         // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut patch_builder, doc, clock, text_rep);
+        expose_queue.flush_queue(&mut patch_builder, doc, read_doc, text_rep);
 
         patch_builder.take_patches()
     }
@@ -447,31 +463,31 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue(
+    fn pump_queue<R: ReadDoc>(
         &mut self,
         obj: &ExId,
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read_doc: &R,
         text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock, text_rep);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
-    fn flush_queue(
+    fn flush_queue<R: ReadDoc>(
         &mut self,
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read_doc: &R,
         text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), patch_builder, doc, clock, text_rep);
+            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
         }
     }
 
@@ -483,22 +499,21 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj(
+    fn flush_obj<R: ReadDoc>(
         &mut self,
         exid: ExId,
         patch_builder: &mut PatchBuilder,
         doc: &Automerge,
-        clock: Option<&Clock>,
+        read_doc: &R,
         text_rep: TextRepresentation,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
-        let parents = doc.ops().parents(id, text_rep, clock.cloned());
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
-                let text = doc.ops().text(&id, clock.cloned());
+                let text = read_doc.text(&exid).ok()?;
                 // TODO - need text_spans()
-                patch_builder.splice_text(parents, exid, 0, &text, None);
+                patch_builder.splice_text(read_doc, exid, 0, &text, None);
             }
             ObjType::List | ObjType::Text => {
                 for ListRangeItem {
@@ -507,18 +522,12 @@ impl ExposeQueue {
                     id,
                     conflict,
                     ..
-                } in doc.list_range_for(&exid, .., clock.cloned())
+                } in read_doc.list_range(&exid, ..)
                 {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(
-                        parents.clone(),
-                        exid.clone(),
-                        index,
-                        (value, id),
-                        conflict,
-                    );
+                    patch_builder.insert(read_doc, exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {
@@ -527,18 +536,12 @@ impl ExposeQueue {
                     value,
                     id,
                     conflict,
-                } in doc.map_range_for(&exid, .., clock.cloned())
+                } in read_doc.map_range(&exid, ..)
                 {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.put(
-                        parents.clone(),
-                        exid.clone(),
-                        key.into(),
-                        (value, id),
-                        conflict,
-                    );
+                    patch_builder.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
                 }
             }
         }

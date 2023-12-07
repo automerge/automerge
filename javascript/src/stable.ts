@@ -345,7 +345,7 @@ export function from<T extends Record<string, unknown>>(
  * let patchCallback = patch => {
  *    patchedPath = patch.path
  * }
- * doc1 = automerge.change(doc1, {message, "add another value", time: 1640995200, patchCallback}, d => {
+ * doc1 = automerge.change(doc1, {message: "add another value", time: 1640995200, patchCallback}, d => {
  *     d.key2 = "value2"
  * })
  * assert.equal(patchedPath, ["key2"])

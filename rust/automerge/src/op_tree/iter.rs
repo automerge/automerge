@@ -208,7 +208,7 @@ impl<'a> Iterator for Inner<'a> {
 mod tests {
     use super::super::OpTreeInternal;
     use crate::op_set::{OpIdx, OpSetData};
-    use crate::types::{Key, OpBuilder, OpId, OpType, ScalarValue, ROOT};
+    use crate::types::{Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, ROOT};
     use proptest::prelude::*;
 
     #[derive(Clone)]
@@ -261,8 +261,6 @@ mod tests {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId::new(counter, 0),
             key: Key::Map(0),
-            succ: Default::default(),
-            pred: Default::default(),
             insert: false,
         };
         osd.push(ROOT.into(), op)
@@ -377,7 +375,7 @@ mod tests {
     }
 
     fn make_optree(actions: &[Action], osd: &OpSetData) -> super::OpTreeInternal {
-        let mut optree = OpTreeInternal::new();
+        let mut optree = OpTreeInternal::new(ObjType::List);
         for action in actions {
             match action {
                 Action::Insert(index, idx) => {

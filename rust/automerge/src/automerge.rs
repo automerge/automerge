@@ -20,7 +20,7 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
-    OpBuilder, OpId, OpType, Value,
+    OpBuilder, OpId, OpIds, OpType, Value,
 };
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -628,40 +628,7 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                let storage::load::Reconstructed {
-                    max_op,
-                    result: op_set,
-                    changes,
-                    heads,
-                } = storage::load::reconstruct_document(
-                    &d,
-                    options.verification_mode,
-                    OpSet::builder(),
-                )
-                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
-                let mut hashes_by_index = HashMap::new();
-                let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
-                let mut change_graph = ChangeGraph::new();
-                for (index, change) in changes.iter().enumerate() {
-                    // SAFETY: This should be fine because we just constructed an opset containing
-                    // all the changes
-                    let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
-                    actor_to_history.entry(actor_index).or_default().push(index);
-                    hashes_by_index.insert(index, change.hash());
-                    change_graph.add_change(change, actor_index)?;
-                }
-                let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
-                Self {
-                    queue: vec![],
-                    history: changes,
-                    history_index,
-                    states: actor_to_history,
-                    change_graph,
-                    ops: op_set,
-                    deps: heads.into_iter().collect(),
-                    actor: Actor::Unused(ActorId::random()),
-                    max_op,
-                }
+                reconstruct_document(&d, options.verification_mode)?
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -842,8 +809,8 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
-        for (obj, op) in ops {
-            self.insert_op(&obj, op, patch_log)?;
+        for (obj, op, pred) in ops {
+            self.insert_op(&obj, op, &pred, patch_log)?;
         }
         Ok(())
     }
@@ -866,7 +833,7 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder)> {
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder, OpIds)> {
         let actor = self.ops.osd.actors.cache(change.actor_id().clone());
         let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
         actors.push(actor);
@@ -913,10 +880,9 @@ impl Automerge {
                             c.expand,
                         ),
                         key,
-                        succ: Default::default(),
-                        pred,
                         insert: c.insert,
                     },
+                    pred,
                 )
             })
             .collect()
@@ -1224,12 +1190,8 @@ impl Automerge {
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
-            let pred: Vec<_> = op.pred().map(|id| self.to_short_string(*id)).collect();
-            let succ: Vec<_> = op
-                .succ()
-                .into_iter()
-                .map(|id| self.to_short_string(*id))
-                .collect();
+            let pred: Vec<_> = op.pred().map(|op| self.to_short_string(*op.id())).collect();
+            let succ: Vec<_> = op.succ().map(|op| self.to_short_string(*op.id())).collect();
             let insert = match op.insert() {
                 true => "t",
                 false => "f",
@@ -1268,19 +1230,20 @@ impl Automerge {
         &mut self,
         obj: &ObjId,
         op: OpBuilder,
+        pred: &OpIds,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let is_delete = op.is_delete();
         let idx = self.ops.load(*obj, op);
-        let op = idx.as_op2(&self.ops.osd);
+        let op = idx.as_op(&self.ops.osd);
 
         let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj, patch_log.text_rep())?;
-            let found = self.ops.find_op_with_patch_log(&obj, op);
-            found.log_patches(&obj, op, self, patch_log);
+            let found = self.ops.find_op_with_patch_log(&obj, op, pred);
+            found.log_patches(&obj, op, pred, self, patch_log);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.find_op_without_patch_log(obj, op);
+            let found = self.ops.find_op_without_patch_log(obj, op, pred);
             (found.pos, found.succ)
         };
 
@@ -1536,7 +1499,7 @@ impl Automerge {
         let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
         let found = self
             .ops
-            .seek_opid(&obj.id, opid, obj.encoding, clock.as_ref())
+            .seek_list_opid(&obj.id, opid, obj.encoding, clock.as_ref())
             .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
         Ok(found.index)
     }
@@ -1627,9 +1590,12 @@ impl Automerge {
                             let prop = match *op.key() {
                                 Key::Map(prop) => Prop::Map(self.ops.osd.props.get(prop).clone()),
                                 Key::Seq(_) => {
-                                    let Some(found) =
-                                        self.ops.seek_opid(obj_id, *op.id(), obj.encoding, None)
-                                    else {
+                                    let Some(found) = self.ops.seek_list_opid(
+                                        obj_id,
+                                        *op.id(),
+                                        obj.encoding,
+                                        None,
+                                    ) else {
                                         continue;
                                     };
                                     Prop::Seq(found.index)
@@ -1920,4 +1886,41 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
+}
+
+pub(crate) fn reconstruct_document<'a>(
+    doc: &'a storage::Document<'a>,
+    mode: VerificationMode,
+) -> Result<Automerge, AutomergeError> {
+    let storage::load::ReconOpSet {
+        changes,
+        op_set,
+        heads,
+        max_op,
+    } = storage::load::reconstruct_opset(doc, mode)
+        .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+
+    let mut hashes_by_index = HashMap::new();
+    let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut change_graph = ChangeGraph::new();
+    for (index, change) in changes.iter().enumerate() {
+        // SAFETY: This should be fine because we just constructed an opset containing
+        // all the changes
+        let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
+        actor_to_history.entry(actor_index).or_default().push(index);
+        hashes_by_index.insert(index, change.hash());
+        change_graph.add_change(change, actor_index)?;
+    }
+    let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+    Ok(Automerge {
+        queue: vec![],
+        history: changes,
+        history_index,
+        states: actor_to_history,
+        change_graph,
+        ops: op_set,
+        deps: heads.into_iter().collect(),
+        actor: Actor::Unused(ActorId::random()),
+        max_op,
+    })
 }

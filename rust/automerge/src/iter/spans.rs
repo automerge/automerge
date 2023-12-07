@@ -198,6 +198,6 @@ impl<'a> Iterator for OpTreeOps<'a> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|idx| idx.as_op2(&self.doc.ops().osd))
+        self.iter.next().map(|idx| idx.as_op(&self.doc.ops().osd))
     }
 }

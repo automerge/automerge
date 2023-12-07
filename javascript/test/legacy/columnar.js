@@ -578,8 +578,8 @@ function decodeOps(ops, forDocument) {
     const elemId = op.keyStr
       ? undefined
       : op.keyCtr === 0
-      ? "_head"
-      : `${op.keyCtr}@${op.keyActor}`
+        ? "_head"
+        : `${op.keyCtr}@${op.keyActor}`
     const action = ACTIONS[op.action] || op.action
     const newOp = elemId
       ? { obj, elemId, action }

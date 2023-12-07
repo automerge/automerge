@@ -503,6 +503,7 @@ impl Key {
     }
 }
 
+// FIXME - isn't having ord and partial ord here dangerous?
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
 
@@ -730,7 +731,7 @@ impl From<Prop> for wasm_bindgen::JsValue {
 #[cfg(test)]
 pub(crate) mod gen {
     use super::{
-        ChangeHash, ElemId, Key, ObjType, OpBuilder, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
+        ChangeHash, ElemId, Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, HASH_SIZE,
     };
     use crate::value::Counter;
 
@@ -799,8 +800,6 @@ pub(crate) mod gen {
                 key,
                 insert,
                 action,
-                succ: OpIds::empty(),
-                pred: OpIds::empty(),
             },
         )
     }

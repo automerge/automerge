@@ -61,6 +61,7 @@ impl<'a> Iterator for Parents<'a> {
             typ,
             prop,
             visible,
+            ..
         } = self
             .ops
             .parent_object(&self.obj, self.text_rep, self.clock.as_ref())?;

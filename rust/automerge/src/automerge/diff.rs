@@ -9,10 +9,10 @@ use crate::types::ObjId;
 use crate::{
     marks::{RichText, RichTextStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, Op, ScalarValue},
-    Automerge, ObjType, OpType,
+    types::{Clock, ListEncoding, Op, Prop},
+    value::Value,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, OpType, ReadDoc,
 };
-use crate::{AutomergeError, ChangeHash, Cursor, ObjId as ExId, Prop, ReadDoc, Value};
 
 #[derive(Clone, Debug)]
 struct Winner<'a> {
@@ -266,10 +266,8 @@ fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
 }
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
-    if let (Some(ScalarValue::Counter(before_c)), Some(ScalarValue::Counter(after_c))) =
-        (before.op.scalar_value(), after.op.scalar_value())
-    {
-        let n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
+    if before.op.is_counter() && after.op.is_counter() {
+        let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
         if n != 0 {
             return Some(n);
         }

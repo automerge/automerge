@@ -5,32 +5,26 @@ use crate::{
     convert,
     op_set::OpSetData,
     storage::AsChangeOp,
-    types::{ActorId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
+    types::{ActorId, Key, MarkData, Op, OpId, OpType, ScalarValue},
 };
 
 /// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
 /// the actor ID stored in the opset data.
 ///
 /// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSetData
-pub(crate) fn op_as_actor_id<'a>(
-    obj: &'a ObjId,
-    op: Op<'a>,
-    osd: &'a OpSetData,
-) -> OpWithMetadata<'a> {
-    OpWithMetadata { obj, op, osd }
+pub(crate) fn op_as_actor_id(op: Op<'_>) -> OpWithMetadata<'_> {
+    OpWithMetadata { op }
 }
 
 pub(crate) struct OpWithMetadata<'a> {
-    obj: &'a ObjId,
     op: Op<'a>,
-    osd: &'a OpSetData,
 }
 
 impl<'a> OpWithMetadata<'a> {
     fn wrap(&self, opid: OpId) -> OpIdWithMetadata<'a> {
         OpIdWithMetadata {
             opid,
-            osd: self.osd,
+            osd: self.op.osd(),
         }
     }
 }
@@ -66,10 +60,10 @@ impl<'a> Iterator for PredWithMetadata<'a> {
     type Item = OpIdWithMetadata<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(op) = self.op.pred().nth(self.offset) {
+        if let Some(opid) = self.op.pred().nth(self.offset).map(|o| *o.id()) {
             self.offset += 1;
             Some(OpIdWithMetadata {
-                opid: *op,
+                opid,
                 osd: self.osd,
             })
         } else {
@@ -103,12 +97,12 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.obj.is_root() {
+        if self.op.obj().is_root() {
             convert::ObjId::Root
         } else {
             convert::ObjId::Op(OpIdWithMetadata {
-                opid: *self.obj.opid(),
-                osd: self.osd,
+                opid: *self.op.obj().opid(),
+                osd: self.op.osd(),
             })
         }
     }
@@ -117,13 +111,13 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
         PredWithMetadata {
             op: self.op,
             offset: 0,
-            osd: self.osd,
+            osd: self.op.osd(),
         }
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
         match &self.op.key() {
-            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.osd.props.get(*idx).into())),
+            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.op.osd().props.get(*idx).into())),
             Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
             Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(e.0))),
         }

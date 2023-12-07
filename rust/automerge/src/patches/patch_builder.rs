@@ -2,22 +2,29 @@ use core::fmt::Debug;
 use std::sync::Arc;
 
 use crate::marks::RichText;
-use crate::{ObjId, Parents, Prop, Value};
+use crate::{ObjId, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct PatchBuilder {
     patches: Vec<Patch>,
     last_mark_set: Option<Arc<RichText>>, // keep this around for a quick pointer equality test
 }
 
 impl PatchBuilder {
-    pub(crate) fn new() -> Self {
-        Self {
-            patches: Vec::new(),
-            last_mark_set: None,
+    pub(crate) fn get_path<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: &ObjId,
+    ) -> Option<Vec<(ObjId, Prop)>> {
+        match doc.parents(obj) {
+            Ok(parents) => parents.visible_path(),
+            Err(e) => {
+                log!("error generating patch : {:?}", e);
+                None
+            }
         }
     }
 
@@ -25,9 +32,9 @@ impl PatchBuilder {
         std::mem::take(&mut self.patches)
     }
 
-    pub(crate) fn insert(
+    pub(crate) fn insert<R: ReadDoc>(
         &mut self,
-        parents: Parents<'_>,
+        doc: &R,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
@@ -46,15 +53,22 @@ impl PatchBuilder {
                 return;
             }
         }
-        let mut values = SequenceTree::new();
-        values.push(value);
-        let action = PatchAction::Insert { index, values };
-        self.finish(parents, obj, action);
+        if let Some(path) = self.get_path(doc, &obj) {
+            let mut values = SequenceTree::new();
+            values.push(value);
+            let action = PatchAction::Insert { index, values };
+            self.push(Patch { obj, path, action });
+        }
     }
 
-    pub(crate) fn splice_text(
+    fn push(&mut self, patch: Patch) {
+        self.patches.push(patch);
+        self.last_mark_set = None;
+    }
+
+    pub(crate) fn splice_text<R: ReadDoc>(
         &mut self,
-        parents: Parents<'_>,
+        doc: &R,
         obj: ObjId,
         index: usize,
         value: &str,
@@ -73,18 +87,20 @@ impl PatchBuilder {
                 return;
             }
         }
-        let action = PatchAction::SpliceText {
-            index,
-            value: value.into(),
-            marks: marks.as_deref().cloned(),
-        };
-        self.finish(parents, obj, action);
-        self.last_mark_set = marks;
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::SpliceText {
+                index,
+                value: value.into(),
+                marks: marks.as_deref().cloned(),
+            };
+            self.push(Patch { obj, path, action });
+            self.last_mark_set = marks;
+        }
     }
 
-    pub(crate) fn delete_seq(
+    pub(crate) fn delete_seq<R: ReadDoc>(
         &mut self,
-        parents: Parents<'_>,
+        doc: &R,
         obj: ObjId,
         index: usize,
         length: usize,
@@ -134,56 +150,64 @@ impl PatchBuilder {
             }
             _ => {}
         }
-        let action = PatchAction::DeleteSeq { index, length };
-        self.finish(parents, obj, action);
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::DeleteSeq { index, length };
+            self.push(Patch { obj, path, action })
+        }
     }
 
-    pub(crate) fn delete_map(&mut self, parents: Parents<'_>, obj: ObjId, key: &str) {
-        let action = PatchAction::DeleteMap {
-            key: key.to_owned(),
-        };
-        self.finish(parents, obj, action);
+    pub(crate) fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::DeleteMap {
+                key: key.to_owned(),
+            };
+            self.push(Patch { obj, path, action })
+        }
     }
 
-    pub(crate) fn put(
+    pub(crate) fn put<R: ReadDoc>(
         &mut self,
-        parents: Parents<'_>,
+        doc: &R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        let value = (tagged_value.0.to_owned(), tagged_value.1);
-        let action = match prop {
-            Prop::Map(key) => PatchAction::PutMap {
-                key,
-                value,
-                conflict,
-            },
-            Prop::Seq(index) => PatchAction::PutSeq {
-                index,
-                value,
-                conflict,
-            },
-        };
-        self.finish(parents, obj, action);
+        if let Some(path) = self.get_path(doc, &obj) {
+            let value = (tagged_value.0.to_owned(), tagged_value.1);
+            let action = match prop {
+                Prop::Map(key) => PatchAction::PutMap {
+                    key,
+                    value,
+                    conflict,
+                },
+                Prop::Seq(index) => PatchAction::PutSeq {
+                    index,
+                    value,
+                    conflict,
+                },
+            };
+            self.push(Patch { obj, path, action })
+        }
     }
 
-    pub(crate) fn increment(
+    pub(crate) fn increment<R: ReadDoc>(
         &mut self,
-        parents: Parents<'_>,
+        doc: &R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (i64, ObjId),
     ) {
-        let value = tagged_value.0;
-        let action = PatchAction::Increment { prop, value };
-        self.finish(parents, obj, action);
+        if let Some(path) = self.get_path(doc, &obj) {
+            let value = tagged_value.0;
+            let action = PatchAction::Increment { prop, value };
+            self.push(Patch { obj, path, action })
+        }
     }
 
-    pub(crate) fn mark<'a, 'b, M: Iterator<Item = Mark<'b>>>(
+    pub(crate) fn mark<'a, 'b, R: ReadDoc, M: Iterator<Item = Mark<'b>>>(
         &mut self,
-        parents: Parents<'a>,
+        doc: &'a R,
         obj: ObjId,
         mark: M,
     ) {
@@ -193,14 +217,16 @@ impl PatchBuilder {
             }
             return;
         }
-        let marks: Vec<_> = mark.map(|m| m.into_owned()).collect();
-        if !marks.is_empty() {
-            let action = PatchAction::Mark { marks };
-            self.finish(parents, obj, action);
+        if let Some(path) = self.get_path(doc, &obj) {
+            let marks: Vec<_> = mark.map(|m| m.into_owned()).collect();
+            if !marks.is_empty() {
+                let action = PatchAction::Mark { marks };
+                self.push(Patch { obj, path, action });
+            }
         }
     }
 
-    pub(crate) fn flag_conflict(&mut self, parents: Parents<'_>, obj: ObjId, prop: Prop) {
+    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, prop: Prop) {
         let conflict = match maybe_append(&mut self.patches, &obj) {
             Some(PatchAction::PutMap { key, conflict, .. })
                 if Some(key.as_str()) == prop.as_str() =>
@@ -214,28 +240,10 @@ impl PatchBuilder {
         };
         if let Some(conflict) = conflict {
             *conflict = true
-        } else {
+        } else if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::Conflict { prop };
-            self.finish(parents, obj, action);
+            self.push(Patch { obj, path, action });
         }
-    }
-
-    fn finish(&mut self, parents: Parents<'_>, obj: ObjId, action: PatchAction) {
-        let mut patch = Patch {
-            obj,
-            action,
-            path: vec![],
-        };
-        for p in parents {
-            // parent was deleted - dont make a patch
-            if !p.visible {
-                return;
-            }
-            patch.path.push((p.obj, p.prop));
-        }
-        patch.path.reverse();
-        self.patches.push(patch);
-        self.last_mark_set = None;
     }
 }
 

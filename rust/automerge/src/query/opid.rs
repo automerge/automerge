@@ -1,7 +1,7 @@
 use crate::marks::RichText;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::OpTreeNode;
-use crate::query::{ListState, QueryResult, RichTextQueryState, TreeQuery};
+use crate::query::{Index, ListState, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, OpId};
 use std::cmp::Ordering;
@@ -81,15 +81,20 @@ impl<'a> OpIdSearch<'a> {
 }
 
 impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
-    fn query_node(&mut self, child: &'a OpTreeNode, osd: &'a OpSetData) -> QueryResult {
-        self.list_state.check_if_node_is_clean(child);
+    fn query_node(
+        &mut self,
+        child: &'a OpTreeNode,
+        index: &'a Index,
+        osd: &'a OpSetData,
+    ) -> QueryResult {
+        self.list_state.check_if_node_is_clean(index);
         if self.clock.is_some() {
             QueryResult::Descend
         } else {
             match &self.target {
-                SearchTarget::OpId(id, _) if !child.index.ops.contains(id) => {
+                SearchTarget::OpId(id, _) if !index.ops.contains(id) => {
                     self.list_state
-                        .process_node(child, osd, Some(&mut self.marks));
+                        .process_node(child, index, osd, Some(&mut self.marks));
                     QueryResult::Next
                 }
                 _ => QueryResult::Descend,
@@ -159,8 +164,8 @@ impl<'a> SimpleOpIdSearch<'a> {
 }
 
 impl<'a> TreeQuery<'a> for SimpleOpIdSearch<'a> {
-    fn query_node(&mut self, child: &OpTreeNode, _osd: &OpSetData) -> QueryResult {
-        if self.found || child.index.ops.contains(&self.target) {
+    fn query_node(&mut self, child: &OpTreeNode, index: &Index, _osd: &OpSetData) -> QueryResult {
+        if self.found || index.ops.contains(&self.target) {
             QueryResult::Descend
         } else {
             self.pos += child.len();
