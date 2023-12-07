@@ -546,6 +546,11 @@ impl Automerge {
         self.get_obj_meta(obj)
     }
 
+    pub(crate) fn exid_to_just_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
+        let opid = self.exid_to_opid(id)?;
+        Ok(ObjId(opid))
+    }
+
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
         self.ops.id_to_exid(id)
     }
@@ -1395,14 +1400,14 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Parents<'_>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        Ok(self.ops.parents(obj.id, clock))
+        let obj = self.exid_to_just_obj(obj)?;
+        Ok(self.ops.parents(obj, clock))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
-        self.exid_to_obj(obj)
+        self.exid_to_just_obj(obj)
             .ok()
-            .map(|obj| self.ops.keys(&obj.id, clock))
+            .map(|obj| self.ops.keys(&obj, clock))
             .unwrap_or_default()
     }
 
@@ -1412,9 +1417,9 @@ impl Automerge {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'a, R> {
-        self.exid_to_obj(obj)
+        self.exid_to_just_obj(obj)
             .ok()
-            .map(|obj| self.ops.map_range(&obj.id, range, clock))
+            .map(|obj| self.ops.map_range(&obj, range, clock))
             .unwrap_or_default()
     }
 
@@ -1424,9 +1429,9 @@ impl Automerge {
         range: R,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        self.exid_to_obj(obj)
+        self.exid_to_just_obj(obj)
             .ok()
-            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, clock))
+            .map(|obj| self.ops.list_range(&obj, range, clock))
             .unwrap_or_default()
     }
 

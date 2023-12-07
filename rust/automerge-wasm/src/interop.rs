@@ -1,4 +1,5 @@
 use crate::error::InsertObject;
+use crate::export_cache::CachedObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation};
 use am::sync::{Capability, ChunkList, MessageVersion};
@@ -6,9 +7,8 @@ use automerge as am;
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
-use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
@@ -17,118 +17,7 @@ use wasm_bindgen::JsCast;
 
 use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
 
-const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
-const DATATYPE_SYMBOL: &str = "_am_datatype_";
-const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
-const META_SYMBOL: &str = "_am_meta";
-
-#[derive(Debug, Clone)]
-pub(crate) struct ExportCache {
-    objs: HashMap<ObjId, CachedObject>,
-    definition: Object,
-    value_key: JsValue,
-    meta_sym: Symbol,
-    datatype_sym: Symbol,
-    raw_obj_sym: Symbol,
-    raw_data_sym: Symbol,
-}
-
-impl ExportCache {
-    pub(crate) fn new() -> Result<Self, error::Export> {
-        let definition = Object::new();
-        Reflect::set(&definition, &"writable".into(), &false.into())
-            .map_err(|_| error::Export::SetHidden("writable"))?;
-        Reflect::set(&definition, &"enumerable".into(), &false.into())
-            .map_err(|_| error::Export::SetHidden("enumerable"))?;
-        Reflect::set(&definition, &"configurable".into(), &false.into())
-            .map_err(|_| error::Export::SetHidden("configurable"))?;
-        let raw_obj_sym = Symbol::for_(RAW_OBJECT_SYMBOL);
-        let datatype_sym = Symbol::for_(DATATYPE_SYMBOL);
-        let meta_sym = Symbol::for_(META_SYMBOL);
-        let raw_data_sym = Symbol::for_(RAW_DATA_SYMBOL);
-        let value_key = "value".into();
-        Ok(Self {
-            objs: HashMap::new(),
-            definition,
-            raw_obj_sym,
-            datatype_sym,
-            meta_sym,
-            value_key,
-            raw_data_sym,
-        })
-    }
-
-    pub(crate) fn set_meta(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.meta_sym, value)
-    }
-
-    pub(crate) fn get_raw_data(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.raw_data_sym)
-    }
-
-    pub(crate) fn set_raw_data(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_data_sym, value)
-    }
-
-    pub(crate) fn get_raw_object(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.raw_obj_sym)
-    }
-
-    pub(crate) fn set_raw_object(
-        &self,
-        obj: &Object,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_obj_sym, value)
-    }
-
-    pub(crate) fn get_datatype(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.datatype_sym)
-    }
-
-    pub(crate) fn set_datatype(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.datatype_sym, value)
-    }
-
-    pub(crate) fn get_value(&self, obj: &JsValue, key: &Symbol) -> Result<JsValue, error::GetProp> {
-        Reflect::get(obj, key).map_err(|error| error::GetProp {
-            property: key.to_string().into(),
-            error,
-        })
-    }
-
-    pub(crate) fn set_value(
-        &self,
-        obj: &Object,
-        key: &JsValue,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        Reflect::set(&self.definition, &self.value_key, value)
-            .map_err(|_| error::Export::SetHidden("value"))?;
-        Object::define_property(obj, key, &self.definition);
-        Ok(())
-    }
-
-    pub(crate) fn set_hidden(
-        &self,
-        obj: &Object,
-        raw_obj: &JsValue,
-        datatype: &JsValue,
-        meta: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_obj_sym, raw_obj)?;
-        self.set_value(obj, &self.datatype_sym, datatype)?;
-        self.set_value(obj, &self.meta_sym, meta)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct CachedObject {
-    pub(crate) id: ObjId,
-    pub(crate) inner: Object,
-    pub(crate) outer: Object,
-}
+pub(crate) use crate::export_cache::ExportCache;
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
@@ -849,105 +738,10 @@ pub(crate) fn get_heads(
 }
 
 impl Automerge {
-    pub(crate) fn export_object(
-        &self,
-        obj: &ObjId,
-        datatype: Datatype,
-        heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
-        cache: &ExportCache,
-    ) -> Result<JsValue, error::Export> {
-        let result = match datatype {
-            Datatype::Text => match self.text_rep {
-                TextRepresentation::String => {
-                    if let Some(heads) = heads {
-                        self.doc.text_at(obj, heads)?.into()
-                    } else {
-                        self.doc.text(obj)?.into()
-                    }
-                }
-                TextRepresentation::Array => self
-                    .wrap_object(
-                        &self.export_list(obj, heads, meta, cache)?,
-                        datatype,
-                        obj,
-                        meta,
-                        cache,
-                    )?
-                    .into(),
-            },
-            Datatype::List => self
-                .wrap_object(
-                    &self.export_list(obj, heads, meta, cache)?,
-                    datatype,
-                    obj,
-                    meta,
-                    cache,
-                )?
-                .into(),
-            _ => self
-                .wrap_object(
-                    &self.export_map(obj, heads, meta, cache)?,
-                    datatype,
-                    obj,
-                    meta,
-                    cache,
-                )?
-                .into(),
-        };
-        Ok(result)
-    }
-
-    pub(crate) fn export_map(
-        &self,
-        obj: &ObjId,
-        heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
-        cache: &ExportCache,
-    ) -> Result<Object, error::Export> {
-        let map = Object::new();
-        let items = if let Some(heads) = heads {
-            self.doc.map_range_at(obj, .., heads)
-        } else {
-            self.doc.map_range(obj, ..)
-        };
-        for item in items {
-            let subval = match item.value {
-                Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta, cache)?,
-                Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep), cache)?,
-            };
-            Reflect::set(&map, &item.key.into(), &subval).map_err(|error| error::SetProp {
-                property: item.key.into(),
-                error,
-            })?;
-        }
-        Ok(map)
-    }
-
-    pub(crate) fn export_list(
-        &self,
-        obj: &ObjId,
-        heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
-        cache: &ExportCache,
-    ) -> Result<Object, error::Export> {
-        if let Some(heads) = heads {
-            self.doc.list_range_at(obj, .., heads)
-        } else {
-            self.doc.list_range(obj, ..)
-        }
-        .map(|item| match &item.value {
-            Value::Object(o) => self.export_object(&item.id, o.into(), heads, meta, cache),
-            Value::Scalar(_) => self.export_value(alloc(&item.value, self.text_rep), cache),
-        })
-        .collect::<Result<Array, _>>()
-        .map(|array| array.into())
-    }
-
     pub(crate) fn export_value(
         &self,
         (datatype, raw_value): (Datatype, JsValue),
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<JsValue, error::Export> {
         if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function
@@ -968,7 +762,7 @@ impl Automerge {
     pub(crate) fn unwrap_object(
         &self,
         ext_val: &Object,
-        cache: &mut ExportCache,
+        cache: &mut ExportCache<'_>,
         meta: &JsValue,
     ) -> Result<(bool, CachedObject), error::Export> {
         let id_val = cache.get_raw_object(ext_val)?;
@@ -1018,7 +812,7 @@ impl Automerge {
     pub(crate) fn unwrap_scalar(
         &self,
         ext_val: JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<JsValue, error::Export> {
         let inner = cache.get_raw_data(&ext_val)?;
         if !inner.is_undefined() {
@@ -1033,7 +827,7 @@ impl Automerge {
         (datatype, raw_value): (Datatype, JsValue),
         id: &ObjId,
         meta: &JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<JsValue, error::Export> {
         if let Ok(obj) = raw_value.clone().dyn_into::<Object>() {
             let result = self.wrap_object(&obj, datatype, id, meta, cache)?;
@@ -1047,7 +841,7 @@ impl Automerge {
         &self,
         value: &Object,
         datatype: Datatype,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
         if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function
@@ -1069,7 +863,7 @@ impl Automerge {
         datatype: Datatype,
         id: &ObjId,
         meta: &JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
         let value = if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function
@@ -1101,7 +895,7 @@ impl Automerge {
         array: &Array,
         patch: &Patch,
         meta: &JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutSeq { index, value, .. } => {
@@ -1171,14 +965,13 @@ impl Automerge {
         map: &Object,
         patch: &Patch,
         meta: &JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutMap { key, value, .. } => {
                 let sub_val =
                     self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
                 js_set(map, key, &sub_val)?;
-                //Ok(result)
                 Ok(())
             }
             PatchAction::DeleteMap { key, .. } => {
@@ -1186,7 +979,6 @@ impl Automerge {
                     prop: key.to_string(),
                     err: e,
                 })?;
-                //Ok(result)
                 Ok(())
             }
             PatchAction::Increment { prop, value, .. } => {
@@ -1201,7 +993,6 @@ impl Automerge {
                             key,
                             &self.export_value(alloc(&new_value, self.text_rep), cache)?,
                         )?;
-                        //Ok(result)
                         Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -1224,7 +1015,7 @@ impl Automerge {
         root: Object,
         patch: &Patch,
         meta: &JsValue,
-        cache: &mut ExportCache,
+        cache: &mut ExportCache<'_>,
     ) -> Result<Object, error::ApplyPatch> {
         let (_, root_cache) = self.unwrap_object(&root, cache, meta)?;
         let mut current = root_cache.clone();
@@ -1294,7 +1085,7 @@ impl Automerge {
         num_del: usize,
         values: I,
         meta: &JsValue,
-        cache: &ExportCache,
+        cache: &ExportCache<'_>,
     ) -> Result<(), error::ApplyPatch> {
         let args: Array = values
             .into_iter()
@@ -1776,8 +1567,8 @@ pub(crate) mod error {
     #[derive(Debug, thiserror::Error)]
     #[error("unable to get property {property}: {error:?}")]
     pub struct GetProp {
-        pub(super) property: String,
-        pub(super) error: wasm_bindgen::JsValue,
+        pub(crate) property: String,
+        pub(crate) error: wasm_bindgen::JsValue,
     }
 
     impl From<GetProp> for JsValue {
@@ -1789,8 +1580,8 @@ pub(crate) mod error {
     #[derive(Debug, thiserror::Error)]
     #[error("error setting property {property:?} on JS value: {error:?}")]
     pub struct SetProp {
-        pub(super) property: JsValue,
-        pub(super) error: JsValue,
+        pub(crate) property: JsValue,
+        pub(crate) error: JsValue,
     }
 
     impl From<SetProp> for JsValue {
@@ -1847,6 +1638,10 @@ pub(crate) mod error {
         CallSplice(JsValue),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error("invalid root processed")]
+        InvalidRoot,
+        #[error("missing child in export")]
+        MissingChild,
     }
 
     impl From<Export> for JsValue {
