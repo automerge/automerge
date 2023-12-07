@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/interop.rs`."><title>interop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge_wasm" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.0 (79e9716c9 2023-11-13)" data-channel="1.74.0" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge_wasm/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/interop.rs`."><title>interop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-fa3bb1812debf86c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge_wasm" data-themes="" data-resource-suffix="" data-rustdoc-version="1.74.1 (a28077b28 2023-12-04)" data-channel="1.74.1" data-search-js="search-8be46b629f5f14a8.js" data-settings-js="settings-74424d7eec62a23e.js" ><script src="../../static.files/storage-fec3eaa3851e447d.js"></script><script defer src="../../static.files/src-script-3280b574d94e47b4.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-c5bd66d33317d69f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-5d8b3c7633ad77ba.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge_wasm/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -1786,212 +1786,8 @@
 <a href="#1786" id="1786">1786</a>
 <a href="#1787" id="1787">1787</a>
 <a href="#1788" id="1788">1788</a>
-<a href="#1789" id="1789">1789</a>
-<a href="#1790" id="1790">1790</a>
-<a href="#1791" id="1791">1791</a>
-<a href="#1792" id="1792">1792</a>
-<a href="#1793" id="1793">1793</a>
-<a href="#1794" id="1794">1794</a>
-<a href="#1795" id="1795">1795</a>
-<a href="#1796" id="1796">1796</a>
-<a href="#1797" id="1797">1797</a>
-<a href="#1798" id="1798">1798</a>
-<a href="#1799" id="1799">1799</a>
-<a href="#1800" id="1800">1800</a>
-<a href="#1801" id="1801">1801</a>
-<a href="#1802" id="1802">1802</a>
-<a href="#1803" id="1803">1803</a>
-<a href="#1804" id="1804">1804</a>
-<a href="#1805" id="1805">1805</a>
-<a href="#1806" id="1806">1806</a>
-<a href="#1807" id="1807">1807</a>
-<a href="#1808" id="1808">1808</a>
-<a href="#1809" id="1809">1809</a>
-<a href="#1810" id="1810">1810</a>
-<a href="#1811" id="1811">1811</a>
-<a href="#1812" id="1812">1812</a>
-<a href="#1813" id="1813">1813</a>
-<a href="#1814" id="1814">1814</a>
-<a href="#1815" id="1815">1815</a>
-<a href="#1816" id="1816">1816</a>
-<a href="#1817" id="1817">1817</a>
-<a href="#1818" id="1818">1818</a>
-<a href="#1819" id="1819">1819</a>
-<a href="#1820" id="1820">1820</a>
-<a href="#1821" id="1821">1821</a>
-<a href="#1822" id="1822">1822</a>
-<a href="#1823" id="1823">1823</a>
-<a href="#1824" id="1824">1824</a>
-<a href="#1825" id="1825">1825</a>
-<a href="#1826" id="1826">1826</a>
-<a href="#1827" id="1827">1827</a>
-<a href="#1828" id="1828">1828</a>
-<a href="#1829" id="1829">1829</a>
-<a href="#1830" id="1830">1830</a>
-<a href="#1831" id="1831">1831</a>
-<a href="#1832" id="1832">1832</a>
-<a href="#1833" id="1833">1833</a>
-<a href="#1834" id="1834">1834</a>
-<a href="#1835" id="1835">1835</a>
-<a href="#1836" id="1836">1836</a>
-<a href="#1837" id="1837">1837</a>
-<a href="#1838" id="1838">1838</a>
-<a href="#1839" id="1839">1839</a>
-<a href="#1840" id="1840">1840</a>
-<a href="#1841" id="1841">1841</a>
-<a href="#1842" id="1842">1842</a>
-<a href="#1843" id="1843">1843</a>
-<a href="#1844" id="1844">1844</a>
-<a href="#1845" id="1845">1845</a>
-<a href="#1846" id="1846">1846</a>
-<a href="#1847" id="1847">1847</a>
-<a href="#1848" id="1848">1848</a>
-<a href="#1849" id="1849">1849</a>
-<a href="#1850" id="1850">1850</a>
-<a href="#1851" id="1851">1851</a>
-<a href="#1852" id="1852">1852</a>
-<a href="#1853" id="1853">1853</a>
-<a href="#1854" id="1854">1854</a>
-<a href="#1855" id="1855">1855</a>
-<a href="#1856" id="1856">1856</a>
-<a href="#1857" id="1857">1857</a>
-<a href="#1858" id="1858">1858</a>
-<a href="#1859" id="1859">1859</a>
-<a href="#1860" id="1860">1860</a>
-<a href="#1861" id="1861">1861</a>
-<a href="#1862" id="1862">1862</a>
-<a href="#1863" id="1863">1863</a>
-<a href="#1864" id="1864">1864</a>
-<a href="#1865" id="1865">1865</a>
-<a href="#1866" id="1866">1866</a>
-<a href="#1867" id="1867">1867</a>
-<a href="#1868" id="1868">1868</a>
-<a href="#1869" id="1869">1869</a>
-<a href="#1870" id="1870">1870</a>
-<a href="#1871" id="1871">1871</a>
-<a href="#1872" id="1872">1872</a>
-<a href="#1873" id="1873">1873</a>
-<a href="#1874" id="1874">1874</a>
-<a href="#1875" id="1875">1875</a>
-<a href="#1876" id="1876">1876</a>
-<a href="#1877" id="1877">1877</a>
-<a href="#1878" id="1878">1878</a>
-<a href="#1879" id="1879">1879</a>
-<a href="#1880" id="1880">1880</a>
-<a href="#1881" id="1881">1881</a>
-<a href="#1882" id="1882">1882</a>
-<a href="#1883" id="1883">1883</a>
-<a href="#1884" id="1884">1884</a>
-<a href="#1885" id="1885">1885</a>
-<a href="#1886" id="1886">1886</a>
-<a href="#1887" id="1887">1887</a>
-<a href="#1888" id="1888">1888</a>
-<a href="#1889" id="1889">1889</a>
-<a href="#1890" id="1890">1890</a>
-<a href="#1891" id="1891">1891</a>
-<a href="#1892" id="1892">1892</a>
-<a href="#1893" id="1893">1893</a>
-<a href="#1894" id="1894">1894</a>
-<a href="#1895" id="1895">1895</a>
-<a href="#1896" id="1896">1896</a>
-<a href="#1897" id="1897">1897</a>
-<a href="#1898" id="1898">1898</a>
-<a href="#1899" id="1899">1899</a>
-<a href="#1900" id="1900">1900</a>
-<a href="#1901" id="1901">1901</a>
-<a href="#1902" id="1902">1902</a>
-<a href="#1903" id="1903">1903</a>
-<a href="#1904" id="1904">1904</a>
-<a href="#1905" id="1905">1905</a>
-<a href="#1906" id="1906">1906</a>
-<a href="#1907" id="1907">1907</a>
-<a href="#1908" id="1908">1908</a>
-<a href="#1909" id="1909">1909</a>
-<a href="#1910" id="1910">1910</a>
-<a href="#1911" id="1911">1911</a>
-<a href="#1912" id="1912">1912</a>
-<a href="#1913" id="1913">1913</a>
-<a href="#1914" id="1914">1914</a>
-<a href="#1915" id="1915">1915</a>
-<a href="#1916" id="1916">1916</a>
-<a href="#1917" id="1917">1917</a>
-<a href="#1918" id="1918">1918</a>
-<a href="#1919" id="1919">1919</a>
-<a href="#1920" id="1920">1920</a>
-<a href="#1921" id="1921">1921</a>
-<a href="#1922" id="1922">1922</a>
-<a href="#1923" id="1923">1923</a>
-<a href="#1924" id="1924">1924</a>
-<a href="#1925" id="1925">1925</a>
-<a href="#1926" id="1926">1926</a>
-<a href="#1927" id="1927">1927</a>
-<a href="#1928" id="1928">1928</a>
-<a href="#1929" id="1929">1929</a>
-<a href="#1930" id="1930">1930</a>
-<a href="#1931" id="1931">1931</a>
-<a href="#1932" id="1932">1932</a>
-<a href="#1933" id="1933">1933</a>
-<a href="#1934" id="1934">1934</a>
-<a href="#1935" id="1935">1935</a>
-<a href="#1936" id="1936">1936</a>
-<a href="#1937" id="1937">1937</a>
-<a href="#1938" id="1938">1938</a>
-<a href="#1939" id="1939">1939</a>
-<a href="#1940" id="1940">1940</a>
-<a href="#1941" id="1941">1941</a>
-<a href="#1942" id="1942">1942</a>
-<a href="#1943" id="1943">1943</a>
-<a href="#1944" id="1944">1944</a>
-<a href="#1945" id="1945">1945</a>
-<a href="#1946" id="1946">1946</a>
-<a href="#1947" id="1947">1947</a>
-<a href="#1948" id="1948">1948</a>
-<a href="#1949" id="1949">1949</a>
-<a href="#1950" id="1950">1950</a>
-<a href="#1951" id="1951">1951</a>
-<a href="#1952" id="1952">1952</a>
-<a href="#1953" id="1953">1953</a>
-<a href="#1954" id="1954">1954</a>
-<a href="#1955" id="1955">1955</a>
-<a href="#1956" id="1956">1956</a>
-<a href="#1957" id="1957">1957</a>
-<a href="#1958" id="1958">1958</a>
-<a href="#1959" id="1959">1959</a>
-<a href="#1960" id="1960">1960</a>
-<a href="#1961" id="1961">1961</a>
-<a href="#1962" id="1962">1962</a>
-<a href="#1963" id="1963">1963</a>
-<a href="#1964" id="1964">1964</a>
-<a href="#1965" id="1965">1965</a>
-<a href="#1966" id="1966">1966</a>
-<a href="#1967" id="1967">1967</a>
-<a href="#1968" id="1968">1968</a>
-<a href="#1969" id="1969">1969</a>
-<a href="#1970" id="1970">1970</a>
-<a href="#1971" id="1971">1971</a>
-<a href="#1972" id="1972">1972</a>
-<a href="#1973" id="1973">1973</a>
-<a href="#1974" id="1974">1974</a>
-<a href="#1975" id="1975">1975</a>
-<a href="#1976" id="1976">1976</a>
-<a href="#1977" id="1977">1977</a>
-<a href="#1978" id="1978">1978</a>
-<a href="#1979" id="1979">1979</a>
-<a href="#1980" id="1980">1980</a>
-<a href="#1981" id="1981">1981</a>
-<a href="#1982" id="1982">1982</a>
-<a href="#1983" id="1983">1983</a>
-<a href="#1984" id="1984">1984</a>
-<a href="#1985" id="1985">1985</a>
-<a href="#1986" id="1986">1986</a>
-<a href="#1987" id="1987">1987</a>
-<a href="#1988" id="1988">1988</a>
-<a href="#1989" id="1989">1989</a>
-<a href="#1990" id="1990">1990</a>
-<a href="#1991" id="1991">1991</a>
-<a href="#1992" id="1992">1992</a>
-<a href="#1993" id="1993">1993</a>
 </pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
+<span class="kw">use </span><span class="kw">crate</span>::export_cache::CachedObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
 <span class="kw">use </span>am::sync::{Capability, ChunkList, MessageVersion};
@@ -1999,9 +1795,8 @@
 <span class="kw">use </span>automerge::ReadDoc;
 <span class="kw">use </span>automerge::ROOT;
 <span class="kw">use </span>automerge::{Change, ChangeHash, ObjType, Prop};
-<span class="kw">use </span>js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+<span class="kw">use </span>js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 <span class="kw">use </span>std::borrow::Cow;
-<span class="kw">use </span>std::collections::HashMap;
 <span class="kw">use </span>std::collections::{BTreeSet, HashSet};
 <span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>std::ops::Deref;
@@ -2010,118 +1805,7 @@
 
 <span class="kw">use </span>am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
 
-<span class="kw">const </span>RAW_DATA_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_raw_value_&quot;</span>;
-<span class="kw">const </span>DATATYPE_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_datatype_&quot;</span>;
-<span class="kw">const </span>RAW_OBJECT_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_objectId&quot;</span>;
-<span class="kw">const </span>META_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_meta&quot;</span>;
-
-<span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ExportCache {
-    objs: HashMap&lt;ObjId, CachedObject&gt;,
-    definition: Object,
-    value_key: JsValue,
-    meta_sym: Symbol,
-    datatype_sym: Symbol,
-    raw_obj_sym: Symbol,
-    raw_data_sym: Symbol,
-}
-
-<span class="kw">impl </span>ExportCache {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, error::Export&gt; {
-        <span class="kw">let </span>definition = Object::new();
-        Reflect::set(<span class="kw-2">&amp;</span>definition, <span class="kw-2">&amp;</span><span class="string">&quot;writable&quot;</span>.into(), <span class="kw-2">&amp;</span><span class="bool-val">false</span>.into())
-            .map_err(|<span class="kw">_</span>| error::Export::SetHidden(<span class="string">&quot;writable&quot;</span>))<span class="question-mark">?</span>;
-        Reflect::set(<span class="kw-2">&amp;</span>definition, <span class="kw-2">&amp;</span><span class="string">&quot;enumerable&quot;</span>.into(), <span class="kw-2">&amp;</span><span class="bool-val">false</span>.into())
-            .map_err(|<span class="kw">_</span>| error::Export::SetHidden(<span class="string">&quot;enumerable&quot;</span>))<span class="question-mark">?</span>;
-        Reflect::set(<span class="kw-2">&amp;</span>definition, <span class="kw-2">&amp;</span><span class="string">&quot;configurable&quot;</span>.into(), <span class="kw-2">&amp;</span><span class="bool-val">false</span>.into())
-            .map_err(|<span class="kw">_</span>| error::Export::SetHidden(<span class="string">&quot;configurable&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let </span>raw_obj_sym = Symbol::for_(RAW_OBJECT_SYMBOL);
-        <span class="kw">let </span>datatype_sym = Symbol::for_(DATATYPE_SYMBOL);
-        <span class="kw">let </span>meta_sym = Symbol::for_(META_SYMBOL);
-        <span class="kw">let </span>raw_data_sym = Symbol::for_(RAW_DATA_SYMBOL);
-        <span class="kw">let </span>value_key = <span class="string">&quot;value&quot;</span>.into();
-        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-            objs: HashMap::new(),
-            definition,
-            raw_obj_sym,
-            datatype_sym,
-            meta_sym,
-            value_key,
-            raw_data_sym,
-        })
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_meta(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>Object, value: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.meta_sym, value)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_raw_data(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::GetProp&gt; {
-        <span class="self">self</span>.get_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.raw_data_sym)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_raw_data(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>Object, value: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.raw_data_sym, value)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_raw_object(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::GetProp&gt; {
-        <span class="self">self</span>.get_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.raw_obj_sym)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_raw_object(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>Object,
-        value: <span class="kw-2">&amp;</span>JsValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.raw_obj_sym, value)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_datatype(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::GetProp&gt; {
-        <span class="self">self</span>.get_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.datatype_sym)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_datatype(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>Object, value: <span class="kw-2">&amp;</span>JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.datatype_sym, value)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_value(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>JsValue, key: <span class="kw-2">&amp;</span>Symbol) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::GetProp&gt; {
-        Reflect::get(obj, key).map_err(|error| error::GetProp {
-            property: key.to_string().into(),
-            error,
-        })
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_value(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>Object,
-        key: <span class="kw-2">&amp;</span>JsValue,
-        value: <span class="kw-2">&amp;</span>JsValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        Reflect::set(<span class="kw-2">&amp;</span><span class="self">self</span>.definition, <span class="kw-2">&amp;</span><span class="self">self</span>.value_key, value)
-            .map_err(|<span class="kw">_</span>| error::Export::SetHidden(<span class="string">&quot;value&quot;</span>))<span class="question-mark">?</span>;
-        Object::define_property(obj, key, <span class="kw-2">&amp;</span><span class="self">self</span>.definition);
-        <span class="prelude-val">Ok</span>(())
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_hidden(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>Object,
-        raw_obj: <span class="kw-2">&amp;</span>JsValue,
-        datatype: <span class="kw-2">&amp;</span>JsValue,
-        meta: <span class="kw-2">&amp;</span>JsValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Export&gt; {
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.raw_obj_sym, raw_obj)<span class="question-mark">?</span>;
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.datatype_sym, datatype)<span class="question-mark">?</span>;
-        <span class="self">self</span>.set_value(obj, <span class="kw-2">&amp;</span><span class="self">self</span>.meta_sym, meta)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(())
-    }
-}
-
-<span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>CachedObject {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) id: ObjId,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) inner: Object,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) outer: Object,
-}
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::export_cache::ExportCache;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JS(<span class="kw">pub</span>(<span class="kw">crate</span>) JsValue);
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>AR(<span class="kw">pub</span>(<span class="kw">crate</span>) Array);
@@ -2842,105 +2526,10 @@
 }
 
 <span class="kw">impl </span>Automerge {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_object(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        datatype: Datatype,
-        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
-        meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
-        <span class="kw">let </span>result = <span class="kw">match </span>datatype {
-            Datatype::Text =&gt; <span class="kw">match </span><span class="self">self</span>.text_rep {
-                TextRepresentation::String =&gt; {
-                    <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
-                        <span class="self">self</span>.doc.text_at(obj, heads)<span class="question-mark">?</span>.into()
-                    } <span class="kw">else </span>{
-                        <span class="self">self</span>.doc.text(obj)<span class="question-mark">?</span>.into()
-                    }
-                }
-                TextRepresentation::Array =&gt; <span class="self">self
-                    </span>.wrap_object(
-                        <span class="kw-2">&amp;</span><span class="self">self</span>.export_list(obj, heads, meta, cache)<span class="question-mark">?</span>,
-                        datatype,
-                        obj,
-                        meta,
-                        cache,
-                    )<span class="question-mark">?
-                    </span>.into(),
-            },
-            Datatype::List =&gt; <span class="self">self
-                </span>.wrap_object(
-                    <span class="kw-2">&amp;</span><span class="self">self</span>.export_list(obj, heads, meta, cache)<span class="question-mark">?</span>,
-                    datatype,
-                    obj,
-                    meta,
-                    cache,
-                )<span class="question-mark">?
-                </span>.into(),
-            <span class="kw">_ </span>=&gt; <span class="self">self
-                </span>.wrap_object(
-                    <span class="kw-2">&amp;</span><span class="self">self</span>.export_map(obj, heads, meta, cache)<span class="question-mark">?</span>,
-                    datatype,
-                    obj,
-                    meta,
-                    cache,
-                )<span class="question-mark">?
-                </span>.into(),
-        };
-        <span class="prelude-val">Ok</span>(result)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_map(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
-        meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::Export&gt; {
-        <span class="kw">let </span>map = Object::new();
-        <span class="kw">let </span>items = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
-            <span class="self">self</span>.doc.map_range_at(obj, .., heads)
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.map_range(obj, ..)
-        };
-        <span class="kw">for </span>item <span class="kw">in </span>items {
-            <span class="kw">let </span>subval = <span class="kw">match </span>item.value {
-                Value::Object(o) =&gt; <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>item.id, o.into(), heads, meta, cache)<span class="question-mark">?</span>,
-                Value::Scalar(<span class="kw">_</span>) =&gt; <span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>item.value, <span class="self">self</span>.text_rep), cache)<span class="question-mark">?</span>,
-            };
-            Reflect::set(<span class="kw-2">&amp;</span>map, <span class="kw-2">&amp;</span>item.key.into(), <span class="kw-2">&amp;</span>subval).map_err(|error| error::SetProp {
-                property: item.key.into(),
-                error,
-            })<span class="question-mark">?</span>;
-        }
-        <span class="prelude-val">Ok</span>(map)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_list(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
-        meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::Export&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
-            <span class="self">self</span>.doc.list_range_at(obj, .., heads)
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.list_range(obj, ..)
-        }
-        .map(|item| <span class="kw">match </span><span class="kw-2">&amp;</span>item.value {
-            Value::Object(o) =&gt; <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>item.id, o.into(), heads, meta, cache),
-            Value::Scalar(<span class="kw">_</span>) =&gt; <span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>item.value, <span class="self">self</span>.text_rep), cache),
-        })
-        .collect::&lt;<span class="prelude-ty">Result</span>&lt;Array, <span class="kw">_</span>&gt;&gt;()
-        .map(|array| array.into())
-    }
-
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_value(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         (datatype, raw_value): (Datatype, JsValue),
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
             <span class="kw">let </span>wrapped_value = function
@@ -2961,7 +2550,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unwrap_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         ext_val: <span class="kw-2">&amp;</span>Object,
-        cache: <span class="kw-2">&amp;mut </span>ExportCache,
+        cache: <span class="kw-2">&amp;mut </span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
         meta: <span class="kw-2">&amp;</span>JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(bool, CachedObject), error::Export&gt; {
         <span class="kw">let </span>id_val = cache.get_raw_object(ext_val)<span class="question-mark">?</span>;
@@ -3011,7 +2600,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unwrap_scalar(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         ext_val: JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
         <span class="kw">let </span>inner = cache.get_raw_data(<span class="kw-2">&amp;</span>ext_val)<span class="question-mark">?</span>;
         <span class="kw">if </span>!inner.is_undefined() {
@@ -3026,7 +2615,7 @@
         (datatype, raw_value): (Datatype, JsValue),
         id: <span class="kw-2">&amp;</span>ObjId,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
         <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = raw_value.clone().dyn_into::&lt;Object&gt;() {
             <span class="kw">let </span>result = <span class="self">self</span>.wrap_object(<span class="kw-2">&amp;</span>obj, datatype, id, meta, cache)<span class="question-mark">?</span>;
@@ -3040,7 +2629,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         value: <span class="kw-2">&amp;</span>Object,
         datatype: Datatype,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::Export&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
             <span class="kw">let </span>wrapped_value = function
@@ -3062,7 +2651,7 @@
         datatype: Datatype,
         id: <span class="kw-2">&amp;</span>ObjId,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::Export&gt; {
         <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
             <span class="kw">let </span>wrapped_value = function
@@ -3094,7 +2683,7 @@
         array: <span class="kw-2">&amp;</span>Array,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::ApplyPatch&gt; {
         <span class="kw">match </span><span class="kw-2">&amp;</span>patch.action {
             PatchAction::PutSeq { index, value, .. } =&gt; {
@@ -3164,23 +2753,21 @@
         map: <span class="kw-2">&amp;</span>Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::ApplyPatch&gt; {
         <span class="kw">match </span><span class="kw-2">&amp;</span>patch.action {
             PatchAction::PutMap { key, value, .. } =&gt; {
                 <span class="kw">let </span>sub_val =
                     <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="self">self</span>.text_rep), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta, cache)<span class="question-mark">?</span>;
                 js_set(map, key, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
-                <span class="comment">//Ok(result)
-                </span><span class="prelude-val">Ok</span>(())
+                <span class="prelude-val">Ok</span>(())
             }
             PatchAction::DeleteMap { key, .. } =&gt; {
                 Reflect::delete_property(map, <span class="kw-2">&amp;</span>key.into()).map_err(|e| error::Export::Delete {
                     prop: key.to_string(),
                     err: e,
                 })<span class="question-mark">?</span>;
-                <span class="comment">//Ok(result)
-                </span><span class="prelude-val">Ok</span>(())
+                <span class="prelude-val">Ok</span>(())
             }
             PatchAction::Increment { prop, value, .. } =&gt; {
                 <span class="kw">if let </span>Prop::Map(key) = prop {
@@ -3194,8 +2781,7 @@
                             key,
                             <span class="kw-2">&amp;</span><span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>new_value, <span class="self">self</span>.text_rep), cache)<span class="question-mark">?</span>,
                         )<span class="question-mark">?</span>;
-                        <span class="comment">//Ok(result)
-                        </span><span class="prelude-val">Ok</span>(())
+                        <span class="prelude-val">Ok</span>(())
                     } <span class="kw">else </span>{
                         <span class="prelude-val">Err</span>(error::ApplyPatch::IncrementNonNumeric)
                     }
@@ -3217,7 +2803,7 @@
         root: Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;mut </span>ExportCache,
+        cache: <span class="kw-2">&amp;mut </span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>(<span class="kw">_</span>, root_cache) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>root, cache, meta)<span class="question-mark">?</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>current = root_cache.clone();
@@ -3287,7 +2873,7 @@
         num_del: usize,
         values: I,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        cache: <span class="kw-2">&amp;</span>ExportCache,
+        cache: <span class="kw-2">&amp;</span>ExportCache&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::ApplyPatch&gt; {
         <span class="kw">let </span>args: Array = values
             .into_iter()
@@ -3769,8 +3355,8 @@
     <span class="attr">#[derive(Debug, thiserror::Error)]
     #[error(<span class="string">&quot;unable to get property {property}: {error:?}&quot;</span>)]
     </span><span class="kw">pub struct </span>GetProp {
-        <span class="kw">pub</span>(<span class="kw">super</span>) property: String,
-        <span class="kw">pub</span>(<span class="kw">super</span>) error: wasm_bindgen::JsValue,
+        <span class="kw">pub</span>(<span class="kw">crate</span>) property: String,
+        <span class="kw">pub</span>(<span class="kw">crate</span>) error: wasm_bindgen::JsValue,
     }
 
     <span class="kw">impl </span>From&lt;GetProp&gt; <span class="kw">for </span>JsValue {
@@ -3782,8 +3368,8 @@
     <span class="attr">#[derive(Debug, thiserror::Error)]
     #[error(<span class="string">&quot;error setting property {property:?} on JS value: {error:?}&quot;</span>)]
     </span><span class="kw">pub struct </span>SetProp {
-        <span class="kw">pub</span>(<span class="kw">super</span>) property: JsValue,
-        <span class="kw">pub</span>(<span class="kw">super</span>) error: JsValue,
+        <span class="kw">pub</span>(<span class="kw">crate</span>) property: JsValue,
+        <span class="kw">pub</span>(<span class="kw">crate</span>) error: JsValue,
     }
 
     <span class="kw">impl </span>From&lt;SetProp&gt; <span class="kw">for </span>JsValue {
@@ -3840,6 +3426,10 @@
         </span>CallSplice(JsValue),
         <span class="attr">#[error(transparent)]
         </span>Automerge(<span class="attr">#[from] </span>AutomergeError),
+        <span class="attr">#[error(<span class="string">&quot;invalid root processed&quot;</span>)]
+        </span>InvalidRoot,
+        <span class="attr">#[error(<span class="string">&quot;missing child in export&quot;</span>)]
+        </span>MissingChild,
     }
 
     <span class="kw">impl </span>From&lt;Export&gt; <span class="kw">for </span>JsValue {
