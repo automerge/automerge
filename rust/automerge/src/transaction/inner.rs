@@ -2,7 +2,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::exid::ExId;
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::marks::{ExpandMark, Mark, RichText};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
@@ -221,7 +221,7 @@ impl TransactionInner {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         let value = value.into();
         let prop = prop.into();
         match (&prop, obj.typ) {
@@ -255,7 +255,7 @@ impl TransactionInner {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         let prop = prop.into();
         match (&prop, obj.typ) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
@@ -317,7 +317,7 @@ impl TransactionInner {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -342,7 +342,7 @@ impl TransactionInner {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -519,7 +519,7 @@ impl TransactionInner {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = doc.exid_to_obj(obj, patch_log.text_rep())?;
         self.local_op(
             doc,
             patch_log,
@@ -537,7 +537,7 @@ impl TransactionInner {
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         let prop = prop.into();
         if obj.typ == ObjType::Text {
             let index = prop.as_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
@@ -569,7 +569,7 @@ impl TransactionInner {
         del: isize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -598,7 +598,7 @@ impl TransactionInner {
         del: isize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
@@ -716,14 +716,7 @@ impl TransactionInner {
                         let mut opid = self.next_id().minus(values.len());
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
-                            patch_log.insert(
-                                obj,
-                                index + offset,
-                                v.clone().into(),
-                                opid,
-                                false,
-                                marks.clone(),
-                            );
+                            patch_log.insert(obj, index + offset, v.clone().into(), opid, false);
                         }
                     }
                 }
@@ -740,7 +733,7 @@ impl TransactionInner {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
 
         self.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)?;
@@ -773,6 +766,131 @@ impl TransactionInner {
         self.mark(doc, patch_log, ex_obj, mark, expand)
     }
 
+    pub(crate) fn split_block(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        ex_obj: &ExId,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
+        if obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+
+        let action = OpType::Make(ObjType::Map);
+        let id = self.next_id();
+
+        let query = doc.ops().search(
+            &obj.id,
+            query::InsertNth::new(index, obj.encoding, self.scope.clone()),
+        );
+        let pos = query.pos();
+        let key = query.key()?;
+
+        let op = OpBuilder {
+            id,
+            action,
+            key,
+            insert: true,
+        };
+
+        let op_idx = doc
+            .ops_mut()
+            .load_with_range(obj.id, op, &mut self.idx_range);
+        doc.ops_mut().insert(pos, &obj.id, op_idx);
+        let op = op_idx.as_op(doc.osd());
+
+        patch_log.insert(
+            obj.id,
+            index,
+            crate::hydrate::Value::Map(crate::hydrate::Map::default()),
+            *op.id(),
+            false,
+        );
+
+        Ok(op.exid())
+    }
+
+    pub(crate) fn join_block(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        block: &ExId,
+    ) -> Result<(), AutomergeError> {
+        let block = doc.exid_to_obj(block, patch_log.text_rep())?;
+        // FIXME - unwrap
+        let parent = doc
+            .ops()
+            .parent_object(&block.id, patch_log.text_rep(), None)
+            .unwrap();
+
+        if parent.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(parent.typ));
+        }
+
+        /*
+                // TODO - inline this
+                self.update_block_inner(doc, patch_log, obj, &block.id.into())?;
+
+                Ok(())
+            }
+
+            fn update_block_inner(
+                &mut self,
+                doc: &mut Automerge,
+                patch_log: &mut PatchLog,
+                obj: ObjMeta,
+                block_id: &OpId,
+            ) -> Result<(), AutomergeError> {
+        */
+        let key = Key::Seq(block.id.0.into());
+
+        let action = OpType::Delete;
+
+        let op = OpBuilder {
+            id: self.next_id(),
+            action,
+            key,
+            insert: false,
+        };
+
+        let query = doc.ops().search(
+            &parent.obj,
+            query::OpIdSearch::opid(block.id.0, parent.encoding, None),
+        );
+        let index = query.index();
+        let mut pos = query.pos();
+        let mut pred_ids = vec![];
+        let mut succ_pos = vec![];
+        {
+            let mut iter = doc.ops().iter_ops(&parent.obj);
+            let mut next = iter.nth(pos);
+            while let Some(e) = next {
+                if e.elemid_or_key() != op.elemid_or_key() {
+                    break;
+                }
+                let visible = e.visible_at(self.scope.as_ref());
+                if visible {
+                    succ_pos.push(pos);
+                }
+                pos += 1;
+                pred_ids.push(e.id());
+                next = iter.next();
+            }
+        }
+
+        let op_idx = doc
+            .ops_mut()
+            .load_with_range(parent.obj, op, &mut self.idx_range);
+
+        doc.ops_mut().add_succ(&parent.obj, &succ_pos, op_idx);
+
+        patch_log.delete_seq(parent.obj, index, 1);
+
+        Ok(())
+    }
+
     fn finalize_op(
         &mut self,
         doc: &mut Automerge,
@@ -780,7 +898,7 @@ impl TransactionInner {
         obj: ObjId,
         prop: Prop,
         idx: OpIdx,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) {
         let op = idx.as_op(doc.osd());
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
@@ -793,19 +911,12 @@ impl TransactionInner {
                     match (obj_type, prop) {
                         (Some(ObjType::List), Prop::Seq(index)) => {
                             //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            patch_log.insert(obj, index, op.value().into(), *op.id(), false, marks);
+                            patch_log.insert(obj, index, op.value().into(), *op.id(), false);
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
                                 //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                patch_log.insert(
-                                    obj,
-                                    index,
-                                    op.value().into(),
-                                    *op.id(),
-                                    false,
-                                    marks,
-                                );
+                                patch_log.insert(obj, index, op.value().into(), *op.id(), false);
                             } else {
                                 patch_log.splice(obj, index, op.as_str(), marks);
                             }

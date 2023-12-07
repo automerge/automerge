@@ -6,7 +6,10 @@ use std::{
 
 use crate::op_set::Op;
 pub(crate) use crate::op_set::{OpIdx, OpSetData};
-use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
+use crate::{
+    query::{ChangeVisibility, Index, QueryResult, TreeQuery},
+    types::OpId,
+};
 pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
@@ -95,6 +98,7 @@ impl OpTreeNode {
             for i in &self.elements {
                 index.insert(i.as_op(osd));
             }
+            index.block = self.regenerate_block(osd);
             self.index = Some(index)
         }
     }
@@ -145,13 +149,21 @@ impl OpTreeNode {
 
     pub(crate) fn index_insert(&mut self, op: Op<'_>) {
         if let Some(index) = &mut self.index {
-            index.insert(op)
+            index.insert(op);
         }
+        self.index_regen_block(op.osd())
     }
 
     pub(crate) fn index_remove(&mut self, op: Op<'_>) {
         if let Some(index) = &mut self.index {
             index.remove(op);
+        }
+        self.index_regen_block(op.osd())
+    }
+
+    pub(crate) fn index_regen_block(&mut self, osd: &OpSetData) {
+        if self.index.is_some() {
+            self.index.as_mut().unwrap().block = self.regenerate_block(osd);
         }
     }
 
@@ -159,11 +171,11 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         element: OpIdx,
-        m: &OpSetData,
+        osd: &OpSetData,
     ) {
         assert!(!self.is_full());
 
-        self.index_insert(element.as_op(m));
+        self.index_insert(element.as_op(osd));
 
         if self.is_leaf() {
             self.length += 1;
@@ -173,17 +185,18 @@ impl OpTreeNode {
             let child = &mut self.children[child_index];
 
             if child.is_full() {
-                self.split_child(child_index, m);
+                self.split_child(child_index, osd);
 
                 // child structure has changed so we need to find the index again
                 let (child_index, sub_index) = self.find_child_index(index);
                 let child = &mut self.children[child_index];
-                child.insert_into_non_full_node(sub_index, element, m);
+                child.insert_into_non_full_node(sub_index, element, osd);
             } else {
-                child.insert_into_non_full_node(sub_index, element, m);
+                child.insert_into_non_full_node(sub_index, element, osd);
             }
             self.length += 1;
         }
+        self.index_regen_block(osd);
     }
 
     // A utility function to split the child `full_child_index` of this node
@@ -440,7 +453,33 @@ impl OpTreeNode {
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
         self.length += successor_sibling.length + 1;
+        self.index_regen_block(osd);
         assert!(self.is_full());
+    }
+
+    fn block(&self) -> Option<OpId> {
+        self.index.as_ref().and_then(|i| i.block)
+    }
+
+    fn regenerate_block(&self, osd: &OpSetData) -> Option<OpId> {
+        if self.is_leaf() {
+            self.elements
+                .iter()
+                .rev()
+                .find_map(|e| e.as_op(osd).visible_block())
+        } else {
+            let mut elems = self
+                .elements
+                .iter()
+                .rev()
+                .map(|e| e.as_op(osd).visible_block());
+            let mut nodes = self
+                .children
+                .iter()
+                .rev()
+                .filter_map(|c| c.block().or_else(|| elems.next().flatten()));
+            nodes.next()
+        }
     }
 
     /// Update the operation at the given index using the provided function.
@@ -450,6 +489,7 @@ impl OpTreeNode {
         &mut self,
         index: usize,
         vis: ChangeVisibility<'a>,
+        osd: &OpSetData,
     ) -> Option<ChangeVisibility<'a>> {
         if self.is_leaf() {
             self.index.as_mut().map(|index| index.change_vis(vis))
@@ -462,10 +502,12 @@ impl OpTreeNode {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
+                        self.index_regen_block(osd);
                         return self.index.as_mut().map(|index| index.change_vis(vis));
                     }
                     Ordering::Greater => {
-                        if let Some(vis) = child.update(index - cumulative_len, vis) {
+                        if let Some(vis) = child.update(index - cumulative_len, vis, osd) {
+                            self.index_regen_block(osd);
                             return self.index.as_mut().map(|index| index.change_vis(vis));
                         } else {
                             return None;

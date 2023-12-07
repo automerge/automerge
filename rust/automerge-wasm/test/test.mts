@@ -2075,12 +2075,10 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.get("/mixed", 0), 'A');
       assert.deepEqual(doc.get("/mixed", 1), '🐻');
-      assert.deepEqual(doc.get("/mixed", 2), '🐻');
-      assert.deepEqual(doc.get("/mixed", 3), 'X');
+      assert.deepEqual(doc.get("/mixed", 2), 'X');
       assert.deepEqual(doc.get("/mixed", 1, heads1), '🐻');
-      assert.deepEqual(doc.get("/mixed", 2, heads1), '🐻');
-      assert.deepEqual(doc.get("/mixed", 3, heads1), 'A');
-      assert.deepEqual(doc.get("/mixed", 4, heads1), '🐻');
+      assert.deepEqual(doc.get("/mixed", 2, heads1), 'A');
+      assert.deepEqual(doc.get("/mixed", 3, heads1), '🐻');
     })
 
     it('can handle non-characters embedded in text', () => {
@@ -2104,14 +2102,14 @@ describe('Automerge', () => {
 
       // multi - char strings appear as a span of strings
       // non strings appear as an object replacement unicode char
-      assert.deepEqual(mat.bad_text, 'ABBBBB￼C')
-      assert.deepEqual(doc.text("/bad_text"), 'ABBBBB￼C')
-      assert.deepEqual(doc.materialize("/bad_text"), 'ABBBBB￼C')
+      assert.deepEqual(mat.bad_text, "ABBBBB\ufffcC")
+      assert.deepEqual(doc.text("/bad_text"), "ABBBBB\ufffcC")
+      assert.deepEqual(doc.materialize("/bad_text"), "ABBBBB\ufffcC")
 
       // deleting in the middle of a multi-byte character will delete the whole thing
       const doc1 = doc.fork()
       doc1.splice("/bad_text", 3, 3, "X");
-      assert.deepEqual(doc1.text("/bad_text"), 'AX￼C')
+      assert.deepEqual(doc1.text("/bad_text"), 'AX\ufffcC')
 
       // deleting in the middle of a multi-byte character will delete the whole thing
       // and characters past its end
@@ -2126,16 +2124,12 @@ describe('Automerge', () => {
       // inserting in the middle of a mutli-bytes span inserts after
       const doc4 = doc.fork()
       doc4.splice("/bad_text", 3, 0, "X");
-      assert.deepEqual(doc4.text("/bad_text"), 'ABBBBBX￼C')
+      assert.deepEqual(doc4.text("/bad_text"), 'ABBBBBX\ufffcC')
 
       // deleting into the middle of a multi-byte span deletes the whole thing
       const doc5 = doc.fork()
       doc5.splice("/bad_text", 0, 2, "X");
-      assert.deepEqual(doc5.text("/bad_text"), 'X￼C')
-
-      // you can access elements in the text by text index
-      assert.deepEqual(doc5.getAll("/bad_text", 1), [['map', '4@aaaa' ]])
-      assert.deepEqual(doc5.getAll("/bad_text", 2, doc.getHeads()), [['str', 'BBBBB', '3@aaaa' ]])
+      assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
   })
 
@@ -2193,6 +2187,7 @@ describe('Automerge', () => {
         assert.deepEqual(mat.text, new FakeText("0abcd"))
     })
 
+    // TODO: Need to decide how to resolve text_v1 behavior with blocks
     it("should allow inserting objects in old style text", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("text", (e: any) => new FakeText(e))

@@ -1,8 +1,10 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::hydrate;
+use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::marks::{ExpandMark, Mark, RichText};
 use crate::patches::PatchLog;
 use crate::types::Clock;
 use crate::AutomergeError;
@@ -203,6 +205,19 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -241,7 +256,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         obj: O,
         index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<MarkSet, AutomergeError> {
+    ) -> Result<RichText, AutomergeError> {
         self.doc
             .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
     }
@@ -263,6 +278,14 @@ impl<'a> ReadDoc for Transaction<'a> {
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc
             .get_for(obj.as_ref(), prop.into(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate(obj, heads)
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -415,6 +438,18 @@ impl<'a> Transactable for Transaction<'a> {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
+    }
+
+    fn split_block<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+    }
+
+    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, block.as_ref()))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

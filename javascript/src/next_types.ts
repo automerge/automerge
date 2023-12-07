@@ -7,6 +7,7 @@ export {
   Uint,
   Float64,
   type Patch,
+  type MapObjType,
   type PatchCallback,
   type Mark,
   type MarkSet,

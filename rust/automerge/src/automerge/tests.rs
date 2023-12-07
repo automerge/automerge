@@ -1500,6 +1500,7 @@ fn get_parent_objects() {
         doc.parents(&map).unwrap().next(),
         Some(Parent {
             obj: ROOT,
+            typ: ObjType::Map,
             prop: Prop::Map("a".into()),
             visible: true
         })
@@ -1508,6 +1509,7 @@ fn get_parent_objects() {
         doc.parents(&list).unwrap().next(),
         Some(Parent {
             obj: map,
+            typ: ObjType::Map,
             prop: Prop::Map("b".into()),
             visible: true
         })
@@ -1516,6 +1518,7 @@ fn get_parent_objects() {
         doc.parents(&text).unwrap().next(),
         Some(Parent {
             obj: list,
+            typ: ObjType::List,
             prop: Prop::Seq(0),
             visible: true
         })
@@ -1564,6 +1567,7 @@ fn parents_iterator() {
         parents.next(),
         Some(Parent {
             obj: list,
+            typ: ObjType::List,
             prop: Prop::Seq(0),
             visible: true
         })
@@ -1572,6 +1576,7 @@ fn parents_iterator() {
         parents.next(),
         Some(Parent {
             obj: map,
+            typ: ObjType::Map,
             prop: Prop::Map("b".into()),
             visible: true
         })
@@ -1580,6 +1585,7 @@ fn parents_iterator() {
         parents.next(),
         Some(Parent {
             obj: ROOT,
+            typ: ObjType::Map,
             prop: Prop::Map("a".into()),
             visible: true
         })

@@ -6,6 +6,7 @@ export { Int, Uint, Float64 } from "./numbers.js"
 import { Counter } from "./counter.js"
 import type { Patch } from "@automerge/automerge-wasm"
 export type {
+  MapObjType,
   Cursor,
   Patch,
   MarkSet,

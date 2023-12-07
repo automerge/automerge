@@ -2,7 +2,7 @@ use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
-use crate::marks::{MarkAccumulator, MarkSet};
+use crate::marks::{MarkAccumulator, RichText};
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
@@ -41,14 +41,14 @@ use super::{PatchBuilder, TextRepresentation};
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
+    pub(crate) events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -72,14 +72,13 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     },
     Insert {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     },
     IncrementMap {
         key: String,
@@ -272,7 +271,7 @@ impl PatchLog {
         obj: ObjId,
         index: usize,
         text: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) {
         self.events.push((
             obj,
@@ -284,7 +283,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<RichText>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
@@ -301,18 +300,14 @@ impl PatchLog {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
-        self.events.push((
-            obj,
-            Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-                marks,
-            },
-        ))
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
+        };
+        self.events.push((obj, event))
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
@@ -385,7 +380,7 @@ impl PatchLog {
                     value,
                     id,
                     conflict,
-                    marks,
+                    //marks,
                 } => {
                     let opid = doc.id_to_exid(*id);
                     patch_builder.insert(
@@ -394,7 +389,7 @@ impl PatchLog {
                         *index,
                         (value.into(), opid),
                         *conflict,
-                        marks.clone(),
+                        //marks.clone(),
                     );
                 }
                 Event::DeleteSeq { index, num } => {
@@ -517,7 +512,7 @@ impl ExposeQueue {
         match doc.ops().object_type(&id)? {
             ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
                 let text = read_doc.text(&exid).ok()?;
-                // TODO - need read_doc, text_spans()
+                // TODO - need text_spans()
                 patch_builder.splice_text(read_doc, exid, 0, &text, None);
             }
             ObjType::List | ObjType::Text => {
@@ -526,20 +521,13 @@ impl ExposeQueue {
                     value,
                     id,
                     conflict,
-                    marks,
+                    ..
                 } in read_doc.list_range(&exid, ..)
                 {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(
-                        read_doc,
-                        exid.clone(),
-                        index,
-                        (value, id),
-                        conflict,
-                        marks,
-                    );
+                    patch_builder.insert(read_doc, exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {

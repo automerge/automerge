@@ -11,12 +11,16 @@ pub struct List(SequenceTree<ListValue>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListValue {
-    value: Value,
-    marks: HashMap<String, ScalarValue>,
-    conflict: bool,
+    pub value: Value,
+    pub marks: HashMap<String, ScalarValue>,
+    pub conflict: bool,
 }
 
 impl List {
+    pub fn iter(&self) -> impl Iterator<Item = &ListValue> {
+        self.0.iter()
+    }
+
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {
