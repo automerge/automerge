@@ -55,7 +55,7 @@ impl Cursor {
         //
         // Version is currently always `0`
         //
-        let actor_bytes = self.actor.to_bytes();
+        let actor_bytes = self.actor.as_bytes();
         let mut bytes = Vec::with_capacity(actor_bytes.len() + 4 + 4 + 1);
         bytes.push(SERIALIZATION_VERSION_TAG);
         leb128::write::unsigned(&mut bytes, actor_bytes.len() as u64).unwrap();

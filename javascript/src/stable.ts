@@ -476,10 +476,8 @@ function progressDocument<T>(
   const state = _state(doc)
   const nextState = { ...state, heads: undefined }
 
-  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches(
-    doc,
-    nextState,
-  )
+  // @ts-ignore
+  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches( doc, nextState, new WeakMap() )
 
   if (patches.length > 0) {
     if (callback != null) {
@@ -514,6 +512,7 @@ function _change<T>(
   const state = _state(doc)
 
   if (doc === undefined || state === undefined) {
+    console.log(`doc=${doc} state=${state}`);
     throw new RangeError("must be the document root")
   }
   if (state.heads) {

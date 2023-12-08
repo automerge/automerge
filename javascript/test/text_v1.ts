@@ -209,10 +209,12 @@ describe("Automerge.Text", () => {
     })
 
     it("should allow control characters to be updated", () => {
+      console.log("S1", s1.text);
       const s2 = Automerge.change(
         s1,
         doc => (doc.text.get(1)!.attribute = "italic"),
       )
+      console.log("S2", s2.text);
       const s3 = Automerge.load<DocType>(Automerge.save(s2))
       assert.strictEqual(s1.text.get(1).attribute, "bold")
       assert.strictEqual(s2.text.get(1).attribute, "italic")

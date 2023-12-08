@@ -26,6 +26,7 @@ impl ExId {
     ///
     /// This serialization format is versioned and incompatible changes to it will be considered a
     /// breaking change for the version of this library.
+    #[inline(never)]
     pub fn to_bytes(&self) -> Vec<u8> {
         // The serialized format is
         //
@@ -55,7 +56,7 @@ impl ExId {
                 vec![val]
             }
             ExId::Id(id, actor, counter) => {
-                let actor_bytes = actor.to_bytes();
+                let actor_bytes = actor.as_bytes();
                 let mut bytes = Vec::with_capacity(actor_bytes.len() + 4 + 4);
                 let tag = SERIALIZATION_VERSION_TAG | (TYPE_ID << 4);
                 bytes.push(tag);
@@ -65,6 +66,33 @@ impl ExId {
                 leb128::write::unsigned(&mut bytes, *id).unwrap();
                 bytes
             }
+        }
+    }
+
+    #[inline(never)]
+    pub fn to_unsafe_u8(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        match self {
+          Self::Root => {
+            leb128::write::unsigned(&mut bytes, 0).unwrap();
+          }
+          Self::Id(counter, _, actor) =>  {
+            leb128::write::unsigned(&mut bytes, *counter).unwrap();
+            leb128::write::unsigned(&mut bytes, *actor as u64).unwrap();
+          }
+        }
+        bytes
+    }
+
+    #[inline(never)]
+    pub fn to_unsafe_u64(&self) -> u64 {
+        match self {
+          Self::Root => {
+            0
+          }
+          Self::Id(counter, _, actor) =>  {
+            ((*counter as u32) as u64) << 32 | (*actor as u32) as u64
+          }
         }
     }
 

@@ -169,9 +169,17 @@ export type Mark = {
   end: number,
 }
 
+export type ObjMetadata = {
+  obj: ObjId,
+  datatype: Datatype,
+  user_data: unknown,
+  raw?: MaterializeValue,
+}
+
 export function encodeChange(change: ChangeToEncode): Change;
 export function create(options?: InitOptions): Automerge;
 export function load(data: Uint8Array, options?: LoadOptions): Automerge;
+export function getObjMetadata(obj: Object): ObjMetadata | undefined;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -184,6 +192,7 @@ export function importSyncState(state: JsSyncState): SyncState;
 export interface API {
   create(options?: InitOptions): Automerge;
   load(data: Uint8Array, options?: LoadOptions): Automerge;
+  getObjMetadata(obj: Object): ObjMetadata | undefined;
   encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;
@@ -231,7 +240,7 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
+  materialize(obj?: ObjID, heads?: Heads, userdata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
 
   // transactions
@@ -279,8 +288,8 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
-  applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
+  applyPatches<Doc>(obj: Doc, userdata?: unknown): Doc;
+  applyAndReturnPatches<Doc>(obj: Doc, userdata?: unknown): {value: Doc, patches: Patch[]};
 }
 
 export interface JsSyncState {

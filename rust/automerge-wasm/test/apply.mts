@@ -1,15 +1,13 @@
 
 import { describe, it } from 'mocha';
 import assert from 'assert'
-import { create } from '../nodejs/automerge_wasm.cjs'
+import { create, getObjMetadata } from '../nodejs/automerge_wasm.cjs'
 
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
 
 // @ts-ignore
 function _obj(doc: any) : any {
-  if (typeof doc === 'object' && doc !== null) {
-    return doc[OBJECT_ID]
-  }
+  return getObjMetadata(doc)?.obj
 }
 
 // sample classes for testing
@@ -171,6 +169,8 @@ describe('Automerge', () => {
         doc1.putObject("/", "map", {})
         const applied = doc1.applyPatches(mat)
 
+        assert.deepEqual(getObjMetadata(applied.counter), { datatype: "counter", raw: 1 })
+
         assert.equal(_obj(applied.string), null)
         assert.equal(_obj(applied.uint), null)
         assert.equal(_obj(applied.int), null)
@@ -184,13 +184,44 @@ describe('Automerge', () => {
         assert.notEqual(_obj(applied.map), null)
     })
 
-    it('should set the root OBJECT_ID to "_root"', () => {
+    it('should set the object metadata "_root"', () => {
         const doc1 = create({ actor: 'aaaa'})
-        const mat: any = doc1.materialize("/")
-        assert.equal(_obj(mat), "_root")
+        const user1 = { u: 1 }
+        const user2 = { u: 2 }
+        const user3 = { u: 3 }
+        console.log("materialize");
+
+        const mat: any = doc1.materialize("/", undefined, user1)
+        let objMetadata = getObjMetadata(mat)
+        console.log(objMetadata);
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user1)
+
+        // first patch (this will use the fastpath and no apply patches)
         doc1.put("/", "key", "value")
-        const applied = doc1.applyPatches(mat)
-        assert.equal(_obj(applied), "_root")
+        const applied = doc1.applyPatches(mat, user2)
+        objMetadata = getObjMetadata(applied)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user2)
+
+        // second patch
+        doc1.put("/", "key2", "value2")
+        const applied2 = doc1.applyPatches(mat, user2)
+        objMetadata = getObjMetadata(applied2)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user2)
+
+        // no patches - change userdata
+        const applied3 = doc1.applyPatches(mat, user3)
+        objMetadata = getObjMetadata(applied3)
+        assert.equal(objMetadata?.user_data, user3)
+
+        // third patch - dont pass userdata - gets overwritten to undefined
+        doc1.put("/", "key3", "value3")
+        const applied4 = doc1.applyPatches(mat)
+        objMetadata = getObjMetadata(applied4)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.deepEqual(objMetadata, { obj: "_root", datatype: "map" })
     })
 
     it.skip('it can patch quickly', () => {

@@ -4,6 +4,7 @@ import {
   type Change,
   type DecodedChange,
   SyncState,
+  type ObjMetadata,
   type SyncMessage,
   type JsSyncState,
   type DecodedSyncMessage,
@@ -54,6 +55,9 @@ export const ApiHandler: API = {
   },
   importSyncState(state: JsSyncState): SyncState {
     throw new RangeError("Automerge.use() not called (importSyncState)")
+  },
+  getObjMetadata(obj: Object): ObjMetadata | undefined {
+    throw new RangeError("Automerge.use() not called (getObjMetadata)")
   },
 }
 /* eslint-enable */
