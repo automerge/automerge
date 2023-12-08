@@ -5,6 +5,7 @@ import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
 import type {
   AutomergeValue,
   ScalarValue,
+  ObjMetadata,
   MapValue,
   ListValue,
 } from "./types.js"
@@ -15,10 +16,8 @@ import {
 } from "./next_types.js"
 import { Counter, getWriteableCounter } from "./counter.js"
 import {
-  STATE,
+  OBJ_META,
   TRACE,
-  IS_PROXY,
-  OBJECT_ID,
   CLEAR_CACHE,
   COUNTER,
   INT,
@@ -26,6 +25,7 @@ import {
   F64,
 } from "./constants.js"
 import { RawString } from "./raw_string.js"
+import { _meta } from "./internal_state.js"
 
 type TargetCommon = {
   context: Automerge
@@ -215,7 +215,9 @@ function isSameDocument(val, context) {
   // this depends on __wbg_ptr being the wasm pointer
   // a new version of wasm-bindgen will break this
   // but the tests should expose the break
-  if (val && val[STATE]?.handle?.__wbg_ptr === context.__wbg_ptr) {
+  // maybe we need a doc.is_same(other) on the wasm API
+  // @ts-ignore
+  if (_meta(val)?.user_data?.handle?.__wbg_ptr === context.__wbg_ptr) {
     return true
   }
   return false
@@ -225,15 +227,19 @@ const MapHandler = {
   get<T extends Target>(
     target: T,
     key: any,
-  ): ValueType<T> | ObjID | boolean | { handle: Automerge } {
+  ): ObjMetadata<{ handle: Automerge }> | ValueType<T> {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
     }
-    if (key === OBJECT_ID) return objectId
-    if (key === IS_PROXY) return true
     if (key === TRACE) return target.trace
-    if (key === STATE) return { handle: context }
+    if (key === OBJ_META)
+      return {
+        obj: objectId,
+        datatype: "map",
+        proxy: true,
+        user_data: { handle: context },
+      }
     if (!cache[key]) {
       cache[key] = valueAt(target, key)
     }
@@ -329,9 +335,7 @@ const ListHandler = {
     index: any,
   ):
     | ValueType<T>
-    | boolean
-    | ObjID
-    | { handle: Automerge }
+    | ObjMetadata<{ handle: Automerge }>
     | number
     | ((_: any) => boolean) {
     const { context, objectId } = target
@@ -344,10 +348,14 @@ const ListHandler = {
     if (index === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
     }
-    if (index === OBJECT_ID) return objectId
-    if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
-    if (index === STATE) return { handle: context }
+    if (index === OBJ_META)
+      return {
+        obj: objectId,
+        datatype: "list",
+        proxy: true,
+        user_data: { handle: context },
+      }
     if (index === "length") return context.length(objectId)
     if (typeof index === "number") {
       return valueAt(target, index) as ValueType<T>
@@ -458,8 +466,6 @@ const ListHandler = {
 
     if (index === "length")
       return { writable: true, value: context.length(objectId) }
-    if (index === OBJECT_ID)
-      return { configurable: false, enumerable: false, value: objectId }
 
     index = parseListIndex(index)
 
@@ -493,10 +499,14 @@ const TextHandler = Object.assign({}, ListHandler, {
     if (index === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
     }
-    if (index === OBJECT_ID) return objectId
-    if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
-    if (index === STATE) return { handle: context }
+    if (index === OBJ_META)
+      return {
+        obj: objectId,
+        datatype: "text",
+        proxy: true,
+        user_data: { handle: context },
+      }
     if (index === "length") return context.length(objectId)
     if (typeof index === "number") {
       return valueAt(target, index)
@@ -615,10 +625,11 @@ function listMethods<T extends Target>(target: T) {
     },
 
     indexOf(o: any, start = 0) {
+      const objid = _meta(o)?.obj
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
         const value = context.getWithType(objectId, i)
-        if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
+        if (value && (value[1] === objid || value[1] === o)) {
           return i
         }
       }

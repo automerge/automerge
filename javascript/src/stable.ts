@@ -2,7 +2,6 @@
 export { /** @hidden */ uuid } from "./uuid.js"
 
 import { rootProxy } from "./proxies.js"
-import { STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
@@ -70,7 +69,13 @@ import { Automerge } from "@automerge/automerge-wasm"
 
 import { RawString } from "./raw_string.js"
 
-import { _state, _is_proxy, _trace, _obj } from "./internal_state.js"
+import {
+  META,
+  _meta,
+  _strict_meta,
+  _is_proxy,
+  _trace,
+} from "./internal_state.js"
 
 import { stableConflictAt } from "./conflicts.js"
 
@@ -171,7 +176,7 @@ export type InitOptions<T> = {
 
 /** @hidden */
 export function getBackend<T>(doc: Doc<T>): Automerge {
-  return _state(doc).handle
+  return _strict_meta(doc).user_data.handle
 }
 
 function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
@@ -207,7 +212,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     handle.registerDatatype("text", (n: any) => new Text(n))
   }
-  const doc = handle.materialize("/", undefined, {
+  const doc = handle.materialize(META, "/", undefined, {
     handle,
     heads: undefined,
     freeze,
@@ -233,9 +238,9 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
  * @param heads - The hashes of the heads to create a view at
  */
 export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const handle = state.handle
-  return state.handle.materialize("/", heads, {
+  return state.handle.materialize(META, "/", heads, {
     ...state,
     handle,
     heads,
@@ -261,7 +266,7 @@ export function clone<T>(
   doc: Doc<T>,
   _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
@@ -271,7 +276,7 @@ export function clone<T>(
   // set it to undefined to indicate that this is a full fat document
   const { heads: _oldHeads, ...stateSansHeads } = state
   stateSansHeads.patchCallback = opts.patchCallback
-  return handle.applyPatches(doc, { ...stateSansHeads, handle })
+  return handle.applyPatches(META, doc, { ...stateSansHeads, handle })
 }
 
 /** Explicity free the memory backing a document. Note that this is note
@@ -279,7 +284,7 @@ export function clone<T>(
  * [`FinalizationRegistry`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry)
  */
 export function free<T>(doc: Doc<T>) {
-  return _state(doc).handle.free()
+  return _strict_meta(doc).user_data.handle.free()
 }
 
 /**
@@ -473,23 +478,29 @@ function progressDocument<T>(
   if (heads == null) {
     return doc
   }
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const nextState = { ...state, heads: undefined }
 
-  const { value: nextDoc, patches } = state.handle.applyAndReturnPatches(
-    doc,
-    nextState,
-  )
+  let nextDoc
+  let patches: Patch[] = []
+  if (callback) {
+    const result = state.handle.applyAndReturnPatches(META, doc, nextState)
+    nextDoc = result.value
+    patches = result.patches
+  } else {
+    // dont bother generating patches
+    nextDoc = state.handle.applyPatches(META, doc, nextState)
+  }
 
   if (patches.length > 0) {
     if (callback != null) {
       callback(patches, { before: doc, after: nextDoc, source })
     }
 
-    const newState = _state(nextDoc)
+    const newState = _strict_meta(nextDoc).user_data
 
     newState.mostRecentPatch = {
-      before: _state(doc).heads,
+      before: _strict_meta(doc).user_data.heads,
       after: newState.handle.getHeads(),
       patches,
       source,
@@ -511,7 +522,8 @@ function _change<T>(
     throw new RangeError("invalid change function")
   }
 
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
 
   if (doc === undefined || state === undefined) {
     throw new RangeError("must be the document root")
@@ -521,7 +533,7 @@ function _change<T>(
       "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   let heads = state.handle.getHeads()
@@ -587,14 +599,15 @@ export function emptyChange<T>(
     options = { message: options }
   }
 
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
 
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
 
@@ -644,7 +657,7 @@ export function load<T>(
   } else {
     handle.registerDatatype("text", (n: string) => new Text(n))
   }
-  const doc = handle.materialize("/", undefined, {
+  const doc = handle.materialize(META, "/", undefined, {
     handle,
     heads: undefined,
     patchCallback,
@@ -678,13 +691,14 @@ export function loadIncremental<T>(
   if (!opts) {
     opts = {}
   }
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const heads = state.handle.getHeads()
@@ -709,13 +723,14 @@ export function loadIncremental<T>(
  *
  */
 export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an out of date document - set at: " + _trace(doc),
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   return state.handle.saveIncremental()
@@ -729,7 +744,7 @@ export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
  * The returned bytes can be passed to {@link load} or {@link loadIncremental}
  */
 export function save<T>(doc: Doc<T>): Uint8Array {
-  return _state(doc).handle.save()
+  return _strict_meta(doc).user_data.handle.save()
 }
 
 /**
@@ -748,7 +763,7 @@ export function save<T>(doc: Doc<T>): Uint8Array {
  * merge}.
  */
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
-  const localState = _state(local)
+  const localState = _strict_meta(local).user_data
 
   if (localState.heads) {
     throw new RangeError(
@@ -756,7 +771,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
     )
   }
   const heads = localState.handle.getHeads()
-  const remoteState = _state(remote)
+  const remoteState = _strict_meta(remote).user_data
   const changes = localState.handle.getChangesAdded(remoteState.handle)
   localState.handle.applyChanges(changes)
   return progressDocument(local, "merge", heads, localState.patchCallback)
@@ -766,7 +781,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
  * Get the actor ID associated with the document
  */
 export function getActorId<T>(doc: Doc<T>): ActorId {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   return state.handle.getActorId()
 }
 
@@ -830,13 +845,12 @@ export function getConflicts<T>(
   doc: Doc<T>,
   prop: Prop,
 ): Conflicts | undefined {
-  const state = _state(doc, false)
-  if (state.textV2) {
+  const meta = _strict_meta(doc, false)
+  if (meta.user_data.textV2) {
     throw new Error("use unstable.getConflicts for an unstable document")
   }
-  const objectId = _obj(doc)
-  if (objectId != null) {
-    return stableConflictAt(state.handle, objectId, prop)
+  if (meta.obj && meta.user_data) {
+    return stableConflictAt(meta.user_data.handle, meta.obj, prop)
   } else {
     return undefined
   }
@@ -850,8 +864,8 @@ export function getConflicts<T>(
  * getLastLocalChange} and send the result over the network to other peers.
  */
 export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
-  const state = _state(doc)
-  return state.handle.getLastLocalChange() || undefined
+  const state = _strict_meta(doc).user_data
+  return state?.handle.getLastLocalChange() || undefined
 }
 
 /**
@@ -862,15 +876,13 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getObjectId(doc: any, prop?: Prop): ObjID | null {
-  if (prop) {
-    const state = _state(doc, false)
-    const objectId = _obj(doc)
-    if (!state || !objectId) {
-      return null
-    }
+  const meta = _meta(doc)
+  const state = meta?.user_data
+  const objectId = meta?.obj
+  if (prop && state && objectId) {
     return state.handle.get(objectId, prop) as ObjID
   } else {
-    return _obj(doc)
+    return objectId || null
   }
 }
 
@@ -881,7 +893,7 @@ export function getObjectId(doc: any, prop?: Prop): ObjID | null {
  * Note that this will crash if there are changes in `oldState` which are not in `newState`.
  */
 export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>): Change[] {
-  const n = _state(newState)
+  const n = _strict_meta(newState).user_data
   return n.handle.getChanges(getHeads(oldState))
 }
 
@@ -893,7 +905,7 @@ export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>): Change[] {
  *
  */
 export function getAllChanges<T>(doc: Doc<T>): Change[] {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   return state.handle.getChanges([])
 }
 
@@ -913,7 +925,8 @@ export function applyChanges<T>(
   changes: Change[],
   opts?: ApplyOptions<T>,
 ): [Doc<T>] {
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
   if (!opts) {
     opts = {}
   }
@@ -922,7 +935,7 @@ export function applyChanges<T>(
       "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const heads = state.handle.getHeads()
@@ -940,7 +953,7 @@ export function applyChanges<T>(
 
 /** @hidden */
 export function getHistory<T>(doc: Doc<T>): State<T>[] {
-  const textV2 = _state(doc).textV2
+  const textV2 = _strict_meta(doc).user_data.textV2
   const history = getAllChanges(doc)
   return history.map((change, index) => ({
     get change() {
@@ -964,7 +977,7 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
 export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
   checkHeads(before, "before")
   checkHeads(after, "after")
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   if (
     state.mostRecentPatch &&
     equals(state.mostRecentPatch.before, before) &&
@@ -1047,7 +1060,7 @@ export function generateSyncMessage<T>(
   doc: Doc<T>,
   inState: SyncState,
 ): [SyncState, SyncMessage | null] {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const syncState = ApiHandler.importSyncState(inState)
   const message = state.handle.generateSyncMessage(syncState)
   const outState = ApiHandler.exportSyncState(syncState) as SyncState
@@ -1081,13 +1094,14 @@ export function receiveSyncMessage<T>(
   if (!opts) {
     opts = {}
   }
-  const state = _state(doc)
+  const meta = _strict_meta(doc)
+  const state = meta.user_data
   if (state.heads) {
     throw new RangeError(
       "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
     )
   }
-  if (_is_proxy(doc)) {
+  if (meta.proxy) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const heads = state.handle.getHeads()
@@ -1141,7 +1155,7 @@ export function decodeSyncMessage(message: SyncMessage): DecodedSyncMessage {
  * Get any changes in `doc` which are not dependencies of `heads`
  */
 export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   return state.handle.getMissingDeps(heads)
 }
 
@@ -1149,31 +1163,28 @@ export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
  * Get the hashes of the heads of this document
  */
 export function getHeads<T>(doc: Doc<T>): Heads {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   return state.heads || state.handle.getHeads()
 }
 
 /** @hidden */
 export function dump<T>(doc: Doc<T>) {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   state.handle.dump()
 }
 
 /** @hidden */
 export function toJS<T>(doc: Doc<T>): T {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const enabled = state.handle.enableFreeze(false)
-  const result = state.handle.materialize()
+  const result = state.handle.materialize(META)
   state.handle.enableFreeze(enabled)
   return result as T
 }
 
 export function isAutomerge(doc: unknown): boolean {
-  if (typeof doc == "object" && doc !== null) {
-    return getObjectId(doc) === "_root" && !!Reflect.get(doc, STATE)
-  } else {
-    return false
-  }
+  let meta = _meta(doc as Doc<unknown>)
+  return meta?.user_data !== undefined && meta?.obj === "_root"
 }
 
 function isObject(obj: unknown): obj is Record<string, unknown> {
@@ -1181,7 +1192,7 @@ function isObject(obj: unknown): obj is Record<string, unknown> {
 }
 
 export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
-  const state = _state(doc)
+  const state = _strict_meta(doc).user_data
   const result = state.handle.saveSince(heads)
   return result
 }

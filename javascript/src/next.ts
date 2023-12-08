@@ -158,7 +158,13 @@ export { RawString } from "./raw_string.js"
 /** @hidden */
 export const getBackend = stable.getBackend
 
-import { _is_proxy, _state, _obj, _clear_cache } from "./internal_state.js"
+import {
+  _strict_meta,
+  _obj,
+  _state,
+  _is_proxy,
+  _clear_cache,
+} from "./internal_state.js"
 
 /**
  * Create a new automerge document
@@ -300,13 +306,11 @@ export function splice<T>(
   del: number,
   newText?: string,
 ) {
-  if (!_is_proxy(doc)) {
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
+  const objectId = meta.obj
+  if (!meta.proxy) {
     throw new RangeError("object cannot be modified outside of a change block")
-  }
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for splice")
   }
   _clear_cache(doc)
 
@@ -345,11 +349,9 @@ export function getCursor<T>(
   path: stable.Prop[],
   index: number,
 ): Cursor {
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for getCursor")
-  }
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
+  const objectId = meta.obj
 
   path.unshift(objectId)
   const value = path.join("/")
@@ -375,11 +377,9 @@ export function getCursorPosition<T>(
   path: stable.Prop[],
   cursor: Cursor,
 ): number {
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for getCursorPosition")
-  }
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
+  const objectId = meta.obj
 
   path.unshift(objectId)
   const value = path.join("/")
@@ -398,14 +398,12 @@ export function mark<T>(
   name: string,
   value: MarkValue,
 ) {
-  if (!_is_proxy(doc)) {
+  const meta = _strict_meta(doc, false)
+  if (!meta.proxy) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for mark")
-  }
+  const state = meta.user_data
+  const objectId = meta.obj
 
   path.unshift(objectId)
   const obj = path.join("/")
@@ -423,14 +421,12 @@ export function unmark<T>(
   range: MarkRange,
   name: string,
 ) {
-  if (!_is_proxy(doc)) {
+  const meta = _strict_meta(doc, false)
+  if (!meta.proxy) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for unmark")
-  }
+  const state = meta.user_data
+  const objectId = meta.obj
 
   path.unshift(objectId)
   const obj = path.join("/")
@@ -443,11 +439,10 @@ export function unmark<T>(
 }
 
 export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for marks")
-  }
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
+  const objectId = meta.obj
+
   path.unshift(objectId)
   const obj = path.join("/")
   try {
@@ -462,11 +457,10 @@ export function marksAt<T>(
   path: stable.Prop[],
   index: number,
 ): MarkSet {
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for marksAt")
-  }
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
+  const objectId = meta.obj
+
   path.unshift(objectId)
   const obj = path.join("/")
   try {
@@ -524,11 +518,12 @@ export function getConflicts<T>(
   doc: Doc<T>,
   prop: stable.Prop,
 ): Conflicts | undefined {
-  const state = _state(doc, false)
+  const meta = _strict_meta(doc, false)
+  const state = meta.user_data
   if (!state.textV2) {
     throw new Error("use getConflicts for a stable document")
   }
-  const objectId = _obj(doc)
+  const objectId = meta.obj
   if (objectId != null) {
     return unstableConflictAt(state.handle, objectId, prop)
   } else {

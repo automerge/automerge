@@ -4,7 +4,8 @@ use crate::Automerge;
 use automerge as am;
 use automerge::ChangeHash;
 use fxhash::FxBuildHasher;
-use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array, WeakMap};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ops::RangeFull;
 use wasm_bindgen::prelude::*;
@@ -14,10 +15,56 @@ use am::ObjId;
 
 use am::iter::{ListRange, ListRangeItem, MapRange, MapRangeItem};
 
-const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
-const DATATYPE_SYMBOL: &str = "_am_datatype_";
-const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
-const META_SYMBOL: &str = "_am_meta";
+#[derive(Debug, Clone)]
+pub(crate) struct ObjMetadata {
+    pub(crate) obj: Option<ObjId>,
+    pub(crate) datatype: Datatype,
+    pub(crate) user_data: JsValue,
+    pub(crate) raw: ObjFormat,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ObjFormat {
+    Normal,
+    CustomObject(Object),
+    CustomScalar(JsValue),
+}
+
+impl ObjFormat {
+    pub(crate) fn as_obj(&self) -> Option<&Object> {
+        match self {
+            Self::CustomObject(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_js(&self) -> Option<&JsValue> {
+        match self {
+            Self::CustomObject(o) => Some(o),
+            Self::CustomScalar(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+impl TryFrom<ObjMetadata> for JsValue {
+    type Error = JsValue;
+
+    fn try_from(data: ObjMetadata) -> Result<JsValue, JsValue> {
+        let o = Object::new();
+        if let Some(id) = data.obj.as_ref() {
+            Reflect::set(&o, &"obj".into(), &id.to_string().into())?;
+        }
+        Reflect::set(&o, &"datatype".into(), &data.datatype.to_string().into())?;
+        if !data.user_data.is_undefined() {
+            Reflect::set(&o, &"user_data".into(), &data.user_data)?;
+        }
+        if let Some(raw) = data.raw.as_js() {
+            Reflect::set(&o, &"raw".into(), raw)?;
+        }
+        Ok(o.into())
+    }
+}
 
 #[derive(Debug)]
 enum Pending<'a> {
@@ -76,7 +123,6 @@ impl<'a> Task<'a> {
         self,
         export: &mut ExportCache<'a>,
         heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
     ) -> Result<Progress<'a>, error::Export> {
         match self {
             Self::New(obj, Datatype::Text) if export.doc.text_rep.is_string() => {
@@ -94,10 +140,10 @@ impl<'a> Task<'a> {
                 Ok(Progress::Task(Task::Map(js_obj, iter, obj, datatype)))
             }
             Self::Map(js_obj, iter, obj, datatype) => {
-                Self::progress_map(js_obj, iter, obj, datatype, meta, export)
+                Self::progress_map(js_obj, iter, obj, datatype, export)
             }
             Self::List(js_array, iter, obj, datatype) => {
-                Self::progress_list(js_array, iter, obj, datatype, meta, export)
+                Self::progress_list(js_array, iter, obj, datatype, export)
             }
         }
     }
@@ -108,7 +154,6 @@ impl<'a> Task<'a> {
         mut iter: MapRange<'a, RangeFull>,
         obj: ObjId,
         datatype: Datatype,
-        meta: &JsValue,
         export: &mut ExportCache<'a>,
     ) -> Result<Progress<'a>, error::Export> {
         while let Some(map_item) = iter.next() {
@@ -122,7 +167,7 @@ impl<'a> Task<'a> {
                 }
             }
         }
-        let wrapped = export.wrap_object(js_obj, &obj, datatype, meta)?;
+        let wrapped = export.wrap_object(js_obj, &obj, datatype)?;
         Ok(Progress::Done(JsValue::from(wrapped)))
     }
 
@@ -132,7 +177,6 @@ impl<'a> Task<'a> {
         mut iter: ListRange<'a, RangeFull>,
         obj: ObjId,
         datatype: Datatype,
-        meta: &JsValue,
         export: &mut ExportCache<'a>,
     ) -> Result<Progress<'a>, error::Export> {
         while let Some(list_item) = iter.next() {
@@ -146,7 +190,7 @@ impl<'a> Task<'a> {
                 }
             }
         }
-        let wrapped = export.wrap_object(Object::from(js_array), &obj, datatype, meta)?;
+        let wrapped = export.wrap_object(Object::from(js_array), &obj, datatype)?;
         Ok(Progress::Done(JsValue::from(wrapped)))
     }
 }
@@ -160,44 +204,29 @@ enum Progress<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExportCache<'a> {
-    pub(crate) objs: HashMap<ObjId, CachedObject, FxBuildHasher>,
-    datatypes: HashMap<Datatype, JsString, FxBuildHasher>,
+    objs: HashMap<ObjId, COWJsObj, FxBuildHasher>,
+    metadata: WeakMap,
+    user_data: JsValue,
     keys: HashMap<&'a str, JsString>,
-    definition: Object,
-    value_key: JsValue,
-    meta_sym: Symbol,
-    datatype_sym: Symbol,
-    raw_obj_sym: Symbol,
-    raw_data_sym: Symbol,
     doc: &'a Automerge,
 }
 
 impl<'a> ExportCache<'a> {
-    pub(crate) fn new(doc: &'a Automerge) -> Result<Self, error::Export> {
-        let definition = Object::new();
-        let f = false.into();
-        Reflect::set(&definition, &"writable".into(), &f)
-            .map_err(|_| error::Export::SetHidden("writable"))?;
-        Reflect::set(&definition, &"enumerable".into(), &f)
-            .map_err(|_| error::Export::SetHidden("enumerable"))?;
-        Reflect::set(&definition, &"configurable".into(), &f)
-            .map_err(|_| error::Export::SetHidden("configurable"))?;
-        let raw_obj_sym = Symbol::for_(RAW_OBJECT_SYMBOL);
-        let datatype_sym = Symbol::for_(DATATYPE_SYMBOL);
-        let meta_sym = Symbol::for_(META_SYMBOL);
-        let raw_data_sym = Symbol::for_(RAW_DATA_SYMBOL);
-        let value_key = "value".into();
+    pub(crate) fn user_data(&self) -> &JsValue {
+        &self.user_data
+    }
+
+    pub(crate) fn new(
+        doc: &'a Automerge,
+        metadata: WeakMap,
+        user_data: JsValue,
+    ) -> Result<Self, error::Export> {
         Ok(Self {
             objs: HashMap::default(),
-            datatypes: HashMap::default(),
             keys: HashMap::default(),
-            definition,
-            raw_obj_sym,
-            datatype_sym,
-            meta_sym,
-            value_key,
-            raw_data_sym,
             doc,
+            metadata,
+            user_data,
         })
     }
 
@@ -207,12 +236,11 @@ impl<'a> ExportCache<'a> {
         obj: ObjId,
         datatype: Datatype,
         heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         let mut task = Task::New(obj, datatype);
         let mut stack: Vec<Pending<'_>> = Vec::new();
         loop {
-            match task.progress(self, heads, meta)? {
+            match task.progress(self, heads)? {
                 Progress::Task(t) => {
                     task = t;
                 }
@@ -261,16 +289,21 @@ impl<'a> ExportCache<'a> {
             ),
             am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
             am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
-            am::ScalarValue::Unknown { bytes, type_code } => (
-                Datatype::Unknown(*type_code),
-                Uint8Array::from(bytes.as_slice()).into(),
-            ),
+            am::ScalarValue::Unknown { bytes, type_code } => {
+                let mut buff = bytes.clone();
+                buff.push(*type_code);
+                (Datatype::Unknown, Uint8Array::from(buff.as_slice()).into())
+            }
         };
         self.wrap_scalar(js_value, datatype)
     }
 
     #[inline(never)]
-    fn wrap_scalar(&self, value: JsValue, datatype: Datatype) -> Result<JsValue, error::Export> {
+    pub(crate) fn wrap_scalar(
+        &self,
+        value: JsValue,
+        datatype: Datatype,
+    ) -> Result<JsValue, error::Export> {
         if let Some(function) = self.doc.external_types.get(&datatype) {
             let wrapped_value = function
                 .call1(&JsValue::undefined(), &value)
@@ -278,19 +311,17 @@ impl<'a> ExportCache<'a> {
             let o = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
-            self.set_raw_data(&o, &value)?;
-            self.set_datatype(&o, &datatype.into())?;
-            Ok(o.into())
+            let encoded = Self::encode_obj_metadata(
+                None,
+                datatype,
+                &self.user_data,
+                ObjFormat::CustomScalar(value),
+            );
+            self.metadata.set(&o, &encoded);
+            Ok(JsValue::from(o))
         } else {
             Ok(value)
         }
-    }
-
-    #[inline(never)]
-    fn ensure_datatype(&mut self, datatype: Datatype) {
-        self.datatypes
-            .entry(datatype)
-            .or_insert_with(|| JsString::from(datatype.to_string()));
     }
 
     #[inline(never)]
@@ -299,37 +330,85 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn wrap_object(
+    pub(crate) fn wrap_object(
         &mut self,
-        value: Object,
+        mut value: Object,
         obj: &ObjId,
         datatype: Datatype,
-        meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        let value = if let Some(function) = self.doc.external_types.get(&datatype) {
-            self.wrap_custom_object(&value, datatype, function)?
-        } else {
-            value
-        };
+        let mut raw = ObjFormat::Normal;
 
-        // I have to do this dance to make the borrow checker happy
-        self.ensure_datatype(datatype);
-        let js_datatype = self.datatypes.get(&datatype).unwrap(); // save - ensure above
+        if let Some(function) = self.doc.external_types.get(&datatype) {
+            let wrapped = Self::wrap_custom_object(&value, datatype, function)?;
+            raw = ObjFormat::CustomObject(value);
+            value = wrapped;
+        }
 
-        let js_objid = JsString::from(obj.to_string());
-
-        self.set_hidden(&value, &js_objid, js_datatype, meta)?;
+        self.set_obj_metadata(&value, Some(obj), datatype, raw);
 
         if self.doc.freeze {
             Object::freeze(&value);
         }
+
         Ok(value)
     }
 
+    // todo - figure out a way to return a reference here instead of cloning
+    pub(crate) fn copy_on_write(
+        &mut self,
+        outer: &Object,
+    ) -> Result<(bool, COWJsObj), error::Export> {
+        let metadata = self.get_obj_metadata(outer).unwrap_or(ObjMetadata {
+            obj: Some(am::ROOT),
+            datatype: Datatype::Map,
+            user_data: self.user_data().clone(),
+            raw: ObjFormat::Normal,
+        });
+
+        let obj = metadata
+            .obj
+            .as_ref()
+            .ok_or(error::Export::InvalidObjMetadata)?
+            .clone();
+        let datatype = metadata.datatype;
+
+        match self.objs.entry(obj.clone()) {
+            Entry::Occupied(entry) => Ok((true, entry.get().clone())),
+            Entry::Vacant(entry) => {
+                let mut cow_js = COWJsObj {
+                    metadata,
+                    outer: outer.clone(),
+                };
+
+                let shallow_copy = shallow_copy(cow_js.inner());
+
+                if let Some(function) = self.doc.external_types.get(&datatype) {
+                    let wrapped = Self::wrap_custom_object(&shallow_copy, datatype, function)?;
+                    cow_js.set_wrapped_object(shallow_copy, wrapped);
+                } else {
+                    cow_js.set_normal_object(shallow_copy);
+                }
+
+                // in theory - we could reuse the underlying Array and just update entry 2 & 3
+                let encoded = Self::encode_obj_metadata(
+                    Some(&obj),
+                    datatype,
+                    &self.user_data,
+                    cow_js.metadata.raw.clone(),
+                );
+
+                self.metadata.set(&cow_js.outer, &encoded);
+
+                entry.insert(cow_js.clone());
+
+                Ok((false, cow_js))
+            }
+        }
+    }
+
     #[inline(never)]
-    fn wrap_custom_object(
-        &self,
-        value: &Object,
+    pub(crate) fn wrap_custom_object(
+        value: &JsValue,
         datatype: Datatype,
         function: &Function,
     ) -> Result<Object, error::Export> {
@@ -339,77 +418,111 @@ impl<'a> ExportCache<'a> {
         let wrapped_object = wrapped_value
             .dyn_into::<Object>()
             .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
-        self.set_raw_data(&wrapped_object, value)?;
         Ok(wrapped_object)
     }
 
-    pub(crate) fn set_meta(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.meta_sym, value)
+    pub(crate) fn encode_obj_metadata(
+        obj: Option<&ObjId>,
+        datatype: Datatype,
+        user_data: &JsValue,
+        raw: ObjFormat,
+    ) -> JsValue {
+        let mut bytes = obj.map(|o| o.to_bytes()).unwrap_or_default();
+        bytes.push(datatype as u8);
+        let state = Array::new();
+        state.push(&Uint8Array::from(bytes.as_slice()));
+        state.push(user_data);
+        match &raw {
+            ObjFormat::CustomObject(o) => {
+                state.push(o);
+            }
+            ObjFormat::CustomScalar(s) => {
+                state.push(s);
+            }
+            _ => {}
+        }
+        JsValue::from(state)
     }
 
-    pub(crate) fn get_raw_data(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.raw_data_sym)
+    pub(crate) fn get_obj_metadata(&self, obj: &Object) -> Option<ObjMetadata> {
+        let meta = self.metadata.get(obj);
+        Self::decode_obj_metadata(&meta)
     }
 
-    pub(crate) fn set_raw_data(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_data_sym, value)
-    }
-
-    pub(crate) fn get_raw_object(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.raw_obj_sym)
-    }
-
-    pub(crate) fn set_raw_object(
-        &self,
-        obj: &Object,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_obj_sym, value)
-    }
-
-    pub(crate) fn get_datatype(&self, obj: &JsValue) -> Result<JsValue, error::GetProp> {
-        self.get_value(obj, &self.datatype_sym)
-    }
-
-    pub(crate) fn set_datatype(&self, obj: &Object, value: &JsValue) -> Result<(), error::Export> {
-        self.set_value(obj, &self.datatype_sym, value)
-    }
-
-    pub(crate) fn get_value(&self, obj: &JsValue, key: &Symbol) -> Result<JsValue, error::GetProp> {
-        Reflect::get(obj, key).map_err(|error| error::GetProp {
-            property: key.to_string().into(),
-            error,
+    pub(crate) fn decode_obj_metadata(state: &JsValue) -> Option<ObjMetadata> {
+        let array = state.clone().dyn_into::<Array>().ok()?;
+        let mut raw = ObjFormat::Normal;
+        if array.length() == 3 {
+            let inner = array.get(2);
+            if inner.is_object() {
+                raw = ObjFormat::CustomObject(inner.dyn_into::<Object>().ok()?);
+            } else {
+                raw = ObjFormat::CustomScalar(inner);
+            }
+        }
+        let user_data = array.get(1);
+        //let mut bytes = array.pop().dyn_into::<Uint8Array>().ok()?.to_vec();
+        let bytes = array.get(0).dyn_into::<Uint8Array>();
+        let mut bytes = bytes.ok()?.to_vec();
+        let datatype = bytes.pop()?;
+        let datatype = Datatype::try_from(datatype).ok()?;
+        let obj = ObjId::try_from(bytes.as_slice()).ok();
+        Some(ObjMetadata {
+            obj,
+            datatype,
+            user_data,
+            raw,
         })
     }
 
-    pub(crate) fn set_value(
+    pub(crate) fn set_obj_metadata(
         &self,
-        obj: &Object,
-        key: &JsValue,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        Reflect::set(&self.definition, &self.value_key, value)
-            .map_err(|_| error::Export::SetHidden("value"))?;
-        Object::define_property(obj, key, &self.definition);
-        Ok(())
+        js_obj: &Object,
+        id: Option<&ObjId>,
+        datatype: Datatype,
+        raw: ObjFormat,
+    ) {
+        let encoded = Self::encode_obj_metadata(id, datatype, &self.user_data, raw);
+        self.metadata.set(js_obj, &encoded);
     }
 
-    pub(crate) fn set_hidden(
-        &self,
-        obj: &Object,
-        raw_obj: &JsValue,
-        datatype: &JsValue,
-        meta: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.set_value(obj, &self.raw_obj_sym, raw_obj)?;
-        self.set_value(obj, &self.datatype_sym, datatype)?;
-        self.set_value(obj, &self.meta_sym, meta)
+    pub(crate) fn freeze_objects(&self) {
+        for cow in self.objs.values() {
+            Object::freeze(&cow.outer);
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CachedObject {
-    pub(crate) id: ObjId,
-    pub(crate) inner: Object,
+pub(crate) struct COWJsObj {
+    pub(crate) metadata: ObjMetadata,
     pub(crate) outer: Object,
+}
+
+impl COWJsObj {
+    pub(crate) fn id(&self) -> Option<&ObjId> {
+        self.metadata.obj.as_ref()
+    }
+
+    pub(crate) fn inner(&self) -> &Object {
+        self.metadata.raw.as_obj().unwrap_or(&self.outer)
+    }
+
+    fn set_wrapped_object(&mut self, copy: Object, wrapped: Object) {
+        self.metadata.raw = ObjFormat::CustomObject(copy);
+        self.outer = wrapped;
+    }
+
+    fn set_normal_object(&mut self, copy: Object) {
+        self.outer = copy;
+        self.metadata.raw = ObjFormat::Normal;
+    }
+}
+
+fn shallow_copy(obj: &Object) -> Object {
+    if Array::is_array(obj) {
+        Array::from(obj).into()
+    } else {
+        Object::assign(&Object::new(), obj)
+    }
 }

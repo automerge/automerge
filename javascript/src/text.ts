@@ -1,6 +1,8 @@
 import type { Value } from "@automerge/automerge-wasm"
-import { TEXT, STATE } from "./constants.js"
+import { TEXT, OBJ_META } from "./constants.js"
 import type { InternalState } from "./internal_state.js"
+import { _meta } from "./internal_state.js"
+import type { ObjMetadata } from "./types.js"
 
 export class Text {
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -10,7 +12,7 @@ export class Text {
   spans: Array<any> | undefined;
   /** @hidden */
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [STATE]?: InternalState<any>
+  [OBJ_META]?: ObjMetadata<InternalState<any>>
 
   constructor(text?: string | string[] | Value[]) {
     if (typeof text === "string") {
@@ -112,7 +114,7 @@ export class Text {
    * Updates the list item at position `index` to a new value `value`.
    */
   set(index: number, value: Value) {
-    if (this[STATE]) {
+    if (_meta(this)) {
       throw new RangeError(
         "object cannot be modified outside of a change block",
       )
@@ -124,7 +126,7 @@ export class Text {
    * Inserts new list items `values` starting at position `index`.
    */
   insertAt(index: number, ...values: Array<Value | object>) {
-    if (this[STATE]) {
+    if (_meta(this)) {
       throw new RangeError(
         "object cannot be modified outside of a change block",
       )
@@ -141,7 +143,7 @@ export class Text {
    * if `numDelete` is not given, one item is deleted.
    */
   deleteAt(index: number, numDelete = 1) {
-    if (this[STATE]) {
+    if (this[OBJ_META]) {
       throw new RangeError(
         "object cannot be modified outside of a change block",
       )

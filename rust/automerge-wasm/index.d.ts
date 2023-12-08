@@ -2,6 +2,7 @@ export type Actor = string;
 export type ObjID = string;
 export type Change = Uint8Array;
 export type SyncMessage = Uint8Array;
+export type Metadata = WeakMap<Object,Object>;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
@@ -169,9 +170,17 @@ export type Mark = {
   end: number,
 }
 
+export type ObjMetadata<U> = {
+  obj: ObjID,
+  datatype: Datatype,
+  user_data: U,
+  raw?: MaterializeValue,
+}
+
 export function encodeChange(change: ChangeToEncode): Change;
 export function create(options?: InitOptions): Automerge;
 export function load(data: Uint8Array, options?: LoadOptions): Automerge;
+export function getObjMetadata<U>(metadata: Metadata, obj: Object): ObjMetadata<U> | undefined;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -184,6 +193,7 @@ export function importSyncState(state: JsSyncState): SyncState;
 export interface API {
   create(options?: InitOptions): Automerge;
   load(data: Uint8Array, options?: LoadOptions): Automerge;
+  getObjMetadata<U>(meta: Metadata, obj: Object): ObjMetadata<U> | undefined;
   encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;
@@ -231,8 +241,8 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
-  toJS(): MaterializeValue;
+  materialize<U>(metadata: Metadata, obj?: ObjID, heads?: Heads, userdata?: U): MaterializeValue;
+  toJS(obj?: ObjID, heads?: Heads): MaterializeValue;
 
   // transactions
   commit(message?: string, time?: number): Hash | null;
@@ -279,8 +289,8 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
-  applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
+  applyPatches<Doc>(metadata: Metadata, obj: Doc, userdata?: unknown): Doc;
+  applyAndReturnPatches<Doc>(metadata: Metadata, obj: Doc, userdata?: unknown): {value: Doc, patches: Patch[]};
 }
 
 export interface JsSyncState {

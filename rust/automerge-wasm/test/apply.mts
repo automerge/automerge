@@ -1,15 +1,15 @@
 
 import { describe, it } from 'mocha';
 import assert from 'assert'
-import { create } from '../nodejs/automerge_wasm.cjs'
+import { create, getObjMetadata } from '../nodejs/automerge_wasm.cjs'
 
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
 
+let meta = new WeakMap();
+
 // @ts-ignore
 function _obj(doc: any) : any {
-  if (typeof doc === 'object' && doc !== null) {
-    return doc[OBJECT_ID]
-  }
+  return getObjMetadata(meta, doc)?.obj
 }
 
 // sample classes for testing
@@ -26,19 +26,19 @@ describe('Automerge', () => {
       const start = { hello: { mellow: { yellow: "world", x: 1 }, y : 2 } }
       const doc1 = create()
       doc1.putObject("/", "hello", start.hello);
-      let mat = doc1.materialize("/")
+      let mat = doc1.materialize(meta, "/")
       const doc2 = create()
       doc2.merge(doc1)
 
-      let base = doc2.applyPatches({})
+      let base = doc2.applyPatches(meta, {})
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
 
       doc2.delete("/hello/mellow", "yellow");
       // @ts-ignore
       delete start.hello.mellow.yellow;
-      base = doc2.applyPatches(base)
-      mat = doc2.materialize("/")
+      base = doc2.applyPatches(meta, base)
+      mat = doc2.materialize(meta, "/")
 
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
@@ -48,17 +48,17 @@ describe('Automerge', () => {
       const start = { list: [1,2,3,4] }
       const doc1 = create()
       doc1.putObject("/", "list", start.list);
-      let mat = doc1.materialize("/")
+      let mat = doc1.materialize(meta, "/")
       const doc2 = create()
       doc2.merge(doc1)
-      mat = doc1.materialize("/")
-      let base = doc2.applyPatches({})
+      mat = doc1.materialize(meta, "/")
+      let base = doc2.applyPatches(meta, {})
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
 
       doc2.delete("/list", 3);
       start.list.splice(3,1)
-      base = doc2.applyPatches(base)
+      base = doc2.applyPatches(meta, base)
 
       assert.deepEqual(base, start)
     })
@@ -78,8 +78,8 @@ describe('Automerge', () => {
       }
       const doc1 = create()
       doc1.putObject("/", "list", start.list);
-      let base = doc1.applyPatches({})
-      let mat = doc1.clone().materialize("/")
+      let base = doc1.applyPatches(meta, {})
+      let mat = doc1.clone().materialize(meta, "/")
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
 
@@ -89,8 +89,8 @@ describe('Automerge', () => {
       doc1.delete("/list/0", 0)
       start.list[0].splice(0,1)
 
-      mat = doc1.clone().materialize("/")
-      base = doc1.applyPatches(base)
+      mat = doc1.clone().materialize(meta, "/")
+      base = doc1.applyPatches(meta, base)
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
     })
@@ -111,19 +111,19 @@ describe('Automerge', () => {
       doc1.put("/", "n", 10, "counter")
       doc1.put("/", "m", 10, "int")
 
-      let mat = doc1.materialize("/")
+      let mat = doc1.materialize(meta, "/")
       assert.deepEqual( mat, { n: new Counter(10), m: 10 } )
 
       doc2.merge(doc1)
-      let apply = doc2.applyPatches({})
+      let apply = doc2.applyPatches(meta, {})
       assert.deepEqual( apply, { n: new Counter(10), m: 10 } )
 
       doc1.increment("/","n", 5)
-      mat = doc1.materialize("/")
+      mat = doc1.materialize(meta, "/")
       assert.deepEqual( mat, { n: new Counter(15), m: 10 } )
 
       doc2.merge(doc1)
-      apply = doc2.applyPatches(apply)
+      apply = doc2.applyPatches(meta, apply)
       assert.deepEqual( apply, { n: new Counter(15), m: 10 } )
     })
 
@@ -132,24 +132,24 @@ describe('Automerge', () => {
 
       doc1.putObject("/", "notes", "hello world")
 
-      let mat = doc1.materialize("/")
+      let mat = doc1.materialize(meta, "/")
 
       assert.deepEqual( mat, { notes: "hello world" } )
 
       const doc2 = create()
-      let apply : any = doc2.materialize("/") 
-      apply = doc2.applyPatches(apply)
+      let apply : any = doc2.materialize(meta, "/") 
+      apply = doc2.applyPatches(meta, apply)
 
       doc2.merge(doc1);
-      apply = doc2.applyPatches(apply)
+      apply = doc2.applyPatches(meta, apply)
       assert.deepEqual(_obj(apply), "_root")
       assert.deepEqual( apply, { notes: "hello world" } )
 
       doc2.splice("/notes", 6, 5, "everyone");
-      apply = doc2.applyPatches(apply)
+      apply = doc2.applyPatches(meta, apply)
       assert.deepEqual( apply, { notes: "hello everyone" } )
 
-      mat = doc2.materialize("/")
+      mat = doc2.materialize(meta, "/")
       assert.deepEqual(_obj(mat), "_root")
       // @ts-ignore
       assert.deepEqual( mat, { notes: "hello everyone" } )
@@ -157,7 +157,7 @@ describe('Automerge', () => {
 
     it('should set the OBJECT_ID property on lists, maps, and text objects and not on scalars', () => {
         const doc1 = create({ actor: 'aaaa' })
-        const mat: any = doc1.materialize("/")
+        const mat: any = doc1.materialize(meta, "/")
         doc1.registerDatatype("counter", (n: number) => new Counter(n))
         doc1.put("/", "string", "string", "str")
         doc1.put("/", "uint", 2, "uint")
@@ -169,7 +169,9 @@ describe('Automerge', () => {
         doc1.putObject("/", "text", "text")
         doc1.putObject("/", "list", [])
         doc1.putObject("/", "map", {})
-        const applied = doc1.applyPatches(mat)
+        const applied = doc1.applyPatches(meta, mat)
+
+        assert.deepEqual(getObjMetadata(meta, applied.counter), { datatype: "counter", raw: 1 })
 
         assert.equal(_obj(applied.string), null)
         assert.equal(_obj(applied.uint), null)
@@ -184,13 +186,44 @@ describe('Automerge', () => {
         assert.notEqual(_obj(applied.map), null)
     })
 
-    it('should set the root OBJECT_ID to "_root"', () => {
+    it('should set the object metadata "_root"', () => {
         const doc1 = create({ actor: 'aaaa'})
-        const mat: any = doc1.materialize("/")
-        assert.equal(_obj(mat), "_root")
+        const user1 = { u: 1 }
+        const user2 = { u: 2 }
+        const user3 = { u: 3 }
+        console.log("materialize");
+
+        const mat: any = doc1.materialize(meta, "/", undefined, user1)
+        let objMetadata = getObjMetadata(meta, mat)
+        console.log(objMetadata);
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user1)
+
+        // first patch (this will use the fastpath and no apply patches)
         doc1.put("/", "key", "value")
-        const applied = doc1.applyPatches(mat)
-        assert.equal(_obj(applied), "_root")
+        const applied = doc1.applyPatches(meta, mat, user2)
+        objMetadata = getObjMetadata(meta, applied)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user2)
+
+        // second patch
+        doc1.put("/", "key2", "value2")
+        const applied2 = doc1.applyPatches(meta, mat, user2)
+        objMetadata = getObjMetadata(meta, applied2)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.equal(objMetadata?.user_data, user2)
+
+        // no patches - change userdata
+        const applied3 = doc1.applyPatches(meta, mat, user3)
+        objMetadata = getObjMetadata(meta, applied3)
+        assert.equal(objMetadata?.user_data, user3)
+
+        // third patch - dont pass userdata - gets overwritten to undefined
+        doc1.put("/", "key3", "value3")
+        const applied4 = doc1.applyPatches(meta, mat)
+        objMetadata = getObjMetadata(meta, applied4)
+        assert.equal(objMetadata?.obj, "_root")
+        assert.deepEqual(objMetadata, { obj: "_root", datatype: "map" })
     })
 
     it.skip('it can patch quickly', () => {
@@ -198,7 +231,7 @@ describe('Automerge', () => {
       console.time("init")
       let doc1 = create()
       doc1.putObject("/", "notes", "");
-      let mat = doc1.materialize("/")
+      let mat = doc1.materialize(meta, "/")
       let doc2 = doc1.fork()
       let testData = new Array( 100000 ).join("x")
       console.timeEnd("init")

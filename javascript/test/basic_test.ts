@@ -293,7 +293,7 @@ describe("Automerge", () => {
 
     it("allows access to the backend", () => {
       let doc = Automerge.from({ hello: "world" })
-      assert.deepEqual(Automerge.getBackend(doc).materialize(), {
+      assert.deepEqual(Automerge.getBackend(doc).toJS(), {
         hello: "world",
       })
     })

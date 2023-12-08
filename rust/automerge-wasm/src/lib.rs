@@ -33,7 +33,8 @@ use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
-use js_sys::{Array, Function, Object, Uint8Array};
+use fxhash::FxBuildHasher;
+use js_sys::{Array, Function, Object, Uint8Array, WeakMap};
 use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -99,7 +100,7 @@ impl From<TextRepresentation> for am::patches::TextRepresentation {
 pub struct Automerge {
     doc: AutoCommit,
     freeze: bool,
-    external_types: HashMap<Datatype, Function>,
+    external_types: HashMap<Datatype, Function, FxBuildHasher>,
     text_rep: TextRepresentation,
 }
 
@@ -460,9 +461,11 @@ impl Automerge {
                 self.doc.get(&obj, prop)?
             };
             if let Some((value, id)) = value {
-                match alloc(&value, self.text_rep) {
-                    (datatype, js_value) if datatype.is_scalar() => Ok(js_value),
-                    _ => Ok(id.to_string().into()),
+                if value.is_scalar() {
+                    let new_value = alloc(&value, self.text_rep);
+                    Ok(new_value.into_js())
+                } else {
+                    Ok(id.to_string().into())
                 }
             } else {
                 Ok(JsValue::undefined())
@@ -498,9 +501,9 @@ impl Automerge {
                     }
                     (Value::Scalar(_), _) => {
                         let result = Array::new();
-                        let (datatype, value) = alloc(&value.0, self.text_rep);
-                        result.push(&datatype.into());
-                        result.push(&value);
+                        let new_value = alloc(&value.0, self.text_rep);
+                        result.push(&new_value.datatype().into());
+                        result.push(new_value.as_js());
                         Ok(result.into())
                     }
                 }
@@ -530,10 +533,10 @@ impl Automerge {
             }?;
             for (value, id) in values {
                 let sub = Array::new();
-                let (datatype, js_value) = alloc(&value, self.text_rep);
-                sub.push(&datatype.into());
+                let new_value = alloc(&value, self.text_rep);
+                sub.push(&new_value.datatype().into());
                 if value.is_scalar() {
-                    sub.push(&js_value);
+                    sub.push(new_value.as_js());
                 }
                 sub.push(&id.to_string().into());
                 result.push(&JsValue::from(&sub));
@@ -568,18 +571,26 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = applyPatches)]
-    pub fn apply_patches(&mut self, object: JsValue, meta: JsValue) -> Result<JsValue, JsValue> {
-        let (value, _patches) = self.apply_patches_impl(object, meta)?;
+    pub fn apply_patches(
+        &mut self,
+        metadata: JsValue,
+        object: JsValue,
+        user_data: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let metadata = into_weak_map(metadata)?;
+        let (value, _patches) = self.apply_patches_impl(object, metadata, user_data, false)?;
         Ok(value)
     }
 
     #[wasm_bindgen(js_name = applyAndReturnPatches)]
     pub fn apply_and_return_patches(
         &mut self,
+        metadata: JsValue,
         object: JsValue,
-        meta: JsValue,
+        user_data: JsValue,
     ) -> Result<JsValue, JsValue> {
-        let (value, patches) = self.apply_patches_impl(object, meta)?;
+        let metadata = into_weak_map(metadata)?;
+        let (value, patches) = self.apply_patches_impl(object, metadata, user_data, true)?;
 
         let patches: Array = patches
             .into_iter()
@@ -596,34 +607,46 @@ impl Automerge {
     fn apply_patches_impl(
         &mut self,
         object: JsValue,
-        meta: JsValue,
+        metadata: WeakMap,
+        user_data: JsValue,
+        need_patches: bool,
     ) -> Result<(JsValue, Vec<automerge::Patch>), JsValue> {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
 
         let shortcut = self.doc.diff_cursor().is_empty();
-        let patches = self.doc.diff_incremental();
-
-        let mut cache = interop::ExportCache::new(self)?;
 
         if shortcut {
-            let value = cache.materialize(ROOT, Datatype::Map, None, &meta)?;
+            let patches = if need_patches {
+                self.doc.diff_incremental()
+            } else {
+                self.doc.update_diff_cursor();
+                vec![]
+            };
+            let mut cache = interop::ExportCache::new(self, metadata, user_data)?;
+            let value = cache.materialize(ROOT, Datatype::Map, None)?;
             return Ok((value, patches));
         }
 
-        // even if there are no patches we may need to update the meta object
+        let patches = self.doc.diff_incremental();
+        let user_data_defined = !user_data.is_undefined();
+        let mut cache = interop::ExportCache::new(self, metadata, user_data)?;
+
+        // even if there are no patches we may need to update the user_data object
         // which requires that we update the object too
-        if patches.is_empty() && !meta.is_undefined() {
-            let (_, cached_obj) = self.unwrap_object(&object, &mut cache, &meta)?;
-            object = cached_obj.inner;
-            if self.freeze {
-                Object::freeze(&object);
-            }
+        if patches.is_empty() && user_data_defined {
+            // this updates the user_data
+            let cow = cache.copy_on_write(&object)?.1;
+            object = cow.outer;
         }
 
         for p in &patches {
-            object = self.apply_patch(object, p, &meta, &mut cache)?;
+            object = self.apply_patch(object, p, &mut cache)?;
+        }
+
+        if self.freeze {
+            cache.freeze_objects();
         }
 
         Ok((object.into(), patches))
@@ -827,22 +850,33 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = toJS)]
-    pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
-        let mut cache = interop::ExportCache::new(self)?;
-        cache.materialize(ROOT, Datatype::Map, None, &meta)
+    pub fn to_js(
+        &mut self,
+        obj: JsValue,
+        heads: Option<Array>,
+    ) -> Result<JsValue, error::Materialize> {
+        let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
+        let heads = get_heads(heads)?;
+        let datatype = Datatype::from(obj_type);
+        let metadata = WeakMap::new();
+        let user_data = JsValue::null();
+        let mut cache = interop::ExportCache::new(self, metadata, user_data)?;
+        Ok(cache.materialize(obj, datatype, heads.as_ref())?)
     }
 
     pub fn materialize(
         &mut self,
+        metadata: JsValue,
         obj: JsValue,
         heads: Option<Array>,
-        meta: JsValue,
+        user_data: JsValue,
     ) -> Result<JsValue, error::Materialize> {
+        let metadata = into_weak_map(metadata)?;
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
         self.doc.update_diff_cursor();
-        let mut cache = interop::ExportCache::new(self)?;
-        Ok(cache.materialize(obj, obj_type.into(), heads.as_ref(), &meta)?)
+        let mut cache = interop::ExportCache::new(self, metadata, user_data)?;
+        Ok(cache.materialize(obj, obj_type.into(), heads.as_ref())?)
     }
 
     #[wasm_bindgen(js_name = getCursor)]
@@ -945,9 +979,9 @@ impl Automerge {
         let result = Array::new();
         for m in marks {
             let mark = Object::new();
-            let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
+            let value = alloc(&m.value().clone().into(), self.text_rep);
             js_set(&mark, "name", m.name())?;
-            js_set(&mark, "value", value)?;
+            js_set(&mark, "value", value.as_js())?;
             js_set(&mark, "start", m.start as i32)?;
             js_set(&mark, "end", m.end as i32)?;
             result.push(&mark.into());
@@ -970,8 +1004,8 @@ impl Automerge {
             .map_err(to_js_err)?;
         let result = Object::new();
         for (mark, value) in marks.iter() {
-            let (_datatype, value) = alloc(&value.into(), self.text_rep);
-            js_set(&result, mark, value)?;
+            let value = alloc(&value.into(), self.text_rep);
+            js_set(&result, mark, value.as_js())?;
         }
         Ok(result)
     }
@@ -1027,6 +1061,25 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
         TextRepresentation::String
     };
     Automerge::new(actor, text_rep)
+}
+
+fn into_weak_map(metadata: JsValue) -> Result<WeakMap, error::Metadata> {
+    metadata
+        .dyn_into::<WeakMap>()
+        .map_err(|_| error::Metadata::InvalidWeakMap)
+}
+
+#[wasm_bindgen(js_name = getObjMetadata)]
+pub fn get_obj_metadata(metadata: JsValue, obj: Object) -> Result<JsValue, JsValue> {
+    let metadata = into_weak_map(metadata)?;
+    let obj_metadata = metadata.get(&obj);
+    if obj_metadata.is_undefined() {
+        Ok(obj_metadata)
+    } else {
+        let decoded = interop::ExportCache::decode_obj_metadata(&obj_metadata)
+            .ok_or_else(|| interop::error::Export::InvalidMetadata(obj_metadata))?;
+        JsValue::try_from(decoded)
+    }
 }
 
 #[wasm_bindgen(js_name = load)]
@@ -1395,7 +1448,21 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    pub enum Metadata {
+        #[error("metadata must be a WeakMap")]
+        InvalidWeakMap,
+    }
+
+    impl From<Metadata> for JsValue {
+        fn from(e: Metadata) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum Materialize {
+        #[error(transparent)]
+        Metadata(#[from] Metadata),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error("bad heads: {0}")]

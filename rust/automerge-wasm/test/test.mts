@@ -5,6 +5,8 @@ import { BloomFilter } from './helpers/sync.mjs'
 import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../nodejs/automerge_wasm.cjs'
 import { DecodedSyncMessage, Hash } from '../nodejs/automerge_wasm.cjs';
 
+let meta = new WeakMap();
+
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
   let aToBmsg = null, bToAmsg = null, i = 0
@@ -159,19 +161,19 @@ describe('Automerge', () => {
       const sublist = doc.putObject(root, "letters", [])
       doc.insert(sublist, 0, "a");
       doc.insert(sublist, 0, "b");
-      assert.deepEqual(doc.materialize(), { letters: ["b", "a"] })
+      assert.deepEqual(doc.toJS(), { letters: ["b", "a"] })
       doc.push(sublist, "c");
       const heads = doc.getHeads()
-      assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c"] })
+      assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c"] })
       doc.push(sublist, 3, "timestamp");
-      assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3)] })
+      assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c", new Date(3)] })
       doc.splice(sublist, 1, 1, ["d", "e", "f"]);
-      assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3)] })
+      assert.deepEqual(doc.toJS(), { letters: ["b", "d", "e", "f", "c", new Date(3)] })
       doc.put(sublist, 0, "z");
-      assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3)] })
-      assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)])
+      assert.deepEqual(doc.toJS(), { letters: ["z", "d", "e", "f", "c", new Date(3)] })
+      assert.deepEqual(doc.toJS(sublist), ["z", "d", "e", "f", "c", new Date(3)])
       assert.deepEqual(doc.length(sublist), 6)
-      assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] })
+      assert.deepEqual(doc.toJS("/", heads), { letters: ["b", "a", "c"] })
     })
 
     it('should be able delete non-existent props', () => {
@@ -367,9 +369,9 @@ describe('Automerge', () => {
     it('paths can be used instead of objids', () => {
       const doc = create({ actor: "aaaa"})
       doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]])
-      assert.deepEqual(doc.materialize("/"), { list: [{ foo: "bar" }, [1, 2, 3]] })
-      assert.deepEqual(doc.materialize("/list"), [{ foo: "bar" }, [1, 2, 3]])
-      assert.deepEqual(doc.materialize("/list/0"), { foo: "bar" })
+      assert.deepEqual(doc.materialize(meta, "/"), { list: [{ foo: "bar" }, [1, 2, 3]] })
+      assert.deepEqual(doc.materialize(meta, "/list"), [{ foo: "bar" }, [1, 2, 3]])
+      assert.deepEqual(doc.materialize(meta, "/list/0"), { foo: "bar" })
     })
 
     it('should be able to fetch changes by hash', () => {
@@ -393,15 +395,15 @@ describe('Automerge', () => {
       doc.putObject("_root", "info1", "hello world") // 'text' object
       doc.put("_root", "info2", "hello world")  // 'str'
       const l4 = doc.putObject("_root", "info3", "hello world")
-      assert.deepEqual(doc.materialize(), {
+      assert.deepEqual(doc.materialize(meta), {
         "list": [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]],
         "info1": "hello world",
         "info2": "hello world",
         "info3": "hello world",
       })
-      assert.deepEqual(doc.materialize(l2), { zip: ["a", "b"] })
-      assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])
-      assert.deepEqual(doc.materialize(l4), "hello world")
+      assert.deepEqual(doc.materialize(meta, l2), { zip: ["a", "b"] })
+      assert.deepEqual(doc.materialize(meta, l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])
+      assert.deepEqual(doc.materialize(meta, l4), "hello world")
     })
 
     it('only returns an object id when objects are created', () => {
@@ -454,8 +456,8 @@ describe('Automerge', () => {
       A.merge(B)
       const heads2 = A.getHeads();
       A.put("/", "key5", "val5");
-      assert.deepEqual(A.fork(undefined, heads1).materialize("/"), A.materialize("/", heads1))
-      assert.deepEqual(A.fork(undefined, heads2).materialize("/"), A.materialize("/", heads2))
+      assert.deepEqual(A.fork(undefined, heads1).materialize(meta, "/"), A.materialize(meta, "/", heads1))
+      assert.deepEqual(A.fork(undefined, heads2).materialize(meta, "/"), A.materialize(meta, "/", heads2))
     })
 
     it('should handle merging text conflicts then saving & loading', () => {
@@ -1027,7 +1029,7 @@ describe('Automerge', () => {
         n1.commit("", 0)
       }
       n2.applyChanges(n1.getChanges([]))
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.materialize(meta), n2.materialize(meta))
 
       // generate a naive sync message
       let m1 = n1.generateSyncMessage(s1)
@@ -1056,9 +1058,9 @@ describe('Automerge', () => {
         n1.commit("", 0)
       }
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.materialize(meta), n2.materialize(meta))
       sync(n1, n2)
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.materialize(meta), n2.materialize(meta))
     })
 
     it('should sync peers where one has commits the other does not', () => {
@@ -1072,9 +1074,9 @@ describe('Automerge', () => {
         n1.commit("", 0)
       }
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.materialize(meta), n2.materialize(meta))
       sync(n1, n2)
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.materialize(meta), n2.materialize(meta))
     })
 
     it('should work with prior sync state', () => {
@@ -1095,9 +1097,9 @@ describe('Automerge', () => {
         n1.commit("", 0)
       }
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.materialize(meta), n2.materialize(meta))
       sync(n1, n2, s1, s2)
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.materialize(meta), n2.materialize(meta))
     })
 
     it('should not generate messages once synced', () => {
@@ -1192,12 +1194,12 @@ describe('Automerge', () => {
       n1.receiveSyncMessage(s1, msg2to1)
       assert.deepStrictEqual(n1.getMissingDeps(), [])
       //assert.notDeepStrictEqual(patch1, null)
-      assert.deepStrictEqual(n1.materialize(), { x: 4, y: 4 })
+      assert.deepStrictEqual(n1.toJS(), { x: 4, y: 4 })
 
       n2.receiveSyncMessage(s2, msg1to2)
       assert.deepStrictEqual(n2.getMissingDeps(), [])
       //assert.notDeepStrictEqual(patch2, null)
-      assert.deepStrictEqual(n2.materialize(), { x: 4, y: 4 })
+      assert.deepStrictEqual(n2.toJS(), { x: 4, y: 4 })
 
       // The response acknowledges the changes received and sends no further changes
       msg1to2 = n1.generateSyncMessage(s1)
@@ -1276,9 +1278,9 @@ describe('Automerge', () => {
         n1.commit("", 0)
       }
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
       sync(n1, n2, s1, s2)
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should work without prior sync state', () => {
@@ -1308,10 +1310,10 @@ describe('Automerge', () => {
         n2.commit("", 0)
       }
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
       sync(n1, n2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should work with prior sync state', () => {
@@ -1343,10 +1345,10 @@ describe('Automerge', () => {
       s1 = decodeSyncState(encodeSyncState(s1))
       s2 = decodeSyncState(encodeSyncState(s2))
 
-      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
+      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
       sync(n1, n2, s1, s2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should ensure non-empty state after sync', () => {
@@ -1396,7 +1398,7 @@ describe('Automerge', () => {
 
       // everyone should be on the same page here
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
 
       // now make a few more changes and then attempt to sync the fully-up-to-date n1 with the confused r
       for (let i = 6; i < 9; i++) {
@@ -1408,12 +1410,12 @@ describe('Automerge', () => {
       rSyncState = decodeSyncState(encodeSyncState(rSyncState))
 
       assert.notDeepStrictEqual(n1.getHeads(), r.getHeads())
-      assert.notDeepStrictEqual(n1.materialize(), r.materialize())
-      assert.deepStrictEqual(n1.materialize(), { x: 8 })
-      assert.deepStrictEqual(r.materialize(), { x: 2 })
+      assert.notDeepStrictEqual(n1.toJS(), r.toJS())
+      assert.deepStrictEqual(n1.toJS(), { x: 8 })
+      assert.deepStrictEqual(r.toJS(), { x: 2 })
       sync(n1, r, s1, rSyncState)
       assert.deepStrictEqual(n1.getHeads(), r.getHeads())
-      assert.deepStrictEqual(n1.materialize(), r.materialize())
+      assert.deepStrictEqual(n1.toJS(), r.toJS())
       r = null
     })
 
@@ -1430,7 +1432,7 @@ describe('Automerge', () => {
       sync(n1, n2, s1, s2)
 
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
 
       const n2AfterDataLoss = create({ actor: '89abcdef'})
 
@@ -1438,7 +1440,7 @@ describe('Automerge', () => {
       // decodeSyncState(encodeSyncState(s1)) in order to simulate data loss without disconnecting
       sync(n1, n2AfterDataLoss, s1, initSyncState())
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should handle changes concurrent to the last sync heads', () => {
@@ -1474,7 +1476,7 @@ describe('Automerge', () => {
       // Now sync n1 and n2. n3's change is concurrent to n1 and n2's last sync heads
       sync(n1, n2, s12, s21)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should handle histories with lots of branching and merging', () => {
@@ -1517,7 +1519,7 @@ describe('Automerge', () => {
 
       sync(n1, n2, s1, s2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.materialize(), n2.materialize())
+      assert.deepStrictEqual(n1.toJS(), n2.toJS())
     })
 
     it('should handle a false-positive head', () => {
@@ -2005,17 +2007,17 @@ describe('Automerge', () => {
 
     it('can handle overlappying splices', () => {
       const doc = create()
-      let mat : any = doc.materialize("/")
+      let mat : any = doc.materialize(meta, "/")
       doc.putObject("/", "text", "abcdefghij")
       doc.splice("/text", 2, 2, "00")
       doc.splice("/text", 3, 5, "11")
-      mat = doc.applyPatches(mat)
+      mat = doc.applyPatches(meta, mat)
       assert.deepEqual(mat.text, "ab011ij")
     })
 
     it('can handle utf16 text', () => {
       const doc = create()
-      let mat : any = doc.materialize("/")
+      let mat : any = doc.materialize(meta, "/")
 
       doc.putObject("/", "width1", "AAAAAA")
       doc.putObject("/", "width2", "🐻🐻🐻🐻🐻🐻")
@@ -2027,10 +2029,10 @@ describe('Automerge', () => {
 
       const heads1 = doc.getHeads();
 
-      mat = doc.applyPatches(mat)
+      mat = doc.applyPatches(meta, mat)
 
       const remote = load(doc.save())
-      let r_mat : any = remote.materialize("/")
+      let r_mat : any = remote.materialize(meta, "/")
 
       assert.deepEqual(mat, { width1: "AAAAAA", width2: "🐻🐻🐻🐻🐻🐻", mixed: "A🐻A🐻A🐻" })
       assert.deepEqual(mat.width1.slice(2,4), "AA")
@@ -2046,9 +2048,9 @@ describe('Automerge', () => {
       doc.splice("/width2", 2, 2, "A🐻A")
       doc.splice("/mixed", 3, 3, "X")
 
-      mat = doc.applyPatches(mat)
+      mat = doc.applyPatches(meta, mat)
       remote.loadIncremental(doc.saveIncremental());
-      r_mat = remote.applyPatches(r_mat)
+      r_mat = remote.applyPatches(meta, r_mat)
 
       assert.deepEqual(mat.width1, "AA🐻AA")
       assert.deepEqual(mat.width2, "🐻A🐻A🐻🐻🐻🐻")
@@ -2063,9 +2065,9 @@ describe('Automerge', () => {
 
       // when indexing in the middle of a multibyte char it indexes at the char before
       doc.splice("/width2", 4, 1, "X")
-      mat = doc.applyPatches(mat)
+      mat = doc.applyPatches(meta, mat)
       remote.loadIncremental(doc.saveIncremental());
-      r_mat = remote.applyPatches(r_mat)
+      r_mat = remote.applyPatches(meta, r_mat)
 
       assert.deepEqual(mat.width2, "🐻AXA🐻🐻🐻🐻")
 
@@ -2100,13 +2102,13 @@ describe('Automerge', () => {
         deps: []
       }
       const doc = load(encodeChange(change));
-      const mat : any = doc.materialize("/")
+      const mat : any = doc.materialize(meta, "/")
 
       // multi - char strings appear as a span of strings
       // non strings appear as an object replacement unicode char
       assert.deepEqual(mat.bad_text, 'ABBBBB￼C')
       assert.deepEqual(doc.text("/bad_text"), 'ABBBBB￼C')
-      assert.deepEqual(doc.materialize("/bad_text"), 'ABBBBB￼C')
+      assert.deepEqual(doc.toJS("/bad_text"), 'ABBBBB￼C')
 
       // deleting in the middle of a multi-byte character will delete the whole thing
       const doc1 = doc.fork()
@@ -2156,52 +2158,52 @@ describe('Automerge', () => {
         doc.registerDatatype("text", (e: any) => new FakeText(e))
         let txt = doc.putObject(root, "text", "")
         doc.splice(txt, 0, 0, "hello")
-        let mat: any = doc.materialize()
+        let mat: any = doc.toJS()
         assert.deepEqual(mat.text, new FakeText("hello"))
     })
 
     it("should apply patches to old style text", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("text", (e: any) => new FakeText(e))
-        let mat : any = doc.materialize("/")
+        let mat : any = doc.materialize(meta, "/")
         doc.putObject("/", "text", "abcdefghij")
         doc.splice("/text", 2, 2, "00")
         doc.splice("/text", 3, 5, "11")
-        mat = doc.applyPatches(mat)
+        mat = doc.applyPatches(meta, mat)
         assert.deepEqual(mat.text, new FakeText("ab011ij"))
     })
 
     it("should apply list patches to old style text", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("text", (e: any) => new FakeText(e))
-        let mat : any = doc.materialize("/")
+        let mat : any = doc.materialize(meta,"/")
         doc.putObject("/", "text", "abc")
         doc.insert("/text", 0, "0")
         doc.insert("/text", 1, "1")
-        mat = doc.applyPatches(mat)
+        mat = doc.applyPatches(meta, mat)
         assert.deepEqual(mat.text, new FakeText("01abc"))
     })
 
     it("should allow inserting using list methods", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("text", (e: any) => new FakeText(e))
-        let mat : any = doc.materialize("/")
+        let mat : any = doc.materialize(meta, "/")
         const txt = doc.putObject("/", "text", "abc")
         doc.insert(txt, 3, "d")
         doc.insert(txt, 0, "0")
-        mat = doc.applyPatches(mat)
+        mat = doc.applyPatches(meta, mat)
         assert.deepEqual(mat.text, new FakeText("0abcd"))
     })
 
     it("should allow inserting objects in old style text", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("text", (e: any) => new FakeText(e))
-        let mat : any = doc.materialize("/")
+        let mat : any = doc.materialize(meta, "/")
         const txt = doc.putObject("/", "text", "abc")
         doc.insertObject(txt, 0, {"key": "value"})
         doc.insertObject(txt, 2, ["elem"])
         doc.insert(txt, 2, "m")
-        mat = doc.applyPatches(mat)
+        mat = doc.applyPatches(meta, mat)
         assert.deepEqual(mat.text, new FakeText([
             {"key": "value"}, "a", "m", ["elem"], "b", "c"
         ]))
@@ -2218,16 +2220,16 @@ describe('Automerge', () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("str", (e: any) => new RawString(e))
         doc.put("/", "key", "value")
-        let mat: any = doc.materialize()
+        let mat: any = doc.toJS()
         assert.deepStrictEqual(mat.key, new RawString("value"))
     })
 
     it("should generate patches correctly for raw strings", () => {
         let doc = create({ text_v1: true });
         doc.registerDatatype("str", (e: any) => new RawString(e))
-        let mat: any = doc.materialize()
+        let mat: any = doc.toJS()
         doc.put("/", "key", "value")
-        mat = doc.applyPatches(mat)
+        mat = doc.applyPatches(meta, mat)
         assert.deepStrictEqual(mat.key, new RawString("value"))
     })
 
@@ -2236,9 +2238,9 @@ describe('Automerge', () => {
         doc1.put("/", "key", "value")
         let doc2 = load(doc1.saveNoCompress()) // big!
         let doc3 = load(doc1.saveAndVerify()) // slow!
-        let mat1: any = doc1.materialize()
-        let mat2: any = doc2.materialize()
-        let mat3: any = doc3.materialize()
+        let mat1: any = doc1.toJS()
+        let mat2: any = doc2.toJS()
+        let mat3: any = doc3.toJS()
         assert.deepStrictEqual(mat1, mat2)
         assert.deepStrictEqual(mat2, mat3)
     })

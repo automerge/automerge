@@ -5,7 +5,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree,
+    self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree, OpTreeIndex,
     OpTreeInternal, OpsFound,
 };
 use crate::parents::Parents;
@@ -338,7 +338,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(*typ),
+                    internal: OpTreeInternal::new(OpTreeIndex::from(*typ)),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),
@@ -361,7 +361,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(*typ),
+                    internal: OpTreeInternal::new(OpTreeIndex::None),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),
