@@ -18,7 +18,7 @@ use super::{PatchBuilder, TextRepresentation};
 /// efficiently update the state of the materialized view any method which adds operations to the
 /// document has a variant which takes a [`PatchLog`] as an argument. This allows the caller to
 /// record the changes made and then use either [`crate::Automerge::make_patches`] or
-/// [`crate::AutoCommit::make_patches`] to generate a `Vec<Patch>` which can be used to upudate the
+/// [`crate::AutoCommit::make_patches`] to generate a `Vec<Patch>` which can be used to update the
 /// materialized view.
 ///
 /// A `PatchLog` is a set of _relative_ changes. It represents the changes required to go from the
