@@ -1,3 +1,11 @@
+# 0.5.4
+
+* more performance improvements when loading documents with large numbers
+  of objects
+* modify the sync protocol to send the entire document in the first message if
+  the other end has nothing. This dramatically improves the speed of initial
+  sync. This is a backwards compatible change.
+
 # 0.5.3
 
 * numerous performance improvements
