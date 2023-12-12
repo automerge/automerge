@@ -12,15 +12,12 @@ pub(super) struct MessageBuilder {
 }
 
 impl MessageBuilder {
-    pub(super) fn new_v1(changes: Vec<Change>) -> Self {
+    pub(super) fn new_v1<'a, I: Iterator<Item = &'a Change>>(changes: I) -> Self {
         MessageBuilder {
             heads: Vec::new(),
             need: Vec::new(),
             have: Vec::new(),
-            changes: changes
-                .into_iter()
-                .map(|mut c| c.bytes().to_vec())
-                .collect(),
+            changes: changes.map(|c| c.raw_bytes().to_vec()).collect(),
             supported_capabilities: None,
             version: MessageVersion::V1,
         }
