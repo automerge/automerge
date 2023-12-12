@@ -519,6 +519,37 @@ fn sync_from_v2_to_v1() {
     assert_eq!(doc1.get_heads(), doc2.get_heads());
 }
 
+#[test]
+fn sync_v1_to_v2_with_compressed_change() {
+    // Reproduce an issue where the v2 peer was sending changes as compressed bytes rather than
+    // uncompressed, which the old implementation couldn't handle.
+    let mut doc1 = AutoCommit::new();
+    let list = doc1.put_object(ROOT, "list", crate::ObjType::List).unwrap();
+    for index in 0..1000 {
+        doc1.insert(&list, index, index as i64).unwrap();
+    }
+    doc1.commit().unwrap();
+
+    let mut doc2 = AutoCommit::new();
+
+    let mut sync_state2 = crate::sync::State::new();
+    let mut sync_state1 = State::new();
+
+    sync_v1_to_v2(
+        &mut doc2.doc,
+        &mut doc1.doc,
+        &mut sync_state1,
+        &mut sync_state2,
+    );
+
+    assert_eq!(doc1.get_heads(), doc2.get_heads());
+
+    doc1.put(ROOT, "foo", "bar").unwrap();
+    doc2.put(ROOT, "baz", "quux").unwrap();
+    doc1.commit().unwrap();
+    doc2.commit().unwrap();
+}
+
 /// Run the sync protocol with the v1 peer starting first
 fn sync_v1_to_v2(
     v1: &mut crate::Automerge,
@@ -531,10 +562,7 @@ fn sync_v1_to_v2(
 
     loop {
         let a_to_b = v1.generate_sync_message_v1(a_sync_state);
-        let b_to_a = v2.generate_sync_message(b_sync_state);
-        if a_to_b.is_none() && b_to_a.is_none() {
-            break;
-        }
+        let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);
         }
@@ -546,6 +574,8 @@ fn sync_v1_to_v2(
             tracing::debug!(decoded=?decoded, "receiving decoded message on v2");
             v2.receive_sync_message(b_sync_state, decoded).unwrap()
         }
+        let b_to_a = v2.generate_sync_message(b_sync_state);
+        let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             tracing::debug!(msg=?msg, "sending message from v2 to v1");
             let encoded = msg.encode();
@@ -553,6 +583,9 @@ fn sync_v1_to_v2(
                 .expect("v1 message should decode as a v2 message");
             tracing::debug!(decoded=?decoded, "receiving decoded message on v1");
             v1.receive_sync_message_v1(a_sync_state, decoded).unwrap()
+        }
+        if a_to_b_is_none && b_to_a_is_none {
+            break;
         }
         iterations += 1;
     }
@@ -570,10 +603,7 @@ fn sync_v2_to_v1(
 
     loop {
         let a_to_b = v2.generate_sync_message(v2_sync_state);
-        let b_to_a = v1.generate_sync_message_v1(v1_sync_state);
-        if a_to_b.is_none() && b_to_a.is_none() {
-            break;
-        }
+        let a_to_b_is_none = a_to_b.is_none();
         if iterations > MAX_ITER {
             panic!("failed to sync in {} iterations", MAX_ITER);
         }
@@ -583,11 +613,16 @@ fn sync_v2_to_v1(
                 Message::decode(&encoded).expect("v1 message should decode as a v2 message");
             v1.receive_sync_message_v1(v1_sync_state, decoded).unwrap()
         }
+        let b_to_a = v1.generate_sync_message_v1(v1_sync_state);
+        let b_to_a_is_none = b_to_a.is_none();
         if let Some(msg) = b_to_a {
             let encoded = msg.encode();
             let decoded = crate::sync::Message::decode(&encoded)
                 .expect("v1 message should decode as a v2 message");
             v2.receive_sync_message(v2_sync_state, decoded).unwrap()
+        }
+        if a_to_b_is_none && b_to_a_is_none {
+            break;
         }
         iterations += 1;
     }

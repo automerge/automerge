@@ -229,15 +229,8 @@ impl SyncDoc for Automerge {
                 // deduplicate the changes to send with those we have already sent and clone it now
                 let changes = all_changes
                     .into_iter()
-                    .filter_map(|change| {
-                        if !sync_state.sent_hashes.contains(&change.hash()) {
-                            Some(change.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let hashes = changes.iter().map(|c| c.hash()).collect::<Vec<_>>();
+                    .filter(|change| !sync_state.sent_hashes.contains(&change.hash()));
+                let hashes = changes.clone().map(|c| c.hash()).collect::<Vec<_>>();
                 if sync_state.supports_v2_messages() {
                     let encoded = changes
                         .into_iter()
@@ -251,7 +244,7 @@ impl SyncDoc for Automerge {
         } else if sync_state.supports_v2_messages() {
             (MessageBuilder::new_v2(Vec::new()), Vec::new())
         } else {
-            (MessageBuilder::new_v1(Vec::new()), Vec::new())
+            (MessageBuilder::new_v1(std::iter::empty()), Vec::new())
         };
 
         let heads_unchanged = sync_state.last_sent_heads == our_heads;
