@@ -127,4 +127,38 @@ describe("Automerge.Text", () => {
     })
     assert.strictEqual(doc.dom[0][0], "Hello world")
   })
+
+  describe("updateText", () => {
+    it("should calculate a diff when updating text", () => {
+      let doc1 = Automerge.from({ text: "Hello world!" }, { actor: "aaaaaa" })
+
+      let doc2 = Automerge.clone(doc1, { actor: "bbbbbb" })
+      doc2 = Automerge.change(doc2, d => {
+        Automerge.updateText(d, ["text"], "Goodbye world!")
+      })
+
+      doc1 = Automerge.change(doc1, d => {
+        Automerge.updateText(d, ["text"], "Hello friends!")
+      })
+
+      const merged = Automerge.merge(doc1, doc2)
+      assert.strictEqual(merged.text, "Goodbye friends!")
+    })
+
+    it("should handle multi character grapheme clusters", () => {
+      let doc1 = Automerge.from({ text: "left👨‍👩‍👦right" }, { actor: "aaaaaa" })
+
+      let doc2 = Automerge.clone(doc1, { actor: "bbbbbb" })
+      doc2 = Automerge.change(doc2, d => {
+        Automerge.updateText(d, ["text"], "left👨‍👩‍👧right")
+      })
+
+      doc1 = Automerge.change(doc1, d => {
+        Automerge.updateText(d, ["text"], "left👨‍👩‍👦‍👦right")
+      })
+
+      const merged = Automerge.merge(doc1, doc2)
+      assert.strictEqual(merged.text, "left👨‍👩‍👧👨‍👩‍👦‍👦right")
+    })
+  })
 })

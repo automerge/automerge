@@ -323,6 +323,50 @@ export function splice<T>(
 }
 
 /**
+ * Update the value of a string
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to modify
+ * @param path - The path to the string to modify
+ * @param newText - The new text to update the value to
+ *
+ * @remarks
+ * This will calculate a diff between the current value and the new value and
+ * then convert that diff into calls to {@link splice}. This will produce results
+ * which don't merge as well as directly capturing the user input actions, but
+ * sometimes it's not possible to capture user input and this is the best you
+ * can do.
+ *
+ * This is an experimental API and may change in the future.
+ *
+ * @beta
+ */
+export function updateText(
+  doc: Doc<unknown>,
+  path: stable.Prop[],
+  newText: string,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for updateText")
+  }
+  _clear_cache(doc)
+
+  path.unshift(objectId)
+  const value = path.join("/")
+
+  try {
+    return state.handle.updateText(value, newText)
+  } catch (e) {
+    throw new RangeError(`Cannot updateText: ${e}`)
+  }
+}
+
+/**
  * Returns a cursor for the given position in a string.
  *
  * @remarks
