@@ -1,3 +1,8 @@
+# 0.5.5
+
+* Fix a sync protocol backwards compatibility gotcha which caused 0.5.4 peers
+  to emit messages which older peers could not understand in some circumstances.
+
 # 0.5.4
 
 * more performance improvements when loading documents with large numbers
