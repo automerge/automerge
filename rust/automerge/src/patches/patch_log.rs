@@ -17,11 +17,11 @@ use super::{PatchBuilder, TextRepresentation};
 /// in a text editor you may be rendering the current state a text field in the UI. In order to
 /// efficiently update the state of the materialized view any method which adds operations to the
 /// document has a variant which takes a [`PatchLog`] as an argument. This allows the caller to
-/// record the changes made and then use either [`crate::Automerge::make_patches`] or
-/// [`crate::AutoCommit::make_patches`] to generate a `Vec<Patch>` which can be used to update the
+/// record the changes made and then use either [`crate::Automerge::make_patches()`] or
+/// [`crate::AutoCommit::make_patches()`] to generate a [`Vec<Patch>`] which can be used to update the
 /// materialized view.
 ///
-/// A `PatchLog` is a set of _relative_ changes. It represents the changes required to go from the
+/// A [`PatchLog`] is a set of _relative_ changes. It represents the changes required to go from the
 /// state at one point in history to another. What those two points are depends on how you use the
 /// log. A typical reason to create a [`PatchLog`] is to record the changes made by remote peers.
 /// Consider this example:
@@ -107,14 +107,14 @@ impl PatchLog {
     ///
     /// # Arguments
     ///
-    /// * `active`   - If `true` the log will record all changes made to the document. If `false`
+    /// * `active`   - If `true` the log will record all changes made to the document. If [`false`]
     ///                then no changes will be recorded.
     /// * `text_rep` - How text will be represented in the generated patches
     ///
     /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
     /// which record patches are more expensive, so sometimes you may wish to turn off patch
     /// logging for parts of the application, but not others; but you don't want to complicate your
-    /// code with an `Option<PatchLog>`. In that case you can use an inactive [`PatchLog`].
+    /// code with an [`Option<PatchLog>`]. In that case you can use an inactive [`PatchLog`].
     pub fn new(active: bool, text_rep: TextRepresentation) -> Self {
         PatchLog {
             active,
@@ -127,7 +127,7 @@ impl PatchLog {
 
     /// Create a new [`PatchLog`] which doesn't record any changes.
     ///
-    /// See also: [`PatchLog::new`] for a more detailed explanation.
+    /// See also: [`PatchLog::new()`] for a more detailed explanation.
     pub fn inactive(text_rep: TextRepresentation) -> Self {
         Self::new(false, text_rep)
     }
@@ -138,7 +138,7 @@ impl PatchLog {
 
     /// Create a new [`PatchLog`] which does record changes.
     ///
-    /// See also: [`PatchLog::new`] for a more detailed explanation.
+    /// See also: [`PatchLog::new()`] for a more detailed explanation.
     pub fn active(text_rep: TextRepresentation) -> Self {
         Self::new(true, text_rep)
     }

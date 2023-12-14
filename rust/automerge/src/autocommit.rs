@@ -21,15 +21,15 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// ## Creating, loading, merging and forking documents
 ///
-/// A new document can be created with [`Self::new`], which will create a document with a random
-/// [`ActorId`]. Existing documents can be loaded with [`Self::load`].
+/// A new document can be created with [`Self::new()`], which will create a document with a random
+/// [`ActorId`]. Existing documents can be loaded with [`Self::load()`].
 ///
 /// If you have two documents and you want to merge the changes from one into the other you can use
-/// [`Self::merge`].
+/// [`Self::merge()`].
 ///
 /// If you have a document you want to split into two concurrent threads of execution you can use
-/// [`Self::fork`]. If you want to split a document from ealier in its history you can use
-/// [`Self::fork_at`].
+/// [`Self::fork()`]. If you want to split a document from ealier in its history you can use
+/// [`Self::fork_at()`].
 ///
 /// ## Reading values
 ///
@@ -41,16 +41,17 @@ use crate::{LoadOptions, VerificationMode};
 ///
 /// ## Synchronization
 ///
-/// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
+/// To synchronise call [`Self::sync()`] which returns an implementation of [`SyncDoc`]
 ///
 /// ## Patches, maintaining materialized views
 ///
 /// [`AutoCommit`] allows you to generate [`Patch`]es representing changes to the current state of
 /// the document which you can use to maintain a materialized view of the current state. There are
-/// several ways to use this. See the documentation on `Self::diff` for more details, but the key
+/// several ways to use this. See the documentation on [`Self::diff()`] for more details, but the key
 /// point to remember is that [`AutoCommit`] manages an internal "diff cursor" for you. This is a
-/// representation of the heads of the document last time you called `diff_incremental` but you can
-/// also manage it directly using [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`].
+/// representation of the heads of the document last time you called [`Self::diff_incremental()`]
+/// but you can also manage it directly using [`Self::update_diff_cursor()`] and
+/// [`Self::reset_diff_cursor()`].
 #[derive(Debug, Clone)]
 pub struct AutoCommit {
     pub(crate) doc: Automerge,
@@ -140,7 +141,7 @@ impl AutoCommit {
         })
     }
 
-    /// Erases the diff cursor created by [`Self::update_diff_cursor`] and no
+    /// Erases the diff cursor created by [`Self::update_diff_cursor()`] and no
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
@@ -148,14 +149,14 @@ impl AutoCommit {
         self.diff_cursor = Vec::new();
     }
 
-    /// Sets the [`Self::diff_cursor`] to current heads of the document and will begin
+    /// Sets the [`Self::diff_cursor()`] to current heads of the document and will begin
     /// building an index with every change moving forward.
     ///
-    /// If [`Self::diff`] is called with [`Self::diff_cursor`] as `before` and
-    /// [`Self::get_heads`] as `after` - the index will be used
+    /// If [`Self::diff()`] is called with [`Self::diff_cursor()`] as `before` and
+    /// [`Self::get_heads`()] as `after` - the index will be used
     ///
     /// If the cursor is no longer needed it can be reset with
-    /// [`Self::reset_diff_cursor`]
+    /// [`Self::reset_diff_cursor()`]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
         self.patch_log.set_active(true);
@@ -163,7 +164,7 @@ impl AutoCommit {
         self.diff_cursor = self.doc.get_heads();
     }
 
-    /// Returns the cursor set by [`Self::update_diff_cursor`]
+    /// Returns the cursor set by [`Self::update_diff_cursor()`]
     pub fn diff_cursor(&self) -> Vec<ChangeHash> {
         self.diff_cursor.clone()
     }
@@ -177,9 +178,9 @@ impl AutoCommit {
     ///
     /// By default the diff requires a sequental scan of all the ops in the doc.
     ///
-    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor`] and
-    /// `after` must equal [`Self::get_heads`]. The diff cursor is managed with
-    /// [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`]
+    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor()`] and
+    /// `after` must equal [`Self::get_heads()`]. The diff cursor is managed with
+    /// [`Self::update_diff_cursor()`] and [`Self::reset_diff_cursor()`]
     ///
     /// Managing the diff index has a small but non-zero overhead.  It should be
     /// disabled if no longer needed.  If a signifigantly large change is applied
@@ -207,7 +208,7 @@ impl AutoCommit {
     /// doc.update_diff_cursor();
     /// ```
     ///
-    /// See [`Self::diff_incremental`] for encapsulating this pattern.
+    /// See [`Self::diff_incremental()`] for encapsulating this pattern.
     pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let range = OpRange::new(before, after);
@@ -343,8 +344,8 @@ impl AutoCommit {
 
     /// Load an incremental save of a document.
     ///
-    /// Unlike `load` this imports changes into an existing document. It will work with both the
-    /// output of [`Self::save`] and [`Self::save_incremental`]
+    /// Unlike [`Self::load()`] this imports changes into an existing document. It will work with both
+    /// the output of [`Self::save()`] and [`Self::save_incremental()`]
     ///
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
@@ -415,10 +416,10 @@ impl AutoCommit {
         })
     }
 
-    /// Save the changes since the last call to [Self::save`]
+    /// Save the changes since the last call to [`Self::save()`]
     ///
     /// The output of this will not be a compressed document format, but a series of individual
-    /// changes. This is useful if you know you have only made a small change since the last `save`
+    /// changes. This is useful if you know you have only made a small change since the last [`Self::save()`]
     /// and you want to immediately send it somewhere (e.g. you've inserted a single character in a
     /// text object).
     pub fn save_incremental(&mut self) -> Vec<u8> {
@@ -457,7 +458,7 @@ impl AutoCommit {
         self.doc.get_change_by_hash(hash)
     }
 
-    /// Get changes in `other` that are not in `self
+    /// Get changes in `other` that are not in `self`
     pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<&'a Change> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
@@ -518,14 +519,14 @@ impl AutoCommit {
 
     /// Commit any uncommitted changes
     ///
-    /// Returns `None` if there were no operations to commit
+    /// Returns [`None`] if there were no operations to commit
     pub fn commit(&mut self) -> Option<ChangeHash> {
         self.commit_with(CommitOptions::default())
     }
 
     /// Commit the current operations with some options.
     ///
-    /// Returns `None` if there were no operations to commit
+    /// Returns [`None`] if there were no operations to commit
     ///
     /// ```
     /// # use automerge::transaction::CommitOptions;
@@ -567,7 +568,7 @@ impl AutoCommit {
     ///
     /// Because this structure is an "autocommit" there may actually be outstanding operations to
     /// submit. If this is the case this function will create two changes, one with the outstanding
-    /// operations and a new one with no operations. The returned `ChangeHash` will always be the
+    /// operations and a new one with no operations. The returned [`ChangeHash`] will always be the
     /// hash of the empty change.
     pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_closed();
@@ -584,12 +585,12 @@ impl AutoCommit {
         SyncWrapper { inner: self }
     }
 
-    /// Get the hash of the change that contains the given opid.
+    /// Get the hash of the change that contains the given `opid`.
     ///
-    /// Returns none if the opid:
-    /// - is the root object id
-    /// - does not exist in this document
-    /// - is for an operation in a transaction
+    /// Returns [`None`] if the `opid`:
+    /// - Is the root object id
+    /// - Does not exist in this document
+    /// - Is for an operation in a transaction
     pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
         self.doc.hash_for_opid(opid)
     }
@@ -948,7 +949,7 @@ impl Transactable for AutoCommit {
     }
 }
 
-// A wrapper we return from `AutoCommit::sync` to ensure that transactions are closed before we
+// A wrapper we return from [`AutoCommit::sync()`] to ensure that transactions are closed before we
 // start syncing
 struct SyncWrapper<'a> {
     inner: &'a mut AutoCommit,

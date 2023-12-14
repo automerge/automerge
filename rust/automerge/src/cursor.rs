@@ -1,6 +1,8 @@
 use crate::op_set::OpSetData;
 use crate::storage::parse;
 use crate::types::OpId;
+#[cfg(doc)]
+use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
 use std::fmt;
 
@@ -10,10 +12,10 @@ use std::fmt;
 /// While ExId is our default external representation of the Operation ID, it can be quite heavy.
 /// Therefore, we use this lightweight specialized structure.
 ///
-/// This can be persisted using to_bytes and TryFrom<&[u8]>.
+/// This can be persisted using [`Self::to_bytes()`] and [`TryFrom<&[u8]>`][TryFrom].
 ///
-/// A cursor is obtained from [`ReadDoc::get_cursor`](crate::ReadDoc::get_cursor) and dereferenced
-/// with [`ReadDoc::get_cursor_position`](crate::ReadDoc::get_cursor_position).
+/// A cursor is obtained from [`ReadDoc::get_cursor()`] and dereferenced with
+/// [`ReadDoc::get_cursor_position()`].
 #[derive(Clone, PartialEq, Debug)]
 pub struct Cursor {
     ctr: u64,

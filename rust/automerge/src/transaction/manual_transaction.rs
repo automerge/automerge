@@ -14,14 +14,14 @@ use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 /// Transactions group operations into a single change so that no other operations can happen
 /// in-between.
 ///
-/// Created from [`Automerge::transaction`].
+/// Created from [`Automerge::transaction()`].
 ///
 /// ## Drop
 ///
 /// This transaction should be manually committed or rolled back. If not done manually then it will
 /// be rolled back when it is dropped. This is to prevent the document being in an unsafe
 /// intermediate state.
-/// This is consistent with `?` error handling.
+/// This is consistent with [`?`][std::ops::Try] error handling.
 #[derive(Debug)]
 pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
@@ -425,11 +425,11 @@ impl<'a> Transactable for Transaction<'a> {
     }
 }
 
-// If a transaction is not commited or rolled back manually then it can leave the document in an
-// intermediate state.
-// This defaults to rolling back the transaction to be compatible with `?` error returning before
-// reaching a call to `commit`.
 impl<'a> Drop for Transaction<'a> {
+    /// If a transaction is not commited or rolled back manually then it can leave the document in
+    /// an intermediate state.
+    /// This defaults to rolling back the transaction to be compatible with [`?`][std::ops::Try]
+    /// error returning before reaching a call to [`Self::commit()`].
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);
