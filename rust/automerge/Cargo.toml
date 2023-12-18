@@ -33,6 +33,7 @@ js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.8.4", optional = true }
 im = "15.1.0"
+unicode-segmentation = "1.10.1"
 
 [dependencies.web-sys]
 version = "^0.3.55"

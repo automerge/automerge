@@ -947,6 +947,16 @@ impl Transactable for AutoCommit {
             self.doc.get_heads()
         }
     }
+
+    fn update_text<S: AsRef<str>>(
+        &mut self,
+        obj: &ExId,
+        new_text: S,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
+    }
 }
 
 // A wrapper we return from [`AutoCommit::sync()`] to ensure that transactions are closed before we

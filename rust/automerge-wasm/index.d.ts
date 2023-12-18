@@ -206,6 +206,7 @@ export class Automerge {
   splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): void;
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
+  updateText(obj: ObjID, newText: string): void;
 
   // marks
   mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;

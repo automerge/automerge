@@ -423,6 +423,14 @@ impl<'a> Transactable for Transaction<'a> {
             .map(|d| d.get_deps())
             .unwrap_or_default()
     }
+
+    fn update_text<S: AsRef<str>>(
+        &mut self,
+        obj: &ExId,
+        new_text: S,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
+    }
 }
 
 impl<'a> Drop for Transaction<'a> {
