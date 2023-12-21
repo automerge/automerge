@@ -64,7 +64,7 @@ impl Eq for AMbyteSpan {}
 
 impl From<&am::ActorId> for AMbyteSpan {
     fn from(actor: &am::ActorId) -> Self {
-        let slice = actor.to_bytes();
+        let slice = actor.as_bytes();
         Self {
             src: slice.as_ptr(),
             count: slice.len(),

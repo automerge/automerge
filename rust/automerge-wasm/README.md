@@ -130,7 +130,9 @@ Maps are key/value stores.  The root object is always a map.  The keys are alway
                               // make a new empty object and assign it to the key `sub` of mymap
 
     doc.keys(mymap)           // returns ["bytes","foo","sub"]
-    doc.materialize("_root")  // returns { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {}}}
+    doc.toJS("_root")         // returns { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {}}}
+    doc.toJS("/")             // same as above
+    doc.toJS()                // same as above
 ```
 
 ### Lists
@@ -148,7 +150,7 @@ Lists are index addressable sets of values.  These values can be any scalar or o
     doc.insert(items, 0, "bat")                   // insert "bat" to the beginning of the list
     doc.insertObject(items, 1, [1,2])             // insert a list with 2 values at pos 1
 
-    doc.materialize(items)                        // returns [ "bat", [1,2], { hello : "world" }, true, "bag", "brick"]
+    doc.toJS(items)                               // returns [ "bat", [1,2], { hello : "world" }, true, "bag", "brick"]
     doc.length(items)                             // returns 6
 ```
 
@@ -211,7 +213,7 @@ Counters are 64 bit ints that support the increment operation.  Frequently diffe
 
     doc1.merge(doc2)
 
-    doc1.materialize("_root")  // returns { number: 10, total: 33 }
+    doc1.toJS()  // returns { number: 10, total: 33 }
 ```
 
 ### Transactions
@@ -262,7 +264,7 @@ All query functions can take an optional argument of `heads` which allow you to 
     doc.get("_root","key",[])       // returns undefined
 ```
 
-This works for `get()`, `getAll()`, `keys()`, `length()`, `text()`, and `materialize()`
+This works for `get()`, `getAll()`, `keys()`, `length()`, `text()`, and `toJS()`
 
 Queries of old document states are not indexed internally and will be slower than normal access.  If you need a fast indexed version of a document at a previous point in time you can create one with `doc.forkAt(heads, actor?)`
 
@@ -283,8 +285,8 @@ The `merge()` command applies all changes in the argument doc into the calling d
 
     doc1.merge(doc2)
 
-    doc1.materialize("_root")       // returns { key1: "val1", key2: "val2", key3: "val3" }
-    doc2.materialize("_root")       // returns { key1: "val1", key3: "val3" }
+    doc1.toJS()       // returns { key1: "val1", key2: "val2", key3: "val3" }
+    doc2.toJS()       // returns { key1: "val1", key3: "val3" }
 ```
 
 Note that calling `a.merge(a)` will produce an unrecoverable error from the wasm-bindgen layer which (as of this writing) there is no workaround for.
@@ -308,7 +310,7 @@ The `load()` function takes a `Uint8Array()` of bytes produced in this way and c
 
   let doc2 = load(save1)
 
-  doc2.materialize("_root")  // returns { key1: "value1" }
+  doc2.toJS()  // returns { key1: "value1" }
 
   doc1.put("_root", "key2", "value2")
 
@@ -326,10 +328,10 @@ The `load()` function takes a `Uint8Array()` of bytes produced in this way and c
 
   let doc4 = load(save3)
 
-  doc1.materialize("_root")  // returns { key1: "value1", key2: "value2" }
-  doc2.materialize("_root")  // returns { key1: "value1", key2: "value2" }
-  doc3.materialize("_root")  // returns { key1: "value1", key2: "value2" }
-  doc4.materialize("_root")  // returns { key1: "value1", key2: "value2" }
+  doc1.toJS()  // returns { key1: "value1", key2: "value2" }
+  doc2.toJS()  // returns { key1: "value1", key2: "value2" }
+  doc3.toJS()  // returns { key1: "value1", key2: "value2" }
+  doc4.toJS()  // returns { key1: "value1", key2: "value2" }
 ```
 
 One interesting feature of automerge binary saves is that they can be concatenated together in any order and can still be loaded into a coherent merged document.
@@ -344,7 +346,7 @@ let file2 = fs.readFileSync("automerge_save_2");
 let docA = load(file1).merge(load(file2))
 let docB = load(Buffer.concat([ file1, file2 ]))
 
-assert.deepEqual(docA.materialize("/"), docB.materialize("/"))
+assert.deepEqual(docA.toJS(), docB.toJS())
 assert.equal(docA.save(), docB.save())
 ```
 
@@ -425,7 +427,7 @@ Object Ids uniquely identify an object within a document.  They are represented 
   let o2 = doc.putObject("_root", "o2", {})
   doc.put(o1, "hello", "world")
 
-  assert.deepEqual(doc.materialize("_root"), { "o1": { hello: "world" }, "o2": {} })
+  assert.deepEqual(doc.toJS(), { "o1": { hello: "world" }, "o2": {} })
   assert.equal(o1, "1@aabbcc")
   assert.equal(o2, "2@aabbcc")
 
@@ -434,7 +436,7 @@ Object Ids uniquely identify an object within a document.  They are represented 
   doc.put(o1, "a", "b")    // modifying an overwritten object - does nothing
   doc.put(o1v2, "x", "y")  // modifying the new "o1" object
 
-  assert.deepEqual(doc.materialize("_root"), { "o1": { x: "y" }, "o2": {} })
+  assert.deepEqual(doc.toJS("_root"), { "o1": { x: "y" }, "o2": {} })
 ```
 
 ### Appendix: Building

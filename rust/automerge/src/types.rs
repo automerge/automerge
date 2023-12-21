@@ -51,7 +51,7 @@ impl ActorId {
         ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
     }
 
-    pub fn to_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 

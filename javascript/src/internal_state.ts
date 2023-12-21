@@ -1,8 +1,10 @@
 import { type ObjID, type Heads, Automerge } from "@automerge/automerge-wasm"
 
-import { STATE, OBJECT_ID, CLEAR_CACHE, TRACE, IS_PROXY } from "./constants.js"
+import { OBJ_META, CLEAR_CACHE, TRACE } from "./constants.js"
 
-import type { Doc, PatchCallback } from "./types.js"
+import { ApiHandler } from "./low_level.js"
+
+import type { ObjMetadata, Doc, PatchCallback } from "./types.js"
 
 export interface InternalState<T> {
   handle: Automerge
@@ -13,19 +15,18 @@ export interface InternalState<T> {
   textV2: boolean
 }
 
-export function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
+export function _strict_meta<T>(
+  doc: Doc<T>,
+  checkroot = true,
+): ObjMetadata<InternalState<T>> {
   if (typeof doc !== "object") {
     throw new RangeError("must be the document root")
   }
-  const state = Reflect.get(doc, STATE) as InternalState<T>
-  if (
-    state === undefined ||
-    state == null ||
-    (checkroot && _obj(doc) !== "_root")
-  ) {
+  let meta = _meta(doc)
+  if (meta === null || (checkroot && meta?.obj !== "_root")) {
     throw new RangeError("must be the document root")
   }
-  return state
+  return meta
 }
 
 export function _clear_cache<T>(doc: Doc<T>): void {
@@ -36,13 +37,30 @@ export function _trace<T>(doc: Doc<T>): string | undefined {
   return Reflect.get(doc, TRACE) as string
 }
 
+export const META = new WeakMap()
+
+export function _state<T>(doc: Doc<T>, checkroot?: boolean): InternalState<T> {
+  return _strict_meta(doc, checkroot).user_data
+}
+
 export function _obj<T>(doc: Doc<T>): ObjID | null {
+  return _meta(doc)?.obj || null
+}
+
+export function _meta<T>(doc: Doc<T>): ObjMetadata<InternalState<T>> | null {
   if (!(typeof doc === "object") || doc === null) {
     return null
   }
-  return Reflect.get(doc, OBJECT_ID) as ObjID
+  const obj_metadata = ApiHandler.getObjMetadata<InternalState<T>>(META, doc)
+  if (obj_metadata !== undefined) {
+    return obj_metadata || null
+  } else {
+    return (Reflect.get(doc, OBJ_META) as ObjMetadata<InternalState<T>>) || null
+  }
 }
 
 export function _is_proxy<T>(doc: Doc<T>): boolean {
-  return !!Reflect.get(doc, IS_PROXY)
+  return !!(
+    (Reflect.get(doc, OBJ_META) as ObjMetadata<InternalState<T>>) || undefined
+  )?.proxy
 }

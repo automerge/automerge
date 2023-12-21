@@ -47,7 +47,7 @@ pub(crate) struct LastInsert {
 impl OpTree {
     pub(crate) fn new(objtype: ObjType) -> Self {
         Self {
-            internal: OpTreeInternal::new(objtype),
+            internal: OpTreeInternal::new(OpTreeIndex::from(objtype)),
             objtype,
             parent: None,
             last_insert: None,
@@ -202,10 +202,34 @@ pub(crate) struct OpTreeInternal {
     pub(crate) has_index: bool,
 }
 
+pub(crate) enum OpTreeIndex {
+    Some,
+    None,
+}
+
+impl From<ObjType> for OpTreeIndex {
+    fn from(obj_type: ObjType) -> OpTreeIndex {
+        if obj_type.is_sequence() {
+            OpTreeIndex::Some
+        } else {
+            OpTreeIndex::None
+        }
+    }
+}
+
+impl From<OpTreeIndex> for bool {
+    fn from(index: OpTreeIndex) -> bool {
+        match index {
+            OpTreeIndex::Some => true,
+            OpTreeIndex::None => false,
+        }
+    }
+}
+
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
-    pub(crate) fn new(obj_type: ObjType) -> Self {
-        let has_index = obj_type.is_sequence();
+    pub(crate) fn new(index: OpTreeIndex) -> Self {
+        let has_index = index.into();
         Self {
             root_node: None,
             has_index,

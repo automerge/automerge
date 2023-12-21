@@ -235,8 +235,8 @@ impl<'a> Document<'a> {
         let mut data = Vec::with_capacity(ops_out.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
         for actor in &actors {
-            leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
-            data.extend(actor.to_bytes());
+            leb128::write::unsigned(&mut data, actor.as_bytes().len() as u64).unwrap();
+            data.extend(actor.as_bytes());
         }
         leb128::write::unsigned(&mut data, heads_with_indices.len() as u64).unwrap();
         for (head, _) in &heads_with_indices {

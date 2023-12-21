@@ -13,6 +13,13 @@ export type {
   MarkRange,
 } from "@automerge/automerge-wasm"
 
+export type ObjMetadata<U> = {
+  obj: string
+  datatype: string
+  user_data: U
+  proxy?: boolean
+}
+
 export type AutomergeValue =
   | ScalarValue
   | { [key: string]: AutomergeValue }

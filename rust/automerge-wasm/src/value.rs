@@ -1,9 +1,10 @@
 use automerge::{ObjType, ScalarValue, Value};
 use wasm_bindgen::prelude::*;
 
+#[repr(u8)]
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Datatype {
-    Map,
+    Map = 0,
     Table,
     List,
     Text,
@@ -16,16 +17,36 @@ pub(crate) enum Datatype {
     Timestamp,
     Boolean,
     Null,
-    Unknown(u8),
+    Unknown,
+}
+
+impl TryFrom<u8> for Datatype {
+    type Error = InvalidDatatype;
+
+    fn try_from(datatype: u8) -> Result<Self, Self::Error> {
+        match datatype {
+            0 => Ok(Datatype::Map),
+            1 => Ok(Datatype::Table),
+            2 => Ok(Datatype::List),
+            3 => Ok(Datatype::Text),
+            4 => Ok(Datatype::Bytes),
+            5 => Ok(Datatype::Str),
+            6 => Ok(Datatype::Int),
+            7 => Ok(Datatype::Uint),
+            8 => Ok(Datatype::F64),
+            9 => Ok(Datatype::Counter),
+            10 => Ok(Datatype::Timestamp),
+            11 => Ok(Datatype::Boolean),
+            12 => Ok(Datatype::Null),
+            13 => Ok(Datatype::Unknown),
+            _b => Err(InvalidDatatype::InvalidByte(datatype)),
+        }
+    }
 }
 
 impl Datatype {
     pub(crate) fn is_seq(&self) -> bool {
         matches!(self, Self::List | Self::Text)
-    }
-
-    pub(crate) fn is_scalar(&self) -> bool {
-        !matches!(self, Self::Map | Self::Table | Self::List | Self::Text)
     }
 }
 
@@ -64,7 +85,7 @@ impl From<&ScalarValue> for Datatype {
             ScalarValue::Timestamp(_) => Self::Timestamp,
             ScalarValue::Boolean(_) => Self::Boolean,
             ScalarValue::Null => Self::Null,
-            ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
+            ScalarValue::Unknown { .. } => Self::Unknown,
         }
     }
 }
@@ -106,7 +127,7 @@ impl From<Datatype> for String {
             Datatype::Timestamp => "timestamp".into(),
             Datatype::Boolean => "boolean".into(),
             Datatype::Null => "null".into(),
-            Datatype::Unknown(type_code) => format!("unknown{}", type_code),
+            Datatype::Unknown => "unknown".to_string(),
         }
     }
 }
@@ -156,6 +177,8 @@ pub enum InvalidDatatype {
     NotString,
     #[error("cannot handle unknown datatype")]
     UnknownNotImplemented,
+    #[error("datatype is an invalid byte")]
+    InvalidByte(u8),
 }
 
 impl From<InvalidDatatype> for JsValue {
