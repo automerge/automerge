@@ -1,3 +1,9 @@
+# 0.5.6
+
+* Add `Transactable::update_text`, which calculates a diff between the current
+  value of a text field and a new value and converts that diff into a set of 
+  splice operations
+
 # 0.5.5
 
 * Fix a sync protocol backwards compatibility gotcha which caused 0.5.4 peers
