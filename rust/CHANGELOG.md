@@ -1,3 +1,10 @@
+# 0.5.7
+
+* Update itertools dependency to 0.12.0
+* Fix a bug in `Read::get_marks` which caused it to ignore any heads passed to
+  it and always return the latest marks (only relevant if you ever passed 
+  `Some(_)` as the heads argument of `Read::get_marks(objid, index, heads)`)
+
 # 0.5.6
 
 * Add `Transactable::update_text`, which calculates a diff between the current
