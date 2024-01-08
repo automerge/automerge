@@ -1285,7 +1285,7 @@ fn test_change_encoding_expanded_change_round_trip() {
     let change = automerge::Change::try_from(&change_bytes[..]).unwrap();
     assert_eq!(change.raw_bytes(), change_bytes);
     let expanded = automerge::ExpandedChange::from(&change);
-    let unexpanded: automerge::Change = expanded.try_into().unwrap();
+    let unexpanded: automerge::Change = expanded.into();
     assert_eq!(unexpanded.raw_bytes(), change_bytes);
 }
 
