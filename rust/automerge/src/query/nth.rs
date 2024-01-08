@@ -112,7 +112,9 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             QueryResult::Finish
         } else {
             if let Some(m) = self.marks.as_mut() {
-                m.process(op)
+                if op.visible_or_mark(self.clock.as_ref()) {
+                    m.process(op)
+                }
             }
             let visible = op.visible_at(self.clock.as_ref());
             let key = op.elemid_or_key();

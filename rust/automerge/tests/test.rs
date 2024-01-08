@@ -1871,6 +1871,40 @@ fn test_load_incremental_partial_load() {
     doc2.load_incremental(&encoded).unwrap();
 }
 
+#[test]
+fn get_marks_at_heads() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
+    let mark = Mark::new("bold".to_string(), true, 0, 10);
+    tx.mark(&text_id, mark, ExpandMark::After).unwrap();
+    tx.commit();
+
+    let heads = doc.get_heads();
+
+    let mut tx = doc.transaction();
+    tx.mark(
+        &text_id,
+        Mark::new("bold".to_string(), ScalarValue::Null, 0, 10),
+        ExpandMark::None,
+    )
+    .unwrap();
+    let mark_map = tx.get_marks(&text_id, 1, Some(&heads)).unwrap();
+    assert_eq!(mark_map.len(), 1);
+    let (mark_name, mark_value) = mark_map.iter().next().unwrap();
+    assert_eq!(mark_name, "bold");
+    assert_eq!(mark_value, &ScalarValue::Boolean(true));
+
+    tx.commit();
+
+    let mark_map = doc.get_marks(&text_id, 1, Some(&heads)).unwrap();
+    assert_eq!(mark_map.len(), 1);
+    let (mark_name, mark_value) = mark_map.iter().next().unwrap();
+    assert_eq!(mark_name, "bold");
+    assert_eq!(mark_value, &ScalarValue::Boolean(true));
+}
+
 /*
 #[test]
 fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
