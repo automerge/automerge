@@ -1072,7 +1072,7 @@ mod tests {
 
         let exp = exp(patches);
         assert_eq!(
-            exp.get(0),
+            exp.first(),
             Some(ObservedPatch {
                 path: "/list/2".into(),
                 action: ObservedAction::PutSeq {
@@ -1145,7 +1145,7 @@ mod tests {
         let patches = doc1.diff(&heads1, &heads2);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/list/3".into(),
                 action: ObservedAction::PutSeq {
@@ -1170,7 +1170,7 @@ mod tests {
         let patches = doc1.diff(&heads1a, &heads2);
         let exp2 = exp(patches);
         assert_eq!(
-            exp2.get(0),
+            exp2.first(),
             Some(ObservedPatch {
                 path: "/list/4".into(),
                 action: ObservedAction::Insert {
@@ -1183,7 +1183,7 @@ mod tests {
         let patches = doc1.diff(&heads1b, &heads2);
         let exp3 = exp(patches);
         assert_eq!(
-            exp3.get(0),
+            exp3.first(),
             Some(ObservedPatch {
                 path: "/list/3".into(),
                 action: ObservedAction::Insert {
@@ -1232,7 +1232,7 @@ mod tests {
         let patches = doc1.diff(&heads1, &heads2a);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/key".into(),
                 action: ObservedAction::PutMap {
@@ -1246,7 +1246,7 @@ mod tests {
         let patches = doc1.diff(&heads2a, &heads2b);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/key".into(),
                 action: ObservedAction::PutMap {

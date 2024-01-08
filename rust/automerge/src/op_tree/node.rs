@@ -456,7 +456,7 @@ impl OpTreeNode {
         } else {
             let mut cumulative_len = 0;
             let len = self.len();
-            for (_child_index, child) in self.children.iter_mut().enumerate() {
+            for child in self.children.iter_mut() {
                 match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
                         cumulative_len += child.len() + 1;
