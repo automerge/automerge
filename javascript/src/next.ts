@@ -300,23 +300,17 @@ export function splice<T>(
   del: number,
   newText?: string,
 ) {
+  const objPath = absoluteObjPath(doc, path, "splice")
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for splice")
-  }
   _clear_cache(doc)
 
-  path.unshift(objectId)
-  const value = path.join("/")
-
-  index = cursorToIndex(state, value, index)
+  index = cursorToIndex(state, objPath, index)
 
   try {
-    return state.handle.splice(value, index, del, newText)
+    return state.handle.splice(objPath, index, del, newText)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }
@@ -346,21 +340,15 @@ export function updateText(
   path: stable.Prop[],
   newText: string,
 ) {
+  const objPath = absoluteObjPath(doc, path, "updateText")
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for updateText")
-  }
   _clear_cache(doc)
 
-  path.unshift(objectId)
-  const value = path.join("/")
-
   try {
-    return state.handle.updateText(value, newText)
+    return state.handle.updateText(objPath, newText)
   } catch (e) {
     throw new RangeError(`Cannot updateText: ${e}`)
   }
@@ -389,17 +377,11 @@ export function getCursor<T>(
   path: stable.Prop[],
   index: number,
 ): Cursor {
+  const objPath = absoluteObjPath(doc, path, "getCursor")
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for getCursor")
-  }
-
-  path.unshift(objectId)
-  const value = path.join("/")
 
   try {
-    return state.handle.getCursor(value, index)
+    return state.handle.getCursor(objPath, index)
   } catch (e) {
     throw new RangeError(`Cannot getCursor: ${e}`)
   }
@@ -419,17 +401,11 @@ export function getCursorPosition<T>(
   path: stable.Prop[],
   cursor: Cursor,
 ): number {
+  const objPath = absoluteObjPath(doc, path, "getCursorPosition")
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for getCursorPosition")
-  }
-
-  path.unshift(objectId)
-  const value = path.join("/")
 
   try {
-    return state.handle.getCursorPosition(value, cursor)
+    return state.handle.getCursorPosition(objPath, cursor)
   } catch (e) {
     throw new RangeError(`Cannot getCursorPosition: ${e}`)
   }
@@ -442,20 +418,14 @@ export function mark<T>(
   name: string,
   value: MarkValue,
 ) {
+  const objPath = absoluteObjPath(doc, path, "mark")
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for mark")
-  }
-
-  path.unshift(objectId)
-  const obj = path.join("/")
 
   try {
-    return state.handle.mark(obj, range, name, value)
+    return state.handle.mark(objPath, range, name, value)
   } catch (e) {
     throw new RangeError(`Cannot mark: ${e}`)
   }
@@ -467,35 +437,25 @@ export function unmark<T>(
   range: MarkRange,
   name: string,
 ) {
+  const objPath = absoluteObjPath(doc, path, "unmark")
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for unmark")
-  }
-
-  path.unshift(objectId)
-  const obj = path.join("/")
 
   try {
-    return state.handle.unmark(obj, range, name)
+    return state.handle.unmark(objPath, range, name)
   } catch (e) {
     throw new RangeError(`Cannot unmark: ${e}`)
   }
 }
 
 export function marks<T>(doc: Doc<T>, path: stable.Prop[]): Mark[] {
+  const objPath = absoluteObjPath(doc, path, "marks")
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for marks")
-  }
-  path.unshift(objectId)
-  const obj = path.join("/")
+
   try {
-    return state.handle.marks(obj)
+    return state.handle.marks(objPath)
   } catch (e) {
     throw new RangeError(`Cannot call marks(): ${e}`)
   }
@@ -506,15 +466,10 @@ export function marksAt<T>(
   path: stable.Prop[],
   index: number,
 ): MarkSet {
+  const objPath = absoluteObjPath(doc, path, "marksAt")
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for marksAt")
-  }
-  path.unshift(objectId)
-  const obj = path.join("/")
   try {
-    return state.handle.marksAt(obj, index)
+    return state.handle.marksAt(objPath, index)
   } catch (e) {
     throw new RangeError(`Cannot call marksAt(): ${e}`)
   }
@@ -578,4 +533,18 @@ export function getConflicts<T>(
   } else {
     return undefined
   }
+}
+
+function absoluteObjPath(
+  doc: Doc<unknown>,
+  path: stable.Prop[],
+  functionName: string,
+): string {
+  path = path.slice()
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError(`invalid object for ${functionName}`)
+  }
+  path.unshift(objectId)
+  return path.join("/")
 }
