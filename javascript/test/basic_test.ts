@@ -736,4 +736,69 @@ describe("Automerge", () => {
       assert.deepEqual(incremental, since)
     })
   })
+  describe("any function which takes a path should not mutate the argument path", () => {
+    let doc: Automerge.Doc<{ wrapper: { text: string } }>
+    let path: Automerge.Prop[]
+    let pathCopy: Automerge.Prop[]
+    beforeEach(() => {
+      doc = Automerge.init<{ wrapper: { text: string } }>()
+      doc = Automerge.change(doc, d => {
+        d.wrapper = { text: "hello world" }
+      })
+      path = ["wrapper", "text"]
+      pathCopy = path.slice()
+    })
+
+    it("splice", () => {
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, path, 0, 0, "z")
+      })
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("updateText", () => {
+      doc = Automerge.change(doc, d => {
+        Automerge.updateText(d, path, "hello earth")
+      })
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("getCursor", () => {
+      Automerge.getCursor(doc, path, 0)
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("getCursorPosition", () => {
+      const c = Automerge.getCursor(doc, path, 0)
+      Automerge.getCursorPosition(doc, path, c)
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("mark/unmark", () => {
+      doc = Automerge.change(doc, d => {
+        Automerge.mark(
+          d,
+          path,
+          { expand: "none", start: 0, end: 2 },
+          "bold",
+          true,
+        )
+      })
+      assert.deepEqual(path, pathCopy)
+      doc = Automerge.change(doc, d => {
+        Automerge.unmark(d, path, { expand: "none", start: 0, end: 2 }, "bold")
+      })
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("marks", () => {
+      Automerge.marks(doc, path)
+      assert.deepEqual(path, pathCopy)
+    })
+
+    it("marksAt", () => {
+      Automerge.marksAt(doc, path, 0)
+      assert.deepEqual(path, pathCopy)
+    })
+  })
 })
