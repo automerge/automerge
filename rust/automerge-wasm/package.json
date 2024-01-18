@@ -61,7 +61,7 @@
     "uuid": "^9.0.0"
   },
   "exports": {
-    "types": "index.d.ts",
+    "types": "./index.d.ts",
     "workerd": "./web/index.js",
     "browser": "./bundler/automerge_wasm.js",
     "require": "./nodejs/automerge_wasm.cjs",
