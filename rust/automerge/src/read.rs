@@ -4,7 +4,7 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet},
     parents::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjType, Prop, TextRange, Value,
 };
 
 use std::ops::RangeBounds;
@@ -157,6 +157,15 @@ pub trait ReadDoc {
         &self,
         obj: O,
         heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError>;
+
+    /// Get the given range of the string represented by the given text object as at `heads`, see
+    /// [`Self::text()`]
+    fn text_range<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        range: TextRange,
+        at: Option<&[ChangeHash]>,
     ) -> Result<String, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).

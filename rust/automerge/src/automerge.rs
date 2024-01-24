@@ -13,18 +13,20 @@ use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
 use crate::op_set::{OpSet, OpSetData};
 use crate::parents::Parents;
-use crate::patches::{Patch, PatchLog, TextRepresentation};
+use crate::patches::{
+    AttributionLookup, Patch, PatchLog, PatchWithAttribution, TextRepresentation,
+};
 use crate::query;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta,
-    OpBuilder, OpId, OpIds, OpType, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId,
+    ObjMeta, OpBuilder, OpId, OpIds, OpType, Value,
 };
 use crate::{hydrate, ScalarValue};
-use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
+use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc, TextPos, TextRange};
 
 pub(crate) mod current_state;
 pub(crate) mod diff;
@@ -1272,6 +1274,23 @@ impl Automerge {
         patch_log.make_patches(self)
     }
 
+    pub fn diff_with_attr<'a, T: PartialEq>(
+        &self,
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
+        text_rep: TextRepresentation,
+        attr: &'a HashMap<ActorId, T>,
+    ) -> Vec<PatchWithAttribution<'a, T>> {
+        let attr = AttributionLookup::new(attr, &self.ops.osd);
+
+        let before = self.clock_at(before_heads);
+        let after = self.clock_at(after_heads);
+        let mut patch_log = PatchLog::active(text_rep);
+        diff::log_diff(self, &before, &after, &mut patch_log);
+        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.make_patches_with_attr(self, &attr)
+    }
+
     /// Get the heads of this document.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
@@ -1459,6 +1478,28 @@ impl Automerge {
         Ok(self.ops.text(&obj.id, clock))
     }
 
+    pub(crate) fn text_range_for(
+        &self,
+        obj: &ExId,
+        range: TextRange,
+        at: Option<Clock>,
+    ) -> Result<String, AutomergeError> {
+        let range = self.text_range_to_range(obj, range, at.clone())?;
+
+        let obj = self.exid_to_obj(obj)?;
+        let mut buffer = String::new();
+        let mut pos = 0;
+
+        for top in self.ops.top_ops(&obj.id, at) {
+            if range.contains(&pos) {
+                buffer.push_str(top.op.as_str())
+            }
+            pos += top.op.width(ListEncoding::Text)
+        }
+
+        Ok(buffer)
+    }
+
     pub(crate) fn get_cursor_for(
         &self,
         obj: &ExId,
@@ -1469,15 +1510,44 @@ impl Automerge {
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
-            let found =
-                self.ops
-                    .seek_ops_by_prop(&obj.id, position.into(), obj.encoding, clock.as_ref());
+            let found = self
+                .ops
+                .seek_ops_by_prop(&obj, position.into(), clock.as_ref());
             if let Some(op) = found.ops.last() {
                 Ok(Cursor::new(*op.id(), &self.ops.osd))
             } else {
                 Err(AutomergeError::InvalidIndex(position))
             }
         }
+    }
+
+    fn text_range_to_range(
+        &self,
+        obj: &ExId,
+        range: TextRange,
+        clock: Option<Clock>,
+    ) -> Result<std::ops::Range<usize>, AutomergeError> {
+        let mut start = match range.start() {
+            Some(TextPos::Index(n)) => *n,
+            Some(TextPos::Cursor(c)) => self.get_cursor_position_for(obj, c, clock.clone())?,
+            None => 0,
+        };
+        let mut end = match range.end() {
+            Some(TextPos::Index(n)) => *n,
+            Some(TextPos::Cursor(c)) => self.get_cursor_position_for(obj, c, clock.clone())?,
+            None => self.length_for(obj, clock.clone()),
+        };
+        match range {
+            TextRange::RangeFull => {}
+            TextRange::Range { .. } => {}
+            TextRange::RangeFrom { .. } => {}
+            TextRange::RangeTo { .. } => {}
+            TextRange::RangeInclusive { .. } => end += 1,
+            TextRange::RangeToInclusive { .. } => end += 1,
+            TextRange::RangeExclusive { .. } => start += 1,
+            TextRange::RangeFromExclusive { .. } => start += 1,
+        }
+        Ok(start..end)
     }
 
     pub(crate) fn get_cursor_position_for(
@@ -1512,7 +1582,7 @@ impl Automerge {
         let obj = self.exid_to_obj(obj)?;
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj, prop, clock.as_ref())
             .ops
             .into_iter()
             .last()
@@ -1529,7 +1599,7 @@ impl Automerge {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let values = self
             .ops
-            .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj, prop, clock.as_ref())
             .ops
             .into_iter()
             .map(|op| op.tagged_value(clock.as_ref()))
@@ -1688,6 +1758,16 @@ impl ReadDoc for Automerge {
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.text_for(obj.as_ref(), None)
+    }
+
+    fn text_range<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        range: TextRange,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<String, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.text_range_for(obj.as_ref(), range, clock)
     }
 
     fn get_cursor<O: AsRef<ExId>>(

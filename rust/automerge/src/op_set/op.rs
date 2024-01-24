@@ -274,8 +274,11 @@ impl<'a> Op<'a> {
         self.op().predates(clock)
     }
 
-    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
-        self.succ_iter().any(|op| clock.covers(op.id()))
+    pub(crate) fn was_deleted_by(&self, clock: &Clock) -> Option<OpId> {
+        self.succ_iter()
+            .filter(|op| clock.covers(op.id()))
+            .map(|op| *op.id())
+            .last()
     }
 
     pub(crate) fn exid(&self) -> ExId {
@@ -473,12 +476,6 @@ impl OpBuilder {
             OpType::MarkEnd(_) => "markEnd".to_string(),
         }
     }
-
-    /*
-        pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
-            self.succ_iter().any(|i| clock.covers(i))
-        }
-    */
 
     pub(crate) fn predates(&self, clock: &Clock) -> bool {
         clock.covers(&self.id)

@@ -610,7 +610,7 @@ describe('Automerge', () => {
       let headsABPlusTextObj = [ ... heads0, ... headsLocal ];
       let patches4 = doc3.diff(doc3.getHeads(), headsABPlusTextObj);
       assert.deepEqual(patches4, [
-        { action: 'del', length: 29, path: [ 'text', 0 ] }
+        { action: 'del', length: 29, path: [ 'text', 0 ], removed: "aaaaabbbbbcccccdddddeeeeeffff" }
       ]);
     })
 

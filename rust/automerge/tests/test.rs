@@ -1601,10 +1601,10 @@ fn regression_insert_opid() {
     let patches = new_doc.make_patches(&mut patch_log);
 
     let mut expected_patches = Vec::new();
-    expected_patches.push(Patch {
-        obj: ROOT,
-        path: vec![],
-        action: PatchAction::PutMap {
+    expected_patches.push(Patch::new(
+        ROOT,
+        vec![],
+        PatchAction::PutMap {
             key: "list".to_string(),
             value: (
                 Value::Object(ObjType::List),
@@ -1612,7 +1612,7 @@ fn regression_insert_opid() {
             ),
             conflict: false,
         },
-    });
+    ));
     for i in 0..=N {
         let mut seq_tree = SequenceTree::new();
         seq_tree.push((
@@ -1620,19 +1620,19 @@ fn regression_insert_opid() {
             ObjId::Id(2 * (i + 1) as u64, doc.get_actor().clone(), 0),
             false,
         ));
-        expected_patches.push(Patch {
-            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
-            path: vec![(ROOT, Prop::Map("list".into()))],
-            action: PatchAction::Insert {
+        expected_patches.push(Patch::new(
+            ObjId::Id(1, doc.get_actor().clone(), 0),
+            vec![(ROOT, Prop::Map("list".into()))],
+            PatchAction::Insert {
                 index: i,
                 values: seq_tree,
                 marks: None,
             },
-        });
-        expected_patches.push(Patch {
-            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
-            path: vec![(ROOT, Prop::Map("list".into()))],
-            action: PatchAction::PutSeq {
+        ));
+        expected_patches.push(Patch::new(
+            ObjId::Id(1, doc.get_actor().clone(), 0),
+            vec![(ROOT, Prop::Map("list".into()))],
+            PatchAction::PutSeq {
                 index: i,
                 value: (
                     Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
@@ -1640,7 +1640,7 @@ fn regression_insert_opid() {
                 ),
                 conflict: false,
             },
-        });
+        ));
     }
     assert_eq!(patches, expected_patches);
 }

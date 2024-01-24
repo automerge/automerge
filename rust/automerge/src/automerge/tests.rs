@@ -1653,10 +1653,10 @@ fn observe_counter_change_application_overwrite() {
 
     assert_eq!(
         doc3.diff_incremental(),
-        vec![Patch {
-            obj: ExId::Root,
-            path: vec![],
-            action: PatchAction::PutMap {
+        vec![Patch::new(
+            ExId::Root,
+            vec![],
+            PatchAction::PutMap {
                 key: "counter".into(),
                 value: (
                     ScalarValue::Str("mystring".into()).into(),
@@ -1664,7 +1664,7 @@ fn observe_counter_change_application_overwrite() {
                 ),
                 conflict: false,
             }
-        }]
+        )]
     );
 
     let mut doc4 = doc2.clone();

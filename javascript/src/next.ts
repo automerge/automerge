@@ -54,6 +54,7 @@ export {
 } from "./next_types.js"
 
 import type {
+  Heads,
   Cursor,
   Mark,
   MarkSet,
@@ -74,7 +75,6 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
-  Heads,
   Cursor,
 } from "@automerge/automerge-wasm"
 
@@ -124,6 +124,7 @@ export {
   isAutomerge,
   getObjectId,
   diff,
+  diffWithAttribution,
   insertAt,
   deleteAt,
   saveSince,
@@ -408,6 +409,31 @@ export function getCursorPosition<T>(
     return state.handle.getCursorPosition(objPath, cursor)
   } catch (e) {
     throw new RangeError(`Cannot getCursorPosition: ${e}`)
+  }
+}
+
+/**
+ * Returns the current index of the cursor.
+ *
+ * @typeParam T - The type of the value contained in the document
+ *
+ * @param doc - The document
+ * @param path - The path to the string
+ * @param index - The cursor
+ */
+export function getTextRange<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  range: string,
+  heads?: Heads,
+): string {
+  const objPath = absoluteObjPath(doc, path, "getTextRange")
+  const state = _state(doc, false)
+
+  try {
+    return state.handle.textRange(objPath, range, heads)
+  } catch (e) {
+    throw new RangeError(`Cannot getTextRange: ${e}`)
   }
 }
 

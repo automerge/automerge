@@ -4,12 +4,12 @@ use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::types::{ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Patch, ReadDoc};
+use crate::{Automerge, ChangeHash, PatchWithAttribution, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{PatchBuilder, TextRepresentation};
+use super::{AttributionLookup, PatchBuilder, TextRepresentation};
 
 /// A record of changes made to a document
 ///
@@ -41,7 +41,7 @@ use super::{PatchBuilder, TextRepresentation};
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
+    events: Vec<(ObjId, Option<OpId>, Event)>,
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
@@ -65,6 +65,7 @@ pub(crate) enum Event {
     DeleteSeq {
         index: usize,
         num: usize,
+        value: String,
     },
     DeleteMap {
         key: String,
@@ -151,20 +152,41 @@ impl PatchLog {
         self.active
     }
 
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
+    pub(crate) fn delete(&mut self, obj: ObjId, id: OpId, prop: &Prop, value: &str, is_text: bool) {
         match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
+            Prop::Map(key) => self.delete_map(obj, id, key),
+            Prop::Seq(index) => self.delete_seq(obj, id, *index, 1, String::from(value), is_text),
         }
     }
 
-    pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
-        self.events.push((obj, Event::DeleteSeq { index, num }))
+    pub(crate) fn delete_seq(
+        &mut self,
+        obj: ObjId,
+        id: OpId,
+        index: usize,
+        num: usize,
+        value: String,
+        is_text: bool,
+    ) {
+        if is_text {
+            self.events
+                .push((obj, Some(id), Event::DeleteSeq { index, num, value }))
+        } else {
+            self.events.push((
+                obj,
+                Some(id),
+                Event::DeleteSeq {
+                    index,
+                    num,
+                    value: String::new(),
+                },
+            ))
+        }
     }
 
-    pub(crate) fn delete_map(&mut self, obj: ObjId, key: &str) {
+    pub(crate) fn delete_map(&mut self, obj: ObjId, id: OpId, key: &str) {
         self.events
-            .push((obj, Event::DeleteMap { key: key.into() }))
+            .push((obj, Some(id), Event::DeleteMap { key: key.into() }))
     }
 
     pub(crate) fn increment(&mut self, obj: ObjId, prop: &Prop, value: i64, id: OpId) {
@@ -177,6 +199,7 @@ impl PatchLog {
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
         self.events.push((
             obj,
+            Some(id),
             Event::IncrementMap {
                 key: key.into(),
                 n,
@@ -187,7 +210,7 @@ impl PatchLog {
 
     pub(crate) fn increment_seq(&mut self, obj: ObjId, index: usize, n: i64, id: OpId) {
         self.events
-            .push((obj, Event::IncrementSeq { index, n, id }))
+            .push((obj, Some(id), Event::IncrementSeq { index, n, id }))
     }
 
     pub(crate) fn flag_conflict(&mut self, obj: ObjId, prop: &Prop) {
@@ -199,11 +222,12 @@ impl PatchLog {
 
     pub(crate) fn flag_conflict_map(&mut self, obj: ObjId, key: &str) {
         self.events
-            .push((obj, Event::FlagConflictMap { key: key.into() }))
+            .push((obj, None, Event::FlagConflictMap { key: key.into() }))
     }
 
     pub(crate) fn flag_conflict_seq(&mut self, obj: ObjId, index: usize) {
-        self.events.push((obj, Event::FlagConflictSeq { index }))
+        self.events
+            .push((obj, None, Event::FlagConflictSeq { index }))
     }
 
     pub(crate) fn put(
@@ -235,6 +259,7 @@ impl PatchLog {
         }
         self.events.push((
             obj,
+            None,
             Event::PutMap {
                 key: key.into(),
                 value,
@@ -258,6 +283,7 @@ impl PatchLog {
         }
         self.events.push((
             obj,
+            None,
             Event::PutSeq {
                 index,
                 value,
@@ -276,6 +302,26 @@ impl PatchLog {
     ) {
         self.events.push((
             obj,
+            None,
+            Event::Splice {
+                index,
+                text: text.to_string(),
+                marks,
+            },
+        ))
+    }
+
+    pub(crate) fn splice2(
+        &mut self,
+        obj: ObjId,
+        id: OpId,
+        index: usize,
+        text: &str,
+        marks: Option<Arc<MarkSet>>,
+    ) {
+        self.events.push((
+            obj,
+            Some(id),
             Event::Splice {
                 index,
                 text: text.to_string(),
@@ -285,13 +331,13 @@ impl PatchLog {
     }
 
     pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
-        if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
+        if let Some((_, _, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;
         }
         let mut acc = MarkAccumulator::default();
         acc.add(index, len, marks);
-        self.events.push((obj, Event::Mark { marks: acc }))
+        self.events.push((obj, None, Event::Mark { marks: acc }))
     }
 
     pub(crate) fn insert(
@@ -305,6 +351,7 @@ impl PatchLog {
     ) {
         self.events.push((
             obj,
+            Some(id),
             Event::Insert {
                 index,
                 value,
@@ -315,26 +362,60 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+    pub(crate) fn make_patches<'a, T: PartialEq>(
+        &mut self,
+        doc: &Automerge,
+    ) -> Vec<PatchWithAttribution<'a, T>> {
+        self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
+        let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
+        let attr_lookup = AttributionLookup::empty();
+        if let Some(heads) = self.heads.as_ref() {
+            let read_doc = ReadDocAt { doc, heads };
+            Self::make_patches_inner(
+                &self.events,
+                expose,
+                doc,
+                &read_doc,
+                self.text_rep,
+                &attr_lookup,
+            )
+        } else {
+            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep, &attr_lookup)
+        }
+    }
+
+    pub(crate) fn make_patches_with_attr<'a, T: PartialEq>(
+        &mut self,
+        doc: &Automerge,
+        attr_lookup: &AttributionLookup<'a, T>,
+    ) -> Vec<PatchWithAttribution<'a, T>> {
         self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };
-            Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
+            Self::make_patches_inner(
+                &self.events,
+                expose,
+                doc,
+                &read_doc,
+                self.text_rep,
+                attr_lookup,
+            )
         } else {
-            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
+            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep, attr_lookup)
         }
     }
 
-    fn make_patches_inner<R: ReadDoc>(
-        events: &[(ObjId, Event)],
+    fn make_patches_inner<'a, R: ReadDoc, T: PartialEq>(
+        events: &[(ObjId, Option<OpId>, Event)],
         mut expose_queue: ExposeQueue,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
-    ) -> Vec<Patch> {
+        attr_lookup: &AttributionLookup<'a, T>,
+    ) -> Vec<PatchWithAttribution<'a, T>> {
         let mut patch_builder = PatchBuilder::default();
-        for (obj, event) in events {
+        for (obj, attr, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
             // incremental updates are ignored and a observation
@@ -397,8 +478,9 @@ impl PatchLog {
                         marks.clone(),
                     );
                 }
-                Event::DeleteSeq { index, num } => {
-                    patch_builder.delete_seq(read_doc, exid, *index, *num);
+                Event::DeleteSeq { index, num, value } => {
+                    let attr = attr_lookup.get(*attr);
+                    patch_builder.delete_seq(read_doc, exid, *index, *num, value.clone(), attr);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
@@ -408,7 +490,8 @@ impl PatchLog {
                     patch_builder.flag_conflict(read_doc, exid, index.into());
                 }
                 Event::Splice { index, text, marks } => {
-                    patch_builder.splice_text(read_doc, exid, *index, text, marks.clone());
+                    let attr = attr_lookup.get(*attr);
+                    patch_builder.splice_text(read_doc, exid, *index, text, marks.clone(), attr);
                 }
                 Event::Mark { marks } => {
                     patch_builder.mark(read_doc, exid, marks.clone().into_iter())
@@ -450,7 +533,7 @@ impl PatchLog {
     }
 }
 
-impl AsRef<OpId> for &(ObjId, Event) {
+impl AsRef<OpId> for &(ObjId, Option<OpId>, Event) {
     fn as_ref(&self) -> &OpId {
         &self.0 .0
     }
@@ -468,10 +551,10 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue<R: ReadDoc>(
+    fn pump_queue<T: PartialEq, R: ReadDoc>(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, T>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -484,9 +567,9 @@ impl ExposeQueue {
         }
     }
 
-    fn flush_queue<R: ReadDoc>(
+    fn flush_queue<T: PartialEq, R: ReadDoc>(
         &mut self,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, T>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -504,10 +587,10 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj<R: ReadDoc>(
+    fn flush_obj<R: ReadDoc, T: PartialEq>(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, T>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -518,7 +601,7 @@ impl ExposeQueue {
             ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
                 let text = read_doc.text(&exid).ok()?;
                 // TODO - need read_doc, text_spans()
-                patch_builder.splice_text(read_doc, exid, 0, &text, None);
+                patch_builder.splice_text(read_doc, exid, 0, &text, None, None);
             }
             ObjType::List | ObjType::Text => {
                 for ListRangeItem {

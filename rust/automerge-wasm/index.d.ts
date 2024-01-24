@@ -96,8 +96,9 @@ export type Op = {
   pred: string[],
 }
 
-export type PatchValue = string | number | boolean | null | Date | Uint8Array | {} | []
+export type PatchValue = string | number | boolean | null | Date | Uint8Array | object | []
 export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
+export type PatchWithAttr<T> =  PutPatch | DelPatchWithAttr<T> | SpliceTextPatchWithAttr<T> | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -108,6 +109,10 @@ export type PutPatch = {
 
 export interface MarkSet  {
   [name : string]: Value;
+}
+
+export interface Attribution<T>  {
+  [name : Actor]: T;
 }
 
 export type MarkPatch = {
@@ -140,6 +145,15 @@ export type DelPatch = {
   action: 'del'
   path: Prop[],
   length?: number,
+  removed?: string
+}
+
+export type DelPatchWithAttr<T> = {
+  action: 'del'
+  path: Prop[],
+  length?: number,
+  attr?: T
+  removed?: string
 }
 
 export type SpliceTextPatch = {
@@ -147,6 +161,14 @@ export type SpliceTextPatch = {
   path: Prop[],
   value: string,
   marks?: MarkSet,
+}
+
+export type SpliceTextPatchWithAttr<T> = {
+  action: 'splice'
+  path: Prop[],
+  value: string,
+  marks?: MarkSet,
+  attr: T
 }
 
 export type InsertPatch = {
@@ -215,6 +237,7 @@ export class Automerge {
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
   diff(before: Heads, after: Heads): Patch[];
+  diffWithAttribution<T>(before: Heads, after: Heads, attr: Attribution<T>): PatchWithAttr<T>[]
 
   // text cursor
   getCursor(obj: ObjID, index: number, heads?: Heads) : Cursor;
@@ -231,6 +254,7 @@ export class Automerge {
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
+  textRange(obj: ObjID, range: string, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
   materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
@@ -245,7 +269,7 @@ export class Automerge {
 
   // patches
   enableFreeze(enable: boolean): boolean;
-  registerDatatype(datatype: string, callback: Function): void;
+  registerDatatype<T>(datatype: string, callback: (obj: T) => object): void;
   diffIncremental(): Patch[];
   updateDiffCursor(): void;
   resetDiffCursor(): void;

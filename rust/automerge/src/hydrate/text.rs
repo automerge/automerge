@@ -17,7 +17,7 @@ impl Text {
                 self.value.splice_text_value(index, &value);
                 Ok(())
             }
-            PatchAction::DeleteSeq { index, length } => {
+            PatchAction::DeleteSeq { index, length, .. } => {
                 for _ in 0..length {
                     self.value.remove(index);
                 }

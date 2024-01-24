@@ -168,16 +168,15 @@ impl OpSetInternal {
 
     pub(crate) fn seek_ops_by_prop<'a>(
         &'a self,
-        obj: &ObjId,
+        obj: &ObjMeta,
         prop: Prop,
-        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         self.trees
-            .get(obj)
+            .get(&obj.id)
             .and_then(|tree| {
                 tree.internal
-                    .seek_ops_by_prop(&self.osd, prop, encoding, clock)
+                    .seek_ops_by_prop(&self.osd, prop, obj.encoding, clock)
             })
             .unwrap_or_default()
     }

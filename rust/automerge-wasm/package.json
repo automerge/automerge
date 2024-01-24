@@ -31,7 +31,7 @@
   "module": "./bundler/automerge_wasm.js",
   "main": "./nodejs/automerge_wasm.cjs",
   "scripts": {
-    "lint": "eslint test/*.ts index.d.ts",
+    "lint": "eslint test/*.mts index.d.ts",
     "debug": "cross-env PROFILE=dev TARGET_DIR=debug yarn buildall",
     "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target",
     "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' yarn buildall",

@@ -1,7 +1,8 @@
 mod patch;
 mod patch_builder;
 mod patch_log;
-pub use patch::{Patch, PatchAction};
+pub(crate) use patch::AttributionLookup;
+pub use patch::{NoAttribution, Patch, PatchAction, PatchWithAttribution};
 pub(crate) use patch_builder::PatchBuilder;
 pub use patch_log::PatchLog;
 

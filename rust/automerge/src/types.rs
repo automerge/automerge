@@ -510,12 +510,12 @@ impl OpId {
 
     #[inline]
     pub(crate) fn counter(&self) -> u64 {
-        self.0.into()
+        self.0 as u64
     }
 
     #[inline]
     pub(crate) fn actor(&self) -> usize {
-        self.1.try_into().unwrap()
+        self.1 as usize
     }
 
     #[inline]

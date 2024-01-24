@@ -619,6 +619,49 @@ describe("Automerge", () => {
       Automerge.getCursorPosition(doc, ["value"], cursor)
     })
 
+    it("can use cursors in getTextRange", () => {
+      let doc = Automerge.from({
+        value: "The sly fox jumped over the lazy dog",
+      })
+      let heads1 = Automerge.getHeads(doc)
+      let cursor = Automerge.getCursor(doc, ["value"], 19)
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], 0, 3, "Has the")
+      })
+      assert.deepEqual(doc.value, "Has the sly fox jumped over the lazy dog")
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], cursor, 0, "right ")
+      })
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], "0..11"),
+        "Has the sly",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], "0..11", heads1),
+        "The sly fox",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], `..${cursor}`),
+        "Has the sly fox jumped right ",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], `..${cursor}`, heads1),
+        "The sly fox jumped ",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], `0..${cursor}`, heads1),
+        "The sly fox jumped ",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], `${cursor}...`),
+        "ver the lazy dog",
+      )
+      assert.deepEqual(
+        Automerge.getTextRange(doc, ["value"], `${cursor}...`, heads1),
+        "ver the lazy dog",
+      )
+    })
+
     it("should be able to pass a doc to from() to make a shallow copy", () => {
       let state = {
         text: "The sly fox jumped over the lazy dog",
