@@ -358,16 +358,10 @@ export function updateText(
 
 export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for splitBlock")
-  }
-
-  path.unshift(objectId)
-  const value = path.join("/")
+  const objPath = absoluteObjPath(doc, path, "spans")
 
   try {
-    return state.handle.spans(value)
+    return state.handle.spans(objPath)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }
@@ -375,19 +369,12 @@ export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
 
 export function block<T>(doc: Doc<T>, path: stable.Prop[]) {
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-
-  if (!objectId) {
-    throw new RangeError("invalid doc argument for block()")
-  }
+  const objPath = absoluteObjPath(doc, path, "block")
 
   _clear_cache(doc)
 
-  path.unshift(objectId)
-  const path_string = path.join("/")
-
   if (_is_proxy(doc)) {
-    let info = state.handle.objInfo(path_string)
+    const info = state.handle.objInfo(objPath)
     // TODO: I should also check that the parent is text
     if (info.type == "map" && info.path !== undefined) {
       return mapProxy(state.handle, info.id, state.textV2, info.path)
@@ -395,7 +382,7 @@ export function block<T>(doc: Doc<T>, path: stable.Prop[]) {
       throw new RangeError("Not a block")
     }
   } else {
-    let tmp = state.handle.materialize(path_string, state.heads, state)
+    const tmp = state.handle.materialize(objPath, state.heads, state)
     return tmp
   }
 }
@@ -409,26 +396,43 @@ export function splitBlock<T>(
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
   const state = _state(doc, false)
-  const objectId = _obj(doc)
-  if (!objectId) {
-    throw new RangeError("invalid object for splitBlock")
-  }
   _clear_cache(doc)
 
-  path.unshift(objectId)
-  const value = path.join("/")
-
-  index = cursorToIndex(state, value, index)
+  index = cursorToIndex(state, objPath, index)
 
   try {
-    let id = state.handle.splitBlock(value, index, {})
-    let info = state.handle.objInfo(id)
-    let blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
+    const id = state.handle.splitBlock(objPath, index, {})
+    const info = state.handle.objInfo(id)
+    const blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
     Object.assign(blockProxy, block)
     return blockProxy
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function joinBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "joinBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  const blockPath = objPath.split("/").concat(index.toString()).join("/")
+
+  try {
+    state.handle.joinBlock(blockPath)
+  } catch (e) {
+    throw new RangeError(`Cannot joinBlock: ${e}`)
   }
 }
 

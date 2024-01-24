@@ -8,10 +8,9 @@ import { inspect } from "util"
 describe("Automerge", () => {
   describe("block", () => {
     it("can split a block", () => {
-      let tmp = Automerge.from({ hello: ["world", "zip"] })
-      let block = { parents: ["div"], type: "p" }
-      let callbacks: Automerge.Patch[][] = []
-      let patchCallback: any = (p, info) => {
+      const block = { parents: ["div"], type: "p" }
+      const callbacks: Automerge.Patch[][] = []
+      const patchCallback = (p, _info) => {
         callbacks.push(p)
       }
       let doc = Automerge.from({ text: "aaabbbccc" })
@@ -47,5 +46,24 @@ describe("Automerge", () => {
         { type: "text", value: "REMOVEADDccc" },
       ])
     })
+  })
+
+  it("can join a block", () => {
+    const block = { parents: ["div"], type: "p" }
+    const callbacks: Automerge.Patch[][] = []
+    const patchCallback = (p, _info) => {
+      callbacks.push(p)
+    }
+    let doc = Automerge.from({ text: "aaabbbccc" })
+    doc = Automerge.change(doc, { patchCallback }, d => {
+      Automerge.splitBlock(d, ["text"], 3, block)
+    })
+
+    doc = Automerge.change(doc, { patchCallback }, d => {
+      Automerge.joinBlock(d, ["text"], 3)
+    })
+    assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+      { type: "text", value: "aaabbbccc" },
+    ])
   })
 })
