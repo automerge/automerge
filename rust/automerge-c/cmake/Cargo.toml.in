@@ -13,7 +13,7 @@ bench = false
 doc = false
 
 [dependencies]
-${${PROJECT_NAME}-LIBRARY_NAME} = { path = "../${${PROJECT_NAME}-LIBRARY_NAME}" }
+${LIBRARY_NAME} = { path = "../${LIBRARY_NAME}" }
 hex = "^0.4.3"
 libc = "^0.2"
 smol_str = "0.2"
