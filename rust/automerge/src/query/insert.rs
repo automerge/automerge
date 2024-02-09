@@ -152,7 +152,7 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         if !self.list_state.done() {
-            self.marks.process(op);
+            self.marks.process(op, self.clock.as_ref());
         }
         let key = op.elemid_or_key();
         let visible = op.visible_at(self.clock.as_ref());
@@ -160,7 +160,7 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         if visible {
             if !self.candidates.is_empty() {
                 for op in self.candidates.iter().filter_map(|c| c.id) {
-                    self.marks.process(op);
+                    self.marks.process(op, self.clock.as_ref());
                 }
                 return QueryResult::Finish;
             }
