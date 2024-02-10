@@ -1,3 +1,4 @@
+use crate::clock::Clock;
 use crate::marks::MarkData;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
@@ -12,7 +13,12 @@ pub(crate) struct MarkMap<'a> {
 }
 
 impl<'a> MarkMap<'a> {
-    pub(crate) fn process(&mut self, op: Op<'a>) {
+    pub(crate) fn process(&mut self, op: Op<'a>, clock: Option<&Clock>) {
+        if !(clock.map(|c| c.covers(op.id())).unwrap_or(true)) {
+            // if the op is not visible in the current clock
+            // we can ignore it
+            return;
+        };
         match op.action() {
             OpType::MarkBegin(_, data) => {
                 self.map.insert(*op.id(), data);
