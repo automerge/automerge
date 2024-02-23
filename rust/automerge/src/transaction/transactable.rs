@@ -110,10 +110,13 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
-    fn split_block<O: AsRef<ExId>>(&mut self, obj: O, index: usize)
+    fn split_block<O: AsRef<ExId>>(&mut self, obj: O, index: usize, block_type: &str, parents: &[&str])
         -> Result<ExId, AutomergeError>;
 
-    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError>;
+    fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>;
+
+    fn update_block<O: AsRef<ExId>>(&mut self, text: O, index: usize, new_type: &str, new_parents: &[&str])
+        -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;

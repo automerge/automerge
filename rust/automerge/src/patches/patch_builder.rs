@@ -3,8 +3,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::read::ReadDocInternal;
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use itertools::Itertools;
+
+use crate::clock::Clock;
 use crate::marks::RichText;
-use crate::{ObjId, Parents, Prop, ReadDoc, Value};
+use crate::{Automerge, Cursor, ObjId, Parents, Prop, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
@@ -62,6 +68,12 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
+        if self.block_objs.contains(&obj.to_internal_obj()) {
+            return;
+        }
+        if self.block_objs.contains(&tagged_value.1.to_internal_obj()) {
+            return;
+        }
         let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
             index: tail_index,
@@ -268,4 +280,53 @@ fn maybe_append<'a>(patches: &'a mut [Patch], obj: &ObjId) -> Option<&'a mut Pat
         }) if obj == tail_obj => Some(action),
         _ => None,
     }
+}
+
+fn load_split_block(
+    doc: &Automerge,
+    hidden_blocks: &mut HashSet<crate::types::ObjId>,
+    block_obj_id: crate::types::ObjId,
+    clock: Option<&Clock>,
+) -> Option<(String, Vec<String>)> {
+    hidden_blocks.insert(block_obj_id);
+    let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
+        return None;
+    };
+    // Don't log objects in the block to the patch log
+    for op_idx in block_ops {
+        let op = op_idx.as_op(doc.osd());
+        if let crate::types::OpType::Make(_) = op.action() {
+            hidden_blocks.insert(op.id().into());
+        }
+    }
+    let block = doc.hydrate_map(&block_obj_id, clock);
+    let crate::hydrate::Value::Map(mut block_map) = block else {
+        tracing::warn!("non map value found for block");
+        return None;
+    };
+    let Some(block_type) = block_map.get("type").cloned() else {
+        tracing::warn!("block type not found");
+        return None;
+    };
+    let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
+        tracing::warn!("block type not a string");
+        return None;
+    };
+    let mut block_parents = vec![];
+    let Some(parents) = block_map.get("parents") else {
+        tracing::warn!("block parents not found");
+        return None;
+    };
+    let crate::hydrate::Value::List(parents) = parents else {
+        tracing::warn!("block parents not a list");
+        return None;
+    };
+    for parent in parents.iter() {
+        let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value else {
+            tracing::warn!("block parent not a string");
+            return None;
+        };
+        block_parents.push(parent.to_string());
+    }
+    Some((block_type.to_string(), block_parents))
 }

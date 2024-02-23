@@ -327,6 +327,10 @@ impl<'a> ReadDoc for Transaction<'a> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn block<O: AsRef<ExId>>(&self, obj: O, index: usize, heads: Option<&[ChangeHash]>) -> Result<Option<crate::types::Block>, AutomergeError> {
+        self.doc.block_for(obj.as_ref(), index, self.get_scope(heads))
+    }
 }
 
 impl<'a> Transactable for Transaction<'a> {
@@ -444,12 +448,19 @@ impl<'a> Transactable for Transaction<'a> {
         &mut self,
         obj: O,
         index: usize,
+        block_type: &str,
+        parents: &[&str],
     ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index, block_type, parents))
     }
 
-    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, block.as_ref()))
+    fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
+    }
+
+    fn update_block<O: AsRef<ExId>>(&mut self, text: O, index: usize, new_type: &str, new_parents: &[&str])
+        -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, hist| tx.update_block(doc, hist, text.as_ref(), index, new_type, new_parents))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -466,6 +477,7 @@ impl<'a> Transactable for Transaction<'a> {
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
     }
+
 }
 
 impl<'a> Drop for Transaction<'a> {

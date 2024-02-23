@@ -1,7 +1,7 @@
 use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
-use crate::{Automerge, TextRepresentation};
+use crate::{Automerge, SplitBlockArgs, TextRepresentation, UpdateBlockArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
 use automerge::ReadDoc;
@@ -578,6 +578,69 @@ impl TryFrom<JS> for Vec<Capability> {
     }
 }
 
+impl TryFrom<JS> for SplitBlockArgs {
+    type Error = error::InvalidSplitBlockArgs;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let type_val = js_get(&value.0, "type")?.0;
+        if type_val == JsValue::undefined() || type_val == JsValue::null()
+        {
+            return Err(error::InvalidSplitBlockArgs::NoType);
+        }
+        let block_type = type_val.as_string().ok_or(error::InvalidSplitBlockArgs::TypeNotString)?;
+
+        let js_parents = js_get(&value.0, "parents")?.0;
+        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+            return Err(error::InvalidSplitBlockArgs::NoParents);
+        }
+
+        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
+            error::InvalidSplitBlockArgs::ParentsNotArray
+        })?;
+        let mut parents = Vec::new();
+        for (index, parent) in js_parents_arr.iter().enumerate() {
+            let parent = parent.as_string().ok_or(error::InvalidSplitBlockArgs::ParentNotString(index))?;
+            parents.push(parent);
+        }
+
+        Ok(SplitBlockArgs {
+            block_type,
+            parents,
+        })
+    }
+}
+
+impl TryFrom<JS> for UpdateBlockArgs {
+    type Error = error::InvalidUpdateBlockArgs;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let type_val = js_get(&value.0, "type")?.0;
+        if type_val == JsValue::undefined() || type_val == JsValue::null()
+        {
+            return Err(error::InvalidUpdateBlockArgs::NoType);
+        }
+        let block_type = type_val.as_string().ok_or(error::InvalidUpdateBlockArgs::TypeNotString)?;
+
+        let js_parents = js_get(&value.0, "parents")?.0;
+        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+            return Err(error::InvalidUpdateBlockArgs::NoParents);
+        }
+
+        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
+            error::InvalidUpdateBlockArgs::ParentsNotArray
+        })?;
+        let mut parents = Vec::new();
+        for (index, parent) in js_parents_arr.iter().enumerate() {
+            let parent = parent.as_string().ok_or(error::InvalidUpdateBlockArgs::ParentNotString(index))?;
+            parents.push(parent);
+        }
+
+        Ok(UpdateBlockArgs {
+            block_type,
+            parents,
+        })
+    }
+}
 pub(crate) fn to_js_err<T: Display>(err: T) -> JsValue {
     js_sys::Error::new(&std::format!("{}", err)).into()
 }
@@ -1355,7 +1418,6 @@ pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
     patches
         .into_iter()
         // removing update block for now
-        .filter(|p| !matches!(p.action, PatchAction::UpdateBlock { .. }))
         .map(|p| export_patch(doc, p, heads))
         .collect()
 }
@@ -1501,25 +1563,44 @@ fn export_patch(doc: &Automerge, p: Patch, heads: &[ChangeHash]) -> Result<JsVal
             index,
             cursor,
             conflict,
+            parents,
+            block_type,
         } => {
             js_set(&result, "action", "splitBlock")?;
+            js_set(&result, "index", index)?;
             js_set(&result, "path", export_path(path, &index.into()))?;
             js_set(&result, "cursor", cursor.to_string())?;
             if conflict {
                 js_set(&result, "conflict", true)?;
             }
+            js_set(&result, "type", block_type)?;
+            let js_parents = Array::new();
+            for p in parents {
+                js_parents.push(&JsValue::from(&p));
+            }
+            js_set(&result, "parents", js_parents)?;
             Ok(result.into())
         }
-        PatchAction::UpdateBlock { patch } => {
+        PatchAction::UpdateBlock { index, new_block_type, new_block_parents } => {
             js_set(&result, "action", "updateBlock")?;
-            js_set(&result, "path", export_path(path, &Prop::from(999)))?;
-            js_set(&result, "patch", export_patch(doc, *patch, heads)?)?;
+            js_set(&result, "index", index)?;
+            js_set(&result, "path", export_path(path, &index.into()))?;
+            js_set(&result, "new_type", new_block_type)?;
+            if let Some(new_parents) = new_block_parents {
+                let new_block_parents = Array::new();
+                for p in new_parents {
+                    new_block_parents.push(&JsValue::from(&p));
+                }
+                js_set(&result, "new_parents", new_block_parents)?;
+            } else {
+                js_set(&result, "new_parents", JsValue::NULL)?;
+            }
             Ok(result.into())
         }
-        PatchAction::JoinBlock { index, cursor } => {
+        PatchAction::JoinBlock { index } => {
             js_set(&result, "action", "joinBlock")?;
             js_set(&result, "path", export_path(path, &index.into()))?;
-            js_set(&result, "cursor", cursor.to_string())?;
+            js_set(&result, "index", index)?;
             Ok(result.into())
         }
     }
@@ -1844,5 +1925,37 @@ pub(crate) mod error {
         NotArray,
         #[error("element {0} was not a Uint8Array")]
         ElemNotUint8Array(usize),
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum InvalidSplitBlockArgs {
+        #[error(transparent)]
+        ReflectGet(#[from] GetProp),
+        #[error("no 'parents' key")]
+        NoParents,
+        #[error("parents was not an array")]
+        ParentsNotArray,
+        #[error("parent {0} was not a string")]
+        ParentNotString(usize),
+        #[error("no 'type' key")]
+        NoType,
+        #[error("type was not a string")]
+        TypeNotString,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum InvalidUpdateBlockArgs {
+        #[error(transparent)]
+        ReflectGet(#[from] GetProp),
+        #[error("no 'parents' key")]
+        NoParents,
+        #[error("parents was not an array")]
+        ParentsNotArray,
+        #[error("parent {0} was not a string")]
+        ParentNotString(usize),
+        #[error("no 'type' key")]
+        NoType,
+        #[error("type was not a string")]
+        TypeNotString,
     }
 }

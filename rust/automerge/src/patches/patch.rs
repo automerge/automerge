@@ -87,18 +87,20 @@ pub enum PatchAction {
     Mark {
         marks: Vec<Mark<'static>>,
     },
-
     SplitBlock {
         index: usize,
         cursor: Cursor,
         conflict: bool,
+        parents: Vec<String>,
+        block_type: String,
     },
     JoinBlock {
         index: usize,
-        cursor: Cursor,
     },
     UpdateBlock {
-        patch: Box<Patch>,
+        index: usize,
+        new_block_type: Option<String>,
+        new_block_parents: Option<Vec<String>>,
     },
 }
 
