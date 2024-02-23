@@ -18,16 +18,15 @@ describe("Automerge", () => {
         Automerge.splitBlock(d, ["text"], 3, block)
       })
 
-      assert.deepStrictEqual(Automerge.block(doc, ["text", 3]), block)
+      assert.deepStrictEqual(Automerge.block(doc, ["text"], 3), block)
 
-      assert.deepStrictEqual(callbacks[0].slice(0, 6), [
-        { action: "insert", path: ["text", 3], values: [{}] },
-        { action: "put", path: ["text", 3, "parents"], value: [] },
-        { action: "put", path: ["text", 3, "type"], value: "" },
-        { action: "insert", path: ["text", 3, "parents", 0], values: [""] },
-        { action: "splice", path: ["text", 3, "parents", 0, 0], value: "div" },
-        { action: "splice", path: ["text", 3, "type", 0], value: "p" },
-      ])
+      assert.deepStrictEqual(callbacks[0][0], {
+        action: "splitBlock",
+        path: ["text", 3],
+        type: "p",
+        cursor: Automerge.getCursor(doc, ["text"], 3),
+        parents: ["div"]
+      })
       assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
         { type: "text", value: "aaa" },
         { type: "block", value: block },
@@ -66,4 +65,48 @@ describe("Automerge", () => {
       { type: "text", value: "aaabbbccc" },
     ])
   })
+
+  it.only("block patches are emitted after sync messages", () => {
+
+    let doc1 = Automerge.from({ text: "aaabbbccc" })
+    let doc2 = Automerge.clone(doc1)
+
+    const headsBefore = Automerge.getHeads(doc2)
+    
+    function sync() {
+      let sync1 = Automerge.initSyncState()
+      let sync2 = Automerge.initSyncState()
+      let one_to_two: Uint8Array | null
+      let two_to_one: Uint8Array | null
+      let done = false
+      while(!done) {
+        [sync1, one_to_two] = Automerge.generateSyncMessage(doc1, sync1)
+        if (one_to_two != null) {
+          [doc2, sync2] = Automerge.receiveSyncMessage(doc2, sync2, one_to_two)
+        }
+
+        [sync2, two_to_one] = Automerge.generateSyncMessage(doc2, sync2)
+        if (two_to_one != null) {
+          [doc1, sync1] = Automerge.receiveSyncMessage(doc1, sync1, two_to_one)
+        }
+        if (one_to_two == null && two_to_one == null) {
+          done = true
+        }
+      }
+    }
+
+    doc1 = Automerge.change(doc1, d => {
+      Automerge.splitBlock(d, ["text"], 3, { parents: [], type: "paragraph" })
+    })
+    sync()
+
+    const diff = Automerge.diff(doc2, headsBefore, Automerge.getHeads(doc2))
+    assert.deepStrictEqual(diff, [{
+      action: "splitBlock",
+      path: ["text", 3],
+      type: "paragraph",
+      parents: [],
+    }])
+  })
+
 })

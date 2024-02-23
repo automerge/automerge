@@ -1,23 +1,31 @@
 use core::fmt::Debug;
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use itertools::Itertools;
+
+use crate::clock::Clock;
 use crate::marks::RichText;
-use crate::{ObjId, Parents, Prop, Value};
+use crate::{Automerge, Cursor, ObjId, Parents, Prop, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone)]
-pub(crate) struct PatchBuilder {
+pub(crate) struct PatchBuilder<'a> {
     patches: Vec<Patch>,
     last_mark_set: Option<Arc<RichText>>, // keep this around for a quick pointer equality test
+    osd: &'a crate::op_set::OpSetData,
+    block_objs: HashSet<crate::types::ObjId>,
 }
 
-impl PatchBuilder {
-    pub(crate) fn new() -> Self {
+impl<'a> PatchBuilder<'a> {
+    pub(crate) fn new(osd: &'a crate::op_set::OpSetData) -> Self {
         Self {
             patches: Vec::new(),
             last_mark_set: None,
+            osd,
+            block_objs: HashSet::new(),
         }
     }
 
@@ -33,6 +41,12 @@ impl PatchBuilder {
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
+        if self.block_objs.contains(&obj.to_internal_obj()) {
+            return;
+        }
+        if self.block_objs.contains(&tagged_value.1.to_internal_obj()) {
+            return;
+        }
         let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
             index: tail_index,
@@ -139,6 +153,9 @@ impl PatchBuilder {
     }
 
     pub(crate) fn delete_map(&mut self, parents: Parents<'_>, obj: ObjId, key: &str) {
+        if self.block_objs.contains(&obj.to_internal_obj()) {
+            return;
+        }
         let action = PatchAction::DeleteMap {
             key: key.to_owned(),
         };
@@ -153,6 +170,12 @@ impl PatchBuilder {
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
+        if self.block_objs.contains(&obj.to_internal_obj()) {
+            return;
+        }
+        if self.block_objs.contains(&tagged_value.1.to_internal_obj()) {
+            return;
+        }
         let value = (tagged_value.0.to_owned(), tagged_value.1);
         let action = match prop {
             Prop::Map(key) => PatchAction::PutMap {
@@ -181,9 +204,9 @@ impl PatchBuilder {
         self.finish(parents, obj, action);
     }
 
-    pub(crate) fn mark<'a, 'b, M: Iterator<Item = Mark<'b>>>(
+    pub(crate) fn mark<'b, 'c, M: Iterator<Item = Mark<'c>>>(
         &mut self,
-        parents: Parents<'a>,
+        parents: Parents<'b>,
         obj: ObjId,
         mark: M,
     ) {
@@ -220,6 +243,87 @@ impl PatchBuilder {
         }
     }
 
+    pub(crate) fn split_block(
+        &mut self,
+        doc: &Automerge,
+        parents: Parents<'_>,
+        obj: ObjId,
+        created_at: Option<&Clock>,
+        index: usize,
+        block_id: crate::types::ObjId,
+        elem: crate::types::OpId,
+    ) {
+        if let Some((block_type, block_parents)) =
+            load_split_block(doc, &mut self.block_objs, block_id, created_at)
+        {
+            let action = PatchAction::SplitBlock {
+                index,
+                cursor: Cursor::new(elem, self.osd),
+                conflict: false,
+                parents: block_parents,
+                block_type,
+            };
+            self.finish(parents, obj, action);
+        }
+    }
+
+    pub(crate) fn join_block(
+        &mut self,
+        parents: Parents<'_>,
+        obj: ObjId,
+        joined_block_id: crate::types::ObjId,
+        index: usize,
+    ) {
+        self.block_objs.insert(joined_block_id);
+        let action = PatchAction::JoinBlock { index };
+        self.finish(parents, obj, action);
+    }
+
+    pub(crate) fn hydrate_update_block(
+        &mut self,
+        doc: &Automerge,
+        parents: Parents<'_>,
+        obj: ObjId,
+        index: usize,
+        before_block_id: crate::types::ObjId,
+        after_block_id: crate::types::ObjId,
+    ) {
+        let crate::automerge::diff::UpdateBlockDiff {
+            new_type,
+            new_parents,
+            composed_obj_ids,
+        } = crate::automerge::diff::load_update_block_diff(index, doc, before_block_id, after_block_id);
+        self.block_objs.extend(composed_obj_ids);
+        if new_type.is_some() || new_parents.is_some() {
+            let action = PatchAction::UpdateBlock {
+                index,
+                new_block_type: new_type,
+                new_block_parents: new_parents,
+            };
+            self.finish(parents, obj, action);
+        }
+    }
+
+    pub(crate) fn update_block(
+        &mut self,
+        parents: Parents<'_>,
+        obj: ObjId,
+        index: usize,
+        new_block_id: crate::types::ObjId,
+        new_parents_id: crate::types::ObjId,
+        new_type: Option<String>,
+        new_parents: Option<Vec<String>>,
+    ) {
+        self.block_objs.insert(new_block_id);
+        self.block_objs.insert(new_parents_id);
+        let action = PatchAction::UpdateBlock {
+            index,
+            new_block_type: new_type,
+            new_block_parents: new_parents,
+        };
+        self.finish(parents, obj, action);
+    }
+
     fn finish(&mut self, parents: Parents<'_>, obj: ObjId, action: PatchAction) {
         let mut patch = Patch {
             obj,
@@ -239,7 +343,7 @@ impl PatchBuilder {
     }
 }
 
-impl AsMut<PatchBuilder> for PatchBuilder {
+impl<'a> AsMut<PatchBuilder<'a>> for PatchBuilder<'a> {
     fn as_mut(&mut self) -> &mut Self {
         self
     }
@@ -254,4 +358,53 @@ fn maybe_append<'a>(patches: &'a mut [Patch], obj: &ObjId) -> Option<&'a mut Pat
         }) if obj == tail_obj => Some(action),
         _ => None,
     }
+}
+
+fn load_split_block(
+    doc: &Automerge,
+    hidden_blocks: &mut HashSet<crate::types::ObjId>,
+    block_obj_id: crate::types::ObjId,
+    clock: Option<&Clock>,
+) -> Option<(String, Vec<String>)> {
+    hidden_blocks.insert(block_obj_id);
+    let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
+        return None;
+    };
+    // Don't log objects in the block to the patch log
+    for op_idx in block_ops {
+        let op = op_idx.as_op(doc.osd());
+        if let crate::types::OpType::Make(_) = op.action() {
+            hidden_blocks.insert(op.id().into());
+        }
+    }
+    let block = doc.hydrate_map(&block_obj_id, clock);
+    let crate::hydrate::Value::Map(mut block_map) = block else {
+        tracing::warn!("non map value found for block");
+        return None;
+    };
+    let Some(block_type) = block_map.get("type").cloned() else {
+        tracing::warn!("block type not found");
+        return None;
+    };
+    let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
+        tracing::warn!("block type not a string");
+        return None;
+    };
+    let mut block_parents = vec![];
+    let Some(parents) = block_map.get("parents") else {
+        tracing::warn!("block parents not found");
+        return None;
+    };
+    let crate::hydrate::Value::List(parents) = parents else {
+        tracing::warn!("block parents not a list");
+        return None;
+    };
+    for parent in parents.iter() {
+        let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value else {
+            tracing::warn!("block parent not a string");
+            return None;
+        };
+        block_parents.push(parent.to_string());
+    }
+    Some((block_type.to_string(), block_parents))
 }

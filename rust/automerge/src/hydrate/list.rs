@@ -21,6 +21,10 @@ impl List {
         self.0.iter()
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {

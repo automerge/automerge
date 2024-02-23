@@ -33,7 +33,7 @@
   "scripts": {
     "lint": "eslint test/*.ts index.d.ts",
     "debug": "cross-env PROFILE=dev TARGET_DIR=debug yarn buildall",
-    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target",
+    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target && node ./fixup-node-cjs.mjs",
     "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' yarn buildall",
     "release": "cross-env PROFILE=release TARGET_DIR=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target && cross-env TARGET=deno yarn target && TARGET=web yarn target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node ./fixup-node-cjs.mjs",

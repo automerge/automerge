@@ -54,7 +54,6 @@ export {
 } from "./next_types.js"
 
 import type {
-  MapObjType,
   Cursor,
   Mark,
   MarkSet,
@@ -66,7 +65,6 @@ import { type PatchCallback } from "./stable.js"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts.js"
 import { unstableConflictAt } from "./conflicts.js"
-import { mapProxy } from "./proxies.js"
 import type { InternalState } from "./internal_state.js"
 
 export type {
@@ -78,7 +76,13 @@ export type {
   SyncMessage,
   Heads,
   Cursor,
+  Span,
+  SplitBlockPatch, 
+  JoinBlockPatch,
+  UpdateBlockPatch,
 } from "@automerge/automerge-wasm"
+
+import { type Span } from "@automerge/automerge-wasm"
 
 export type {
   ActorId,
@@ -356,42 +360,36 @@ export function updateText(
   }
 }
 
-export function spans<T>(doc: Doc<T>, path: stable.Prop[]) {
+export function spans<T>(doc: Doc<T>, path: stable.Prop[]): Span[] {
   const state = _state(doc, false)
   const objPath = absoluteObjPath(doc, path, "spans")
 
   try {
-    return state.handle.spans(objPath)
+    return state.handle.spans(objPath, state.heads)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }
 }
 
-export function block<T>(doc: Doc<T>, path: stable.Prop[]) {
+export function block<T>(doc: Doc<T>, path: stable.Prop[], index: number | Cursor) {
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
   const state = _state(doc, false)
-  const objPath = absoluteObjPath(doc, path, "block")
 
-  _clear_cache(doc)
+  index = cursorToIndex(state, objPath, index)
 
-  if (_is_proxy(doc)) {
-    const info = state.handle.objInfo(objPath)
-    // TODO: I should also check that the parent is text
-    if (info.type == "map" && info.path !== undefined) {
-      return mapProxy(state.handle, info.id, state.textV2, info.path)
-    } else {
-      throw new RangeError("Not a block")
-    }
-  } else {
-    const tmp = state.handle.materialize(objPath, state.heads, state)
-    return tmp
+  try {
+    return state.handle.getBlock(objPath, index)
+  } catch (e) {
+    throw new RangeError(`Cannot get block: ${e}`)
   }
+
 }
 
 export function splitBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: MapObjType,
+  block: {type: string, parents: string[]},
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -403,11 +401,7 @@ export function splitBlock<T>(
   index = cursorToIndex(state, objPath, index)
 
   try {
-    const id = state.handle.splitBlock(objPath, index, {})
-    const info = state.handle.objInfo(id)
-    const blockProxy = mapProxy(state.handle, id, state.textV2, info.path || [])
-    Object.assign(blockProxy, block)
-    return blockProxy
+    state.handle.splitBlock(objPath, index, block)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
   }
@@ -427,12 +421,32 @@ export function joinBlock<T>(
 
   index = cursorToIndex(state, objPath, index)
 
-  const blockPath = objPath.split("/").concat(index.toString()).join("/")
-
   try {
-    state.handle.joinBlock(blockPath)
+    state.handle.joinBlock(objPath, index)
   } catch (e) {
     throw new RangeError(`Cannot joinBlock: ${e}`)
+  }
+}
+
+export function updateBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: {type: string, parents: string[]},
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.updateBlock(objPath, index, block)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
   }
 }
 

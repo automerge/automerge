@@ -169,6 +169,8 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<Spans<'_>, AutomergeError>;
 
+    fn block<O: AsRef<ExId>>(&self, obj: O, index: usize, heads: Option<&[ChangeHash]>) -> Result<Option<crate::types::Block>, AutomergeError>;
+
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
     /// Example use cases:

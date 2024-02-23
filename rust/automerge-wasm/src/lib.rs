@@ -363,21 +363,45 @@ impl Automerge {
         &mut self,
         obj: JsValue,
         index: f64,
-        value: JsValue,
-    ) -> Result<JsValue, error::InsertObject> {
+        args: JsValue,
+    ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
-        let imported_obj = import_obj(&value, Some("map"))?;
-        let block = self.doc.split_block(&obj, index as usize)?;
-        // TODO: clean this up
-        self.subset::<error::InsertObject, _>(&block, imported_obj.subvals())?;
-        Ok(block.to_string().into())
+        let SplitBlockArgs { block_type, parents } = JS(args).try_into()?;
+        self.doc.split_block(&obj, index as usize, &block_type, &parents.iter().map(|p| p.as_ref()).collect::<Vec<_>>())?;
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = joinBlock)]
-    pub fn join_block(&mut self, block: JsValue) -> Result<(), error::Block> {
-        let (block, _) = self.import(block)?;
-        self.doc.join_block(&block)?;
+    pub fn join_block(&mut self, text: JsValue, index: usize) -> Result<(), error::Block> {
+        let (text, _) = self.import(text)?;
+        self.doc.join_block(&text, index)?;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = updateBlock)]
+    pub fn update_block(&mut self, text: JsValue, index: usize, args: JsValue) -> Result<(), error::UpdateBlock> {
+        let (text, _) = self.import(text)?;
+        let UpdateBlockArgs { block_type, parents } = JS(args).try_into()?;
+        self.doc.update_block(&text, index, &block_type, &parents.iter().map(|p| p.as_ref()).collect::<Vec<_>>())?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = getBlock)]
+    pub fn get_block(&mut self, text: JsValue, index: usize) -> Result<JsValue, error::GetBlock> {
+        let (text, _) = self.import(text)?;
+        let Some(block) = self.doc.block(&text, index, None)? else {
+            return Ok(JsValue::null());
+        };
+        
+        let mut obj = Object::new();
+        let block_type = JsValue::from_str(block.block_type());
+        let parents = Array::new();
+        for parent in block.parents() {
+            parents.push(&JsValue::from_str(parent));
+        }
+        js_set(&obj, "type", block_type)?;
+        js_set(&obj, "parents", JsValue::from(parents))?;
+        Ok(obj.into())
     }
 
     #[wasm_bindgen(js_name = insertObject)]
@@ -1242,6 +1266,16 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
     SyncState::decode(data)
 }
 
+struct SplitBlockArgs {
+    block_type: String,
+    parents: Vec<String>,
+}
+
+struct UpdateBlockArgs {
+    block_type: String,
+    parents: Vec<String>,
+}
+
 pub mod error {
     use automerge::{AutomergeError, ObjType};
     use js_sys::RangeError;
@@ -1617,4 +1651,53 @@ pub mod error {
             RangeError::new(&e.to_string()).into()
         }
     }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum SplitBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        InvalidArgs(#[from] interop::error::InvalidSplitBlockArgs),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<SplitBlock> for JsValue {
+        fn from(e: SplitBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum UpdateBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        InvalidArgs(#[from] interop::error::InvalidUpdateBlockArgs),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<UpdateBlock> for JsValue {
+        fn from(e: UpdateBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Set(#[from] interop::error::SetProp),
+    }
+
+    impl From<GetBlock> for JsValue {
+        fn from(e: GetBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
 }

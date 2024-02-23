@@ -4,7 +4,7 @@ use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, RichText};
 use crate::types::{Clock, ObjId, ObjMeta, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -44,7 +44,15 @@ pub struct PatchLog {
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
+    blocks: HashMap<OpId, Block>,
     pub(crate) heads: Option<Vec<ChangeHash>>,
+}
+
+#[derive(Clone, Debug)]
+struct Block{
+    id: OpId,
+    block_type: Option<String>,
+    parents: Option<Vec<String>>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -98,6 +106,28 @@ pub(crate) enum Event {
     Mark {
         marks: MarkAccumulator,
     },
+    SplitBlock {
+        at: Option<Clock>,
+        index: usize,
+        block_id: ObjId,
+        elem: OpId,
+    },
+    JoinBlock {
+        index: usize,
+        joined_block_id: crate::types::ObjId,
+    },
+    DehydratedUpdateBlock {
+        index: usize,
+        before_block_id: ObjId,
+        after_block_id: ObjId,
+    },
+    HydratedUpdateBlock {
+        index: usize,
+        new_block_id: crate::types::ObjId,
+        new_parents_id: crate::types::ObjId,
+        new_parents: Option<Vec<String>>,
+        new_block_type: Option<String>,
+    }
 }
 
 impl PatchLog {
@@ -120,6 +150,7 @@ impl PatchLog {
             events: vec![],
             heads: None,
             text_rep,
+            blocks: HashMap::new(),
         }
     }
 
@@ -302,6 +333,67 @@ impl PatchLog {
         self.events.push((obj.id, event))
     }
 
+    pub(crate) fn split_block(
+        &mut self,
+        obj: &ObjMeta,
+        created_at: Option<Clock>,
+        index: usize,
+        block_id: ObjId,
+        elem: OpId,
+    ) {
+        self.events.push((
+            obj.id,
+            Event::SplitBlock {
+                at: created_at,
+                index,
+                block_id,
+                elem,
+            },
+        ))
+    }
+
+    pub(crate) fn join_block(&mut self, obj: &ObjMeta, joined_block_id: crate::types::ObjId, index: usize) {
+        self.events.push((obj.id, Event::JoinBlock { index, joined_block_id }))
+    }
+
+    pub(crate) fn update_block(
+        &mut self,
+        obj: &ObjMeta,
+        index: usize,
+        before_block_id: ObjId,
+        after_block_id: ObjId,
+    ) {
+        self.events.push((
+            obj.id,
+            Event::DehydratedUpdateBlock {
+                index,
+                before_block_id,
+                after_block_id,
+            },
+        ))
+    }
+
+    pub(crate) fn hydrated_update_block(
+        &mut self,
+        obj: &ObjMeta,
+        index: usize,
+        new_block_id: crate::types::ObjId,
+        new_parents_id: crate::types::ObjId,
+        new_parents: Option<Vec<String>>,
+        new_block_type: Option<String>,
+    ) {
+        self.events.push((
+            obj.id,
+            Event::HydratedUpdateBlock {
+                index,
+                new_block_id,
+                new_parents_id,
+                new_parents,
+                new_block_type,
+            },
+        ))
+    }
+
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
@@ -316,7 +408,7 @@ impl PatchLog {
         clock: Option<&Clock>,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new();
+        let mut patch_builder = PatchBuilder::new(&doc.ops().osd);
         for (obj, event) in events {
             // FIXME - adding a Cow::* to parents would let us not clone here
             let parents = doc.ops().parents(*obj, text_rep, clock.cloned());
@@ -392,6 +484,50 @@ impl PatchLog {
                 Event::Mark { marks } => {
                     patch_builder.mark(parents, exid, marks.clone().into_iter())
                 }
+                Event::SplitBlock {
+                    index,
+                    elem,
+                    block_id,    
+                    at,
+                } => {
+                    patch_builder.split_block(
+                        doc,
+                        parents,
+                        exid,
+                        at.as_ref(),
+                        *index,
+                        *block_id,
+                        *elem,
+                    );
+                }
+                Event::JoinBlock { index, joined_block_id} => {
+                    patch_builder.join_block(parents, exid, *joined_block_id, *index);
+                }
+                Event::DehydratedUpdateBlock {
+                    index,
+                    before_block_id,
+                    after_block_id,
+                } => {
+                    patch_builder.hydrate_update_block(
+                        doc,
+                        parents,
+                        exid,
+                        *index,
+                        *before_block_id,
+                        *after_block_id,
+                    );
+                }
+                Event::HydratedUpdateBlock{index, new_block_id, new_parents_id, new_parents, new_block_type} => {
+                    patch_builder.update_block(
+                        parents,
+                        exid,
+                        *index,
+                        *new_block_id,
+                        *new_parents_id,
+                        new_block_type.clone(),
+                        new_parents.clone(),
+                    );
+                }
             }
         }
         // any objects exposed AFTER all other events get exposed here
@@ -412,6 +548,7 @@ impl PatchLog {
             expose: HashSet::new(),
             events: Default::default(),
             text_rep: self.text_rep,
+            blocks: self.blocks.clone(),
             heads: None,
         }
     }

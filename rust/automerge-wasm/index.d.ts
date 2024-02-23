@@ -101,7 +101,7 @@ export type Op = {
 }
 
 export type PatchValue = string | number | boolean | null | Date | Uint8Array | {} | []
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch | SplitBlockPatch | UpdateBlockPatch | JoinBlockPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -150,6 +150,7 @@ export type SpliceTextPatch = {
   action: 'splice'
   path: Prop[],
   value: string,
+  block?: { parents: string[], type: string }
   marks?: MarkSet,
 }
 
@@ -164,6 +165,28 @@ export type InsertPatch = {
 export type ConflictPatch = {
   action: 'conflict'
   path: Prop[],
+}
+
+export type SplitBlockPatch = {
+  action: 'splitBlock'
+  path: Prop[],
+  index: number,
+  type: string,
+  parents: string[],
+}
+
+export type UpdateBlockPatch = {
+  action: 'updateBlock'
+  path: Prop[],
+  index: number,
+  new_type: string | null,
+  new_parents: string[] | null,
+}
+
+export type JoinBlockPatch = {
+  action: 'joinBlock'
+  path: Prop[],
+  index: number,
 }
 
 export type Mark = {
@@ -219,8 +242,10 @@ export class Automerge {
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
   // blocks
-  splitBlock(obj: ObjID, index: number, block: MapObjType): ObjID;
-  joinBlock(block: ObjID) : void;
+  splitBlock(obj: ObjID, index: number, block: {type: string, parents: string[]}): void;
+  joinBlock(obj: ObjID, index: number) : void;
+  updateBlock(obj: ObjID, index: number, block: {type: string, parents: string[]}): void;
+  getBlock(obj: ObjID, index: number): {type: string, parents: string[]} | null;
 
   diff(before: Heads, after: Heads): Patch[];
 

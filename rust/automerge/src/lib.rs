@@ -306,7 +306,7 @@ pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, Block};
 pub use value::{ScalarValue, Value};
 
 /// The object ID for the root map of a document

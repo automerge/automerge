@@ -1471,6 +1471,46 @@ impl Automerge {
         Ok(Spans::new(iter, self, clock))
     }
 
+    pub(crate) fn block_for(
+        &self,
+        obj: &ExId,
+        index: usize,
+        clock: Option<Clock>,
+    ) -> Result<Option<crate::Block>, AutomergeError> {
+        let obj = self.exid_to_obj(obj, TextRepresentation::String)?;
+        let Some((op, (value, _))) = self
+            .ops
+            .seek_ops_by_prop(&obj.id, Prop::Seq(index), obj.encoding, clock.as_ref())
+            .ops
+            .into_iter()
+            .last()
+            .map(|op| (op, op.tagged_value(clock.as_ref()))) else {
+                return Err(AutomergeError::InvalidIndex(index));
+            };
+        let crate::Value::Object(crate::ObjType::Map) = value else {
+            return Ok(None);
+        };
+        let crate::hydrate::Value::Map(mut block_map) = self.hydrate_map(&ObjId::from(*op.id()), clock.as_ref()) else {
+            return Ok(None);
+        };
+        let Some(crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type))) = block_map.get("type") else {
+            return Ok(None);
+        };
+        let block_type = block_type.to_string();
+        let Some(crate::hydrate::Value::List(parents_list)) = block_map.get("parents") else {
+            return Ok(None);
+        };
+        let mut parents = Vec::new();
+        for parent in parents_list.iter() {
+            if let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value {
+                parents.push(parent.to_string());
+            } else {
+                return Ok(None);
+            }
+        }
+        Ok(Some(crate::Block::new(block_type.to_string(), parents)))
+    }
+
     pub(crate) fn get_cursor_for(
         &self,
         obj: &ExId,
@@ -1857,6 +1897,10 @@ impl ReadDoc for Automerge {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
+    }
+
+    fn block<O: AsRef<ExId>>(&self, obj: O, index: usize, heads: Option<&[ChangeHash]>) -> Result<Option<crate::Block>, AutomergeError> {
+        self.block_for(obj.as_ref(), index, heads.map(|h| self.clock_at(h)))
     }
 }
 

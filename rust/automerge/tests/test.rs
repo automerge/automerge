@@ -1891,7 +1891,7 @@ fn get_marks_at_heads() {
     .unwrap();
     let mark_map = tx.get_marks(&text_id, 1, Some(&heads)).unwrap();
     assert_eq!(mark_map.len(), 1);
-    let (mark_name, mark_value) = mark_map.iter().next().unwrap();
+    let (mark_name, mark_value) = mark_map.iter_marks().next().unwrap();
     assert_eq!(mark_name, "bold");
     assert_eq!(mark_value, &ScalarValue::Boolean(true));
 
@@ -1899,7 +1899,7 @@ fn get_marks_at_heads() {
 
     let mark_map = doc.get_marks(&text_id, 1, Some(&heads)).unwrap();
     assert_eq!(mark_map.len(), 1);
-    let (mark_name, mark_value) = mark_map.iter().next().unwrap();
+    let (mark_name, mark_value) = mark_map.iter_marks().next().unwrap();
     assert_eq!(mark_name, "bold");
     assert_eq!(mark_value, &ScalarValue::Boolean(true));
 }

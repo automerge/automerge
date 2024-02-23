@@ -733,6 +733,29 @@ impl From<Prop> for wasm_bindgen::JsValue {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    block_type: String,
+    parents: Vec<String>,
+}
+
+impl Block {
+    pub(crate) fn new(block_type: String, parents: Vec<String>) -> Self {
+        Self {
+            block_type,
+            parents,
+        }
+    }
+
+    pub fn block_type(&self) -> &str {
+        &self.block_type
+    }
+
+    pub fn parents(&self) -> &[String] {
+        &self.parents
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod gen {
     use super::{

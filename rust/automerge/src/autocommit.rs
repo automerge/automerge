@@ -824,6 +824,10 @@ impl ReadDoc for AutoCommit {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn block<O: AsRef<ExId>>(&self, obj: O, index: usize, heads: Option<&[ChangeHash]>) -> Result<Option<crate::types::Block>, AutomergeError> {
+        self.doc.block_for(obj.as_ref(), index, self.get_scope(heads))
+    }
 }
 
 impl Transactable for AutoCommit {
@@ -962,16 +966,25 @@ impl Transactable for AutoCommit {
         &mut self,
         obj: O,
         index: usize,
+        block_type: &str,
+        parents: &[&str],
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index, block_type, parents)
     }
 
-    fn join_block<O: AsRef<ExId>>(&mut self, block: O) -> Result<(), AutomergeError> {
+    fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        tx.join_block(&mut self.doc, patch_log, block.as_ref())
+        tx.join_block(&mut self.doc, patch_log, text.as_ref(), index)
+    }
+
+    fn update_block<O: AsRef<ExId>>(&mut self, text: O, index: usize, new_type: &str, new_parents: &[&str])
+        -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.update_block(&mut self.doc, patch_log, text.as_ref(), index, new_type, new_parents)
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -991,6 +1004,7 @@ impl Transactable for AutoCommit {
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
         crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
     }
+
 }
 
 // A wrapper we return from [`AutoCommit::sync()`] to ensure that transactions are closed before we
