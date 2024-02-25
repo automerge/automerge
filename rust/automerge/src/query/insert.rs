@@ -123,13 +123,15 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
     }
 
     fn can_shortcut_search(&mut self, tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
-        if let Some(last) = &tree.last_insert {
-            if last.index + last.width == self.list_state.target() {
-                self.candidates.push(Loc::new(last.pos + 1, last.key));
-                return true;
-            }
-        }
+        // TODO: Fix this logic to handle marks
         false
+        //if let Some(last) = &tree.last_insert {
+            //if last.index + last.width == self.list_state.target() {
+                //self.candidates.push(Loc::new(last.pos + 1, last.key));
+                //return true;
+            //}
+        //}
+        //false
     }
 
     fn query_node(
