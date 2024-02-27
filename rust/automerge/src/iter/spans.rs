@@ -3,7 +3,7 @@ use crate::hydrate;
 use crate::marks::{RichText, RichTextStateMachine};
 //use crate::port::HasMetadata;
 use crate::op_set::Op;
-use crate::op_tree::OpTreeIter;
+use crate::op_tree::{OpTreeIter, OpTreeOpIter};
 use crate::types::Clock;
 use crate::types::{Key, ListEncoding, ObjType, OpId, OpType};
 use crate::Automerge;
@@ -170,10 +170,7 @@ impl<'a> Spans<'a> {
         doc: &'a Automerge,
         clock: Option<Clock>,
     ) -> Self {
-        let op_iter = iter.map(|i| OpTreeOpIter {
-            iter: i,
-            osd: doc.osd(),
-        });
+        let op_iter = iter.map(|i| OpTreeOpIter::new(i, doc.osd()));
         Spans {
             internal: op_iter.map(|i| SpansInternal::new(i, doc, clock)),
         }
@@ -196,18 +193,5 @@ impl<'a> Iterator for Spans<'a> {
                 }
                 None => None,
             })
-    }
-}
-
-struct OpTreeOpIter<'a> {
-    iter: OpTreeIter<'a>,
-    osd: &'a crate::op_set::OpSetData,
-}
-
-impl<'a> Iterator for OpTreeOpIter<'a> {
-    type Item = Op<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|idx| idx.as_op(self.osd))
     }
 }

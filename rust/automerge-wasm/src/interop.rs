@@ -1,7 +1,7 @@
 use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
-use crate::{Automerge, SplitBlockArgs, TextRepresentation, UpdateBlockArgs};
+use crate::{Automerge, SplitBlockArgs, TextRepresentation, UpdateBlockArgs, UpdateBlocksArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
 use automerge::ReadDoc;
@@ -641,6 +641,62 @@ impl TryFrom<JS> for UpdateBlockArgs {
         })
     }
 }
+
+impl TryFrom<JS> for am::BlockOrText<'static> {
+    type Error = error::InvalidBlockOrText;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if let Some(str_val) = value.as_string() {
+            return Ok(am::BlockOrText::Text(Cow::Owned(str_val)))
+        }
+
+        if !value.0.is_object() {
+            return Err(error::InvalidBlockOrText::NotObjectOrString);
+        }
+        let type_val = js_get(&value.0, "type")?.0;
+        if type_val == JsValue::undefined() || type_val == JsValue::null()
+        {
+            return Err(error::InvalidBlockOrText::NoType);
+        }
+        let block_type = type_val.as_string().ok_or(error::InvalidBlockOrText::TypeNotString)?;
+
+        let js_parents = js_get(&value.0, "parents")?.0;
+        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+            return Err(error::InvalidBlockOrText::NoParents);
+        }
+
+        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
+            error::InvalidBlockOrText::ParentsNotArray
+        })?;
+        let mut parents = Vec::new();
+        for (index, parent) in js_parents_arr.iter().enumerate() {
+            let parent = parent.as_string().ok_or(error::InvalidBlockOrText::ParentNotString(index))?;
+            parents.push(parent);
+        }
+        Ok(am::BlockOrText::Block(am::Block::new(block_type).with_parents(parents)))
+    }
+}
+
+impl TryFrom<JS> for UpdateBlocksArgs {
+    type Error = error::InvalidUpdateBlocksArgs;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value
+            .0
+            .dyn_into::<Array>()
+            .map_err(|_| error::InvalidUpdateBlocksArgs::NotArray)?;
+        let value = value
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let v = JS(v);
+                v.try_into().map_err(|e| error::InvalidUpdateBlocksArgs::InvalidElement(i, e))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(UpdateBlocksArgs(value))
+    }
+}
+
 pub(crate) fn to_js_err<T: Display>(err: T) -> JsValue {
     js_sys::Error::new(&std::format!("{}", err)).into()
 }
@@ -1957,5 +2013,31 @@ pub(crate) mod error {
         NoType,
         #[error("type was not a string")]
         TypeNotString,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum InvalidBlockOrText {
+        #[error("must be a block object or a string")]
+        NotObjectOrString,
+        #[error(transparent)]
+        ReflectGet(#[from] GetProp),
+        #[error("no 'parents' key")]
+        NoParents,
+        #[error("parents was not an array")]
+        ParentsNotArray,
+        #[error("parent {0} was not a string")]
+        ParentNotString(usize),
+        #[error("no 'type' key")]
+        NoType,
+        #[error("type was not a string")]
+        TypeNotString,
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum InvalidUpdateBlocksArgs {
+        #[error("value must be an array")]
+        NotArray,
+        #[error("element {0} not a valid block: {1}")]
+        InvalidElement(usize, InvalidBlockOrText),
     }
 }

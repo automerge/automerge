@@ -450,6 +450,25 @@ export function updateBlock<T>(
   }
 }
 
+export function updateBlocks<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  blocks: ({type: string, parents: string[]} | string)[],
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  try {
+    state.handle.updateBlocks(objPath, blocks)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
+  }
+}
+
 /**
  * Returns a cursor for the given position in a string.
  *

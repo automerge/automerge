@@ -308,6 +308,7 @@ pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, Block};
 pub use value::{ScalarValue, Value};
+pub use transaction::{NewBlock, BlockOrText};
 
 /// The object ID for the root map of a document
 pub const ROOT: ObjId = ObjId::Root;

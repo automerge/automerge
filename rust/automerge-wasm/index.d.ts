@@ -245,6 +245,7 @@ export class Automerge {
   splitBlock(obj: ObjID, index: number, block: {type: string, parents: string[]}): void;
   joinBlock(obj: ObjID, index: number) : void;
   updateBlock(obj: ObjID, index: number, block: {type: string, parents: string[]}): void;
+  updateBlocks(obj: ObjID, newBlocks: ({type: string, parents: string[]} | string)[]): void;
   getBlock(obj: ObjID, index: number): {type: string, parents: string[]} | null;
 
   diff(before: Heads, after: Heads): Patch[];

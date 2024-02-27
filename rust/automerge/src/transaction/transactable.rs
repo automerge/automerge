@@ -1,5 +1,10 @@
+use std::borrow::{Borrow, Cow};
+
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
+use crate::text_value::TextValue;
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
@@ -110,13 +115,31 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
-    fn split_block<O: AsRef<ExId>>(&mut self, obj: O, index: usize, block_type: &str, parents: &[&str])
-        -> Result<ExId, AutomergeError>;
+    fn split_block<'a, O>(
+        &mut self,
+        obj: O,
+        index: usize,
+        args: NewBlock<'a>,
+    ) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>;
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>;
 
-    fn update_block<O: AsRef<ExId>>(&mut self, text: O, index: usize, new_type: &str, new_parents: &[&str])
-        -> Result<(), AutomergeError>;
+    fn update_block<'p, O>(
+        &mut self,
+        text: O,
+        index: usize,
+        new_block: NewBlock<'p>,
+    ) -> Result<(), AutomergeError>
+    where
+        O: AsRef<ExId>;
+
+    fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
@@ -130,4 +153,43 @@ pub trait Transactable: ReadDoc {
     /// can do.
     fn update_text<S: AsRef<str>>(&mut self, obj: &ExId, new_text: S)
         -> Result<(), AutomergeError>;
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum BlockOrText<'a> {
+    Block(crate::Block),
+    Text(Cow<'a, str>),
+}
+
+impl<'a> BlockOrText<'a> {
+    pub(crate) fn width(&self) -> usize {
+        match self {
+            BlockOrText::Block(b) => 1,
+            BlockOrText::Text(t) => t.graphemes(true).map(|c| TextValue::width(c)).sum(),
+        }
+    }
+}
+
+pub struct NewBlock<'a> {
+    pub(crate) block_type: &'a str,
+    pub(crate) parents: Vec<String>,
+}
+
+impl<'a> NewBlock<'a> {
+    pub fn new(block_type: &'a str) -> NewBlock<'a> {
+        NewBlock {
+            block_type,
+            parents: Vec::new(),
+        }
+    }
+
+    pub fn with_parents<I: IntoIterator, >(self, parents: I) -> NewBlock<'a> 
+    where
+        I::Item: std::borrow::Borrow<str>
+    {
+        NewBlock {
+            block_type: self.block_type,
+            parents: parents.into_iter().map(|s| s.borrow().to_string()).collect(),
+        }
+    }
 }
