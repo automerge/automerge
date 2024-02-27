@@ -19,7 +19,7 @@ use std::{fmt::Debug, mem};
 mod iter;
 mod node;
 
-pub(crate) use iter::OpTreeIter;
+pub(crate) use iter::{OpTreeIter, OpTreeOpIter};
 #[allow(unused)]
 pub(crate) use node::OpTreeNode;
 pub use node::B;

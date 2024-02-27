@@ -740,10 +740,17 @@ pub struct Block {
 }
 
 impl Block {
-    pub(crate) fn new(block_type: String, parents: Vec<String>) -> Self {
+    pub fn new(block_type: String) -> Self {
         Self {
             block_type,
+            parents: Vec::new(),
+        }
+    }
+
+    pub fn with_parents(self, parents: Vec<String>) -> Self {
+        Self {
             parents,
+            ..self
         }
     }
 
@@ -755,6 +762,7 @@ impl Block {
         &self.parents
     }
 }
+
 
 #[cfg(test)]
 pub(crate) mod gen {

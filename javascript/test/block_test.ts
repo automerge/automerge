@@ -23,6 +23,7 @@ describe("Automerge", () => {
       assert.deepStrictEqual(callbacks[0][0], {
         action: "splitBlock",
         path: ["text", 3],
+        index: 3,
         type: "p",
         cursor: Automerge.getCursor(doc, ["text"], 3),
         parents: ["div"]
@@ -66,47 +67,56 @@ describe("Automerge", () => {
     ])
   })
 
-  it.only("block patches are emitted after sync messages", () => {
-
-    let doc1 = Automerge.from({ text: "aaabbbccc" })
-    let doc2 = Automerge.clone(doc1)
-
-    const headsBefore = Automerge.getHeads(doc2)
-    
-    function sync() {
-      let sync1 = Automerge.initSyncState()
-      let sync2 = Automerge.initSyncState()
-      let one_to_two: Uint8Array | null
-      let two_to_one: Uint8Array | null
-      let done = false
-      while(!done) {
-        [sync1, one_to_two] = Automerge.generateSyncMessage(doc1, sync1)
-        if (one_to_two != null) {
-          [doc2, sync2] = Automerge.receiveSyncMessage(doc2, sync2, one_to_two)
-        }
-
-        [sync2, two_to_one] = Automerge.generateSyncMessage(doc2, sync2)
-        if (two_to_one != null) {
-          [doc1, sync1] = Automerge.receiveSyncMessage(doc1, sync1, two_to_one)
-        }
-        if (one_to_two == null && two_to_one == null) {
-          done = true
-        }
-      }
-    }
-
-    doc1 = Automerge.change(doc1, d => {
-      Automerge.splitBlock(d, ["text"], 3, { parents: [], type: "paragraph" })
+  it("emits a single split patch when call diff after splitting a block", () => {
+    const block = { parents: [], type: "ordered-list-item" }
+    let doc = Automerge.from({ text: "aaa" })
+    doc = Automerge.change(doc, d => {
+      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "paragraph" })
+      Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item" })
     })
-    sync()
 
-    const diff = Automerge.diff(doc2, headsBefore, Automerge.getHeads(doc2))
-    assert.deepStrictEqual(diff, [{
-      action: "splitBlock",
-      path: ["text", 3],
-      type: "paragraph",
-      parents: [],
-    }])
+    const headsBefore = Automerge.getHeads(doc)
+    doc = Automerge.change(doc, d => {
+      Automerge.splitBlock(d, ["text"], 3, block)
+    })
+    const headsAfter = Automerge.getHeads(doc)
+
+    const diff = Automerge.diff(doc, headsBefore, headsAfter)
+    assert.deepStrictEqual(diff, [
+      {
+        action: "splitBlock",
+        path: ["text",3],
+        index: 3,
+        type: "ordered-list-item",
+        cursor: Automerge.getCursor(doc, ["text"], 3),
+        parents: []
+      },
+    ])
+  })
+
+  it("allows updating all blocks at once", () => {
+    let doc = Automerge.from({text: ""})
+    doc = Automerge.change(doc, d => {
+      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item" })
+      Automerge.splice(d, ["text"], 1, 0, "first thing")
+      Automerge.splitBlock(d, ["text"], 7, { parents: [], type: "ordered-list-item" })
+      Automerge.splice(d, ["text"], 8, 0, "second thing")
+    })
+
+    doc = Automerge.change(doc, d => {
+      Automerge.updateBlocks(d, ["text"], [
+        { type: "paragraph", parents: [] },
+        "the first thing",
+        { type: "unordered-list-item", parents: ["ordered-list-item"] },
+        "the second thing",
+      ])
+    })
+    assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+      { type: "block", value: { type: "paragraph", parents: [] } },
+      { type: "text", value: "the first thing" },
+      { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"] } },
+      { type: "text", value: "the second thing" },
+    ])
   })
 
 })

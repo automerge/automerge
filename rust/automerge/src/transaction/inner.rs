@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
@@ -785,14 +786,14 @@ impl TransactionInner {
         self.mark(doc, patch_log, ex_obj, mark, expand)
     }
 
-    pub(crate) fn split_block(
+    pub(crate) fn split_block<P: std::borrow::Borrow<str>, PI: Iterator<Item = P>>(
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
         block_type: &str,
-        parents: &[&str],
+        parents: PI,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if obj.typ != ObjType::Text {
@@ -806,7 +807,15 @@ impl TransactionInner {
         let pos = query.pos();
         let key = query.key()?;
 
-        let (idx, parents_idx) = self.make_block(doc, &obj, index, true, block_type, parents, patch_log.text_rep())?;
+        let (idx, parents_idx) = self.make_block(
+            doc,
+            &obj,
+            index,
+            true,
+            block_type,
+            parents,
+            patch_log.text_rep(),
+        )?;
         let block_op_id = *idx.as_op(doc.osd()).id();
         let block_id = block_op_id.into();
 
@@ -815,23 +824,35 @@ impl TransactionInner {
         Ok(idx.as_op(doc.osd()).exid())
     }
 
-    fn make_block(
+    fn make_block<'p, PI>(
         &mut self,
         doc: &mut Automerge,
         obj: &ObjMeta,
         index: usize,
         insert: bool,
         block_type: &str,
-        block_parents: &[&str],
+        block_parents: PI,
         text_rep: TextRepresentation,
-    ) -> Result<(OpIdx, OpIdx), AutomergeError> {
+    ) -> Result<(OpIdx, OpIdx), AutomergeError>
+    where
+        PI: Iterator,
+        PI::Item: Borrow<str>,
+    {
         let action = OpType::Make(ObjType::Map);
-        
+
         let idx = if insert {
-            self.do_insert(doc, &mut PatchLog::inactive(text_rep), obj, index, ListEncoding::Text, action)?
+            self.do_insert(
+                doc,
+                &mut PatchLog::inactive(text_rep),
+                obj,
+                index,
+                ListEncoding::Text,
+                action,
+            )?
         } else {
             println!("making block");
-            self.local_list_op(doc, &mut PatchLog::inactive(text_rep), obj, index, action)?.unwrap()
+            self.local_list_op(doc, &mut PatchLog::inactive(text_rep), obj, index, action)?
+                .unwrap()
         };
 
         let block_op_id = *idx.as_op(doc.osd()).id();
@@ -874,7 +895,7 @@ impl TransactionInner {
             );
             let parent_op = OpBuilder {
                 id: self.next_id(),
-                action: OpType::Put(parent.to_string().into()),
+                action: OpType::Put(parent.borrow().to_string().into()),
                 key,
                 insert: true,
             };
@@ -887,15 +908,19 @@ impl TransactionInner {
         Ok((idx, parents_idx))
     }
 
-    pub(crate) fn update_block(
+    pub(crate) fn update_block<PI>(
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
         index: usize,
         block_type: &str,
-        parents: &[&str],
-    ) -> Result<(), AutomergeError> {
+        parents: PI,
+    ) -> Result<(), AutomergeError>
+    where
+        PI: Iterator + ExactSizeIterator + Clone,
+        PI::Item: Borrow<str>,
+    {
         let text_obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
 
         if text_obj.typ != ObjType::Text {
@@ -940,12 +965,13 @@ impl TransactionInner {
             if (existing_parents.len() as usize) != parents.len() {
                 all_parents_equal = false;
             } else {
-                for (index, parent) in existing_parents.iter().enumerate() {
-                    let hydrate::Value::Scalar(ScalarValue::Str(parent)) = &parent.value else {
+                for (old_parent, new_parent) in existing_parents.iter().zip(parents.clone()) {
+                    let hydrate::Value::Scalar(ScalarValue::Str(old_parent)) = &old_parent.value
+                    else {
                         all_parents_equal = false;
                         break;
                     };
-                    if Some(parent.as_str()) != parents.get(index).map(|s| *s) {
+                    if old_parent.as_str() != new_parent.borrow() {
                         all_parents_equal = false;
                         break;
                     }
@@ -964,7 +990,7 @@ impl TransactionInner {
             index,
             false,
             block_type,
-            parents,
+            parents.clone(),
             patch_log.text_rep(),
         )?;
 
@@ -972,7 +998,12 @@ impl TransactionInner {
 
         let parents_id = parents_idx.as_op(doc.osd());
         let new_parents = if do_update_parents {
-            Some(parents.into_iter().map(|s| s.to_string()).collect())
+            Some(
+                parents
+                    .into_iter()
+                    .map(|s| s.borrow().to_string())
+                    .collect(),
+            )
         } else {
             None
         };

@@ -367,7 +367,7 @@ impl Automerge {
     ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
         let SplitBlockArgs { block_type, parents } = JS(args).try_into()?;
-        self.doc.split_block(&obj, index as usize, &block_type, &parents.iter().map(|p| p.as_ref()).collect::<Vec<_>>())?;
+        self.doc.split_block(&obj, index as usize, am::NewBlock::new(&block_type).with_parents(parents))?;
         Ok(())
     }
 
@@ -378,11 +378,19 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = updateBlocks)]
+    pub fn update_blocks(&mut self, text: JsValue, new_blocks: JsValue) -> Result<(), error::UpdateBlocks> {
+        let (text, _) = self.import(text)?;
+        let  UpdateBlocksArgs( blocks ) = JS(new_blocks).try_into()?;
+        self.doc.update_blocks(&text, blocks)?;
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = updateBlock)]
     pub fn update_block(&mut self, text: JsValue, index: usize, args: JsValue) -> Result<(), error::UpdateBlock> {
         let (text, _) = self.import(text)?;
         let UpdateBlockArgs { block_type, parents } = JS(args).try_into()?;
-        self.doc.update_block(&text, index, &block_type, &parents.iter().map(|p| p.as_ref()).collect::<Vec<_>>())?;
+        self.doc.update_block(&text, index, am::NewBlock::new(&block_type).with_parents(parents))?;
         Ok(())
     }
 
@@ -1276,6 +1284,8 @@ struct UpdateBlockArgs {
     parents: Vec<String>,
 }
 
+struct UpdateBlocksArgs(Vec<am::BlockOrText<'static>>);
+
 pub mod error {
     use automerge::{AutomergeError, ObjType};
     use js_sys::RangeError;
@@ -1696,6 +1706,22 @@ pub mod error {
 
     impl From<GetBlock> for JsValue {
         fn from(e: GetBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum UpdateBlocks {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidArgs(#[from] interop::error::InvalidUpdateBlocksArgs),
+    }
+
+    impl From<UpdateBlocks> for JsValue {
+        fn from(e: UpdateBlocks) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

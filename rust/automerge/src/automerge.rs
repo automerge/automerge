@@ -1508,7 +1508,7 @@ impl Automerge {
                 return Ok(None);
             }
         }
-        Ok(Some(crate::Block::new(block_type.to_string(), parents)))
+        Ok(Some(crate::Block::new(block_type.to_string()).with_parents(parents)))
     }
 
     pub(crate) fn get_cursor_for(
