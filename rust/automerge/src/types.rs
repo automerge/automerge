@@ -3,6 +3,7 @@ use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -733,10 +734,11 @@ impl From<Prop> for wasm_bindgen::JsValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     block_type: String,
     parents: Vec<String>,
+    attrs: HashMap<String, ScalarValue>,
 }
 
 impl Block {
@@ -744,6 +746,7 @@ impl Block {
         Self {
             block_type,
             parents: Vec::new(),
+            attrs: HashMap::new(),
         }
     }
 
@@ -754,12 +757,27 @@ impl Block {
         }
     }
 
+    pub(crate) fn with_attrs<I: Iterator<Item=(String, ScalarValue)>>(self, attrs: I) -> Self {
+        let mut current_attrs = self.attrs;
+        for (k, v) in attrs {
+            current_attrs.insert(k, v);
+        }
+        Self {
+            attrs: current_attrs,
+            ..self
+        }
+    }
+
     pub fn block_type(&self) -> &str {
         &self.block_type
     }
 
     pub fn parents(&self) -> &[String] {
         &self.parents
+    }
+    
+    pub fn attrs(&self) -> &HashMap<String, ScalarValue> {
+        &self.attrs
     }
 }
 

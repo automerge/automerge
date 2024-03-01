@@ -66,6 +66,27 @@ fn split_block_diff_full() {
 }
 
 #[test]
+fn split_block_with_attrs() {
+    use automerge::hydrate;
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let block = doc
+        .split_block(
+            &text,
+            0,
+            NewBlock::new("ordered-list-item")
+                .with_parents(["unordered-list-item", "ordered-list-item"].into_iter())
+                .with_attr("key", 1.into()),
+        )
+        .unwrap();
+    let mut spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(spans.len(), 1);
+    let Some(automerge::iter::Span::Block(b)) = spans.pop() else {
+        panic!("expected block span");
+    };
+}
+
+#[test]
 fn join_block_diff_incremental() {
     let mut doc = automerge::AutoCommit::new();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -667,26 +688,7 @@ fn print_spans<I: Iterator<Item = automerge::iter::Span>>(spans: I) {
     for span in spans {
         match span {
             automerge::iter::Span::Block(block) => {
-                use automerge::hydrate::Value;
-                let Value::Map(mut map) = block else {
-                    panic!("expected block to be a map, got {:?}", block);
-                };
-                let Some(Value::Scalar(automerge::ScalarValue::Str(s))) = map.get("type").clone()
-                else {
-                    panic!("expected block to have a type, got {:?}", map);
-                };
-                let block_type = s.to_string();
-                let Value::List(parents) = map.get("parents").unwrap() else {
-                    panic!("expected block to have parents, got {:?}", map);
-                };
-                let parents = parents
-                    .iter()
-                    .map(|v| match &v.value {
-                        Value::Scalar(automerge::ScalarValue::Str(s)) => s.to_string(),
-                        _ => panic!("expected parents to be values, got {:?}", v),
-                    })
-                    .collect::<Vec<_>>();
-                println!("block: {:?}, parents: {:?}", block_type, parents);
+                println!("block: {:?}, parents: {:?}", block.block_type(), block.parents());
             }
             automerge::iter::Span::Text(s, _) => {
                 println!("text: {:?}", s);
