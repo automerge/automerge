@@ -754,3 +754,42 @@ fn print_patches(patches: Vec<automerge::Patch>) {
         }
     }
 }
+
+#[test]
+fn splice_patch_with_blocks_across_optree_page_boundary() {
+    // Reproduces an issue where if you have blocks in the document and then insert text at the end
+    // of the document, when you hit a multiple of the opetree page boundary the remote patches
+    // (i.e. not the patches produced by TransactionInner) would be wrong
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
+        .unwrap();
+    doc.splice_text(&text, 1, 0, "item 1").unwrap();
+    doc.split_block(&text, 7, NewBlock::new("ordered-list-item"))
+        .unwrap();
+    doc.update_block(&text, 7, NewBlock::new("paragraph"))
+        .unwrap();
+    let text_len = doc.length(&text);
+
+    for i in 0..100 {
+        println!("patching at {}", i + text_len);
+        doc.update_diff_cursor();
+        let mut doc2 = doc.fork();
+        doc2.update_diff_cursor();
+        doc.splice_text(&text, text_len + i, 0, "a").unwrap();
+        let local_diff = doc.diff_incremental();
+        let heads_before = doc2.get_heads();
+        doc2.merge(&mut doc).unwrap();
+        doc2.reset_diff_cursor();
+        let heads_after = doc2.get_heads();
+        let remote_diff = doc2.diff(&heads_before, &heads_after);
+        if (remote_diff != local_diff) {
+            #[cfg(feature = "optree-visualisation")]
+            println!("{}", doc.visualise_optree(None));
+            println!("-------------------------");
+            #[cfg(feature = "optree-visualisation")]
+            println!("{}", doc2.visualise_optree(None));
+        }
+        assert_eq!(local_diff, remote_diff);
+    }
+}
