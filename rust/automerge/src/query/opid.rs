@@ -92,11 +92,11 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
             QueryResult::Descend
         } else {
             match &self.target {
-                SearchTarget::OpId(id, _) if !index.ops.contains(id) => {
-                    self.list_state
-                        .process_node(child, index, osd, Some(&mut self.marks));
-                    QueryResult::Next
-                }
+                //SearchTarget::OpId(id, _) if !index.ops.contains(id) => {
+                    //self.list_state
+                        //.process_node(child, index, osd, Some(&mut self.marks));
+                    //QueryResult::Next
+                //}
                 _ => QueryResult::Descend,
             }
         }
