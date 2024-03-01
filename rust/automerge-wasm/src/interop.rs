@@ -458,6 +458,12 @@ impl From<Vec<ChangeHash>> for AR {
     }
 }
 
+impl From<&[String]> for AR {
+    fn from(value: &[String]) -> Self {
+        AR(value.iter().map(JsValue::from).collect())
+    }
+}
+
 impl From<&[ChangeHash]> for AR {
     fn from(value: &[ChangeHash]) -> Self {
         AR(value
@@ -1390,24 +1396,28 @@ pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatyp
                 TextRepresentation::Array => (Datatype::Text, Array::new().into()),
             },
         },
-        am::Value::Scalar(s) => match s.as_ref() {
-            am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
-            am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
-            am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
-            am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
-            am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
-            am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
-            am::ScalarValue::Timestamp(v) => (
-                Datatype::Timestamp,
-                js_sys::Date::new(&(*v as f64).into()).into(),
-            ),
-            am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
-            am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
-            am::ScalarValue::Unknown { bytes, type_code } => (
-                Datatype::Unknown(*type_code),
-                Uint8Array::from(bytes.as_slice()).into(),
-            ),
-        },
+        am::Value::Scalar(s) => alloc_scalar(s.as_ref())
+    }
+}
+
+fn alloc_scalar(value: &am::ScalarValue) -> (Datatype, JsValue) {
+    match value {
+        am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
+        am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
+        am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
+        am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+        am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
+        am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
+        am::ScalarValue::Timestamp(v) => (
+            Datatype::Timestamp,
+            js_sys::Date::new(&(*v as f64).into()).into(),
+        ),
+        am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
+        am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
+        am::ScalarValue::Unknown { bytes, type_code } => (
+            Datatype::Unknown(*type_code),
+            Uint8Array::from(bytes.as_slice()).into(),
+        ),
     }
 }
 
@@ -1428,11 +1438,11 @@ pub(crate) fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
     result
 }
 
-pub(crate) fn export_spans(spans: Spans<'_>) -> Result<Array, error::SetProp> {
-    spans.map(export_span).collect()
+pub(crate) fn export_spans(doc: &Automerge, cache: ExportCache<'_>, spans: Spans<'_>) -> Result<Array, error::SetProp> {
+    spans.map(|span| export_span(doc, &cache, span)).collect()
 }
 
-pub(crate) fn export_span(span: Span) -> Result<Object, error::SetProp> {
+pub(crate) fn export_span(doc: &Automerge, cache: &ExportCache<'_>, span: Span) -> Result<Object, error::SetProp> {
     match span {
         Span::Text(t, m) => {
             let result = Object::new();
@@ -1457,10 +1467,24 @@ pub(crate) fn export_span(span: Span) -> Result<Object, error::SetProp> {
         Span::Block(b) => {
             let result = Object::new();
             js_set(&result, "type", "block")?;
-            js_set(&result, "value", &JsValue::from(&b))?;
+            js_set(&result, "value", export_block(doc, cache, b)?)?;
             Ok(result)
         }
     }
+}
+
+fn export_block(doc: &Automerge, cache: &ExportCache<'_>, block: am::Block) -> Result<JsValue, error::SetProp> {
+    let result: JsValue = Object::new().into();
+    Reflect::set(&result, &"type".into(), &block.block_type().into()).unwrap();
+    Reflect::set(&result, &"parents".into(), &AR::from(block.parents()).into()).unwrap();
+    let mut attrs = Object::new();
+    for (k, v) in block.attrs() {
+        let (datatype, val) = alloc_scalar(v);
+        let val = doc.export_value((datatype, val), cache).unwrap();
+        Reflect::set(&attrs, &k.into(), &val).unwrap();
+    }
+    Reflect::set(&result, &"attrs".into(), &attrs.into()).unwrap();
+    Ok(result)
 }
 
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(

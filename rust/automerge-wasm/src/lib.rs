@@ -216,14 +216,15 @@ impl Automerge {
         }
     }
 
-    pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
+    pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::GetSpans> {
         let (obj, _) = self.import(obj)?;
         let spans = if let Some(heads) = get_heads(heads)? {
             self.doc.spans_at(&obj, &heads)?
         } else {
             self.doc.spans(&obj)?
         };
-        Ok(interop::export_spans(spans)?)
+        let mut cache = interop::ExportCache::new(self)?;
+        Ok(interop::export_spans(self, cache, spans)?)
     }
 
     pub fn splice(
@@ -1722,6 +1723,26 @@ pub mod error {
 
     impl From<UpdateBlocks> for JsValue {
         fn from(e: UpdateBlocks) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetSpans {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        BadHeads(#[from] interop::error::BadChangeHashes),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Set(#[from] interop::error::SetProp),
+    }
+
+    impl From<GetSpans> for JsValue {
+        fn from(e: GetSpans) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

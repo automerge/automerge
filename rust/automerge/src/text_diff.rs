@@ -161,7 +161,7 @@ struct BlockDiffHook<'a> {
     idx: usize,
 }
 
-#[derive(Debug, Eq, Clone)]
+#[derive(Debug, Clone)]
 enum BlockOrGrapheme {
     Block(Block),
     Grapheme(String),

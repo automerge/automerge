@@ -1,4 +1,5 @@
 use std::borrow::{Borrow, Cow};
+use std::collections::HashMap;
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -155,7 +156,7 @@ pub trait Transactable: ReadDoc {
         -> Result<(), AutomergeError>;
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum BlockOrText<'a> {
     Block(crate::Block),
     Text(Cow<'a, str>),
@@ -170,9 +171,11 @@ impl<'a> BlockOrText<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct NewBlock<'a> {
     pub(crate) block_type: &'a str,
     pub(crate) parents: Vec<String>,
+    pub(crate) attrs: HashMap<&'a str, ScalarValue>,
 }
 
 impl<'a> NewBlock<'a> {
@@ -180,6 +183,7 @@ impl<'a> NewBlock<'a> {
         NewBlock {
             block_type,
             parents: Vec::new(),
+            attrs: HashMap::new(),
         }
     }
 
@@ -190,6 +194,29 @@ impl<'a> NewBlock<'a> {
         NewBlock {
             block_type: self.block_type,
             parents: parents.into_iter().map(|s| s.borrow().to_string()).collect(),
+            attrs: self.attrs,
+        }
+    }
+
+    pub fn with_attr(self, key: &'a str, value: ScalarValue) -> NewBlock<'a> {
+        let mut attrs = self.attrs;
+        attrs.insert(key, value);
+        NewBlock {
+            block_type: self.block_type,
+            parents: self.parents,
+            attrs,
+        }
+    }
+
+    pub fn with_attrs<I: IntoIterator<Item = &'a (String, ScalarValue)>>(self, attrs: I) -> NewBlock<'a> {
+        let mut current_attrs = self.attrs;
+        for (k, v) in attrs.into_iter() {
+            current_attrs.insert(k, v.clone());
+        }
+        NewBlock {
+            block_type: self.block_type,
+            parents: self.parents,
+            attrs: current_attrs,
         }
     }
 }
