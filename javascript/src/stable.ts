@@ -733,7 +733,7 @@ export function save<T>(doc: Doc<T>): Uint8Array {
 }
 
 /**
- * Merge `local` into `remote`
+ * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document
  * @param local - The document to merge changes into
  * @param remote - The document to merge changes from
