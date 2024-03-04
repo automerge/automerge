@@ -10,7 +10,7 @@ use itertools::Itertools;
 
 use crate::clock::Clock;
 use crate::marks::RichText;
-use crate::{Automerge, Cursor, ObjId, Parents, Prop, Value};
+use crate::{Automerge, Block, Cursor, ObjId, Parents, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
@@ -287,7 +287,7 @@ fn load_split_block(
     hidden_blocks: &mut HashSet<crate::types::ObjId>,
     block_obj_id: crate::types::ObjId,
     clock: Option<&Clock>,
-) -> Option<(String, Vec<String>)> {
+) -> Option<Block> {
     hidden_blocks.insert(block_obj_id);
     let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
         return None;
@@ -299,34 +299,6 @@ fn load_split_block(
             hidden_blocks.insert(op.id().into());
         }
     }
-    let block = doc.hydrate_map(&block_obj_id, clock);
-    let crate::hydrate::Value::Map(mut block_map) = block else {
-        tracing::warn!("non map value found for block");
-        return None;
-    };
-    let Some(block_type) = block_map.get("type").cloned() else {
-        tracing::warn!("block type not found");
-        return None;
-    };
-    let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
-        tracing::warn!("block type not a string");
-        return None;
-    };
-    let mut block_parents = vec![];
-    let Some(parents) = block_map.get("parents") else {
-        tracing::warn!("block parents not found");
-        return None;
-    };
-    let crate::hydrate::Value::List(parents) = parents else {
-        tracing::warn!("block parents not a list");
-        return None;
-    };
-    for parent in parents.iter() {
-        let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value else {
-            tracing::warn!("block parent not a string");
-            return None;
-        };
-        block_parents.push(parent.to_string());
-    }
-    Some((block_type.to_string(), block_parents))
+    let block_val = doc.hydrate_map(&block_obj_id, clock);
+    crate::block::hydrate_block(block_val)
 }

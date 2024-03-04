@@ -175,7 +175,7 @@ impl<'a> BlockOrText<'a> {
 pub struct NewBlock<'a> {
     pub(crate) block_type: &'a str,
     pub(crate) parents: Vec<String>,
-    pub(crate) attrs: HashMap<&'a str, ScalarValue>,
+    pub(crate) attrs: HashMap<String, ScalarValue>,
 }
 
 impl<'a> NewBlock<'a> {
@@ -198,9 +198,9 @@ impl<'a> NewBlock<'a> {
         }
     }
 
-    pub fn with_attr(self, key: &'a str, value: ScalarValue) -> NewBlock<'a> {
+    pub fn with_attr(self, key: &str, value: ScalarValue) -> NewBlock<'a> {
         let mut attrs = self.attrs;
-        attrs.insert(key, value);
+        attrs.insert(key.to_string(), value);
         NewBlock {
             block_type: self.block_type,
             parents: self.parents,
@@ -208,15 +208,11 @@ impl<'a> NewBlock<'a> {
         }
     }
 
-    pub fn with_attrs<I: IntoIterator<Item = &'a (String, ScalarValue)>>(self, attrs: I) -> NewBlock<'a> {
-        let mut current_attrs = self.attrs;
-        for (k, v) in attrs.into_iter() {
-            current_attrs.insert(k, v.clone());
-        }
+    pub fn with_attrs(self, attrs: HashMap<String, ScalarValue>) -> NewBlock<'a> {
         NewBlock {
             block_type: self.block_type,
             parents: self.parents,
-            attrs: current_attrs,
+            attrs,
         }
     }
 }

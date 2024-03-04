@@ -8,7 +8,7 @@ import { inspect } from "util"
 describe("Automerge", () => {
   describe("block", () => {
     it("can split a block", () => {
-      const block = { parents: ["div"], type: "p" }
+      const block = { parents: ["div"], type: "p", attrs: {} }
       const callbacks: Automerge.Patch[][] = []
       const patchCallback = (p, _info) => {
         callbacks.push(p)
@@ -26,7 +26,8 @@ describe("Automerge", () => {
         index: 3,
         type: "p",
         cursor: Automerge.getCursor(doc, ["text"], 3),
-        parents: ["div"]
+        parents: ["div"],
+        attrs: {}
       })
       assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
         { type: "text", value: "aaa" },
@@ -49,7 +50,7 @@ describe("Automerge", () => {
   })
 
   it("can join a block", () => {
-    const block = { parents: ["div"], type: "p" }
+    const block = { parents: ["div"], type: "p", attrs: {} }
     const callbacks: Automerge.Patch[][] = []
     const patchCallback = (p, _info) => {
       callbacks.push(p)
@@ -68,11 +69,11 @@ describe("Automerge", () => {
   })
 
   it("emits a single split patch when call diff after splitting a block", () => {
-    const block = { parents: [], type: "ordered-list-item" }
+    const block = { parents: [], type: "ordered-list-item", attrs: {} }
     let doc = Automerge.from({ text: "aaa" })
     doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "paragraph" })
-      Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item" })
+      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "paragraph", attrs: {} })
+      Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: {} })
     })
 
     const headsBefore = Automerge.getHeads(doc)
@@ -86,6 +87,7 @@ describe("Automerge", () => {
       {
         action: "splitBlock",
         path: ["text",3],
+        attrs: {},
         index: 3,
         type: "ordered-list-item",
         cursor: Automerge.getCursor(doc, ["text"], 3),
@@ -97,24 +99,24 @@ describe("Automerge", () => {
   it("allows updating all blocks at once", () => {
     let doc = Automerge.from({text: ""})
     doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item" })
+      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: {} })
       Automerge.splice(d, ["text"], 1, 0, "first thing")
-      Automerge.splitBlock(d, ["text"], 7, { parents: [], type: "ordered-list-item" })
+      Automerge.splitBlock(d, ["text"], 7, { parents: [], type: "ordered-list-item", attrs: {} })
       Automerge.splice(d, ["text"], 8, 0, "second thing")
     })
 
     doc = Automerge.change(doc, d => {
       Automerge.updateBlocks(d, ["text"], [
-        { type: "paragraph", parents: [] },
+        { type: "paragraph", parents: [], attrs: {} },
         "the first thing",
-        { type: "unordered-list-item", parents: ["ordered-list-item"] },
+        { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} },
         "the second thing",
       ])
     })
     assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
-      { type: "block", value: { type: "paragraph", parents: [] } },
+      { type: "block", value: { type: "paragraph", parents: [], attrs: {} } },
       { type: "text", value: "the first thing" },
-      { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"] } },
+      { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} } },
       { type: "text", value: "the second thing" },
     ])
   })

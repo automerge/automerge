@@ -1,9 +1,8 @@
 use crate::{
-    marks::{Mark, RichText},
-    Cursor, ObjId, Prop, Value,
+    marks::{Mark, RichText}, Cursor, ObjId, Prop, ScalarValue, Value
 };
 use core::fmt::Debug;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use crate::sequence_tree::SequenceTree;
 use crate::text_value::TextValue;
@@ -93,6 +92,7 @@ pub enum PatchAction {
         conflict: bool,
         parents: Vec<String>,
         block_type: String,
+        attrs: HashMap<String, ScalarValue>,
     },
     JoinBlock {
         index: usize,
@@ -101,6 +101,7 @@ pub enum PatchAction {
         index: usize,
         new_block_type: Option<String>,
         new_block_parents: Option<Vec<String>>,
+        new_attrs: Option<HashMap<String, ScalarValue>>,
     },
 }
 

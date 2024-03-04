@@ -1,5 +1,5 @@
 //use crate::exid::ExId;
-use crate::{hydrate, Block};
+use crate::Block;
 use crate::marks::{RichText, RichTextStateMachine};
 //use crate::port::HasMetadata;
 use crate::op_set::Op;
@@ -53,7 +53,7 @@ pub(crate) enum SpanInternal {
     Obj(OpId, usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Span {
     Text(String, Option<Arc<RichText>>),
     Block(Block),
@@ -189,7 +189,7 @@ impl<'a> Iterator for Spans<'a> {
                     let value = internal
                         .doc
                         .hydrate_map(&opid.into(), internal.clock.as_ref());
-                    if let Some(block) = hydrate_block(value) {
+                    if let Some(block) = crate::block::hydrate_block(value) {
                         Some(Span::Block(block))
                     } else {
                         tracing::warn!("Failed to hydrate block {:?}", opid);
@@ -200,38 +200,3 @@ impl<'a> Iterator for Spans<'a> {
             })
     }
 }
-
-fn hydrate_block(value: hydrate::Value) -> Option<Block> {
-    let hydrate::Value::Map(mut map) = value else {
-        return None;
-    };
-    let block_type = map.get("block_type")?;
-    let hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
-        return None;
-    };
-    let block_type = block_type.to_string();
-    let parents = map.get("parents")?;
-    let hydrate::Value::List(parents) = parents else {
-        return None;
-    };
-    let parents = parents
-        .iter()
-        .filter_map(|p| match &p.value {
-            hydrate::Value::Scalar(crate::ScalarValue::Str(p)) => Some(p.to_string()),
-            _ => None,
-        })
-        .collect();
-    let attrs = map.get("attrs")?;
-    let hydrate::Value::Map(attrs) = attrs else {
-        return None;
-    };
-    let attrs = attrs
-        .iter()
-        .filter_map(|(k, v)| match &v.value {
-            hydrate::Value::Scalar(v) => Some((k.clone(), v.clone())),
-            _ => None,
-        });
-    Some(Block::new(block_type.to_string()).with_parents(parents).with_attrs(attrs))
-}
-
-

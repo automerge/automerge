@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjMeta, OpId};
-use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc, ScalarValue};
+use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 use crate::{op_tree::OpSetData, types::OpBuilder, Automerge, Change, ChangeHash, Prop};
 
 #[derive(Debug, Clone)]
@@ -792,6 +793,7 @@ impl TransactionInner {
         index: usize,
         block_type: &str,
         parents: PI,
+        attrs: HashMap<smol_str::SmolStr, ScalarValue>,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj, patch_log.text_rep())?;
         if obj.typ != ObjType::Text {
@@ -805,13 +807,14 @@ impl TransactionInner {
         let pos = query.pos();
         let key = query.key()?;
 
-        let (idx, parents_idx) = self.make_block(
+        let (idx, parents_idx, attrs_idx) = self.make_block(
             doc,
             &obj,
             index,
             true,
             block_type,
             parents,
+            attrs.iter().map(|(k, v)| (k.as_str(), v)),
             patch_log.text_rep(),
         )?;
         let block_op_id = *idx.as_op(doc.osd()).id();
@@ -822,7 +825,7 @@ impl TransactionInner {
         Ok(idx.as_op(doc.osd()).exid())
     }
 
-    fn make_block<'p, PI>(
+    fn make_block<'p, 'attr, PI, AI>(
         &mut self,
         doc: &mut Automerge,
         obj: &ObjMeta,
@@ -830,11 +833,13 @@ impl TransactionInner {
         insert: bool,
         block_type: &str,
         block_parents: PI,
+        attrs: AI,
         text_rep: TextRepresentation,
-    ) -> Result<(OpIdx, OpIdx), AutomergeError>
+    ) -> Result<(OpIdx, OpIdx, OpIdx), AutomergeError>
     where
         PI: Iterator,
         PI::Item: Borrow<str>,
+        AI: Iterator<Item=(&'attr str, &'attr ScalarValue)>,
     {
         let action = OpType::Make(ObjType::Map);
 
@@ -882,7 +887,6 @@ impl TransactionInner {
             .load_with_range(block_id, parents_op, &mut self.idx_range);
         doc.ops_mut().insert(0, &block_id, parents_idx);
         let parents_id = crate::types::ObjId::from(parents_idx.as_op(doc.osd()).id());
-
         // insert the parents
         let mut last_parent = None;
         for (index, parent) in block_parents.into_iter().enumerate() {
@@ -903,7 +907,33 @@ impl TransactionInner {
             doc.ops_mut().insert(index, &parents_id, parent_idx);
             last_parent = Some(*parent_idx.as_op(doc.osd()).id());
         }
-        Ok((idx, parents_idx))
+
+        let attrs_op = OpBuilder {
+            id: self.next_id(),
+            action: OpType::Make(ObjType::Map),
+            key: Key::Map(doc.ops_mut().osd.props.cache("attrs".to_string())),
+            insert: false,
+        };
+        let attrs_idx = doc
+            .ops_mut()
+            .load_with_range(block_id, attrs_op, &mut self.idx_range);
+        doc.ops_mut().insert(1, &block_id, attrs_idx);
+        let attrs_id = crate::types::ObjId::from(attrs_idx.as_op(doc.osd()).id());
+        for (k, v) in attrs {
+            let key = Key::Map(doc.ops_mut().osd.props.cache(k.to_string()));
+            let attr_op = OpBuilder {
+                id: self.next_id(),
+                action: OpType::Put(v.clone()),
+                key,
+                insert: false,
+            };
+            let attr_idx =
+                doc.ops_mut()
+                    .load_with_range(attrs_id, attr_op, &mut self.idx_range);
+            doc.ops_mut().insert(0, &attrs_id, attr_idx);
+        }
+
+        Ok((idx, parents_idx, attrs_idx))
     }
 
     pub(crate) fn update_block<PI>(
@@ -914,6 +944,7 @@ impl TransactionInner {
         index: usize,
         block_type: &str,
         parents: PI,
+        attrs: HashMap<smol_str::SmolStr, ScalarValue>,
     ) -> Result<(), AutomergeError>
     where
         PI: Iterator + ExactSizeIterator + Clone,
@@ -945,50 +976,46 @@ impl TransactionInner {
         }
 
         let existing = doc.hydrate_map(&block_obj_id, self.scope.as_ref());
-        let hydrate::Value::Map(mut existing_block) = existing else {
+        let Some(existing) = crate::block::hydrate_block(existing) else {
             tracing::warn!("update_block called on non-block object");
             return Err(AutomergeError::InvalidOp(block_obj_typ));
         };
-        let mut do_update_type = true;
-        if let Some(hydrate::Value::Scalar(ScalarValue::Str(existing_type))) =
-            existing_block.get("type")
-        {
-            if existing_type == block_type {
-                do_update_type = false;
-            }
-        }
-        let mut do_update_parents = true;
-        if let Some(hydrate::Value::List(existing_parents)) = existing_block.get("parents") {
-            let mut all_parents_equal = true;
-            if (existing_parents.len() as usize) != parents.len() {
-                all_parents_equal = false;
+        let do_update_type = existing.block_type() != block_type;
+        let do_update_parents = {
+            if existing.parents().len() != parents.len() {
+                true
             } else {
-                for (old_parent, new_parent) in existing_parents.iter().zip(parents.clone()) {
-                    let hydrate::Value::Scalar(ScalarValue::Str(old_parent)) = &old_parent.value
-                    else {
-                        all_parents_equal = false;
-                        break;
-                    };
-                    if old_parent.as_str() != new_parent.borrow() {
-                        all_parents_equal = false;
-                        break;
-                    }
-                }
+                existing
+                    .parents()
+                    .iter()
+                    .zip(parents.clone())
+                    .any(|(a, b)| a != b.borrow())
             }
-            do_update_parents = !all_parents_equal;
-        }
+        };
 
-        if !(do_update_type || do_update_parents) {
+        let do_update_attrs = {
+            if existing.attrs().len() != attrs.len() {
+                true
+            } else {
+                existing
+                    .attrs()
+                    .iter()
+                    .any(|(k, v)| attrs.get(k.as_str()).map(|a| a != v).unwrap_or(true))
+            }
+        };
+
+        if !(do_update_type || do_update_parents || do_update_attrs) {
             return Ok(());
         }
 
-        let (idx, parents_idx) = self.make_block(
+        let (idx, parents_idx, attrs_idx) = self.make_block(
             doc,
             &text_obj,
             index,
             false,
             block_type,
             parents.clone(),
+            attrs.iter().map(|(k, v)| (k.as_str(), v)),
             patch_log.text_rep(),
         )?;
 
@@ -1012,13 +1039,28 @@ impl TransactionInner {
             None
         };
 
+        let attrs_id = attrs_idx.as_op(doc.osd());
+
+        let new_attrs = if do_update_attrs {
+            Some(
+                attrs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         patch_log.hydrated_update_block(
             &text_obj,
             index,
             block_id.id().into(),
             parents_id.id().into(),
+            attrs_id.id().into(),
             new_parents,
             new_block_type,
+            new_attrs,
         );
         Ok(())
     }

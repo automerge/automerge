@@ -1,6 +1,29 @@
+use std::collections::HashMap;
+
 use automerge::{
     transaction::Transactable, Block, BlockOrText, NewBlock, ObjType, PatchAction, ReadDoc, ROOT,
 };
+use test_log::test;
+
+#[test]
+fn get_block_at_index() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "Hello, World!").unwrap();
+    doc
+        .split_block(
+            &text,
+            5,
+            NewBlock::new("ordered-list-item")
+                .with_parents(["unordered-list-item", "ordered-list-item"].into_iter())
+                .with_attr("key", 1.into()),
+        )
+        .unwrap();
+    let block = doc.block(&text, 5, None).unwrap().unwrap();
+    assert_eq!(block, Block::new("ordered-list-item".to_string()).with_parents(
+        vec!["unordered-list-item".to_string(), "ordered-list-item".to_string()]
+    ).with_attrs([("key".to_string(), 1.into())].into_iter()));
+}
 
 #[test]
 fn split_block_diff_incremental() {
@@ -29,6 +52,7 @@ fn split_block_diff_incremental() {
                 "ordered-list-item".to_string()
             ],
             block_type: "ordered-list-item".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
@@ -61,29 +85,231 @@ fn split_block_diff_full() {
                 "ordered-list-item".to_string()
             ],
             block_type: "ordered-list-item".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
 
 #[test]
 fn split_block_with_attrs() {
-    use automerge::hydrate;
     let mut doc = automerge::AutoCommit::new();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
-    let block = doc
-        .split_block(
-            &text,
-            0,
-            NewBlock::new("ordered-list-item")
-                .with_parents(["unordered-list-item", "ordered-list-item"].into_iter())
-                .with_attr("key", 1.into()),
-        )
-        .unwrap();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
     let mut spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    assert_eq!(spans.len(), 1);
+    assert_eq!(spans.len(), 1, "expected 1 span, got {:?}", spans.len());
     let Some(automerge::iter::Span::Block(b)) = spans.pop() else {
         panic!("expected block span");
     };
+    assert_eq!(
+        b.attrs(),
+        &HashMap::from_iter([("key".to_string(), 1.into())])
+    );
+}
+
+#[test]
+fn split_block_with_attrs_local_patch() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "Hello").unwrap();
+    doc.update_diff_cursor();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
+    let patches = doc.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(
+        patches[0].action,
+        PatchAction::SplitBlock {
+            index: 0,
+            cursor: doc.get_cursor(text, 0, None).unwrap(),
+            conflict: false,
+            parents: vec![],
+            attrs: HashMap::from_iter([("key".to_string(), 1.into())]),
+            block_type: "paragraph".to_string(),
+        }
+    );
+}
+
+#[test]
+fn split_block_with_attrs_remote_patch() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "Hello").unwrap();
+    let mut doc2 = doc.fork();
+    doc2.update_diff_cursor();
+    doc.update_diff_cursor();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
+
+    doc2.update_diff_cursor();
+    let heads_before = doc2.get_heads();
+    doc2.merge(&mut doc).unwrap();
+    let heads_after = doc2.get_heads();
+
+    let patches = doc2.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(
+        patches[0].action,
+        PatchAction::SplitBlock {
+            index: 0,
+            cursor: doc.get_cursor(&text, 0, None).unwrap(),
+            conflict: false,
+            parents: vec![],
+            attrs: HashMap::from_iter([("key".to_string(), 1.into())]),
+            block_type: "paragraph".to_string(),
+        }
+    );
+
+    let remote_patches = doc2.diff(&heads_before, &heads_after);
+    assert_eq!(remote_patches.len(), 1);
+    assert_eq!(
+        remote_patches[0].action,
+        PatchAction::SplitBlock {
+            index: 0,
+            cursor: doc.get_cursor(text, 0, None).unwrap(),
+            conflict: false,
+            parents: vec![],
+            attrs: HashMap::from_iter([("key".to_string(), 1.into())]),
+            block_type: "paragraph".to_string(),
+        }
+    );
+}
+
+#[test]
+fn update_block_attrs() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
+    doc.update_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 2.into()),
+    )
+    .unwrap();
+    let mut spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(spans.len(), 1, "expected 1 span, got {:?}", spans.len());
+    let Some(automerge::iter::Span::Block(b)) = spans.pop() else {
+        panic!("expected block span");
+    };
+    assert_eq!(
+        b.attrs(),
+        &HashMap::from_iter([("key".to_string(), 2.into())])
+    );
+}
+
+#[test]
+fn update_block_attrs_local_patch() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
+    doc.update_diff_cursor();
+
+    let heads_before = doc.get_heads();
+    doc.update_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 2.into()),
+    )
+    .unwrap();
+    let heads_after = doc.get_heads();
+
+    let patches = doc.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(
+        patches[0].action,
+        PatchAction::UpdateBlock {
+            index: 0,
+            new_block_type: None,
+            new_block_parents: None,
+            new_attrs: Some(HashMap::from_iter([("key".to_string(), 2.into())])),
+        }
+    );
+
+    doc.reset_diff_cursor();
+    let full_patches = doc.diff(&heads_before, &heads_after);
+    assert_eq!(full_patches.len(), 1);
+    assert_eq!(
+        full_patches[0].action,
+        PatchAction::UpdateBlock {
+            index: 0,
+            new_block_type: None,
+            new_block_parents: None,
+            new_attrs: Some(HashMap::from_iter([("key".to_string(), 2.into())])),
+        }
+    );
+}
+
+#[test]
+fn update_block_attrs_remote_patch() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 1.into()),
+    )
+    .unwrap();
+
+    let mut doc2 = doc.fork();
+
+    doc.update_block(
+        &text,
+        0,
+        NewBlock::new("paragraph").with_attr("key", 2.into()),
+    )
+    .unwrap();
+
+    let heads_before = doc2.get_heads();
+    doc2.update_diff_cursor();
+    doc2.merge(&mut doc).unwrap();
+    let heads_after = doc2.get_heads();
+
+    let patches = doc2.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(
+        patches[0].action,
+        PatchAction::UpdateBlock {
+            index: 0,
+            new_block_type: None,
+            new_block_parents: None,
+            new_attrs: Some(HashMap::from_iter([("key".to_string(), 2.into())])),
+        }
+    );
+
+    doc2.reset_diff_cursor();
+    let full_patches = doc2.diff(&heads_before, &heads_after);
+    assert_eq!(full_patches.len(), 1);
+    assert_eq!(
+        full_patches[0].action,
+        PatchAction::UpdateBlock {
+            index: 0,
+            new_block_type: None,
+            new_block_parents: None,
+            new_attrs: Some(HashMap::from_iter([("key".to_string(), 2.into())])),
+        }
+    );
 }
 
 #[test]
@@ -227,6 +453,7 @@ fn update_block_type_diff_incremental() {
             index: 5,
             new_block_type: Some("unordered-list-item".to_string()),
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: None,
         }
     );
 }
@@ -253,6 +480,7 @@ fn update_block_type_diff_incremental_add_parent() {
             index: 5,
             new_block_type: None,
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: None,
         }
     );
 }
@@ -287,6 +515,7 @@ fn update_block_type_diff_full() {
             index: 5,
             new_block_type: Some("unordered-list-item".to_string()),
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: None,
         }
     );
 }
@@ -315,6 +544,7 @@ fn splitblock_merge_patches_incremental() {
             conflict: false,
             parents: vec![],
             block_type: "paragraph".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
@@ -346,6 +576,7 @@ fn splitblock_merge_patches_full() {
             conflict: false,
             parents: vec![],
             block_type: "paragraph".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
@@ -378,6 +609,7 @@ fn update_block_merge_patches_incremental() {
             index: 6,
             new_block_type: Some("unordered-list-item".to_string()),
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: None,
         }
     );
 }
@@ -414,6 +646,7 @@ fn update_block_merge_patches_full() {
             index: 6,
             new_block_type: Some("unordered-list-item".to_string()),
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: None,
         }
     );
 }
@@ -489,6 +722,7 @@ fn split_block_at_end_of_document_incremental() {
             conflict: false,
             parents: vec![],
             block_type: "list_item".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
@@ -518,12 +752,13 @@ fn split_block_at_end_of_document_full() {
             conflict: false,
             parents: vec![],
             block_type: "list_item".to_string(),
+            attrs: HashMap::new(),
         }
     );
 }
 
 #[test]
-fn update_blocks_change_block_type() {
+fn update_blocks_change_block_properties() {
     let mut doc = automerge::AutoCommit::new();
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
@@ -542,12 +777,28 @@ fn update_blocks_change_block_type() {
             BlockOrText::Text("item 1".into()),
             BlockOrText::Block(
                 Block::new("unordered-list-item".to_string())
+                    .with_attrs([("key".to_string(), 1.into())].into_iter())
                     .with_parents(vec!["ordered-list-item".to_string()]),
             ),
             BlockOrText::Text("item 2".into()),
         ],
     )
     .unwrap();
+
+    let spans = doc.spans(&text).unwrap().map(|s| match s {
+        automerge::iter::Span::Block(b) => BlockOrText::Block(b),
+        automerge::iter::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
+    }).collect::<Vec<_>>();
+    assert_eq!(spans, vec![
+        BlockOrText::Block(Block::new("paragraph".to_string())),
+        BlockOrText::Text("item 1".into()),
+        BlockOrText::Block(
+            Block::new("unordered-list-item".to_string())
+                .with_attrs([("key".to_string(), 1.into())].into_iter())
+                .with_parents(vec!["ordered-list-item".to_string()]),
+        ),
+        BlockOrText::Text("item 2".into()),
+    ]);
 
     let patches = doc.diff_incremental();
 
@@ -567,6 +818,7 @@ fn update_blocks_change_block_type() {
             index: 0,
             new_block_type: Some("paragraph".to_string()),
             new_block_parents: None,
+            new_attrs: None,
         }
     );
 
@@ -584,8 +836,10 @@ fn update_blocks_change_block_type() {
             index: 7,
             new_block_type: Some("unordered-list-item".to_string()),
             new_block_parents: Some(vec!["ordered-list-item".to_string()]),
+            new_attrs: Some(HashMap::from_iter([("key".to_string(), 1.into())])),
         }
     );
+
 }
 
 #[test]
@@ -598,7 +852,6 @@ fn update_blocks_updates_text() {
     doc.split_block(&text, 12, NewBlock::new("ordered-list-item"))
         .unwrap();
     doc.splice_text(&text, 13, 0, "second thing").unwrap();
-    let spans_before = doc.spans(&text).unwrap().collect::<Vec<_>>();
 
     doc.update_diff_cursor();
 
@@ -623,7 +876,7 @@ fn update_blocks_updates_text() {
     let update_block_patches = patches
         .iter()
         .filter_map(|p| match &p.action {
-            action @ PatchAction::UpdateBlock { .. } => Some(p),
+            PatchAction::UpdateBlock { .. } => Some(p),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -638,14 +891,15 @@ fn update_blocks_updates_text() {
             index: 16,
             new_block_type: Some("paragraph".to_string()),
             new_block_parents: None,
+            new_attrs: None,
         }
     );
 
     let num_splice_or_del_patches = patches
         .iter()
         .filter_map(|p| match &p.action {
-            action @ PatchAction::SpliceText { .. } => Some(p),
-            action @ PatchAction::DeleteSeq { .. } => Some(p),
+            PatchAction::SpliceText { .. } => Some(p),
+            PatchAction::DeleteSeq { .. } => Some(p),
             _ => None,
         })
         .count();
@@ -684,11 +938,15 @@ fn update_blocks_noop() {
     assert_eq!(patches.len(), 0, "expected no patches");
 }
 
-fn print_spans<I: Iterator<Item = automerge::iter::Span>>(spans: I) {
+fn print_spans<'a, I: Iterator<Item = &'a automerge::iter::Span>>(spans: I) {
     for span in spans {
         match span {
             automerge::iter::Span::Block(block) => {
-                println!("block: {:?}, parents: {:?}", block.block_type(), block.parents());
+                println!(
+                    "block: {:?}, parents: {:?}",
+                    block.block_type(),
+                    block.parents()
+                );
             }
             automerge::iter::Span::Text(s, _) => {
                 println!("text: {:?}", s);
@@ -740,18 +998,20 @@ fn print_patches(patches: Vec<automerge::Patch>) {
                 conflict,
                 parents,
                 block_type,
+                attrs,
             } => println!(
-                "split block at {:?} with type {:?} and parents {:?}",
-                index, block_type, parents
+                "split block at {:?} with type {:?} parents {:?}, and attrs: {:?}",
+                index, block_type, parents, attrs
             ),
             PatchAction::JoinBlock { index } => println!("join block at {:?}", index),
             PatchAction::UpdateBlock {
                 index,
                 new_block_type,
                 new_block_parents,
+                new_attrs,
             } => println!(
-                "update block at {:?} with type {:?} and parents {:?}",
-                index, new_block_type, new_block_parents
+                "update block at {:?} with type {:?}, parents {:?}, and attrs: {:?}",
+                index, new_block_type, new_block_parents, new_attrs
             ),
         }
     }
@@ -785,7 +1045,7 @@ fn splice_patch_with_blocks_across_optree_page_boundary() {
         doc2.reset_diff_cursor();
         let heads_after = doc2.get_heads();
         let remote_diff = doc2.diff(&heads_before, &heads_after);
-        if (remote_diff != local_diff) {
+        if remote_diff != local_diff {
             #[cfg(feature = "optree-visualisation")]
             println!("{}", doc.visualise_optree(None));
             println!("-------------------------");
@@ -795,3 +1055,4 @@ fn splice_patch_with_blocks_across_optree_page_boundary() {
         assert_eq!(local_diff, remote_diff);
     }
 }
+
