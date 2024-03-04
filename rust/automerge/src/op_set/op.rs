@@ -312,7 +312,7 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn succ(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.succ_idx().map(|idx| idx.as_opdep(self.osd).succ())
     }
 
@@ -325,7 +325,7 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn pred(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn pred(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.pred_idx().map(|idx| idx.as_opdep(self.osd).pred())
     }
 }
