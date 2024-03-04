@@ -987,6 +987,7 @@ impl Transactable for AutoCommit {
             index,
             args.block_type,
             args.parents.into_iter(),
+            args.attrs.into_iter().map(|(k, v)| (k.into(), v)).collect(),
         )
     }
 
@@ -1014,6 +1015,7 @@ impl Transactable for AutoCommit {
             index,
             args.block_type,
             args.parents.into_iter(),
+            args.attrs.into_iter().map(|(k, v)| (k.into(), v)).collect(),
         )
     }
 

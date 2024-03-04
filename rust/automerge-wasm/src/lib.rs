@@ -367,8 +367,18 @@ impl Automerge {
         args: JsValue,
     ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
-        let SplitBlockArgs { block_type, parents } = JS(args).try_into()?;
-        self.doc.split_block(&obj, index as usize, am::NewBlock::new(&block_type).with_parents(parents))?;
+        let SplitBlockArgs {
+            block_type,
+            parents,
+            attrs,
+        } = interop::import_split_block_args(self, JS(args))?;
+        self.doc.split_block(
+            &obj,
+            index as usize,
+            am::NewBlock::new(&block_type)
+                .with_parents(parents)
+                .with_attrs(attrs),
+        )?;
         Ok(())
     }
 
@@ -380,18 +390,37 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = updateBlocks)]
-    pub fn update_blocks(&mut self, text: JsValue, new_blocks: JsValue) -> Result<(), error::UpdateBlocks> {
+    pub fn update_blocks(
+        &mut self,
+        text: JsValue,
+        new_blocks: JsValue,
+    ) -> Result<(), error::UpdateBlocks> {
         let (text, _) = self.import(text)?;
-        let  UpdateBlocksArgs( blocks ) = JS(new_blocks).try_into()?;
+        let UpdateBlocksArgs(blocks) = interop::import_update_blocks_args(self, JS(new_blocks))?;
         self.doc.update_blocks(&text, blocks)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = updateBlock)]
-    pub fn update_block(&mut self, text: JsValue, index: usize, args: JsValue) -> Result<(), error::UpdateBlock> {
+    pub fn update_block(
+        &mut self,
+        text: JsValue,
+        index: usize,
+        args: JsValue,
+    ) -> Result<(), error::UpdateBlock> {
         let (text, _) = self.import(text)?;
-        let UpdateBlockArgs { block_type, parents } = JS(args).try_into()?;
-        self.doc.update_block(&text, index, am::NewBlock::new(&block_type).with_parents(parents))?;
+        let UpdateBlockArgs {
+            block_type,
+            parents,
+            attrs,
+        } = interop::import_update_block_args(self, JS(args))?;
+        self.doc.update_block(
+            &text,
+            index,
+            am::NewBlock::new(&block_type)
+                .with_parents(parents)
+                .with_attrs(attrs),
+        )?;
         Ok(())
     }
 
@@ -401,15 +430,24 @@ impl Automerge {
         let Some(block) = self.doc.block(&text, index, None)? else {
             return Ok(JsValue::null());
         };
-        
+
         let mut obj = Object::new();
         let block_type = JsValue::from_str(block.block_type());
         let parents = Array::new();
         for parent in block.parents() {
             parents.push(&JsValue::from_str(parent));
         }
+
+        let attrs = Object::new();
+        let cache = interop::ExportCache::new(self).unwrap();
+        for (key, value) in block.attrs() {
+            let alloced = interop::alloc_scalar(value);
+            let value = self.export_value(alloced, &cache)?;
+            js_set(&attrs, key, JsValue::from(value))?;
+        }
         js_set(&obj, "type", block_type)?;
         js_set(&obj, "parents", JsValue::from(parents))?;
+        js_set(&obj, "attrs", JsValue::from(attrs))?;
         Ok(obj.into())
     }
 
@@ -687,7 +725,8 @@ impl Automerge {
         let (value, patches) = self.apply_patches_impl(object, meta)?;
 
         let heads = self.doc.get_heads();
-        let patches = interop::export_patches(self, patches, &heads)?;
+        let cache = interop::ExportCache::new(self)?;
+        let patches = interop::export_patches(self, &cache, patches, &heads)?;
 
         let result = Object::new();
         js_set(&result, "value", value)?;
@@ -739,7 +778,8 @@ impl Automerge {
 
         let patches = self.doc.diff_incremental();
         let heads = self.doc.get_heads();
-        let result = interop::export_patches(self, patches, &heads)?;
+        let cache = interop::ExportCache::new(self).unwrap();
+        let result = interop::export_patches(self, &cache, patches, &heads)?;
         Ok(result)
     }
 
@@ -759,7 +799,8 @@ impl Automerge {
 
         let patches = self.doc.diff(&before, &after);
 
-        Ok(interop::export_patches(self, patches, &after)?)
+        let cache = interop::ExportCache::new(self).unwrap();
+        Ok(interop::export_patches(self, &cache, patches, &after)?)
     }
 
     pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
@@ -1278,11 +1319,13 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 struct SplitBlockArgs {
     block_type: String,
     parents: Vec<String>,
+    attrs: HashMap<String, ScalarValue>,
 }
 
 struct UpdateBlockArgs {
     block_type: String,
     parents: Vec<String>,
+    attrs: HashMap<String, ScalarValue>,
 }
 
 struct UpdateBlocksArgs(Vec<am::BlockOrText<'static>>);
@@ -1703,6 +1746,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         Set(#[from] interop::error::SetProp),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
     }
 
     impl From<GetBlock> for JsValue {
@@ -1746,5 +1791,4 @@ pub mod error {
             RangeError::new(&e.to_string()).into()
         }
     }
-
 }

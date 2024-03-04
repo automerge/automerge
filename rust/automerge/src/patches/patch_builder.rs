@@ -1,12 +1,12 @@
 use core::fmt::Debug;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
 
 use crate::clock::Clock;
 use crate::marks::RichText;
-use crate::{Automerge, Cursor, ObjId, Parents, Prop, Value};
+use crate::{Automerge, Block, Cursor, ObjId, Parents, Prop, ReadDoc, Value};
 
 use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
@@ -253,15 +253,16 @@ impl<'a> PatchBuilder<'a> {
         block_id: crate::types::ObjId,
         elem: crate::types::OpId,
     ) {
-        if let Some((block_type, block_parents)) =
+        if let Some(block) =
             load_split_block(doc, &mut self.block_objs, block_id, created_at)
         {
             let action = PatchAction::SplitBlock {
                 index,
                 cursor: Cursor::new(elem, self.osd),
                 conflict: false,
-                parents: block_parents,
-                block_type,
+                parents: block.parents().to_vec(),
+                block_type: block.block_type().to_string(),
+                attrs: block.attrs().clone(),
             };
             self.finish(parents, obj, action);
         }
@@ -291,14 +292,16 @@ impl<'a> PatchBuilder<'a> {
         let crate::automerge::diff::UpdateBlockDiff {
             new_type,
             new_parents,
+            new_attrs,
             composed_obj_ids,
         } = crate::automerge::diff::load_update_block_diff(index, doc, before_block_id, after_block_id);
         self.block_objs.extend(composed_obj_ids);
-        if new_type.is_some() || new_parents.is_some() {
+        if new_type.is_some() || new_parents.is_some() || new_attrs.is_some() {
             let action = PatchAction::UpdateBlock {
                 index,
                 new_block_type: new_type,
                 new_block_parents: new_parents,
+                new_attrs,
             };
             self.finish(parents, obj, action);
         }
@@ -311,15 +314,19 @@ impl<'a> PatchBuilder<'a> {
         index: usize,
         new_block_id: crate::types::ObjId,
         new_parents_id: crate::types::ObjId,
+        new_attrs_id: crate::types::ObjId,
         new_type: Option<String>,
         new_parents: Option<Vec<String>>,
+        new_attrs: Option<HashMap<String, crate::ScalarValue>>,
     ) {
         self.block_objs.insert(new_block_id);
         self.block_objs.insert(new_parents_id);
+        self.block_objs.insert(new_attrs_id);
         let action = PatchAction::UpdateBlock {
             index,
             new_block_type: new_type,
             new_block_parents: new_parents,
+            new_attrs,
         };
         self.finish(parents, obj, action);
     }
@@ -365,7 +372,7 @@ fn load_split_block(
     hidden_blocks: &mut HashSet<crate::types::ObjId>,
     block_obj_id: crate::types::ObjId,
     clock: Option<&Clock>,
-) -> Option<(String, Vec<String>)> {
+) -> Option<Block> {
     hidden_blocks.insert(block_obj_id);
     let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
         return None;
@@ -377,34 +384,6 @@ fn load_split_block(
             hidden_blocks.insert(op.id().into());
         }
     }
-    let block = doc.hydrate_map(&block_obj_id, clock);
-    let crate::hydrate::Value::Map(mut block_map) = block else {
-        tracing::warn!("non map value found for block");
-        return None;
-    };
-    let Some(block_type) = block_map.get("type").cloned() else {
-        tracing::warn!("block type not found");
-        return None;
-    };
-    let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
-        tracing::warn!("block type not a string");
-        return None;
-    };
-    let mut block_parents = vec![];
-    let Some(parents) = block_map.get("parents") else {
-        tracing::warn!("block parents not found");
-        return None;
-    };
-    let crate::hydrate::Value::List(parents) = parents else {
-        tracing::warn!("block parents not a list");
-        return None;
-    };
-    for parent in parents.iter() {
-        let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value else {
-            tracing::warn!("block parent not a string");
-            return None;
-        };
-        block_parents.push(parent.to_string());
-    }
-    Some((block_type.to_string(), block_parents))
+    let block_val = doc.hydrate_map(&block_obj_id, clock);
+    crate::block::hydrate_block(block_val)
 }

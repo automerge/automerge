@@ -12,7 +12,7 @@ use automerge::{
 };
 use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
 use wasm_bindgen::prelude::*;
@@ -584,123 +584,192 @@ impl TryFrom<JS> for Vec<Capability> {
     }
 }
 
-impl TryFrom<JS> for SplitBlockArgs {
-    type Error = error::InvalidSplitBlockArgs;
+pub(crate) fn import_split_block_args(
+    doc: &Automerge,
+    value: JS,
+) -> Result<SplitBlockArgs, error::InvalidSplitBlockArgs> {
+    let type_val = js_get(&value.0, "type")?.0;
+    if type_val == JsValue::undefined() || type_val == JsValue::null() {
+        return Err(error::InvalidSplitBlockArgs::NoType);
+    }
+    let block_type = type_val
+        .as_string()
+        .ok_or(error::InvalidSplitBlockArgs::TypeNotString)?;
 
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let type_val = js_get(&value.0, "type")?.0;
-        if type_val == JsValue::undefined() || type_val == JsValue::null()
-        {
-            return Err(error::InvalidSplitBlockArgs::NoType);
-        }
-        let block_type = type_val.as_string().ok_or(error::InvalidSplitBlockArgs::TypeNotString)?;
+    let js_parents = js_get(&value.0, "parents")?.0;
+    if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+        return Err(error::InvalidSplitBlockArgs::NoParents);
+    }
 
-        let js_parents = js_get(&value.0, "parents")?.0;
-        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
-            return Err(error::InvalidSplitBlockArgs::NoParents);
-        }
+    let js_parents_arr = js_parents
+        .dyn_into::<Array>()
+        .map_err(|_| error::InvalidSplitBlockArgs::ParentsNotArray)?;
+    let mut parents = Vec::new();
+    for (index, parent) in js_parents_arr.iter().enumerate() {
+        let parent = parent
+            .as_string()
+            .ok_or(error::InvalidSplitBlockArgs::ParentNotString(index))?;
+        parents.push(parent);
+    }
 
-        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
-            error::InvalidSplitBlockArgs::ParentsNotArray
-        })?;
-        let mut parents = Vec::new();
-        for (index, parent) in js_parents_arr.iter().enumerate() {
-            let parent = parent.as_string().ok_or(error::InvalidSplitBlockArgs::ParentNotString(index))?;
-            parents.push(parent);
-        }
+    let js_attrs = js_get(&value.0, "attrs")?.0;
+    if js_attrs == JsValue::undefined() || js_attrs == JsValue::null() {
+        return Err(error::InvalidSplitBlockArgs::NoAttrs);
+    }
+    let js_attrs = js_attrs
+        .dyn_into::<Object>()
+        .map_err(|_| error::InvalidSplitBlockArgs::AttrsNotObject)?;
+    let mut attrs = HashMap::new();
+    for entry in js_sys::Object::entries(&js_attrs).iter() {
+        // entry is a [key, value] pair returned from Object.entries()
+        let entry = entry.dyn_into::<Array>().unwrap();
+        let key = entry.get(0).as_string().unwrap();
+        let value = entry.get(1);
+        let Some(imported_value) = doc.import_scalar(&value, &None) else {
+            return Err(error::InvalidSplitBlockArgs::InvalidAttr(key));
+        };
+        attrs.insert(key, imported_value);
+    }
 
-        Ok(SplitBlockArgs {
-            block_type,
-            parents,
+    Ok(SplitBlockArgs {
+        block_type,
+        parents,
+        attrs,
+    })
+}
+
+pub(crate) fn import_update_block_args(
+    doc: &Automerge,
+    value: JS,
+) -> Result<UpdateBlockArgs, error::InvalidUpdateBlockArgs> {
+    let type_val = js_get(&value.0, "type")?.0;
+    if type_val == JsValue::undefined() || type_val == JsValue::null() {
+        return Err(error::InvalidUpdateBlockArgs::NoType);
+    }
+    let block_type = type_val
+        .as_string()
+        .ok_or(error::InvalidUpdateBlockArgs::TypeNotString)?;
+
+    let js_parents = js_get(&value.0, "parents")?.0;
+    if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+        return Err(error::InvalidUpdateBlockArgs::NoParents);
+    }
+
+    let js_parents_arr = js_parents
+        .dyn_into::<Array>()
+        .map_err(|_| error::InvalidUpdateBlockArgs::ParentsNotArray)?;
+    let mut parents = Vec::new();
+    for (index, parent) in js_parents_arr.iter().enumerate() {
+        let parent = parent
+            .as_string()
+            .ok_or(error::InvalidUpdateBlockArgs::ParentNotString(index))?;
+        parents.push(parent);
+    }
+
+    let js_attrs = js_get(&value.0, "attrs")?.0;
+    if js_attrs == JsValue::undefined() || js_attrs == JsValue::null() {
+        return Err(error::InvalidUpdateBlockArgs::NoAttrs);
+    }
+    let js_attrs = js_attrs
+        .dyn_into::<Object>()
+        .map_err(|_| error::InvalidUpdateBlockArgs::AttrsNotObject)?;
+    let mut attrs = HashMap::new();
+    for entry in js_sys::Object::entries(&js_attrs).iter() {
+        // entry is a [key, value] pair returned from Object.entries()
+        let entry = entry.dyn_into::<Array>().unwrap();
+        let key = entry.get(0).as_string().unwrap();
+        let value = entry.get(1);
+        let Some(imported_value) = doc.import_scalar(&value, &None) else {
+            return Err(error::InvalidUpdateBlockArgs::InvalidAttr(key));
+        };
+        attrs.insert(key, imported_value);
+    }
+
+    Ok(UpdateBlockArgs {
+        block_type,
+        parents,
+        attrs,
+    })
+}
+
+pub(crate) fn import_block_or_text(
+    doc: &Automerge,
+    value: JS,
+) -> Result<am::BlockOrText<'static>, error::InvalidBlockOrText> {
+    if let Some(str_val) = value.as_string() {
+        return Ok(am::BlockOrText::Text(Cow::Owned(str_val)));
+    }
+
+    if !value.0.is_object() {
+        return Err(error::InvalidBlockOrText::NotObjectOrString);
+    }
+    let type_val = js_get(&value.0, "type")?.0;
+    if type_val == JsValue::undefined() || type_val == JsValue::null() {
+        return Err(error::InvalidBlockOrText::NoType);
+    }
+    let block_type = type_val
+        .as_string()
+        .ok_or(error::InvalidBlockOrText::TypeNotString)?;
+
+    let js_parents = js_get(&value.0, "parents")?.0;
+    if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
+        return Err(error::InvalidBlockOrText::NoParents);
+    }
+
+    let js_parents_arr = js_parents
+        .dyn_into::<Array>()
+        .map_err(|_| error::InvalidBlockOrText::ParentsNotArray)?;
+    let mut parents = Vec::new();
+    for (index, parent) in js_parents_arr.iter().enumerate() {
+        let parent = parent
+            .as_string()
+            .ok_or(error::InvalidBlockOrText::ParentNotString(index))?;
+        parents.push(parent);
+    }
+
+    let js_attrs = js_get(&value.0, "attrs")?.0;
+    if js_attrs == JsValue::undefined() || js_attrs == JsValue::null() {
+        return Err(error::InvalidBlockOrText::NoAttrs);
+    }
+    let js_attrs = js_attrs
+        .dyn_into::<Object>()
+        .map_err(|_| error::InvalidBlockOrText::AttrsNotObject)?;
+    let mut attrs = HashMap::new();
+    for entry in js_sys::Object::entries(&js_attrs).iter() {
+        // entry is a [key, value] pair returned from Object.entries()
+        let entry = entry.dyn_into::<Array>().unwrap();
+        let key = entry.get(0).as_string().unwrap();
+        let value = entry.get(1);
+        let Some(imported_value) = doc.import_scalar(&value, &None) else {
+            return Err(error::InvalidBlockOrText::InvalidAttr(key));
+        };
+        attrs.insert(key, imported_value);
+    }
+    Ok(am::BlockOrText::Block(
+        am::Block::new(block_type)
+            .with_parents(parents)
+            .with_attrs(attrs.into_iter()),
+    ))
+}
+
+pub(crate) fn import_update_blocks_args(
+    doc: &Automerge,
+    value: JS,
+) -> Result<UpdateBlocksArgs, error::InvalidUpdateBlocksArgs> {
+    let value = value
+        .0
+        .dyn_into::<Array>()
+        .map_err(|_| error::InvalidUpdateBlocksArgs::NotArray)?;
+    let value = value
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let v = JS(v);
+            import_block_or_text(doc, v)
+                .map_err(|e| error::InvalidUpdateBlocksArgs::InvalidElement(i, e))
         })
-    }
-}
-
-impl TryFrom<JS> for UpdateBlockArgs {
-    type Error = error::InvalidUpdateBlockArgs;
-
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let type_val = js_get(&value.0, "type")?.0;
-        if type_val == JsValue::undefined() || type_val == JsValue::null()
-        {
-            return Err(error::InvalidUpdateBlockArgs::NoType);
-        }
-        let block_type = type_val.as_string().ok_or(error::InvalidUpdateBlockArgs::TypeNotString)?;
-
-        let js_parents = js_get(&value.0, "parents")?.0;
-        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
-            return Err(error::InvalidUpdateBlockArgs::NoParents);
-        }
-
-        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
-            error::InvalidUpdateBlockArgs::ParentsNotArray
-        })?;
-        let mut parents = Vec::new();
-        for (index, parent) in js_parents_arr.iter().enumerate() {
-            let parent = parent.as_string().ok_or(error::InvalidUpdateBlockArgs::ParentNotString(index))?;
-            parents.push(parent);
-        }
-
-        Ok(UpdateBlockArgs {
-            block_type,
-            parents,
-        })
-    }
-}
-
-impl TryFrom<JS> for am::BlockOrText<'static> {
-    type Error = error::InvalidBlockOrText;
-
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        if let Some(str_val) = value.as_string() {
-            return Ok(am::BlockOrText::Text(Cow::Owned(str_val)))
-        }
-
-        if !value.0.is_object() {
-            return Err(error::InvalidBlockOrText::NotObjectOrString);
-        }
-        let type_val = js_get(&value.0, "type")?.0;
-        if type_val == JsValue::undefined() || type_val == JsValue::null()
-        {
-            return Err(error::InvalidBlockOrText::NoType);
-        }
-        let block_type = type_val.as_string().ok_or(error::InvalidBlockOrText::TypeNotString)?;
-
-        let js_parents = js_get(&value.0, "parents")?.0;
-        if js_parents == JsValue::undefined() || js_parents == JsValue::null() {
-            return Err(error::InvalidBlockOrText::NoParents);
-        }
-
-        let js_parents_arr = js_parents.dyn_into::<Array>().map_err(|_| {
-            error::InvalidBlockOrText::ParentsNotArray
-        })?;
-        let mut parents = Vec::new();
-        for (index, parent) in js_parents_arr.iter().enumerate() {
-            let parent = parent.as_string().ok_or(error::InvalidBlockOrText::ParentNotString(index))?;
-            parents.push(parent);
-        }
-        Ok(am::BlockOrText::Block(am::Block::new(block_type).with_parents(parents)))
-    }
-}
-
-impl TryFrom<JS> for UpdateBlocksArgs {
-    type Error = error::InvalidUpdateBlocksArgs;
-
-    fn try_from(value: JS) -> Result<Self, Self::Error> {
-        let value = value
-            .0
-            .dyn_into::<Array>()
-            .map_err(|_| error::InvalidUpdateBlocksArgs::NotArray)?;
-        let value = value
-            .into_iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let v = JS(v);
-                v.try_into().map_err(|e| error::InvalidUpdateBlocksArgs::InvalidElement(i, e))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(UpdateBlocksArgs(value))
-    }
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(UpdateBlocksArgs(value))
 }
 
 pub(crate) fn to_js_err<T: Display>(err: T) -> JsValue {
@@ -1161,7 +1230,8 @@ impl Automerge {
                 let new_text = self.apply_patch_to_text(&s, patch)?;
                 js_set(&current.inner, &prop, &new_text)?;
                 return Ok(root_cache.outer);
-            } else if subval.is_object() {
+            }
+            if subval.is_object() {
                 let subval = subval.dyn_into::<Object>().unwrap();
                 let (cache_hit, cached_obj) = self.unwrap_object(&subval, cache, meta)?;
                 if !cache_hit {
@@ -1396,11 +1466,11 @@ pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatyp
                 TextRepresentation::Array => (Datatype::Text, Array::new().into()),
             },
         },
-        am::Value::Scalar(s) => alloc_scalar(s.as_ref())
+        am::Value::Scalar(s) => alloc_scalar(s.as_ref()),
     }
 }
 
-fn alloc_scalar(value: &am::ScalarValue) -> (Datatype, JsValue) {
+pub(crate) fn alloc_scalar(value: &am::ScalarValue) -> (Datatype, JsValue) {
     match value {
         am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
         am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
@@ -1438,11 +1508,19 @@ pub(crate) fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
     result
 }
 
-pub(crate) fn export_spans(doc: &Automerge, cache: ExportCache<'_>, spans: Spans<'_>) -> Result<Array, error::SetProp> {
+pub(crate) fn export_spans(
+    doc: &Automerge,
+    cache: ExportCache<'_>,
+    spans: Spans<'_>,
+) -> Result<Array, error::SetProp> {
     spans.map(|span| export_span(doc, &cache, span)).collect()
 }
 
-pub(crate) fn export_span(doc: &Automerge, cache: &ExportCache<'_>, span: Span) -> Result<Object, error::SetProp> {
+pub(crate) fn export_span(
+    doc: &Automerge,
+    cache: &ExportCache<'_>,
+    span: Span,
+) -> Result<Object, error::SetProp> {
     match span {
         Span::Text(t, m) => {
             let result = Object::new();
@@ -1473,10 +1551,19 @@ pub(crate) fn export_span(doc: &Automerge, cache: &ExportCache<'_>, span: Span) 
     }
 }
 
-fn export_block(doc: &Automerge, cache: &ExportCache<'_>, block: am::Block) -> Result<JsValue, error::SetProp> {
+fn export_block(
+    doc: &Automerge,
+    cache: &ExportCache<'_>,
+    block: am::Block,
+) -> Result<JsValue, error::SetProp> {
     let result: JsValue = Object::new().into();
     Reflect::set(&result, &"type".into(), &block.block_type().into()).unwrap();
-    Reflect::set(&result, &"parents".into(), &AR::from(block.parents()).into()).unwrap();
+    Reflect::set(
+        &result,
+        &"parents".into(),
+        &AR::from(block.parents()).into(),
+    )
+    .unwrap();
     let mut attrs = Object::new();
     for (k, v) in block.attrs() {
         let (datatype, val) = alloc_scalar(v);
@@ -1489,6 +1576,7 @@ fn export_block(doc: &Automerge, cache: &ExportCache<'_>, block: am::Block) -> R
 
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
     doc: &Automerge,
+    cache: &ExportCache<'_>,
     patches: I,
     heads: &[ChangeHash],
 ) -> Result<Array, error::Export> {
@@ -1498,11 +1586,16 @@ pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
     patches
         .into_iter()
         // removing update block for now
-        .map(|p| export_patch(doc, p, heads))
+        .map(|p| export_patch(doc, cache, p, heads))
         .collect()
 }
 
-fn export_patch(doc: &Automerge, p: Patch, heads: &[ChangeHash]) -> Result<JsValue, error::Export> {
+fn export_patch(
+    doc: &Automerge,
+    cache: &ExportCache<'_>,
+    p: Patch,
+    heads: &[ChangeHash],
+) -> Result<JsValue, error::Export> {
     let result = Object::new();
     let path = &p.path.as_slice();
     match p.action {
@@ -1645,6 +1738,7 @@ fn export_patch(doc: &Automerge, p: Patch, heads: &[ChangeHash]) -> Result<JsVal
             conflict,
             parents,
             block_type,
+            attrs,
         } => {
             js_set(&result, "action", "splitBlock")?;
             js_set(&result, "index", index)?;
@@ -1659,13 +1753,30 @@ fn export_patch(doc: &Automerge, p: Patch, heads: &[ChangeHash]) -> Result<JsVal
                 js_parents.push(&JsValue::from(&p));
             }
             js_set(&result, "parents", js_parents)?;
+
+            let js_attrs = Object::new();
+            for (k, v) in attrs {
+                let (datatype, val) = alloc_scalar(&v);
+                let val = doc.export_value((datatype, val), cache).unwrap();
+                js_set(&js_attrs, &k, &val)?;
+            }
+            js_set(&result, "attrs", js_attrs)?;
             Ok(result.into())
         }
-        PatchAction::UpdateBlock { index, new_block_type, new_block_parents } => {
+        PatchAction::UpdateBlock {
+            index,
+            new_block_type,
+            new_block_parents,
+            new_attrs,
+        } => {
             js_set(&result, "action", "updateBlock")?;
             js_set(&result, "index", index)?;
             js_set(&result, "path", export_path(path, &index.into()))?;
-            js_set(&result, "new_type", new_block_type)?;
+            if let Some(new_type) = new_block_type {
+                js_set(&result, "new_type", new_type)?;
+            } else {
+                js_set(&result, "new_type", JsValue::NULL)?;
+            };
             if let Some(new_parents) = new_block_parents {
                 let new_block_parents = Array::new();
                 for p in new_parents {
@@ -1674,6 +1785,17 @@ fn export_patch(doc: &Automerge, p: Patch, heads: &[ChangeHash]) -> Result<JsVal
                 js_set(&result, "new_parents", new_block_parents)?;
             } else {
                 js_set(&result, "new_parents", JsValue::NULL)?;
+            }
+            if let Some(new_attrs) = new_attrs {
+                let new_block_attrs = Object::new();
+                for (key, value) in new_attrs {
+                    let (datatype, val) = alloc_scalar(&value);
+                    let val = doc.export_value((datatype, val), cache).unwrap();
+                    js_set(&new_block_attrs, &key, &val)?;
+                }
+                js_set(&result, "new_attrs", new_block_attrs)?;
+            } else {
+                js_set(&result, "new_attrs", JsValue::NULL)?;
             }
             Ok(result.into())
         }
@@ -2021,6 +2143,12 @@ pub(crate) mod error {
         NoType,
         #[error("type was not a string")]
         TypeNotString,
+        #[error("no 'attrs' key")]
+        NoAttrs,
+        #[error("'attrs' was not an object")]
+        AttrsNotObject,
+        #[error("attr '{0}' was not a valid scalar value")]
+        InvalidAttr(String),
     }
 
     #[derive(thiserror::Error, Debug)]
@@ -2035,6 +2163,12 @@ pub(crate) mod error {
         ParentNotString(usize),
         #[error("no 'type' key")]
         NoType,
+        #[error("no 'attrs' key")]
+        NoAttrs,
+        #[error("'attrs' was not an object")]
+        AttrsNotObject,
+        #[error("attr '{0}' was not a valid scalar value")]
+        InvalidAttr(String),
         #[error("type was not a string")]
         TypeNotString,
     }
@@ -2055,6 +2189,12 @@ pub(crate) mod error {
         NoType,
         #[error("type was not a string")]
         TypeNotString,
+        #[error("no 'attrs' key")]
+        NoAttrs,
+        #[error("'attrs' was not an object")]
+        AttrsNotObject,
+        #[error("attr '{0}' was not a valid scalar value")]
+        InvalidAttr(String),
     }
 
     #[derive(Debug, thiserror::Error)]

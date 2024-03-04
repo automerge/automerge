@@ -48,12 +48,14 @@ export {
   type MarkRange,
   type MarkValue,
   type AutomergeValue,
+  type BlockAttrValue,
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
 } from "./next_types.js"
 
 import type {
+  BlockAttrValue,
   Cursor,
   Mark,
   MarkSet,
@@ -389,7 +391,7 @@ export function splitBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {type: string, parents: string[]},
+  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -432,7 +434,7 @@ export function updateBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {type: string, parents: string[]},
+  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -453,7 +455,7 @@ export function updateBlock<T>(
 export function updateBlocks<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  blocks: ({type: string, parents: string[]} | string)[],
+  blocks: ({type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}} | string)[],
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")

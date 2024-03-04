@@ -125,8 +125,10 @@ pub(crate) enum Event {
         index: usize,
         new_block_id: crate::types::ObjId,
         new_parents_id: crate::types::ObjId,
+        new_attrs_id: crate::types::ObjId,
         new_parents: Option<Vec<String>>,
         new_block_type: Option<String>,
+        new_attrs: Option<HashMap<String, crate::ScalarValue>>,
     }
 }
 
@@ -379,8 +381,10 @@ impl PatchLog {
         index: usize,
         new_block_id: crate::types::ObjId,
         new_parents_id: crate::types::ObjId,
+        new_attrs_id: crate::types::ObjId,
         new_parents: Option<Vec<String>>,
         new_block_type: Option<String>,
+        new_attrs: Option<HashMap<String, crate::ScalarValue>>,
     ) {
         self.events.push((
             obj.id,
@@ -388,8 +392,10 @@ impl PatchLog {
                 index,
                 new_block_id,
                 new_parents_id,
+                new_attrs_id,
                 new_parents,
                 new_block_type,
+                new_attrs,
             },
         ))
     }
@@ -517,15 +523,17 @@ impl PatchLog {
                         *after_block_id,
                     );
                 }
-                Event::HydratedUpdateBlock{index, new_block_id, new_parents_id, new_parents, new_block_type} => {
+                Event::HydratedUpdateBlock{index, new_block_id, new_parents_id, new_attrs_id, new_parents, new_block_type, new_attrs} => {
                     patch_builder.update_block(
                         parents,
                         exid,
                         *index,
                         *new_block_id,
                         *new_parents_id,
+                        *new_attrs_id,
                         new_block_type.clone(),
                         new_parents.clone(),
+                        new_attrs.clone(),
                     );
                 }
             }
@@ -587,7 +595,7 @@ impl ExposeQueue {
     fn pump_queue(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
         clock: Option<&Clock>,
         text_rep: TextRepresentation,
@@ -602,7 +610,7 @@ impl ExposeQueue {
 
     fn flush_queue(
         &mut self,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
         clock: Option<&Clock>,
         text_rep: TextRepresentation,
@@ -623,7 +631,7 @@ impl ExposeQueue {
     fn flush_obj(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
         clock: Option<&Clock>,
         text_rep: TextRepresentation,

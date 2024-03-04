@@ -205,6 +205,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                             self.idx,
                             b2.block_type(),
                             b2.parents().iter().map(|s| s.as_str()),
+                            b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
                         )?;
                     }
                 }
@@ -265,6 +266,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                         i,
                         b.block_type(),
                         b.parents().iter().map(|s| s.as_str()),
+                        b.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
                     )?;
                     self.idx += 1;
                 }

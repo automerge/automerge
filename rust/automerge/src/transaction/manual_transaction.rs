@@ -460,8 +460,9 @@ impl<'a> Transactable for Transaction<'a> {
     where
         O: AsRef<ExId>
     {
+        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
         self.do_tx(|tx, doc, hist| {
-            tx.split_block(doc, hist, obj.as_ref(), index, args.block_type, args.parents.into_iter())
+            tx.split_block(doc, hist, obj.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
         })
     }
 
@@ -481,8 +482,9 @@ impl<'a> Transactable for Transaction<'a> {
     where
         O: AsRef<ExId>
     {
+        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
         self.do_tx(|tx, doc, hist| {
-            tx.update_block(doc, hist, text.as_ref(), index, args.block_type, args.parents.into_iter())
+            tx.update_block(doc, hist, text.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
         })
     }
 

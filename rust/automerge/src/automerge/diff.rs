@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -311,7 +312,7 @@ pub(crate) fn load_split_block(
     hidden_blocks: &mut HashSet<crate::types::ObjId>,
     block_obj_id: crate::types::ObjId,
     clock: Option<&Clock>,
-) -> Option<(String, Vec<String>)> {
+) -> Option<(String, Vec<String>, HashMap<String, crate::ScalarValue>)> {
     hidden_blocks.insert(block_obj_id);
     let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
         return None;
@@ -352,12 +353,30 @@ pub(crate) fn load_split_block(
         };
         block_parents.push(parent.to_string());
     }
-    Some((block_type.to_string(), block_parents))
+
+    let Some(attrs) = block_map.get("attrs") else {
+        tracing::warn!("block attrs not found");
+        return None;
+    };
+    let mut block_attrs = HashMap::new();
+    let crate::hydrate::Value::Map(attrs) = attrs else {
+        tracing::warn!("block attrs not a map");
+        return None;
+    };
+    for (k, v) in attrs.iter() {
+        let crate::hydrate::Value::Scalar(v) = &v.value else {
+            tracing::warn!("block attr value not a scalar");
+            return None;
+        };
+        block_attrs.insert(k.to_string(), v.clone());
+    };
+    Some((block_type.to_string(), block_parents, block_attrs))
 }
 
 pub(crate) struct UpdateBlockDiff {
     pub(crate) new_type: Option<String>,
     pub(crate) new_parents: Option<Vec<String>>,
+    pub(crate) new_attrs: Option<HashMap<String, crate::ScalarValue>>,
     pub(crate) composed_obj_ids: HashSet<crate::types::ObjId>,
 }
 
@@ -368,17 +387,19 @@ pub(crate) fn load_update_block_diff(
     after_block_id: crate::types::ObjId,
 ) -> UpdateBlockDiff {
     let mut composed_obj_ids = HashSet::new();
-    let Some((type_before, parents_before)) = load_split_block(doc, &mut composed_obj_ids, before_block_id, None) else {
+    let Some((type_before, parents_before, attrs_before)) = load_split_block(doc, &mut composed_obj_ids, before_block_id, None) else {
         return UpdateBlockDiff {
             new_type: None,
             new_parents: None,
+            new_attrs: None,
             composed_obj_ids,
         };
     };
-    let Some((type_after, parents_after)) = load_split_block(doc, &mut composed_obj_ids, after_block_id, None) else {
+    let Some((type_after, parents_after, attrs_after)) = load_split_block(doc, &mut composed_obj_ids, after_block_id, None) else {
         return UpdateBlockDiff {
             new_type: None,
             new_parents: None,
+            new_attrs: None,
             composed_obj_ids,
         };
     };
@@ -395,9 +416,16 @@ pub(crate) fn load_update_block_diff(
         None
     };
 
+    let new_attrs = if attrs_before != attrs_after {
+        Some(attrs_after)
+    } else {
+        None
+    };
+
     UpdateBlockDiff {
         new_type,
         new_parents,
+        new_attrs,
         composed_obj_ids,
     }
 }

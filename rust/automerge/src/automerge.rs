@@ -1484,16 +1484,21 @@ impl Automerge {
             .ops
             .into_iter()
             .last()
-            .map(|op| (op, op.tagged_value(clock.as_ref()))) else {
-                return Err(AutomergeError::InvalidIndex(index));
-            };
+            .map(|op| (op, op.tagged_value(clock.as_ref())))
+        else {
+            return Err(AutomergeError::InvalidIndex(index));
+        };
         let crate::Value::Object(crate::ObjType::Map) = value else {
             return Ok(None);
         };
-        let crate::hydrate::Value::Map(mut block_map) = self.hydrate_map(&ObjId::from(*op.id()), clock.as_ref()) else {
+        let crate::hydrate::Value::Map(mut block_map) =
+            self.hydrate_map(&ObjId::from(*op.id()), clock.as_ref())
+        else {
             return Ok(None);
         };
-        let Some(crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type))) = block_map.get("type") else {
+        let Some(crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type))) =
+            block_map.get("type")
+        else {
             return Ok(None);
         };
         let block_type = block_type.to_string();
@@ -1508,7 +1513,21 @@ impl Automerge {
                 return Ok(None);
             }
         }
-        Ok(Some(crate::Block::new(block_type.to_string()).with_parents(parents)))
+
+        let Some(crate::hydrate::Value::Map(attr_map)) = block_map.get("attrs") else {
+            return Ok(None);
+        };
+        let mut attrs = HashMap::new();
+        for (key, value) in attr_map.iter() {
+            if let crate::hydrate::Value::Scalar(value) = &value.value {
+                attrs.insert(key.to_string(), value.clone());
+            }
+        }
+        Ok(Some(
+            crate::Block::new(block_type.to_string())
+                .with_parents(parents)
+                .with_attrs(attrs.into_iter()),
+        ))
     }
 
     pub(crate) fn get_cursor_for(
@@ -1899,7 +1918,12 @@ impl ReadDoc for Automerge {
             .and_then(|index| self.history.get(*index))
     }
 
-    fn block<O: AsRef<ExId>>(&self, obj: O, index: usize, heads: Option<&[ChangeHash]>) -> Result<Option<crate::Block>, AutomergeError> {
+    fn block<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<Option<crate::Block>, AutomergeError> {
         self.block_for(obj.as_ref(), index, heads.map(|h| self.clock_at(h)))
     }
 }

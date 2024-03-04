@@ -757,7 +757,7 @@ impl Block {
         }
     }
 
-    pub(crate) fn with_attrs<I: Iterator<Item=(String, ScalarValue)>>(self, attrs: I) -> Self {
+    pub fn with_attrs<I: Iterator<Item=(String, ScalarValue)>>(self, attrs: I) -> Self {
         let mut current_attrs = self.attrs;
         for (k, v) in attrs {
             current_attrs.insert(k, v);
