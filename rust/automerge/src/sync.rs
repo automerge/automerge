@@ -578,7 +578,7 @@ impl ChunkList {
         self.0.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> + ExactSizeIterator {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &[u8]> {
         self.0.iter().map(|v| v.as_slice())
     }
 }
