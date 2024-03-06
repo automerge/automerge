@@ -9,7 +9,9 @@ export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
 export type MapObjType = { [key: string]: ObjType | Value }
 export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
-export type Span = { type: "text", value: string } | { type: "block", value: MaterializeValue }
+export type Block = {type: string, parents: string[], attrs: { [key: string]: Value } }
+export type Span = { type: "text", value: string } 
+  | { type: "block", value: Block }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
@@ -173,6 +175,7 @@ export type SplitBlockPatch = {
   index: number,
   type: string,
   parents: string[],
+  attrs: { [key: string]: Value },
 }
 
 export type UpdateBlockPatch = {
