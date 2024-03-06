@@ -225,26 +225,6 @@ impl Automerge {
         }
     }
 
-    /// Remove the current actor from the opset if it has no ops
-    ///
-    /// If the current actor ID has no ops in the opset then remove it from the cache of actor IDs.
-    /// This us used when rolling back a transaction. If the rolled back ops are the only ops for
-    /// the current actor then we want to remove that actor from the opset so it doesn't end up in
-    /// any saved version of the document.
-    ///
-    /// # Panics
-    ///
-    /// If the last actor in the [`OpSet`] is not the actor ID of this document
-    pub(crate) fn rollback_last_actor(&mut self) {
-        if let Actor::Cached(actor_idx) = self.actor {
-            if self.states.get(&actor_idx).is_none() && self.ops.osd.actors.len() > 0 {
-                assert!(self.ops.osd.actors.len() == actor_idx + 1);
-                let actor = self.ops.osd.actors.remove_last();
-                self.actor = Actor::Unused(actor);
-            }
-        }
-    }
-
     /// Set the actor id for this document.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.actor = Actor::Unused(actor);
