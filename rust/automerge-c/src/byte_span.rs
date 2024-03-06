@@ -3,7 +3,8 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::os::raw::c_char;
 
-use libc::{c_int, strlen};
+use std::ffi::c_int;
+use std::ffi::CStr;
 use smol_str::SmolStr;
 
 macro_rules! to_str {
@@ -92,7 +93,7 @@ impl From<*const c_char> for AMbyteSpan {
         if !cs.is_null() {
             Self {
                 src: cs as *const u8,
-                count: unsafe { strlen(cs) },
+                count: unsafe { CStr::from_ptr(cs as *mut i8).to_bytes().len() },
             }
         } else {
             Self::default()

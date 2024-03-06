@@ -15,7 +15,6 @@ doc = false
 [dependencies]
 ${LIBRARY_NAME} = { path = "../${LIBRARY_NAME}" }
 hex = "^0.4.3"
-libc = "^0.2"
 smol_str = "0.2"
 
 [build-dependencies]

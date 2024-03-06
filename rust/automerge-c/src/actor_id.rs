@@ -1,7 +1,7 @@
 use automerge as am;
-use libc::c_int;
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::ffi::c_int;
 use std::str::FromStr;
 
 use crate::byte_span::AMbyteSpan;

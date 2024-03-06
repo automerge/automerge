@@ -15,8 +15,8 @@ doc = false
 [dependencies]
 automerge = { path = "../automerge" }
 hex = "^0.4.3"
-libc = "^0.2"
 smol_str = "0.2"
+getrandom = { version = "^0.2", features = ["js"] }
 
 [build-dependencies]
 cbindgen = "^0.24"
