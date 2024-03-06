@@ -195,8 +195,6 @@ impl TransactionInner {
             }
         }
 
-        doc.rollback_last_actor();
-
         num
     }
 

@@ -44,6 +44,7 @@ where
         self.lookup.get(item).cloned()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.cache.len()
     }
@@ -54,19 +55,6 @@ where
 
     pub(crate) fn safe_get(&self, index: usize) -> Option<&T> {
         self.cache.get(index)
-    }
-
-    /// Remove the last inserted entry into this cache.
-    /// This is safe to do as it does not require reshuffling other entries.
-    ///
-    /// # Panics
-    ///
-    /// Panics on an empty cache.
-    pub(crate) fn remove_last(&mut self) -> T {
-        let last = self.cache.len() - 1;
-        let t = self.cache.remove(last);
-        self.lookup.remove(&t);
-        t
     }
 
     pub(crate) fn sorted(&self) -> IndexedCache<T> {

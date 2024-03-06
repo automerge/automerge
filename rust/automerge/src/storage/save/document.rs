@@ -31,7 +31,9 @@ where
     O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
     let actor_lookup = actors.encode_index();
-    let doc_ops = ops.map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
+    let doc_ops = ops
+        .clone()
+        .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {
@@ -41,8 +43,19 @@ where
         graph: &hash_graph,
     });
 
+    let actors_with_ops = ops.fold(std::collections::HashSet::new(), |mut set, (_obj, op)| {
+        set.extend(op.referenced_actors());
+        set
+    });
+
+    let actors_with_ops = actors
+        .sorted()
+        .into_iter()
+        .filter(|actor| actors_with_ops.contains(actor))
+        .collect::<Vec<_>>();
+
     let doc = Document::new(
-        actors.sorted().cache,
+        actors_with_ops,
         hash_graph.heads_with_indices(heads.to_vec()),
         doc_ops,
         changes,
