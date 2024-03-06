@@ -2,12 +2,13 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     clock::Clock,
-    iter::{Span, SpanInternal, SpansInternal},
+    iter::{SpanInternal, SpansInternal},
     op_tree::OpTreeOpIter,
     text_value::TextValue,
     transaction::TransactionInner,
     Automerge, Block, BlockOrText, ObjId as ExId, PatchLog, ReadDoc,
 };
+mod replace;
 mod myers;
 mod utils;
 
@@ -139,7 +140,7 @@ pub(crate) fn myers_block_diff<'a, 'b, I: IntoIterator<Item = BlockOrText<'b>>>(
     let text_obj_meta = doc.exid_to_obj(text_obj, patch_log.text_rep())?;
     let old = spans_as_grapheme(doc, &text_obj_meta.id, None)?;
     let new = block_or_text_as_grapheme(new.into_iter());
-    let mut hook = BlockDiffHook {
+    let mut hook = replace::Replace::new(BlockDiffHook {
         tx,
         doc,
         patch_log,
@@ -147,7 +148,7 @@ pub(crate) fn myers_block_diff<'a, 'b, I: IntoIterator<Item = BlockOrText<'b>>>(
         idx: 0,
         old: &old,
         new: &new,
-    };
+    });
     myers::diff(&mut hook, &old, 0..old.len(), &new, 0..new.len())
 }
 
@@ -161,22 +162,10 @@ struct BlockDiffHook<'a> {
     idx: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum BlockOrGrapheme {
     Block(Block),
     Grapheme(String),
-}
-
-impl PartialEq<BlockOrGrapheme> for BlockOrGrapheme {
-    fn eq(&self, other: &BlockOrGrapheme) -> bool {
-        match (self, other) {
-            // We return true for blocks and the in `DiffHook::equal` we examine blocks and if
-            // there are any changes we issue an update block. 
-            (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => true,
-            (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Grapheme(g2)) => g1 == g2,
-            _ => false,
-        }
-    }
 }
 
 impl BlockOrGrapheme {
@@ -192,25 +181,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
     type Error = crate::AutomergeError;
 
     fn equal(&mut self, old_index: usize, new_index: usize, len: usize) -> Result<(), Self::Error> {
-        // check if blocks have changed and if so issue update block, just increment index by
-        // character width for characters
         for i in 0..len {
-            match (&self.old[old_index + i], &self.new[new_index + i]) {
-                (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => {
-                    if b1 != b2 {
-                        self.tx.update_block(
-                            self.doc,
-                            self.patch_log,
-                            self.obj,
-                            self.idx,
-                            b2.block_type(),
-                            b2.parents().iter().map(|s| s.as_str()),
-                            b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
-                        )?;
-                    }
-                }
-                _ => {}
-            }
             self.idx += self.old[old_index + i].width();
         }
         Ok(())
@@ -292,8 +263,60 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
     ) -> Result<(), Self::Error> {
         // iterate through the old and new indices, if we're replacing a block with a block, update
         // the block. Otherwise, delete the old and insert the new
-        self.delete(old_index, old_len, new_index)?;
-        self.insert(old_index, new_index, new_len)?;
+        let mut old_idx = old_index;
+        let mut new_idx = new_index;
+        while old_idx < old_index + old_len && new_idx < new_index + new_len {
+            match (&self.old[old_idx], &self.new[new_idx]) {
+                (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => {
+                    if b1 != b2 {
+                        self.tx.update_block(
+                            self.doc,
+                            self.patch_log,
+                            self.obj,
+                            self.idx,
+                            b2.block_type(),
+                            b2.parents().iter().map(|s| s.as_str()),
+                            b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
+                        )?;
+                    }
+                    self.idx += 1;
+                    old_idx += 1;
+                    new_idx += 1;
+                }
+                (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Grapheme(g2)) => {
+                    self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                    self.tx
+                        .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                    self.idx += TextValue::width(g2);
+                    old_idx += 1;
+                    new_idx += 1;
+                }
+                (BlockOrGrapheme::Block(_), BlockOrGrapheme::Grapheme(g2)) => {
+                    self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                    self.tx
+                        .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                    self.idx += TextValue::width(g2);
+                    old_idx += 1;
+                    new_idx += 1;
+                }
+                (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Block(b2)) => {
+                    self.tx.join_block(self.doc, self.patch_log, self.obj, self.idx)?;
+                    self.tx.split_block(
+                        self.doc,
+                        self.patch_log,
+                        self.obj,
+                        self.idx,
+                        b2.block_type(),
+                        b2.parents().iter().map(|s| s.as_str()),
+                        b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
+                    )?;
+                    self.idx += 1;
+                    old_idx += 1;
+                    new_idx += 1;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -336,28 +359,7 @@ fn hydrate_block(
     block_op: crate::types::OpId,
     clock: Option<&Clock>,
 ) -> Option<Block> {
-    use crate::hydrate::{ListValue, Value};
-    let Value::Map(mut block_map) = doc.hydrate_map(&block_op.into(), clock) else {
-        return None;
-    };
-    let Some(Value::Scalar(crate::ScalarValue::Str(block_type))) = block_map.get("type") else {
-        return None;
-    };
-
-    let block = Block::new(block_type.to_string());
-
-    if let Some(Value::List(list)) = block_map.get("parents") {
-        let mut parents = Vec::new();
-        for ListValue { value: parent, .. } in list.iter() {
-            if let Value::Scalar(crate::ScalarValue::Str(parent)) = parent {
-                parents.push(parent.to_string());
-            } else {
-                return Some(block);
-            }
-        }
-        return Some(block.with_parents(parents));
-    }
-    Some(block)
+    crate::block::hydrate_block(doc.hydrate_map(&block_op.into(), clock))
 }
 
 fn block_or_text_as_grapheme<'a, I: Iterator<Item = BlockOrText<'a>>>(
