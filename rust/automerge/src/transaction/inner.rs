@@ -855,7 +855,6 @@ impl TransactionInner {
                 action,
             )?
         } else {
-            println!("making block");
             self.local_list_op(doc, &mut PatchLog::inactive(text_rep), obj, index, action)?
                 .unwrap()
         };
@@ -863,19 +862,32 @@ impl TransactionInner {
         let block_op_id = *idx.as_op(doc.osd()).id();
         let block_id = crate::types::ObjId::from(block_op_id);
 
-        // Now populate the block
-        //
-        // set the "type" key
-        let type_op = OpBuilder {
+        let attrs_op = OpBuilder {
             id: self.next_id(),
-            action: OpType::Put(block_type.into()),
-            key: Key::Map(doc.ops_mut().osd.props.cache("type".to_string())),
+            action: OpType::Make(ObjType::Map),
+            key: Key::Map(doc.ops_mut().osd.props.cache("attrs".to_string())),
             insert: false,
         };
-        let block_type_idx = doc
+        let attrs_idx = doc
             .ops_mut()
-            .load_with_range(block_id, type_op, &mut self.idx_range);
-        doc.ops_mut().insert(0, &block_id, block_type_idx);
+            .load_with_range(block_id, attrs_op, &mut self.idx_range);
+        // TODO: Don't hard code the indices like this, it's very very fragile
+        doc.ops_mut().insert(0, &block_id, attrs_idx);
+        let attrs_id = crate::types::ObjId::from(attrs_idx.as_op(doc.osd()).id());
+        for (k, v) in attrs {
+            let key = Key::Map(doc.ops_mut().osd.props.cache(k.to_string()));
+            let attr_op = OpBuilder {
+                id: self.next_id(),
+                action: OpType::Put(v.clone()),
+                key,
+                insert: false,
+            };
+            let attr_idx =
+                doc.ops_mut()
+                    .load_with_range(attrs_id, attr_op, &mut self.idx_range);
+            doc.ops_mut().insert(0, &attrs_id, attr_idx);
+        }
+
 
         // create the "parents" list
         let parents_op = OpBuilder {
@@ -887,7 +899,7 @@ impl TransactionInner {
         let parents_idx = doc
             .ops_mut()
             .load_with_range(block_id, parents_op, &mut self.idx_range);
-        doc.ops_mut().insert(0, &block_id, parents_idx);
+        doc.ops_mut().insert(1, &block_id, parents_idx);
         let parents_id = crate::types::ObjId::from(parents_idx.as_op(doc.osd()).id());
         // insert the parents
         let mut last_parent = None;
@@ -910,30 +922,20 @@ impl TransactionInner {
             last_parent = Some(*parent_idx.as_op(doc.osd()).id());
         }
 
-        let attrs_op = OpBuilder {
+        // Now populate the block
+        //
+        // set the "type" key
+        let type_op = OpBuilder {
             id: self.next_id(),
-            action: OpType::Make(ObjType::Map),
-            key: Key::Map(doc.ops_mut().osd.props.cache("attrs".to_string())),
+            action: OpType::Put(block_type.into()),
+            key: Key::Map(doc.ops_mut().osd.props.cache("type".to_string())),
             insert: false,
         };
-        let attrs_idx = doc
+        let block_type_idx = doc
             .ops_mut()
-            .load_with_range(block_id, attrs_op, &mut self.idx_range);
-        doc.ops_mut().insert(1, &block_id, attrs_idx);
-        let attrs_id = crate::types::ObjId::from(attrs_idx.as_op(doc.osd()).id());
-        for (k, v) in attrs {
-            let key = Key::Map(doc.ops_mut().osd.props.cache(k.to_string()));
-            let attr_op = OpBuilder {
-                id: self.next_id(),
-                action: OpType::Put(v.clone()),
-                key,
-                insert: false,
-            };
-            let attr_idx =
-                doc.ops_mut()
-                    .load_with_range(attrs_id, attr_op, &mut self.idx_range);
-            doc.ops_mut().insert(0, &attrs_id, attr_idx);
-        }
+            .load_with_range(block_id, type_op, &mut self.idx_range);
+        doc.ops_mut().insert(2, &block_id, block_type_idx);
+
 
         Ok((idx, parents_idx, attrs_idx))
     }

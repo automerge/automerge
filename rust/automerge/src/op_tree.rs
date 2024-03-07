@@ -332,6 +332,8 @@ impl OpTreeInternal {
         let pos = self.binary_search_by(osd, |o| o.key_cmp(op.key()).then_with(|| o.cmp(&op)));
         let mut iter = self.iter();
         let op2 = iter.nth(pos).map(|idx| idx.as_op(osd))?;
+        println!("op: {:?}", op.id());
+        println!("op2: {:?}", op2.id());
         assert_eq!(op, op2);
         let index = 0;
         for e in iter.map(|idx| idx.as_op(osd)) {

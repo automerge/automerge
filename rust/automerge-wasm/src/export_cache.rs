@@ -1,10 +1,12 @@
 use crate::interop::error;
+use crate::interop::ExternalTypeConstructor;
+use crate::interop::ValueContext;
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
 use automerge::ChangeHash;
 use fxhash::FxBuildHasher;
-use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::collections::HashMap;
 use std::ops::RangeFull;
 use wasm_bindgen::prelude::*;
@@ -271,10 +273,8 @@ impl<'a> ExportCache<'a> {
 
     #[inline(never)]
     fn wrap_scalar(&self, value: JsValue, datatype: Datatype) -> Result<JsValue, error::Export> {
-        if let Some(function) = self.doc.external_types.get(&datatype) {
-            let wrapped_value = function
-                .call1(&JsValue::undefined(), &value)
-                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        if let Some(constructor) = self.doc.external_types.get(&datatype) {
+            let wrapped_value = constructor.call(&value, datatype, ValueContext::Value)?;
             let o = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -306,8 +306,8 @@ impl<'a> ExportCache<'a> {
         datatype: Datatype,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        let value = if let Some(function) = self.doc.external_types.get(&datatype) {
-            self.wrap_custom_object(&value, datatype, function)?
+        let value = if let Some(constructor) = self.doc.external_types.get(&datatype) {
+            self.wrap_custom_object(&value, datatype, constructor)?
         } else {
             value
         };
@@ -331,11 +331,9 @@ impl<'a> ExportCache<'a> {
         &self,
         value: &Object,
         datatype: Datatype,
-        function: &Function,
+        constructor: &ExternalTypeConstructor
     ) -> Result<Object, error::Export> {
-        let wrapped_value = function
-            .call1(&JsValue::undefined(), value)
-            .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
         let wrapped_object = wrapped_value
             .dyn_into::<Object>()
             .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;

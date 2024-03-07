@@ -98,7 +98,7 @@ impl From<TextRepresentation> for am::patches::TextRepresentation {
 pub struct Automerge {
     doc: AutoCommit,
     freeze: bool,
-    external_types: HashMap<Datatype, Function>,
+    external_types: HashMap<Datatype, interop::ExternalTypeConstructor>,
     text_rep: TextRepresentation,
 }
 
@@ -442,7 +442,7 @@ impl Automerge {
         let cache = interop::ExportCache::new(self).unwrap();
         for (key, value) in block.attrs() {
             let alloced = interop::alloc_scalar(value);
-            let value = self.export_value(alloced, &cache)?;
+            let value = self.export_value(alloced, &cache, interop::ValueContext::BlockAttr)?;
             js_set(&attrs, key, JsValue::from(value))?;
         }
         js_set(&obj, "type", block_type)?;
@@ -703,7 +703,7 @@ impl Automerge {
     ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
         if let Ok(function) = function.dyn_into::<Function>() {
-            self.external_types.insert(datatype, function);
+            self.external_types.insert(datatype, interop::ExternalTypeConstructor::new(function));
         } else {
             self.external_types.remove(&datatype);
         }

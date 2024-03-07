@@ -934,22 +934,68 @@ pub(crate) fn get_heads(
         .transpose()
 }
 
+/// Where an exported value will be used
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ValueContext {
+    /// This value will be a value in the document
+    Value,
+    /// This value will be an attribute of a block
+    BlockAttr,
+}
+
+impl From<ValueContext> for JsValue {
+    fn from(context: ValueContext) -> Self {
+        match context {
+            ValueContext::Value => JsValue::from_str("value"),
+            ValueContext::BlockAttr => JsValue::from_str("blockAttr"),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ExternalTypeConstructor(Function);
+
+impl ExternalTypeConstructor {
+    pub(crate) fn new(f: Function) -> Self {
+        Self(f)
+    }
+
+    pub(crate) fn call(
+        &self,
+        inner_value: &JsValue,
+        datatype: Datatype,
+        context: ValueContext,
+    ) -> Result<JsValue, error::Export> {
+        let export_args = Object::new();
+        js_set(&export_args, "context", context)?;
+        self.0
+            .call2(&JsValue::undefined(), inner_value, &export_args)
+            .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))
+    }
+}
+
 impl Automerge {
     pub(crate) fn export_value(
         &self,
         (datatype, raw_value): (Datatype, JsValue),
         cache: &ExportCache<'_>,
+        context: ValueContext,
     ) -> Result<JsValue, error::Export> {
         if let Some(function) = self.external_types.get(&datatype) {
-            let wrapped_value = function
-                .call1(&JsValue::undefined(), &raw_value)
-                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
-            if let Ok(o) = wrapped_value.dyn_into::<Object>() {
-                cache.set_raw_data(&o, &raw_value)?;
-                cache.set_datatype(&o, &datatype.into())?;
-                Ok(o.into())
-            } else {
-                Err(error::Export::InvalidDataHandler(datatype.to_string()))
+            let export_args = Object::new();
+            js_set(&export_args, "context", context)?;
+            let wrapped_value = function.call(&raw_value, datatype, context)?;
+            //web_sys::console::log_1(&format!("wrapped_value: {:?}", wrapped_value).into());
+            match wrapped_value.dyn_into::<Object>() {
+                Ok(o) => {
+                    cache.set_raw_data(&o, &raw_value)?;
+                    cache.set_datatype(&o, &datatype.into())?;
+                    Ok(o.into())
+                }
+                Err(val) => match val.dyn_into::<JsString>() {
+                    Ok(s) => Ok(s.into()),
+                    Err(val) => Err(error::Export::InvalidDataHandler(datatype.to_string())),
+                },
             }
         } else {
             Ok(raw_value)
@@ -1030,7 +1076,7 @@ impl Automerge {
             let result = self.wrap_object(&obj, datatype, id, meta, cache)?;
             Ok(result.into())
         } else {
-            self.export_value((datatype, raw_value), cache)
+            self.export_value((datatype, raw_value), cache, ValueContext::Value)
         }
     }
 
@@ -1040,10 +1086,8 @@ impl Automerge {
         datatype: Datatype,
         cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
-        if let Some(function) = self.external_types.get(&datatype) {
-            let wrapped_value = function
-                .call1(&JsValue::undefined(), value)
-                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        if let Some(constructor) = self.external_types.get(&datatype) {
+            let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
             let wrapped_object = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -1062,10 +1106,8 @@ impl Automerge {
         meta: &JsValue,
         cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
-        let value = if let Some(function) = self.external_types.get(&datatype) {
-            let wrapped_value = function
-                .call1(&JsValue::undefined(), value)
-                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        let value = if let Some(constructor) = self.external_types.get(&datatype) {
+            let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
             let wrapped_object = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -1118,7 +1160,11 @@ impl Automerge {
                         js_set(
                             array,
                             index,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
+                            &self.export_value(
+                                alloc(&new_value, self.text_rep),
+                                cache,
+                                ValueContext::Value,
+                            )?,
                         )?;
                         Ok(())
                     } else {
@@ -1191,7 +1237,11 @@ impl Automerge {
                         js_set(
                             map,
                             key,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
+                            &self.export_value(
+                                alloc(&new_value, self.text_rep),
+                                cache,
+                                ValueContext::Value,
+                            )?,
                         )?;
                         Ok(())
                     } else {
@@ -1567,7 +1617,9 @@ fn export_block(
     let mut attrs = Object::new();
     for (k, v) in block.attrs() {
         let (datatype, val) = alloc_scalar(v);
-        let val = doc.export_value((datatype, val), cache).unwrap();
+        let val = doc
+            .export_value((datatype, val), cache, ValueContext::BlockAttr)
+            .unwrap();
         Reflect::set(&attrs, &k.into(), &val).unwrap();
     }
     Reflect::set(&result, &"attrs".into(), &attrs.into()).unwrap();
@@ -1757,7 +1809,9 @@ fn export_patch(
             let js_attrs = Object::new();
             for (k, v) in attrs {
                 let (datatype, val) = alloc_scalar(&v);
-                let val = doc.export_value((datatype, val), cache).unwrap();
+                let val = doc
+                    .export_value((datatype, val), cache, ValueContext::BlockAttr)
+                    .unwrap();
                 js_set(&js_attrs, &k, &val)?;
             }
             js_set(&result, "attrs", js_attrs)?;
@@ -1790,7 +1844,9 @@ fn export_patch(
                 let new_block_attrs = Object::new();
                 for (key, value) in new_attrs {
                     let (datatype, val) = alloc_scalar(&value);
-                    let val = doc.export_value((datatype, val), cache).unwrap();
+                    let val = doc
+                        .export_value((datatype, val), cache, ValueContext::BlockAttr)
+                        .unwrap();
                     js_set(&new_block_attrs, &key, &val)?;
                 }
                 js_set(&result, "new_attrs", new_block_attrs)?;

@@ -1076,4 +1076,3 @@ fn splice_patch_with_blocks_across_optree_page_boundary() {
         assert_eq!(local_diff, remote_diff);
     }
 }
-
