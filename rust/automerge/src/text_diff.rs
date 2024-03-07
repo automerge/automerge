@@ -149,6 +149,15 @@ pub(crate) fn myers_block_diff<'a, 'b, I: IntoIterator<Item = BlockOrText<'b>>>(
         old: &old,
         new: &new,
     });
+    //let mut hook = BlockDiffHook {
+        //tx,
+        //doc,
+        //patch_log,
+        //obj: text_obj,
+        //idx: 0,
+        //old: &old,
+        //new: &new,
+    //};
     myers::diff(&mut hook, &old, 0..old.len(), &new, 0..new.len())
 }
 
@@ -265,11 +274,86 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
         // the block. Otherwise, delete the old and insert the new
         let mut old_idx = old_index;
         let mut new_idx = new_index;
-        while old_idx < old_index + old_len && new_idx < new_index + new_len {
-            match (&self.old[old_idx], &self.new[new_idx]) {
-                (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => {
-                    if b1 != b2 {
-                        self.tx.update_block(
+        while old_idx < old_index + old_len || new_idx < new_index + new_len {
+            let old = if old_idx < old_index + old_len {
+                self.old.get(old_idx)
+            } else {
+                None
+            };
+            let new = if new_idx < new_index + new_len {
+                self.new.get(new_idx)
+            } else {
+                None
+            };
+            match (old, new) {
+                (None, None) => {},
+                (None, Some(val)) => match val {
+                    BlockOrGrapheme::Block(b) => {
+                        self.tx.split_block(
+                            self.doc,
+                            self.patch_log,
+                            self.obj,
+                            self.idx,
+                            b.block_type(),
+                            b.parents().iter().map(|s| s.as_str()),
+                            b.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
+                        )?;
+                        self.idx += 1;
+                        new_idx += 1;
+                    }
+                    BlockOrGrapheme::Grapheme(g) => {
+                        self.tx
+                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g)?;
+                        self.idx += TextValue::width(g);
+                        new_idx += 1;
+                    }
+                },
+                (Some(val), None) => match val {
+                    BlockOrGrapheme::Block(b) => {
+                        self.tx.join_block(self.doc, self.patch_log, self.obj, self.idx)?;
+                        old_idx += 1;
+                    }
+                    BlockOrGrapheme::Grapheme(g) => {
+                        self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                        old_idx += 1;
+                    }
+                },
+                (Some(old), Some(new)) => match (old, new) {
+                    (BlockOrGrapheme::Block(b1), BlockOrGrapheme::Block(b2)) => {
+                        if b1 != b2 {
+                            self.tx.update_block(
+                                self.doc,
+                                self.patch_log,
+                                self.obj,
+                                self.idx,
+                                b2.block_type(),
+                                b2.parents().iter().map(|s| s.as_str()),
+                                b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
+                            )?;
+                        }
+                        self.idx += 1;
+                        old_idx += 1;
+                        new_idx += 1;
+                    }
+                    (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Grapheme(g2)) => {
+                        self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                        self.tx
+                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                        self.idx += TextValue::width(g2);
+                        old_idx += 1;
+                        new_idx += 1;
+                    }
+                    (BlockOrGrapheme::Block(_), BlockOrGrapheme::Grapheme(g2)) => {
+                        self.tx.join_block(self.doc, self.patch_log, self.obj, self.idx)?;
+                        self.tx
+                            .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
+                        self.idx += TextValue::width(g2);
+                        old_idx += 1;
+                        new_idx += 1;
+                    }
+                    (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Block(b2)) => {
+                        self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
+                        self.tx.split_block(
                             self.doc,
                             self.patch_log,
                             self.obj,
@@ -278,41 +362,10 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                             b2.parents().iter().map(|s| s.as_str()),
                             b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
                         )?;
+                        self.idx += 1;
+                        old_idx += 1;
+                        new_idx += 1;
                     }
-                    self.idx += 1;
-                    old_idx += 1;
-                    new_idx += 1;
-                }
-                (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Grapheme(g2)) => {
-                    self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
-                    self.tx
-                        .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
-                    self.idx += TextValue::width(g2);
-                    old_idx += 1;
-                    new_idx += 1;
-                }
-                (BlockOrGrapheme::Block(_), BlockOrGrapheme::Grapheme(g2)) => {
-                    self.tx.delete(self.doc, self.patch_log, self.obj, self.idx)?;
-                    self.tx
-                        .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
-                    self.idx += TextValue::width(g2);
-                    old_idx += 1;
-                    new_idx += 1;
-                }
-                (BlockOrGrapheme::Grapheme(g1), BlockOrGrapheme::Block(b2)) => {
-                    self.tx.join_block(self.doc, self.patch_log, self.obj, self.idx)?;
-                    self.tx.split_block(
-                        self.doc,
-                        self.patch_log,
-                        self.obj,
-                        self.idx,
-                        b2.block_type(),
-                        b2.parents().iter().map(|s| s.as_str()),
-                        b2.attrs().iter().map(|(k, v)| (k.into(), v.clone())).collect(),
-                    )?;
-                    self.idx += 1;
-                    old_idx += 1;
-                    new_idx += 1;
                 }
             }
         }
