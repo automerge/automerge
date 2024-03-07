@@ -938,6 +938,27 @@ fn update_blocks_noop() {
     assert_eq!(patches.len(), 0, "expected no patches");
 }
 
+#[test]
+fn update_blocks_updates_text_and_blocks_at_once() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(&text, 0, NewBlock::new("paragraph"))
+        .unwrap();
+    doc.splice_text(&text, 1, 0, "hello world").unwrap();
+    
+    doc.update_blocks(&text, vec![
+        BlockOrText::Block(Block::new("unordered-list-item".to_string())),
+        BlockOrText::Text("goodbye world".into()),
+    ]).unwrap();
+
+    let spans_after = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(spans_after, vec![
+        automerge::iter::Span::Block(Block::new("unordered-list-item".to_string())),
+        automerge::iter::Span::Text("goodbye world".into(), None),
+    ]);
+
+}
+
 fn print_spans<'a, I: Iterator<Item = &'a automerge::iter::Span>>(spans: I) {
     for span in spans {
         match span {
