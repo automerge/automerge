@@ -121,4 +121,75 @@ describe("Automerge", () => {
     ])
   })
 
+  describe("users strings instead of RawString in block attributes", () => {
+
+    it("when loading blocks", () => {
+      let doc = Automerge.from({text: ""})
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval" } })
+        Automerge.splice(d, ["text"], 1, 0, "first thing")
+      })
+      const block = Automerge.block(doc, ["text"], 0)
+      if (!block) throw new Error("block not found")
+      assert.deepStrictEqual(block.attrs, { "data-foo": "someval" })
+    })
+
+    it("when loading spans", () => {
+      let doc = Automerge.from({text: ""})
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval" } })
+        Automerge.splice(d, ["text"], 1, 0, "first thing")
+      })
+      const spans = Automerge.spans(doc, ["text"])
+      const block = spans[0]
+      if (!(block.type === "block")) throw new Error("block not found")
+      assert.deepStrictEqual(block.value.attrs, { "data-foo": "someval" })
+    })
+
+    it("in splitBlock patches", () => {
+      let doc = Automerge.from({text: ""})
+      const headsBefore = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval"} })
+      })
+      const cursor = Automerge.getCursor(doc, ["text"], 0)
+      const headsAfter = Automerge.getHeads(doc)
+      const diff = Automerge.diff(doc, headsBefore, headsAfter)
+      assert.deepStrictEqual(diff, [
+        {
+          action: "splitBlock",
+          path: ["text",0],
+          attrs: {"data-foo": "someval"},
+          index: 0,
+          type: "ordered-list-item",
+          cursor,
+          parents: []
+        },
+      ])
+    })
+
+    it("in updateBlock patches", () => {
+      let doc = Automerge.from({text: ""})
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval"} })
+      })
+      const headsBefore = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someotherval"} })
+      })
+      const headsAfter = Automerge.getHeads(doc)
+      const diff = Automerge.diff(doc, headsBefore, headsAfter)
+      assert.deepStrictEqual(diff, [
+        {
+          action: "updateBlock",
+          path: ["text",0],
+          index: 0,
+          new_attrs: { "data-foo": "someotherval" },
+          new_type: null,
+          new_parents: null
+        },
+      ])
+    })
+  })
+
 })

@@ -429,12 +429,38 @@ describe('blocks', () => {
         "the second thing",
       ])
       const spansAfter = doc.spans("/text");
+      console.log(JSON.stringify(spansAfter, null, 2))
       assert.deepStrictEqual(spansAfter, [
         {type: "block", value: {type: "paragraph", parents: [], attrs: {kind: "reallytodo"}}},
         {type: "text", value: "the first thing"},
         {type: "block", value: {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {}}},
         {type: "text", value: "the second thing"},
       ])
+    })
+  })
+
+  describe("when registering a datatype", () => {
+    it("should call the register datatype function with a context argument", () => {
+      const doc = create()
+
+      class AttrString {
+        constructor(public value: string) {}
+      }
+
+      doc.registerDatatype("str", (value: string, {context}: {context: string}) => {
+        if (context === "blockAttr") {
+          return new AttrString(value)
+        } else {
+          return value
+        }
+      })
+
+      doc.putObject("_root", "text", "aaabbbccc")
+      doc.splitBlock("/text", 0, {type: "paragraph", parents: [], attrs: {kind: "todo"}});
+
+      const block = doc.getBlock("/text", 0)
+      if (block == null) throw new Error("block is null")
+      assert.deepStrictEqual(block.attrs.kind, new AttrString("todo"))
     })
   })
 })
