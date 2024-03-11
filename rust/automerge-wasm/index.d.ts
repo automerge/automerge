@@ -10,7 +10,7 @@ export type MaterializeValue = { [key:string]: MaterializeValue } | Array<Materi
 export type MapObjType = { [key: string]: ObjType | Value }
 export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
 export type Block = {type: string, parents: string[], attrs: { [key: string]: Value } }
-export type Span = { type: "text", value: string } 
+export type Span = { type: "text", value: string, "marks"?: MarkSet } 
   | { type: "block", value: Block }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
