@@ -56,3 +56,17 @@ fn test_strings_in_lists_are_converted_to_text() {
     let text = loaded.text(obj_id).unwrap();
     assert_eq!(text, "hello");
 }
+
+#[test]
+fn test_does_not_add_size_when_strings_are_not_converted() {
+    let empty_document = AutoCommit::new().save();
+    let mut loaded = AutoCommit::load_with_options(
+        &empty_document,
+        LoadOptions::new().migrate_strings(StringMigration::ConvertToText),
+    )
+    .unwrap();
+
+    let saved_again = loaded.save();
+
+    assert_eq!(empty_document.len(), saved_again.len());
+}

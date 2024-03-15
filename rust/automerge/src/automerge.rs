@@ -1599,12 +1599,16 @@ impl Automerge {
                 _ => {}
             }
         }
-        let mut tx = self.transaction();
-        for Conversion { obj_id, prop, text } in to_convert {
-            let text_id = tx.put_object(obj_id, prop, ObjType::Text)?;
-            tx.splice_text(&text_id, 0, 0, &text)?;
+
+        if !to_convert.is_empty() {
+            let mut tx = self.transaction();
+            for Conversion { obj_id, prop, text } in to_convert {
+                let text_id = tx.put_object(obj_id, prop, ObjType::Text)?;
+                tx.splice_text(&text_id, 0, 0, &text)?;
+            }
+            tx.commit();
         }
-        tx.commit();
+
         Ok(())
     }
 }
