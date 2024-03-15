@@ -183,6 +183,7 @@ skip = [
     # cbindgen, which we only use at build time in automerge-c
     { name = "linux-raw-sys", version = "0.3.8" },
     { name = "rustix", version = "0.37.21" },
+    { name = "heck", version = "0.5.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
