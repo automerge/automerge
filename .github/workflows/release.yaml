@@ -247,3 +247,26 @@ jobs:
           branch: gh-pages
           folder: ./javascript/api-docs
           target-folder: api-docs/js
+
+  publish-c-docs:
+    runs-on: ubuntu-latest
+    # needs:
+    #   - check_if_js_version_upgraded
+    # if: ${{ !contains(needs.check_if_js_version_upgraded.outputs.js_version, '-') }}
+    defaults:
+      run:
+        working-directory: ./c
+    steps:
+      - name: Install doxygen
+        run: sudo apt-get install -y doxygen
+        shell: bash
+      - name: build c documentation with CMake and Doxygen
+        id: build_c_docs
+        run: ./scripts/ci/c-docs
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: ./c/rust/automerge-c/build/docs/html
+          target-folder: api-docs/c
+        
