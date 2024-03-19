@@ -9,6 +9,7 @@ use crate::op_tree::{
     OpTreeInternal, OpsFound,
 };
 use crate::parents::Parents;
+use crate::patches::TextRepresentation;
 use crate::query::{ChangeVisibility, TreeQuery};
 use crate::text_value::TextValue;
 use crate::types::{
@@ -98,23 +99,19 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn iter_obj(&self, obj: &ObjId) -> Option<OpTreeIter<'_>> {
+        self.trees.get(obj).map(|t| t.iter())
+    }
+
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpIter<'_>)> + '_ {
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
+        // TODO
         let mut objs: Vec<_> = self
             .trees
             .iter()
-            .map(|t| {
-                (
-                    t.0,
-                    t.1.objtype,
-                    OpIter {
-                        iter: t.1.iter(),
-                        osd: &self.osd,
-                    },
-                )
-            })
+            .map(|t| (ObjMeta::new(*t.0, t.1.objtype), t.1))
             .collect();
-        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).0, (b.0).0));
+        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).id, (b.0).id));
         IterObjs {
             trees: objs.into_iter(),
         }
@@ -129,17 +126,28 @@ impl OpSetInternal {
             .map(|idx| idx.as_op(&self.osd))
     }
 
-    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+    pub(crate) fn parents(
+        &self,
+        obj: ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<Clock>,
+    ) -> Parents<'_> {
         Parents {
             obj,
             ops: self,
+            text_rep,
             clock,
         }
     }
 
-    pub(crate) fn seek_idx(&self, idx: OpIdx, clock: Option<&Clock>) -> Option<FoundOpId<'_>> {
+    pub(crate) fn seek_idx(
+        &self,
+        idx: OpIdx,
+        text_rep: TextRepresentation,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
         let obj = idx.as_op(&self.osd).obj();
-        let (_typ, encoding) = self.type_and_encoding(obj)?;
+        let (_typ, encoding) = self.type_and_encoding(obj, text_rep)?;
         self.trees
             .get(obj)
             .and_then(|tree| tree.internal.seek_idx(idx, encoding, clock, &self.osd))
@@ -149,21 +157,33 @@ impl OpSetInternal {
         &self,
         obj: &ObjId,
         id: OpId,
+        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        let (_typ, encoding) = self.type_and_encoding(obj)?;
         self.trees
             .get(obj)
             .and_then(|tree| tree.internal.seek_list_opid(id, encoding, clock, &self.osd))
     }
 
-    pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
+    pub(crate) fn parent_object(
+        &self,
+        obj: &ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<&Clock>,
+    ) -> Option<Parent> {
         let idx = self.trees.get(obj)?.parent?;
-        let found = self.seek_idx(idx, clock)?;
+        let found = self.seek_idx(idx, text_rep, clock)?;
         let obj = *found.op.obj();
+        let (typ, encoding) = self.type_and_encoding(&obj, text_rep)?;
         let prop = found.op.map_prop().unwrap_or(Prop::Seq(found.index));
         let visible = found.visible;
-        Some(Parent { obj, prop, visible })
+        Some(Parent {
+            obj,
+            prop,
+            visible,
+            typ,
+            encoding,
+        })
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -254,6 +274,7 @@ impl OpSetInternal {
                             new_vis,
                             op: idx.as_op(&self.osd),
                         },
+                        &self.osd,
                     );
                 }
             }
@@ -275,6 +296,7 @@ impl OpSetInternal {
                         new_vis,
                         op: idx.as_op(&self.osd),
                     },
+                    &self.osd,
                 );
             }
         }
@@ -383,9 +405,13 @@ impl OpSetInternal {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
-    pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
+    pub(crate) fn type_and_encoding(
+        &self,
+        id: &ObjId,
+        text_rep: TextRepresentation,
+    ) -> Option<(ObjType, ListEncoding)> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
-        let encoding = objtype.into();
+        let encoding = text_rep.encoding(objtype);
         Some((objtype, encoding))
     }
 
@@ -447,14 +473,10 @@ impl OpSetInternal {
         &self,
         obj: &ObjId,
         range: R,
+        encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange::new(
-            self.top_ops(obj, clock.clone()),
-            ListEncoding::List,
-            range,
-            clock,
-        )
+        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
     }
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
@@ -491,15 +513,14 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, OpIter<'a>)>,
+    trees: std::vec::IntoIter<(ObjMeta, &'a op_tree::OpTree)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, OpIter<'a>);
+    type Item = (ObjMeta, OpTreeIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees.next()
-        //            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+        self.trees.next().map(|(id, tree)| (id, tree.iter()))
     }
 }
 
@@ -825,8 +846,20 @@ impl OpSetData {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Parent {
     pub(crate) obj: ObjId,
+    pub(crate) typ: ObjType,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
+    pub(crate) encoding: ListEncoding,
+}
+
+impl Parent {
+    pub(crate) fn meta(&self) -> ObjMeta {
+        ObjMeta {
+            id: self.obj,
+            typ: self.typ,
+            encoding: self.encoding,
+        }
+    }
 }
 
 #[cfg(test)]

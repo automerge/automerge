@@ -7,10 +7,11 @@ import { Counter } from "./counter.js"
 import type { Patch } from "@automerge/automerge-wasm"
 export type {
   Cursor,
-  Patch,
+  MapObjType,
   MarkSet,
   Mark,
   MarkRange,
+  Patch,
 } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =

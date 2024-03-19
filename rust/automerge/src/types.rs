@@ -3,6 +3,7 @@ use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -285,6 +286,10 @@ impl OpType {
 
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+    }
+
+    pub(crate) fn is_block(&self) -> bool {
+        &OpType::Make(ObjType::Map) == self
     }
 }
 
@@ -578,6 +583,11 @@ pub(crate) struct ObjMeta {
 }
 
 impl ObjMeta {
+    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
+        let encoding = typ.into();
+        ObjMeta { id, typ, encoding }
+    }
+
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -609,6 +619,8 @@ impl From<Option<ObjType>> for ListEncoding {
     }
 }
 
+// FIXME - this is dangerous - encoding is a combo
+// of ObjType **and** TextRep - this will lead to bugs
 impl From<ObjType> for ListEncoding {
     fn from(obj: ObjType) -> Self {
         if obj == ObjType::Text {
@@ -721,6 +733,54 @@ impl From<Prop> for wasm_bindgen::JsValue {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    block_type: String,
+    parents: Vec<String>,
+    attrs: HashMap<String, ScalarValue>,
+}
+
+impl Block {
+    pub fn new(block_type: String) -> Self {
+        Self {
+            block_type,
+            parents: Vec::new(),
+            attrs: HashMap::new(),
+        }
+    }
+
+    pub fn with_parents(self, parents: Vec<String>) -> Self {
+        Self {
+            parents,
+            ..self
+        }
+    }
+
+    pub fn with_attrs<I: Iterator<Item=(String, ScalarValue)>>(self, attrs: I) -> Self {
+        let mut current_attrs = self.attrs;
+        for (k, v) in attrs {
+            current_attrs.insert(k, v);
+        }
+        Self {
+            attrs: current_attrs,
+            ..self
+        }
+    }
+
+    pub fn block_type(&self) -> &str {
+        &self.block_type
+    }
+
+    pub fn parents(&self) -> &[String] {
+        &self.parents
+    }
+    
+    pub fn attrs(&self) -> &HashMap<String, ScalarValue> {
+        &self.attrs
+    }
+}
+
 
 #[cfg(test)]
 pub(crate) mod gen {

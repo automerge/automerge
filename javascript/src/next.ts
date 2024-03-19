@@ -48,12 +48,14 @@ export {
   type MarkRange,
   type MarkValue,
   type AutomergeValue,
+  type BlockAttrValue,
   type ScalarValue,
   type PatchSource,
   type PatchInfo,
 } from "./next_types.js"
 
 import type {
+  BlockAttrValue,
   Cursor,
   Mark,
   MarkSet,
@@ -76,7 +78,13 @@ export type {
   SyncMessage,
   Heads,
   Cursor,
+  Span,
+  SplitBlockPatch, 
+  JoinBlockPatch,
+  UpdateBlockPatch,
 } from "@automerge/automerge-wasm"
+
+import { type Span } from "@automerge/automerge-wasm"
 
 export type {
   ActorId,
@@ -351,6 +359,115 @@ export function updateText(
     return state.handle.updateText(objPath, newText)
   } catch (e) {
     throw new RangeError(`Cannot updateText: ${e}`)
+  }
+}
+
+export function spans<T>(doc: Doc<T>, path: stable.Prop[]): Span[] {
+  const state = _state(doc, false)
+  const objPath = absoluteObjPath(doc, path, "spans")
+
+  try {
+    return state.handle.spans(objPath, state.heads)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function block<T>(doc: Doc<T>, path: stable.Prop[], index: number | Cursor) {
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
+  const state = _state(doc, false)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    return state.handle.getBlock(objPath, index)
+  } catch (e) {
+    throw new RangeError(`Cannot get block: ${e}`)
+  }
+
+}
+
+export function splitBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.splitBlock(objPath, index, block)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function joinBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "joinBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.joinBlock(objPath, index)
+  } catch (e) {
+    throw new RangeError(`Cannot joinBlock: ${e}`)
+  }
+}
+
+export function updateBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.updateBlock(objPath, index, block)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
+  }
+}
+
+export function updateBlocks<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  blocks: ({type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}} | string)[],
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  try {
+    state.handle.updateBlocks(objPath, blocks)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
   }
 }
 

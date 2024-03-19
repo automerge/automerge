@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use crate::exid::ExId;
-use crate::marks::MarkSet;
+use crate::marks::RichText;
 use crate::types::Clock;
 use crate::types::ListEncoding;
 use crate::value::Value;
@@ -92,11 +92,11 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> ListRangeItem<'a> {
-    pub fn marks(&self) -> Option<&MarkSet> {
+    pub fn marks(&self) -> Option<&RichText> {
         self.marks.as_deref()
     }
 }

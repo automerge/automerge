@@ -1,4 +1,5 @@
-use crate::marks::MarkSet;
+use crate::automerge::diff::load_split_block;
+use crate::marks::RichText;
 pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
 use crate::patches::PatchLog;
@@ -18,7 +19,7 @@ use std::{fmt::Debug, mem};
 mod iter;
 mod node;
 
-pub(crate) use iter::OpTreeIter;
+pub(crate) use iter::{OpTreeIter, OpTreeOpIter};
 #[allow(unused)]
 pub(crate) use node::OpTreeNode;
 pub use node::B;
@@ -95,7 +96,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) succ: Vec<usize>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Arc<RichText>>,
 }
 
 impl<'a> FoundOpWithPatchLog<'a> {
@@ -121,17 +122,22 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         patch_log.mark(obj.id, index, len, &marks);
                     }
                 }
+            // TODO - move this into patch_log()
+            //} else if obj.typ == ObjType::Text && !op.action().is_block() {
             } else if obj.typ == ObjType::Text {
-                patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
+                if op.action().is_block() {
+                    patch_log.split_block(
+                        obj,
+                        None,
+                        self.index,
+                        op.id().into(),
+                        *op.id(),
+                    );
+                } else {
+                    patch_log.splice(obj, self.index, op.as_str(), self.marks.clone());
+                }
             } else {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
-                    false,
-                    self.marks.clone(),
-                );
+                patch_log.insert(obj, self.index, op.value().into(), *op.id(), false);
             }
             return;
         }
@@ -144,15 +150,19 @@ impl<'a> FoundOpWithPatchLog<'a> {
         if op.is_delete() {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
-                    Prop::Map(k) => patch_log.delete_map(obj.id, &k),
+                    Prop::Map(k) => patch_log.delete_map(obj, &k),
                     Prop::Seq(index) => {
-                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
+                        if obj.typ == ObjType::Text && over.block_id().is_some() {
+                            patch_log.join_block(obj, over.block_id().unwrap().into(), self.index)
+                        } else {
+                            patch_log.delete_seq(obj, index, over.width(obj.encoding))
+                        }
                     }
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
                     patch_log.put(
-                        obj.id,
+                        obj,
                         &key,
                         before.value().into(),
                         *before.id(),
@@ -166,7 +176,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
             if self.after.is_none() {
                 if let Some(counter) = self.overwritten {
                     if pred.overwrites(counter.id()) {
-                        patch_log.increment(obj.id, &key, value, *op.id());
+                        patch_log.increment(obj, &key, value, *op.id());
                     }
                 }
             }
@@ -177,20 +187,25 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
-                    conflict,
-                    None,
-                );
+                patch_log.insert(obj, self.index, op.value().into(), *op.id(), conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
-                    patch_log.flag_conflict(obj.id, &key);
+                    patch_log.flag_conflict(obj, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.value().into(), *op.id(), conflict, false);
+                if obj.typ == ObjType::Text && op.action().is_block() {
+                    if let Some(before_block_id) = self.overwritten.map(|b| *b.id()) {
+                        let after_block_id = *op.id();
+                        patch_log.update_block(
+                            obj,
+                            self.index,
+                            before_block_id.into(),
+                            after_block_id.into(),
+                        )
+                    }
+                } else {
+                    patch_log.put(obj, &key, op.value().into(), *op.id(), conflict, false);
+                }
             }
         }
     }
@@ -255,7 +270,7 @@ impl OpTreeInternal {
         pred: &OpIds,
         mut pos: usize,
         index: usize,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Arc<RichText>>,
     ) -> FoundOpWithPatchLog<'a> {
         let mut iter = self.iter();
         let mut found = None;
@@ -317,6 +332,8 @@ impl OpTreeInternal {
         let pos = self.binary_search_by(osd, |o| o.key_cmp(op.key()).then_with(|| o.cmp(&op)));
         let mut iter = self.iter();
         let op2 = iter.nth(pos).map(|idx| idx.as_op(osd))?;
+        println!("op: {:?}", op.id());
+        println!("op2: {:?}", op2.id());
         assert_eq!(op, op2);
         let index = 0;
         for e in iter.map(|idx| idx.as_op(osd)) {
@@ -586,9 +603,9 @@ impl OpTreeInternal {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>) {
+    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>, osd: &OpSetData) {
         if self.len() > index {
-            self.root_node.as_mut().unwrap().update(index, vis);
+            self.root_node.as_mut().unwrap().update(index, vis, osd);
         }
     }
 

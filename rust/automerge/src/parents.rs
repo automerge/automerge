@@ -1,6 +1,7 @@
 use crate::op_set;
 use crate::op_set::OpSet;
-use crate::types::ObjId;
+use crate::patches::TextRep;
+use crate::types::{ObjId, ObjType};
 use crate::{clock::Clock, exid::ExId, Prop};
 
 /// An iterator over the "parents" of an object
@@ -11,9 +12,10 @@ use crate::{clock::Clock, exid::ExId, Prop};
 /// have reached the root of the document.
 ///
 /// This is returned by [`crate::ReadDoc::parents`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
+    pub(crate) text_rep: TextRep,
     pub(crate) ops: &'a OpSet,
     pub(crate) clock: Option<Clock>,
 }
@@ -33,7 +35,10 @@ impl<'a> Parents<'a> {
     /// Like `path` but returns `None` if the target is not visible
     pub fn visible_path(self) -> Option<Vec<(ExId, Prop)>> {
         let mut path = Vec::new();
-        for Parent { obj, prop, visible } in self {
+        for Parent {
+            obj, prop, visible, ..
+        } in self
+        {
             if !visible {
                 return None;
             }
@@ -51,11 +56,23 @@ impl<'a> Iterator for Parents<'a> {
         if self.obj.is_root() {
             return None;
         }
-        let op_set::Parent { obj, prop, visible } =
-            self.ops.parent_object(&self.obj, self.clock.as_ref())?;
+        let op_set::Parent {
+            obj,
+            typ,
+            prop,
+            visible,
+            ..
+        } = self
+            .ops
+            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())?;
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);
-        Some(Parent { obj, prop, visible })
+        Some(Parent {
+            obj,
+            typ,
+            prop,
+            visible,
+        })
     }
 }
 
@@ -64,6 +81,8 @@ impl<'a> Iterator for Parents<'a> {
 pub struct Parent {
     /// The object ID this component refers to
     pub obj: ExId,
+    /// The type of the parent object
+    pub typ: ObjType,
     /// The property within `obj` this component refers to
     pub prop: Prop,
     /// Whether this component is "visible"
@@ -77,7 +96,7 @@ pub struct Parent {
 #[cfg(test)]
 mod tests {
     use super::Parent;
-    use crate::{transaction::Transactable, Prop, ReadDoc};
+    use crate::{transaction::Transactable, ObjType, Prop, ReadDoc};
 
     #[test]
     fn test_invisible_parents() {
@@ -102,11 +121,13 @@ mod tests {
                     obj: crate::ROOT,
                     prop: Prop::Map("list".to_string()),
                     visible: true,
+                    typ: ObjType::Map,
                 },
                 Parent {
                     obj: list,
                     prop: Prop::Seq(0),
                     visible: false,
+                    typ: ObjType::List,
                 },
             ]
         );

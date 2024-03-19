@@ -1,9 +1,8 @@
 use crate::{
-    marks::{Mark, MarkSet},
-    ObjId, Prop, Value,
+    marks::{Mark, RichText}, Cursor, ObjId, Prop, ScalarValue, Value
 };
 use core::fmt::Debug;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
 use crate::sequence_tree::SequenceTree;
 use crate::text_value::TextValue;
@@ -53,8 +52,6 @@ pub enum PatchAction {
         /// The values that were inserted, in order that they appear. As with [`Self::PutMap`] and
         /// [`Self::PutSeq`] the object ID is only meaningful for `Value::Obj` values
         values: SequenceTree<(Value<'static>, ObjId, bool)>,
-        /// All marks currently active for these values
-        marks: Option<MarkSet>,
     },
     /// Some text was spliced into a text object
     SpliceText {
@@ -62,7 +59,7 @@ pub enum PatchAction {
         /// The text that was inserted
         value: TextValue,
         /// All marks currently active for this span of text
-        marks: Option<MarkSet>,
+        marks: Option<RichText>,
     },
     /// A counter was incremented
     Increment {
@@ -77,11 +74,35 @@ pub enum PatchAction {
         prop: Prop,
     },
     /// A key was deleted from a map
-    DeleteMap { key: String },
+    DeleteMap {
+        key: String,
+    },
     /// One or more indices were removed from a sequence
-    DeleteSeq { index: usize, length: usize },
+    DeleteSeq {
+        index: usize,
+        length: usize,
+    },
     /// Some marks within a text object were added or removed
-    Mark { marks: Vec<Mark<'static>> },
+    Mark {
+        marks: Vec<Mark<'static>>,
+    },
+    SplitBlock {
+        index: usize,
+        cursor: Cursor,
+        conflict: bool,
+        parents: Vec<String>,
+        block_type: String,
+        attrs: HashMap<String, ScalarValue>,
+    },
+    JoinBlock {
+        index: usize,
+    },
+    UpdateBlock {
+        index: usize,
+        new_block_type: Option<String>,
+        new_block_parents: Option<Vec<String>>,
+        new_attrs: Option<HashMap<String, ScalarValue>>,
+    },
 }
 
 impl fmt::Display for PatchAction {

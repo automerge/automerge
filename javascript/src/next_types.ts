@@ -7,6 +7,7 @@ export {
   Uint,
   Float64,
   type Patch,
+  type MapObjType,
   type PatchCallback,
   type Mark,
   type MarkSet,
@@ -35,3 +36,6 @@ export type ScalarValue =
   | Counter
   | Uint8Array
   | RawString
+
+export type BlockAttrValue = 
+  string | number | boolean | null | Date | Uint8Array

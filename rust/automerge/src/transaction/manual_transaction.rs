@@ -1,8 +1,11 @@
+use std::borrow::Borrow;
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::{hydrate, NewBlock};
+use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::marks::{ExpandMark, Mark, RichText};
 use crate::patches::PatchLog;
 use crate::types::Clock;
 use crate::AutomergeError;
@@ -203,6 +206,19 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -236,12 +252,20 @@ impl<'a> ReadDoc for Transaction<'a> {
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate(obj, heads)
+    }
+
     fn get_marks<O: AsRef<ExId>>(
         &self,
         obj: O,
         index: usize,
         heads: Option<&[ChangeHash]>,
-    ) -> Result<MarkSet, AutomergeError> {
+    ) -> Result<RichText, AutomergeError> {
         self.doc
             .get_marks_for(obj.as_ref(), index, self.get_scope(heads))
     }
@@ -303,6 +327,16 @@ impl<'a> ReadDoc for Transaction<'a> {
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
+    }
+
+    fn block<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        index: usize,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<Option<crate::types::Block>, AutomergeError> {
+        self.doc
+            .block_for(obj.as_ref(), index, self.get_scope(heads))
     }
 }
 
@@ -417,6 +451,43 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
+    fn split_block<'p, O>(
+        &mut self,
+        obj: O,
+        index: usize,
+        args: crate::transaction::NewBlock<'p>,
+    ) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>
+    {
+        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+        self.do_tx(|tx, doc, hist| {
+            tx.split_block(doc, hist, obj.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
+        })
+    }
+
+    fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
+    }
+
+    fn update_block<'p, O>(
+        &mut self,
+        text: O,
+        index: usize,
+        args: NewBlock<'p>,
+    ) -> Result<(), AutomergeError>
+    where
+        O: AsRef<ExId>
+    {
+        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+        self.do_tx(|tx, doc, hist| {
+            tx.update_block(doc, hist, text.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
+        })
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner
             .as_ref()
@@ -430,6 +501,16 @@ impl<'a> Transactable for Transaction<'a> {
         new_text: S,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
+    }
+
+    fn update_blocks<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(move |tx, doc, hist| {
+            crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text)
+        })
     }
 }
 

@@ -7,7 +7,13 @@ export type Hash = string;
 export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
-export type ObjType = string | Array<ObjType | Value> | { [key: string]: ObjType | Value }
+export type MapObjType = { [key: string]: ObjType | Value }
+export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
+export type Block = {type: string, parents: string[], attrs: { [key: string]: Value } }
+export type Span = { type: "text", value: string, "marks"?: MarkSet } 
+  | { type: "block", value: Block }
+export type ListObjType = Array<ObjType | Value>
+export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -97,7 +103,7 @@ export type Op = {
 }
 
 export type PatchValue = string | number | boolean | null | Date | Uint8Array | {} | []
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch | SplitBlockPatch | UpdateBlockPatch | JoinBlockPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -146,6 +152,7 @@ export type SpliceTextPatch = {
   action: 'splice'
   path: Prop[],
   value: string,
+  block?: { parents: string[], type: string }
   marks?: MarkSet,
 }
 
@@ -160,6 +167,30 @@ export type InsertPatch = {
 export type ConflictPatch = {
   action: 'conflict'
   path: Prop[],
+}
+
+export type SplitBlockPatch = {
+  action: 'splitBlock'
+  path: Prop[],
+  index: number,
+  type: string,
+  parents: string[],
+  attrs: { [key: string]: Value },
+}
+
+export type UpdateBlockPatch = {
+  action: 'updateBlock'
+  path: Prop[],
+  index: number,
+  new_type: string | null,
+  new_parents: string[] | null,
+  new_attrs: { [key: string]: string | Value } | null,
+}
+
+export type JoinBlockPatch = {
+  action: 'joinBlock'
+  path: Prop[],
+  index: number,
 }
 
 export type Mark = {
@@ -214,6 +245,13 @@ export class Automerge {
   marks(obj: ObjID, heads?: Heads): Mark[];
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
+  // blocks
+  splitBlock(obj: ObjID, index: number, block: {type: string, parents: string[], attrs: {[key: string]: Value}}): void;
+  joinBlock(obj: ObjID, index: number) : void;
+  updateBlock(obj: ObjID, index: number, block: {type: string, parents: string[], attrs: {[key: string]: Value}}): void;
+  updateBlocks(obj: ObjID, newBlocks: ({type: string, parents: string[], attrs: {[key: string]: Value}} | string)[]): void;
+  getBlock(obj: ObjID, index: number): {type: string, parents: string[], attrs: {[key: string]: Value}} | null;
+
   diff(before: Heads, after: Heads): Patch[];
 
   // text cursor
@@ -229,8 +267,10 @@ export class Automerge {
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
+  objInfo(obj: ObjID, heads?: Heads): ObjInfo;
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
+  spans(obj: ObjID, heads?: Heads): Span[];
   length(obj: ObjID, heads?: Heads): number;
   materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
