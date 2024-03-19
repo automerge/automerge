@@ -1,3 +1,11 @@
+# 0.5.8
+
+* Fix a bug where the logic to rollback a transaction on error could panic
+* Fix a bug where marks were calculated incorrectly when viewing a document at
+  a particular set of heads (i.e. not the "current" heads)
+* Update the `LoadOptions::migrate_strings` logic to no-op if there are no
+  strings to convert
+
 # 0.5.7
 
 * Update itertools dependency to 0.12.0
