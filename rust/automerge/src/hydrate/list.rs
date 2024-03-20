@@ -38,7 +38,7 @@ impl List {
                 }
                 Ok(())
             }
-            PatchAction::DeleteSeq { index, length } => {
+            PatchAction::DeleteSeq { index, length, .. } => {
                 for _ in 0..length {
                     self.0.remove(index);
                 }

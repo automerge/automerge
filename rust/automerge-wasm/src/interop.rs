@@ -722,6 +722,21 @@ pub(crate) fn import_obj(
     }
 }
 
+pub(crate) struct TextRange(pub(crate) am::TextRange);
+
+impl TryFrom<&JsValue> for TextRange {
+    type Error = error::BadTextRange;
+
+    fn try_from(js: &JsValue) -> Result<Self, Self::Error> {
+        if let Some(s) = js.as_string() {
+            if let Ok(range) = am::TextRange::try_from(s.as_str()) {
+                return Ok(Self(range));
+            }
+        }
+        Err(error::BadTextRange::InvalidTextRange)
+    }
+}
+
 pub(crate) fn get_heads(
     heads: Option<Array>,
 ) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
@@ -1283,8 +1298,27 @@ pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatyp
     }
 }
 
-pub(crate) struct JsPatch(pub(crate) Patch);
 pub(crate) struct JsPatches(pub(crate) Vec<Patch>);
+pub(crate) struct JsPatch<'a, T: PatAttr + PartialEq>(pub(crate) am::PatchWithAttribution<'a, T>);
+pub(crate) struct JsPatchesWithAttr<'a>(pub(crate) Vec<am::PatchWithAttribution<'a, JsValue>>);
+
+pub(crate) trait PatAttr {
+    fn js_set(_o: &Object, _attribute: Option<&Self>) -> Result<bool, error::SetProp> {
+        Ok(true)
+    }
+}
+
+impl PatAttr for am::patches::NoAttribution {}
+
+impl PatAttr for JsValue {
+    fn js_set(o: &Object, attribute: Option<&Self>) -> Result<bool, error::SetProp> {
+        if let Some(a) = attribute {
+            js_set(o, "attr", a)
+        } else {
+            js_set(o, "attr", &JsValue::undefined())
+        }
+    }
+}
 
 fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     let result = Array::new();
@@ -1303,12 +1337,13 @@ fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
     result
 }
 
-impl TryFrom<JsPatch> for JsValue {
+impl<'a, T: PatAttr + PartialEq> TryFrom<JsPatch<'a, T>> for JsValue {
     type Error = error::Export;
 
-    fn try_from(p: JsPatch) -> Result<Self, Self::Error> {
+    fn try_from(p: JsPatch<'a, T>) -> Result<Self, Self::Error> {
         let result = Object::new();
         let path = &p.0.path.as_slice();
+        let attribute = p.0.attribute;
         match p.0.action {
             PatchAction::PutMap {
                 key,
@@ -1390,7 +1425,6 @@ impl TryFrom<JsPatch> for JsValue {
                 index,
                 value,
                 marks,
-                ..
             } => {
                 js_set(&result, "action", "splice")?;
                 js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
@@ -1406,6 +1440,7 @@ impl TryFrom<JsPatch> for JsValue {
                     }
                     js_set(&result, "marks", &marks)?;
                 }
+                PatAttr::js_set(&result, attribute)?;
                 Ok(result.into())
             }
             PatchAction::Increment { prop, value, .. } => {
@@ -1419,12 +1454,20 @@ impl TryFrom<JsPatch> for JsValue {
                 js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
                 Ok(result.into())
             }
-            PatchAction::DeleteSeq { index, length, .. } => {
+            PatchAction::DeleteSeq {
+                index,
+                length,
+                value,
+            } => {
                 js_set(&result, "action", "del")?;
                 js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
                 if length > 1 {
                     js_set(&result, "length", length)?;
                 }
+                if !value.is_empty() {
+                    js_set(&result, "removed", value)?;
+                }
+                PatAttr::js_set(&result, attribute)?;
                 Ok(result.into())
             }
             PatchAction::Mark { marks, .. } => {
@@ -1459,6 +1502,18 @@ impl TryFrom<JsPatches> for Array {
     type Error = error::Export;
 
     fn try_from(patches: JsPatches) -> Result<Self, Self::Error> {
+        let result = Array::new();
+        for p in patches.0 {
+            result.push(&JsPatch(p).try_into()?);
+        }
+        Ok(result)
+    }
+}
+
+impl<'a> TryFrom<JsPatchesWithAttr<'a>> for Array {
+    type Error = error::Export;
+
+    fn try_from(patches: JsPatchesWithAttr<'a>) -> Result<Self, Self::Error> {
         let result = Array::new();
         for p in patches.0 {
             result.push(&JsPatch(p).try_into()?);
@@ -1776,6 +1831,12 @@ pub(crate) mod error {
         ElemNotString(usize),
         #[error("element {0} was not a valid capability: {1}")]
         ElemNotValid(usize, String),
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum BadTextRange {
+        #[error("invalid text range")]
+        InvalidTextRange,
     }
 
     #[derive(thiserror::Error, Debug)]

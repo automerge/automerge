@@ -8,9 +8,9 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjId, Op, Prop},
+    types::{Clock, ListEncoding, ObjId, Op, OpId, Prop},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc, TextRange,
 };
 
 #[derive(Clone, Debug)]
@@ -39,20 +39,28 @@ fn process<'a, T: Iterator<Item = Op<'a>>>(
 ) -> Option<Patch<'a>> {
     let mut before_op = None;
     let mut after_op = None;
+    let mut deleted_by = None;
 
     for op in ops {
         let predates_before = op.predates(before);
         let predates_after = op.predates(after);
 
-        if predates_before && !op.was_deleted_before(before) {
+        let deleted_by_before = op.was_deleted_by(before);
+        let deleted_by_after = op.was_deleted_by(after);
+
+        if predates_before && deleted_by_before.is_none() {
             push_top(&mut before_op, op, predates_after, before);
+            if deleted_by_after.is_some() {
+                deleted_by = deleted_by_after;
+            }
         }
 
-        if predates_after && !op.was_deleted_before(after) {
+        if predates_after && deleted_by_after.is_none() {
             push_top(&mut after_op, op, predates_before, after);
         }
     }
-    resolve(before_op, after_op, diff)
+
+    resolve(before_op, after_op, diff, deleted_by)
 }
 
 fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
@@ -73,12 +81,17 @@ fn resolve<'a>(
     before: Option<Winner<'a>>,
     after: Option<Winner<'a>>,
     diff: &mut MarkDiff<'a>,
+    deleted_by: Option<OpId>,
 ) -> Option<Patch<'a>> {
     match (before, after) {
         (None, Some(after)) if after.op.is_mark() => diff.process_after(after.op),
         (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
         (Some(before), None) if before.op.is_mark() => diff.process_before(before.op),
-        (Some(before), None) => Some(Patch::Delete(before)),
+        (Some(before), None) => {
+            // FIXME this is clunky
+            let deleted_by = deleted_by.unwrap_or_else(|| *before.op.id());
+            Some(Patch::Delete(before, deleted_by))
+        }
         (Some(_), Some(after)) if after.op.is_mark() => diff.process(after.op),
         (Some(before), Some(after)) if before.op.id() == after.op.id() => Some(Patch::Old {
             before,
@@ -107,7 +120,7 @@ enum Patch<'a> {
         after: Winner<'a>,
         marks: Option<Arc<MarkSet>>,
     },
-    Delete(Winner<'a>),
+    Delete(Winner<'a>, OpId),
 }
 
 impl<'a> Patch<'a> {
@@ -116,7 +129,7 @@ impl<'a> Patch<'a> {
             Patch::New(winner, _) => winner.op,
             Patch::Update { after, .. } => after.op,
             Patch::Old { after, .. } => after.op,
-            Patch::Delete(winner) => winner.op,
+            Patch::Delete(winner, _) => winner.op,
         }
     }
 }
@@ -177,8 +190,8 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             index + 1
         }
-        Patch::Delete(_) => {
-            patch_log.delete_seq(*obj, index, 1);
+        Patch::Delete(before, id) => {
+            patch_log.delete_seq(*obj, id, index, 1, before.op.as_str().into(), false);
             index
         }
     });
@@ -192,7 +205,8 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::New(winner, marks) => {
-            patch_log.splice(*obj, index, winner.op.as_str(), marks.clone());
+            let by = *winner.op.id();
+            patch_log.splice2(*obj, by, index, winner.op.as_str(), marks.clone());
             index + winner.op.width(encoding)
         }
         Patch::Update {
@@ -200,8 +214,16 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             after,
             marks,
         } => {
-            patch_log.delete_seq(*obj, index, before.op.width(encoding));
-            patch_log.splice(*obj, index, after.op.as_str(), marks.clone());
+            patch_log.delete_seq(
+                *obj,
+                *after.op.id(),
+                index,
+                before.op.width(encoding),
+                before.op.as_str().into(),
+                true,
+            );
+            let by = *after.op.id();
+            patch_log.splice2(*obj, by, index, after.op.as_str(), marks.clone());
             index + after.op.width(encoding)
         }
         Patch::Old { after, marks, .. } => {
@@ -211,8 +233,15 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             index + len
         }
-        Patch::Delete(before) => {
-            patch_log.delete_seq(*obj, index, before.op.width(encoding));
+        Patch::Delete(before, by) => {
+            patch_log.delete_seq(
+                *obj,
+                *by,
+                index,
+                before.op.width(encoding),
+                before.op.as_str().into(),
+                true,
+            );
             index
         }
     });
@@ -249,7 +278,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                     patch_log.increment_map(*obj, key, n, *after.op.id());
                 }
             }
-            Patch::Delete(_) => patch_log.delete_map(*obj, key),
+            Patch::Delete(_, id) => patch_log.delete_map(*obj, id, key),
         });
 }
 
@@ -400,6 +429,15 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
+    }
+
+    fn text_range<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        range: TextRange,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<String, AutomergeError> {
+        self.doc.text_range(obj, range, at)
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {

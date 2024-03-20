@@ -6,7 +6,9 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
 use crate::types::Clock;
 use crate::AutomergeError;
-use crate::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
+use crate::{
+    Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, TextRange, Value,
+};
 
 use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
@@ -201,6 +203,16 @@ impl<'a> ReadDoc for Transaction<'a> {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn text_range<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        range: TextRange,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<String, AutomergeError> {
+        self.doc
+            .text_range_for(obj.as_ref(), range, self.get_scope(at))
     }
 
     fn get_cursor<O: AsRef<ExId>>(

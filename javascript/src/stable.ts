@@ -10,6 +10,8 @@ import {
   type Doc,
   type PatchCallback,
   type Patch,
+  type PatchWithAttr,
+  type Attribution,
   type PatchSource,
 } from "./types.js"
 export {
@@ -973,6 +975,30 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
     return state.mostRecentPatch.patches
   }
   return state.handle.diff(before, after)
+}
+
+/**
+ * Create a set of patches representing the change from one set of heads to another
+ *
+ * If either of the heads are missing from the document the returned set of patches will be empty
+ */
+export function diffWithAttribution<T>(
+  doc: Doc<unknown>,
+  before: Heads,
+  after: Heads,
+  attr: Attribution<T>,
+): PatchWithAttr<T>[] {
+  checkHeads(before, "before")
+  checkHeads(after, "after")
+  const state = _state(doc)
+  if (
+    state.mostRecentPatch &&
+    equals(state.mostRecentPatch.before, before) &&
+    equals(state.mostRecentPatch.after, after)
+  ) {
+    return state.mostRecentPatch.patches
+  }
+  return state.handle.diffWithAttribution(before, after, attr)
 }
 
 function headsEqual(heads1: Heads, heads2: Heads): boolean {

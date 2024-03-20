@@ -113,4 +113,61 @@ describe("patches", () => {
       )
     })
   })
+
+  describe("the diff with attribution function", () => {
+    it("it should be able to diff with attributes", () => {
+      let doc1 = Automerge.from({ text: "hello world" }, { actor: "bbbb" })
+
+      let heads1 = Automerge.getHeads(doc1)
+
+      let doc2 = Automerge.clone(doc1, { actor: "aaaa" })
+
+      doc2 = Automerge.change(doc2, d =>
+        Automerge.splice(d, ["text"], 5, 1, " xxx "),
+      )
+
+      doc1 = Automerge.change(doc1, d =>
+        Automerge.splice(d, ["text"], 5, 1, " yyy "),
+      )
+
+      doc1 = Automerge.merge(doc1, doc2)
+
+      assert.deepStrictEqual(doc1.text, "hello yyy  xxx world")
+
+      let heads2 = Automerge.getHeads(doc1)
+
+      let actor1 = Automerge.getActorId(doc1)
+      let actor2 = Automerge.getActorId(doc2)
+      let attr2 = { [actor1]: "user1", [actor2]: "user2" }
+      let attr3 = { [actor1]: "user1" }
+      let attr4 = { [actor1]: "user1", [actor2]: "user1" }
+
+      let patches1 = Automerge.diff(doc1, heads1, heads2)
+      let patches2 = Automerge.diffWithAttribution(doc1, heads1, heads2, attr2)
+      let patches3 = Automerge.diffWithAttribution(doc1, heads1, heads2, attr3)
+      let patches4 = Automerge.diffWithAttribution(doc1, heads1, heads2, attr4)
+
+      assert.deepStrictEqual(patches1, [
+        { action: "splice", path: ["text", 5], value: " yyy  xxx " },
+        { action: "del", path: ["text", 15], removed: " " },
+      ])
+
+      assert.deepStrictEqual(patches2, [
+        { action: "splice", path: ["text", 5], value: " yyy ", attr: "user1" },
+        { action: "splice", path: ["text", 10], value: " xxx ", attr: "user2" },
+        { action: "del", path: ["text", 15], attr: "user1", removed: " " },
+      ])
+
+      assert.deepStrictEqual(patches3, [
+        { action: "splice", path: ["text", 5], value: " yyy ", attr: "user1" },
+        {
+          action: "splice",
+          path: ["text", 10],
+          value: " xxx ",
+          attr: undefined,
+        },
+        { action: "del", path: ["text", 15], attr: "user1", removed: " " },
+      ])
+    })
+  })
 })

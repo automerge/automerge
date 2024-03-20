@@ -46,7 +46,9 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, AR, JS};
+use interop::{
+    alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, TextRange, AR, JS,
+};
 use sync::SyncState;
 use value::Datatype;
 
@@ -215,6 +217,20 @@ impl Automerge {
         } else {
             Ok(self.doc.text(&obj)?)
         }
+    }
+
+    #[wasm_bindgen(js_name = textRange)]
+    pub fn text_range(
+        &self,
+        obj: JsValue,
+        range: JsValue,
+        heads: Option<Array>,
+    ) -> Result<String, error::Get> {
+        let (obj, _) = self.import(obj)?;
+        let heads = get_heads(heads)?;
+        let range = TextRange::try_from(&range)?;
+        let text = self.doc.text_range(obj, range.0, heads.as_deref())?;
+        Ok(text)
     }
 
     pub fn splice(
@@ -680,6 +696,26 @@ impl Automerge {
 
         let patches = self.doc.diff(&before, &after);
         Ok(interop::JsPatches(patches).try_into()?)
+    }
+
+    #[wasm_bindgen(js_name = diffWithAttribution)]
+    pub fn diff_with_attr(
+        &mut self,
+        before: Array,
+        after: Array,
+        attr: Object,
+    ) -> Result<Array, error::Diff> {
+        let before = get_heads(Some(before))?.unwrap();
+        let after = get_heads(Some(after))?.unwrap();
+        let attr = HashMap::from_iter(Object::entries(&attr).iter().map(|e| {
+            let e = Array::from(&e);
+            let actor = am::ActorId::try_from(e.get(0).as_string().unwrap()).unwrap();
+            let value = e.get(1);
+            (actor, value)
+        }));
+
+        let patches = self.doc.diff_with_attr(&before, &after, &attr);
+        Ok(interop::JsPatchesWithAttr(patches).try_into()?)
     }
 
     pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
@@ -1257,6 +1293,8 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum Get {
+        #[error("invalid text range ")]
+        InvalidRange(#[from] interop::error::BadTextRange),
         #[error("invalid object ID: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
         #[error(transparent)]
@@ -1457,8 +1495,18 @@ pub mod error {
         InvalidCursor,
         #[error("cursors only valid on text - obj type: {0}")]
         InvalidObjType(ObjType),
+        #[error("set prop: {0}")]
+        SetProp(#[from] interop::error::SetProp),
         #[error("bad heads: {0}")]
         Heads(#[from] interop::error::BadChangeHashes),
+        #[error("range must be an object")]
+        InvalidRange,
+        #[error("start must be a number")]
+        InvalidStart,
+        #[error("end must be a number")]
+        InvalidEnd,
+        #[error(transparent)]
+        Expand(#[from] interop::error::BadExpand),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
     }

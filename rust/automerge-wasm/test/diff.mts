@@ -57,10 +57,10 @@ describe('Automerge', () => {
         let patches11 = doc1.diff(heads1,heads1);
         assert.deepStrictEqual(patches12, [
           { action: "splice", path: ["text", 10], value: "cow" },
-          { action: "del", path: ["text", 13], length: 3 },
+          { action: "del", path: ["text", 13], length: 3, removed: "fox" },
         ])
         assert.deepStrictEqual(patches21, [
-          { action: "del", path: ["text", 10], length: 3 },
+          { action: "del", path: ["text", 10], length: 3, removed: "cow" },
           { action: "splice", path: ["text", 10], value: "fox" },
         ])
         assert.deepStrictEqual(patches11, [])
@@ -211,6 +211,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(doc1.diff(heads3, heads2), patches2)
       assert.deepStrictEqual(doc1.diff(heads2, heads3), patches3)
     })
+
     it('it should expose conflicts on inserts', () => {
       let doc1 = create()
       doc1.putObject("/", "list", [0,1,2,3,4,5,6])
@@ -237,5 +238,61 @@ describe('Automerge', () => {
           conflicts: [ false, true, false ],
       }])
     })
+
+    it('it should be able to diff with attributes', () => {
+      let doc1 = create({ actor: "bbbb" })
+      doc1.putObject("/", "text", "hello world");
+
+      let heads1 = doc1.getHeads();
+
+      let doc2 = doc1.fork("aaaa")
+
+      doc2.splice("/text", 5, 1, " xxx ");
+
+      doc1.splice("/text", 5, 1, " yyy ");
+
+      doc1.merge(doc2)
+
+      assert.deepStrictEqual(doc1.text('/text'), "hello yyy  xxx world");
+
+      let heads2 = doc1.getHeads();
+
+      let actor1 = doc1.getActorId();
+      let actor2 = doc2.getActorId();
+
+      let attr2 = { [actor1] : "user1", [actor2] : "user2" };
+      let attr3 = { [actor1] : "user1" };
+      let attr4 = { [actor1] : "user1", [actor2] : "user1" };
+
+      let patches1 = doc1.diff(heads1, heads2)
+      let patches2 = doc1.diffWithAttribution(heads1, heads2, attr2)
+      let patches3 = doc1.diffWithAttribution(heads1, heads2, attr3)
+      let patches4 = doc1.diffWithAttribution(heads1, heads2, attr4)
+
+      assert.deepStrictEqual(patches1, [
+        { action: 'splice', path: [ 'text', 5 ], value: ' yyy  xxx ' },
+        { action: 'del', path: [ 'text', 15 ], removed: " " }
+
+      ])
+
+      assert.deepStrictEqual(patches2, [
+        { action: 'splice', path: [ 'text', 5 ], value: ' yyy ', attr: 'user1' },
+        { action: 'splice', path: [ 'text', 10 ], value: ' xxx ', attr: 'user2' },
+        { action: 'del', path: [ 'text', 15 ], attr: 'user1', removed: " " }
+      ])
+
+      assert.deepStrictEqual(patches3, [
+        { action: 'splice', path: [ 'text', 5 ], value: ' yyy ', attr: 'user1' },
+        { action: 'splice', path: [ 'text', 10 ], value: ' xxx ', attr: undefined },
+        { action: 'del', path: [ 'text', 15 ], attr: 'user1', removed: " " }
+      ])
+
+      assert.deepStrictEqual(patches4, [
+        { action: 'splice', path: [ 'text', 5 ], value: ' yyy  xxx ', attr: 'user1' },
+        { action: 'del', path: [ 'text', 15 ], attr: 'user1', removed: " " }
+      ])
+
+    })
+
   })
 })

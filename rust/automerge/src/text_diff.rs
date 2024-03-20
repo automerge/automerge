@@ -1,8 +1,8 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    text_value::TextValue, transaction::TransactionInner, Automerge, ObjId as ExId, PatchLog,
-    ReadDoc,
+    patches::PatchLog, text_value::TextValue, transaction::TransactionInner, Automerge,
+    ObjId as ExId, ReadDoc,
 };
 mod myers;
 mod utils;

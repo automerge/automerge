@@ -6,6 +6,7 @@ export {
   Int,
   Uint,
   Float64,
+  Heads,
   type Patch,
   type PatchCallback,
   type Mark,

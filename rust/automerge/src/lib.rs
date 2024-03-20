@@ -293,14 +293,14 @@ pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, S
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
-pub use cursor::Cursor;
+pub use cursor::{Cursor, TextPos, TextRange};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use parents::{Parent, Parents};
-pub use patches::{Patch, PatchAction, PatchLog};
+pub use patches::{Patch, PatchAction, PatchLog, PatchWithAttribution};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;

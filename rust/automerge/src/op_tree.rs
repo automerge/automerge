@@ -144,10 +144,15 @@ impl<'a> FoundOpWithPatchLog<'a> {
         if op.is_delete() {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
-                    Prop::Map(k) => patch_log.delete_map(obj.id, &k),
-                    Prop::Seq(index) => {
-                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
-                    }
+                    Prop::Map(k) => patch_log.delete_map(obj.id, *op.id(), &k),
+                    Prop::Seq(index) => patch_log.delete_seq(
+                        obj.id,
+                        *op.id(),
+                        index,
+                        over.width(obj.encoding),
+                        op.as_str().into(),
+                        obj.typ == ObjType::Text, // FIXME - what about encoding?
+                    ),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;

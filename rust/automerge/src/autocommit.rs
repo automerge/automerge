@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
@@ -10,10 +12,10 @@ use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
 use crate::{hydrate, OnPartialLoad};
-use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
+use crate::{sync, ObjType, Parents, Patch, PatchWithAttribution, ReadDoc, ScalarValue};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
-    Prop, Value,
+    Prop, TextRange, Value,
 };
 use crate::{LoadOptions, VerificationMode};
 
@@ -169,7 +171,6 @@ impl AutoCommit {
         self.diff_cursor.clone()
     }
 
-    /// Generate the patches recorded in `patch_log`
     pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
         self.doc.make_patches(patch_log)
     }
@@ -242,6 +243,19 @@ impl AutoCommit {
         };
         self.diff_cache = Some((range, patches));
         self.diff_cache.as_ref().unwrap().1.clone()
+    }
+
+    pub fn diff_with_attr<'a, T: PartialEq>(
+        &mut self,
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
+        attr: &'a HashMap<ActorId, T>,
+    ) -> Vec<PatchWithAttribution<'a, T>> {
+        self.ensure_transaction_closed();
+        let text_rep = self.patch_log.text_rep();
+
+        self.doc
+            .diff_with_attr(before_heads, after_heads, text_rep, attr)
     }
 
     /// This is a convience function that encapsulates the following common pattern
@@ -739,6 +753,16 @@ impl ReadDoc for AutoCommit {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn text_range<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        range: TextRange,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<String, AutomergeError> {
+        self.doc
+            .text_range_for(obj.as_ref(), range, self.get_scope(at))
     }
 
     fn get_cursor<O: AsRef<ExId>>(
