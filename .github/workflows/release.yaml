@@ -257,6 +257,10 @@ jobs:
       - name: Install doxygen
         run: sudo apt-get install -y doxygen
         shell: bash
+      - name: diagnostics
+        run: |
+          pwd
+          ls -altr
       - name: build c documentation with CMake and Doxygen
         id: build_c_docs
         run: ./scripts/ci/c-docs
