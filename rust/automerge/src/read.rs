@@ -7,7 +7,7 @@ use crate::{
     Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
-use std::ops::RangeBounds;
+use std::{collections::HashMap, ops::RangeBounds};
 
 /// Methods for reading values from an automerge document
 ///
@@ -241,4 +241,9 @@ pub trait ReadDoc {
 
     /// Get a change by its hash.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+}
+
+pub(crate) trait ReadDocInternal: ReadDoc {
+    /// Produce a map from object ID to path for all visible objects in this doc
+    fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>>;
 }
