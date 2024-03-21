@@ -257,6 +257,10 @@ jobs:
       - name: Install doxygen
         run: sudo apt-get install -y doxygen
         shell: bash
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
       - name: diagnostics
         run: |
           pwd
