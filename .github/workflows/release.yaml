@@ -255,7 +255,7 @@ jobs:
     # if: ${{ !contains(needs.check_if_js_version_upgraded.outputs.js_version, '-') }}
     defaults:
       run:
-        working-directory: ./c
+        working-directory: ./
     steps:
       - name: Install doxygen
         run: sudo apt-get install -y doxygen
