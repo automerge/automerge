@@ -126,7 +126,7 @@ jobs:
     # We create release only if the version in the package.json has been upgraded and after the WASM release
     if: |
       (always() && ! cancelled()) &&
-      (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') && 
+      (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') &&
       needs.check_if_js_version_upgraded.outputs.js_has_updated == 'true'
     steps:
       - uses: actions/setup-node@v3
@@ -248,25 +248,22 @@ jobs:
           folder: ./javascript/api-docs
           target-folder: api-docs/js
 
-  #publish-c-docs:
-    #runs-on: ubuntu-latest
-    ## needs:
-    ##   - check_if_js_version_upgraded
-    ## if: ${{ !contains(needs.check_if_js_version_upgraded.outputs.js_version, '-') }}
-    #defaults:
-      #run:
-        #working-directory: ./
-    #steps:
-      #- name: Install doxygen
-        #run: sudo apt-get install -y doxygen
-        #shell: bash
-      #- name: build c documentation with CMake and Doxygen
-        #id: build_c_docs
-        #run: ./scripts/ci/c-docs
-      #- name: Deploy 🚀
-        #uses: JamesIves/github-pages-deploy-action@v4
-        #with:
-          #branch: gh-pages
-          #folder: ./c/rust/automerge-c/build/docs/html
-          #target-folder: api-docs/c
-        
+  publish-c-docs:
+    runs-on: ubuntu-latest
+    # needs:
+    #   - check_if_js_version_upgraded
+    # if: ${{ !contains(needs.check_if_js_version_upgraded.outputs.js_version, '-') }}
+    steps:
+      - name: Install doxygen
+        run: sudo apt-get install -y doxygen
+        shell: bash
+      - name: build c documentation with CMake and Doxygen
+        id: build_c_docs
+        run: ./scripts/ci/c-docs
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: ./rust/automerge-c/build/docs/html
+          target-folder: api-docs/c
+
