@@ -15,6 +15,7 @@ use crate::op_set::{OpSet, OpSetData};
 use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::query;
+use crate::read::ReadDocInternal;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
@@ -1374,9 +1375,7 @@ impl Automerge {
         let clock = heads.map(|heads| self.clock_at(heads));
         self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
-}
 
-impl Automerge {
     pub(crate) fn parents_for(
         &self,
         obj: &ExId,
@@ -1591,6 +1590,51 @@ impl Automerge {
 
         Ok(())
     }
+
+    pub(crate) fn visible_obj_paths(
+        &self,
+        at: Option<&[ChangeHash]>,
+    ) -> HashMap<ExId, Vec<(ExId, Prop)>> {
+        let at = at.map(|heads| self.clock_at(heads));
+        let mut paths = HashMap::<ExId, Vec<(ExId, Prop)>>::new();
+        let mut visible_objs = HashSet::<crate::types::ObjId>::new();
+        visible_objs.insert(crate::types::ObjId::root());
+        paths.insert(ExId::Root, vec![]);
+
+        for (obj, _, ops) in self.ops.iter_objs() {
+            // Note that this works because the OpSet iterates in causal order,
+            // which means that we have already seen the operation which
+            // creates the object and added it to the visible_objs set if it
+            // is visible.
+            if !visible_objs.contains(obj) {
+                continue;
+            }
+            for op in ops {
+                if op.visible_at(at.as_ref()) {
+                    if let OpType::Make(_) = op.action() {
+                        visible_objs.insert(op.id().into());
+                        let (mut path, parent_obj_id) = if obj.is_root() {
+                            (vec![], ExId::Root)
+                        } else {
+                            let parent_obj_id = self.ops.id_to_exid(obj.0);
+                            (paths.get(&parent_obj_id).cloned().unwrap(), parent_obj_id)
+                        };
+                        let prop = match op.key() {
+                            Key::Map(prop) => Prop::Map(self.ops.osd.props.get(*prop).clone()),
+                            Key::Seq(_) => {
+                                let found = self.ops.seek_list_opid(obj, *op.id(), None).unwrap();
+                                Prop::Seq(found.index)
+                            }
+                        };
+                        path.push((parent_obj_id.clone(), prop));
+                        let obj_id = self.ops.id_to_exid(*op.id());
+                        paths.insert(obj_id, path);
+                    }
+                }
+            }
+        }
+        paths
+    }
 }
 
 impl ReadDoc for Automerge {
@@ -1795,6 +1839,12 @@ impl ReadDoc for Automerge {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
+    }
+}
+
+impl ReadDocInternal for Automerge {
+    fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>> {
+        self.visible_obj_paths(None)
     }
 }
 
