@@ -111,7 +111,11 @@ impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'a, R> {
                 };
                 map.serialize(serializer)
             }
-            Value::Object(ObjType::List | ObjType::Text) => {
+            Value::Object(ObjType::Text) => {
+                let text = self.doc.text(&self.obj).unwrap();
+                text.serialize(serializer)
+            }
+            Value::Object(ObjType::List) => {
                 let seq = AutoSerdeSeq {
                     doc: self.doc,
                     obj: self.obj.clone(),
