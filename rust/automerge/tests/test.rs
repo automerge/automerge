@@ -903,7 +903,7 @@ fn save_restore_complex_transactional() {
 
 #[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
@@ -1077,7 +1077,7 @@ fn increment_non_counter_list() {
 
 #[test]
 fn test_local_inc_in_map() {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
