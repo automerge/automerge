@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          arguments: '--manifest-path ./rust/Cargo.toml'
+          manifest-path: './rust/Cargo.toml'
           command: check ${{ matrix.checks }}
 
   wasm_tests:

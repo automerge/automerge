@@ -903,7 +903,7 @@ fn save_restore_complex_transactional() {
 
 #[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
@@ -1077,7 +1077,7 @@ fn increment_non_counter_list() {
 
 #[test]
 fn test_local_inc_in_map() {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
@@ -1935,3 +1935,62 @@ fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError
     Ok(())
 }
 */
+
+#[test]
+fn rollback_with_no_ops() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut doc2 = doc.fork();
+
+    let tx = doc2.transaction();
+    tx.commit();
+
+    let mut doc3 = doc.fork();
+    doc3.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "b", 2)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    doc2.merge(&mut doc3).unwrap();
+
+    let tx = doc2.transaction();
+    tx.rollback();
+}
+
+#[test]
+fn save_with_ops_which_reference_actors_only_via_delete() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut forked = doc.fork();
+    forked
+        .transact::<_, _, AutomergeError>(|tx| {
+            tx.delete(ROOT, "a")?;
+            Ok::<_, AutomergeError>(())
+        })
+        .unwrap();
+
+    doc.merge(&mut forked).unwrap();
+
+    // `doc` now contains a delete op which uses the actor of the fork. Delete
+    // ops don't exist explicitly in the document ops, they are referenced in
+    // the "successors" of the encoded ops. This means that when we're encoding
+    // actor IDs into the document we need to check that any actor IDs which
+    // are referenced in the `successors` of an op are encoded as well.
+
+    let saved = doc.save();
+    // This will panic if we failed to encode the referenced actor ID
+    let _ = Automerge::load(&saved).unwrap();
+}
