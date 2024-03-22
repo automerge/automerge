@@ -414,7 +414,7 @@ impl Automerge {
             parents,
             attrs,
         } = interop::import_update_block_args(self, JS(args))?;
-        self.doc.update_block(
+        self.doc.replace_block(
             &text,
             index,
             am::NewBlock::new(&block_type)
@@ -703,7 +703,8 @@ impl Automerge {
     ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
         if let Ok(function) = function.dyn_into::<Function>() {
-            self.external_types.insert(datatype, interop::ExternalTypeConstructor::new(function));
+            self.external_types
+                .insert(datatype, interop::ExternalTypeConstructor::new(function));
         } else {
             self.external_types.remove(&datatype);
         }

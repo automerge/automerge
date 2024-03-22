@@ -331,7 +331,7 @@ impl<'a> ExportCache<'a> {
         &self,
         value: &Object,
         datatype: Datatype,
-        constructor: &ExternalTypeConstructor
+        constructor: &ExternalTypeConstructor,
     ) -> Result<Object, error::Export> {
         let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
         let wrapped_object = wrapped_value
