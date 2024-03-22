@@ -112,5 +112,29 @@ describe("patches", () => {
         /after must be an array/,
       )
     })
+
+    it("should correctly diff the reverse of deleting a string value on next", () => {
+      const doc = Automerge.from<{ list: string[] }>({ list: ["a", "b", "c"] })
+
+      Automerge.change(
+        doc,
+        {
+          patchCallback: (_, patchInfo) => {
+            const reverse = Automerge.diff(
+              patchInfo.after,
+              Automerge.getHeads(patchInfo.after),
+              Automerge.getHeads(patchInfo.before),
+            )
+            assert.deepEqual(reverse, [
+              { action: "insert", path: ["list", 1], values: [""] },
+              { action: "splice", path: ["list", 1, 0], value: "b" },
+            ])
+          },
+        },
+        doc => {
+          Automerge.deleteAt(doc.list, 1)
+        },
+      )
+    })
   })
 })
