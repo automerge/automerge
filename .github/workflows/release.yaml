@@ -248,29 +248,29 @@ jobs:
           folder: ./javascript/api-docs
           target-folder: api-docs/js
 
-  publish-c-docs:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install doxygen
-        run: sudo apt-get install -y doxygen
-        shell: bash
-      - name: Install CMocka
-        run: sudo apt-get install -y libcmocka-dev
-      - name: Install/update CMake
-        uses: jwlawson/actions-setup-cmake@v1.12
-        with:
-          cmake-version: latest
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          ref: ${{ github.ref }}
-      - name: build c documentation with CMake and Doxygen
-        id: build_c_docs
-        run: ./scripts/ci/c-docs
-      - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          branch: gh-pages
-          folder: ./rust/automerge-c/build/docs/html
-          target-folder: api-docs/c
+  # publish-c-docs:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Install doxygen
+  #       run: sudo apt-get install -y doxygen
+  #       shell: bash
+  #     - name: Install CMocka
+  #       run: sudo apt-get install -y libcmocka-dev
+  #     - name: Install/update CMake
+  #       uses: jwlawson/actions-setup-cmake@v1.12
+  #       with:
+  #         cmake-version: latest
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
+  #         ref: ${{ github.ref }}
+  #     - name: build c documentation with CMake and Doxygen
+  #       id: build_c_docs
+  #       run: ./scripts/ci/c-docs
+  #     - name: Deploy 🚀
+  #       uses: JamesIves/github-pages-deploy-action@v4
+  #       with:
+  #         branch: gh-pages
+  #         folder: ./rust/automerge-c/build/docs/html
+  #         target-folder: api-docs/c
 
