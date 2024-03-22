@@ -1013,7 +1013,7 @@ impl TransactionInner {
             }
         }
         for key in delenda {
-            self.delete(doc, patch_log, &map, key)?;
+            self.delete(doc, patch_log, map, key)?;
         }
         Ok(())
     }

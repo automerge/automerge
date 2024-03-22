@@ -853,6 +853,7 @@ pub(crate) struct Parent {
 }
 
 impl Parent {
+    #[allow(dead_code)]
     pub(crate) fn meta(&self) -> ObjMeta {
         ObjMeta {
             id: self.obj,

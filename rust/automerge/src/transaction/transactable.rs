@@ -1,11 +1,8 @@
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 
-use unicode_segmentation::UnicodeSegmentation;
-
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
-use crate::text_value::TextValue;
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
@@ -116,13 +113,13 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
-    fn split_block<'a, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
+    fn split_block<O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>;
 
-    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
+    fn replace_block<O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 

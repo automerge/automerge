@@ -28,6 +28,7 @@ impl<D: DiffHook> Replace<D> {
     }
 
     /// Extracts the inner hook.
+    #[allow(dead_code)]
     pub(super) fn into_inner(self) -> D {
         self.d
     }

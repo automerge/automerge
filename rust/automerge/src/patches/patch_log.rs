@@ -6,7 +6,7 @@ use crate::read::ReadDocInternal;
 use crate::marks::{MarkAccumulator, RichText};
 use crate::types::{ObjId, ObjMeta, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, Patch, ReadDoc};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 

@@ -122,7 +122,7 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         self.pos() == other.pos() && self.key() == other.key()
     }
 
-    fn can_shortcut_search(&mut self, tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
+    fn can_shortcut_search(&mut self, _tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
         // TODO: Fix this logic to handle marks
         false
         //if let Some(last) = &tree.last_insert {

@@ -31,6 +31,10 @@ impl List {
         self.0.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {

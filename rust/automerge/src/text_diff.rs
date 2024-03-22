@@ -245,7 +245,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                         self.idx += TextValue::width(&run);
                         run.clear();
                     }
-                    split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, &b)?;
+                    split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b)?;
                     self.idx += 1;
                 }
                 BlockOrGrapheme::Grapheme(g) => {

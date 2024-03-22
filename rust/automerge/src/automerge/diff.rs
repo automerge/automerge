@@ -544,8 +544,7 @@ mod tests {
     use std::borrow::Cow;
 
     use crate::{
-        marks::Mark, patches::TextRepresentation, transaction::Transactable, types::MarkData,
-        AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue, Value, ROOT,
+        hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue, Value, ROOT
     };
     use itertools::Itertools;
 
@@ -1397,6 +1396,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn update_map_diff_incremental() {
         let mut doc = AutoCommit::new();
         let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
