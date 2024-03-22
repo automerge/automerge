@@ -112,4 +112,14 @@ pub trait Transactable: ReadDoc {
 
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
+
+    /// Update the value of a string
+    ///
+    /// This will calculate a diff between the current value and the new value and
+    /// then convert that diff into calls to {@link splice}. This will produce results
+    /// which don't merge as well as directly capturing the user input actions, but
+    /// sometimes it's not possible to capture user input and this is the best you
+    /// can do.
+    fn update_text<S: AsRef<str>>(&mut self, obj: &ExId, new_text: S)
+        -> Result<(), AutomergeError>;
 }

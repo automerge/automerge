@@ -41,6 +41,7 @@ impl GenericColumnRange {
 }
 
 /// The type of values which can be stored in a generic column
+#[allow(dead_code)]
 pub(crate) enum CellValue {
     /// The contents of a simple column
     Simple(SimpleValue),
@@ -48,6 +49,7 @@ pub(crate) enum CellValue {
     Group(Vec<Vec<SimpleValue>>),
 }
 
+#[allow(dead_code)]
 pub(crate) enum SimpleValue {
     Uint(Option<u64>),
     Int(Option<i64>),

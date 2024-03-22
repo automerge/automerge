@@ -37,6 +37,7 @@ pub enum Value {
     SyncHave(AMsyncHave),
     SyncMessage(AMsyncMessage),
     SyncState(RefCell<AMsyncState>),
+    #[allow(clippy::enum_variant_names)]
     Value(am::Value<'static>),
 }
 

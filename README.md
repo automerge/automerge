@@ -25,8 +25,7 @@ reading the code and tests to figure out how to use them.
 If you're familiar with CRDTs and interested in the design of Automerge in
 particular take a look at https://automerge.org/automerge-binary-format-spec.
 
-Finally, if you want to talk to us about this project please [join the
-Slack](https://join.slack.com/t/automerge/shared_invite/zt-e4p3760n-kKh7r3KRH1YwwNfiZM8ktw)
+Finally, if you want to talk to us about this project please [join our Discord server](https://discord.gg/HrpnPAU5zx)!
 
 ## Status
 

@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use crate::patches::TextRepresentation;
+use crate::read::ReadDocInternal;
 use crate::{
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
@@ -497,12 +498,18 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     }
 }
 
+impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
+    fn live_obj_paths(&self) -> std::collections::HashMap<ExId, Vec<(ExId, Prop)>> {
+        self.doc.visible_obj_paths(Some(self.heads))
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use crate::{
-        marks::Mark, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch,
-        PatchAction, Prop, ScalarValue, Value, ROOT,
+        marks::Mark, patches::TextRepresentation, transaction::Transactable, types::MarkData,
+        AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -1072,7 +1079,7 @@ mod tests {
 
         let exp = exp(patches);
         assert_eq!(
-            exp.get(0),
+            exp.first(),
             Some(ObservedPatch {
                 path: "/list/2".into(),
                 action: ObservedAction::PutSeq {
@@ -1145,7 +1152,7 @@ mod tests {
         let patches = doc1.diff(&heads1, &heads2);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/list/3".into(),
                 action: ObservedAction::PutSeq {
@@ -1170,7 +1177,7 @@ mod tests {
         let patches = doc1.diff(&heads1a, &heads2);
         let exp2 = exp(patches);
         assert_eq!(
-            exp2.get(0),
+            exp2.first(),
             Some(ObservedPatch {
                 path: "/list/4".into(),
                 action: ObservedAction::Insert {
@@ -1183,7 +1190,7 @@ mod tests {
         let patches = doc1.diff(&heads1b, &heads2);
         let exp3 = exp(patches);
         assert_eq!(
-            exp3.get(0),
+            exp3.first(),
             Some(ObservedPatch {
                 path: "/list/3".into(),
                 action: ObservedAction::Insert {
@@ -1232,7 +1239,7 @@ mod tests {
         let patches = doc1.diff(&heads1, &heads2a);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/key".into(),
                 action: ObservedAction::PutMap {
@@ -1246,7 +1253,7 @@ mod tests {
         let patches = doc1.diff(&heads2a, &heads2b);
         let exp1 = exp(patches);
         assert_eq!(
-            exp1.get(0),
+            exp1.first(),
             Some(ObservedPatch {
                 path: "/key".into(),
                 action: ObservedAction::PutMap {
@@ -1301,6 +1308,56 @@ mod tests {
                     value: ScalarValue::Null,
                 }]),
             }]
+        );
+    }
+
+    #[test]
+    fn diff_with_before_and_after_heads() {
+        let mut doc = AutoCommit::new();
+        doc.set_text_rep(TextRepresentation::String);
+
+        let text = doc.put_object(ROOT, "value", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "aaa").unwrap();
+        let heads1 = doc.get_heads();
+
+        let text = doc.put_object(ROOT, "value", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "bbb").unwrap();
+        let heads2 = doc.get_heads();
+
+        let patch12 = doc.diff(&heads1, &heads2);
+        assert_eq!(
+            exp(patch12),
+            vec![
+                ObservedPatch {
+                    path: "/value".into(),
+                    action: ObservedAction::PutMap {
+                        value: Value::Object(ObjType::Text),
+                        conflict: false,
+                    }
+                },
+                ObservedPatch {
+                    path: "/value/0".into(),
+                    action: ObservedAction::SpliceText("bbb".to_string()),
+                },
+            ]
+        );
+
+        let patch21 = doc.diff(&heads2, &heads1);
+        assert_eq!(
+            exp(patch21),
+            vec![
+                ObservedPatch {
+                    path: "/value".into(),
+                    action: ObservedAction::PutMap {
+                        value: Value::Object(ObjType::Text),
+                        conflict: false,
+                    }
+                },
+                ObservedPatch {
+                    path: "/value/0".into(),
+                    action: ObservedAction::SpliceText("aaa".to_string()),
+                },
+            ]
         );
     }
 }

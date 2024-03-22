@@ -107,9 +107,7 @@ impl<'a> AsRef<Mark<'a>> for AMmark<'a> {
 #[no_mangle]
 pub unsafe extern "C" fn AMmarkName(mark: *const AMmark) -> AMbyteSpan {
     if let Some(mark) = mark.as_ref() {
-        if let Ok(name) = mark.as_ref().name().as_bytes().try_into() {
-            return name;
-        }
+        return mark.as_ref().name().as_bytes().into();
     }
     Default::default()
 }

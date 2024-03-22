@@ -111,7 +111,7 @@ impl<'a> Ord for Op<'a> {
 }
 
 impl<'a> Op<'a> {
-    pub(crate) fn actor(&self) -> &ActorId {
+    pub(crate) fn actor(&self) -> &'a ActorId {
         &self.osd.actors[self.op().id.actor()]
     }
 
@@ -312,7 +312,7 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn succ(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.succ_idx().map(|idx| idx.as_opdep(self.osd).succ())
     }
 
@@ -325,8 +325,14 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn pred(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn pred(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.pred_idx().map(|idx| idx.as_opdep(self.osd).pred())
+    }
+
+    pub(crate) fn referenced_actors(&self) -> impl Iterator<Item = &'a ActorId> {
+        std::iter::once(self.actor())
+            .chain(self.pred().map(|op| op.actor()))
+            .chain(self.succ().map(|op| op.actor()))
     }
 }
 

@@ -271,6 +271,27 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = updateText)]
+    pub fn update_text(
+        &mut self,
+        obj: JsValue,
+        new_text: JsValue,
+    ) -> Result<(), error::UpdateText> {
+        let (obj, obj_type) = self.import(obj)?;
+        if !matches!(obj_type, am::ObjType::Text) {
+            return Err(error::UpdateText::ObjectNotText);
+        }
+        if self.text_rep != TextRepresentation::String {
+            return Err(error::UpdateText::TextRepNotString);
+        }
+        if let Some(t) = new_text.as_string() {
+            self.doc.update_text(&obj, t)?;
+            Ok(())
+        } else {
+            Err(error::UpdateText::ValueNotString)
+        }
+    }
+
     pub fn push(
         &mut self,
         obj: JsValue,
@@ -1264,6 +1285,26 @@ pub mod error {
 
     impl From<Splice> for JsValue {
         fn from(e: Splice) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum UpdateText {
+        #[error("invalid object ID: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("object was not a text object")]
+        ObjectNotText,
+        #[error("update_text is only availalbe for the string representation of text objects")]
+        TextRepNotString,
+        #[error("value passed to update_text was not a string")]
+        ValueNotString,
+    }
+
+    impl From<UpdateText> for JsValue {
+        fn from(e: UpdateText) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

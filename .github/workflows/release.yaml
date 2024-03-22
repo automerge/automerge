@@ -126,7 +126,7 @@ jobs:
     # We create release only if the version in the package.json has been upgraded and after the WASM release
     if: |
       (always() && ! cancelled()) &&
-      (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') && 
+      (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') &&
       needs.check_if_js_version_upgraded.outputs.js_has_updated == 'true'
     steps:
       - uses: actions/setup-node@v3
@@ -247,3 +247,30 @@ jobs:
           branch: gh-pages
           folder: ./javascript/api-docs
           target-folder: api-docs/js
+
+  # publish-c-docs:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Install doxygen
+  #       run: sudo apt-get install -y doxygen
+  #       shell: bash
+  #     - name: Install CMocka
+  #       run: sudo apt-get install -y libcmocka-dev
+  #     - name: Install/update CMake
+  #       uses: jwlawson/actions-setup-cmake@v1.12
+  #       with:
+  #         cmake-version: latest
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 0
+  #         ref: ${{ github.ref }}
+  #     - name: build c documentation with CMake and Doxygen
+  #       id: build_c_docs
+  #       run: ./scripts/ci/c-docs
+  #     - name: Deploy 🚀
+  #       uses: JamesIves/github-pages-deploy-action@v4
+  #       with:
+  #         branch: gh-pages
+  #         folder: ./rust/automerge-c/build/docs/html
+  #         target-folder: api-docs/c
+

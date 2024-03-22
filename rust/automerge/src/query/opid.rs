@@ -107,7 +107,7 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     }
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
-        self.marks.process(op);
+        self.marks.process(op, self.clock);
         match self.target {
             SearchTarget::OpId(target, None) => {
                 if op.id() == &target {

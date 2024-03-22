@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "0.5.5"
+version = "0.5.8"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -18,7 +18,7 @@ hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "^0.10.0"
 thiserror = "^1.0.16"
-itertools = "^0.10.3"
+itertools = "0.12.0"
 flate2 = "^1.0.22"
 uuid = { version = "^1.2.1", features = ["v4", "serde"] }
 smol_str = { version = "0.2", features = ["serde"] }
@@ -33,6 +33,7 @@ js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.8.4", optional = true }
 im = "15.1.0"
+unicode-segmentation = "1.10.1"
 
 [dependencies.web-sys]
 version = "^0.3.55"
