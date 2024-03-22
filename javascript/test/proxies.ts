@@ -1,6 +1,6 @@
 import * as assert from "assert"
 import { beforeEach } from "mocha"
-import { type Doc, from, change } from "../src/index.js"
+import { type Doc, from, change, next } from "../src/index.js"
 
 type DocType = {
   list: string[]
@@ -8,8 +8,10 @@ type DocType = {
 
 describe("Proxies", () => {
   let doc: Doc<DocType>
+  let nextDoc: Doc<DocType>
   beforeEach(() => {
     doc = from({ list: ["a", "b", "c"] })
+    nextDoc = next.from({ list: ["a", "b", "c"] })
   })
 
   describe("List Iterators", () => {
@@ -47,6 +49,24 @@ describe("Proxies", () => {
         }
 
         assert.equal(count, 0)
+      })
+    })
+  })
+
+  describe("List indexOf", () => {
+    it("should return the index of a value", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("b"), 1)
+      })
+
+      change(nextDoc, d => {
+        assert.equal(d.list.indexOf("b"), 1)
+      })
+    })
+
+    it("should return -1 if the value is not found", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("d"), -1)
       })
     })
   })
