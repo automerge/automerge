@@ -57,6 +57,7 @@ where
         self.cache.get(index)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn sorted(&self) -> IndexedCache<T> {
         let mut sorted = Self::new();
         self.cache.iter().sorted().cloned().for_each(|item| {

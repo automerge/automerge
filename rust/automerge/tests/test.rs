@@ -1,7 +1,7 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
-use automerge::transaction::Transactable;
+use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
     PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
@@ -1989,6 +1989,26 @@ fn save_with_ops_which_reference_actors_only_via_delete() {
     // the "successors" of the encoded ops. This means that when we're encoding
     // actor IDs into the document we need to check that any actor IDs which
     // are referenced in the `successors` of an op are encoded as well.
+
+    let saved = doc.save();
+    // This will panic if we failed to encode the referenced actor ID
+    let _ = Automerge::load(&saved).unwrap();
+}
+
+#[test]
+fn save_with_empty_commits() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut forked = doc.fork();
+    forked.empty_commit(CommitOptions::default());
+
+    doc.merge(&mut forked).unwrap();
 
     let saved = doc.save();
     // This will panic if we failed to encode the referenced actor ID
