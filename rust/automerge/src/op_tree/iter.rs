@@ -211,10 +211,7 @@ pub(crate) struct OpTreeOpIter<'a> {
 
 impl<'a> OpTreeOpIter<'a> {
     pub(crate) fn new(iter: OpTreeIter<'a>, osd: &'a crate::op_set::OpSetData) -> Self {
-        Self {
-            iter,
-            osd,
-        }
+        Self { iter, osd }
     }
 }
 

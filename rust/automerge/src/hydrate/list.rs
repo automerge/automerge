@@ -6,8 +6,14 @@ use crate::{PatchAction, ScalarValue, SequenceTree};
 
 use super::{HydrateError, Value};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct List(SequenceTree<ListValue>);
+
+impl std::fmt::Debug for List {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.iter()).finish()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListValue {
@@ -105,7 +111,7 @@ impl ListValue {
     }
 }
 
-impl From<Vec<Value>> for Value {
+impl From<Vec<Value>> for List {
     fn from(values: Vec<Value>) -> Self {
         let mut s = SequenceTree::new();
         for value in values {
@@ -115,6 +121,12 @@ impl From<Vec<Value>> for Value {
                 marks: Default::default(),
             })
         }
-        Value::List(List(s))
+        List(s)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(values: Vec<Value>) -> Self {
+        Value::List(List::from(values))
     }
 }

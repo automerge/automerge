@@ -5,7 +5,7 @@ mod result;
 mod transactable;
 
 pub use self::commit::CommitOptions;
-pub use self::transactable::{BlockOrText, Transactable, NewBlock};
+pub use self::transactable::{BlockOrText, NewBlock, Transactable};
 pub(crate) use inner::{TransactionArgs, TransactionInner};
 pub use manual_transaction::Transaction;
 pub use result::Failure;

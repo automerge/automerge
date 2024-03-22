@@ -1,6 +1,9 @@
 use std::str::FromStr;
 
-use automerge::{marks::Mark, transaction::Transactable, ActorId, AutoCommit, ObjType, PatchAction, ReadDoc, ScalarValue, ROOT};
+use automerge::{
+    marks::Mark, transaction::Transactable, ActorId, AutoCommit, ObjType, PatchAction, ReadDoc,
+    ScalarValue, ROOT,
+};
 use test_log::test;
 
 #[test]
@@ -44,14 +47,25 @@ fn update_text_big_ole_graphemes() {
 
 macro_rules! assert_marks {
     ($marks:expr, $expected:expr) => {
-        let marks = $marks.iter_marks().collect::<std::collections::HashMap<&str, &ScalarValue>>();
-        let expected = $expected.into_iter().map(|(name, value)| (name, ScalarValue::from(value))).collect::<std::collections::HashMap<&str, _>>();
-        assert_eq!(marks.len(), $expected.len(), "expected {} marks, got {}", $expected.len(), marks.len());
+        let marks = $marks
+            .iter_marks()
+            .collect::<std::collections::HashMap<&str, &ScalarValue>>();
+        let expected = $expected
+            .into_iter()
+            .map(|(name, value)| (name, ScalarValue::from(value)))
+            .collect::<std::collections::HashMap<&str, _>>();
+        assert_eq!(
+            marks.len(),
+            $expected.len(),
+            "expected {} marks, got {}",
+            $expected.len(),
+            marks.len()
+        );
         let mut marks_equal = true;
         for (mark_name, mark_value) in &expected {
             if marks.get(*mark_name) != Some(&&mark_value) {
                 marks_equal = false;
-                break
+                break;
             }
         }
         if !marks_equal {
@@ -69,7 +83,12 @@ fn incremental_splice_patches_include_marks() {
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "12345").unwrap();
 
-    doc.mark(&text, Mark::new("strong".to_string(), true, 1, 2), automerge::marks::ExpandMark::Both).unwrap();
+    doc.mark(
+        &text,
+        Mark::new("strong".to_string(), true, 1, 2),
+        automerge::marks::ExpandMark::Both,
+    )
+    .unwrap();
     doc.update_diff_cursor();
 
     // Do the first splice
@@ -77,7 +96,12 @@ fn incremental_splice_patches_include_marks() {
     let patches = doc.diff_incremental();
     assert_eq!(patches.len(), 1);
 
-    let PatchAction::SpliceText { index, value, marks } = patches[0].action.clone() else {
+    let PatchAction::SpliceText {
+        index,
+        value,
+        marks,
+    } = patches[0].action.clone()
+    else {
         panic!("expected a splice patch, got {:?}", patches[0].action);
     };
     assert_eq!(index, 1);
@@ -93,8 +117,12 @@ fn incremental_splice_patches_include_marks() {
     assert_eq!(patches.len(), 1);
     let patch = patches[0].clone();
 
-
-    let PatchAction::SpliceText { index, value, marks } = patch.action.clone() else {
+    let PatchAction::SpliceText {
+        index,
+        value,
+        marks,
+    } = patch.action.clone()
+    else {
         panic!("expected a splice patch, got {:?}", patch.action);
     };
     assert_eq!(index, 2);
@@ -104,4 +132,3 @@ fn incremental_splice_patches_include_marks() {
     };
     assert_marks!(marks, [("strong", true)]);
 }
-

@@ -132,3 +132,11 @@ pub enum HydrateError {
     #[error("invalid prop in patch: {0}")]
     ApplyInvalidProp(PatchAction),
 }
+
+#[derive(Error, Debug)]
+pub enum UpdateObjectError {
+    #[error("cannot change object type")]
+    ChangeType,
+    #[error(transparent)]
+    Automerge(#[from] AutomergeError),
+}

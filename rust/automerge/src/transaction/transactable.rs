@@ -116,23 +116,13 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
-    fn split_block<'a, O>(
-        &mut self,
-        obj: O,
-        index: usize,
-        args: NewBlock<'a>,
-    ) -> Result<ExId, AutomergeError>
+    fn split_block<'a, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>;
 
-    fn update_block<'p, O>(
-        &mut self,
-        text: O,
-        index: usize,
-        new_block: NewBlock<'p>,
-    ) -> Result<(), AutomergeError>
+    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 
@@ -154,21 +144,18 @@ pub trait Transactable: ReadDoc {
     /// can do.
     fn update_text<S: AsRef<str>>(&mut self, obj: &ExId, new_text: S)
         -> Result<(), AutomergeError>;
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError>;
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum BlockOrText<'a> {
-    Block(crate::Block),
+    Block(crate::hydrate::Map),
     Text(Cow<'a, str>),
-}
-
-impl<'a> BlockOrText<'a> {
-    pub(crate) fn width(&self) -> usize {
-        match self {
-            BlockOrText::Block(b) => 1,
-            BlockOrText::Text(t) => t.graphemes(true).map(|c| TextValue::width(c)).sum(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -187,13 +174,16 @@ impl<'a> NewBlock<'a> {
         }
     }
 
-    pub fn with_parents<I: IntoIterator, >(self, parents: I) -> NewBlock<'a> 
+    pub fn with_parents<I: IntoIterator>(self, parents: I) -> NewBlock<'a>
     where
-        I::Item: std::borrow::Borrow<str>
+        I::Item: std::borrow::Borrow<str>,
     {
         NewBlock {
             block_type: self.block_type,
-            parents: parents.into_iter().map(|s| s.borrow().to_string()).collect(),
+            parents: parents
+                .into_iter()
+                .map(|s| s.borrow().to_string())
+                .collect(),
             attrs: self.attrs,
         }
     }

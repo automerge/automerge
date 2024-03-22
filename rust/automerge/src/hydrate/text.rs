@@ -4,10 +4,19 @@ use crate::{text_value::TextValue, PatchAction, ScalarValue};
 
 use super::{HydrateError, Value};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Text {
     value: TextValue,
     marks: HashMap<String, ScalarValue>,
+}
+
+impl std::fmt::Debug for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Text")
+            .field("value", &self.value.make_string())
+            .field("marks", &self.marks)
+            .finish()
+    }
 }
 
 impl Text {
@@ -47,5 +56,11 @@ impl From<TextValue> for Value {
 impl From<&Text> for String {
     fn from(text: &Text) -> Self {
         text.value.make_string()
+    }
+}
+
+impl ToString for Text {
+    fn to_string(&self) -> String {
+        self.value.make_string()
     }
 }

@@ -1,8 +1,7 @@
-use std::borrow::Borrow;
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{hydrate, NewBlock};
+use crate::hydrate;
 use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark, RichText};
@@ -328,16 +327,6 @@ impl<'a> ReadDoc for Transaction<'a> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
-
-    fn block<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        index: usize,
-        heads: Option<&[ChangeHash]>,
-    ) -> Result<Option<crate::types::Block>, AutomergeError> {
-        self.doc
-            .block_for(obj.as_ref(), index, self.get_scope(heads))
-    }
 }
 
 impl<'a> Transactable for Transaction<'a> {
@@ -451,19 +440,11 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
-    fn split_block<'p, O>(
-        &mut self,
-        obj: O,
-        index: usize,
-        args: crate::transaction::NewBlock<'p>,
-    ) -> Result<ExId, AutomergeError>
+    fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
-        O: AsRef<ExId>
+        O: AsRef<ExId>,
     {
-        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        self.do_tx(|tx, doc, hist| {
-            tx.split_block(doc, hist, obj.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
-        })
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
     }
 
     fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>
@@ -473,19 +454,11 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
     }
 
-    fn update_block<'p, O>(
-        &mut self,
-        text: O,
-        index: usize,
-        args: NewBlock<'p>,
-    ) -> Result<(), AutomergeError>
+    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
-        O: AsRef<ExId>
+        O: AsRef<ExId>,
     {
-        let attrs = args.attrs.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
-        self.do_tx(|tx, doc, hist| {
-            tx.update_block(doc, hist, text.as_ref(), index, args.block_type, args.parents.into_iter(), attrs)
-        })
+        self.do_tx(|tx, doc, hist| tx.replace_block(doc, hist, text.as_ref(), index))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {
@@ -511,6 +484,14 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(move |tx, doc, hist| {
             crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text)
         })
+    }
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        self.do_tx(move |tx, doc, hist| tx.update_object(doc, hist, obj.as_ref(), new_value))
     }
 }
 

@@ -1,8 +1,9 @@
 use crate::{
-    marks::{Mark, RichText}, Cursor, ObjId, Prop, ScalarValue, Value
+    marks::{Mark, RichText},
+    ObjId, Prop, Value,
 };
 use core::fmt::Debug;
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use crate::sequence_tree::SequenceTree;
 use crate::text_value::TextValue;
@@ -74,35 +75,11 @@ pub enum PatchAction {
         prop: Prop,
     },
     /// A key was deleted from a map
-    DeleteMap {
-        key: String,
-    },
+    DeleteMap { key: String },
     /// One or more indices were removed from a sequence
-    DeleteSeq {
-        index: usize,
-        length: usize,
-    },
+    DeleteSeq { index: usize, length: usize },
     /// Some marks within a text object were added or removed
-    Mark {
-        marks: Vec<Mark<'static>>,
-    },
-    SplitBlock {
-        index: usize,
-        cursor: Cursor,
-        conflict: bool,
-        parents: Vec<String>,
-        block_type: String,
-        attrs: HashMap<String, ScalarValue>,
-    },
-    JoinBlock {
-        index: usize,
-    },
-    UpdateBlock {
-        index: usize,
-        new_block_type: Option<String>,
-        new_block_parents: Option<Vec<String>>,
-        new_attrs: Option<HashMap<String, ScalarValue>>,
-    },
+    Mark { marks: Vec<Mark<'static>> },
 }
 
 impl fmt::Display for PatchAction {

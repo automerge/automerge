@@ -1,4 +1,3 @@
-use crate::automerge::diff::load_split_block;
 use crate::marks::RichText;
 pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
@@ -123,19 +122,8 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     }
                 }
             // TODO - move this into patch_log()
-            //} else if obj.typ == ObjType::Text && !op.action().is_block() {
-            } else if obj.typ == ObjType::Text {
-                if op.action().is_block() {
-                    patch_log.split_block(
-                        obj,
-                        None,
-                        self.index,
-                        op.id().into(),
-                        *op.id(),
-                    );
-                } else {
-                    patch_log.splice(obj, self.index, op.as_str(), self.marks.clone());
-                }
+            } else if obj.typ == ObjType::Text && !op.action().is_block() {
+                patch_log.splice(obj, self.index, op.as_str(), self.marks.clone());
             } else {
                 patch_log.insert(obj, self.index, op.value().into(), *op.id(), false);
             }
@@ -151,13 +139,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => patch_log.delete_map(obj, &k),
-                    Prop::Seq(index) => {
-                        if obj.typ == ObjType::Text && over.block_id().is_some() {
-                            patch_log.join_block(obj, over.block_id().unwrap().into(), self.index)
-                        } else {
-                            patch_log.delete_seq(obj, index, over.width(obj.encoding))
-                        }
-                    }
+                    Prop::Seq(index) => patch_log.delete_seq(&obj, index, over.width(obj.encoding)),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
@@ -193,19 +175,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     patch_log.flag_conflict(obj, &key);
                 }
             } else {
-                if obj.typ == ObjType::Text && op.action().is_block() {
-                    if let Some(before_block_id) = self.overwritten.map(|b| *b.id()) {
-                        let after_block_id = *op.id();
-                        patch_log.update_block(
-                            obj,
-                            self.index,
-                            before_block_id.into(),
-                            after_block_id.into(),
-                        )
-                    }
-                } else {
-                    patch_log.put(obj, &key, op.value().into(), *op.id(), conflict, false);
-                }
+                patch_log.put(obj, &key, op.value().into(), *op.id(), conflict, false);
             }
         }
     }

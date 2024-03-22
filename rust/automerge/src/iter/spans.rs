@@ -1,5 +1,4 @@
 //use crate::exid::ExId;
-use crate::Block;
 use crate::marks::{RichText, RichTextStateMachine};
 //use crate::port::HasMetadata;
 use crate::op_set::Op;
@@ -56,7 +55,7 @@ pub(crate) enum SpanInternal {
 #[derive(Debug, PartialEq)]
 pub enum Span {
     Text(String, Option<Arc<RichText>>),
-    Block(Block),
+    Block(crate::hydrate::Map),
 }
 
 impl<'a, I> SpansInternal<'a, I>
@@ -189,12 +188,11 @@ impl<'a> Iterator for Spans<'a> {
                     let value = internal
                         .doc
                         .hydrate_map(&opid.into(), internal.clock.as_ref());
-                    if let Some(block) = crate::block::hydrate_block(value) {
-                        Some(Span::Block(block))
-                    } else {
-                        tracing::warn!("Failed to hydrate block {:?}", opid);
-                        Some(Span::Text("\u{fffc}".to_string(), None))
-                    }
+                    let crate::hydrate::Value::Map(value) = value else {
+                        tracing::warn!("unexpected non map object in text");
+                        return None;
+                    };
+                    Some(Span::Block(value))
                 }
                 None => None,
             })

@@ -49,7 +49,7 @@ pub struct PatchLog {
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -149,13 +149,6 @@ impl PatchLog {
 
     pub(crate) fn is_active(&self) -> bool {
         self.active
-    }
-
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
-        }
     }
 
     pub(crate) fn delete_seq(&mut self, obj: &ObjMeta, index: usize, num: usize) {

@@ -1,6 +1,4 @@
 use itertools::Itertools;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -131,11 +129,7 @@ impl<'a> Patch<'a> {
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     // Ojbects we don't want to iterate over because they are accounted for by
     // block patches (i.e. the "parents" list in a block).
-    let mut hidden_blocks = HashSet::new();
     for (obj, ops) in doc.ops().iter_objs() {
-        if hidden_blocks.contains(&obj.id) {
-            continue;
-        }
         let mut diff = RichTextDiff::new(doc);
         let ops_by_key = ops.group_by(|o| o.as_op(doc.osd()).elemid_or_key());
         let diffs = ops_by_key.into_iter().filter_map(|(_key, key_ops)| {
@@ -148,15 +142,7 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
         });
 
         if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_diff(
-                &mut hidden_blocks,
-                before,
-                after,
-                patch_log,
-                &obj,
-                diffs,
-                doc,
-            )
+            log_text_diff(patch_log, &obj, diffs)
         } else if obj.typ.is_sequence() {
             log_list_diff(patch_log, &obj, diffs);
         } else {
@@ -211,13 +197,9 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    hidden_blocks: &mut HashSet<crate::types::ObjId>,
-    before: &Clock,
-    after: &Clock,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     patches: I,
-    doc: &Automerge,
 ) {
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
@@ -226,25 +208,9 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.splice(obj, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                hidden_blocks.insert(winner.op.id().into());
-                match winner.op.value_at(Some(winner.clock)) {
-                    Value::Object(ObjType::Map) => {
-                        patch_log.split_block(obj, Some(winner.clock.clone()), index, (*winner.op.id()).into(), *winner.op.id());
-                    }
-                    _ => {
-                        // we don't know what this is so just insert an object replacement
-                        // character
-                        patch_log.insert(
-                            obj,
-                            index,
-                            "\u{FFFC}".into(),
-                            *winner.op.id(),
-                            winner.conflict,
-                        );
-                    }
-                }
+                let value = winner.op.value_at(Some(winner.clock)).into();
+                patch_log.insert(obj, index, value, *winner.op.id(), winner.conflict);
             }
-
             index + winner.op.width(encoding)
         }
         Patch::Update {
@@ -252,42 +218,11 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             after,
             marks,
         } => {
-            match (before.op.action(), after.op.action()) {
-                // None of these scenarios really happen because we don't provide
-                // any API for directly setting a position in a text object.
-                (OpType::Make(ObjType::Map), OpType::Make(ObjType::Map)) => {
-                    patch_log.update_block(
-                        obj,
-                        index,
-                        before.op.id().into(),
-                        after.op.id().into(),
-                    );
-                }
-                (OpType::Make(ObjType::Map), OpType::Put(_)) => {
-                    patch_log.join_block(obj, before.op.id().into(), index);
-                    patch_log.splice(obj, index, after.op.as_str(), marks.clone());
-                }
-                (OpType::Put(_), OpType::Make(ObjType::Map)) => {
-                    patch_log.split_block(
-                        obj,
-                        Some(after.clock.clone()),
-                        index,
-                        (*after.op.id()).into(),
-                        *after.op.id(),
-                    );
-                }
-                (_, _) => {
-                    patch_log.delete_seq(obj, index, before.op.width(encoding));
-                    patch_log.splice(obj, index, after.op.as_str(), marks.clone());
-                }
-            }
+            patch_log.delete_seq(obj, index, before.op.width(encoding));
+            patch_log.splice(obj, index, after.op.as_str(), marks.clone());
             index + after.op.width(encoding)
         }
-        Patch::Old { before, after, marks, .. } => {
-            if *after.op.action() == OpType::Make(ObjType::Map) {
-                // this _might be an updated block
-                patch_log.update_block(obj, index, (*before.op.id()).into(), (*after.op.id()).into());
-            }
+        Patch::Old { after, marks, .. } => {
             let len = after.op.width(encoding);
             if let Some(marks) = marks {
                 patch_log.mark(obj.id, index, len, marks)
@@ -295,140 +230,10 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index + len
         }
         Patch::Delete(before) => {
-            match before.op.action() {
-                OpType::Make(_) => {
-                    patch_log.join_block(obj, before.op.id().into(), index);
-                }
-                _ => {
-                    patch_log.delete_seq(obj, index, before.op.width(encoding));
-                }
-            }
+            patch_log.delete_seq(obj, index, before.op.width(encoding));
             index
         }
     });
-}
-
-pub(crate) fn load_split_block(
-    doc: &Automerge,
-    hidden_blocks: &mut HashSet<crate::types::ObjId>,
-    block_obj_id: crate::types::ObjId,
-    clock: Option<&Clock>,
-) -> Option<(String, Vec<String>, HashMap<String, crate::ScalarValue>)> {
-    hidden_blocks.insert(block_obj_id);
-    let Some(block_ops) = doc.ops().iter_obj(&block_obj_id) else {
-        return None;
-    };
-    // Don't log objects in the block to the patch log
-    for op_idx in block_ops {
-        let op = op_idx.as_op(doc.osd());
-        if let OpType::Make(_) = op.action() {
-            hidden_blocks.insert(op.id().into());
-        }
-    }
-    let block = doc.hydrate_map(&block_obj_id, clock);
-    let crate::hydrate::Value::Map(mut block_map) = block else {
-        tracing::warn!("non map value found for block");
-        return None;
-    };
-    let Some(block_type) = block_map.get("type").cloned() else {
-        tracing::warn!("block type not found");
-        return None;
-    };
-    let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(block_type)) = block_type else {
-        tracing::warn!("block type not a string");
-        return None;
-    };
-    let mut block_parents = vec![];
-    let Some(parents) = block_map.get("parents") else {
-        tracing::warn!("block parents not found");
-        return None;
-    };
-    let crate::hydrate::Value::List(parents) = parents else {
-        tracing::warn!("block parents not a list");
-        return None;
-    };
-    for parent in parents.iter() {
-        let crate::hydrate::Value::Scalar(crate::ScalarValue::Str(parent)) = &parent.value else {
-            tracing::warn!("block parent not a string");
-            return None;
-        };
-        block_parents.push(parent.to_string());
-    }
-
-    let Some(attrs) = block_map.get("attrs") else {
-        tracing::warn!("block attrs not found");
-        return None;
-    };
-    let mut block_attrs = HashMap::new();
-    let crate::hydrate::Value::Map(attrs) = attrs else {
-        tracing::warn!("block attrs not a map");
-        return None;
-    };
-    for (k, v) in attrs.iter() {
-        let crate::hydrate::Value::Scalar(v) = &v.value else {
-            tracing::warn!("block attr value not a scalar");
-            return None;
-        };
-        block_attrs.insert(k.to_string(), v.clone());
-    };
-    Some((block_type.to_string(), block_parents, block_attrs))
-}
-
-pub(crate) struct UpdateBlockDiff {
-    pub(crate) new_type: Option<String>,
-    pub(crate) new_parents: Option<Vec<String>>,
-    pub(crate) new_attrs: Option<HashMap<String, crate::ScalarValue>>,
-    pub(crate) composed_obj_ids: HashSet<crate::types::ObjId>,
-}
-
-pub(crate) fn load_update_block_diff(
-    index: usize,
-    doc: &Automerge,
-    before_block_id: crate::types::ObjId,
-    after_block_id: crate::types::ObjId,
-) -> UpdateBlockDiff {
-    let mut composed_obj_ids = HashSet::new();
-    let Some((type_before, parents_before, attrs_before)) = load_split_block(doc, &mut composed_obj_ids, before_block_id, None) else {
-        return UpdateBlockDiff {
-            new_type: None,
-            new_parents: None,
-            new_attrs: None,
-            composed_obj_ids,
-        };
-    };
-    let Some((type_after, parents_after, attrs_after)) = load_split_block(doc, &mut composed_obj_ids, after_block_id, None) else {
-        return UpdateBlockDiff {
-            new_type: None,
-            new_parents: None,
-            new_attrs: None,
-            composed_obj_ids,
-        };
-    };
-
-    let new_type = if type_before != type_after {
-        Some(type_after)
-    } else {
-        None
-    };
-
-    let new_parents = if parents_before != parents_after {
-        Some(parents_after)
-    } else {
-        None
-    };
-
-    let new_attrs = if attrs_before != attrs_after {
-        Some(attrs_after)
-    } else {
-        None
-    };
-
-    UpdateBlockDiff {
-        new_type,
-        new_parents,
-        new_attrs,
-        composed_obj_ids,
-    }
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
@@ -731,20 +536,12 @@ impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
     fn live_obj_paths(&self) -> std::collections::HashMap<ExId, Vec<(ExId, Prop)>> {
         self.doc.visible_obj_paths(Some(self.heads))
     }
-
-    fn block<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        index: usize,
-        heads: Option<&[ChangeHash]>,
-    ) -> Result<Option<crate::types::Block>, AutomergeError> {
-        self.doc
-            .block(obj, index, Some(heads.unwrap_or(self.heads)))
-    }
 }
 
 #[cfg(test)]
 mod tests {
+
+    use std::borrow::Cow;
 
     use crate::{
         marks::Mark, patches::TextRepresentation, transaction::Transactable, types::MarkData,
@@ -862,9 +659,6 @@ mod tests {
                     action: ObservedAction::Conflict(prop),
                     path: format!("/{}", path.clone().join("/")),
                 },
-                PatchAction::SplitBlock { .. } => todo!(),
-                PatchAction::JoinBlock { .. } => todo!(),
-                PatchAction::UpdateBlock { .. } => todo!(),
             }
         }
     }
@@ -1600,6 +1394,94 @@ mod tests {
                     action: ObservedAction::SpliceText("aaa".to_string()),
                 },
             ]
+        );
+    }
+
+    fn update_map_diff_incremental() {
+        let mut doc = AutoCommit::new();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "Hello, World!").unwrap();
+        doc.update_diff_cursor();
+        let block = doc.split_block(&text, 5).unwrap();
+        doc.update_object(
+            &block,
+            &hydrate_map! {
+                "type" => "unordered-list-item",
+                "parents" => hydrate_list!["ordered-list-item", "unordered-list-item"],
+                "attrs" => hydrate_map! {}
+            }
+            .into(),
+        )
+        .unwrap();
+        let patches = exp(doc.diff_incremental());
+        let patches_by_path =
+            patches
+                .into_iter()
+                .fold(std::collections::HashMap::new(), |mut acc, patch| {
+                    acc.entry(patch.path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(patch.action);
+                    acc
+                });
+        assert_eq!(
+            patches_by_path["/text/5"],
+            vec![ObservedAction::Insert {
+                values: vec![Value::Object(ObjType::Map)],
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/type"],
+            vec![ObservedAction::PutMap {
+                value: Value::Scalar(Cow::Owned(ScalarValue::Str("unordered-list-item".into()))),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/parents"],
+            vec![ObservedAction::PutMap {
+                value: Value::Object(ObjType::List),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/attrs"],
+            vec![ObservedAction::PutMap {
+                value: Value::Object(ObjType::Map),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/parents/0"],
+            vec![ObservedAction::Insert {
+                values: vec![
+                    Value::Scalar(Cow::Owned(ScalarValue::Str("ordered-list-item".into()))),
+                    Value::Scalar(Cow::Owned(ScalarValue::Str("unordered-list-item".into())))
+                ]
+            }]
+        );
+
+        assert_eq!(patches_by_path.len(), 5);
+    }
+
+    #[test]
+    fn join_block_diff_incremental() {
+        let mut doc = AutoCommit::new();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "Hello, World!").unwrap();
+        doc.split_block(&text, 5).unwrap();
+        doc.update_diff_cursor();
+        doc.join_block(&text, 5).unwrap();
+        let patches = exp(doc.diff_incremental());
+        assert_eq!(
+            patches,
+            vec![ObservedPatch {
+                path: "/text/5".into(),
+                action: ObservedAction::DelSeq {},
+            }]
         );
     }
 }

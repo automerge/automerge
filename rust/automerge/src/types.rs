@@ -751,13 +751,10 @@ impl Block {
     }
 
     pub fn with_parents(self, parents: Vec<String>) -> Self {
-        Self {
-            parents,
-            ..self
-        }
+        Self { parents, ..self }
     }
 
-    pub fn with_attrs<I: Iterator<Item=(String, ScalarValue)>>(self, attrs: I) -> Self {
+    pub fn with_attrs<I: Iterator<Item = (String, ScalarValue)>>(self, attrs: I) -> Self {
         let mut current_attrs = self.attrs;
         for (k, v) in attrs {
             current_attrs.insert(k, v);
@@ -775,12 +772,11 @@ impl Block {
     pub fn parents(&self) -> &[String] {
         &self.parents
     }
-    
+
     pub fn attrs(&self) -> &HashMap<String, ScalarValue> {
         &self.attrs
     }
 }
-
 
 #[cfg(test)]
 pub(crate) mod gen {

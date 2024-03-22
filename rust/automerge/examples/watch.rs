@@ -91,9 +91,6 @@ fn get_changes(_doc: &Automerge, patches: Vec<Patch>) {
                     prop, obj, path,
                 )
             }
-            PatchAction::SplitBlock { .. } => todo!(),
-            PatchAction::JoinBlock { .. } => todo!(),
-            PatchAction::UpdateBlock { .. } => todo!(),
         }
     }
 }

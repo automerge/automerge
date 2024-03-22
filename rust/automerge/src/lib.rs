@@ -259,7 +259,6 @@ macro_rules! __log {
 mod autocommit;
 mod automerge;
 mod autoserde;
-mod block;
 mod change;
 mod change_graph;
 mod clock;
@@ -307,9 +306,9 @@ pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, Block};
+pub use transaction::{BlockOrText, NewBlock};
+pub use types::{ActorId, Block, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 pub use value::{ScalarValue, Value};
-pub use transaction::{NewBlock, BlockOrText};
 
 /// The object ID for the root map of a document
 pub const ROOT: ObjId = ObjId::Root;

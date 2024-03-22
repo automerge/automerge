@@ -126,10 +126,10 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         // TODO: Fix this logic to handle marks
         false
         //if let Some(last) = &tree.last_insert {
-            //if last.index + last.width == self.list_state.target() {
-                //self.candidates.push(Loc::new(last.pos + 1, last.key));
-                //return true;
-            //}
+        //if last.index + last.width == self.list_state.target() {
+        //self.candidates.push(Loc::new(last.pos + 1, last.key));
+        //return true;
+        //}
         //}
         //false
     }

@@ -15,7 +15,6 @@ pub(crate) struct RichTextQueryState<'a> {
 }
 
 impl<'a> RichTextQueryState<'a> {
-
     pub(crate) fn block(&self) -> Option<&OpId> {
         self.block.as_ref()
     }

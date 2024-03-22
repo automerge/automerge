@@ -100,6 +100,18 @@ impl From<Value> for value::Value<'_> {
     }
 }
 
+impl From<Map> for Value {
+    fn from(value: Map) -> Self {
+        Value::Map(value)
+    }
+}
+
+impl From<List> for Value {
+    fn from(value: List) -> Self {
+        Value::List(value)
+    }
+}
+
 impl From<&Value> for value::Value<'_> {
     fn from(value: &Value) -> Self {
         match value {
@@ -169,14 +181,14 @@ impl Automerge {
 #[macro_export]
 macro_rules! hydrate_map {
     {$($k: expr => $v: expr),* $(,)?} => {
-        hydrate::Value::from(std::collections::HashMap::from([$(($k, hydrate::Value::from($v)),)*]))
+        $crate::hydrate::Map::from(std::collections::HashMap::from([$(($k, $crate::hydrate::Value::from($v)),)*]))
     };
 }
 
 #[macro_export]
 macro_rules! hydrate_list {
     {$($v: expr),* $(,)?} => {
-        hydrate::Value::from(Vec::<hydrate::Value>::from([$(hydrate::Value::from($v),)*]))
+        $crate::hydrate::List::from(Vec::<$crate::hydrate::Value>::from([$($crate::hydrate::Value::from($v),)*]))
     };
 }
 

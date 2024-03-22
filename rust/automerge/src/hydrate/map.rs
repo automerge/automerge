@@ -50,7 +50,7 @@ impl Map {
         }
     }
 
-    pub fn get(&mut self, key: &str) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key).map(|mv| &mv.value)
     }
 
