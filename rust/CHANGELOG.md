@@ -1,3 +1,10 @@
+# 0.5.9
+
+* Fix a bug introduced in 0.5.8 which caused an error when loading a saved
+  document which contained empty commits
+* Improve performance when diffing documents which contain a large number of 
+  objects
+
 # 0.5.8
 
 * Fix a bug where the logic to rollback a transaction on error could panic
