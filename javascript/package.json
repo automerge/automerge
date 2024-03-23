@@ -70,15 +70,7 @@
     "denoify/evt": "2.4.18"
   },
   "dependencies": {
-<<<<<<< HEAD
-    "@automerge/automerge-wasm": "0.11.0",
-=======
-<<<<<<< HEAD
-    "@automerge/automerge-wasm": "0.10.0",
-=======
-    "@automerge/automerge-wasm": "0.10.0-richtext-alpha.1",
->>>>>>> c3e2ce483 (Add alpha versions)
->>>>>>> dac722d74 (Add alpha versions)
+    "@automerge/automerge-wasm": "0.13.0-richtext-alpha.2",
     "uuid": "^9.0.0"
   }
 }

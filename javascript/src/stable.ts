@@ -203,7 +203,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const textV2 = opts.enableTextV2 || false
   if (textV2) {
     handle.registerDatatype("str", (n: string, {context}: {context: string}) => {
-      if (context === "blockAttr") {
+      if (context === "block") {
         return n
       } else {
         return new RawString(n)

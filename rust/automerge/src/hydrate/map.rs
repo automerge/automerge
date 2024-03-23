@@ -108,3 +108,20 @@ impl From<HashMap<&str, Value>> for Map {
             .collect())
     }
 }
+
+impl From<HashMap<String, Value>> for Map {
+    fn from(value: HashMap<String, Value>) -> Self {
+        Map(value
+            .into_iter()
+            .map(|(k, value)| {
+                (
+                    k,
+                    MapValue {
+                        value,
+                        conflict: false,
+                    },
+                )
+            })
+            .collect())
+    }
+}

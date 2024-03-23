@@ -367,18 +367,13 @@ impl Automerge {
         args: JsValue,
     ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
-        let SplitBlockArgs {
-            block_type,
-            parents,
-            attrs,
-        } = interop::import_split_block_args(self, JS(args))?;
-        self.doc.split_block(
-            &obj,
-            index as usize,
-            am::NewBlock::new(&block_type)
-                .with_parents(parents)
-                .with_attrs(attrs),
-        )?;
+        let block = self.doc.split_block(&obj, index as usize)?;
+        let hydrate = match interop::js_val_to_hydrate(args) {
+            val @ am::hydrate::Value::Map(_) => val,
+            _ => return Err(error::SplitBlock::InvalidArgs),
+        };
+
+        self.doc.update_object(&block, &hydrate)?;
         Ok(())
     }
 
@@ -409,46 +404,40 @@ impl Automerge {
         args: JsValue,
     ) -> Result<(), error::UpdateBlock> {
         let (text, _) = self.import(text)?;
-        let UpdateBlockArgs {
-            block_type,
-            parents,
-            attrs,
-        } = interop::import_update_block_args(self, JS(args))?;
-        self.doc.replace_block(
-            &text,
-            index,
-            am::NewBlock::new(&block_type)
-                .with_parents(parents)
-                .with_attrs(attrs),
-        )?;
+        let new_block = self.doc.replace_block(&text, index)?;
+        let new_value = interop::js_val_to_hydrate(args);
+        if !matches!(new_value, am::hydrate::Value::Map(_)) {
+            return Err(error::UpdateBlock::InvalidArgs);
+        }
+        self.doc.update_object(&new_block, &new_value)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = getBlock)]
-    pub fn get_block(&mut self, text: JsValue, index: usize) -> Result<JsValue, error::GetBlock> {
+    pub fn get_block(
+        &mut self,
+        text: JsValue,
+        index: usize,
+        heads: Option<Array>,
+    ) -> Result<JsValue, error::GetBlock> {
         let (text, _) = self.import(text)?;
-        let Some(block) = self.doc.block(&text, index, None)? else {
+        let Some((Value::Object(am::ObjType::Map), id)) = self.doc.get(&text, index)? else {
             return Ok(JsValue::null());
         };
 
-        let mut obj = Object::new();
-        let block_type = JsValue::from_str(block.block_type());
-        let parents = Array::new();
-        for parent in block.parents() {
-            parents.push(&JsValue::from_str(parent));
-        }
+        let heads = get_heads(heads)?;
+        let hydrated = if let Some(h) = heads {
+            self.doc.hydrate(&id, Some(&h))?
+        } else {
+            self.doc.hydrate(&id, None)?
+        };
 
-        let attrs = Object::new();
-        let cache = interop::ExportCache::new(self).unwrap();
-        for (key, value) in block.attrs() {
-            let alloced = interop::alloc_scalar(value);
-            let value = self.export_value(alloced, &cache, interop::ValueContext::BlockAttr)?;
-            js_set(&attrs, key, JsValue::from(value))?;
-        }
-        js_set(&obj, "type", block_type)?;
-        js_set(&obj, "parents", JsValue::from(parents))?;
-        js_set(&obj, "attrs", JsValue::from(attrs))?;
-        Ok(obj.into())
+        Ok(interop::export_hydrate(
+            interop::ValueContext::Block,
+            self,
+            &interop::ExportCache::new(self).unwrap(),
+            hydrated,
+        ))
     }
 
     #[wasm_bindgen(js_name = insertObject)]
@@ -1317,18 +1306,6 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
     SyncState::decode(data)
 }
 
-struct SplitBlockArgs {
-    block_type: String,
-    parents: Vec<String>,
-    attrs: HashMap<String, ScalarValue>,
-}
-
-struct UpdateBlockArgs {
-    block_type: String,
-    parents: Vec<String>,
-    attrs: HashMap<String, ScalarValue>,
-}
-
 struct UpdateBlocksArgs(Vec<am::BlockOrText<'static>>);
 
 pub mod error {
@@ -1711,10 +1688,12 @@ pub mod error {
     pub enum SplitBlock {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
-        #[error(transparent)]
-        InvalidArgs(#[from] interop::error::InvalidSplitBlockArgs),
+        #[error("the block value must be a map")]
+        InvalidArgs,
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        UpdateObject(#[from] automerge::error::UpdateObjectError),
     }
 
     impl From<SplitBlock> for JsValue {
@@ -1727,10 +1706,12 @@ pub mod error {
     pub enum UpdateBlock {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
-        #[error(transparent)]
-        InvalidArgs(#[from] interop::error::InvalidUpdateBlockArgs),
+        #[error("the updated block args must be a map")]
+        InvalidArgs,
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Update(#[from] automerge::error::UpdateObjectError),
     }
 
     impl From<UpdateBlock> for JsValue {
@@ -1749,6 +1730,8 @@ pub mod error {
         Set(#[from] interop::error::SetProp),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
+        #[error(transparent)]
+        BadHeads(#[from] interop::error::BadChangeHashes),
     }
 
     impl From<GetBlock> for JsValue {

@@ -12,67 +12,12 @@ describe('blocks', () => {
       const text = doc.putObject("_root", "list", "🐻🐻🐻bbbccc")
       doc.splitBlock(text, 6, { type: "li", parents: ["ul"], attrs: {kind: "todo" }});
       const spans = doc.spans("/list");
+        console.log(JSON.stringify(spans))
       assert.deepStrictEqual(spans, [
         { type: "text", value: "🐻🐻🐻" },
         { type: 'block', value: { type: 'li', parents: ['ul'], attrs: {kind: "todo"} } },
         { type: 'text', value: 'bbbccc' }
       ])
-    })
-
-    it("produces local incremental patches", () => {
-      const doc = create({ actor: "aabbcc" })
-      const text = doc.putObject("_root", "text", "🐻🐻🐻bbbccc")
-      doc.updateDiffCursor()
-      doc.splitBlock(text, 6, { type: "li", parents: ["ul"], attrs: {kind: "todo"} });
-      const patches = doc.diffIncremental()
-      assert.deepStrictEqual(patches, [{
-          action: 'splitBlock',
-          path: ['text', 6],
-          index: 6,
-          type: 'li',
-          parents: ['ul'],
-          attrs: {kind: "todo"},
-          cursor: doc.getCursor("/text", 6)
-      }])
-    })
-
-    it("produces remote incremental patches", () => {
-      const doc = create({ actor: "aabbcc" })
-      const text = doc.putObject("_root", "text", "🐻🐻🐻bbbccc")
-      const doc2 = doc.fork()
-      doc2.updateDiffCursor()
-      doc.splitBlock(text, 6, { type: "li", parents: ["ul"], attrs: {kind: "todo"} });
-      doc2.merge(doc)
-      const patches = doc2.diffIncremental()
-      assert.deepStrictEqual(patches, [{
-          action: 'splitBlock',
-          path: ['text', 6],
-          index: 6,
-          type: 'li',
-          parents: ['ul'],
-          attrs: {kind: "todo"},
-          cursor: doc.getCursor("/text", 6)
-      }])
-
-    })
-
-    it("produces full scan patches", () => {
-      const doc = create({ actor: "aabbcc" })
-      const text = doc.putObject("_root", "text", "🐻🐻🐻bbbccc")
-      const headsBefore = doc.getHeads()
-      doc.splitBlock(text, 6, { type: "li", parents: ["ul"], attrs: { kind: "todo"} });
-      const headsAfter = doc.getHeads()
-      doc.resetDiffCursor()
-      const patches = doc.diff(headsBefore, headsAfter)
-      assert.deepStrictEqual(patches, [{
-          action: 'splitBlock',
-          path: ['text', 6],
-          index: 6,
-          type: 'li',
-          parents: ['ul'],
-          attrs: {kind: "todo"},
-          cursor: doc.getCursor("/text", 6)
-      }])
     })
 
     it.skip('consolidates patches', () => {
@@ -112,41 +57,6 @@ describe('blocks', () => {
       ])
     })
 
-    it("produces local incremental patches", () => {
-      doc.joinBlock(text, 3);
-      const patches = doc.diffIncremental()
-      assert.deepStrictEqual(patches, [{
-        action: "joinBlock",
-        path: ["text", 3],
-        index: 3
-      }])
-    })
-
-    it("produces remote incremental patches", () => {
-      const doc2 = doc.fork()
-      doc2.updateDiffCursor()
-      doc.joinBlock(text, 3);
-      doc2.merge(doc)
-      const patches = doc2.diffIncremental()
-      assert.deepStrictEqual(patches, [{
-        action: "joinBlock",
-        path: ["text", 3],
-        index: 3
-      }])
-    })
-
-    it("produces full scan patches", () => {
-      const headsBefore = doc.getHeads()
-      doc.joinBlock(text, 3);
-      const headsAfter = doc.getHeads()
-      doc.resetDiffCursor()
-      const patches = doc.diff(headsBefore, headsAfter)
-      assert.deepStrictEqual(patches, [{
-        action: "joinBlock",
-        path: ["text", 3],
-        index: 3
-      }])
-    })
   })
 
   it.skip('patches correctly reference blocks', () => {
@@ -252,165 +162,6 @@ describe('blocks', () => {
           { type: 'text', value: 'bbbccc' }
         ])
       })
-
-      it("produces local incremental patches", () => {
-        doc.updateBlock(text, 3, {type: "ordered-list-item", parents: [], attrs: {} });
-        const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: "ordered-list-item",  
-          new_parents: null,
-          new_attrs: null,
-        }]);
-      })
-
-      it("produces remote incremental patches", () => {
-        const doc2 = doc.fork()
-        doc2.updateDiffCursor()
-        doc.updateBlock(text, 3, {type: "ordered-list-item", parents: [], attrs: {} });
-        doc2.merge(doc)
-        const patches = doc2.diffIncremental()
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: "ordered-list-item",  
-          new_parents: null,
-          new_attrs: null,
-        }])
-      })
-
-      it("produces full scan patches", () => {
-        const headsBefore = doc.getHeads()
-        doc.updateBlock(text, 3, {type: "ordered-list-item", parents: [], attrs: {} });
-        const headsAfter = doc.getHeads()
-        doc.resetDiffCursor()
-        const patches = doc.diff(headsBefore, headsAfter)
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: "ordered-list-item",  
-          new_parents: null,
-          new_attrs: null,
-        }])
-      })
-    })
-
-    describe("when updating block parents", () => {
-      it("can update the block parents", () => {
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} });
-        const spans = doc.spans("/text")
-        assert.deepStrictEqual(spans, [
-          { type: 'text', value: 'aaa' },
-          { type: 'block', value: { type: 'unordered-list-item', parents: ['ordered-list-item'], attrs: {} } },
-          { type: 'text', value: 'bbbccc' }
-        ])
-      })
-
-      it("produces local incremental patches", () => {
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} });
-        const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_attrs: null,
-          new_parents: ["ordered-list-item"],  
-        }]);
-      })
-
-      it("produces remote incremental patches", () => {
-        const doc2 = doc.fork()
-        doc2.updateDiffCursor()
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} });
-        doc2.merge(doc)
-        const patches = doc2.diffIncremental()
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_attrs: null,
-          new_parents: ["ordered-list-item"],  
-        }])
-      })
-
-      it("produces full scan patches", () => {
-        const headsBefore = doc.getHeads()
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} });
-        const headsAfter = doc.getHeads()
-        doc.updateDiffCursor()
-        const patches = doc.diff(headsBefore, headsAfter)
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_attrs: null,
-          new_parents: ["ordered-list-item"],  
-        }])
-      })
-    })
-
-    describe("when updating block attributes", () => {
-      it("can update block attributes", () => {
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} });
-        const spans = doc.spans("/text")
-        assert.deepStrictEqual(spans, [
-          { type: 'text', value: 'aaa' },
-          { type: 'block', value: { type: 'unordered-list-item', parents: ['ordered-list-item'], attrs: {} } },
-          { type: 'text', value: 'bbbccc' }
-        ])
-      })
-  
-      it("produces local incremental patches", () => {
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: [], attrs: {foo: "bar"} });
-        const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_parents: null,
-          new_attrs: {foo: "bar"}
-        }]);
-      })
-
-      it("produces remote incremental patches", () => {
-        const doc2 = doc.fork()
-        doc2.updateDiffCursor()
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: [], attrs: {foo: "bar"} });
-        doc2.merge(doc)
-        const patches = doc2.diffIncremental()
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_parents: null,
-          new_attrs: {foo: "bar"}
-        }])
-      })
-
-      it("produces full scan patches", () => {
-        const headsBefore = doc.getHeads()
-        doc.updateBlock(text, 3, {type: "unordered-list-item", parents: [], attrs: {foo: "bar"} });
-        const headsAfter = doc.getHeads()
-        doc.resetDiffCursor()
-        const patches = doc.diff(headsBefore, headsAfter)
-        assert.deepStrictEqual(patches, [{
-          action: "updateBlock",
-          path: ["text", 3],
-          index: 3,
-          new_type: null,
-          new_parents: null,
-          new_attrs: {foo: "bar"}
-        }])
-      })
     })
   })
 
@@ -429,7 +180,6 @@ describe('blocks', () => {
         "the second thing",
       ])
       const spansAfter = doc.spans("/text");
-      console.log(JSON.stringify(spansAfter, null, 2))
       assert.deepStrictEqual(spansAfter, [
         {type: "block", value: {type: "paragraph", parents: [], attrs: {kind: "reallytodo"}}},
         {type: "text", value: "the first thing"},
@@ -448,7 +198,7 @@ describe('blocks', () => {
       }
 
       doc.registerDatatype("str", (value: string, {context}: {context: string}) => {
-        if (context === "blockAttr") {
+        if (context === "block") {
           return new AttrString(value)
         } else {
           return value

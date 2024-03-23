@@ -265,7 +265,7 @@ mod clock;
 mod columnar;
 mod convert;
 mod cursor;
-mod error;
+pub mod error;
 pub mod ex;
 mod exid;
 pub mod hydrate;

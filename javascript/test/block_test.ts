@@ -5,6 +5,14 @@ import { mismatched_heads } from "./helpers"
 import { PatchSource } from "../src/types"
 import { inspect } from "util"
 
+function pathsEqual(a: Automerge.Prop[], b: Automerge.Prop[]) {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 describe("Automerge", () => {
   describe("block", () => {
     it("can split a block", () => {
@@ -21,13 +29,9 @@ describe("Automerge", () => {
       assert.deepStrictEqual(Automerge.block(doc, ["text"], 3), block)
 
       assert.deepStrictEqual(callbacks[0][0], {
-        action: "splitBlock",
+        action: "insert",
         path: ["text", 3],
-        index: 3,
-        type: "p",
-        cursor: Automerge.getCursor(doc, ["text"], 3),
-        parents: ["div"],
-        attrs: {}
+        values: [{}]
       })
       assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
         { type: "text", value: "aaa" },
@@ -65,34 +69,6 @@ describe("Automerge", () => {
     })
     assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
       { type: "text", value: "aaabbbccc" },
-    ])
-  })
-
-  it("emits a single split patch when call diff after splitting a block", () => {
-    const block = { parents: [], type: "ordered-list-item", attrs: {} }
-    let doc = Automerge.from({ text: "aaa" })
-    doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "paragraph", attrs: {} })
-      Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: {} })
-    })
-
-    const headsBefore = Automerge.getHeads(doc)
-    doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 3, block)
-    })
-    const headsAfter = Automerge.getHeads(doc)
-
-    const diff = Automerge.diff(doc, headsBefore, headsAfter)
-    assert.deepStrictEqual(diff, [
-      {
-        action: "splitBlock",
-        path: ["text",3],
-        attrs: {},
-        index: 3,
-        type: "ordered-list-item",
-        cursor: Automerge.getCursor(doc, ["text"], 3),
-        parents: []
-      },
     ])
   })
 
@@ -152,20 +128,14 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => {
         Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval"} })
       })
-      const cursor = Automerge.getCursor(doc, ["text"], 0)
       const headsAfter = Automerge.getHeads(doc)
       const diff = Automerge.diff(doc, headsBefore, headsAfter)
-      assert.deepStrictEqual(diff, [
-        {
-          action: "splitBlock",
-          path: ["text",0],
-          attrs: {"data-foo": "someval"},
-          index: 0,
-          type: "ordered-list-item",
-          cursor,
-          parents: []
-        },
-      ])
+      const attrPatch = diff.filter(p => pathsEqual(p.path, ["text",0, "attrs", "data-foo"]))[0]
+      assert.deepStrictEqual(attrPatch, {
+        action: "put",
+        path: ["text",0, "attrs", "data-foo"],
+        value: "someval",
+      })
     })
 
     it("in updateBlock patches", () => {
@@ -179,17 +149,12 @@ describe("Automerge", () => {
       })
       const headsAfter = Automerge.getHeads(doc)
       const diff = Automerge.diff(doc, headsBefore, headsAfter)
-      assert.deepStrictEqual(diff, [
-        {
-          action: "updateBlock",
-          path: ["text",0],
-          index: 0,
-          new_attrs: { "data-foo": "someotherval" },
-          new_type: null,
-          new_parents: null
-        },
-      ])
+      const attrPatch = diff.filter(p => pathsEqual(p.path, ["text",0, "attrs", "data-foo"]))[0]
+      assert.deepStrictEqual(attrPatch, {
+        action: "put",
+        path: ["text",0, "attrs", "data-foo"],
+        value: "someotherval",
+      })
     })
   })
-
 })

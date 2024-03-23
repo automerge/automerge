@@ -788,7 +788,7 @@ impl TransactionInner {
 
         let query = doc.ops().search(
             &obj.id,
-            query::InsertNth::new(index, ListEncoding::List, self.scope.clone()),
+            query::InsertNth::new(index, obj.encoding, self.scope.clone()),
         );
         let pos = query.pos();
         let key = query.key()?;
