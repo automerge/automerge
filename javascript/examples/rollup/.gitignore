@@ -1,0 +1,8 @@
+yarn.lock
+node_modules
+public/*.wasm
+public/main.js
+public/in-service-worker/*.wasm
+public/in-service-worker/automerge.js
+dist
+*.log
