@@ -177,6 +177,7 @@ pub unsafe extern "C" fn AMsyncStateLastSentHeads(sync_state: *const AMsyncState
 /// \pre \p has_value `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
 ///          `AMresultFree()` in order to avoid a memory leak.
+/// \internal
 ///
 /// # Safety
 /// sync_state must be a valid pointer to an AMsyncState
