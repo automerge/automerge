@@ -9,9 +9,8 @@ export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
 export type MapObjType = { [key: string]: ObjType | Value }
 export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
-export type Block = {type: string, parents: string[], attrs: { [key: string]: Value } }
 export type Span = { type: "text", value: string, "marks"?: MarkSet } 
-  | { type: "block", value: Block }
+  | { type: "block", value: {[key: string]: MaterializeValue} }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
@@ -103,7 +102,7 @@ export type Op = {
 }
 
 export type PatchValue = string | number | boolean | null | Date | Uint8Array | {} | []
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch | SplitBlockPatch | UpdateBlockPatch | JoinBlockPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch | ConflictPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -169,30 +168,6 @@ export type ConflictPatch = {
   path: Prop[],
 }
 
-export type SplitBlockPatch = {
-  action: 'splitBlock'
-  path: Prop[],
-  index: number,
-  type: string,
-  parents: string[],
-  attrs: { [key: string]: Value },
-}
-
-export type UpdateBlockPatch = {
-  action: 'updateBlock'
-  path: Prop[],
-  index: number,
-  new_type: string | null,
-  new_parents: string[] | null,
-  new_attrs: { [key: string]: string | Value } | null,
-}
-
-export type JoinBlockPatch = {
-  action: 'joinBlock'
-  path: Prop[],
-  index: number,
-}
-
 export type Mark = {
   name: string,
   value: Value,
@@ -238,6 +213,7 @@ export class Automerge {
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
   updateText(obj: ObjID, newText: string): void;
+  updateSpans(obj: ObjID, newSpans: Span[]): void;
 
   // marks
   mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
@@ -246,11 +222,10 @@ export class Automerge {
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
 
   // blocks
-  splitBlock(obj: ObjID, index: number, block: {type: string, parents: string[], attrs: {[key: string]: Value}}): void;
+  splitBlock(obj: ObjID, index: number, block: {[key: string]: MaterializeValue}): void;
   joinBlock(obj: ObjID, index: number) : void;
-  updateBlock(obj: ObjID, index: number, block: {type: string, parents: string[], attrs: {[key: string]: Value}}): void;
-  updateBlocks(obj: ObjID, newBlocks: ({type: string, parents: string[], attrs: {[key: string]: Value}} | string)[]): void;
-  getBlock(obj: ObjID, index: number): {type: string, parents: string[], attrs: {[key: string]: Value}} | null;
+  updateBlock(obj: ObjID, index: number, block: {[key: string]: MaterializeValue}): void;
+  getBlock(obj: ObjID, index: number): {[key: string]: MaterializeValue} | null;
 
   diff(before: Heads, after: Heads): Patch[];
 

@@ -1,6 +1,5 @@
 use crate::interop::error;
 use crate::interop::ExternalTypeConstructor;
-use crate::interop::ValueContext;
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
@@ -274,7 +273,7 @@ impl<'a> ExportCache<'a> {
     #[inline(never)]
     fn wrap_scalar(&self, value: JsValue, datatype: Datatype) -> Result<JsValue, error::Export> {
         if let Some(constructor) = self.doc.external_types.get(&datatype) {
-            let wrapped_value = constructor.call(&value, datatype, ValueContext::Value)?;
+            let wrapped_value = constructor.construct(&value, datatype)?;
             let o = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -333,7 +332,7 @@ impl<'a> ExportCache<'a> {
         datatype: Datatype,
         constructor: &ExternalTypeConstructor,
     ) -> Result<Object, error::Export> {
-        let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
+        let wrapped_value = constructor.construct(value, datatype)?;
         let wrapped_object = wrapped_value
             .dyn_into::<Object>()
             .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;

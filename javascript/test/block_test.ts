@@ -82,11 +82,11 @@ describe("Automerge", () => {
     })
 
     doc = Automerge.change(doc, d => {
-      Automerge.updateBlocks(d, ["text"], [
-        { type: "paragraph", parents: [], attrs: {} },
-        "the first thing",
-        { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} },
-        "the second thing",
+      Automerge.updateSpans(d, ["text"], [
+        { type: "block", value: {type: "paragraph", parents: [], attrs: {} }},
+        { type: "text", value: "the first thing"},
+        { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} } },
+        { type: "text", value: "the second thing"},
       ])
     })
     assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [

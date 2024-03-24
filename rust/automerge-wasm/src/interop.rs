@@ -1,7 +1,7 @@
 use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
-use crate::{Automerge, TextRepresentation, UpdateBlocksArgs};
+use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
 use automerge::ReadDoc;
@@ -588,40 +588,48 @@ pub(crate) fn import_block_or_text(
     doc: &Automerge,
     value: JS,
 ) -> Result<am::BlockOrText<'static>, error::InvalidBlockOrText> {
-    if let Some(str_val) = value.as_string() {
-        return Ok(am::BlockOrText::Text(Cow::Owned(str_val)));
-    }
-
-    if !value.0.is_object() {
+    let Ok(obj) = value.0.dyn_into::<Object>() else {
         return Err(error::InvalidBlockOrText::NotObjectOrString);
-    }
-
-    let val = js_val_to_hydrate(value.0);
-    let am::hydrate::Value::Map(map) = val else {
-        return Err(error::InvalidBlockOrText::BlockNotObject);
     };
-
-    Ok(am::BlockOrText::Block(map))
+    let type_str = js_get(&obj, "type")?;
+    let type_str = type_str
+        .as_string()
+        .ok_or(error::InvalidBlockOrText::TypeNotString)?;
+    match type_str.as_str() {
+        "text" => {
+            let text = js_get(&obj, "value")?;
+            let text = text
+                .as_string()
+                .ok_or(error::InvalidBlockOrText::TextNotString)?;
+            Ok(am::BlockOrText::Text(text.into()))
+        }
+        "block" => {
+            let value = js_get(&obj, "value")?;
+            let hydrate_val = js_val_to_hydrate(value.0);
+            let am::hydrate::Value::Map(map) = hydrate_val else {
+                return Err(error::InvalidBlockOrText::BlockNotObject);
+            };
+            Ok(am::BlockOrText::Block(map))
+        }
+        other => return Err(error::InvalidBlockOrText::InvalidType(other.to_string())),
+    }
 }
 
-pub(crate) fn import_update_blocks_args(
+pub(crate) fn import_update_spans_args(
     doc: &Automerge,
     value: JS,
-) -> Result<UpdateBlocksArgs, error::InvalidUpdateBlocksArgs> {
+) -> Result<UpdateSpansArgs, error::InvalidUpdateSpansArgs> {
     let value = value
         .0
         .dyn_into::<Array>()
-        .map_err(|_| error::InvalidUpdateBlocksArgs::NotArray)?;
-    let value = value
-        .into_iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let v = JS(v);
-            import_block_or_text(doc, v)
-                .map_err(|e| error::InvalidUpdateBlocksArgs::InvalidElement(i, e))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(UpdateBlocksArgs(value))
+        .map_err(|_| error::InvalidUpdateSpansArgs::NotArray)?;
+    let mut values = Vec::new();
+    for (i, v) in value.into_iter().enumerate() {
+        let block = import_block_or_text(doc, JS(v))
+            .map_err(|e| error::InvalidUpdateSpansArgs::InvalidElement(i, e))?;
+        values.push(block);
+    }
+    Ok(UpdateSpansArgs(values))
 }
 
 pub(crate) fn to_js_err<T: Display>(err: T) -> JsValue {
@@ -786,43 +794,43 @@ pub(crate) fn get_heads(
         .transpose()
 }
 
-/// Where an exported value will be used
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ValueContext {
-    /// This value will be a value in the document
-    Value,
-    /// This value will be an attribute of a block
-    Block,
-}
-
-impl From<ValueContext> for JsValue {
-    fn from(context: ValueContext) -> Self {
-        match context {
-            ValueContext::Value => JsValue::from_str("value"),
-            ValueContext::Block => JsValue::from_str("block"),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
-pub(crate) struct ExternalTypeConstructor(Function);
+pub(crate) struct ExternalTypeConstructor {
+    construct: Function,
+    deconstruct: Function,
+}
 
 impl ExternalTypeConstructor {
-    pub(crate) fn new(f: Function) -> Self {
-        Self(f)
+    pub(crate) fn new(construct: Function, deconstruct: Function) -> Self {
+        Self {
+            construct,
+            deconstruct,
+        }
     }
 
-    pub(crate) fn call(
+    pub(crate) fn construct(
         &self,
         inner_value: &JsValue,
         datatype: Datatype,
-        context: ValueContext,
     ) -> Result<JsValue, error::Export> {
-        let export_args = Object::new();
-        js_set(&export_args, "context", context)?;
-        self.0
-            .call2(&JsValue::undefined(), inner_value, &export_args)
+        self.construct
+            .call1(&JsValue::undefined(), inner_value)
             .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))
+    }
+
+    pub(crate) fn deconstruct(
+        &self,
+        value: &JsValue,
+        datatype: Datatype,
+    ) -> Result<Option<JsValue>, error::ImportValue> {
+        let decon_result = self
+            .deconstruct
+            .call1(&JsValue::undefined(), value)
+            .map_err(|e| error::ImportValue::CallDataHandler(datatype.to_string(), e))?;
+        if decon_result.is_undefined() {
+            return Ok(None);
+        }
+        Ok(Some(decon_result))
     }
 }
 
@@ -831,12 +839,9 @@ impl Automerge {
         &self,
         (datatype, raw_value): (Datatype, JsValue),
         cache: &ExportCache<'_>,
-        context: ValueContext,
     ) -> Result<JsValue, error::Export> {
         if let Some(function) = self.external_types.get(&datatype) {
-            let export_args = Object::new();
-            js_set(&export_args, "context", context)?;
-            let wrapped_value = function.call(&raw_value, datatype, context)?;
+            let wrapped_value = function.construct(&raw_value, datatype)?;
             //web_sys::console::log_1(&format!("wrapped_value: {:?}", wrapped_value).into());
             match wrapped_value.dyn_into::<Object>() {
                 Ok(o) => {
@@ -928,7 +933,7 @@ impl Automerge {
             let result = self.wrap_object(&obj, datatype, id, meta, cache)?;
             Ok(result.into())
         } else {
-            self.export_value((datatype, raw_value), cache, ValueContext::Value)
+            self.export_value((datatype, raw_value), cache)
         }
     }
 
@@ -939,7 +944,7 @@ impl Automerge {
         cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
         if let Some(constructor) = self.external_types.get(&datatype) {
-            let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
+            let wrapped_value = constructor.construct(value, datatype)?;
             let wrapped_object = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -959,7 +964,7 @@ impl Automerge {
         cache: &ExportCache<'_>,
     ) -> Result<Object, error::Export> {
         let value = if let Some(constructor) = self.external_types.get(&datatype) {
-            let wrapped_value = constructor.call(value, datatype, ValueContext::Value)?;
+            let wrapped_value = constructor.construct(value, datatype)?;
             let wrapped_object = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -1012,11 +1017,7 @@ impl Automerge {
                         js_set(
                             array,
                             index,
-                            &self.export_value(
-                                alloc(&new_value, self.text_rep),
-                                cache,
-                                ValueContext::Value,
-                            )?,
+                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
                         )?;
                         Ok(())
                     } else {
@@ -1086,11 +1087,7 @@ impl Automerge {
                         js_set(
                             map,
                             key,
-                            &self.export_value(
-                                alloc(&new_value, self.text_rep),
-                                cache,
-                                ValueContext::Value,
-                            )?,
+                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
                         )?;
                         Ok(())
                     } else {
@@ -1441,14 +1438,13 @@ pub(crate) fn export_span(
         Span::Block(b) => {
             let result = Object::new();
             js_set(&result, "type", "block")?;
-            js_set(&result, "value", export_hydrate(ValueContext::Block, doc, cache, b.into()));
+            js_set(&result, "value", export_hydrate(doc, cache, b.into()))?;
             Ok(result)
         }
     }
 }
 
 pub(super) fn export_hydrate(
-    context: ValueContext,
     doc: &Automerge,
     cache: &ExportCache<'_>,
     value: am::hydrate::Value,
@@ -1456,35 +1452,32 @@ pub(super) fn export_hydrate(
     match value {
         am::hydrate::Value::Scalar(s) => {
             let (datatype, val) = alloc_scalar(&s);
-            doc.export_value((datatype, val), cache, context)
-                .unwrap()
+            doc.export_value((datatype, val), cache).unwrap()
         }
         am::hydrate::Value::Map(h_map) => {
             let map = Object::new();
             for (k, v) in h_map.iter() {
-                let val = export_hydrate(context, doc, cache, v.value.clone());
+                let val = export_hydrate(doc, cache, v.value.clone());
                 Reflect::set(&map, &k.into(), &val).unwrap();
             }
             map.into()
-        },
+        }
         am::hydrate::Value::List(h_list) => {
             let list = Array::new();
             for v in h_list.iter() {
-                let val = export_hydrate(context, doc, cache, v.value.clone());
+                let val = export_hydrate(doc, cache, v.value.clone());
                 list.push(&val);
             }
             list.into()
         }
-        am::hydrate::Value::Text(text) => {
-            match doc.text_rep {
-                TextRepresentation::String => text.to_string().into(),
-                TextRepresentation::Array => {
-                    let list = Array::new();
-                    for c in text.to_string().chars() {
-                        list.push(&c.to_string().into());
-                    }
-                    list.into()
+        am::hydrate::Value::Text(text) => match doc.text_rep {
+            TextRepresentation::String => text.to_string().into(),
+            TextRepresentation::Array => {
+                let list = Array::new();
+                for c in text.to_string().chars() {
+                    list.push(&c.to_string().into());
                 }
+                list.into()
             }
         },
     }
@@ -1709,6 +1702,8 @@ pub(super) fn js_val_to_hydrate(js_val: JsValue) -> am::hydrate::Value {
 pub(crate) mod error {
     use automerge::{AutomergeError, LoadChangeError};
     use wasm_bindgen::JsValue;
+
+    use crate::value::Datatype;
 
     #[derive(Debug, thiserror::Error)]
     pub enum BadJSChanges {
@@ -1954,6 +1949,8 @@ pub(crate) mod error {
         InvalidPath(String, ImportPath),
         #[error("unable to import object id: {0}")]
         BadImport(AutomergeError),
+        #[error("error calling data handler for type {0}: {1:?}")]
+        CallDataHandler(String, JsValue),
     }
 
     impl From<ImportObj> for JsValue {
@@ -2013,50 +2010,6 @@ pub(crate) mod error {
     }
 
     #[derive(thiserror::Error, Debug)]
-    pub enum InvalidSplitBlockArgs {
-        #[error(transparent)]
-        ReflectGet(#[from] GetProp),
-        #[error("no 'parents' key")]
-        NoParents,
-        #[error("parents was not an array")]
-        ParentsNotArray,
-        #[error("parent {0} was not a string")]
-        ParentNotString(usize),
-        #[error("no 'type' key")]
-        NoType,
-        #[error("type was not a string")]
-        TypeNotString,
-        #[error("no 'attrs' key")]
-        NoAttrs,
-        #[error("'attrs' was not an object")]
-        AttrsNotObject,
-        #[error("attr '{0}' was not a valid scalar value")]
-        InvalidAttr(String),
-    }
-
-    #[derive(thiserror::Error, Debug)]
-    pub enum InvalidUpdateBlockArgs {
-        #[error(transparent)]
-        ReflectGet(#[from] GetProp),
-        #[error("no 'parents' key")]
-        NoParents,
-        #[error("parents was not an array")]
-        ParentsNotArray,
-        #[error("parent {0} was not a string")]
-        ParentNotString(usize),
-        #[error("no 'type' key")]
-        NoType,
-        #[error("no 'attrs' key")]
-        NoAttrs,
-        #[error("'attrs' was not an object")]
-        AttrsNotObject,
-        #[error("attr '{0}' was not a valid scalar value")]
-        InvalidAttr(String),
-        #[error("type was not a string")]
-        TypeNotString,
-    }
-
-    #[derive(thiserror::Error, Debug)]
     pub enum InvalidBlockOrText {
         #[error("must be a block object or a string")]
         NotObjectOrString,
@@ -2064,13 +2017,25 @@ pub(crate) mod error {
         BlockNotObject,
         #[error(transparent)]
         ReflectGet(#[from] GetProp),
+        #[error("'type' property must be a string")]
+        TypeNotString,
+        #[error("invalid 'type' property: {0}")]
+        InvalidType(String),
+        #[error("'text' property must be a string")]
+        TextNotString,
     }
 
     #[derive(Debug, thiserror::Error)]
-    pub enum InvalidUpdateBlocksArgs {
-        #[error("value must be an array")]
+    pub enum InvalidUpdateSpansArgs {
+        #[error("updateSpans args must be an array")]
         NotArray,
-        #[error("element {0} not a valid block: {1}")]
+        #[error("block {0} not a valid block: {1}")]
         InvalidElement(usize, InvalidBlockOrText),
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ImportValue {
+        #[error("error calling deconstructor for type {0}: {1:?}")]
+        CallDataHandler(String, JsValue),
     }
 }

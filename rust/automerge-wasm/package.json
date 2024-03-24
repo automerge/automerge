@@ -44,6 +44,7 @@
     "test": "mocha --loader=ts-node/esm test/**/*.mts"
   },
   "devDependencies": {
+    "@types/assert": "^1.5.10",
     "@types/mocha": "^10.0.1",
     "@types/node": "^18.11.13",
     "@types/uuid": "^9.0.1",

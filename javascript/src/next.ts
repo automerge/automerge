@@ -79,12 +79,9 @@ export type {
   Heads,
   Cursor,
   Span,
-  SplitBlockPatch, 
-  JoinBlockPatch,
-  UpdateBlockPatch,
 } from "@automerge/automerge-wasm"
 
-import { type Span } from "@automerge/automerge-wasm"
+import { type Span, MaterializeValue } from "@automerge/automerge-wasm"
 
 export type {
   ActorId,
@@ -452,10 +449,10 @@ export function updateBlock<T>(
   }
 }
 
-export function updateBlocks<T>(
+export function updateSpans<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  blocks: ({type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}} | string)[],
+  blocks: Span[],
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -465,7 +462,7 @@ export function updateBlocks<T>(
   _clear_cache(doc)
 
   try {
-    state.handle.updateBlocks(objPath, blocks)
+    state.handle.updateSpans(objPath, blocks)
   } catch (e) {
     throw new RangeError(`Cannot updateBlock: ${e}`)
   }

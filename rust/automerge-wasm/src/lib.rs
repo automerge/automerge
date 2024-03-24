@@ -302,6 +302,24 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = updateSpans)]
+    pub fn update_spans(
+        &mut self,
+        obj: JsValue,
+        args: JsValue,
+    ) -> Result<(), error::UpdateSpans> {
+        let (obj, obj_type) = self.import(obj)?;
+        if !matches!(obj_type, am::ObjType::Text) {
+            return Err(error::UpdateSpans::ObjectNotText);
+        }
+        if self.text_rep != TextRepresentation::String {
+            return Err(error::UpdateSpans::TextRepNotString);
+        }
+        let args = interop::import_update_spans_args(self, JS(args))?;
+        self.doc.update_blocks(&obj, args.0)?;
+        Ok(())
+    }
+
     pub fn push(
         &mut self,
         obj: JsValue,
@@ -384,18 +402,6 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = updateBlocks)]
-    pub fn update_blocks(
-        &mut self,
-        text: JsValue,
-        new_blocks: JsValue,
-    ) -> Result<(), error::UpdateBlocks> {
-        let (text, _) = self.import(text)?;
-        let UpdateBlocksArgs(blocks) = interop::import_update_blocks_args(self, JS(new_blocks))?;
-        self.doc.update_blocks(&text, blocks)?;
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name = updateBlock)]
     pub fn update_block(
         &mut self,
@@ -433,7 +439,6 @@ impl Automerge {
         };
 
         Ok(interop::export_hydrate(
-            interop::ValueContext::Block,
             self,
             &interop::ExportCache::new(self).unwrap(),
             hydrated,
@@ -1306,7 +1311,7 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
     SyncState::decode(data)
 }
 
-struct UpdateBlocksArgs(Vec<am::BlockOrText<'static>>);
+struct UpdateSpansArgs(Vec<am::BlockOrText<'static>>);
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};
@@ -1422,6 +1427,26 @@ pub mod error {
 
     impl From<UpdateText> for JsValue {
         fn from(e: UpdateText) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum UpdateSpans {
+        #[error("invalid object ID: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("object was not a text object")]
+        ObjectNotText,
+        #[error(transparent)]
+        InvalidArgs(#[from] interop::error::InvalidUpdateSpansArgs),
+        #[error("update_text is only availalbe for the string representation of text objects")]
+        TextRepNotString,
+    }
+
+    impl From<UpdateSpans> for JsValue {
+        fn from(e: UpdateSpans) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }
@@ -1736,22 +1761,6 @@ pub mod error {
 
     impl From<GetBlock> for JsValue {
         fn from(e: GetBlock) -> Self {
-            RangeError::new(&e.to_string()).into()
-        }
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum UpdateBlocks {
-        #[error("invalid object id: {0}")]
-        ImportObj(#[from] interop::error::ImportObj),
-        #[error(transparent)]
-        Automerge(#[from] AutomergeError),
-        #[error(transparent)]
-        InvalidArgs(#[from] interop::error::InvalidUpdateBlocksArgs),
-    }
-
-    impl From<UpdateBlocks> for JsValue {
-        fn from(e: UpdateBlocks) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

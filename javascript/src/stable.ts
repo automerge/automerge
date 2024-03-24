@@ -202,12 +202,8 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
   if (textV2) {
-    handle.registerDatatype("str", (n: string, {context}: {context: string}) => {
-      if (context === "block") {
-        return n
-      } else {
-        return new RawString(n)
-      }
+    handle.registerDatatype("str", (n: string) => {
+      return new RawString(n)
     })
   } else {
     handle.registerDatatype("text", (n: string) => new Text(n))
