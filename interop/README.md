@@ -19,31 +19,20 @@ Using the Automerge-cli tool to examine the file (`automerge export exemplar`):
 
 ```
 {
-    "bool": true,
-    "bytes": [
-        133,
-        111,
-        74,
-        131
-    ],
-    "counter": 5,
-    "fp": 3.14159267,
-    "int": -4,
-    "location": "https://automerge.org/",
-    "notes": [
-        "🇬",
-        "🇧",
-        "👨",
-        "‍",
-        "👨",
-        "‍",
-        "👧",
-        "‍",
-        "👦",
-        "😀"
-    ],
-    "timestamp": -905182979000
-    "title": "Hello 🇬🇧👨‍👨‍👧‍👦😀",
-    "uint": 18446744073709551615
+  "bool": true,
+  "bytes": [
+    133,
+    111,
+    74,
+    131
+  ],
+  "counter": 5,
+  "fp": 3.14159267,
+  "int": -4,
+  "location": "https://automerge.org/",
+  "notes": "🇬🇧👨‍👨‍👧‍👦😀",
+  "timestamp": -905182979000,
+  "title": "Hello 🇬🇧👨‍👨‍👧‍👦😀",
+  "uint": 18446744073709551615
 }
 ```
