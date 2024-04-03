@@ -83,24 +83,23 @@ impl<'a> OpIdSearch<'a> {
 impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     fn query_node(
         &mut self,
-        _child: &'a OpTreeNode,
+        child: &'a OpTreeNode,
         index: &'a Index,
-        _osd: &'a OpSetData,
+        osd: &'a OpSetData,
     ) -> QueryResult {
         self.list_state.check_if_node_is_clean(index);
         if self.clock.is_some() {
             QueryResult::Descend
         } else {
             // TODO: reimplement this
-            //match &self.target {
-                //SearchTarget::OpId(id, _) if !index.ops.contains(id) => {
-                //self.list_state
-                //.process_node(child, index, osd, Some(&mut self.marks));
-                //QueryResult::Next
-                //}
-                //_ => QueryResult::Descend,
-            //}
-            QueryResult::Descend
+            match &self.target {
+                SearchTarget::OpId(id, _) if !index.ops.contains(id) => {
+                    self.list_state
+                        .process_node(child, index, osd, Some(&mut self.marks));
+                    QueryResult::Next
+                }
+                _ => QueryResult::Descend,
+            }
         }
     }
 
