@@ -1,5 +1,5 @@
 use automerge::{
-    hydrate_list, hydrate_map, transaction::Transactable, BlockOrText, ObjType, ReadDoc, ROOT,
+    hydrate_list, hydrate_map, hydrate_text, transaction::Transactable, BlockOrText, ObjType, ReadDoc, ROOT
 };
 use test_log::test;
 
@@ -315,4 +315,36 @@ fn splice_patch_with_blocks_across_optree_page_boundary() {
         }
         assert_eq!(local_diff, remote_diff);
     }
+}
+
+#[test]
+fn text_complex_block_properties() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    //let block = doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
+    //.unwrap();
+    let block1 = doc.split_block(&text, 0).unwrap();
+    doc.update_object(
+        &block1,
+        &hydrate_map! {
+            "type" => hydrate_text!("ordered-list-item"),
+            "parents" => hydrate_list![hydrate_text!("div")],
+        }
+        .into(),
+    )
+    .unwrap();
+
+    let (text_obj, text_id) = doc.get(&block1, "type").unwrap().unwrap();
+    assert_eq!(text_obj, automerge::Value::Object(automerge::ObjType::Text));
+    let value = doc.text(&text_id).unwrap();
+    assert_eq!(value, "ordered-list-item");
+
+    let (list_obj, list_id) = doc.get(&block1, "parents").unwrap().unwrap();
+    assert_eq!(list_obj, automerge::Value::Object(automerge::ObjType::List));
+    let len = doc.length(&list_id);
+    assert_eq!(len, 1);
+    let (elem, elem_id) = doc.get(&list_id, 0).unwrap().unwrap();
+    assert_eq!(elem, automerge::Value::Object(automerge::ObjType::Text));
+    let elem_text = doc.text(&elem_id).unwrap();
+    assert_eq!(elem_text, "div");
 }

@@ -449,6 +449,17 @@ impl TryFrom<JS> for am::sync::Message {
     }
 }
 
+impl TryFrom<JS> for Option<Datatype> {
+    type Error = crate::value::InvalidDatatype;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.0.is_null() || value.0.is_undefined() {
+            return Ok(None);
+        }
+        Datatype::try_from(value.0).map(Some)
+    }
+}
+
 impl From<Vec<ChangeHash>> for AR {
     fn from(values: Vec<ChangeHash>) -> Self {
         AR(values
@@ -605,8 +616,8 @@ pub(crate) fn import_block_or_text(
         }
         "block" => {
             let value = js_get(&obj, "value")?;
-            let hydrate_val = js_val_to_hydrate(value.0);
-            let am::hydrate::Value::Map(map) = hydrate_val else {
+            let hydrate_val = js_val_to_hydrate(doc, value.0);
+            let Ok(am::hydrate::Value::Map(map)) = hydrate_val else {
                 return Err(error::InvalidBlockOrText::BlockNotObject);
             };
             Ok(am::BlockOrText::Block(map))
@@ -668,6 +679,7 @@ pub(crate) fn to_prop(p: JsValue) -> Result<Prop, error::InvalidProp> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum JsObjType {
     Text(String),
     Map(Vec<(Prop, JsValue)>),
@@ -723,10 +735,10 @@ impl<'a> Iterator for SubValIter<'a> {
 
 pub(crate) fn import_obj(
     value: &JsValue,
-    datatype: Option<&str>,
+    datatype: Option<Datatype>,
 ) -> Result<JsObjType, InsertObject> {
     match datatype {
-        Some("map") => {
+        Some(Datatype::Map) => {
             let map = value
                 .clone()
                 .dyn_into::<js_sys::Object>()
@@ -738,7 +750,7 @@ pub(crate) fn import_obj(
                 .collect();
             Ok(JsObjType::Map(map))
         }
-        Some("list") => {
+        Some(Datatype::List) => {
             let list = value
                 .clone()
                 .dyn_into::<js_sys::Array>()
@@ -750,7 +762,7 @@ pub(crate) fn import_obj(
                 .collect();
             Ok(JsObjType::List(list))
         }
-        Some("text") => {
+        Some(Datatype::Text) => {
             let text = value.as_string().ok_or(InsertObject::ValueNotObject)?;
             Ok(JsObjType::Text(text))
         }
@@ -821,12 +833,11 @@ impl ExternalTypeConstructor {
     pub(crate) fn deconstruct(
         &self,
         value: &JsValue,
-        datatype: Datatype,
     ) -> Result<Option<JsValue>, error::ImportValue> {
         let decon_result = self
             .deconstruct
             .call1(&JsValue::undefined(), value)
-            .map_err(|e| error::ImportValue::CallDataHandler(datatype.to_string(), e))?;
+            .map_err(|e| error::ImportValue::CallDataHandler(e))?;
         if decon_result.is_undefined() {
             return Ok(None);
         }
@@ -1276,19 +1287,19 @@ impl Automerge {
     pub(crate) fn import_scalar(
         &self,
         value: &JsValue,
-        datatype: &Option<String>,
+        datatype: Option<Datatype>,
     ) -> Option<am::ScalarValue> {
-        match datatype.as_deref() {
-            Some("boolean") => value.as_bool().map(am::ScalarValue::Boolean),
-            Some("int") => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
-            Some("uint") => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
-            Some("str") => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
-            Some("f64") => value.as_f64().map(am::ScalarValue::F64),
-            Some("bytes") => Some(am::ScalarValue::Bytes(
+        match datatype {
+            Some(Datatype::Boolean) => value.as_bool().map(am::ScalarValue::Boolean),
+            Some(Datatype::Int) => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
+            Some(Datatype::Uint) => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+            Some(Datatype::Str) => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
+            Some(Datatype::F64) => value.as_f64().map(am::ScalarValue::F64),
+            Some(Datatype::Bytes) => Some(am::ScalarValue::Bytes(
                 value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
             )),
-            Some("counter") => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
-            Some("timestamp") => {
+            Some(Datatype::Counter) => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
+            Some(Datatype::Timestamp) => {
                 if let Some(v) = value.as_f64() {
                     Some(am::ScalarValue::Timestamp(v as i64))
                 } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
@@ -1297,7 +1308,7 @@ impl Automerge {
                     None
                 }
             }
-            Some("null") => Some(am::ScalarValue::Null),
+            Some(Datatype::Null) => Some(am::ScalarValue::Null),
             Some(_) => None,
             None => {
                 if value.is_null() {
@@ -1326,12 +1337,12 @@ impl Automerge {
     pub(crate) fn import_value(
         &self,
         value: &JsValue,
-        datatype: Option<String>,
+        datatype: Option<Datatype>,
     ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), error::InvalidValue> {
-        match self.import_scalar(value, &datatype) {
+        match self.import_scalar(value, datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {
-                if let Ok(js_obj) = import_obj(value, datatype.as_deref()) {
+                if let Ok(js_obj) = import_obj(value, datatype) {
                     Ok((
                         js_obj.objtype().into(),
                         js_obj
@@ -1659,43 +1670,50 @@ fn prop_to_js(prop: &Prop) -> JsValue {
     }
 }
 
-pub(super) fn js_val_to_hydrate(js_val: JsValue) -> am::hydrate::Value {
-    if js_val.is_string() {
-        am::hydrate::Value::Scalar(js_val.as_string().unwrap().into())
-    } else if let Some(float_val) = js_val.as_f64() {
-        if (float_val.round() - float_val).abs() < f64::EPSILON {
-            am::hydrate::Value::Scalar(am::ScalarValue::Int(float_val as i64))
-        } else {
-            am::hydrate::Value::Scalar(am::ScalarValue::F64(float_val))
-        }
-    } else if let Some(bool_val) = js_val.as_bool() {
-        am::hydrate::Value::Scalar(bool_val.into())
-    } else if js_val.is_null() {
-        am::hydrate::Value::Scalar(am::ScalarValue::Null)
-    } else if js_val.is_instance_of::<Object>() {
-        if js_val.is_instance_of::<js_sys::Date>() {
-            am::hydrate::Value::Scalar(am::ScalarValue::Timestamp(
-                js_val.dyn_into::<js_sys::Date>().unwrap().get_time() as i64,
-            ))
-        } else if js_val.is_instance_of::<Array>() {
-            let arr = js_val.dyn_into::<Array>().unwrap();
-            let mut values = Vec::new();
-            for i in 0..arr.length() {
-                values.push(js_val_to_hydrate(arr.get(i)));
+pub(super) fn js_val_to_hydrate(
+    doc: &Automerge,
+    js_val: JsValue,
+) -> Result<am::hydrate::Value, error::JsValToHydrate> {
+    let (datatype, value) = match doc
+        .external_types
+        .iter()
+        .find_map(|(dt, et)| et.deconstruct(&js_val).map(|r| r.map(|v| (*dt, v))).transpose())
+    {
+        Some(Ok((dt, v))) => (Some(dt), v),
+        Some(Err(e)) => return Err(e.into()),
+        None => (None, js_val.clone()),
+    };
+    if let Ok(js_obj) = import_obj(&value, datatype) {
+        match js_obj.objtype() {
+            am::ObjType::Map | am::ObjType::Table => {
+                let obj: HashMap<String, am::hydrate::Value> = js_obj.subvals()
+                    .into_iter()
+                    .filter_map(|(p, v)| match p.as_ref() {
+                        Prop::Map(key) => Some((key.to_string(), v)),
+                        _ => None,
+                    })
+                    .map(|(k, v)| js_val_to_hydrate(doc, v).map(|v| (k, v)))
+                    .collect::<Result<_, _>>()?;
+                Ok(am::hydrate::Value::Map(obj.into()).into())
+            },
+            am::ObjType::List => {
+                let obj: Vec<am::hydrate::Value> = js_obj.subvals()
+                    .into_iter()
+                    .map(|(p, v)| js_val_to_hydrate(doc, v))
+                    .collect::<Result<_, _>>()?;
+                Ok(am::hydrate::Value::List(obj.into()).into())
+            },
+            am::ObjType::Text => {
+                let Some(obj) = js_obj.text() else{
+                    return Err(error::JsValToHydrate::InvalidText);
+                };
+                Ok(am::hydrate::Value::Text(obj.into()).into())
             }
-            am::hydrate::Value::List(values.into()).into()
-        } else {
-            let obj = js_val.dyn_into::<Object>().unwrap();
-            let mut map = HashMap::new();
-            for key in Object::keys(&obj) {
-                let key_str = key.as_string().unwrap();
-                let value = js_val_to_hydrate(Reflect::get(&obj, &key).unwrap());
-                map.insert(key_str, value);
-            }
-            am::hydrate::Value::Map(map.into()).into()
         }
+    } else if let Some(val) = doc.import_scalar(&value, datatype) {
+        Ok(am::hydrate::Value::Scalar(val).into())
     } else {
-        am::hydrate::Value::Scalar(am::ScalarValue::Null)
+        Err(error::JsValToHydrate::UnknownType)
     }
 }
 
@@ -1703,7 +1721,7 @@ pub(crate) mod error {
     use automerge::{AutomergeError, LoadChangeError};
     use wasm_bindgen::JsValue;
 
-    use crate::value::Datatype;
+    use crate::error::InsertObject;
 
     #[derive(Debug, thiserror::Error)]
     pub enum BadJSChanges {
@@ -2035,7 +2053,23 @@ pub(crate) mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum ImportValue {
-        #[error("error calling deconstructor for type {0}: {1:?}")]
-        CallDataHandler(String, JsValue),
+        #[error("error calling deconstructor: {0:?}")]
+        CallDataHandler(JsValue),
+        #[error("deconstructor did not return an array of [datatype, value]")]
+        BadDeconstructor,
+        #[error("deconstructor returned a bad datatype: {0}")]
+        BadDataType(#[from] crate::value::InvalidDatatype),
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum JsValToHydrate {
+        #[error(transparent)]
+        ImportValue(#[from] ImportValue),
+        #[error(transparent)]
+        InvalidValue(#[from] InvalidValue),
+        #[error("text object had no text")]
+        InvalidText,
+        #[error("unable to determine type of value")]
+        UnknownType,
     }
 }

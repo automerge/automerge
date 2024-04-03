@@ -38,4 +38,4 @@ export type ScalarValue =
   | RawString
 
 export type BlockAttrValue = 
-  string | number | boolean | null | Date | Uint8Array
+  string | number | boolean | null | Date | Uint8Array | RawString | Counter

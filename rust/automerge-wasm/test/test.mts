@@ -2147,7 +2147,11 @@ describe('Automerge', () => {
     }
     it("should materialize old style text", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("text", (e: any) => new FakeText(e))
+        doc.registerDatatype("text", (e: any) => new FakeText(e), (e: any) => {
+            if (e instanceof FakeText) {
+                return ["text", e.elems]
+            } 
+        })
         let txt = doc.putObject(root, "text", "")
         doc.splice(txt, 0, 0, "hello")
         let mat: any = doc.materialize()
@@ -2156,7 +2160,11 @@ describe('Automerge', () => {
 
     it("should apply patches to old style text", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("text", (e: any) => new FakeText(e))
+        doc.registerDatatype("text", (e: any) => new FakeText(e), e => {
+            if (e instanceof FakeText) {
+                return e.elems
+            }
+        })
         let mat : any = doc.materialize("/")
         doc.putObject("/", "text", "abcdefghij")
         doc.splice("/text", 2, 2, "00")
@@ -2167,7 +2175,11 @@ describe('Automerge', () => {
 
     it("should apply list patches to old style text", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("text", (e: any) => new FakeText(e))
+        doc.registerDatatype("text", (e: any) => new FakeText(e), e => {
+            if (e instanceof FakeText) {
+                return e.elems
+            } 
+        })
         let mat : any = doc.materialize("/")
         doc.putObject("/", "text", "abc")
         doc.insert("/text", 0, "0")
@@ -2178,7 +2190,11 @@ describe('Automerge', () => {
 
     it("should allow inserting using list methods", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("text", (e: any) => new FakeText(e))
+        doc.registerDatatype("text", (e: any) => new FakeText(e), e => {
+            if (e instanceof FakeText) {
+                return e.elems
+            }
+        })
         let mat : any = doc.materialize("/")
         const txt = doc.putObject("/", "text", "abc")
         doc.insert(txt, 3, "d")
@@ -2190,7 +2206,11 @@ describe('Automerge', () => {
     // TODO: Need to decide how to resolve text_v1 behavior with blocks
     it("should allow inserting objects in old style text", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("text", (e: any) => new FakeText(e))
+        doc.registerDatatype("text", (e: any) => new FakeText(e), e => {
+            if (e instanceof FakeText) {
+                return e.elems
+            }
+        })
         let mat : any = doc.materialize("/")
         const txt = doc.putObject("/", "text", "abc")
         doc.insertObject(txt, 0, {"key": "value"})
@@ -2211,7 +2231,11 @@ describe('Automerge', () => {
 
     it("should allow registering a different type for strings", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("str", (e: any) => new RawString(e))
+        doc.registerDatatype("str", (e: any) => new RawString(e), e => {
+            if (e instanceof RawString) {
+                return e.val
+            }
+        })
         doc.put("/", "key", "value")
         let mat: any = doc.materialize()
         assert.deepStrictEqual(mat.key, new RawString("value"))
@@ -2219,7 +2243,11 @@ describe('Automerge', () => {
 
     it("should generate patches correctly for raw strings", () => {
         let doc = create({ text_v1: true });
-        doc.registerDatatype("str", (e: any) => new RawString(e))
+        doc.registerDatatype("str", (e: any) => new RawString(e), (e: any) => {
+            if (e instanceof RawString) {
+                return ["str", e.val]
+            }
+        })
         let mat: any = doc.materialize()
         doc.put("/", "key", "value")
         mat = doc.applyPatches(mat)

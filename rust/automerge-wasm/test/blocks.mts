@@ -185,5 +185,29 @@ describe('blocks', () => {
         {type: "text", value: "the second thing"},
       ])
     })
+
+    it("can set external data types as block attributes", () => {
+      const doc = create()
+      class RawString {
+        constructor(public value: string) {}
+      }
+      doc.registerDatatype("str", (s: any) => new RawString(s), (s) => {
+        if (s instanceof RawString) {
+          return s.value;
+        }
+      })
+      doc.putObject("_root","text", "hello world");
+      doc.updateSpans("/text", [
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        {type: "block", value: {type: new RawString("paragraph"), parents: [], attrs: {}}},
+        {type: "text", value: "hello world"},
+      ])
+      const spansAfter = doc.spans("/text");
+      assert.deepStrictEqual(spansAfter, [
+        {type: "block", value: {type: new RawString("paragraph"), parents: [], attrs: {}}},
+        {type: "text", value: "hello world"},
+      ])
+    })
   })
 })

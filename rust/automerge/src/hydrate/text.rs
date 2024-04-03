@@ -64,3 +64,15 @@ impl ToString for Text {
         self.value.make_string()
     }
 }
+
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Text::new(value.into())
+    }
+}
+
+impl<'a> From<&'a str> for Text {
+    fn from(value: &'a str) -> Self {
+        Text::new(value.into())
+    }
+}

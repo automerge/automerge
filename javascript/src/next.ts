@@ -388,7 +388,7 @@ export function splitBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
+  block: {[key: string]: MaterializeValue},
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -431,7 +431,7 @@ export function updateBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {type: string, parents: string[], attrs: {[key: string]: BlockAttrValue}},
+  block: {[key: string]: MaterializeValue},
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")

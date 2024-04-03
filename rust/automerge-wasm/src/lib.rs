@@ -251,7 +251,7 @@ impl Automerge {
             if let Ok(array) = text.dyn_into::<Array>() {
                 for (index, i) in array.iter().enumerate() {
                     let value = self
-                        .import_scalar(&i, &None)
+                        .import_scalar(&i, None)
                         .ok_or(error::Splice::ValueNotPrimitive(index))?;
                     vals.push(value);
                 }
@@ -303,11 +303,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = updateSpans)]
-    pub fn update_spans(
-        &mut self,
-        obj: JsValue,
-        args: JsValue,
-    ) -> Result<(), error::UpdateSpans> {
+    pub fn update_spans(&mut self, obj: JsValue, args: JsValue) -> Result<(), error::UpdateSpans> {
         let (obj, obj_type) = self.import(obj)?;
         if !matches!(obj_type, am::ObjType::Text) {
             return Err(error::UpdateSpans::ObjectNotText);
@@ -327,8 +323,9 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         let index = self.doc.length(&obj);
         self.doc.insert(&obj, index, value)?;
@@ -370,8 +367,9 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.insert(&obj, index as usize, value)?;
         Ok(())
@@ -386,8 +384,8 @@ impl Automerge {
     ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
         let block = self.doc.split_block(&obj, index as usize)?;
-        let hydrate = match interop::js_val_to_hydrate(args) {
-            val @ am::hydrate::Value::Map(_) => val,
+        let hydrate = match interop::js_val_to_hydrate(&self, args) {
+            Ok(val @ am::hydrate::Value::Map(_)) => val,
             _ => return Err(error::SplitBlock::InvalidArgs),
         };
 
@@ -411,7 +409,7 @@ impl Automerge {
     ) -> Result<(), error::UpdateBlock> {
         let (text, _) = self.import(text)?;
         let new_block = self.doc.replace_block(&text, index)?;
-        let new_value = interop::js_val_to_hydrate(args);
+        let new_value = interop::js_val_to_hydrate(self, args)?;
         if !matches!(new_value, am::hydrate::Value::Map(_)) {
             return Err(error::UpdateBlock::InvalidArgs);
         }
@@ -481,8 +479,9 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.put(&obj, prop, value)?;
         Ok(())
@@ -693,15 +692,22 @@ impl Automerge {
     pub fn register_datatype(
         &mut self,
         datatype: JsValue,
-        function: JsValue,
+        export_function: JsValue,
+        import_function: JsValue,
     ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
-        if let Ok(function) = function.dyn_into::<Function>() {
-            self.external_types
-                .insert(datatype, interop::ExternalTypeConstructor::new(function));
-        } else {
+        let Ok(export_function) = export_function.dyn_into::<Function>() else {
             self.external_types.remove(&datatype);
-        }
+            return Ok(());
+        };
+        let Ok(import_function) = import_function.dyn_into::<Function>() else {
+            self.external_types.remove(&datatype);
+            return Ok(());
+        };
+        self.external_types.insert(
+            datatype,
+            interop::ExternalTypeConstructor::new(export_function, import_function),
+        );
         Ok(())
     }
 
@@ -1053,8 +1059,9 @@ impl Automerge {
 
         let name = name.as_string().ok_or(error::Mark::InvalidName)?;
 
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or_else(|| error::Mark::InvalidValue)?;
 
         self.doc
@@ -1463,6 +1470,8 @@ pub mod error {
         InvalidProp(#[from] interop::error::InvalidProp),
         #[error(transparent)]
         InvalidValue(#[from] interop::error::InvalidValue),
+        #[error(transparent)]
+        InvalidDatatype(#[from] crate::value::InvalidDatatype),
     }
 
     impl From<Insert> for JsValue {
@@ -1701,6 +1710,8 @@ pub mod error {
         InvalidEnd,
         #[error("range must be an object")]
         InvalidRange,
+        #[error(transparent)]
+        InvalidDatatype(#[from] crate::value::InvalidDatatype),
     }
 
     impl From<Mark> for JsValue {
@@ -1737,6 +1748,8 @@ pub mod error {
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         Update(#[from] automerge::error::UpdateObjectError),
+        #[error("invalid value")]
+        InvalidValue(#[from] interop::error::JsValToHydrate),
     }
 
     impl From<UpdateBlock> for JsValue {

@@ -1098,7 +1098,7 @@ impl TransactionInner {
                 // Here we are either changing the type of the existing object, or inserting an
                 // entirely new object
                 let mut make_obj = |typ: ObjType| match (&old, &key) {
-                    (Some(_), Prop::Seq(index)) => {
+                    (None, Prop::Seq(index)) => {
                         self.insert_object(doc, patch_log, parent, *index, typ)
                     }
                     _ => self.put_object(doc, patch_log, parent, key.clone(), typ),

@@ -4,6 +4,7 @@ import * as WASM from "@automerge/automerge-wasm"
 import { mismatched_heads } from "./helpers"
 import { PatchSource } from "../src/types"
 import { inspect } from "util"
+import { RawString } from "../src/raw_string"
 
 function pathsEqual(a: Automerge.Prop[], b: Automerge.Prop[]) {
   if (a.length !== b.length) return false
@@ -31,7 +32,7 @@ describe("Automerge", () => {
       assert.deepStrictEqual(callbacks[0][0], {
         action: "insert",
         path: ["text", 3],
-        values: [{}]
+        values: [{}],
       })
       assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
         { type: "text", value: "aaa" },
@@ -73,88 +74,91 @@ describe("Automerge", () => {
   })
 
   it("allows updating all blocks at once", () => {
-    let doc = Automerge.from({text: ""})
+    let doc = Automerge.from({ text: "" })
     doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: {} })
+      Automerge.splitBlock(d, ["text"], 0, {
+        parents: [],
+        type: "ordered-list-item",
+        attrs: {},
+      })
       Automerge.splice(d, ["text"], 1, 0, "first thing")
-      Automerge.splitBlock(d, ["text"], 7, { parents: [], type: "ordered-list-item", attrs: {} })
+      Automerge.splitBlock(d, ["text"], 7, {
+        parents: [],
+        type: "ordered-list-item",
+        attrs: {},
+      })
       Automerge.splice(d, ["text"], 8, 0, "second thing")
     })
 
     doc = Automerge.change(doc, d => {
-      Automerge.updateSpans(d, ["text"], [
-        { type: "block", value: {type: "paragraph", parents: [], attrs: {} }},
-        { type: "text", value: "the first thing"},
-        { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} } },
-        { type: "text", value: "the second thing"},
-      ])
+      Automerge.updateSpans(
+        d,
+        ["text"],
+        [
+          {
+            type: "block",
+            value: { type: "paragraph", parents: [], attrs: {} },
+          },
+          { type: "text", value: "the first thing" },
+          {
+            type: "block",
+            value: {
+              type: "unordered-list-item",
+              parents: ["ordered-list-item"],
+              attrs: {},
+            },
+          },
+          { type: "text", value: "the second thing" },
+        ],
+      )
     })
     assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
       { type: "block", value: { type: "paragraph", parents: [], attrs: {} } },
       { type: "text", value: "the first thing" },
-      { type: "block", value: { type: "unordered-list-item", parents: ["ordered-list-item"], attrs: {} } },
+      {
+        type: "block",
+        value: {
+          type: "unordered-list-item",
+          parents: ["ordered-list-item"],
+          attrs: {},
+        },
+      },
       { type: "text", value: "the second thing" },
     ])
   })
 
-  describe("users strings instead of RawString in block attributes", () => {
-
+  describe("allows using RawString instead of RawString in block attributes", () => {
     it("when loading blocks", () => {
-      let doc = Automerge.from({text: ""})
+      let doc = Automerge.from({ text: "" })
       doc = Automerge.change(doc, d => {
-        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval" } })
+        Automerge.splitBlock(d, ["text"], 0, {
+          parents: [],
+          type: new RawString("ordered-list-item"),
+          attrs: { "data-foo": new RawString("someval") },
+        })
         Automerge.splice(d, ["text"], 1, 0, "first thing")
       })
       const block = Automerge.block(doc, ["text"], 0)
       if (!block) throw new Error("block not found")
-      assert.deepStrictEqual(block.attrs, { "data-foo": "someval" })
+      assert.deepStrictEqual(block.attrs, { "data-foo": new RawString("someval") })
     })
 
     it("when loading spans", () => {
-      let doc = Automerge.from({text: ""})
+      let doc = Automerge.from({ text: "" })
       doc = Automerge.change(doc, d => {
-        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval" } })
+        Automerge.splitBlock(d, ["text"], 0, {
+          parents: [new RawString("div")],
+          type: new RawString("ordered-list-item"),
+          attrs: { "data-foo": new RawString("someval") },
+        })
         Automerge.splice(d, ["text"], 1, 0, "first thing")
       })
       const spans = Automerge.spans(doc, ["text"])
       const block = spans[0]
       if (!(block.type === "block")) throw new Error("block not found")
-      assert.deepStrictEqual(block.value.attrs, { "data-foo": "someval" })
-    })
-
-    it("in splitBlock patches", () => {
-      let doc = Automerge.from({text: ""})
-      const headsBefore = Automerge.getHeads(doc)
-      doc = Automerge.change(doc, d => {
-        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval"} })
-      })
-      const headsAfter = Automerge.getHeads(doc)
-      const diff = Automerge.diff(doc, headsBefore, headsAfter)
-      const attrPatch = diff.filter(p => pathsEqual(p.path, ["text",0, "attrs", "data-foo"]))[0]
-      assert.deepStrictEqual(attrPatch, {
-        action: "put",
-        path: ["text",0, "attrs", "data-foo"],
-        value: "someval",
-      })
-    })
-
-    it("in updateBlock patches", () => {
-      let doc = Automerge.from({text: ""})
-      doc = Automerge.change(doc, d => {
-        Automerge.splitBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someval"} })
-      })
-      const headsBefore = Automerge.getHeads(doc)
-      doc = Automerge.change(doc, d => {
-        Automerge.updateBlock(d, ["text"], 0, { parents: [], type: "ordered-list-item", attrs: { "data-foo": "someotherval"} })
-      })
-      const headsAfter = Automerge.getHeads(doc)
-      const diff = Automerge.diff(doc, headsBefore, headsAfter)
-      const attrPatch = diff.filter(p => pathsEqual(p.path, ["text",0, "attrs", "data-foo"]))[0]
-      assert.deepStrictEqual(attrPatch, {
-        action: "put",
-        path: ["text",0, "attrs", "data-foo"],
-        value: "someotherval",
-      })
+      assert.deepStrictEqual(block.value.parents, [new RawString("div")])
+      assert.deepStrictEqual(block.value.attrs, { "data-foo": new RawString("someval") })
+      assert.deepStrictEqual(block.value.type,  new RawString("ordered-list-item"))
     })
   })
 })

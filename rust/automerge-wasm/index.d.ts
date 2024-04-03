@@ -5,7 +5,7 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
-export type Value = string | number | boolean | null | Date | Uint8Array
+export type Value = string | number | boolean | null | Date | Uint8Array | object
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
 export type MapObjType = { [key: string]: ObjType | Value }
 export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
@@ -260,7 +260,7 @@ export class Automerge {
 
   // patches
   enableFreeze(enable: boolean): boolean;
-  registerDatatype(datatype: string, callback: Function): void;
+  registerDatatype(datatype: string, construct: Function, deconstruct: (arg: any) => any | undefined): void;
   diffIncremental(): Patch[];
   updateDiffCursor(): void;
   resetDiffCursor(): void;
