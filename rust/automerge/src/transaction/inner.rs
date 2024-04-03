@@ -708,7 +708,7 @@ impl TransactionInner {
             }
 
             doc.ops_mut()
-                .hint(&obj.id, cursor - width, pos - 1, width, key);
+                .hint(&obj.id, cursor - width, pos - 1, width, key, marks.clone());
 
             if patch_log.is_active() {
                 match splice_type {

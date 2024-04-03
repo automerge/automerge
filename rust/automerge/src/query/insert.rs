@@ -15,7 +15,20 @@ pub(crate) struct InsertNth<'a> {
     clock: Option<Clock>,
     last_visible_key: Option<Key>,
     candidates: Vec<Loc<'a>>,
-    marks: RichTextQueryState<'a>,
+    //marks: RichTextQueryState<'a>,
+    marks: QueriedMarks<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum QueriedMarks<'a> {
+    FromQuery(RichTextQueryState<'a>),
+    FromLastSeen(Arc<RichText>),
+}
+
+impl<'a> std::default::Default for QueriedMarks<'a> {
+    fn default() -> Self {
+        QueriedMarks::FromQuery(Default::default())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +79,12 @@ impl<'a> InsertNth<'a> {
     }
 
     pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<RichText>> {
-        RichText::from_query_state(&self.marks, osd)
+        match self.marks {
+            QueriedMarks::FromQuery(ref state) => {
+                RichText::from_query_state(state, osd)
+            }
+            QueriedMarks::FromLastSeen(ref rt) => Some(rt.clone()),
+        }
     }
 
     pub(crate) fn pos(&self) -> usize {
@@ -122,16 +140,17 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         self.pos() == other.pos() && self.key() == other.key()
     }
 
-    fn can_shortcut_search(&mut self, _tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
-        // TODO: Fix this logic to handle marks
+    fn can_shortcut_search(&mut self, tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
+        if let Some(last) = &tree.last_insert {
+            if last.index + last.width == self.list_state.target() {
+                self.candidates.push(Loc::new(last.pos + 1, last.key));
+                if let Some(marks) = &last.marks {
+                    self.marks = QueriedMarks::FromLastSeen(marks.clone());
+                }
+                return true;
+            }
+        }
         false
-        //if let Some(last) = &tree.last_insert {
-        //if last.index + last.width == self.list_state.target() {
-        //self.candidates.push(Loc::new(last.pos + 1, last.key));
-        //return true;
-        //}
-        //}
-        //false
     }
 
     fn query_node(
@@ -142,8 +161,12 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
     ) -> QueryResult {
         self.list_state.check_if_node_is_clean(index);
         if self.clock.is_none() {
+            let marks = match &mut self.marks {
+                QueriedMarks::FromQuery(state) => Some(state),
+                QueriedMarks::FromLastSeen(_) => None,
+            };
             self.list_state
-                .process_node(child, index, osd, Some(&mut self.marks))
+                .process_node(child, index, osd, marks)
         } else {
             QueryResult::Descend
         }
@@ -151,7 +174,9 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
         if !self.list_state.done() {
-            self.marks.process(op, self.clock.as_ref());
+            if let QueriedMarks::FromQuery(ref mut marks) = self.marks {
+                marks.process(op, self.clock.as_ref());
+            }
         }
         let key = op.elemid_or_key();
         let visible = op.visible_at(self.clock.as_ref());
@@ -159,7 +184,9 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         if visible {
             if !self.candidates.is_empty() {
                 for op in self.candidates.iter().filter_map(|c| c.id) {
-                    self.marks.process(op, self.clock.as_ref());
+                    if let QueriedMarks::FromQuery(ref mut marks) = self.marks {
+                        marks.process(op, self.clock.as_ref());
+                    }
                 }
                 return QueryResult::Finish;
             }
