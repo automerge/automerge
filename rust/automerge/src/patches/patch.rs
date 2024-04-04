@@ -53,8 +53,6 @@ pub enum PatchAction {
         /// The values that were inserted, in order that they appear. As with [`Self::PutMap`] and
         /// [`Self::PutSeq`] the object ID is only meaningful for `Value::Obj` values
         values: SequenceTree<(Value<'static>, ObjId, bool)>,
-        /// All marks currently active for these values
-        marks: Option<MarkSet>,
     },
     /// Some text was spliced into a text object
     SpliceText {

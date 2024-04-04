@@ -99,20 +99,16 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn iter_obj(&self, obj: &ObjId) -> Option<OpTreeIter<'_>> {
+        self.trees.get(obj).map(|t| t.iter())
+    }
+
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_>)> + '_ {
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
         let mut objs: Vec<_> = self
             .trees
             .iter()
-            .map(|t| {
-                (
-                    ObjMeta::new(*t.0, t.1.objtype),
-                    OpIter {
-                        iter: t.1.iter(),
-                        osd: &self.osd,
-                    },
-                )
-            })
+            .map(|t| (ObjMeta::new(*t.0, t.1.objtype), t.1))
             .collect();
         objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).id, (b.0).id));
         IterObjs {
@@ -178,9 +174,15 @@ impl OpSetInternal {
         let idx = self.trees.get(obj)?.parent?;
         let found = self.seek_idx(idx, text_rep, clock)?;
         let obj = *found.op.obj();
+        let typ = self.obj_type(&obj)?;
         let prop = found.op.map_prop().unwrap_or(Prop::Seq(found.index));
         let visible = found.visible;
-        Some(Parent { obj, prop, visible })
+        Some(Parent {
+            obj,
+            prop,
+            visible,
+            typ,
+        })
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -272,6 +274,7 @@ impl OpSetInternal {
                             new_vis,
                             op: idx.as_op(&self.osd),
                         },
+                        &self.osd,
                     );
                 }
             }
@@ -293,6 +296,7 @@ impl OpSetInternal {
                         new_vis,
                         op: idx.as_op(&self.osd),
                     },
+                    &self.osd,
                 );
             }
         }
@@ -504,14 +508,14 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(ObjMeta, OpIter<'a>)>,
+    trees: std::vec::IntoIter<(ObjMeta, &'a op_tree::OpTree)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (ObjMeta, OpIter<'a>);
+    type Item = (ObjMeta, OpTreeIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees.next()
+        self.trees.next().map(|(id, tree)| (id, tree.iter()))
     }
 }
 
@@ -837,6 +841,7 @@ impl OpSetData {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Parent {
     pub(crate) obj: ObjId,
+    pub(crate) typ: ObjType,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
 }

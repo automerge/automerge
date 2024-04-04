@@ -286,6 +286,10 @@ impl OpType {
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
+
+    pub(crate) fn is_block(&self) -> bool {
+        &OpType::Make(ObjType::Map) == self
+    }
 }
 
 impl From<ObjType> for OpType {
