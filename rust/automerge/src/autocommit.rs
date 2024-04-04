@@ -1000,6 +1000,16 @@ impl Transactable for AutoCommit {
         crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
     }
 
+    fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'a>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        crate::text_diff::myers_block_diff(&mut self.doc, tx, patch_log, text.as_ref(), new_text)
+    }
+
     fn update_object<O: AsRef<ExId>>(
         &mut self,
         obj: O,

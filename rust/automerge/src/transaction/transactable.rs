@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
@@ -120,6 +122,12 @@ pub trait Transactable: ReadDoc {
     where
         O: AsRef<ExId>;
 
+    fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError>;
+
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
 
@@ -138,4 +146,10 @@ pub trait Transactable: ReadDoc {
         obj: O,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError>;
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum BlockOrText<'a> {
+    Block(crate::hydrate::Map),
+    Text(Cow<'a, str>),
 }
