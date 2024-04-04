@@ -112,7 +112,11 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 if let OpType::MarkEnd(_) = op.action() {
                     let q = doc.ops().search(
                         &obj.id,
-                        query::SeekMark::new(op.id().prev(), self.pos, obj.encoding),
+                        query::SeekMark::new(
+                            op.id().prev(),
+                            self.pos,
+                            patch_log.text_rep().encoding(obj.typ),
+                        ),
                     );
                     for mark in q.finish() {
                         let index = mark.start;
@@ -145,9 +149,11 @@ impl<'a> FoundOpWithPatchLog<'a> {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => patch_log.delete_map(obj.id, &k),
-                    Prop::Seq(index) => {
-                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
-                    }
+                    Prop::Seq(index) => patch_log.delete_seq(
+                        obj.id,
+                        index,
+                        over.width(patch_log.text_rep().encoding(obj.typ)),
+                    ),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;

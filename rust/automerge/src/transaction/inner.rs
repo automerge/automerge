@@ -7,7 +7,7 @@ use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
-use crate::types::{Clock, Key, ListEncoding, ObjId, OpId};
+use crate::types::{Clock, Key, ListEncoding, ObjMeta, OpId};
 use crate::{op_tree::OpSetData, types::OpBuilder, Automerge, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -228,7 +228,7 @@ impl TransactionInner {
             (Prop::Seq(_), ObjType::Text) => Ok(()),
             _ => Err(AutomergeError::InvalidOp(obj.typ)),
         }?;
-        self.local_op(doc, patch_log, obj.id, prop, value.into())?;
+        self.local_op(doc, patch_log, &obj, prop, value.into())?;
         Ok(())
     }
 
@@ -260,7 +260,7 @@ impl TransactionInner {
             (Prop::Seq(_), ObjType::List) => Ok(()),
             _ => Err(AutomergeError::InvalidOp(obj.typ)),
         }?;
-        self.local_op(doc, patch_log, obj.id, prop, value.into())
+        self.local_op(doc, patch_log, &obj, prop, value.into())
             .map(|val| val.unwrap().as_op(doc.osd()).exid())
     }
 
@@ -295,13 +295,13 @@ impl TransactionInner {
         idx: OpIdx,
         is_delete: bool,
         pos: usize,
-        obj: ObjId,
+        obj: &ObjMeta,
         succ_pos: &[usize],
     ) {
-        doc.ops_mut().add_succ(&obj, succ_pos, idx);
+        doc.ops_mut().add_succ(&obj.id, succ_pos, idx);
 
         if !is_delete {
-            doc.ops_mut().insert(pos, &obj, idx);
+            doc.ops_mut().insert(pos, &obj.id, idx);
         }
 
         self.finalize_op(doc, patch_log, obj, prop, idx, None);
@@ -321,14 +321,7 @@ impl TransactionInner {
         }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(
-            doc,
-            patch_log,
-            obj.id,
-            index,
-            ListEncoding::List,
-            value.into(),
-        )?;
+        self.do_insert(doc, patch_log, &obj, index, value.into())?;
         Ok(())
     }
 
@@ -344,14 +337,7 @@ impl TransactionInner {
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let idx = self.do_insert(
-            doc,
-            patch_log,
-            obj.id,
-            index,
-            ListEncoding::List,
-            value.into(),
-        )?;
+        let idx = self.do_insert(doc, patch_log, &obj, index, value.into())?;
         Ok(idx.as_op(doc.osd()).exid())
     }
 
@@ -359,16 +345,19 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
-        encoding: ListEncoding,
         action: OpType,
     ) -> Result<OpIdx, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops().search(
-            &obj,
-            query::InsertNth::new(index, encoding, self.scope.clone()),
+            &obj.id,
+            query::InsertNth::new(
+                index,
+                patch_log.text_rep().encoding(obj.typ),
+                self.scope.clone(),
+            ),
         );
         let marks = query.marks(doc.osd());
         let pos = query.pos();
@@ -383,8 +372,8 @@ impl TransactionInner {
 
         let idx = doc
             .ops_mut()
-            .load_with_range(obj, op.clone(), &mut self.idx_range);
-        doc.ops_mut().insert(pos, &obj, idx);
+            .load_with_range(obj.id, op.clone(), &mut self.idx_range);
+        doc.ops_mut().insert(pos, &obj.id, idx);
 
         self.finalize_op(doc, patch_log, obj, Prop::Seq(index), idx, marks);
 
@@ -395,7 +384,7 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         prop: Prop,
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
@@ -409,7 +398,7 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         prop: String,
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
@@ -421,9 +410,12 @@ impl TransactionInner {
         let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
         let key = Key::Map(prop_index);
         let prop: Prop = prop.into();
-        let query =
-            doc.ops()
-                .seek_ops_by_prop(&obj, prop.clone(), ListEncoding::List, self.scope.as_ref());
+        let query = doc.ops().seek_ops_by_prop(
+            &obj.id,
+            prop.clone(),
+            patch_log.text_rep().encoding(obj.typ),
+            self.scope.as_ref(),
+        );
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Delete {
             return Ok(None);
@@ -449,7 +441,9 @@ impl TransactionInner {
         let ops_pos = query.ops_pos;
 
         let is_delete = op.is_delete();
-        let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
+        let idx = doc
+            .ops_mut()
+            .load_with_range(obj.id, op, &mut self.idx_range);
 
         self.insert_local_op(doc, patch_log, prop, idx, is_delete, pos, obj, &ops_pos);
 
@@ -460,13 +454,13 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
         let osd = doc.osd();
         let query = doc.ops().search(
-            &obj,
+            &obj.id,
             query::Nth::new(index, ListEncoding::List, self.scope.clone(), osd),
         );
 
@@ -493,7 +487,9 @@ impl TransactionInner {
         let pos = query.pos();
         let ops_pos = query.ops_pos;
         let is_delete = op.is_delete();
-        let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
+        let idx = doc
+            .ops_mut()
+            .load_with_range(obj.id, op, &mut self.idx_range);
 
         self.insert_local_op(
             doc,
@@ -518,13 +514,7 @@ impl TransactionInner {
         value: i64,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(
-            doc,
-            patch_log,
-            obj.id,
-            prop.into(),
-            OpType::Increment(value),
-        )?;
+        self.local_op(doc, patch_log, &obj, prop.into(), OpType::Increment(value))?;
         Ok(())
     }
 
@@ -543,7 +533,7 @@ impl TransactionInner {
                 doc,
                 patch_log,
                 SpliceArgs {
-                    obj: obj.id,
+                    obj,
                     index,
                     del: 1,
                     values: vec![],
@@ -551,7 +541,7 @@ impl TransactionInner {
                 },
             )?;
         } else {
-            self.local_op(doc, patch_log, obj.id, prop, OpType::Delete)?;
+            self.local_op(doc, patch_log, &obj, prop, OpType::Delete)?;
         }
         Ok(())
     }
@@ -576,7 +566,7 @@ impl TransactionInner {
             doc,
             patch_log,
             SpliceArgs {
-                obj: obj.id,
+                obj,
                 index,
                 del,
                 values,
@@ -605,7 +595,7 @@ impl TransactionInner {
             doc,
             patch_log,
             SpliceArgs {
-                obj: obj.id,
+                obj,
                 index,
                 del,
                 values,
@@ -642,7 +632,7 @@ impl TransactionInner {
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
             let query = doc.ops().search(
-                &obj,
+                &obj.id,
                 query::Nth::new(index, encoding, self.scope.clone(), doc.osd()),
             );
 
@@ -663,22 +653,24 @@ impl TransactionInner {
             let query_key = query.key()?;
             let ops_pos = query.ops_pos;
             let op = self.next_delete(query_key);
-            let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
+            let idx = doc
+                .ops_mut()
+                .load_with_range(obj.id, op, &mut self.idx_range);
 
-            doc.ops_mut().add_succ(&obj, &ops_pos, idx);
+            doc.ops_mut().add_succ(&obj.id, &ops_pos, idx);
 
             deleted += step;
         }
 
         if deleted > 0 && patch_log.is_active() {
-            patch_log.delete_seq(obj, index, deleted);
+            patch_log.delete_seq(obj.id, index, deleted);
         }
 
         // do the insert query for the first item and then
         // insert the remaining ops one after the other
         if !values.is_empty() {
             let query = doc.ops().search(
-                &obj,
+                &obj.id,
                 query::InsertNth::new(index, encoding, self.scope.clone()),
             );
             let mut pos = query.pos();
@@ -692,8 +684,10 @@ impl TransactionInner {
 
                 key = op.id.into();
 
-                let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
-                doc.ops_mut().insert(pos, &obj, idx);
+                let idx = doc
+                    .ops_mut()
+                    .load_with_range(obj.id, op, &mut self.idx_range);
+                doc.ops_mut().insert(pos, &obj.id, idx);
 
                 width = idx.as_op(doc.osd()).width(encoding);
                 cursor += width;
@@ -701,21 +695,21 @@ impl TransactionInner {
             }
 
             doc.ops_mut()
-                .hint(&obj, cursor - width, pos - 1, width, key);
+                .hint(&obj.id, cursor - width, pos - 1, width, key);
 
             if patch_log.is_active() {
                 match splice_type {
                     SpliceType::Text(text)
                         if matches!(patch_log.text_rep(), TextRepresentation::String) =>
                     {
-                        patch_log.splice(obj, index, text, marks.clone());
+                        patch_log.splice(obj.id, index, text, marks);
                     }
                     SpliceType::List | SpliceType::Text(..) => {
                         let mut opid = self.next_id().minus(values.len());
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
                             patch_log.insert(
-                                obj,
+                                obj.id,
                                 index + offset,
                                 v.clone().into(),
                                 opid,
@@ -741,13 +735,12 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
 
-        self.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)?;
+        self.do_insert(doc, patch_log, &obj, mark.start, action)?;
         self.do_insert(
             doc,
             patch_log,
-            obj.id,
+            &obj,
             mark.end,
-            obj.encoding,
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
@@ -775,7 +768,7 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         prop: Prop,
         idx: OpIdx,
         marks: Option<Arc<MarkSet>>,
@@ -786,18 +779,25 @@ impl TransactionInner {
             //let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert() {
                 if !op.is_mark() {
-                    let obj_type = doc.ops().object_type(&obj);
+                    let obj_type = doc.ops().object_type(&obj.id);
                     assert!(obj_type.unwrap().is_sequence());
                     match (obj_type, prop) {
                         (Some(ObjType::List), Prop::Seq(index)) => {
                             //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            patch_log.insert(obj, index, op.value().into(), *op.id(), false, marks);
+                            patch_log.insert(
+                                obj.id,
+                                index,
+                                op.value().into(),
+                                *op.id(),
+                                false,
+                                marks,
+                            );
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
                                 //let value = (op.value(), doc.ops().id_to_exid(op.id));
                                 patch_log.insert(
-                                    obj,
+                                    obj.id,
                                     index,
                                     op.value().into(),
                                     *op.id(),
@@ -805,19 +805,19 @@ impl TransactionInner {
                                     marks,
                                 );
                             } else {
-                                patch_log.splice(obj, index, op.as_str(), marks);
+                                patch_log.splice(obj.id, index, op.as_str(), marks);
                             }
                         }
                         _ => {}
                     }
                 }
             } else if op.is_delete() {
-                patch_log.delete(obj, &prop);
+                patch_log.delete(obj.id, &prop);
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment(obj, &prop, value, *op.id());
+                patch_log.increment(obj.id, &prop, value, *op.id());
             } else {
                 //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                patch_log.put(obj, &prop, op.value().into(), *op.id(), false, false);
+                patch_log.put(obj.id, &prop, op.value().into(), *op.id(), false, false);
             }
         }
     }
@@ -846,7 +846,7 @@ impl<'a> SpliceType<'a> {
 }
 
 struct SpliceArgs<'a> {
-    obj: ObjId,
+    obj: ObjMeta,
     index: usize,
     del: isize,
     values: Vec<ScalarValue>,

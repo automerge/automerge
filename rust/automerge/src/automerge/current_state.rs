@@ -80,13 +80,13 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
-    for (obj, typ, ops) in doc.ops().iter_objs() {
-        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_patches(doc, patch_log, obj, ops)
-        } else if typ.is_sequence() {
-            log_list_patches(doc, patch_log, obj, ops);
+    for (obj, ops) in doc.ops().iter_objs() {
+        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_patches(doc, patch_log, &obj.id, ops)
+        } else if obj.typ.is_sequence() {
+            log_list_patches(doc, patch_log, &obj.id, ops);
         } else {
-            log_map_patches(doc, patch_log, obj, ops);
+            log_map_patches(doc, patch_log, &obj.id, ops);
         }
     }
 }
