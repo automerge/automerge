@@ -466,6 +466,14 @@ impl<'a> Transactable for Transaction<'a> {
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
     }
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        self.do_tx(move |tx, doc, hist| tx.update_object(doc, hist, obj.as_ref(), new_value))
+    }
 }
 
 impl<'a> Drop for Transaction<'a> {

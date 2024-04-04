@@ -1,4 +1,3 @@
-use crate::hydrate;
 use crate::patches::TextRepresentation;
 use crate::text_value::TextValue;
 use crate::transaction::Transactable;
@@ -23,7 +22,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
         hydrate_map!(
             "list" => hydrate_list!(5,6,7,"hello", ScalarValue::counter(100), hydrate_map!(), hydrate_list![]),
             "text" => TextValue::new("hello world"),
-        )
+        ).into()
     );
     doc.splice_text(&text, 6, 0, "big bad ")?;
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
