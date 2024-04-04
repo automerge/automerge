@@ -1376,6 +1376,20 @@ impl Automerge {
         self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
 
+    pub(crate) fn hydrate_obj(
+        &self,
+        obj: &crate::ObjId,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let clock = heads.map(|heads| self.clock_at(heads));
+        Ok(match obj.typ {
+            ObjType::Map | ObjType::Table => self.hydrate_map(&obj.id, clock.as_ref()),
+            ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
+            ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
+        })
+    }
+
     pub(crate) fn parents_for(
         &self,
         obj: &ExId,
@@ -1827,6 +1841,20 @@ impl ReadDoc for Automerge {
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let clock = self.clock_at(heads);
         self.marks_for(obj.as_ref(), Some(clock))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = heads.map(|h| self.clock_at(h));
+        Ok(match obj.typ {
+            ObjType::List => self.hydrate_list(&obj.id, clock.as_ref()),
+            ObjType::Text => self.hydrate_text(&obj.id, clock.as_ref()),
+            _ => self.hydrate_map(&obj.id, clock.as_ref()),
+        })
     }
 
     fn get_marks<O: AsRef<ExId>>(

@@ -596,10 +596,6 @@ impl AutoCommit {
         self.doc.hash_for_opid(opid)
     }
 
-    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        self.doc.hydrate(heads)
-    }
-
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
@@ -773,6 +769,14 @@ impl ReadDoc for AutoCommit {
     ) -> Result<usize, AutomergeError> {
         self.doc
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(

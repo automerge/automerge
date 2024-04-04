@@ -6,7 +6,7 @@ use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
 use crate::types::Clock;
-use crate::AutomergeError;
+use crate::{hydrate, AutomergeError};
 use crate::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
 
 use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
@@ -248,6 +248,14 @@ impl<'a> ReadDoc for Transaction<'a> {
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
     }
 
     fn get_marks<O: AsRef<ExId>>(
