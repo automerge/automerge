@@ -5,6 +5,7 @@ use crate::{
     ReadDoc,
 };
 mod myers;
+mod replace;
 mod utils;
 
 pub(crate) fn myers_diff<'a, S: AsRef<str>>(
