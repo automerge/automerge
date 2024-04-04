@@ -265,7 +265,7 @@ mod clock;
 mod columnar;
 mod convert;
 mod cursor;
-mod error;
+pub mod error;
 mod exid;
 pub mod hydrate;
 mod indexed_cache;
@@ -304,6 +304,7 @@ pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
+pub use transaction::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 pub use value::{ScalarValue, Value};
 
