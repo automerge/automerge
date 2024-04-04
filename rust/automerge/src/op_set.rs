@@ -3,6 +3,7 @@ use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
+use crate::marks::MarkSet;
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree,
@@ -21,6 +22,7 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 mod op;
 
@@ -105,6 +107,7 @@ impl OpSetInternal {
 
     /// Iterate over objects in the opset in causal order
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
+        // TODO
         let mut objs: Vec<_> = self
             .trees
             .iter()
@@ -318,13 +321,22 @@ impl OpSetInternal {
         self.length
     }
 
-    pub(crate) fn hint(&mut self, obj: &ObjId, index: usize, pos: usize, width: usize, key: Key) {
+    pub(crate) fn hint(
+        &mut self,
+        obj: &ObjId,
+        index: usize,
+        pos: usize,
+        width: usize,
+        key: Key,
+        marks: Option<Arc<MarkSet>>,
+    ) {
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = Some(LastInsert {
                 index,
                 pos,
                 width,
                 key,
+                marks,
             })
         }
     }

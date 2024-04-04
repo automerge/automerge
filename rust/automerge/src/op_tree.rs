@@ -42,6 +42,7 @@ pub(crate) struct LastInsert {
     pub(crate) index: usize,
     pub(crate) width: usize,
     pub(crate) key: Key,
+    pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
 impl OpTree {
