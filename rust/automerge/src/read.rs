@@ -1,6 +1,7 @@
 use crate::{
     error::AutomergeError,
     exid::ExId,
+    iter::Spans,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet},
     parents::Parents,
@@ -158,6 +159,14 @@ pub trait ReadDoc {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError>;
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///

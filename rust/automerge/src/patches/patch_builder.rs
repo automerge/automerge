@@ -61,7 +61,6 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
         let value = (tagged_value.0.to_owned(), tagged_value.1, conflict);
         if let Some(PatchAction::Insert {
@@ -71,7 +70,7 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         }) = maybe_append(&mut self.patches, &obj)
         {
             let range = *tail_index..=*tail_index + values.len();
-            if marks == self.last_mark_set && range.contains(&index) {
+            if range.contains(&index) {
                 values.insert(index - *tail_index, value);
                 return;
             }
@@ -79,13 +78,8 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         if let Some(path) = self.get_path(&obj) {
             let mut values = SequenceTree::new();
             values.push(value);
-            let action = PatchAction::Insert {
-                index,
-                values,
-                marks: marks.as_deref().cloned(),
-            };
+            let action = PatchAction::Insert { index, values };
             self.push(Patch { obj, path, action });
-            self.last_mark_set = marks;
         }
     }
 
@@ -137,6 +131,9 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
                     for _ in 0..length {
                         value.remove(index - *tail_index);
                     }
+                    if value.len() == 0 {
+                        self.patches.pop();
+                    }
                     return;
                 }
             }
@@ -149,6 +146,9 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
                 if range.contains(&index) && range.contains(&(index + length - 1)) {
                     for _ in 0..length {
                         values.remove(index - *tail_index);
+                    }
+                    if values.len() == 0 {
+                        self.patches.pop();
                     }
                     return;
                 }

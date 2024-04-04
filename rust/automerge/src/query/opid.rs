@@ -1,7 +1,7 @@
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::MarkSet;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::OpTreeNode;
-use crate::query::{Index, ListState, MarkMap, QueryResult, TreeQuery};
+use crate::query::{Index, ListState, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, OpId};
 use std::cmp::Ordering;
@@ -13,7 +13,7 @@ pub(crate) struct OpIdSearch<'a> {
     list_state: ListState,
     clock: Option<&'a Clock>,
     target: SearchTarget<'a>,
-    marks: MarkMap<'a>,
+    marks: RichTextQueryState<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,11 +76,7 @@ impl<'a> OpIdSearch<'a> {
     }
 
     pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<MarkSet>> {
-        let mut marks = MarkStateMachine::default();
-        for (id, mark_data) in self.marks.iter() {
-            marks.mark_begin(*id, mark_data, osd);
-        }
-        marks.current().cloned()
+        MarkSet::from_query_state(&self.marks, osd)
     }
 }
 

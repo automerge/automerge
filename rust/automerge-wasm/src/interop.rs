@@ -1349,7 +1349,6 @@ impl TryFrom<JsPatch> for JsValue {
             PatchAction::Insert {
                 index,
                 values,
-                marks,
                 ..
             } => {
                 let conflicts = values.iter().map(|v| v.2).collect::<Vec<_>>();
@@ -1372,17 +1371,6 @@ impl TryFrom<JsPatch> for JsValue {
                             .map(|c| JsValue::from(*c))
                             .collect::<Array>(),
                     )?;
-                }
-                if let Some(m) = marks {
-                    let marks = Object::new();
-                    for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
-                    }
-                    js_set(&result, "marks", marks)?;
                 }
                 Ok(result.into())
             }

@@ -49,7 +49,7 @@ pub struct PatchLog {
     pub(crate) heads: Option<Vec<ChangeHash>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -80,7 +80,6 @@ pub(crate) enum Event {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     },
     IncrementMap {
         key: String,
@@ -150,13 +149,6 @@ impl PatchLog {
 
     pub(crate) fn is_active(&self) -> bool {
         self.active
-    }
-
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
-        }
     }
 
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
@@ -302,18 +294,14 @@ impl PatchLog {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
-        self.events.push((
-            obj,
-            Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-                marks,
-            },
-        ))
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
+        };
+        self.events.push((obj, event))
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
@@ -380,7 +368,7 @@ impl PatchLog {
                     value,
                     id,
                     conflict,
-                    marks,
+                    //marks,
                 } => {
                     let opid = doc.id_to_exid(*id);
                     patch_builder.insert(
@@ -388,7 +376,7 @@ impl PatchLog {
                         *index,
                         (value.into(), opid),
                         *conflict,
-                        marks.clone(),
+                        //marks.clone(),
                     );
                 }
                 Event::DeleteSeq { index, num } => {
@@ -518,13 +506,13 @@ impl ExposeQueue {
                     value,
                     id,
                     conflict,
-                    marks,
+                    ..
                 } in read_doc.list_range(&exid, ..)
                 {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(exid.clone(), index, (value, id), conflict, marks);
+                    patch_builder.insert(exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {

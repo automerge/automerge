@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use crate::op_set::OpIdx;
 
-use super::{OpTreeInternal, OpTreeNode};
+use super::{Op, OpTreeInternal, OpTreeNode};
 
 #[derive(Clone)]
 pub(crate) struct OpTreeIter<'a>(Inner<'a>);
@@ -201,6 +201,25 @@ impl<'a> Iterator for Inner<'a> {
                 }
             }
         }
+    }
+}
+
+pub(crate) struct OpTreeOpIter<'a> {
+    iter: OpTreeIter<'a>,
+    osd: &'a crate::op_set::OpSetData,
+}
+
+impl<'a> OpTreeOpIter<'a> {
+    pub(crate) fn new(iter: OpTreeIter<'a>, osd: &'a crate::op_set::OpSetData) -> Self {
+        Self { iter, osd }
+    }
+}
+
+impl<'a> Iterator for OpTreeOpIter<'a> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|idx| idx.as_op(self.osd))
     }
 }
 

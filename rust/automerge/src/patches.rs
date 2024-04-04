@@ -32,6 +32,6 @@ impl TextRepresentation {
 
 impl std::default::Default for TextRepresentation {
     fn default() -> Self {
-        TextRepresentation::Array // FIXME
+        TextRepresentation::String
     }
 }
