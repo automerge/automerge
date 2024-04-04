@@ -1,6 +1,7 @@
 use crate::{
     error::AutomergeError,
     exid::ExId,
+    hydrate,
     iter::Spans,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet},
@@ -222,6 +223,12 @@ pub trait ReadDoc {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError>;
 
     /// Get all conflicting values out of the document at this prop that conflict.
     ///

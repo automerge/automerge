@@ -519,6 +519,14 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
         self.doc.spans_at(obj, heads)
     }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
+    }
 }
 
 impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
@@ -530,8 +538,10 @@ impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
 #[cfg(test)]
 mod tests {
 
+    use std::borrow::Cow;
+
     use crate::{
-        marks::Mark, patches::TextRepresentation,
+        hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
         transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop,
         ScalarValue, Value, ROOT,
     };
@@ -1383,6 +1393,77 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn update_map_diff_incremental() {
+        let mut doc = AutoCommit::new();
+        let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc.splice_text(&text, 0, 0, "Hello, World!").unwrap();
+        doc.update_diff_cursor();
+        let block = doc.split_block(&text, 5).unwrap();
+        doc.update_object(
+            &block,
+            &hydrate_map! {
+                "type" => "unordered-list-item",
+                "parents" => hydrate_list!["ordered-list-item", "unordered-list-item"],
+                "attrs" => hydrate_map! {}
+            }
+            .into(),
+        )
+        .unwrap();
+        let patches = exp(doc.diff_incremental());
+        let patches_by_path = patches.into_iter().fold(
+            std::collections::HashMap::<_, Vec<_>>::new(),
+            |mut acc, patch| {
+                acc.entry(patch.path.clone())
+                    .or_default()
+                    .push(patch.action);
+                acc
+            },
+        );
+        assert_eq!(
+            patches_by_path["/text/5"],
+            vec![ObservedAction::Insert {
+                values: vec![Value::Object(ObjType::Map)],
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/type"],
+            vec![ObservedAction::PutMap {
+                value: Value::Scalar(Cow::Owned(ScalarValue::Str("unordered-list-item".into()))),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/parents"],
+            vec![ObservedAction::PutMap {
+                value: Value::Object(ObjType::List),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/attrs"],
+            vec![ObservedAction::PutMap {
+                value: Value::Object(ObjType::Map),
+                conflict: false,
+            }]
+        );
+
+        assert_eq!(
+            patches_by_path["/text/5/parents/0"],
+            vec![ObservedAction::Insert {
+                values: vec![
+                    Value::Scalar(Cow::Owned(ScalarValue::Str("ordered-list-item".into()))),
+                    Value::Scalar(Cow::Owned(ScalarValue::Str("unordered-list-item".into())))
+                ]
+            }]
+        );
+
+        assert_eq!(patches_by_path.len(), 5);
     }
 
     #[test]
