@@ -23,7 +23,6 @@
     unused_parens,
     while_true
 )]
-#![allow(clippy::unused_unit)]
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
@@ -99,7 +98,7 @@ impl From<TextRepresentation> for am::patches::TextRepresentation {
 pub struct Automerge {
     doc: AutoCommit,
     freeze: bool,
-    external_types: HashMap<Datatype, Function>,
+    external_types: HashMap<Datatype, interop::ExternalTypeConstructor>,
     text_rep: TextRepresentation,
 }
 
@@ -217,6 +216,17 @@ impl Automerge {
         }
     }
 
+    pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::GetSpans> {
+        let (obj, _) = self.import(obj)?;
+        let spans = if let Some(heads) = get_heads(heads)? {
+            self.doc.spans_at(&obj, &heads)?
+        } else {
+            self.doc.spans(&obj)?
+        };
+        let cache = interop::ExportCache::new(self)?;
+        Ok(interop::export_spans(self, cache, spans)?)
+    }
+
     pub fn splice(
         &mut self,
         obj: JsValue,
@@ -241,7 +251,7 @@ impl Automerge {
             if let Ok(array) = text.dyn_into::<Array>() {
                 for (index, i) in array.iter().enumerate() {
                     let value = self
-                        .import_scalar(&i, &None)
+                        .import_scalar(&i, None)
                         .ok_or(error::Splice::ValueNotPrimitive(index))?;
                     vals.push(value);
                 }
@@ -292,6 +302,20 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = updateSpans)]
+    pub fn update_spans(&mut self, obj: JsValue, args: JsValue) -> Result<(), error::UpdateSpans> {
+        let (obj, obj_type) = self.import(obj)?;
+        if !matches!(obj_type, am::ObjType::Text) {
+            return Err(error::UpdateSpans::ObjectNotText);
+        }
+        if self.text_rep != TextRepresentation::String {
+            return Err(error::UpdateSpans::TextRepNotString);
+        }
+        let args = interop::import_update_spans_args(self, JS(args))?;
+        self.doc.update_blocks(&obj, args.0)?;
+        Ok(())
+    }
+
     pub fn push(
         &mut self,
         obj: JsValue,
@@ -299,8 +323,9 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         let index = self.doc.length(&obj);
         self.doc.insert(&obj, index, value)?;
@@ -314,7 +339,7 @@ impl Automerge {
         value: JsValue,
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
-        let imported_obj = import_obj(&value, &None)?;
+        let imported_obj = import_obj(&value, None)?;
         let index = self.doc.length(&obj);
         let opid = self
             .doc
@@ -342,11 +367,80 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.insert(&obj, index as usize, value)?;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = splitBlock)]
+    pub fn split_block(
+        &mut self,
+        obj: JsValue,
+        index: f64,
+        args: JsValue,
+    ) -> Result<(), error::SplitBlock> {
+        let (obj, _) = self.import(obj)?;
+        let block = self.doc.split_block(&obj, index as usize)?;
+        let hydrate = match interop::js_val_to_hydrate(self, args) {
+            Ok(val @ am::hydrate::Value::Map(_)) => val,
+            _ => return Err(error::SplitBlock::InvalidArgs),
+        };
+
+        self.doc.update_object(&block, &hydrate)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = joinBlock)]
+    pub fn join_block(&mut self, text: JsValue, index: usize) -> Result<(), error::Block> {
+        let (text, _) = self.import(text)?;
+        self.doc.join_block(&text, index)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = updateBlock)]
+    pub fn update_block(
+        &mut self,
+        text: JsValue,
+        index: usize,
+        args: JsValue,
+    ) -> Result<(), error::UpdateBlock> {
+        let (text, _) = self.import(text)?;
+        let new_block = self.doc.replace_block(&text, index)?;
+        let new_value = interop::js_val_to_hydrate(self, args)?;
+        if !matches!(new_value, am::hydrate::Value::Map(_)) {
+            return Err(error::UpdateBlock::InvalidArgs);
+        }
+        self.doc.update_object(&new_block, &new_value)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = getBlock)]
+    pub fn get_block(
+        &mut self,
+        text: JsValue,
+        index: usize,
+        heads: Option<Array>,
+    ) -> Result<JsValue, error::GetBlock> {
+        let (text, _) = self.import(text)?;
+        let Some((Value::Object(am::ObjType::Map), id)) = self.doc.get(&text, index)? else {
+            return Ok(JsValue::null());
+        };
+
+        let heads = get_heads(heads)?;
+        let hydrated = if let Some(h) = heads {
+            self.doc.hydrate(&id, Some(&h))?
+        } else {
+            self.doc.hydrate(&id, None)?
+        };
+
+        Ok(interop::export_hydrate(
+            self,
+            &interop::ExportCache::new(self).unwrap(),
+            hydrated,
+        ))
     }
 
     #[wasm_bindgen(js_name = insertObject)]
@@ -357,7 +451,7 @@ impl Automerge {
         value: JsValue,
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
-        let imported_obj = import_obj(&value, &None)?;
+        let imported_obj = import_obj(&value, None)?;
         let opid = self
             .doc
             .insert_object(&obj, index as usize, imported_obj.objtype())?;
@@ -385,8 +479,9 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.put(&obj, prop, value)?;
         Ok(())
@@ -401,7 +496,7 @@ impl Automerge {
     ) -> Result<JsValue, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let imported_obj = import_obj(&value, &None)?;
+        let imported_obj = import_obj(&value, None)?;
         let opid = self.doc.put_object(&obj, prop, imported_obj.objtype())?;
         if let Some(s) = imported_obj.text() {
             match self.text_rep {
@@ -426,7 +521,7 @@ impl Automerge {
             + From<interop::error::InvalidValue>,
     {
         for (p, v) in vals {
-            let (value, subvals) = self.import_value(v.as_ref(), None)?;
+            let (value, subvals) = self.import_value(&v, None)?;
             //let opid = self.0.set(id, p, value)?;
             let opid = match (p.as_ref(), value) {
                 (Prop::Map(s), Value::Object(objtype)) => {
@@ -533,6 +628,26 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = objInfo)]
+    pub fn obj_info(&self, obj: JsValue, heads: Option<Array>) -> Result<Object, error::Get> {
+        // fixme - import takes a path - needs heads to be accurate
+        let (obj, _) = self.import(obj)?;
+        let typ = self.doc.object_type(&obj)?;
+        let result = Object::new();
+        let parents = if let Some(heads) = get_heads(heads)? {
+            self.doc.parents_at(&obj, &heads)
+        } else {
+            self.doc.parents(&obj)
+        }?;
+        js_set(&result, "id", obj.to_string())?;
+        js_set(&result, "type", typ.to_string())?;
+        if let Some(path) = parents.visible_path() {
+            let path = interop::export_just_path(&path);
+            js_set(&result, "path", &path)?;
+        }
+        Ok(result)
+    }
+
     #[wasm_bindgen(js_name = getAll)]
     pub fn get_all(
         &self,
@@ -577,14 +692,22 @@ impl Automerge {
     pub fn register_datatype(
         &mut self,
         datatype: JsValue,
-        function: JsValue,
+        export_function: JsValue,
+        import_function: JsValue,
     ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
-        if let Ok(function) = function.dyn_into::<Function>() {
-            self.external_types.insert(datatype, function);
-        } else {
+        let Ok(export_function) = export_function.dyn_into::<Function>() else {
             self.external_types.remove(&datatype);
-        }
+            return Ok(());
+        };
+        let Ok(import_function) = import_function.dyn_into::<Function>() else {
+            self.external_types.remove(&datatype);
+            return Ok(());
+        };
+        self.external_types.insert(
+            datatype,
+            interop::ExternalTypeConstructor::new(export_function, import_function),
+        );
         Ok(())
     }
 
@@ -602,11 +725,7 @@ impl Automerge {
     ) -> Result<JsValue, JsValue> {
         let (value, patches) = self.apply_patches_impl(object, meta)?;
 
-        let patches: Array = patches
-            .into_iter()
-            .map(interop::JsPatch)
-            .map(JsValue::try_from)
-            .collect::<Result<_, _>>()?;
+        let patches = interop::export_patches(patches)?;
 
         let result = Object::new();
         js_set(&result, "value", value)?;
@@ -657,10 +776,7 @@ impl Automerge {
         // If we pop the patches then we won't be able to revert them.
 
         let patches = self.doc.diff_incremental();
-        let result = Array::new();
-        for p in patches {
-            result.push(&interop::JsPatch(p).try_into()?);
-        }
+        let result = interop::export_patches(patches)?;
         Ok(result)
     }
 
@@ -679,7 +795,8 @@ impl Automerge {
         let after = get_heads(Some(after))?.unwrap();
 
         let patches = self.doc.diff(&before, &after);
-        Ok(interop::JsPatches(patches).try_into()?)
+
+        Ok(interop::export_patches(patches)?)
     }
 
     pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
@@ -937,8 +1054,9 @@ impl Automerge {
 
         let name = name.as_string().ok_or(error::Mark::InvalidName)?;
 
+        let datatype = JS(datatype).try_into()?;
         let value = self
-            .import_scalar(&value, &datatype.as_string())
+            .import_scalar(&value, datatype)
             .ok_or_else(|| error::Mark::InvalidValue)?;
 
         self.doc
@@ -1195,6 +1313,8 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
     SyncState::decode(data)
 }
 
+struct UpdateSpansArgs(Vec<am::BlockOrText<'static>>);
+
 pub mod error {
     use automerge::{AutomergeError, ObjType};
     use js_sys::RangeError;
@@ -1259,12 +1379,16 @@ pub mod error {
     pub enum Get {
         #[error("invalid object ID: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
+        #[error("object not visible")]
+        NotVisible,
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error("bad heads: {0}")]
         BadHeads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         InvalidProp(#[from] interop::error::InvalidProp),
+        #[error(transparent)]
+        ExportError(#[from] interop::error::SetProp),
     }
 
     impl From<Get> for JsValue {
@@ -1310,6 +1434,26 @@ pub mod error {
     }
 
     #[derive(Debug, thiserror::Error)]
+    pub enum UpdateSpans {
+        #[error("invalid object ID: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("object was not a text object")]
+        ObjectNotText,
+        #[error(transparent)]
+        InvalidArgs(#[from] interop::error::InvalidUpdateSpansArgs),
+        #[error("update_text is only availalbe for the string representation of text objects")]
+        TextRepNotString,
+    }
+
+    impl From<UpdateSpans> for JsValue {
+        fn from(e: UpdateSpans) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
     pub enum Insert {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
@@ -1321,11 +1465,33 @@ pub mod error {
         InvalidProp(#[from] interop::error::InvalidProp),
         #[error(transparent)]
         InvalidValue(#[from] interop::error::InvalidValue),
+        #[error(transparent)]
+        InvalidDatatype(#[from] crate::value::InvalidDatatype),
     }
 
     impl From<Insert> for JsValue {
         fn from(e: Insert) -> Self {
             RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Block {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error("block name must be a string")]
+        InvalidName,
+        #[error("block parents must be an array of strings")]
+        InvalidParents,
+        #[error("invalid cursor")]
+        InvalidCursor,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<Block> for JsValue {
+        fn from(e: Block) -> Self {
+            JsValue::from(e.to_string())
         }
     }
 
@@ -1539,10 +1705,90 @@ pub mod error {
         InvalidEnd,
         #[error("range must be an object")]
         InvalidRange,
+        #[error(transparent)]
+        InvalidDatatype(#[from] crate::value::InvalidDatatype),
     }
 
     impl From<Mark> for JsValue {
         fn from(e: Mark) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum SplitBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error("the block value must be a map")]
+        InvalidArgs,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        UpdateObject(#[from] automerge::error::UpdateObjectError),
+    }
+
+    impl From<SplitBlock> for JsValue {
+        fn from(e: SplitBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum UpdateBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error("the updated block args must be a map")]
+        InvalidArgs,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Update(#[from] automerge::error::UpdateObjectError),
+        #[error("invalid value")]
+        InvalidValue(#[from] interop::error::JsValToHydrate),
+    }
+
+    impl From<UpdateBlock> for JsValue {
+        fn from(e: UpdateBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetBlock {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Set(#[from] interop::error::SetProp),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error(transparent)]
+        BadHeads(#[from] interop::error::BadChangeHashes),
+    }
+
+    impl From<GetBlock> for JsValue {
+        fn from(e: GetBlock) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetSpans {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        BadHeads(#[from] interop::error::BadChangeHashes),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Set(#[from] interop::error::SetProp),
+    }
+
+    impl From<GetSpans> for JsValue {
+        fn from(e: GetSpans) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }
