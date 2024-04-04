@@ -15,10 +15,6 @@ pub(crate) struct RichTextQueryState<'a> {
 }
 
 impl<'a> RichTextQueryState<'a> {
-    pub(crate) fn block(&self) -> Option<&OpId> {
-        self.block.as_ref()
-    }
-
     pub(crate) fn process(&mut self, op: Op<'a>, clock: Option<&Clock>) {
         if !(clock.map(|c| c.covers(op.id())).unwrap_or(true)) {
             // if the op is not visible in the current clock
