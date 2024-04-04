@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::exid::ExId;
+use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -9,7 +11,7 @@ use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjMeta, OpId};
 use crate::{op_tree::OpSetData, types::OpBuilder, Automerge, Change, ChangeHash, Prop};
-use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+use crate::{AutomergeError, ObjType, OpType, ReadDoc, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
@@ -933,6 +935,189 @@ impl TransactionInner {
                 patch_log.increment(obj.id, &prop, value, *op.id());
             } else {
                 patch_log.put(obj.id, &prop, op.value().into(), *op.id(), false, false);
+            }
+        }
+    }
+
+    pub(crate) fn update_object(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        obj: &ExId,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        let obj_meta = doc.exid_to_obj(obj)?;
+        match (obj_meta.typ, new_value) {
+            (ObjType::Map, crate::hydrate::Value::Map(map)) => {
+                Ok(self.update_map(doc, patch_log, obj, map)?)
+            }
+            (ObjType::List, crate::hydrate::Value::List(list)) => {
+                Ok(self.update_list(doc, patch_log, obj, list)?)
+            }
+            (ObjType::Text, crate::hydrate::Value::Text(new_text)) => {
+                Ok(crate::text_diff::myers_diff(
+                    doc,
+                    self,
+                    patch_log,
+                    obj,
+                    new_text.to_string().as_str(),
+                )?)
+            }
+            _ => Err(crate::error::UpdateObjectError::ChangeType),
+        }
+    }
+
+    pub(crate) fn update_map(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        map: &crate::ObjId,
+        new_value: &crate::hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        let mut delenda = HashSet::new();
+        let obj = doc.exid_to_obj(map)?;
+        let current_vals = doc
+            .ops()
+            .map_range(&obj.id, .., self.scope.clone())
+            .map(|MapRangeItem { key, value, id, .. }| (key.to_string(), value.into_owned(), id))
+            .collect::<Vec<_>>();
+
+        let mut present_keys = HashSet::new();
+        for (key, value, id) in current_vals {
+            present_keys.insert(key.clone());
+            match new_value.get(&key) {
+                Some(new_value) => self.update_value(
+                    doc,
+                    patch_log,
+                    map,
+                    key.into(),
+                    new_value,
+                    Some((id, value)),
+                )?,
+                None => {
+                    delenda.insert(key.clone());
+                }
+            }
+        }
+        for (key, new_value) in new_value.iter() {
+            if !present_keys.contains(key) {
+                self.update_value(doc, patch_log, map, key.into(), &new_value.value, None)?;
+            }
+        }
+        for key in delenda {
+            self.delete(doc, patch_log, map, key)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_list(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        list: &crate::ObjId,
+        new_value: &crate::hydrate::List,
+    ) -> Result<(), AutomergeError> {
+        let old_items = doc
+            .list_range(list, ..)
+            .map(|ListRangeItem { value, id, .. }| Some((value.into_owned(), id)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(std::iter::repeat_with(|| None));
+        let new_values = new_value
+            .iter()
+            .map(Some)
+            .chain(std::iter::repeat_with(|| None));
+
+        let mut index = 0;
+        let mut to_delete = 0;
+        for (old, new) in std::iter::zip(old_items, new_values) {
+            match (old, new) {
+                (Some((value, id)), Some(new_value)) => {
+                    self.update_value(
+                        doc,
+                        patch_log,
+                        list,
+                        Prop::Seq(index),
+                        &new_value.value,
+                        Some((id, value)),
+                    )?;
+                }
+                (Some(_), None) => {
+                    to_delete += 1;
+                }
+                (None, Some(new_value)) => {
+                    self.update_value(
+                        doc,
+                        patch_log,
+                        list,
+                        Prop::Seq(index),
+                        &new_value.value,
+                        None,
+                    )?;
+                }
+                (None, None) => {
+                    break;
+                }
+            }
+            index += 1;
+        }
+        for i in 0..to_delete {
+            self.delete(doc, patch_log, list, Prop::Seq(index + i))?;
+        }
+        Ok(())
+    }
+
+    fn update_value(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        parent: &crate::ObjId,
+        key: Prop,
+        new_value: &crate::hydrate::Value,
+        old_value: Option<(ExId, crate::Value<'_>)>,
+    ) -> Result<(), AutomergeError> {
+        match (old_value, new_value) {
+            (Some((id, crate::Value::Object(ObjType::Map))), crate::hydrate::Value::Map(new)) => {
+                self.update_map(doc, patch_log, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::List))), crate::hydrate::Value::List(new)) => {
+                self.update_list(doc, patch_log, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::Text))), crate::hydrate::Value::Text(new)) => {
+                crate::text_diff::myers_diff(doc, self, patch_log, &id, new.to_string().as_str())
+            }
+            (old, new) => {
+                // Here we are either changing the type of the existing object, or inserting an
+                // entirely new object
+                let mut make_obj = |typ: ObjType| match (&old, &key) {
+                    (None, Prop::Seq(index)) => {
+                        self.insert_object(doc, patch_log, parent, *index, typ)
+                    }
+                    _ => self.put_object(doc, patch_log, parent, key.clone(), typ),
+                };
+                match new {
+                    crate::hydrate::Value::Map(new) => {
+                        let map_id = make_obj(ObjType::Map)?;
+                        self.update_map(doc, patch_log, &map_id, new)
+                    }
+
+                    crate::hydrate::Value::List(new) => {
+                        let list_id = make_obj(ObjType::List)?;
+                        self.update_list(doc, patch_log, &list_id, new)
+                    }
+
+                    crate::hydrate::Value::Text(new) => {
+                        let text_id = make_obj(ObjType::Text)?;
+                        self.splice_text(doc, patch_log, &text_id, 0, 0, new.to_string().as_str())
+                    }
+
+                    crate::hydrate::Value::Scalar(val) => match (old, &key) {
+                        (None, Prop::Seq(index)) => {
+                            self.insert(doc, patch_log, parent, *index, val.clone())
+                        }
+                        _ => self.put(doc, patch_log, parent, key.clone(), val.clone()),
+                    },
+                }
             }
         }
     }

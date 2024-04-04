@@ -132,4 +132,10 @@ pub trait Transactable: ReadDoc {
     /// can do.
     fn update_text<S: AsRef<str>>(&mut self, obj: &ExId, new_text: S)
         -> Result<(), AutomergeError>;
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError>;
 }
