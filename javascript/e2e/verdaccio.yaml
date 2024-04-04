@@ -13,6 +13,9 @@ packages:
   "@automerge/automerge":
     access: "$all"
     publish: "$all"
+  "@automerge/prosemirror":
+    access: "$all"
+    publish: "$all"
   "*":
     access: "$all"
     publish: "$all"
