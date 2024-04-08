@@ -32,6 +32,8 @@ where
     state: SpansState<'a>,
 }
 
+/// A sequence of block markers and text spans. Returned by [`crate::ReadDoc::spans`] and
+/// [`crate::ReadDoc::spans_at`]
 pub struct Spans<'a> {
     internal: Option<SpansInternal<'a, OpTreeOpIter<'a>>>,
 }
@@ -54,7 +56,9 @@ pub(crate) enum SpanInternal {
 
 #[derive(Debug, PartialEq)]
 pub enum Span {
+    /// A span of text and the marks that were active for that span
     Text(String, Option<Arc<MarkSet>>),
+    /// A block marker
     Block(crate::hydrate::Map),
 }
 
