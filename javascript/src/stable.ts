@@ -1190,25 +1190,36 @@ export type {
 }
 
 function registerDatatypes(handle: Automerge, textV2: boolean) {
-  handle.registerDatatype("counter", (n: number) => new Counter(n), (n) => {
-    if (n instanceof Counter) {
-      return n.value
-    }
-  })
-  if (textV2) {
-    handle.registerDatatype("str", (n: string) => {
-      return new RawString(n)
+  handle.registerDatatype(
+    "counter",
+    (n: number) => new Counter(n),
+    n => {
+      if (n instanceof Counter) {
+        return n.value
+      }
     },
-    (s) => {
-      if (s instanceof RawString) {
-        return s.val
-      }
-    })
+  )
+  if (textV2) {
+    handle.registerDatatype(
+      "str",
+      (n: string) => {
+        return new RawString(n)
+      },
+      s => {
+        if (s instanceof RawString) {
+          return s.val
+        }
+      },
+    )
   } else {
-    handle.registerDatatype("text", (n: string) => new Text(n), t => {
-      if (t instanceof Text) {
-        return t.join("")
-      }
-    })
+    handle.registerDatatype(
+      "text",
+      (n: string) => new Text(n),
+      t => {
+        if (t instanceof Text) {
+          return t.join("")
+        }
+      },
+    )
   }
 }
