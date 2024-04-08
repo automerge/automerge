@@ -161,8 +161,10 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
 
+    /// Return the sequence of text and block markers in the text object `obj`
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError>;
 
+    /// Return the sequence of text and block markers in the text object `obj` as at `heads`
     fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,

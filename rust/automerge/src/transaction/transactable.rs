@@ -112,16 +112,30 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
+    /// Insert a block marker into the text object `obj` at the given index.
+    ///
+    /// # Returns
+    ///
+    /// The ID of the new block marker. The block marker is a plain old map so you can use all the
+    /// normal methods of modifying a map to interact with it.
     fn split_block<O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 
+    /// Delete a block marker at `index` from the text object `obj`.
     fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>;
 
+    /// Replace a block marker at `index` in `obj` with a new marker and return the ID of the new
+    /// marker
     fn replace_block<O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
     where
         O: AsRef<ExId>;
 
+    /// Update the blocks and text in a text object
+    ///
+    /// This performs a diff against the current state of both the text and the block markers in a
+    /// text object and attempts to perform a reasonably minimal set of operations to update the
+    /// document to match the new text.
     fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
         &mut self,
         text: O,
