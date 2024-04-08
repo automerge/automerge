@@ -140,7 +140,9 @@ describe("Automerge", () => {
       })
       const block = Automerge.block(doc, ["text"], 0)
       if (!block) throw new Error("block not found")
-      assert.deepStrictEqual(block.attrs, { "data-foo": new RawString("someval") })
+      assert.deepStrictEqual(block.attrs, {
+        "data-foo": new RawString("someval"),
+      })
     })
 
     it("when loading spans", () => {
@@ -157,8 +159,13 @@ describe("Automerge", () => {
       const block = spans[0]
       if (!(block.type === "block")) throw new Error("block not found")
       assert.deepStrictEqual(block.value.parents, [new RawString("div")])
-      assert.deepStrictEqual(block.value.attrs, { "data-foo": new RawString("someval") })
-      assert.deepStrictEqual(block.value.type,  new RawString("ordered-list-item"))
+      assert.deepStrictEqual(block.value.attrs, {
+        "data-foo": new RawString("someval"),
+      })
+      assert.deepStrictEqual(
+        block.value.type,
+        new RawString("ordered-list-item"),
+      )
     })
   })
 })

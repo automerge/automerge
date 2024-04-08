@@ -357,6 +357,16 @@ export function updateText(
   }
 }
 
+/**
+ * Return the text + block markers at a given path
+ *
+ * @remarks
+ * Rich text in automerge is represented as a sequence of characters with block
+ * markers appearing inline with the text, and inline formatting spans overlaid
+ * on the whole sequence. Block markers are normal automerge maps, but they are
+ * only visible via either the {@link block} function or the {@link spans}
+ * function. This function returns the current state of the spans
+ */
 export function spans<T>(doc: Doc<T>, path: stable.Prop[]): Span[] {
   const state = _state(doc, false)
   const objPath = absoluteObjPath(doc, path, "spans")
@@ -368,7 +378,14 @@ export function spans<T>(doc: Doc<T>, path: stable.Prop[]): Span[] {
   }
 }
 
-export function block<T>(doc: Doc<T>, path: stable.Prop[], index: number | Cursor) {
+/**
+ * Get the block marker at the given index
+ */
+export function block<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+) {
   const objPath = absoluteObjPath(doc, path, "splitBlock")
   const state = _state(doc, false)
 
@@ -379,14 +396,16 @@ export function block<T>(doc: Doc<T>, path: stable.Prop[], index: number | Curso
   } catch (e) {
     throw new RangeError(`Cannot get block: ${e}`)
   }
-
 }
 
+/**
+ * Insert a new block marker at the given index
+ */
 export function splitBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {[key: string]: MaterializeValue},
+  block: { [key: string]: MaterializeValue },
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -404,6 +423,9 @@ export function splitBlock<T>(
   }
 }
 
+/**
+ * Delete the block marker at the given index
+ */
 export function joinBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
@@ -425,11 +447,14 @@ export function joinBlock<T>(
   }
 }
 
+/**
+ * Update the block marker at the given index
+ */
 export function updateBlock<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   index: number | Cursor,
-  block: {[key: string]: MaterializeValue},
+  block: { [key: string]: MaterializeValue },
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -447,10 +472,18 @@ export function updateBlock<T>(
   }
 }
 
+/**
+ * Update the spans at the given path
+ *
+ * @remarks
+ * Like {@link updateText} this will diff `newSpans` against the current state
+ * of the text at `path` and perform a reasonably minimal number of operations
+ * required to update the spans to the new state.
+ */
 export function updateSpans<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  blocks: Span[],
+  newSpans: Span[],
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -460,7 +493,7 @@ export function updateSpans<T>(
   _clear_cache(doc)
 
   try {
-    state.handle.updateSpans(objPath, blocks)
+    state.handle.updateSpans(objPath, newSpans)
   } catch (e) {
     throw new RangeError(`Cannot updateBlock: ${e}`)
   }
