@@ -489,7 +489,7 @@ export function updateSpans<T>(
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
-  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const objPath = absoluteObjPath(doc, path, "updateSpans")
   const state = _state(doc, false)
   _clear_cache(doc)
 
