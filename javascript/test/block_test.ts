@@ -73,58 +73,104 @@ describe("Automerge", () => {
     ])
   })
 
-  it("allows updating all blocks at once", () => {
-    let doc = Automerge.from({ text: "" })
-    doc = Automerge.change(doc, d => {
-      Automerge.splitBlock(d, ["text"], 0, {
-        parents: [],
-        type: "ordered-list-item",
-        attrs: {},
+  describe("updateSpans", () => {
+    it("allows updating all blocks at once", () => {
+      let doc = Automerge.from({ text: "" })
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, {
+          parents: [],
+          type: "ordered-list-item",
+          attrs: {},
+        })
+        Automerge.splice(d, ["text"], 1, 0, "first thing")
+        Automerge.splitBlock(d, ["text"], 7, {
+          parents: [],
+          type: "ordered-list-item",
+          attrs: {},
+        })
+        Automerge.splice(d, ["text"], 8, 0, "second thing")
       })
-      Automerge.splice(d, ["text"], 1, 0, "first thing")
-      Automerge.splitBlock(d, ["text"], 7, {
-        parents: [],
-        type: "ordered-list-item",
-        attrs: {},
+
+      doc = Automerge.change(doc, d => {
+        Automerge.updateSpans(
+          d,
+          ["text"],
+          [
+            {
+              type: "block",
+              value: { type: "paragraph", parents: [], attrs: {} },
+            },
+            { type: "text", value: "the first thing" },
+            {
+              type: "block",
+              value: {
+                type: "unordered-list-item",
+                parents: ["ordered-list-item"],
+                attrs: {},
+              },
+            },
+            { type: "text", value: "the second thing" },
+          ],
+        )
       })
-      Automerge.splice(d, ["text"], 8, 0, "second thing")
+      assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
+        { type: "block", value: { type: "paragraph", parents: [], attrs: {} } },
+        { type: "text", value: "the first thing" },
+        {
+          type: "block",
+          value: {
+            type: "unordered-list-item",
+            parents: ["ordered-list-item"],
+            attrs: {},
+          },
+        },
+        { type: "text", value: "the second thing" },
+      ])
     })
 
-    doc = Automerge.change(doc, d => {
-      Automerge.updateSpans(
-        d,
-        ["text"],
-        [
-          {
-            type: "block",
-            value: { type: "paragraph", parents: [], attrs: {} },
-          },
-          { type: "text", value: "the first thing" },
-          {
-            type: "block",
-            value: {
-              type: "unordered-list-item",
-              parents: ["ordered-list-item"],
-              attrs: {},
-            },
-          },
-          { type: "text", value: "the second thing" },
-        ],
-      )
-    })
-    assert.deepStrictEqual(Automerge.spans(doc, ["text"]), [
-      { type: "block", value: { type: "paragraph", parents: [], attrs: {} } },
-      { type: "text", value: "the first thing" },
-      {
-        type: "block",
-        value: {
-          type: "unordered-list-item",
-          parents: ["ordered-list-item"],
+    it("emits insert patches with RawString for attribute updatese", () => {
+      let doc = Automerge.from({ text: "" })
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, {
+          parents: [],
+          type: "paragraph",
           attrs: {},
+        })
+      })
+      const patches: Automerge.Patch[] = []
+      doc = Automerge.change(
+        doc,
+        {
+          patchCallback: p => {
+            patches.push(...p)
+          },
         },
-      },
-      { type: "text", value: "the second thing" },
-    ])
+        d => {
+          Automerge.updateSpans(
+            d,
+            ["text"],
+            [
+              {
+                type: "block",
+                value: {
+                  type: "paragraph",
+                  parents: [new Automerge.RawString("someparent")],
+                  attrs: {},
+                },
+              },
+            ],
+          )
+        },
+      )
+
+      assert.deepStrictEqual(patches, [
+        {
+          action: "insert",
+          path: ["text", 0, "parents", 0],
+          values: [new Automerge.RawString("someparent")],
+        },
+      ])
+    })
   })
 
   describe("allows using RawString instead of RawString in block attributes", () => {

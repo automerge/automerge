@@ -1495,6 +1495,7 @@ pub(super) fn export_hydrate(
 }
 
 pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
+    externals: &HashMap<Datatype, ExternalTypeConstructor>,
     patches: I,
 ) -> Result<Array, error::Export> {
     // this is for performance - each block is the same
@@ -1503,11 +1504,14 @@ pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
     patches
         .into_iter()
         // removing update block for now
-        .map(export_patch)
+        .map(|p| export_patch(externals, p))
         .collect()
 }
 
-fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
+fn export_patch(
+    externals: &HashMap<Datatype, ExternalTypeConstructor>,
+    p: Patch,
+) -> Result<JsValue, error::Export> {
     let result = Object::new();
     let path = &p.path.as_slice();
     match p.action {
@@ -1519,11 +1523,14 @@ fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
         } => {
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
-            js_set(
-                &result,
-                "value",
-                alloc(&value.0, TextRepresentation::String).1,
-            )?;
+
+            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let exported_val = if let Some(external_type) = externals.get(&datatype) {
+                external_type.construct(&value, datatype)?
+            } else {
+                value
+            };
+            js_set(&result, "value", exported_val)?;
             if conflict {
                 js_set(&result, "conflict", true)?;
             }
@@ -1537,11 +1544,14 @@ fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
         } => {
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
-            js_set(
-                &result,
-                "value",
-                alloc(&value.0, TextRepresentation::String).1,
-            )?;
+
+            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let exported_val = if let Some(external_type) = externals.get(&datatype) {
+                external_type.construct(&value, datatype)?
+            } else {
+                value
+            };
+            js_set(&result, "value", exported_val)?;
             if conflict {
                 js_set(&result, "conflict", true)?;
             }
@@ -1549,16 +1559,21 @@ fn export_patch(p: Patch) -> Result<JsValue, error::Export> {
         }
         PatchAction::Insert { index, values, .. } => {
             let conflicts = values.iter().map(|v| v.2).collect::<Vec<_>>();
+            let values = values
+                .iter()
+                .map(|v| {
+                    let (datatype, js_val) = alloc(&v.0, TextRepresentation::String);
+                    let exported_val = if let Some(external_type) = externals.get(&datatype) {
+                        external_type.construct(&js_val, datatype)
+                    } else {
+                        Ok(js_val)
+                    };
+                    exported_val
+                })
+                .collect::<Result<Array, _>>()?;
             js_set(&result, "action", "insert")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
-            js_set(
-                &result,
-                "values",
-                values
-                    .iter()
-                    .map(|v| alloc(&v.0, TextRepresentation::String).1)
-                    .collect::<Array>(),
-            )?;
+            js_set(&result, "values", values)?;
             if conflicts.iter().any(|c| *c) {
                 js_set(
                     &result,
