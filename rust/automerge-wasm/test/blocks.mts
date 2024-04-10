@@ -209,5 +209,71 @@ describe('blocks', () => {
         {type: "text", value: "hello world"},
       ])
     })
+
+    describe("when updating block attributes with external data types", () => {
+      let doc: Automerge
+      class RawString {
+        constructor(public value: string) {}
+      }
+
+      beforeEach(() => {
+        doc = create()
+        doc.registerDatatype("str", (s: any) => new RawString(s), (s) => {
+          if (s instanceof RawString) {
+            return s.value;
+          }
+        })
+        doc.putObject("_root","text", "hello world");
+        doc.splitBlock("/text", 0, {type: new RawString("paragraph"), parents: [new RawString("parent")], attrs: {}});
+        doc.updateDiffCursor();
+
+      })
+
+      it("emits external datatype values in insert patches", () => {
+        // Only change here is adding the "someparent" parent
+        doc.updateSpans("/text", [
+          {type: "block", value: {type: new RawString("paragraph"), parents: [ new RawString("parent"), new RawString("someotherparent")], attrs: {}}},
+          {type: "text", value: "hello world"},
+        ])
+
+        const patches = doc.diffIncremental();
+        assert.deepStrictEqual(patches, [{
+          action: "insert",
+          path: ["text", 0, "parents", 1],
+          values: [new RawString("someotherparent")]
+        }])
+      })
+
+      it("emits external datatype values in put in map patches", () => {
+        // Only change here is adding the "flavor" attribute
+        doc.updateSpans("/text", [
+          {type: "block", value: {type: new RawString("paragraph"), parents: [ new RawString("parent")], attrs: {}, flavor: new RawString("chocolate")}},
+          {type: "text", value: "hello world"},
+        ])
+
+        const patches = doc.diffIncremental();
+        assert.deepStrictEqual(patches, [{
+          action: "put",
+          path: ["text", 0, "flavor"],
+          value: new RawString("chocolate")
+        }])
+      })
+
+      it("emits external datatype values in put in seq patches", () => {
+        // Only change here is adding the "flavor" attribute
+        doc.updateSpans("/text", [
+          {type: "block", value: {type: new RawString("paragraph"), parents: [new RawString("grandparent")], attrs: {}}},
+          {type: "text", value: "hello world"},
+        ])
+
+        const patches = doc.diffIncremental();
+        assert.deepStrictEqual(patches, [{
+          action: "put",
+          path: ["text", 0, "parents", 0],
+          value: new RawString("grandparent")
+        }])
+      })
+
+    })
   })
 })
