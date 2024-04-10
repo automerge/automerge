@@ -11,6 +11,7 @@ export type {
   MarkSet,
   Mark,
   MarkRange,
+  MarkPatch,
   Patch,
 } from "@automerge/automerge-wasm"
 
