@@ -1028,9 +1028,8 @@ impl TransactionInner {
             .map(Some)
             .chain(std::iter::repeat_with(|| None));
 
-        let mut index = 0;
         let mut to_delete = 0;
-        for (old, new) in std::iter::zip(old_items, new_values) {
+        for (index, (old, new)) in std::iter::zip(old_items, new_values).enumerate() {
             match (old, new) {
                 (Some((value, id)), Some(new_value)) => {
                     self.update_value(
@@ -1059,10 +1058,9 @@ impl TransactionInner {
                     break;
                 }
             }
-            index += 1;
         }
-        for i in 0..to_delete {
-            self.delete(doc, patch_log, list, Prop::Seq(index + i))?;
+        for i in (0..to_delete).rev() {
+            self.delete(doc, patch_log, list, Prop::Seq(i))?;
         }
         Ok(())
     }
