@@ -167,5 +167,43 @@ describe("Automerge", () => {
         new RawString("ordered-list-item"),
       )
     })
+
+    it("updates the document even if the only change was to a block attribute", () => {
+      // The issue here was that when the only change was to a block attribute
+      // there were no patches applied to the document, this in turn meant that
+      // the logic which marks a document as stale was marking the current
+      // document as stale.
+      let doc = Automerge.from({ text: "" })
+      doc = Automerge.change(doc, d => {
+        Automerge.splitBlock(d, ["text"], 0, {
+          parents: [],
+          type: "paragraph",
+          attrs: {},
+        })
+        Automerge.splice(d, ["text"], 1, 0, "item")
+      })
+
+      doc = Automerge.change(doc, d => {
+        Automerge.updateSpans(
+          d,
+          ["text"],
+          [
+            {
+              type: "block",
+              value: {
+                type: "paragraph",
+                parents: ["ordered-list-item"],
+                attrs: {},
+              },
+            },
+            { type: "text", value: "item" },
+          ],
+        )
+      })
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 0, 1, "A")
+      })
+    })
   })
 })

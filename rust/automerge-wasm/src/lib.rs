@@ -754,16 +754,17 @@ impl Automerge {
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
-        if patches.is_empty() && !meta.is_undefined() {
+        if !meta.is_undefined() {
             let (_, cached_obj) = self.unwrap_object(&object, &mut cache, &meta)?;
             object = cached_obj.inner;
-            if self.freeze {
-                Object::freeze(&object);
-            }
         }
 
         for p in &patches {
             object = self.apply_patch(object, p, &meta, &mut cache)?;
+        }
+
+        if self.freeze {
+            Object::freeze(&object);
         }
 
         Ok((object.into(), patches))
