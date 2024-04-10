@@ -253,3 +253,39 @@ fn text_complex_block_properties() {
     let elem_text = doc.text(elem_id).unwrap();
     assert_eq!(elem_text, "div");
 }
+
+#[test]
+fn update_spans_delete_attribute() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    //let block = doc.split_block(&text, 0, NewBlock::new("ordered-list-item"))
+    //.unwrap();
+    let block1 = doc.split_block(&text, 0).unwrap();
+    doc.update_object(
+        &block1,
+        &hydrate_map! {
+            "type" => hydrate_text!("ordered-list-item"),
+            "parents" => hydrate_list![hydrate_text!("div")],
+        }
+        .into(),
+    )
+    .unwrap();
+
+    doc.update_blocks(
+        &text,
+        [BlockOrText::Block(hydrate_map! {
+            "type" => "ordered-list-item",
+            "parents" => hydrate_list![],
+        })],
+    )
+    .unwrap();
+
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![automerge::iter::Span::Block(hydrate_map! {
+            "type" => "ordered-list-item",
+            "parents" => hydrate_list![],
+        })]
+    );
+}
