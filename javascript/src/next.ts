@@ -73,6 +73,7 @@ export type {
   SpliceTextPatch,
   InsertPatch,
   IncPatch,
+  MarkPatch,
   SyncMessage,
   Heads,
   Cursor,
