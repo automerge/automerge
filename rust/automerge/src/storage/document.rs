@@ -26,7 +26,7 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: Vec<ActorId>,
     heads: Vec<ChangeHash>,
-    op_metadata: DocOpColumns,
+    pub(crate) op_metadata: DocOpColumns,
     op_bytes: Range<usize>,
     change_metadata: DocChangeColumns,
     change_bytes: Range<usize>,
@@ -312,6 +312,10 @@ impl<'a> Document<'a> {
         &'a self,
     ) -> impl Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a {
         self.op_metadata.iter(&self.bytes[self.op_bytes.clone()])
+    }
+
+    pub(crate) fn op_raw_bytes(&self) -> &[u8] {
+        &self.bytes[self.op_bytes.clone()]
     }
 
     pub(crate) fn iter_changes(

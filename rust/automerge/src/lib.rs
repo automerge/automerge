@@ -273,6 +273,7 @@ pub mod iter;
 mod legacy;
 pub mod marks;
 mod op_set;
+mod op_set2;
 pub mod op_tree;
 mod parents;
 pub mod patches;

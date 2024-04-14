@@ -9,7 +9,7 @@ description = "A JSON-like data structure (a CRDT) that can be modified concurre
 readme = "./README.md"
 
 [features]
-optree-visualisation = ["dot", "rand"]
+optree-visualisation = ["dot"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
 utf8-indexing = []
 
@@ -31,8 +31,9 @@ serde = { version = "^1.0", features = ["derive"] }
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
-rand = { version = "^0.8.4", optional = true }
+rand = { version = "^0.8.4", optional = false }
 im = "15.1.0"
+
 unicode-segmentation = "1.10.1"
 
 [dependencies.web-sys]

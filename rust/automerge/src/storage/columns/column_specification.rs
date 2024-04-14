@@ -1,8 +1,14 @@
 /// An implementation of column specifications as specified in [1]
 ///
 /// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone, Copy, Ord)]
 pub(crate) struct ColumnSpec(u32);
+
+impl PartialOrd for ColumnSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.normalize().partial_cmp(&other.normalize())
+    }
+}
 
 impl ColumnSpec {
     pub(crate) fn new(id: ColumnId, col_type: ColumnType, deflate: bool) -> Self {
