@@ -13,7 +13,8 @@ use std::sync::Arc;
 struct SpansState<'a> {
     key: Option<Key>,
     last_op: Option<Op<'a>>,
-    current: Option<Arc<MarkSet>>,
+    current_marks: Option<Arc<MarkSet>>,
+    next_marks: Option<Option<Arc<MarkSet>>>,
     len: usize,
     index: usize,
     text: String,
@@ -79,7 +80,11 @@ where
 impl<'a> SpansState<'a> {
     fn process_op(&mut self, op: Op<'a>, doc: &Automerge) -> Option<SpanInternal> {
         if self.marks.process(*op.id(), op.action(), doc.osd()) {
-            self.flush()
+            // The marks have changed, so we record what the new marks are. We
+            // don't flush yet though because there might not be any characters
+            // in this span and the marks might change back to the current marks
+            self.next_marks = Some(self.marks.current().cloned());
+            None
         } else {
             match op.action() {
                 OpType::Make(ObjType::Map) => {
@@ -87,9 +92,27 @@ impl<'a> SpansState<'a> {
                     self.flush()
                 }
                 OpType::Make(_) | OpType::Put(_) => {
-                    self.len += op.width(ListEncoding::Text);
-                    self.text.push_str(op.as_str());
-                    None
+                    if let Some(next_marks) = self.next_marks.take() {
+                        let mut result = None;
+                        if next_marks == self.current_marks {
+                            self.len += op.width(ListEncoding::Text);
+                            self.text.push_str(op.as_str());
+                        } else {
+                            // only flush if the marks are actually changing. One situation where
+                            // they might not change is if a zero length mark was encountered in
+                            // between two spans with the same marks. In this case `process_op`
+                            // would change `next_marks` to the empty span, and then back again.
+                            result = self.flush();
+                            self.current_marks = next_marks;
+                            self.len = op.width(ListEncoding::Text);
+                        }
+                        self.text.push_str(op.as_str());
+                        result
+                    } else {
+                        self.len += op.width(ListEncoding::Text);
+                        self.text.push_str(op.as_str());
+                        None
+                    }
                 }
                 _ => None,
             }
@@ -104,7 +127,7 @@ impl<'a> SpansState<'a> {
             let mut current = self.marks.current().cloned();
 
             std::mem::swap(&mut text, &mut self.text);
-            std::mem::swap(&mut current, &mut self.current);
+            std::mem::swap(&mut current, &mut self.current_marks);
 
             let span = SpanInternal::Text(text, index, current);
 
@@ -118,7 +141,7 @@ impl<'a> SpansState<'a> {
             self.index += width;
             Some(block)
         } else {
-            self.current = self.marks.current().cloned();
+            self.current_marks = self.marks.current().cloned();
             None
         }
     }
