@@ -96,7 +96,6 @@ impl<'a> SpansState<'a> {
                         let mut result = None;
                         if next_marks == self.current_marks {
                             self.len += op.width(ListEncoding::Text);
-                            self.text.push_str(op.as_str());
                         } else {
                             // only flush if the marks are actually changing. One situation where
                             // they might not change is if a zero length mark was encountered in
