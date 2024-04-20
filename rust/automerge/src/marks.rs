@@ -155,6 +155,17 @@ impl MarkSet {
     }
 }
 
+// FromIterator implementation for an iterator of (String, ScalarValue) tuples
+impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
+    fn from_iter<I: IntoIterator<Item = (String, ScalarValue)>>(iter: I) -> Self {
+        let mut marks = BTreeMap::new();
+        for (name, value) in iter {
+            marks.insert(name.into(), value);
+        }
+        MarkSet { marks }
+    }
+}
+
 impl<'a> Mark<'a> {
     pub fn new<V: Into<ScalarValue>>(
         name: String,
@@ -223,7 +234,7 @@ impl<'a> MarkStateMachine<'a> {
     pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {
         let mut result = false;
 
-        let index = match self.find(id.prev(), osd).err() {
+        let index = match self.find(id, osd).err() {
             Some(index) => index,
             None => return false,
         };
