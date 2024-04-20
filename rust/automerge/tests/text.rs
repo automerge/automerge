@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use automerge::{
+    hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark},
     transaction::Transactable,
@@ -320,6 +321,32 @@ fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
     assert!(marks_are_consolidated(&spans));
 }
 
+#[test]
+fn empty_marks_before_block_marker_dont_repeat_text() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.split_block(&text, 0).unwrap();
+    doc.split_block(&text, 0).unwrap();
+    doc.mark(
+        &text,
+        Mark::new("strong".to_string(), ScalarValue::from(true), 1, 1),
+        automerge::marks::ExpandMark::Both,
+    )
+    .unwrap();
+    doc.splice_text(&text, 2, 0, "a").unwrap();
+
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+
+    assert_eq!(
+        spans,
+        vec![
+            Span::Block(hydrate_map! {}),
+            Span::Block(hydrate_map! {}),
+            Span::Text("a".to_string(), None),
+        ]
+    );
+}
+
 proptest::proptest! {
     #[test]
     fn marks_are_okay(scenario in arb_scenario()) {
@@ -350,6 +377,17 @@ proptest::proptest! {
             println!("scenario: {:?}", scenario);
             println!("spans: {:?}", spans);
             panic!("marks are not consolidated");
+        }
+
+        let span_chars = spans.iter().map(|span| match span {
+            Span::Text(text, _) => text.clone(),
+            Span::Block(_) => "\n".to_string(),
+        }).collect::<String>();
+        if !span_chars.chars().eq(expected_chars.chars()) {
+            println!("scenario: {:?}", scenario);
+            println!("expected: {:?}", expected_chars);
+            println!("actual: {:?}", span_chars);
+            panic!("expected text did not match span text");
         }
 
         // replace unicode object replacement which automerge inserts for block markers wwith a newline
