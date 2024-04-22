@@ -1689,9 +1689,13 @@ impl Automerge {
                         let prop = match op.key() {
                             Key::Map(prop) => Prop::Map(self.ops.osd.props.get(*prop).clone()),
                             Key::Seq(_) => {
+                                let encoding = match obj.typ {
+                                    ObjType::Text => ListEncoding::Text,
+                                    _ => ListEncoding::List,
+                                };
                                 let found = self
                                     .ops
-                                    .seek_list_opid(&obj.id, *op.id(), ListEncoding::Text, None)
+                                    .seek_list_opid(&obj.id, *op.id(), encoding, at.as_ref())
                                     .unwrap();
                                 Prop::Seq(found.index)
                             }

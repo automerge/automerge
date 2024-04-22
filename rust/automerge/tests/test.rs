@@ -2013,3 +2013,46 @@ fn save_with_empty_commits() {
     // This will panic if we failed to encode the referenced actor ID
     let _ = Automerge::load(&saved).unwrap();
 }
+
+#[test]
+fn large_patches_in_lists_are_correct() {
+    // Reproduces a bug caused by an incorrect use of ListEncoding in Automerge::live_obj_paths.
+    // This is a function which precalculates the path of every visible object in the document.
+    // The problem was that when calculating the index into a sequence it was using
+    // ListEncoding::List to determine the index, which meant that when a string was inserted into
+    // a list then the index of elements following the list was based on the number of elements in
+    // the string, when it should just increase the index by one for the whole string.
+    //
+    // This bug was a little tricky to track down because it was only triggered by an optimization
+    // which kicks in when there are > 100 patches to render.
+
+    let mut doc = Automerge::new();
+    let heads_before = doc.get_heads();
+    let list = doc
+        .transact::<_, _, AutomergeError>(|tx| {
+            let list = tx.put_object(ROOT, "list", ObjType::List)?;
+            // This should just count as one
+            tx.insert(&list, 0, "123456")?;
+            for i in 1..501 {
+                let inner = tx.insert_object(&list, i, ObjType::Map)?;
+                tx.put(&inner, "a", i as i64)?;
+            }
+            Ok(list)
+        })
+        .unwrap()
+        .result;
+    let heads_after = doc.get_heads();
+    let patches = doc.diff(&heads_before, &heads_after, TextRepresentation::String);
+    let final_patch = patches.last().unwrap();
+    assert_eq!(
+        final_patch.path,
+        vec![
+            (ROOT, Prop::Map("list".into())),
+            (list, Prop::Seq(500)) // In the buggy code this was incorrectly coming out as 505 due to
+                                   // the counting of "123456" as 6 elements rather than 1
+        ]
+    );
+    let PatchAction::PutMap { .. } = &final_patch.action else {
+        panic!("Expected PutMap, got {:?}", final_patch.action);
+    };
+}
