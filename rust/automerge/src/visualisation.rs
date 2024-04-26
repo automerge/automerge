@@ -243,7 +243,7 @@ impl OpTableRow {
             crate::OpType::Put(v) => format!("set {}", v),
             crate::OpType::Make(obj) => format!("make {}", obj),
             crate::OpType::Increment(v) => format!("inc {}", v),
-            crate::OpType::MarkBegin(_, m) => format!("markEnd {}", m),
+            crate::OpType::MarkBegin(_, m) => format!("markBegin {}", m),
             crate::OpType::MarkEnd(m) => format!("markEnd {}", m),
         };
         let prop = match op.key() {

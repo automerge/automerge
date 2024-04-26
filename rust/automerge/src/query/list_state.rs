@@ -115,7 +115,7 @@ impl ListState {
                 marks.insert(*id, data);
             }
             for id in index.mark_end.iter() {
-                marks.remove(id);
+                marks.remove(&id.prev());
             }
         }
     }
