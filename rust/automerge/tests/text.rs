@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use automerge::{
-    hydrate_map,
+    hydrate_list, hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark},
     transaction::Transactable,
@@ -345,6 +345,167 @@ fn empty_marks_before_block_marker_dont_repeat_text() {
             Span::Text("a".to_string(), None),
         ]
     );
+}
+
+#[test]
+fn insertions_after_noexpand_spans_are_not_marked() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let block1 = doc.split_block(&text, 0).unwrap();
+    doc.update_object(
+        &block1,
+        &hydrate_map! {
+            "type" => "heading",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }
+        .into(),
+    )
+    .unwrap();
+    doc.splice_text(&text, 1, 0, "Heading").unwrap();
+    let block2 = doc.split_block(&text, 8).unwrap();
+    doc.update_object(
+        &block2,
+        &hydrate_map! {
+            "type" => "paragraph",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }
+        .into(),
+    )
+    .unwrap();
+    doc.splice_text(&text, 9, 0, "a").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("strong".to_string(), ScalarValue::from(true), 9, 9),
+        automerge::marks::ExpandMark::None,
+    )
+    .unwrap();
+
+    let spans = doc.spans(&text).unwrap();
+    let mut new_blocks = spans
+        .map(|s| match s {
+            Span::Text(s, _) => automerge::BlockOrText::Text(s.into()),
+            Span::Block(m) => automerge::BlockOrText::Block(m),
+        })
+        .collect::<Vec<_>>();
+    new_blocks.push(automerge::BlockOrText::Block(hydrate_map! {
+        "type" => "paragraph",
+        "parents" => hydrate_list![],
+        "attrs" => hydrate_map!{},
+    }));
+
+    doc.update_blocks(&text, new_blocks).unwrap();
+
+    #[cfg(feature = "optree-visualisation")]
+    {
+        println!("{}", doc.visualise_optree(None));
+    }
+
+    let marks = doc.marks(&text).unwrap();
+    println!("marks: {:?}", marks);
+
+    let heads_before = doc.get_heads();
+    doc.splice_text(&text, 11, 0, "a").unwrap();
+    let heads_after = doc.get_heads();
+
+    let marks = doc.marks(&text).unwrap();
+    println!("marks: {:?}", marks);
+
+    let patches = doc.diff(&heads_before, &heads_after);
+    assert_eq!(patches.len(), 1);
+
+    let Patch {
+        action: PatchAction::SpliceText { marks, .. },
+        ..
+    } = &patches[0]
+    else {
+        panic!("expected single splice patch, got: {:?}", patches);
+    };
+    assert_eq!(
+        marks, &None,
+        "expected marks to be none, got {:?}",
+        patches[0]
+    );
+}
+
+#[test]
+fn marks_which_cross_optree_boundaries_are_not_double_counted_in_splice_patches() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let block1 = doc.split_block(&text, 0).unwrap();
+    doc.update_object(
+        &block1,
+        &hydrate_map! {
+            "type" => "heading",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }
+        .into(),
+    )
+    .unwrap();
+    doc.splice_text(&text, 1, 0, "Heading").unwrap();
+    let block2 = doc.split_block(&text, 8).unwrap();
+    doc.update_object(
+        &block2,
+        &hydrate_map! {
+            "type" => "paragraph",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }
+        .into(),
+    )
+    .unwrap();
+    doc.splice_text(&text, 9, 0, "Hello world").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("strong".to_string(), ScalarValue::from(true), 15, 20),
+        automerge::marks::ExpandMark::None,
+    )
+    .unwrap();
+
+    let start = 20;
+    for i in 0..100 {
+        let spans = doc.spans(&text).unwrap();
+        let mut new_blocks = spans
+            .map(|s| match s {
+                Span::Text(s, _) => automerge::BlockOrText::Text(s.into()),
+                Span::Block(m) => automerge::BlockOrText::Block(m),
+            })
+            .collect::<Vec<_>>();
+        new_blocks.push(automerge::BlockOrText::Block(hydrate_map! {
+            "type" => "paragraph",
+            "parents" => hydrate_list![],
+            "attrs" => hydrate_map!{},
+        }));
+
+        doc.update_blocks(&text, new_blocks).unwrap();
+
+        doc.update_diff_cursor();
+        let heads_before = doc.get_heads();
+        let end = start + (i * 2) + 1;
+        doc.splice_text(&text, end, 0, "a").unwrap();
+        let heads_after = doc.get_heads();
+        //let marks = doc.marks(&text).unwrap();
+
+        //let patches = doc.diff_incremental();
+
+        let patches = doc.diff(&heads_before, &heads_after);
+        assert_eq!(patches.len(), 1);
+
+        let Patch {
+            action: PatchAction::SpliceText { marks, .. },
+            ..
+        } = &patches[0]
+        else {
+            panic!("expected single splice patch, got: {:?}", patches);
+        };
+        assert_eq!(
+            marks, &None,
+            "expected marks to be none, got {:?}",
+            patches[0]
+        );
+    }
 }
 
 proptest::proptest! {

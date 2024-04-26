@@ -727,6 +727,19 @@ impl TransactionInner {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
+        if mark.start == mark.end && expand == ExpandMark::None {
+            // In peritext terms this is the same as a mark which has a begin anchor before one
+            // character and an end anchor after the character preceding that character. E.g in the
+            // following sequence where the "<",">" symbols represent the mark anchor points:
+            //
+            // |   |  |   |  |   |
+            // < a >  < b >  < c >
+            // |   |  |   |  |   |
+            //
+            // A mark from 1 to 1 with expand set to none would begin at the anchor point before
+            // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
+            return Ok(());
+        }
         let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
 
