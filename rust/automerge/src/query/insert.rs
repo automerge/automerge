@@ -30,11 +30,23 @@ impl<'a> std::default::Default for QueriedMarks<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Loc<'a> {
     key: Key,
     pos: usize,
     id: Option<Op<'a>>,
+}
+
+impl<'a> std::fmt::Debug for Loc<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Loc {{ key: {:?}, pos: {:?}, id: {:?} }}",
+            self.key,
+            self.pos,
+            self.id.map(|i| (i.id(), i.action()))
+        )
+    }
 }
 
 impl<'a> Loc<'a> {
@@ -125,6 +137,9 @@ impl<'a> InsertNth<'a> {
                 op.action(),
                 OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
             ) {
+                if let QueriedMarks::FromQuery(ref mut marks) = self.marks {
+                    marks.process(op, self.clock.as_ref());
+                }
                 self.candidates
                     .push(Loc::mark(self.list_state.pos() + 1, *key, op));
             }
@@ -179,11 +194,6 @@ impl<'a> TreeQuery<'a> for InsertNth<'a> {
         self.identify_valid_insertion_spot(op, &key);
         if visible {
             if !self.candidates.is_empty() {
-                for op in self.candidates.iter().filter_map(|c| c.id) {
-                    if let QueriedMarks::FromQuery(ref mut marks) = self.marks {
-                        marks.process(op, self.clock.as_ref());
-                    }
-                }
                 return QueryResult::Finish;
             }
             self.last_visible_key = Some(key);
