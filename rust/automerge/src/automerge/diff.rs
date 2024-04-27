@@ -22,8 +22,25 @@ use crate::{
 struct Winner<'a> {
     op: Op<'a>,
     clock: &'a Clock,
+    // Whether the op was in the history of the other clock
     cross_visible: bool,
     conflict: bool,
+}
+
+impl<'a> Winner<'a> {
+    /// True if this is a make op which was visible in the after clock but deleted in the before
+    /// clock
+    fn is_undeleted_make_obj(&self) -> bool {
+        // This works because cross_visible is true if the op was visible in both clocks. On
+        // it's own that would not seem to be enough because the this op could be visible in  both
+        // clocks but deleted in both clocks but the logic in `process()` only calls `push_top()`
+        // if the op was not deleted.
+        //
+        // This means that if we see this operation in a `New` patch (which means we are inserting
+        // it into some object) then it must have been deleted in the before clock (because it was
+        // in the history of both clocks but the before clock doesn't have it).
+        self.cross_visible && matches!(self.op.action(), OpType::Make(_))
+    }
 }
 
 /*
@@ -158,6 +175,12 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         Patch::New(winner, _) => {
             let value = winner.op.value_at(Some(winner.clock)).into();
             patch_log.insert(obj.id, index, value, *winner.op.id(), winner.conflict);
+
+            // If this op was already visible and it's an object then we need to mark the object as
+            // exposed so that the diff will include the patches to create the exposed object
+            if winner.is_undeleted_make_obj() {
+                patch_log.expose(*winner.op.id());
+            }
             index + 1
         }
         Patch::Update { before, after, .. } => {
@@ -209,6 +232,11 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 let value = winner.op.value_at(Some(winner.clock)).into();
                 patch_log.insert(obj.id, index, value, *winner.op.id(), winner.conflict);
             }
+            // If this op was already visible and it's an object then we need to mark the object as
+            // exposed so that the diff will include the patches to create the exposed object
+            if winner.is_undeleted_make_obj() {
+                patch_log.expose(*winner.op.id());
+            }
             index + winner.op.width(encoding)
         }
         Patch::Update {
@@ -245,6 +273,14 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
                 let value = winner.op.value_at(Some(winner.clock)).into();
+                // If this op was already visible and it's an object then we need to mark the object as
+                // exposed so that the diff will include the patches to create the exposed object
+                if winner.is_undeleted_make_obj() {
+                    patch_log.expose(*winner.op.id());
+                }
+                if winner.is_undeleted_make_obj() {
+                    patch_log.expose(*winner.op.id());
+                }
                 patch_log.put_map(obj.id, key, value, *winner.op.id(), winner.conflict, false)
             }
             Patch::Update { before, after, .. } => {

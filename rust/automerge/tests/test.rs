@@ -2056,3 +2056,111 @@ fn large_patches_in_lists_are_correct() {
         panic!("Expected PutMap, got {:?}", final_patch.action);
     };
 }
+
+#[test]
+fn diff_should_reverse_deletion_of_object_in_list_correctly() {
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, "a").unwrap();
+    let text = doc
+        .insert_object(&list, 1, automerge::ObjType::Text)
+        .unwrap();
+    doc.splice_text(&text, 0, 0, "b").unwrap();
+    doc.insert(&list, 2, "c").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&list, 1).unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::Insert { index, values } = &patch.action else {
+        panic!("Expected Insert, got {:?}", patch.action);
+    };
+    assert_eq!(*index, 1);
+    assert_eq!(values.len(), 1);
+    let (value, _, _) = values.into_iter().next().unwrap();
+    assert_eq!(value, &Value::Object(ObjType::Text));
+
+    let patch = patches[1].clone();
+    let PatchAction::SpliceText { index, value, .. } = patch.action else {
+        panic!("Expected SpliceText, got {:?}", patch.action);
+    };
+    assert_eq!(index, 0);
+    assert_eq!(value.make_string(), "b");
+}
+
+#[test]
+fn diff_should_reverse_deletion_of_object_in_map_correctly() {
+    let mut doc = AutoCommit::new();
+
+    let map = doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.put_object(&map, "text", ObjType::Text).unwrap();
+
+    doc.put(&map, "a", "a").unwrap();
+    let text = doc.put_object(&map, "b", automerge::ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "b").unwrap();
+    doc.put(&map, "c", "c").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&map, "b").unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::PutMap { key, value, .. } = &patch.action else {
+        panic!("Expected putmap, got {:?}", patch.action);
+    };
+    assert_eq!(key, "b");
+    assert_eq!(value.0, Value::Object(ObjType::Text));
+
+    let patch = patches[1].clone();
+    let PatchAction::SpliceText { index, value, .. } = patch.action else {
+        panic!("Expected SpliceText, got {:?}", patch.action);
+    };
+    assert_eq!(index, 0);
+    assert_eq!(value.make_string(), "b");
+}
+
+#[test]
+fn diff_should_reverse_deletion_of_block_in_text_correctly() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    let block = doc.split_block(&text, 1).unwrap();
+    doc.splice_text(&text, 2, 0, "b").unwrap();
+    doc.put(&block, "key", "value").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&text, 1).unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::Insert { index, values } = &patch.action else {
+        panic!("Expected Insert, got {:?}", patch.action);
+    };
+    assert_eq!(*index, 1);
+    assert_eq!(values.len(), 1);
+    let (value, _, _) = values.into_iter().next().unwrap();
+    assert_eq!(value, &Value::Object(ObjType::Map));
+
+    let patch = patches[1].clone();
+    let PatchAction::PutMap { key, value, .. } = patch.action else {
+        panic!("Expected PutMap, got {:?}", patch.action);
+    };
+    assert_eq!(key, "key");
+    let Value::Scalar(s) = value.0 else {
+        panic!("Expected Scalar, got {:?}", value.0);
+    };
+    assert_eq!(s.as_ref(), &ScalarValue::Str("value".into()));
+}
