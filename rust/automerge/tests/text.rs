@@ -619,6 +619,48 @@ fn expand_marks_are_reported_in_patches() {
     );
 }
 
+#[test]
+fn test_remote_patches_for_marks_with_expand_after() {
+    let mut doc_a = AutoCommit::new();
+    let text = doc_a.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc_a.splice_text(&text, 0, 0, "fox").unwrap();
+    doc_a
+        .mark(
+            &text,
+            Mark::new("strong".to_string(), ScalarValue::from(true), 0, 3),
+            automerge::marks::ExpandMark::After,
+        )
+        .unwrap();
+
+    let mut doc_b = doc_a.fork();
+
+    let heads_before_a = doc_a.get_heads();
+    doc_a.splice_text(&text, 3, 0, "a").unwrap();
+    let heads_after_a = doc_a.get_heads();
+
+    doc_b.update_diff_cursor();
+    let heads_before_b = doc_b.get_heads();
+    println!("doing merge");
+    doc_b.merge(&mut doc_a).unwrap();
+    println!("done merge");
+    let heads_after_b = doc_b.get_heads();
+
+    let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);
+    let patches_b = doc_b.diff(&heads_before_b, &heads_after_b);
+
+    #[cfg(feature = "optree-visualisation")]
+    {
+        println!("--------------------------------");
+        println!("Doc A");
+        println!("{}", doc_a.visualise_optree(None));
+        println!("--------------------------------");
+        println!("Doc B");
+        println!("{}", doc_b.visualise_optree(None));
+    }
+
+    assert_eq!(patches_a, patches_b);
+}
+
 proptest::proptest! {
     #[test]
     fn marks_are_okay(scenario in arb_scenario()) {
