@@ -315,6 +315,10 @@ impl PatchLog {
         }
     }
 
+    pub(crate) fn expose(&mut self, id: OpId) {
+        self.expose.insert(id);
+    }
+
     fn make_patches_inner<R: ReadDocInternal>(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
