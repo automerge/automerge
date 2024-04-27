@@ -16,11 +16,28 @@ pub(crate) struct OpIdSearch<'a> {
     marks: RichTextQueryState<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum SearchTarget<'a> {
-    OpId(OpId, Option<Op<'a>>),
+    OpId(
+        // The opid we are looking for
+        OpId,
+        // If we are performing an inset, this is the operation we are inserting
+        Option<Op<'a>>,
+    ),
     Op(Op<'a>),
     Complete(usize),
+}
+
+impl std::fmt::Debug for SearchTarget<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SearchTarget::OpId(id, to_insert) => {
+                write!(f, "OpId({:?}, {:?})", id, to_insert.map(|op| op.id()))
+            }
+            SearchTarget::Op(op) => write!(f, "Op({:?})", op.id()),
+            SearchTarget::Complete(n) => write!(f, "Complete({})", n),
+        }
+    }
 }
 
 impl<'a> OpIdSearch<'a> {
@@ -103,15 +120,16 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     }
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
-        self.marks.process(op, self.clock);
         match self.target {
             SearchTarget::OpId(target, None) => {
+                self.marks.process(op, self.clock);
                 if op.id() == &target {
                     self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
             }
             SearchTarget::OpId(target, Some(op2)) => {
+                self.marks.process(op, self.clock);
                 if op.id() == &target {
                     if op2.insert() {
                         self.target = SearchTarget::Op(op2);
@@ -126,6 +144,7 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
                     self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
+                self.marks.process(op, self.clock);
             }
             SearchTarget::Complete(_) => return QueryResult::Finish, // this should never happen
         }
