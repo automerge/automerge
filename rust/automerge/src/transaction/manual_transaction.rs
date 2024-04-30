@@ -475,7 +475,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
     }
 
-    fn update_blocks<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
+    fn update_spans<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
         &mut self,
         text: O,
         new_text: I,
