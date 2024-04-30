@@ -287,6 +287,21 @@ impl PatchLog {
         self.events.push((obj, Event::Mark { marks: acc }))
     }
 
+    pub(crate) fn insert_and_maybe_expose(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        if expose && value.is_object() {
+            self.expose.insert(id);
+        }
+        self.insert(obj, index, value, id, conflict)
+    }
+
     pub(crate) fn insert(
         &mut self,
         obj: ObjId,
@@ -313,10 +328,6 @@ impl PatchLog {
         } else {
             Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
         }
-    }
-
-    pub(crate) fn expose(&mut self, id: OpId) {
-        self.expose.insert(id);
     }
 
     fn make_patches_inner<R: ReadDocInternal>(
