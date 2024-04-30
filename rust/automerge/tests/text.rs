@@ -391,7 +391,7 @@ fn insertions_after_noexpand_spans_are_not_marked() {
         "attrs" => hydrate_map!{},
     }));
 
-    doc.update_blocks(&text, new_blocks).unwrap();
+    doc.update_spans(&text, new_blocks).unwrap();
 
     let marks = doc.marks(&text).unwrap();
     println!("marks: {:?}", marks);

@@ -136,7 +136,7 @@ pub trait Transactable: ReadDoc {
     /// This performs a diff against the current state of both the text and the block markers in a
     /// text object and attempts to perform a reasonably minimal set of operations to update the
     /// document to match the new text.
-    fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
+    fn update_spans<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
         &mut self,
         text: O,
         new_text: I,

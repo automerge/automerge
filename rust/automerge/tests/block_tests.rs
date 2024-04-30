@@ -35,7 +35,7 @@ fn update_blocks_change_block_properties() {
 
     doc.update_diff_cursor();
 
-    doc.update_blocks(
+    doc.update_spans(
         &text,
         [
             BlockOrText::Block(hydrate_map! {
@@ -94,7 +94,7 @@ fn update_blocks_updates_text() {
 
     doc.update_diff_cursor();
 
-    doc.update_blocks(
+    doc.update_spans(
         &text,
         [
             BlockOrText::Block(hydrate_map! {
@@ -160,7 +160,7 @@ fn update_blocks_noop() {
 
     doc.update_diff_cursor();
 
-    doc.update_blocks(
+    doc.update_spans(
         &text,
         [
             BlockOrText::Block(hydrate_map! {
@@ -195,7 +195,7 @@ fn update_blocks_updates_text_and_blocks_at_once() {
     .unwrap();
     doc.splice_text(&text, 1, 0, "hello world").unwrap();
 
-    doc.update_blocks(
+    doc.update_spans(
         &text,
         vec![
             BlockOrText::Block(hydrate_map! {
@@ -271,7 +271,7 @@ fn update_spans_delete_attribute() {
     )
     .unwrap();
 
-    doc.update_blocks(
+    doc.update_spans(
         &text,
         [BlockOrText::Block(hydrate_map! {
             "type" => "ordered-list-item",

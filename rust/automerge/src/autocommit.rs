@@ -1000,7 +1000,7 @@ impl Transactable for AutoCommit {
         crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
     }
 
-    fn update_blocks<'a, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'a>>>(
+    fn update_spans<'a, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'a>>>(
         &mut self,
         text: O,
         new_text: I,

@@ -312,7 +312,7 @@ impl Automerge {
             return Err(error::UpdateSpans::TextRepNotString);
         }
         let args = interop::import_update_spans_args(self, JS(args))?;
-        self.doc.update_blocks(&obj, args.0)?;
+        self.doc.update_spans(&obj, args.0)?;
         Ok(())
     }
 
