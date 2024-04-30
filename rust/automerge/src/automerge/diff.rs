@@ -27,32 +27,6 @@ struct Winner<'a> {
     conflict: bool,
 }
 
-impl<'a> Winner<'a> {
-    /// True if this is a make op which was visible in the after clock but deleted in the before
-    /// clock
-    fn is_undeleted_make_obj(&self) -> bool {
-        // This works because cross_visible is true if the op was visible in both clocks. On
-        // it's own that would not seem to be enough because the this op could be visible in  both
-        // clocks but deleted in both clocks but the logic in `process()` only calls `push_top()`
-        // if the op was not deleted.
-        //
-        // This means that if we see this operation in a `New` patch (which means we are inserting
-        // it into some object) then it must have been deleted in the before clock (because it was
-        // in the history of both clocks but the before clock doesn't have it).
-        self.cross_visible && matches!(self.op.action(), OpType::Make(_))
-    }
-}
-
-/*
-impl<'a> Deref for Winner<'a> {
-    type Target = Op<'a>;
-
-    fn deref(&self) -> &'a Self::Target {
-        &self.op
-    }
-}
-*/
-
 fn process<'a, T: Iterator<Item = Op<'a>>>(
     ops: T,
     before: &'a Clock,
@@ -174,24 +148,18 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
             let value = winner.op.value_at(Some(winner.clock)).into();
-            patch_log.insert(obj.id, index, value, *winner.op.id(), winner.conflict);
-
-            // If this op was already visible and it's an object then we need to mark the object as
-            // exposed so that the diff will include the patches to create the exposed object
-            if winner.is_undeleted_make_obj() {
-                patch_log.expose(*winner.op.id());
-            }
+            let id = *winner.op.id();
+            let conflict = winner.conflict;
+            let expose = winner.cross_visible;
+            patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             index + 1
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
-            if after.cross_visible {
-                let value = after.op.value_at(Some(after.clock)).into();
-                patch_log.put_seq(obj.id, index, value, *after.op.id(), conflict, true)
-            } else {
-                let value = after.op.value_at(Some(after.clock)).into();
-                patch_log.put_seq(obj.id, index, value, *after.op.id(), conflict, false)
-            }
+            let value = after.op.value_at(Some(after.clock)).into();
+            let id = *after.op.id();
+            let expose = after.cross_visible;
+            patch_log.put_seq(obj.id, index, value, id, conflict, expose);
             index + 1
         }
         Patch::Old {
@@ -230,12 +198,10 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             } else {
                 // blocks
                 let value = winner.op.value_at(Some(winner.clock)).into();
-                patch_log.insert(obj.id, index, value, *winner.op.id(), winner.conflict);
-            }
-            // If this op was already visible and it's an object then we need to mark the object as
-            // exposed so that the diff will include the patches to create the exposed object
-            if winner.is_undeleted_make_obj() {
-                patch_log.expose(*winner.op.id());
+                let id = *winner.op.id();
+                let conflict = winner.conflict;
+                let expose = winner.cross_visible;
+                patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             }
             index + winner.op.width(encoding)
         }
@@ -273,25 +239,17 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
                 let value = winner.op.value_at(Some(winner.clock)).into();
-                // If this op was already visible and it's an object then we need to mark the object as
-                // exposed so that the diff will include the patches to create the exposed object
-                if winner.is_undeleted_make_obj() {
-                    patch_log.expose(*winner.op.id());
-                }
-                if winner.is_undeleted_make_obj() {
-                    patch_log.expose(*winner.op.id());
-                }
-                patch_log.put_map(obj.id, key, value, *winner.op.id(), winner.conflict, false)
+                let id = *winner.op.id();
+                let conflict = winner.conflict;
+                let expose = winner.cross_visible;
+                patch_log.put_map(obj.id, key, value, id, conflict, expose)
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
-                if after.cross_visible {
-                    let value = after.op.value_at(Some(after.clock)).into();
-                    patch_log.put_map(obj.id, key, value, *after.op.id(), conflict, true)
-                } else {
-                    let value = after.op.value_at(Some(after.clock)).into();
-                    patch_log.put_map(obj.id, key, value, *after.op.id(), conflict, false)
-                }
+                let value = after.op.value_at(Some(after.clock)).into();
+                let id = *after.op.id();
+                let expose = after.cross_visible;
+                patch_log.put_map(obj.id, key, value, id, conflict, expose)
             }
             Patch::Old { before, after, .. } => {
                 if !before.conflict && after.conflict {
