@@ -63,6 +63,7 @@ where
         .count()
 }
 
+#[allow(dead_code)]
 struct OffsetLookup<Int> {
     offset: usize,
     vec: Vec<Int>,

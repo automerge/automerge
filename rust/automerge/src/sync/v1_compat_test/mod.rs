@@ -100,7 +100,7 @@ impl Automerge {
         }
 
         sync_state.have_responded = true;
-        sync_state.last_sent_heads = our_heads.clone();
+        sync_state.last_sent_heads.clone_from(&our_heads);
         sync_state
             .sent_hashes
             .extend(changes_to_send.iter().map(|c| c.hash()));
@@ -235,7 +235,7 @@ impl Automerge {
         self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
 
         if changes_is_empty && message_heads == before_heads {
-            sync_state.last_sent_heads = message_heads.clone();
+            sync_state.last_sent_heads.clone_from(&message_heads);
         }
 
         let known_heads = message_heads
@@ -243,7 +243,7 @@ impl Automerge {
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
-            sync_state.shared_heads = message_heads.clone();
+            sync_state.shared_heads.clone_from(&message_heads);
             // If the remote peer has lost all its data, reset our state to perform a full resync
             if message_heads.is_empty() {
                 sync_state.last_sent_heads = Default::default();

@@ -7,9 +7,10 @@ pub use patch_log::PatchLog;
 
 use crate::{types::ListEncoding, ObjType};
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {
     Array,
+    #[default]
     String,
 }
 
@@ -27,11 +28,5 @@ impl TextRepresentation {
 
     pub fn is_string(&self) -> bool {
         matches!(self, TextRepresentation::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::String
     }
 }

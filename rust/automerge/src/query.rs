@@ -1,7 +1,7 @@
 use crate::marks::MarkData;
 use crate::op_set::Op;
 use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
-use crate::types::{Key, ListEncoding, OpBuilder, OpId, OpType};
+use crate::types::{Key, ListEncoding, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -26,19 +26,7 @@ pub(crate) struct ChangeVisibility<'a> {
     pub(crate) op: Op<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CounterData {
-    pos: usize,
-    val: i64,
-    succ: HashSet<OpId>,
-    op: OpBuilder,
-}
-
 pub(crate) trait TreeQuery<'a>: Clone + Debug {
-    fn equiv(&mut self, _other: &Self) -> bool {
-        false
-    }
-
     fn can_shortcut_search(&mut self, _tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
         false
     }

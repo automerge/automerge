@@ -148,10 +148,6 @@ impl<'a> InsertNth<'a> {
 }
 
 impl<'a> TreeQuery<'a> for InsertNth<'a> {
-    fn equiv(&mut self, other: &Self) -> bool {
-        self.pos() == other.pos() && self.key() == other.key()
-    }
-
     fn can_shortcut_search(&mut self, tree: &'a OpTree, _osd: &'a OpSetData) -> bool {
         if let Some(last) = &tree.last_insert {
             if last.index + last.width == self.list_state.target() {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{text_value::TextValue, PatchAction, ScalarValue};
 
@@ -59,9 +59,9 @@ impl From<&Text> for String {
     }
 }
 
-impl ToString for Text {
-    fn to_string(&self) -> String {
-        self.value.make_string()
+impl Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value.make_string())
     }
 }
 
