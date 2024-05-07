@@ -43,10 +43,6 @@ pub(crate) struct ChangeActors<'a, ActorId, I, O, C> {
     _phantom: std::marker::PhantomData<(&'a O, C)>,
 }
 
-#[derive(thiserror::Error, Debug)]
-#[error("actor index {0} referenced by an operation was not found in the changes")]
-pub(crate) struct MissingActor(usize);
-
 #[derive(Debug, thiserror::Error)]
 #[error("pred OpIds out of order")]
 pub(crate) struct PredOutOfOrder;

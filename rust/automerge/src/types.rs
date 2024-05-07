@@ -593,16 +593,11 @@ impl ObjMeta {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ListEncoding {
+    #[default]
     List,
     Text,
-}
-
-impl Default for ListEncoding {
-    fn default() -> Self {
-        ListEncoding::List
-    }
 }
 
 impl From<Option<ObjType>> for ListEncoding {
@@ -627,9 +622,6 @@ impl ElemId {
         Self(OpId(0, 0))
     }
 }
-
-#[derive(Debug, Clone)]
-pub(crate) struct Peer {}
 
 /// The number of bytes in a change hash.
 pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
