@@ -10,4 +10,8 @@ export class RawString {
   toString(): string {
     return this.val
   }
+
+  toJSON(): string {
+    return this.val
+  }
 }

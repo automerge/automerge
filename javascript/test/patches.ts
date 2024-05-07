@@ -114,6 +114,7 @@ describe("patches", () => {
     })
   })
 
+<<<<<<< HEAD
   describe("the diff with attribution function", () => {
     it("it should be able to diff with attributes", () => {
       let doc1 = Automerge.from({ text: "hello world" }, { actor: "bbbb" })
@@ -169,5 +170,29 @@ describe("patches", () => {
         { action: "del", path: ["text", 15], attr: "user1", removed: " " },
       ])
     })
+=======
+  it("should correctly diff the reverse of deleting a string value on next", () => {
+    const doc = Automerge.from<{ list: string[] }>({ list: ["a", "b", "c"] })
+
+    Automerge.change(
+      doc,
+      {
+        patchCallback: (_, patchInfo) => {
+          const reverse = Automerge.diff(
+            patchInfo.after,
+            Automerge.getHeads(patchInfo.after),
+            Automerge.getHeads(patchInfo.before),
+          )
+          assert.deepEqual(reverse, [
+            { action: "insert", path: ["list", 1], values: [""] },
+            { action: "splice", path: ["list", 1, 0], value: "b" },
+          ])
+        },
+      },
+      doc => {
+        Automerge.deleteAt(doc.list, 1)
+      },
+    )
+>>>>>>> main
   })
 })

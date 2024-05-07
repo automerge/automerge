@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::exid::ExId;
+use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -9,7 +11,7 @@ use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjId, ObjMeta, OpId};
 use crate::{op_tree::OpSetData, types::OpBuilder, Automerge, Change, ChangeHash, Prop};
-use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+use crate::{AutomergeError, ObjType, OpType, ReadDoc, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
@@ -195,8 +197,6 @@ impl TransactionInner {
             }
         }
 
-        doc.rollback_last_actor();
-
         num
     }
 
@@ -306,7 +306,7 @@ impl TransactionInner {
             doc.ops_mut().insert(pos, &obj.id, idx);
         }
 
-        self.finalize_op(doc, patch_log, obj.id, prop, idx, None);
+        self.finalize_op(doc, patch_log, obj, prop, idx, None);
     }
 
     pub(crate) fn insert<V: Into<ScalarValue>>(
@@ -323,14 +323,7 @@ impl TransactionInner {
         }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(
-            doc,
-            patch_log,
-            obj.id,
-            index,
-            ListEncoding::List,
-            value.into(),
-        )?;
+        self.do_insert(doc, patch_log, &obj, index, value.into())?;
         Ok(())
     }
 
@@ -346,14 +339,7 @@ impl TransactionInner {
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let idx = self.do_insert(
-            doc,
-            patch_log,
-            obj.id,
-            index,
-            ListEncoding::List,
-            value.into(),
-        )?;
+        let idx = self.do_insert(doc, patch_log, &obj, index, value.into())?;
         Ok(idx.as_op(doc.osd()).exid())
     }
 
@@ -361,16 +347,19 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        obj: &ObjMeta,
         index: usize,
-        encoding: ListEncoding,
         action: OpType,
     ) -> Result<OpIdx, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops().search(
-            &obj,
-            query::InsertNth::new(index, encoding, self.scope.clone()),
+            &obj.id,
+            query::InsertNth::new(
+                index,
+                patch_log.text_rep().encoding(obj.typ),
+                self.scope.clone(),
+            ),
         );
         let marks = query.marks(doc.osd());
         let pos = query.pos();
@@ -385,8 +374,8 @@ impl TransactionInner {
 
         let idx = doc
             .ops_mut()
-            .load_with_range(obj, op.clone(), &mut self.idx_range);
-        doc.ops_mut().insert(pos, &obj, idx);
+            .load_with_range(obj.id, op.clone(), &mut self.idx_range);
+        doc.ops_mut().insert(pos, &obj.id, idx);
 
         self.finalize_op(doc, patch_log, obj, Prop::Seq(index), idx, marks);
 
@@ -423,9 +412,12 @@ impl TransactionInner {
         let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
         let key = Key::Map(prop_index);
         let prop: Prop = prop.into();
-        let query = doc
-            .ops()
-            .seek_ops_by_prop(obj, prop.clone(), self.scope.as_ref());
+        let query = doc.ops().seek_ops_by_prop(
+            &obj.id,
+            prop.clone(),
+            patch_log.text_rep().encoding(obj.typ),
+            self.scope.as_ref(),
+        );
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Delete {
             return Ok(None);
@@ -543,7 +535,7 @@ impl TransactionInner {
                 doc,
                 patch_log,
                 SpliceArgs {
-                    obj: obj.id,
+                    obj,
                     index,
                     del: 1,
                     values: vec![],
@@ -576,7 +568,7 @@ impl TransactionInner {
             doc,
             patch_log,
             SpliceArgs {
-                obj: obj.id,
+                obj,
                 index,
                 del,
                 values,
@@ -605,7 +597,7 @@ impl TransactionInner {
             doc,
             patch_log,
             SpliceArgs {
-                obj: obj.id,
+                obj,
                 index,
                 del,
                 values,
@@ -647,7 +639,7 @@ impl TransactionInner {
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
             let query = doc.ops().search(
-                &obj,
+                &obj.id,
                 query::Nth::new(index, encoding, self.scope.clone(), doc.osd()),
             );
 
@@ -669,17 +661,20 @@ impl TransactionInner {
             let query_key = query.key()?;
             let ops_pos = query.ops_pos;
             let op = self.next_delete(query_key);
-            deleted_opid = Some(op.id);
-            let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
 
-            doc.ops_mut().add_succ(&obj, &ops_pos, idx);
+            deleted_opid = Some(op.id);
+            let idx = doc
+                .ops_mut()
+                .load_with_range(obj.id, op, &mut self.idx_range);
+
+            doc.ops_mut().add_succ(&obj.id, &ops_pos, idx);
 
             deleted += step;
         }
 
         if let Some(id) = deleted_opid {
             if patch_log.is_active() {
-                patch_log.delete_seq(obj, id, index, deleted, deleted_str, is_text_splice);
+                patch_log.delete_seq(obj.id, id, index, deleted, deleted_str, is_text_splice);
             }
         }
 
@@ -687,7 +682,7 @@ impl TransactionInner {
         // insert the remaining ops one after the other
         if !values.is_empty() {
             let query = doc.ops().search(
-                &obj,
+                &obj.id,
                 query::InsertNth::new(index, encoding, self.scope.clone()),
             );
             let mut pos = query.pos();
@@ -701,8 +696,10 @@ impl TransactionInner {
 
                 key = op.id.into();
 
-                let idx = doc.ops_mut().load_with_range(obj, op, &mut self.idx_range);
-                doc.ops_mut().insert(pos, &obj, idx);
+                let idx = doc
+                    .ops_mut()
+                    .load_with_range(obj.id, op, &mut self.idx_range);
+                doc.ops_mut().insert(pos, &obj.id, idx);
 
                 width = idx.as_op(doc.osd()).width(encoding);
                 cursor += width;
@@ -710,27 +707,20 @@ impl TransactionInner {
             }
 
             doc.ops_mut()
-                .hint(&obj, cursor - width, pos - 1, width, key);
+                .hint(&obj.id, cursor - width, pos - 1, width, key, marks.clone());
 
             if patch_log.is_active() {
                 match splice_type {
                     SpliceType::Text(text)
                         if matches!(patch_log.text_rep(), TextRepresentation::String) =>
                     {
-                        patch_log.splice(obj, index, text, marks.clone());
+                        patch_log.splice(obj.id, index, text, marks);
                     }
                     SpliceType::List | SpliceType::Text(..) => {
                         let mut opid = self.next_id().minus(values.len());
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
-                            patch_log.insert(
-                                obj,
-                                index + offset,
-                                v.clone().into(),
-                                opid,
-                                false,
-                                marks.clone(),
-                            );
+                            patch_log.insert(obj.id, index + offset, v.clone().into(), opid, false);
                         }
                     }
                 }
@@ -747,16 +737,28 @@ impl TransactionInner {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
+        if mark.start == mark.end && expand == ExpandMark::None {
+            // In peritext terms this is the same as a mark which has a begin anchor before one
+            // character and an end anchor after the character preceding that character. E.g in the
+            // following sequence where the "<",">" symbols represent the mark anchor points:
+            //
+            // |   |  |   |  |   |
+            // < a >  < b >  < c >
+            // |   |  |   |  |   |
+            //
+            // A mark from 1 to 1 with expand set to none would begin at the anchor point before
+            // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
+            return Ok(());
+        }
         let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
 
-        self.do_insert(doc, patch_log, obj.id, mark.start, obj.encoding, action)?;
+        self.do_insert(doc, patch_log, &obj, mark.start, action)?;
         self.do_insert(
             doc,
             patch_log,
-            obj.id,
+            &obj,
             mark.end,
-            obj.encoding,
             OpType::MarkEnd(expand.after()),
         )?;
         if patch_log.is_active() {
@@ -780,19 +782,155 @@ impl TransactionInner {
         self.mark(doc, patch_log, ex_obj, mark, expand)
     }
 
-    fn finalize_op(
+    pub(crate) fn split_block(
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        obj: ObjId,
+        ex_obj: &ExId,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
+
+        let action = OpType::Make(ObjType::Map);
+        let id = self.next_id();
+
+        let query = doc.ops().search(
+            &obj.id,
+            query::InsertNth::new(
+                index,
+                patch_log.text_rep().encoding(obj.typ),
+                self.scope.clone(),
+            ),
+        );
+        let pos = query.pos();
+        let key = query.key()?;
+
+        let op = OpBuilder {
+            id,
+            action,
+            key,
+            insert: true,
+        };
+
+        let op_idx = doc
+            .ops_mut()
+            .load_with_range(obj.id, op, &mut self.idx_range);
+        doc.ops_mut().insert(pos, &obj.id, op_idx);
+        let op = op_idx.as_op(doc.osd());
+
+        patch_log.insert(
+            obj.id,
+            index,
+            crate::hydrate::Value::Map(crate::hydrate::Map::default()),
+            *op.id(),
+            false,
+        );
+
+        Ok(op.exid())
+    }
+
+    pub(crate) fn join_block(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        text: &ExId,
+        index: usize,
+    ) -> Result<(), AutomergeError> {
+        let text_obj = doc.exid_to_obj(text)?;
+
+        if text_obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(text_obj.typ));
+        }
+
+        let target = doc
+            .ops()
+            .seek_ops_by_prop(
+                &text_obj.id,
+                Prop::Seq(index),
+                patch_log.text_rep().encoding(text_obj.typ),
+                self.scope.as_ref(),
+            )
+            .ops
+            .into_iter()
+            .last()
+            .ok_or(AutomergeError::InvalidIndex(index))?;
+        let block_id = *target.id();
+
+        let key = Key::Seq(block_id.into());
+
+        let action = OpType::Delete;
+
+        let op = OpBuilder {
+            id: self.next_id(),
+            action,
+            key,
+            insert: false,
+        };
+
+        let query = doc.ops().search(
+            &text_obj.id,
+            query::OpIdSearch::opid(block_id, patch_log.text_rep().encoding(text_obj.typ), None),
+        );
+        let index = query.index();
+        let mut pos = query.pos();
+        let mut pred_ids = vec![];
+        let mut succ_pos = vec![];
+        {
+            let mut iter = doc.ops().iter_ops(&text_obj.id);
+            let mut next = iter.nth(pos);
+            while let Some(e) = next {
+                if e.elemid_or_key() != op.elemid_or_key() {
+                    break;
+                }
+                let visible = e.visible_at(self.scope.as_ref());
+                if visible {
+                    succ_pos.push(pos);
+                }
+                pos += 1;
+                pred_ids.push(e.id());
+                next = iter.next();
+            }
+        }
+
+        let target_id = *target.id();
+        let deleted = target.as_str().to_string();
+        let op_idx = doc
+            .ops_mut()
+            .load_with_range(text_obj.id, op, &mut self.idx_range);
+
+        doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op_idx);
+
+        patch_log.delete_seq(text_obj.id, target_id, index, 1, deleted, true);
+
+        Ok(())
+    }
+
+    pub(crate) fn replace_block(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        text: &ExId,
+        index: usize,
+    ) -> Result<ExId, AutomergeError> {
+        self.join_block(doc, patch_log, text, index)?;
+        self.split_block(doc, patch_log, text, index)
+    }
+
+    fn finalize_op(
+        &mut self,
+        doc: &Automerge,
+        patch_log: &mut PatchLog,
+        obj: &ObjMeta,
         prop: Prop,
         idx: OpIdx,
         marks: Option<Arc<MarkSet>>,
     ) {
-        let obj_type = doc.ops().object_type(&obj);
         let is_text = matches!(
-            (obj_type, patch_log.text_rep()),
-            (Some(ObjType::Text), TextRepresentation::String)
+            (obj.typ, patch_log.text_rep()),
+            (ObjType::Text, TextRepresentation::String)
         );
         let op = idx.as_op(doc.osd());
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
@@ -800,24 +938,209 @@ impl TransactionInner {
             //let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert() {
                 if !op.is_mark() {
-                    assert!(obj_type.unwrap().is_sequence());
+                    assert!(obj.typ.is_sequence());
                     match (is_text, prop) {
                         (false, Prop::Seq(index)) => {
-                            patch_log.insert(obj, index, op.value().into(), *op.id(), false, marks);
+                            patch_log.insert(obj.id, index, op.value().into(), *op.id(), false);
                         }
                         (true, Prop::Seq(index)) => {
-                            patch_log.splice(obj, index, op.as_str(), marks);
+                            if matches!(patch_log.text_rep(), TextRepresentation::Array) {
+                                //let value = (op.value(), doc.ops().id_to_exid(op.id));
+                                patch_log.insert(obj.id, index, op.value().into(), *op.id(), false);
+                            } else {
+                                patch_log.splice(obj.id, index, op.as_str(), marks);
+                            }
                         }
                         _ => {}
                     }
                 }
             } else if op.is_delete() {
-                patch_log.delete(obj, *op.id(), &prop, op.as_str(), is_text);
+                patch_log.delete(obj.id, *op.id(), &prop, op.as_str(), is_text);
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment(obj, &prop, value, *op.id());
+                patch_log.increment(obj.id, &prop, value, *op.id());
             } else {
-                //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                patch_log.put(obj, &prop, op.value().into(), *op.id(), false, false);
+                patch_log.put(obj.id, &prop, op.value().into(), *op.id(), false, false);
+            }
+        }
+    }
+
+    pub(crate) fn update_object(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        obj: &ExId,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        let obj_meta = doc.exid_to_obj(obj)?;
+        match (obj_meta.typ, new_value) {
+            (ObjType::Map, crate::hydrate::Value::Map(map)) => {
+                Ok(self.update_map(doc, patch_log, obj, map)?)
+            }
+            (ObjType::List, crate::hydrate::Value::List(list)) => {
+                Ok(self.update_list(doc, patch_log, obj, list)?)
+            }
+            (ObjType::Text, crate::hydrate::Value::Text(new_text)) => {
+                Ok(crate::text_diff::myers_diff(
+                    doc,
+                    self,
+                    patch_log,
+                    obj,
+                    new_text.to_string().as_str(),
+                )?)
+            }
+            _ => Err(crate::error::UpdateObjectError::ChangeType),
+        }
+    }
+
+    pub(crate) fn update_map(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        map: &crate::ObjId,
+        new_value: &crate::hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        let mut delenda = HashSet::new();
+        let obj = doc.exid_to_obj(map)?;
+        let current_vals = doc
+            .ops()
+            .map_range(&obj.id, .., self.scope.clone())
+            .map(|MapRangeItem { key, value, id, .. }| (key.to_string(), value.into_owned(), id))
+            .collect::<Vec<_>>();
+
+        let mut present_keys = HashSet::new();
+        for (key, value, id) in current_vals {
+            present_keys.insert(key.clone());
+            match new_value.get(&key) {
+                Some(new_value) => self.update_value(
+                    doc,
+                    patch_log,
+                    map,
+                    key.into(),
+                    new_value,
+                    Some((id, value)),
+                )?,
+                None => {
+                    delenda.insert(key.clone());
+                }
+            }
+        }
+        for (key, new_value) in new_value.iter() {
+            if !present_keys.contains(key) {
+                self.update_value(doc, patch_log, map, key.into(), &new_value.value, None)?;
+            }
+        }
+        for key in delenda {
+            self.delete(doc, patch_log, map, key)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn update_list(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        list: &crate::ObjId,
+        new_value: &crate::hydrate::List,
+    ) -> Result<(), AutomergeError> {
+        let old_items = doc
+            .list_range(list, ..)
+            .map(|ListRangeItem { value, id, .. }| Some((value.into_owned(), id)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain(std::iter::repeat_with(|| None));
+        let new_values = new_value
+            .iter()
+            .map(Some)
+            .chain(std::iter::repeat_with(|| None));
+
+        let mut to_delete = 0;
+        for (index, (old, new)) in std::iter::zip(old_items, new_values).enumerate() {
+            match (old, new) {
+                (Some((value, id)), Some(new_value)) => {
+                    self.update_value(
+                        doc,
+                        patch_log,
+                        list,
+                        Prop::Seq(index),
+                        &new_value.value,
+                        Some((id, value)),
+                    )?;
+                }
+                (Some(_), None) => {
+                    to_delete += 1;
+                }
+                (None, Some(new_value)) => {
+                    self.update_value(
+                        doc,
+                        patch_log,
+                        list,
+                        Prop::Seq(index),
+                        &new_value.value,
+                        None,
+                    )?;
+                }
+                (None, None) => {
+                    break;
+                }
+            }
+        }
+        for i in (0..to_delete).rev() {
+            self.delete(doc, patch_log, list, Prop::Seq(i))?;
+        }
+        Ok(())
+    }
+
+    fn update_value(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        parent: &crate::ObjId,
+        key: Prop,
+        new_value: &crate::hydrate::Value,
+        old_value: Option<(ExId, crate::Value<'_>)>,
+    ) -> Result<(), AutomergeError> {
+        match (old_value, new_value) {
+            (Some((id, crate::Value::Object(ObjType::Map))), crate::hydrate::Value::Map(new)) => {
+                self.update_map(doc, patch_log, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::List))), crate::hydrate::Value::List(new)) => {
+                self.update_list(doc, patch_log, &id, new)
+            }
+            (Some((id, crate::Value::Object(ObjType::Text))), crate::hydrate::Value::Text(new)) => {
+                crate::text_diff::myers_diff(doc, self, patch_log, &id, new.to_string().as_str())
+            }
+            (old, new) => {
+                // Here we are either changing the type of the existing object, or inserting an
+                // entirely new object
+                let mut make_obj = |typ: ObjType| match (&old, &key) {
+                    (None, Prop::Seq(index)) => {
+                        self.insert_object(doc, patch_log, parent, *index, typ)
+                    }
+                    _ => self.put_object(doc, patch_log, parent, key.clone(), typ),
+                };
+                match new {
+                    crate::hydrate::Value::Map(new) => {
+                        let map_id = make_obj(ObjType::Map)?;
+                        self.update_map(doc, patch_log, &map_id, new)
+                    }
+
+                    crate::hydrate::Value::List(new) => {
+                        let list_id = make_obj(ObjType::List)?;
+                        self.update_list(doc, patch_log, &list_id, new)
+                    }
+
+                    crate::hydrate::Value::Text(new) => {
+                        let text_id = make_obj(ObjType::Text)?;
+                        self.splice_text(doc, patch_log, &text_id, 0, 0, new.to_string().as_str())
+                    }
+
+                    crate::hydrate::Value::Scalar(val) => match (old, &key) {
+                        (None, Prop::Seq(index)) => {
+                            self.insert(doc, patch_log, parent, *index, val.clone())
+                        }
+                        _ => self.put(doc, patch_log, parent, key.clone(), val.clone()),
+                    },
+                }
             }
         }
     }
@@ -846,7 +1169,7 @@ impl<'a> SpliceType<'a> {
 }
 
 struct SpliceArgs<'a> {
-    obj: ObjId,
+    obj: ObjMeta,
     index: usize,
     del: isize,
     values: Vec<ScalarValue>,

@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, iter::Iterator};
 
 use fxhash::FxBuildHasher;
+use itertools::Itertools;
 
 use crate::{
     indexed_cache::IndexedCache,
@@ -30,8 +31,16 @@ where
     I: Iterator<Item = &'a Change> + Clone + 'a,
     O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
+    let actor_ids = changes
+        .clone()
+        .map(|c| c.actor_id().clone())
+        .unique()
+        .collect::<Vec<_>>();
+
     let actor_lookup = actors.encode_index();
-    let doc_ops = ops.map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
+    let doc_ops = ops
+        .clone()
+        .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {
@@ -42,7 +51,7 @@ where
     });
 
     let doc = Document::new(
-        actors.sorted().cache,
+        actor_ids,
         hash_graph.heads_with_indices(heads.to_vec()),
         doc_ops,
         changes,

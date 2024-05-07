@@ -1,7 +1,7 @@
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::MarkSet;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::OpTreeNode;
-use crate::query::{Index, ListState, MarkMap, QueryResult, TreeQuery};
+use crate::query::{Index, ListState, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::Clock;
 use crate::types::{ListEncoding, OpId};
 use std::cmp::Ordering;
@@ -13,14 +13,31 @@ pub(crate) struct OpIdSearch<'a> {
     list_state: ListState,
     clock: Option<&'a Clock>,
     target: SearchTarget<'a>,
-    marks: MarkMap<'a>,
+    marks: RichTextQueryState<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum SearchTarget<'a> {
-    OpId(OpId, Option<Op<'a>>),
+    OpId(
+        // The opid we are looking for
+        OpId,
+        // If we are performing an inset, this is the operation we are inserting
+        Option<Op<'a>>,
+    ),
     Op(Op<'a>),
     Complete(usize),
+}
+
+impl std::fmt::Debug for SearchTarget<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SearchTarget::OpId(id, to_insert) => {
+                write!(f, "OpId({:?}, {:?})", id, to_insert.map(|op| op.id()))
+            }
+            SearchTarget::Op(op) => write!(f, "Op({:?})", op.id()),
+            SearchTarget::Complete(n) => write!(f, "Complete({})", n),
+        }
+    }
 }
 
 impl<'a> OpIdSearch<'a> {
@@ -76,11 +93,7 @@ impl<'a> OpIdSearch<'a> {
     }
 
     pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<MarkSet>> {
-        let mut marks = MarkStateMachine::default();
-        for (id, mark_data) in self.marks.iter() {
-            marks.mark_begin(*id, mark_data, osd);
-        }
-        marks.current().cloned()
+        MarkSet::from_query_state(&self.marks, osd)
     }
 }
 
@@ -107,15 +120,16 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     }
 
     fn query_element(&mut self, op: Op<'a>) -> QueryResult {
-        self.marks.process(op);
         match self.target {
             SearchTarget::OpId(target, None) => {
+                self.marks.process(op, self.clock);
                 if op.id() == &target {
                     self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
             }
             SearchTarget::OpId(target, Some(op2)) => {
+                self.marks.process(op, self.clock);
                 if op.id() == &target {
                     if op2.insert() {
                         self.target = SearchTarget::Op(op2);
@@ -130,6 +144,7 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
                     self.target = SearchTarget::Complete(self.list_state.pos());
                     return QueryResult::Finish;
                 }
+                self.marks.process(op, self.clock);
             }
             SearchTarget::Complete(_) => return QueryResult::Finish, // this should never happen
         }

@@ -1,11 +1,12 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
 use crate::types::Clock;
-use crate::AutomergeError;
+use crate::{hydrate, AutomergeError};
 use crate::{
     Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, TextRange, Value,
 };
@@ -215,6 +216,19 @@ impl<'a> ReadDoc for Transaction<'a> {
             .text_range_for(obj.as_ref(), range, self.get_scope(at))
     }
 
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -246,6 +260,14 @@ impl<'a> ReadDoc for Transaction<'a> {
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
     }
 
     fn get_marks<O: AsRef<ExId>>(
@@ -429,6 +451,27 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
+    fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+    }
+
+    fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
+    }
+
+    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.replace_block(doc, hist, text.as_ref(), index))
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner
             .as_ref()
@@ -442,6 +485,24 @@ impl<'a> Transactable for Transaction<'a> {
         new_text: S,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
+    }
+
+    fn update_spans<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(move |tx, doc, hist| {
+            crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text)
+        })
+    }
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        self.do_tx(move |tx, doc, hist| tx.update_object(doc, hist, obj.as_ref(), new_value))
     }
 }
 

@@ -111,7 +111,7 @@ impl<'a> Ord for Op<'a> {
 }
 
 impl<'a> Op<'a> {
-    pub(crate) fn actor(&self) -> &ActorId {
+    pub(crate) fn actor(&self) -> &'a ActorId {
         &self.osd.actors[self.op().id.actor()]
     }
 
@@ -315,7 +315,7 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn succ(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.succ_idx().map(|idx| idx.as_opdep(self.osd).succ())
     }
 
@@ -328,8 +328,31 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn pred(&self) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator {
+    pub(crate) fn pred(&self) -> impl ExactSizeIterator<Item = Op<'a>> {
         self.pred_idx().map(|idx| idx.as_opdep(self.osd).pred())
+    }
+
+    pub(crate) fn block_id(&self) -> Option<OpId> {
+        if self.action().is_block() {
+            if self.insert() {
+                return Some(*self.id());
+            } else if let Key::Seq(ElemId(id)) = self.key() {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn visible_block(&self) -> Option<OpId> {
+        if self.visible() {
+            self.block_id()
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_put(&self) -> bool {
+        matches!(&self.action(), OpType::Put(_))
     }
 }
 

@@ -5,9 +5,15 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
-export type Value = string | number | boolean | null | Date | Uint8Array
+export type ScalarValue = string | number | boolean | null | Date | Uint8Array 
+export type Value = ScalarValue | object
 export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
-export type ObjType = string | Array<ObjType | Value> | { [key: string]: ObjType | Value }
+export type MapObjType = { [key: string]: ObjType | Value }
+export type ObjInfo = { id: ObjID, type: ObjTypeName, path?: Prop[] };
+export type Span = { type: "text", value: string, "marks"?: MarkSet } 
+  | { type: "block", value: {[key: string]: MaterializeValue} }
+export type ListObjType = Array<ObjType | Value>
+export type ObjType = string | ListObjType | MapObjType
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -108,7 +114,7 @@ export type PutPatch = {
 }
 
 export interface MarkSet  {
-  [name : string]: Value;
+  [name : string]: ScalarValue;
 }
 
 export interface Attribution<T>  {
@@ -186,7 +192,7 @@ export type ConflictPatch = {
 
 export type Mark = {
   name: string,
-  value: Value,
+  value: ScalarValue,
   start: number,
   end: number,
 }
@@ -229,12 +235,19 @@ export class Automerge {
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
   updateText(obj: ObjID, newText: string): void;
+  updateSpans(obj: ObjID, newSpans: Span[]): void;
 
   // marks
   mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
   unmark(obj: ObjID, range: MarkRange, name: string): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
   marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
+
+  // blocks
+  splitBlock(obj: ObjID, index: number, block: {[key: string]: MaterializeValue}): void;
+  joinBlock(obj: ObjID, index: number) : void;
+  updateBlock(obj: ObjID, index: number, block: {[key: string]: MaterializeValue}): void;
+  getBlock(obj: ObjID, index: number): {[key: string]: MaterializeValue} | null;
 
   diff(before: Heads, after: Heads): Patch[];
   diffWithAttribution<T>(before: Heads, after: Heads, attr: Attribution<T>): PatchWithAttr<T>[]
@@ -252,9 +265,14 @@ export class Automerge {
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
+  objInfo(obj: ObjID, heads?: Heads): ObjInfo;
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
+<<<<<<< HEAD
   textRange(obj: ObjID, range: string, heads?: Heads): string;
+=======
+  spans(obj: ObjID, heads?: Heads): Span[];
+>>>>>>> main
   length(obj: ObjID, heads?: Heads): number;
   materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
   toJS(): MaterializeValue;
@@ -269,7 +287,11 @@ export class Automerge {
 
   // patches
   enableFreeze(enable: boolean): boolean;
+<<<<<<< HEAD
   registerDatatype<T>(datatype: string, callback: (obj: T) => object): void;
+=======
+  registerDatatype(datatype: string, construct: Function, deconstruct: (arg: any) => any | undefined): void;
+>>>>>>> main
   diffIncremental(): Patch[];
   updateDiffCursor(): void;
   resetDiffCursor(): void;

@@ -18,7 +18,7 @@ use std::{fmt::Debug, mem};
 mod iter;
 mod node;
 
-pub(crate) use iter::OpTreeIter;
+pub(crate) use iter::{OpTreeIter, OpTreeOpIter};
 #[allow(unused)]
 pub(crate) use node::OpTreeNode;
 pub use node::B;
@@ -42,6 +42,7 @@ pub(crate) struct LastInsert {
     pub(crate) index: usize,
     pub(crate) width: usize,
     pub(crate) key: Key,
+    pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
 impl OpTree {
@@ -112,7 +113,11 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 if let OpType::MarkEnd(_) = op.action() {
                     let q = doc.ops().search(
                         &obj.id,
-                        query::SeekMark::new(op.id().prev(), self.pos, obj.encoding),
+                        query::SeekMark::new(
+                            op.id().prev(),
+                            self.pos,
+                            patch_log.text_rep().encoding(obj.typ),
+                        ),
                     );
                     for mark in q.finish() {
                         let index = mark.start;
@@ -121,17 +126,11 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         patch_log.mark(obj.id, index, len, &marks);
                     }
                 }
-            } else if obj.typ == ObjType::Text {
+            // TODO - move this into patch_log()
+            } else if obj.typ == ObjType::Text && !op.action().is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
-                    false,
-                    self.marks.clone(),
-                );
+                patch_log.insert(obj.id, self.index, op.value().into(), *op.id(), false);
             }
             return;
         }
@@ -149,7 +148,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         obj.id,
                         *op.id(),
                         index,
-                        over.width(obj.encoding),
+                        over.width(patch_log.text_rep().encoding(obj.typ)),
                         op.as_str().into(),
                         obj.typ == ObjType::Text, // FIXME - what about encoding?
                     ),
@@ -182,14 +181,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(
-                    obj.id,
-                    self.index,
-                    op.value().into(),
-                    *op.id(),
-                    conflict,
-                    None,
-                );
+                patch_log.insert(obj.id, self.index, op.value().into(), *op.id(), conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
@@ -591,9 +583,9 @@ impl OpTreeInternal {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>) {
+    pub(crate) fn update(&mut self, index: usize, vis: ChangeVisibility<'_>, osd: &OpSetData) {
         if self.len() > index {
-            self.root_node.as_mut().unwrap().update(index, vis);
+            self.root_node.as_mut().unwrap().update(index, vis, osd);
         }
     }
 

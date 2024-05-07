@@ -8,6 +8,7 @@ export {
   Float64,
   Heads,
   type Patch,
+  type MapObjType,
   type PatchCallback,
   type Mark,
   type MarkSet,

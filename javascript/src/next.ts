@@ -74,9 +74,13 @@ export type {
   SpliceTextPatch,
   InsertPatch,
   IncPatch,
+  MarkPatch,
   SyncMessage,
   Cursor,
+  Span,
 } from "@automerge/automerge-wasm"
+
+import { type Span, MaterializeValue } from "@automerge/automerge-wasm"
 
 export type {
   ActorId,
@@ -352,6 +356,148 @@ export function updateText(
     return state.handle.updateText(objPath, newText)
   } catch (e) {
     throw new RangeError(`Cannot updateText: ${e}`)
+  }
+}
+
+/**
+ * Return the text + block markers at a given path
+ *
+ * @remarks
+ * Rich text in automerge is represented as a sequence of characters with block
+ * markers appearing inline with the text, and inline formatting spans overlaid
+ * on the whole sequence. Block markers are normal automerge maps, but they are
+ * only visible via either the {@link block} function or the {@link spans}
+ * function. This function returns the current state of the spans
+ */
+export function spans<T>(doc: Doc<T>, path: stable.Prop[]): Span[] {
+  const state = _state(doc, false)
+  const objPath = absoluteObjPath(doc, path, "spans")
+
+  try {
+    return state.handle.spans(objPath, state.heads)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+/**
+ * Get the block marker at the given index
+ */
+export function block<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+) {
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
+  const state = _state(doc, false)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    return state.handle.getBlock(objPath, index)
+  } catch (e) {
+    throw new RangeError(`Cannot get block: ${e}`)
+  }
+}
+
+/**
+ * Insert a new block marker at the given index
+ */
+export function splitBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: { [key: string]: MaterializeValue },
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "splitBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.splitBlock(objPath, index, block)
+  } catch (e) {
+    throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+/**
+ * Delete the block marker at the given index
+ */
+export function joinBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "joinBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.joinBlock(objPath, index)
+  } catch (e) {
+    throw new RangeError(`Cannot joinBlock: ${e}`)
+  }
+}
+
+/**
+ * Update the block marker at the given index
+ */
+export function updateBlock<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  index: number | Cursor,
+  block: { [key: string]: MaterializeValue },
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateBlock")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  index = cursorToIndex(state, objPath, index)
+
+  try {
+    state.handle.updateBlock(objPath, index, block)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
+  }
+}
+
+/**
+ * Update the spans at the given path
+ *
+ * @remarks
+ * Like {@link updateText} this will diff `newSpans` against the current state
+ * of the text at `path` and perform a reasonably minimal number of operations
+ * required to update the spans to the new state.
+ */
+export function updateSpans<T>(
+  doc: Doc<T>,
+  path: stable.Prop[],
+  newSpans: Span[],
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const objPath = absoluteObjPath(doc, path, "updateSpans")
+  const state = _state(doc, false)
+  _clear_cache(doc)
+
+  try {
+    state.handle.updateSpans(objPath, newSpans)
+  } catch (e) {
+    throw new RangeError(`Cannot updateBlock: ${e}`)
   }
 }
 

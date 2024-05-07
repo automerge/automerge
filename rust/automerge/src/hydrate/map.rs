@@ -12,11 +12,15 @@ pub struct Map(HashMap<String, MapValue>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MapValue {
-    value: Value,
-    conflict: bool,
+    pub value: Value,
+    pub conflict: bool,
 }
 
 impl Map {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &MapValue)> {
+        self.0.iter()
+    }
+
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::DeleteMap { key } => {
@@ -46,7 +50,7 @@ impl Map {
         }
     }
 
-    pub fn get(&mut self, key: &str) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key).map(|mv| &mv.value)
     }
 
@@ -95,6 +99,23 @@ impl From<HashMap<&str, Value>> for Map {
             .map(|(k, value)| {
                 (
                     k.to_string(),
+                    MapValue {
+                        value,
+                        conflict: false,
+                    },
+                )
+            })
+            .collect())
+    }
+}
+
+impl From<HashMap<String, Value>> for Map {
+    fn from(value: HashMap<String, Value>) -> Self {
+        Map(value
+            .into_iter()
+            .map(|(k, value)| {
+                (
+                    k,
                     MapValue {
                         value,
                         conflict: false,

@@ -2,7 +2,7 @@ use crate::error::AutomergeError;
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set::Op;
 use crate::op_tree::{OpTree, OpTreeNode};
-use crate::query::{Index, ListState, MarkMap, OpSetData, QueryResult, TreeQuery};
+use crate::query::{Index, ListState, OpSetData, QueryResult, RichTextQueryState, TreeQuery};
 use crate::types::{Clock, Key, ListEncoding};
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub(crate) struct Nth<'a> {
     list_state: ListState,
     clock: Option<Clock>,
-    marks: Option<MarkMap<'a>>,
+    marks: Option<RichTextQueryState<'a>>,
     // TODO: put osd in all queries - take out of API
     osd: &'a OpSetData,
     pub(crate) ops: Vec<Op<'a>>,
@@ -112,9 +112,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             QueryResult::Finish
         } else {
             if let Some(m) = self.marks.as_mut() {
-                if op.visible_or_mark(self.clock.as_ref()) {
-                    m.process(op)
-                }
+                m.process(op, self.clock.as_ref())
             }
             let visible = op.visible_at(self.clock.as_ref());
             let key = op.elemid_or_key();

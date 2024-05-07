@@ -5,6 +5,7 @@ use std::ops::RangeBounds;
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
+use crate::iter::Spans;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -609,10 +610,6 @@ impl AutoCommit {
         self.doc.hash_for_opid(opid)
     }
 
-    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
-        self.doc.hydrate(heads)
-    }
-
     fn get_scope(&self, heads: Option<&[ChangeHash]>) -> Option<Clock> {
         // heads arg takes priority
         if let Some(h) = heads {
@@ -765,6 +762,19 @@ impl ReadDoc for AutoCommit {
             .text_range_for(obj.as_ref(), range, self.get_scope(at))
     }
 
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -783,6 +793,14 @@ impl ReadDoc for AutoCommit {
     ) -> Result<usize, AutomergeError> {
         self.doc
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -964,6 +982,30 @@ impl Transactable for AutoCommit {
         )
     }
 
+    fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.split_block(&mut self.doc, patch_log, obj.as_ref(), index)
+    }
+
+    fn join_block<O: AsRef<ExId>>(&mut self, text: O, index: usize) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.join_block(&mut self.doc, patch_log, text.as_ref(), index)
+    }
+
+    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.replace_block(&mut self.doc, patch_log, text.as_ref(), index)
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         if let Some(i) = &self.isolation {
             i.clone()
@@ -980,6 +1022,26 @@ impl Transactable for AutoCommit {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
         crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
+    }
+
+    fn update_spans<'a, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'a>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        crate::text_diff::myers_block_diff(&mut self.doc, tx, patch_log, text.as_ref(), new_text)
+    }
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.update_object(&mut self.doc, patch_log, obj.as_ref(), new_value)
     }
 }
 

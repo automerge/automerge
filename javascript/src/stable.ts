@@ -201,14 +201,8 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const actor = opts.actor
   const handle = ApiHandler.create({ actor, text_v1 })
   handle.enableFreeze(!!opts.freeze)
-  handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
-  if (textV2) {
-    handle.registerDatatype("str", (n: string) => new RawString(n))
-  } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    handle.registerDatatype("text", (n: any) => new Text(n))
-  }
+  registerDatatypes(handle, textV2)
   const doc = handle.materialize("/", undefined, {
     handle,
     heads: undefined,
@@ -639,13 +633,8 @@ export function load<T>(
     convertRawStringsToText,
   })
   handle.enableFreeze(!!opts.freeze)
-  handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
-  if (textV2) {
-    handle.registerDatatype("str", (n: string) => new RawString(n))
-  } else {
-    handle.registerDatatype("text", (n: string) => new Text(n))
-  }
+  registerDatatypes(handle, textV2)
   const doc = handle.materialize("/", undefined, {
     handle,
     heads: undefined,
@@ -735,7 +724,7 @@ export function save<T>(doc: Doc<T>): Uint8Array {
 }
 
 /**
- * Merge `local` into `remote`
+ * Merge `remote` into `local`
  * @typeParam T - The type of values contained in each document
  * @param local - The document to merge changes into
  * @param remote - The document to merge changes from
@@ -1224,4 +1213,39 @@ export type {
   DecodedSyncMessage,
   Heads,
   MaterializeValue,
+}
+
+function registerDatatypes(handle: Automerge, textV2: boolean) {
+  handle.registerDatatype(
+    "counter",
+    (n: number) => new Counter(n),
+    n => {
+      if (n instanceof Counter) {
+        return n.value
+      }
+    },
+  )
+  if (textV2) {
+    handle.registerDatatype(
+      "str",
+      (n: string) => {
+        return new RawString(n)
+      },
+      s => {
+        if (s instanceof RawString) {
+          return s.val
+        }
+      },
+    )
+  } else {
+    handle.registerDatatype(
+      "text",
+      (n: string) => new Text(n),
+      t => {
+        if (t instanceof Text) {
+          return t.join("")
+        }
+      },
+    )
+  }
 }

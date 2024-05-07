@@ -6,6 +6,8 @@ pub use patch::{NoAttribution, Patch, PatchAction, PatchWithAttribution};
 pub(crate) use patch_builder::PatchBuilder;
 pub use patch_log::PatchLog;
 
+use crate::{types::ListEncoding, ObjType};
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {
     Array,
@@ -13,6 +15,13 @@ pub enum TextRepresentation {
 }
 
 impl TextRepresentation {
+    pub(crate) fn encoding(&self, typ: ObjType) -> ListEncoding {
+        match (self, typ) {
+            (&Self::String, ObjType::Text) => ListEncoding::Text,
+            _ => ListEncoding::List,
+        }
+    }
+
     pub fn is_array(&self) -> bool {
         matches!(self, TextRepresentation::Array)
     }
@@ -24,6 +33,6 @@ impl TextRepresentation {
 
 impl std::default::Default for TextRepresentation {
     fn default() -> Self {
-        TextRepresentation::Array // FIXME
+        TextRepresentation::String
     }
 }

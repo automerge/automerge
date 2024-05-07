@@ -6,17 +6,35 @@ use crate::{PatchAction, ScalarValue, SequenceTree};
 
 use super::{HydrateError, Value};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct List(SequenceTree<ListValue>);
+
+impl std::fmt::Debug for List {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.iter()).finish()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListValue {
-    value: Value,
-    marks: HashMap<String, ScalarValue>,
-    conflict: bool,
+    pub value: Value,
+    pub marks: HashMap<String, ScalarValue>,
+    pub conflict: bool,
 }
 
 impl List {
+    pub fn iter(&self) -> impl Iterator<Item = &ListValue> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {
@@ -97,7 +115,7 @@ impl ListValue {
     }
 }
 
-impl From<Vec<Value>> for Value {
+impl From<Vec<Value>> for List {
     fn from(values: Vec<Value>) -> Self {
         let mut s = SequenceTree::new();
         for value in values {
@@ -107,6 +125,12 @@ impl From<Vec<Value>> for Value {
                 marks: Default::default(),
             })
         }
-        Value::List(List(s))
+        List(s)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(values: Vec<Value>) -> Self {
+        Value::List(List::from(values))
     }
 }

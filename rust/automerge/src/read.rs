@@ -1,13 +1,15 @@
 use crate::{
     error::AutomergeError,
     exid::ExId,
+    hydrate,
+    iter::Spans,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet},
     parents::Parents,
     Change, ChangeHash, Cursor, ObjType, Prop, TextRange, Value,
 };
 
-use std::ops::RangeBounds;
+use std::{collections::HashMap, ops::RangeBounds};
 
 /// Methods for reading values from an automerge document
 ///
@@ -168,6 +170,16 @@ pub trait ReadDoc {
         at: Option<&[ChangeHash]>,
     ) -> Result<String, AutomergeError>;
 
+    /// Return the sequence of text and block markers in the text object `obj`
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError>;
+
+    /// Return the sequence of text and block markers in the text object `obj` as at `heads`
+    fn spans_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError>;
+
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
     /// Example use cases:
@@ -223,6 +235,12 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError>;
+
     /// Get all conflicting values out of the document at this prop that conflict.
     ///
     /// If there are multiple conflicting values for a given key this method
@@ -250,4 +268,9 @@ pub trait ReadDoc {
 
     /// Get a change by its hash.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+}
+
+pub(crate) trait ReadDocInternal: ReadDoc {
+    /// Produce a map from object ID to path for all visible objects in this doc
+    fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>>;
 }

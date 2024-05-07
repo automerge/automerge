@@ -578,7 +578,7 @@ impl ChunkList {
         self.0.len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> + ExactSizeIterator {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &[u8]> {
         self.0.iter().map(|v| v.as_slice())
     }
 }
@@ -1274,8 +1274,6 @@ mod tests {
             .sync()
             .generate_sync_message(&mut s1)
             .expect("message was none");
-
-        println!("{:?}", outgoing);
 
         doc2.sync().receive_sync_message(&mut s2, outgoing).unwrap();
 

@@ -3,12 +3,14 @@ use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
+use crate::marks::MarkSet;
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
     self, FoundOpId, FoundOpWithPatchLog, FoundOpWithoutPatchLog, LastInsert, OpTree,
     OpTreeInternal, OpsFound,
 };
 use crate::parents::Parents;
+use crate::patches::TextRepresentation;
 use crate::query::{ChangeVisibility, TreeQuery};
 use crate::text_value::TextValue;
 use crate::types::{
@@ -20,6 +22,7 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 mod op;
 
@@ -98,23 +101,19 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn iter_obj(&self, obj: &ObjId) -> Option<OpTreeIter<'_>> {
+        self.trees.get(obj).map(|t| t.iter())
+    }
+
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpIter<'_>)> + '_ {
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpTreeIter<'_>)> + '_ {
+        // TODO
         let mut objs: Vec<_> = self
             .trees
             .iter()
-            .map(|t| {
-                (
-                    t.0,
-                    t.1.objtype,
-                    OpIter {
-                        iter: t.1.iter(),
-                        osd: &self.osd,
-                    },
-                )
-            })
+            .map(|t| (ObjMeta::new(*t.0, t.1.objtype), t.1))
             .collect();
-        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).0, (b.0).0));
+        objs.sort_by(|a, b| self.osd.lamport_cmp((a.0).id, (b.0).id));
         IterObjs {
             trees: objs.into_iter(),
         }
@@ -129,54 +128,78 @@ impl OpSetInternal {
             .map(|idx| idx.as_op(&self.osd))
     }
 
-    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+    pub(crate) fn parents(
+        &self,
+        obj: ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<Clock>,
+    ) -> Parents<'_> {
         Parents {
             obj,
             ops: self,
+            text_rep,
             clock,
         }
     }
 
-    pub(crate) fn seek_idx(&self, idx: OpIdx, clock: Option<&Clock>) -> Option<FoundOpId<'_>> {
+    pub(crate) fn seek_idx(
+        &self,
+        idx: OpIdx,
+        text_rep: TextRepresentation,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
         let obj = idx.as_op(&self.osd).obj();
-        let (_typ, encoding) = self.type_and_encoding(obj)?;
-        self.trees
-            .get(obj)
-            .and_then(|tree| tree.internal.seek_idx(idx, encoding, clock, &self.osd))
+        let typ = self.obj_type(obj)?;
+        self.trees.get(obj).and_then(|tree| {
+            tree.internal
+                .seek_idx(idx, text_rep.encoding(typ), clock, &self.osd)
+        })
     }
 
     pub(crate) fn seek_list_opid(
         &self,
         obj: &ObjId,
         id: OpId,
+        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        let (_typ, encoding) = self.type_and_encoding(obj)?;
         self.trees
             .get(obj)
             .and_then(|tree| tree.internal.seek_list_opid(id, encoding, clock, &self.osd))
     }
 
-    pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
+    pub(crate) fn parent_object(
+        &self,
+        obj: &ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<&Clock>,
+    ) -> Option<Parent> {
         let idx = self.trees.get(obj)?.parent?;
-        let found = self.seek_idx(idx, clock)?;
+        let found = self.seek_idx(idx, text_rep, clock)?;
         let obj = *found.op.obj();
+        let typ = self.obj_type(&obj)?;
         let prop = found.op.map_prop().unwrap_or(Prop::Seq(found.index));
         let visible = found.visible;
-        Some(Parent { obj, prop, visible })
+        Some(Parent {
+            obj,
+            prop,
+            visible,
+            typ,
+        })
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
         &'a self,
-        obj: &ObjMeta,
+        obj: &ObjId,
         prop: Prop,
+        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         self.trees
-            .get(&obj.id)
+            .get(&obj)
             .and_then(|tree| {
                 tree.internal
-                    .seek_ops_by_prop(&self.osd, prop, obj.encoding, clock)
+                    .seek_ops_by_prop(&self.osd, prop, encoding, clock)
             })
             .unwrap_or_default()
     }
@@ -197,12 +220,13 @@ impl OpSetInternal {
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
         obj: &ObjMeta,
+        encoding: ListEncoding,
         op: Op<'a>,
         pred: &OpIds,
     ) -> FoundOpWithPatchLog<'a> {
         if let Some(tree) = self.trees.get(&obj.id) {
             tree.internal
-                .find_op_with_patch_log(op, pred, obj.encoding, &self.osd)
+                .find_op_with_patch_log(op, pred, encoding, &self.osd)
         } else {
             Default::default()
         }
@@ -253,6 +277,7 @@ impl OpSetInternal {
                             new_vis,
                             op: idx.as_op(&self.osd),
                         },
+                        &self.osd,
                     );
                 }
             }
@@ -274,6 +299,7 @@ impl OpSetInternal {
                         new_vis,
                         op: idx.as_op(&self.osd),
                     },
+                    &self.osd,
                 );
             }
         }
@@ -295,13 +321,22 @@ impl OpSetInternal {
         self.length
     }
 
-    pub(crate) fn hint(&mut self, obj: &ObjId, index: usize, pos: usize, width: usize, key: Key) {
+    pub(crate) fn hint(
+        &mut self,
+        obj: &ObjId,
+        index: usize,
+        pos: usize,
+        width: usize,
+        key: Key,
+        marks: Option<Arc<MarkSet>>,
+    ) {
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = Some(LastInsert {
                 index,
                 pos,
                 width,
                 key,
+                marks,
             })
         }
     }
@@ -382,10 +417,9 @@ impl OpSetInternal {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
-    pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
+    pub(crate) fn obj_type(&self, id: &ObjId) -> Option<ObjType> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
-        let encoding = objtype.into();
-        Some((objtype, encoding))
+        Some(objtype)
     }
 
     /// Return a graphviz representation of the opset.
@@ -446,14 +480,10 @@ impl OpSetInternal {
         &self,
         obj: &ObjId,
         range: R,
+        encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange::new(
-            self.top_ops(obj, clock.clone()),
-            ListEncoding::List,
-            range,
-            clock,
-        )
+        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
     }
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
@@ -490,15 +520,14 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 }
 
 pub(crate) struct IterObjs<'a> {
-    trees: std::vec::IntoIter<(&'a ObjId, ObjType, OpIter<'a>)>,
+    trees: std::vec::IntoIter<(ObjMeta, &'a op_tree::OpTree)>,
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, OpIter<'a>);
+    type Item = (ObjMeta, OpTreeIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.trees.next()
-        //            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+        self.trees.next().map(|(id, tree)| (id, tree.iter()))
     }
 }
 
@@ -824,6 +853,7 @@ impl OpSetData {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Parent {
     pub(crate) obj: ObjId,
+    pub(crate) typ: ObjType,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
 }
@@ -833,7 +863,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ObjId, ObjMeta, OpBuilder, OpId, OpIds, ROOT},
+        types::{Key, ListEncoding, ObjId, ObjMeta, OpBuilder, OpId, OpIds, ROOT},
         ActorId, ScalarValue,
     };
 
@@ -928,7 +958,7 @@ pub(crate) mod tests {
         let new_op = set.load(ROOT.into(), new_op).as_op(&set.osd);
 
         let q1 = set.find_op_without_patch_log(&ObjId::root(), new_op, &pred);
-        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), new_op, &pred);
+        let q2 = set.find_op_with_patch_log(&ObjMeta::root(), ListEncoding::List, new_op, &pred);
 
         // we've inserted `B - 1` elements for "a", so the index should be `B`
         assert_eq!(q1.pos, B);

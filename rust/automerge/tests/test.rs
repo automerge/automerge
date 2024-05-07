@@ -1,7 +1,7 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
-use automerge::transaction::Transactable;
+use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
     PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
@@ -903,7 +903,7 @@ fn save_restore_complex_transactional() {
 
 #[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
@@ -1077,7 +1077,7 @@ fn increment_non_counter_list() {
 
 #[test]
 fn test_local_inc_in_map() {
-    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    let mut v = [ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
@@ -1626,7 +1626,6 @@ fn regression_insert_opid() {
             PatchAction::Insert {
                 index: i,
                 values: seq_tree,
-                marks: None,
             },
         ));
         expected_patches.push(Patch::new(
@@ -1935,3 +1934,233 @@ fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError
     Ok(())
 }
 */
+
+#[test]
+fn rollback_with_no_ops() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut doc2 = doc.fork();
+
+    let tx = doc2.transaction();
+    tx.commit();
+
+    let mut doc3 = doc.fork();
+    doc3.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "b", 2)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    doc2.merge(&mut doc3).unwrap();
+
+    let tx = doc2.transaction();
+    tx.rollback();
+}
+
+#[test]
+fn save_with_ops_which_reference_actors_only_via_delete() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut forked = doc.fork();
+    forked
+        .transact::<_, _, AutomergeError>(|tx| {
+            tx.delete(ROOT, "a")?;
+            Ok::<_, AutomergeError>(())
+        })
+        .unwrap();
+
+    doc.merge(&mut forked).unwrap();
+
+    // `doc` now contains a delete op which uses the actor of the fork. Delete
+    // ops don't exist explicitly in the document ops, they are referenced in
+    // the "successors" of the encoded ops. This means that when we're encoding
+    // actor IDs into the document we need to check that any actor IDs which
+    // are referenced in the `successors` of an op are encoded as well.
+
+    let saved = doc.save();
+    // This will panic if we failed to encode the referenced actor ID
+    let _ = Automerge::load(&saved).unwrap();
+}
+
+#[test]
+fn save_with_empty_commits() {
+    let mut doc = Automerge::new();
+
+    doc.transact::<_, _, AutomergeError>(|tx| {
+        tx.put(ROOT, "a", 1)?;
+        Ok::<_, AutomergeError>(())
+    })
+    .unwrap();
+
+    let mut forked = doc.fork();
+    forked.empty_commit(CommitOptions::default());
+
+    doc.merge(&mut forked).unwrap();
+
+    let saved = doc.save();
+    // This will panic if we failed to encode the referenced actor ID
+    let _ = Automerge::load(&saved).unwrap();
+}
+
+#[test]
+fn large_patches_in_lists_are_correct() {
+    // Reproduces a bug caused by an incorrect use of ListEncoding in Automerge::live_obj_paths.
+    // This is a function which precalculates the path of every visible object in the document.
+    // The problem was that when calculating the index into a sequence it was using
+    // ListEncoding::List to determine the index, which meant that when a string was inserted into
+    // a list then the index of elements following the list was based on the number of elements in
+    // the string, when it should just increase the index by one for the whole string.
+    //
+    // This bug was a little tricky to track down because it was only triggered by an optimization
+    // which kicks in when there are > 100 patches to render.
+
+    let mut doc = Automerge::new();
+    let heads_before = doc.get_heads();
+    let list = doc
+        .transact::<_, _, AutomergeError>(|tx| {
+            let list = tx.put_object(ROOT, "list", ObjType::List)?;
+            // This should just count as one
+            tx.insert(&list, 0, "123456")?;
+            for i in 1..501 {
+                let inner = tx.insert_object(&list, i, ObjType::Map)?;
+                tx.put(&inner, "a", i as i64)?;
+            }
+            Ok(list)
+        })
+        .unwrap()
+        .result;
+    let heads_after = doc.get_heads();
+    let patches = doc.diff(&heads_before, &heads_after, TextRepresentation::String);
+    let final_patch = patches.last().unwrap();
+    assert_eq!(
+        final_patch.path,
+        vec![
+            (ROOT, Prop::Map("list".into())),
+            (list, Prop::Seq(500)) // In the buggy code this was incorrectly coming out as 505 due to
+                                   // the counting of "123456" as 6 elements rather than 1
+        ]
+    );
+    let PatchAction::PutMap { .. } = &final_patch.action else {
+        panic!("Expected PutMap, got {:?}", final_patch.action);
+    };
+}
+
+#[test]
+fn diff_should_reverse_deletion_of_object_in_list_correctly() {
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.insert(&list, 0, "a").unwrap();
+    let text = doc
+        .insert_object(&list, 1, automerge::ObjType::Text)
+        .unwrap();
+    doc.splice_text(&text, 0, 0, "b").unwrap();
+    doc.insert(&list, 2, "c").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&list, 1).unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::Insert { index, values } = &patch.action else {
+        panic!("Expected Insert, got {:?}", patch.action);
+    };
+    assert_eq!(*index, 1);
+    assert_eq!(values.len(), 1);
+    let (value, _, _) = values.into_iter().next().unwrap();
+    assert_eq!(value, &Value::Object(ObjType::Text));
+
+    let patch = patches[1].clone();
+    let PatchAction::SpliceText { index, value, .. } = patch.action else {
+        panic!("Expected SpliceText, got {:?}", patch.action);
+    };
+    assert_eq!(index, 0);
+    assert_eq!(value.make_string(), "b");
+}
+
+#[test]
+fn diff_should_reverse_deletion_of_object_in_map_correctly() {
+    let mut doc = AutoCommit::new();
+
+    let map = doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.put_object(&map, "text", ObjType::Text).unwrap();
+
+    doc.put(&map, "a", "a").unwrap();
+    let text = doc.put_object(&map, "b", automerge::ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "b").unwrap();
+    doc.put(&map, "c", "c").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&map, "b").unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::PutMap { key, value, .. } = &patch.action else {
+        panic!("Expected putmap, got {:?}", patch.action);
+    };
+    assert_eq!(key, "b");
+    assert_eq!(value.0, Value::Object(ObjType::Text));
+
+    let patch = patches[1].clone();
+    let PatchAction::SpliceText { index, value, .. } = patch.action else {
+        panic!("Expected SpliceText, got {:?}", patch.action);
+    };
+    assert_eq!(index, 0);
+    assert_eq!(value.make_string(), "b");
+}
+
+#[test]
+fn diff_should_reverse_deletion_of_block_in_text_correctly() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "a").unwrap();
+    let block = doc.split_block(&text, 1).unwrap();
+    doc.splice_text(&text, 2, 0, "b").unwrap();
+    doc.put(&block, "key", "value").unwrap();
+
+    let heads_before = doc.get_heads();
+    doc.delete(&text, 1).unwrap();
+    let heads_after = doc.get_heads();
+
+    doc.update_diff_cursor();
+    let patches = doc.diff(&heads_after, &heads_before);
+
+    assert_eq!(patches.len(), 2);
+    let patch = patches[0].clone();
+    let PatchAction::Insert { index, values } = &patch.action else {
+        panic!("Expected Insert, got {:?}", patch.action);
+    };
+    assert_eq!(*index, 1);
+    assert_eq!(values.len(), 1);
+    let (value, _, _) = values.into_iter().next().unwrap();
+    assert_eq!(value, &Value::Object(ObjType::Map));
+
+    let patch = patches[1].clone();
+    let PatchAction::PutMap { key, value, .. } = patch.action else {
+        panic!("Expected PutMap, got {:?}", patch.action);
+    };
+    assert_eq!(key, "key");
+    let Value::Scalar(s) = value.0 else {
+        panic!("Expected Scalar, got {:?}", value.0);
+    };
+    assert_eq!(s.as_ref(), &ScalarValue::Str("value".into()));
+}

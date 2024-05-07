@@ -286,6 +286,10 @@ impl OpType {
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
+
+    pub(crate) fn is_block(&self) -> bool {
+        &OpType::Make(ObjType::Map) == self
+    }
 }
 
 impl From<ObjType> for OpType {
@@ -574,15 +578,17 @@ impl ObjId {
 pub(crate) struct ObjMeta {
     pub(crate) id: ObjId,
     pub(crate) typ: ObjType,
-    pub(crate) encoding: ListEncoding,
 }
 
 impl ObjMeta {
+    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
+        ObjMeta { id, typ }
+    }
+
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
             typ: ObjType::Map,
-            encoding: ListEncoding::List,
         }
     }
 }
@@ -602,16 +608,6 @@ impl Default for ListEncoding {
 impl From<Option<ObjType>> for ListEncoding {
     fn from(obj: Option<ObjType>) -> Self {
         if obj == Some(ObjType::Text) {
-            ListEncoding::Text
-        } else {
-            ListEncoding::List
-        }
-    }
-}
-
-impl From<ObjType> for ListEncoding {
-    fn from(obj: ObjType) -> Self {
-        if obj == ObjType::Text {
             ListEncoding::Text
         } else {
             ListEncoding::List

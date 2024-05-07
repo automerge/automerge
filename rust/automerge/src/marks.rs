@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::op_tree::OpSetData;
+use crate::query::RichTextQueryState;
 use crate::types::{OpId, OpType};
 use crate::value::ScalarValue;
 use std::borrow::Cow;
@@ -35,14 +36,14 @@ impl<'a> Mark<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 struct MarkAccItem {
     index: usize,
     len: usize,
     value: ScalarValue,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkAccumulator {
     marks: BTreeMap<SmolStr, Vec<MarkAccItem>>,
 }
@@ -97,6 +98,10 @@ impl MarkSet {
             .map(|(name, value)| (name.as_str(), value))
     }
 
+    pub fn num_marks(&self) -> usize {
+        self.marks.len()
+    }
+
     fn inner(&self) -> &BTreeMap<SmolStr, ScalarValue> {
         &self.marks
     }
@@ -136,6 +141,28 @@ impl MarkSet {
             }
         }
         MarkSet { marks: diff }
+    }
+
+    pub(crate) fn from_query_state(
+        q: &RichTextQueryState<'_>,
+        osd: &OpSetData,
+    ) -> Option<Arc<Self>> {
+        let mut marks = MarkStateMachine::default();
+        for (id, mark_data) in q.iter() {
+            marks.mark_begin(*id, mark_data, osd);
+        }
+        marks.current().cloned()
+    }
+}
+
+// FromIterator implementation for an iterator of (String, ScalarValue) tuples
+impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
+    fn from_iter<I: IntoIterator<Item = (String, ScalarValue)>>(iter: I) -> Self {
+        let mut marks = BTreeMap::new();
+        for (name, value) in iter {
+            marks.insert(name.into(), value);
+        }
+        MarkSet { marks }
     }
 }
 
@@ -207,7 +234,7 @@ impl<'a> MarkStateMachine<'a> {
     pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {
         let mut result = false;
 
-        let index = match self.find(id.prev(), osd).err() {
+        let index = match self.find(id, osd).err() {
             Some(index) => index,
             None => return false,
         };
