@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
     convert,
@@ -10,8 +10,9 @@ use crate::{
 /// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
 ///
 /// # Arguments
-/// * actors - A vector where the i'th element is the actor index of the document encoding of actor
-///            i, as returned by [`OpSetMetadata.actors.encode_index`]
+/// * actors - A hashmap where the key is the actor index in the automerge::Automerge
+///            we are saving and the value is the index of that same actor in the
+///            order the actors will be encoded in the saved document
 /// * props - An indexed cache containing the properties in this op_as_docop
 /// * obj - The object ID this op refers too
 /// * op - The op itself
@@ -21,7 +22,7 @@ use crate::{
 /// The methods of the resulting `AsDocOp` implementation will panic if any actor ID in the op
 /// references an index not in `actors` or a property not in `props`
 pub(crate) fn op_as_docop<'a>(
-    actors: &'a [usize],
+    actors: &'a HashMap<usize, usize>,
     props: &'a IndexedCache<String>,
     op: Op<'a>,
 ) -> OpAsDocOp<'a> {
@@ -34,7 +35,7 @@ pub(crate) fn op_as_docop<'a>(
 
 pub(crate) struct OpAsDocOp<'a> {
     op: Op<'a>,
-    actor_lookup: &'a [usize],
+    actor_lookup: &'a HashMap<usize, usize>,
     props: &'a IndexedCache<String>,
 }
 
@@ -128,7 +129,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
 pub(crate) struct OpAsDocOpSuccIter<'a> {
     op: Op<'a>,
     offset: usize,
-    actor_index: &'a [usize],
+    actor_index: &'a HashMap<usize, usize>,
 }
 
 impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
@@ -151,8 +152,8 @@ impl<'a> ExactSizeIterator for OpAsDocOpSuccIter<'a> {
     }
 }
 
-fn translate<'a>(actor_lookup: &'a [usize], op: &'a OpId) -> DocOpId {
-    let index = actor_lookup[op.actor()];
+fn translate<'a>(actor_lookup: &'a HashMap<usize, usize>, op: &'a OpId) -> DocOpId {
+    let index = actor_lookup[&op.actor()];
     DocOpId {
         actor: index,
         counter: op.counter(),

@@ -31,13 +31,17 @@ where
     I: Iterator<Item = &'a Change> + Clone + 'a,
     O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
-    let actor_ids = changes
+    let mut actor_lookup = HashMap::with_capacity(actors.len());
+    let mut actor_ids = changes
         .clone()
         .map(|c| c.actor_id().clone())
         .unique()
         .collect::<Vec<_>>();
+    actor_ids.sort();
+    for (index, actor_id) in actor_ids.iter().enumerate() {
+        actor_lookup.insert(actors.lookup(actor_id).unwrap(), index);
+    }
 
-    let actor_lookup = actors.encode_index();
     let doc_ops = ops
         .clone()
         .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
@@ -91,7 +95,7 @@ impl HashGraph {
 struct ChangeWithGraph<'a> {
     change: &'a Change,
     graph: &'a HashGraph,
-    actor_lookup: &'a [usize],
+    actor_lookup: &'a HashMap<usize, usize>,
     actors: &'a IndexedCache<ActorId>,
 }
 
@@ -99,7 +103,7 @@ impl<'a> AsChangeMeta<'a> for ChangeWithGraph<'a> {
     type DepsIter = ChangeDepsIter<'a>;
 
     fn actor(&self) -> u64 {
-        self.actor_lookup[self.actors.lookup(self.change.actor_id()).unwrap()] as u64
+        self.actor_lookup[&self.actors.lookup(self.change.actor_id()).unwrap()] as u64
     }
 
     fn seq(&self) -> u64 {

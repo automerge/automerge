@@ -67,33 +67,6 @@ where
         });
         sorted
     }
-
-    /// Create a vector from positions in this index to positions in an equivalent sorted index
-    ///
-    /// This is useful primarily when encoding an `IndexedCache<ActorId>` in the document format.
-    /// In this case we encode the actors in sorted order in the document and all ops reference the
-    /// offset into this sorted actor array. But the `IndexedCache<ActorId>` we have in the
-    /// application does not contain actors in sorted order because we add them as we encounter
-    /// them, so we must map from the actor IDs in the application to the actor IDs in the document
-    /// format
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// let idx: IndexedCache<String> = IndexedCache::new();
-    /// let first_idx = idx.cache("b"); // first_idx is `0`
-    /// let second_idx = idx.cache("a"); // second_idx i `1`
-    /// let encoded = idx.encode_index();
-    /// // first_idx (0) maps to `1` whilst second_idx (1) maps to `0` because "a" < "b"
-    /// assert_eq!(encoded, vec![1,0])
-    /// ```
-    pub(crate) fn encode_index(&self) -> Vec<usize> {
-        let sorted: Vec<_> = self.cache.iter().sorted().cloned().collect();
-        self.cache
-            .iter()
-            .map(|a| sorted.iter().position(|r| r == a).unwrap())
-            .collect()
-    }
 }
 
 impl<T> IntoIterator for IndexedCache<T> {

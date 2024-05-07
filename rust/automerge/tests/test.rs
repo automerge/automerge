@@ -2164,3 +2164,55 @@ fn diff_should_reverse_deletion_of_block_in_text_correctly() {
     };
     assert_eq!(s.as_ref(), &ScalarValue::Str("value".into()));
 }
+
+#[test]
+fn missing_actors_when_docs_are_forked() {
+    // Reproduces https://github.com/automerge/automerge/issues/897
+    //
+    // The problem was a result of these things interacting:
+    //
+    // 1. When we create a transaction we add the actor ID of the document
+    //    creating the transaction to the IndexedCache of actor IDs that
+    //    document stores
+    // 2. When we fork a document we copy the IndexedCache from the source
+    //    document to the forked document
+    // 3. When we save a document we must encode all the actor IDs in the saved
+    //    document in lexicographic order. To do this we first enumerate all
+    //    the actor IDs in the change graph and then encode this in the
+    //    document
+    // 4. We assume that the IndexedCache of actor IDs on the document only
+    //    contains actor IDs which are in the change graph
+    //
+    // What can happen is that we create a new actor ID somehow (by forking or
+    // loading). Then we create a transaction with the new actor ID but never
+    // actually make any changes. Then, we create another actor ID in the
+    // same document - by forking it typically. This means that this last
+    // document has an IndexedCache with an actor ID in it which will never
+    // be saved to the document, but which is followed by an actor ID which
+    // will be saved. This in turn means that the indexes we save to the
+    // document are off by one and so we get load errors.
+    //
+    // The solution was to create the lookup table from actor index to actor
+    // ID directly from the actor IDs in the change graph rather than from the
+    // IndexedCache.
+    let actor0 = ActorId::from(&[0]);
+    let actor1 = ActorId::from(&[1]);
+    let actor2 = ActorId::from(&[2]);
+
+    let mut doc0 = AutoCommit::new().with_actor(actor0);
+    doc0.put(ROOT, "a", 1).unwrap();
+
+    // swap these actors and no error occurs
+    let mut doc1 = doc0.fork().with_actor(actor2);
+    let mut doc2 = doc0.fork().with_actor(actor1);
+
+    doc1.put(ROOT, "b", 2).unwrap();
+    doc2.merge(&mut doc1).unwrap();
+    // This call creates a transaction which doesn't do anything (because the
+    // "c" key doesn't exist) and so the actor ID (actor1) gets added to the
+    // IndexedCache of doc2
+    doc2.delete(ROOT, "c").unwrap();
+
+    // error occurs here
+    doc2.save_and_verify().unwrap();
+}
