@@ -26,10 +26,24 @@ impl OpIdx {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub(crate) struct Op<'a> {
     idx: usize,
     osd: &'a OpSetData,
+}
+
+impl<'a> std::fmt::Debug for Op<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Op")
+            .field("action", &self.action())
+            .field("key", &self.ex_key())
+            .field("id", &self.id())
+            .field("obj", &self.obj())
+            .field("insert", &self.insert())
+            .field("value", &self.value())
+            .field("mark", &self.is_mark())
+            .finish()
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -153,6 +167,13 @@ impl<'a> Op<'a> {
 
     pub(crate) fn key(&self) -> &'a Key {
         &self.op().key
+    }
+
+    pub(crate) fn ex_key(&self) -> crate::op_set2::Key<'_> {
+        match self.key() {
+            Key::Map(idx) => crate::op_set2::Key::Map(self.osd.props.get(*idx)),
+            Key::Seq(ElemId(e)) => crate::op_set2::Key::Seq(crate::types::ElemId(*e)),
+        }
     }
 
     pub(crate) fn id(&self) -> &'a OpId {

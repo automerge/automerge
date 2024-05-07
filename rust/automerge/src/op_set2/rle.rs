@@ -528,6 +528,8 @@ impl LitRunCursor {
 
 pub(crate) type StrCursor = RleCursor<{ usize::MAX }, str>;
 pub(crate) type IntCursor = RleCursor<{ usize::MAX }, u64>;
+pub(crate) type ActorCursor = RleCursor<{ usize::MAX }, super::types::ActorIdx>;
+pub(crate) type ActionCursor = RleCursor<{ usize::MAX }, super::types::Action>;
 
 #[derive(Debug, Clone)]
 pub(crate) enum RleState<'a, P: Packable + ?Sized> {

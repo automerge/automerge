@@ -43,6 +43,10 @@ impl ColumnCursor for RawCursor {
         vec![ColExport::Run(1, data.to_vec())]
     }
 
+    fn scan(data: &[u8]) -> Result<Self, PackError> {
+        Ok(Self { offset: data.len() })
+    }
+
     // dont think this has any real use
     // this column will always use get_slice
     fn try_next<'a>(

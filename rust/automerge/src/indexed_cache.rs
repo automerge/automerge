@@ -105,6 +105,15 @@ impl<T> IntoIterator for IndexedCache<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a IndexedCache<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.cache).into_iter()
+    }
+}
+
 impl<T> Index<usize> for IndexedCache<T> {
     type Output = T;
     fn index(&self, i: usize) -> &T {

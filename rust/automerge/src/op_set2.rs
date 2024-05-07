@@ -3,11 +3,14 @@ pub(crate) mod columns;
 pub(crate) mod delta;
 pub(crate) mod group;
 pub(crate) mod meta;
+mod op;
 pub(crate) mod op_set;
 pub(crate) mod pack;
 pub(crate) mod raw;
 pub(crate) mod rle;
 pub(crate) mod slab;
+mod types;
+pub(crate) use types::Key;
 
 pub(crate) use boolean::BooleanCursor;
 pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};

@@ -132,6 +132,9 @@ impl ColumnCursor for BooleanCursor {
         &self,
         slab: &'a [u8],
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
+        if self.offset >= slab.len() {
+            return Ok(None);
+        }
         let data = &slab[self.offset..];
         let (bytes, count) = u64::unpack(data)?;
         let count = count as usize;

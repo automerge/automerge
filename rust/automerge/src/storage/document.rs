@@ -5,7 +5,7 @@ use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 use crate::{convert, ActorId, ChangeHash};
 
 mod doc_op_columns;
-use doc_op_columns::DocOpColumns;
+pub(crate) use doc_op_columns::DocOpColumns;
 pub(crate) use doc_op_columns::{AsDocOp, DocOp, ReadDocOpError};
 mod doc_change_columns;
 use doc_change_columns::DocChangeColumns;

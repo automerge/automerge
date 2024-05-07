@@ -4,7 +4,7 @@ pub(crate) mod change;
 mod chunk;
 pub(crate) mod columns;
 pub(crate) mod convert;
-mod document;
+pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
 pub(crate) mod save;

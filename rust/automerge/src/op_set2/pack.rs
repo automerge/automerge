@@ -2,6 +2,8 @@ use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 
+use super::types::{Action, ActorIdx};
+
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PackError {
     #[error(transparent)]
@@ -12,6 +14,17 @@ pub(crate) enum PackError {
     IndexOutOfRange(usize),
     #[error("slice out of range {0}..{1}")]
     SliceOutOfRange(usize, usize),
+    #[error("invalid value for {typ}: {error}")]
+    InvalidValue { typ: &'static str, error: String },
+}
+
+impl PackError {
+    pub(crate) fn invalid_value(expected: &'static str, error: impl std::fmt::Display) -> Self {
+        PackError::InvalidValue {
+            typ: expected,
+            error: error.to_string(),
+        }
+    }
 }
 
 pub(crate) trait Packable: PartialEq + Debug {
@@ -233,5 +246,77 @@ impl MaybePackable<bool> for Option<bool> {
 impl MaybePackable<bool> for bool {
     fn maybe_packable(&self) -> Option<bool> {
         Some(*self)
+    }
+}
+
+impl Packable for Action {
+    type Unpacked<'a> = Action;
+
+    type Owned = Action;
+
+    fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
+        item
+    }
+
+    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), super::PackError> {
+        let (len, result) = u64::unpack(buff)?;
+        let action = match result {
+            0 => Action::MakeMap,
+            1 => Action::Set,
+            2 => Action::MakeList,
+            3 => Action::Delete,
+            4 => Action::MakeText,
+            5 => Action::Increment,
+            6 => Action::MakeTable,
+            7 => Action::Mark,
+            other => {
+                return Err(super::PackError::invalid_value(
+                    "valid action (integer between 0 and 7)",
+                    format!("unexpected integer: {}", other),
+                ))
+            }
+        };
+        Ok((len, action))
+    }
+
+    fn width<'a>(item: Self::Unpacked<'a>) -> usize {
+        u64::width(item as u64)
+    }
+
+    fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
+        let as_u64: u64 = match element {
+            Action::MakeMap => 0,
+            Action::MakeList => 1,
+            Action::MakeText => 2,
+            Action::MakeTable => 6,
+            Action::Set => 3,
+            Action::Delete => 4,
+            Action::Increment => 5,
+            Action::Mark => 7,
+        };
+        u64::pack(buff, &as_u64)
+    }
+}
+
+impl Packable for ActorIdx {
+    type Unpacked<'a> = ActorIdx;
+
+    type Owned = ActorIdx;
+
+    fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
+        item
+    }
+
+    fn width<'a>(item: Self::Unpacked<'a>) -> usize {
+        u64::width(u64::from(item))
+    }
+
+    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), super::PackError> {
+        let (len, result) = u64::unpack(buff)?;
+        Ok((len, ActorIdx::from(result)))
+    }
+
+    fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
+        u64::pack(buff, &(u64::from(*element)))
     }
 }

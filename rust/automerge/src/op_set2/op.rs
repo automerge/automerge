@@ -1,88 +1,82 @@
-use super::{DecodeColumnError, DeltaDecoder, Key, OpType, RleDecoder, ScalarValue};
+use super::columns::ColumnDataIter;
+use super::rle::ActorCursor;
+use super::types::{Action, Key, OpType, ScalarValue};
+use super::DeltaCursor;
 use crate::op_set;
 use crate::types::{ObjId, OpId};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub(crate) struct Op<'a> {
     pub(crate) id: OpId,
-    pub(crate) action: u64,
+    pub(crate) action: Action,
     pub(crate) obj: ObjId,
     pub(crate) key: Key<'a>,
     pub(crate) insert: bool,
     pub(crate) value: ScalarValue<'a>,
-    pub(crate) succ: SuccIter<'a>,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<&'a [u8]>,
+    pub(crate) mark_name: Option<&'a str>,
+    pub(super) succ_cursors: SuccCursors<'a>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SuccIterIter<'a> {
-    num: RleDecoder<'a, u64>,
-    actor: RleDecoder<'a, u64>,
-    counter: DeltaDecoder<'a>,
-}
-
-impl<'a> SuccIterIter<'a> {
-    pub(crate) fn new(num: &'a [u8], actor: &'a [u8], counter: &'a [u8]) -> Self {
-        SuccIterIter {
-            num: RleDecoder::from(num),
-            actor: RleDecoder::from(actor),
-            counter: DeltaDecoder::from(counter),
+impl<'a> Clone for Op<'_> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            action: self.action,
+            obj: self.obj,
+            key: self.key,
+            insert: self.insert,
+            value: self.value,
+            expand: self.expand,
+            mark_name: self.mark_name,
+            succ_cursors: self.succ_cursors.clone(),
         }
     }
 }
 
-impl<'a> Iterator for SuccIterIter<'a> {
-    type Item = Result<SuccIter<'a>, DecodeColumnError>;
+#[derive(Clone)]
+pub(super) struct SuccCursors<'a> {
+    pub(super) len: usize,
+    pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
+    pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let actor = self.actor;
-        let counter = self.counter;
-        match self.num.next() {
-            Some(Ok(Some(num))) => {
-                for _ in 0..num {
-                    // throw away results :(
-                    self.actor.next();
-                    self.counter.next();
-                }
-                Some(Ok(SuccIter {
-                    num,
-                    actor,
-                    counter,
-                }))
-            }
-            Some(Ok(None)) | None => Some(Ok(SuccIter {
-                num: 0,
-                actor,
-                counter,
-            })),
-            Some(Err(e)) => Some(Err(DecodeColumnError::decode_raw("succ_num", e))),
-        }
+impl<'a> std::fmt::Debug for SuccCursors<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SuccCursors")
+            .field("len", &self.len)
+            .finish()
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SuccIter<'a> {
-    num: u64,
-    actor: RleDecoder<'a, u64>,
-    counter: DeltaDecoder<'a>,
-}
-
-impl<'a> Iterator for SuccIter<'a> {
-    type Item = Result<OpId, DecodeColumnError>;
+impl<'a> Iterator for SuccCursors<'a> {
+    type Item = OpId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.num > 0 {
-            match (self.actor.next(), self.counter.next()) {
-                (Some(Ok(Some(actor))), Some(Ok(Some(counter)))) => {
-                    self.num -= 1;
-                    Some(Ok(OpId::new(counter as u64, actor as usize)))
-                }
-                _ => Some(Err(DecodeColumnError::unexpected_null("succ"))),
-            }
-        } else {
+        if self.len == 0 {
             None
+        } else {
+            let Some(Some(counter)) = self.succ_counter.next() else {
+                return None;
+            };
+            let Some(Some(actor)) = self.succ_actor.next() else {
+                return None;
+            };
+            self.len -= 1;
+            Some(OpId::new(counter as u64, u64::from(actor) as usize))
         }
+    }
+}
+
+impl<'a> ExactSizeIterator for SuccCursors<'a> {
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'a> Op<'a> {
+    pub(crate) fn succ(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator + 'a {
+        self.succ_cursors.clone()
     }
 }
 
@@ -95,9 +89,6 @@ impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
             && self.key == other.ex_key()
             && self.insert == other.insert()
             && &action == other.action()
-            && self
-                .succ
-                .filter_map(|n| n.ok())
-                .eq(other.succ().map(|n| *n.id()))
+            && self.succ().eq(other.succ().map(|n| *n.id()))
     }
 }

@@ -1,5 +1,6 @@
 use crate::storage::{ColumnSpec, ColumnType};
 
+use super::rle::{ActionCursor, ActorCursor};
 use super::{
     BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MaybePackable, MetaCursor, PackError,
     Packable, RawCursor, RleState, Slab, SlabIter, StrCursor, WritableSlab,
@@ -86,10 +87,40 @@ pub(crate) struct ColumnData<C: ColumnCursor> {
     _phantom: PhantomData<C>,
 }
 
+impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn raw_reader<'a>(&'a self) -> RawReader<'a> {
+        RawReader {
+            slabs: self.slabs.iter(),
+            current: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
     slabs: std::slice::Iter<'a, Slab>,
     iter: Option<SlabIter<'a, C>>,
+}
+
+impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C>
+where
+    C::Item: Clone,
+{
+    fn clone(&self) -> Self {
+        ColumnDataIter {
+            slabs: self.slabs.clone(),
+            iter: self.iter.clone(),
+        }
+    }
+}
+
+impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
+    pub(crate) fn empty() -> Self {
+        ColumnDataIter {
+            slabs: [].iter(),
+            iter: None,
+        }
+    }
 }
 
 impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
@@ -288,9 +319,10 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Column {
-    Actor(ColumnData<IntCursor>),
+    Actor(ColumnData<ActorCursor>),
     Str(ColumnData<StrCursor>),
     Integer(ColumnData<IntCursor>),
+    Action(ColumnData<ActionCursor>),
     Delta(ColumnData<DeltaCursor>),
     Bool(ColumnData<BooleanCursor>),
     ValueMeta(ColumnData<MetaCursor>),
@@ -319,6 +351,7 @@ impl Column {
             Self::ValueMeta(col) => col.slabs.as_slice(),
             Self::Value(col) => col.slabs.as_slice(),
             Self::Group(col) => col.slabs.as_slice(),
+            Self::Action(col) => col.slabs.as_slice(),
         }
     }
 
@@ -332,6 +365,7 @@ impl Column {
             Self::ValueMeta(col) => col.len,
             Self::Value(col) => col.len,
             Self::Group(col) => col.len,
+            Self::Action(col) => col.len,
         }
     }
 
@@ -343,7 +377,13 @@ impl Column {
         match spec.col_type() {
             ColumnType::Actor => Ok(Column::Actor(ColumnData::external(data, range)?)),
             ColumnType::String => Ok(Column::Str(ColumnData::external(data, range)?)),
-            ColumnType::Integer => Ok(Column::Integer(ColumnData::external(data, range)?)),
+            ColumnType::Integer => {
+                if spec.id() == super::op_set::ACTION_COL_ID {
+                    Ok(Column::Action(ColumnData::external(data, range)?))
+                } else {
+                    Ok(Column::Integer(ColumnData::external(data, range)?))
+                }
+            }
             ColumnType::DeltaInteger => Ok(Column::Delta(ColumnData::external(data, range)?)),
             ColumnType::Boolean => Ok(Column::Bool(ColumnData::external(data, range)?)),
             ColumnType::Group => Ok(Column::Group(ColumnData::external(data, range)?)),
@@ -357,6 +397,57 @@ pub(crate) enum SpliceResult {
     Done,
     Add(Vec<Slab>),
     Replace(Vec<Slab>),
+}
+
+pub(crate) struct RawReader<'a> {
+    slabs: std::slice::Iter<'a, Slab>,
+    current: Option<(&'a Slab, usize)>,
+}
+
+impl<'a> RawReader<'a> {
+    pub(crate) fn empty() -> RawReader<'static> {
+        RawReader {
+            slabs: [].iter(),
+            current: None,
+        }
+    }
+
+    /// Read a slice out of a set of slabs
+    ///
+    /// Returns an error if:
+    /// * The read would cross a slab boundary
+    /// * The read would go past the end of the data
+    pub(crate) fn read_next(&mut self, length: usize) -> Result<&'a [u8], ReadRawError> {
+        let (slab, offset) = match self.current.take() {
+            Some(state) => state,
+            None => {
+                if let Some(slab) = self.slabs.next() {
+                    (slab, 0)
+                } else {
+                    return Err(ReadRawError::EndOfData);
+                }
+            }
+        };
+        if offset + length > slab.len() {
+            return Err(ReadRawError::CrossBoundary);
+        }
+        let result = slab[offset..offset + length].as_ref();
+        let new_offset = offset + length;
+        if offset == slab.len() {
+            self.current = None;
+        } else {
+            self.current = Some((slab, new_offset));
+        }
+        Ok(result)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ReadRawError {
+    #[error("attempted to read across slab boundaries")]
+    CrossBoundary,
+    #[error("attempted to read past end of data")]
+    EndOfData,
 }
 
 #[cfg(test)]

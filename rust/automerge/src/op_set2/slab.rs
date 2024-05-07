@@ -2,7 +2,7 @@ use super::{ColumnCursor, PackError, Packable, Run};
 
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Index, Range};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -31,13 +31,26 @@ pub(crate) struct WritableSlab {
     len: usize,
 }
 
+impl Index<Range<usize>> for Slab {
+    type Output = [u8];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        match self {
+            Self::External(ReadOnlySlab { data, range, .. }) => {
+                &data[range.start + index.start..range.start + index.end]
+            }
+            Self::Owned(OwnedSlab { data, .. }) => &data[index],
+        }
+    }
+}
+
 impl Default for Slab {
     fn default() -> Self {
         Self::Owned(OwnedSlab::default())
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
     cursor: C,
