@@ -2,10 +2,14 @@ use super::{
     ColExport, ColumnCursor, Encoder, PackError, RleCursor, RleState, Run, Slab, WritableSlab,
 };
 
+const B: usize = usize::MAX;
+
+type SubCursor = RleCursor<B, u64>;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct GroupCursor {
     sum: u64,
-    rle: RleCursor<u64>,
+    rle: SubCursor,
 }
 
 impl ColumnCursor for GroupCursor {
@@ -21,11 +25,11 @@ impl ColumnCursor for GroupCursor {
         post: Self::PostState<'a>,
         cursor: Self,
     ) {
-        RleCursor::finish(slab, out, state, post, cursor.rle)
+        SubCursor::finish(slab, out, state, post, cursor.rle)
     }
 
     fn append<'a>(state: &mut Self::State<'a>, slab: &mut WritableSlab, item: Option<u64>) {
-        RleCursor::append(state, slab, item)
+        SubCursor::append(state, slab, item)
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
@@ -33,7 +37,7 @@ impl ColumnCursor for GroupCursor {
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
 
-        let (state, post) = RleCursor::encode_inner(&cursor.rle, run, index, slab);
+        let (state, post) = SubCursor::encode_inner(&cursor.rle, run, index, slab);
 
         let current = cursor.rle.start_copy(slab, last_run_count);
 
@@ -52,7 +56,7 @@ impl ColumnCursor for GroupCursor {
     }
 
     fn export(data: &[u8]) -> Vec<ColExport<u64>> {
-        RleCursor::<u64>::export(data)
+        SubCursor::export(data)
     }
 
     fn try_next<'a>(

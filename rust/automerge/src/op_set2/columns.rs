@@ -75,9 +75,7 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
             self.post,
             self.cursor,
         );
-        let slab = Slab::Owned(self.current);
-        self.results.push(slab);
-        self.results
+        self.current.finish()
     }
 }
 
@@ -136,7 +134,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
-    fn export(&self) -> Vec<Vec<ColExport<C::Item>>> {
+    pub(crate) fn export(&self) -> Vec<Vec<ColExport<C::Item>>> {
         self.slabs.iter().map(|s| C::export(s.as_ref())).collect()
     }
 
@@ -365,6 +363,7 @@ pub(crate) enum SpliceResult {
 pub(crate) mod tests {
     use super::*;
     use rand::prelude::*;
+    use rand::rngs::SmallRng;
 
     fn test_splice<'a, C: ColumnCursor, E>(
         vec: &'a mut Vec<E>,
@@ -659,26 +658,26 @@ pub(crate) mod tests {
     // TODO - would be nice if you printed the seed on failure
     // so we could re-seed if we ever see one of these fail
     trait TestRand: Clone {
-        fn index(len: usize) -> usize {
+        fn index(len: usize, rng: &mut SmallRng) -> usize {
             match len {
                 0 => 0,
-                _ => rand::random::<usize>() % len,
+                _ => rng.gen::<usize>() % len,
             }
         }
         fn null() -> Self;
-        fn rand() -> Self;
+        fn rand(rng: &mut SmallRng) -> Self;
         fn plus(&self, index: usize) -> Self;
-        fn rand_vec() -> Vec<Self>
+        fn rand_vec(rng: &mut SmallRng) -> Vec<Self>
         where
             Self: Sized,
         {
             let mut result = vec![];
-            let len = rand::random::<usize>() % 4 + 1;
+            let len = rng.gen::<usize>() % 4 + 1;
             for i in 0..len {
-                if rand::random::<i64>() % 3 == 0 {
+                if rng.gen::<i64>() % 3 == 0 {
                     result.push(Self::null())
                 } else {
-                    result.push(Self::rand())
+                    result.push(Self::rand(rng))
                 }
             }
             result
@@ -689,8 +688,8 @@ pub(crate) mod tests {
         fn null() -> Option<i64> {
             None
         }
-        fn rand() -> Option<i64> {
-            Some(rand::random::<i64>() % 10)
+        fn rand(rng: &mut SmallRng) -> Option<i64> {
+            Some(rng.gen::<i64>() % 10)
         }
         fn plus(&self, index: usize) -> Option<i64> {
             self.map(|i| i + index as i64)
@@ -701,8 +700,8 @@ pub(crate) mod tests {
         fn null() -> bool {
             false
         }
-        fn rand() -> bool {
-            rand::random::<bool>()
+        fn rand(rng: &mut SmallRng) -> bool {
+            rng.gen::<bool>()
         }
         fn plus(&self, index: usize) -> bool {
             true
@@ -713,8 +712,8 @@ pub(crate) mod tests {
         fn null() -> Option<u64> {
             None
         }
-        fn rand() -> Option<u64> {
-            Some(rand::random::<u64>() % 10)
+        fn rand(rng: &mut SmallRng) -> Option<u64> {
+            Some(rng.gen::<u64>() % 10)
         }
         fn plus(&self, index: usize) -> Option<u64> {
             self.map(|i| i + index as u64)
@@ -725,28 +724,35 @@ pub(crate) mod tests {
         fn null() -> Option<String> {
             None
         }
-        fn rand() -> Option<String> {
-            Some(format!("0x{:X}", rand::random::<usize>()).to_owned())
+        fn rand(rng: &mut SmallRng) -> Option<String> {
+            Some(format!("0x{:X}", rng.gen::<usize>()).to_owned())
         }
         fn plus(&self, index: usize) -> Option<String> {
             self.as_ref().map(|s| format!("{}/{}", s, index).to_owned())
         }
     }
 
-    fn generate_splice<T: TestRand>(len: usize) -> (usize, Vec<T>) {
-        let index = T::index(len);
-        let patch = match rand::random::<usize>() % 4 {
+    fn make_rng() -> SmallRng {
+        let seed = rand::random::<u64>();
+        //let seed = 7798599467530965361;
+        log!("SEED: {}", seed);
+        SmallRng::seed_from_u64(seed)
+    }
+
+    fn generate_splice<T: TestRand>(len: usize, rng: &mut SmallRng) -> (usize, Vec<T>) {
+        let index = T::index(len, rng);
+        let patch = match rng.gen::<usize>() % 4 {
             0 => vec![T::null(), T::null(), T::null()],
             1 => {
-                let n = T::rand();
+                let n = T::rand(rng);
                 vec![n.clone(), n.clone(), n]
             }
             2 => {
-                let n = T::rand();
-                let step = rand::random::<usize>() % 4;
+                let n = T::rand(rng);
+                let step = rng.gen::<usize>() % 4;
                 vec![n.clone(), n.plus(step), n.plus(step * 2)]
             }
-            _ => T::rand_vec(),
+            _ => T::rand_vec(rng),
         };
         (index, patch)
     }
@@ -755,8 +761,9 @@ pub(crate) mod tests {
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
         let mut col = ColumnData::<IntCursor>::new();
+        let mut rng = make_rng();
         for i in 0..1000 {
-            let (index, values) = generate_splice(data.len());
+            let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
         }
     }
@@ -765,8 +772,9 @@ pub(crate) mod tests {
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<StrCursor>::new();
+        let mut rng = make_rng();
         for i in 0..100 {
-            let (index, values) = generate_splice(data.len());
+            let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
         }
     }
@@ -775,8 +783,9 @@ pub(crate) mod tests {
     fn column_data_fuzz_test_delta() {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursor>::new();
+        let mut rng = make_rng();
         for i in 0..100 {
-            let (index, values) = generate_splice(data.len());
+            let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
         }
     }
@@ -841,8 +850,9 @@ pub(crate) mod tests {
     fn column_data_fuzz_test_boolean() {
         let mut data: Vec<bool> = vec![];
         let mut col = ColumnData::<BooleanCursor>::new();
+        let mut rng = make_rng();
         for i in 0..100 {
-            let (index, values) = generate_splice(data.len());
+            let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
         }
     }

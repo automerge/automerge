@@ -3,10 +3,13 @@ use super::{
     WritableSlab,
 };
 
+const B: usize = usize::MAX;
+type SubCursor = RleCursor<B, i64>;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct DeltaCursor {
     abs: i64,
-    rle: RleCursor<i64>,
+    rle: SubCursor,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -44,7 +47,7 @@ impl ColumnCursor for DeltaCursor {
             }) => {
                 //let delta = cursor.abs - state.abs;
                 Self::append(&mut state, out, Some(cursor.abs));
-                RleCursor::finish(slab, out, RleState::Empty, None, cursor.rle);
+                SubCursor::finish(slab, out, RleState::Empty, None, cursor.rle);
             }
             Some(Run {
                 count,
@@ -52,12 +55,12 @@ impl ColumnCursor for DeltaCursor {
             }) => {
                 Self::append(&mut state, out, Some(cursor.abs - (count as i64 - 1) * v));
                 let next_post = Some(Run::new(count - 1, Some(v)));
-                RleCursor::finish(slab, out, state.rle, next_post, cursor.rle);
+                SubCursor::finish(slab, out, state.rle, next_post, cursor.rle);
             }
             Some(Run { count, value: None }) => {
                 let next_state = DeltaState::new(state.abs);
-                RleCursor::flush_state(out, state.rle);
-                RleCursor::<i64>::flush_run(out, count, None);
+                SubCursor::flush_state(out, state.rle);
+                SubCursor::flush_run(out, count, None);
                 Self::finish(slab, out, next_state, None, cursor);
             }
             None => {
@@ -65,8 +68,8 @@ impl ColumnCursor for DeltaCursor {
                     match run {
                         Run { count, value: None } => {
                             let next_state = DeltaState::new(state.abs);
-                            RleCursor::flush_state(out, state.rle);
-                            RleCursor::<i64>::flush_run(out, count, None);
+                            SubCursor::flush_state(out, state.rle);
+                            SubCursor::flush_run(out, count, None);
                             Self::finish(slab, out, next_state, None, next_cursor);
                         }
                         Run {
@@ -74,16 +77,16 @@ impl ColumnCursor for DeltaCursor {
                             value: Some(_),
                         } => {
                             Self::append(&mut state, out, Some(next_cursor.abs));
-                            RleCursor::finish(slab, out, state.rle, None, next_cursor.rle);
+                            SubCursor::finish(slab, out, state.rle, None, next_cursor.rle);
                         }
                         run => {
                             let run = Run::new(run.count - 1, run.value);
                             Self::append(&mut state, out, Some(next_cursor.abs - run.delta()));
-                            RleCursor::finish(slab, out, state.rle, Some(run), next_cursor.rle);
+                            SubCursor::finish(slab, out, state.rle, Some(run), next_cursor.rle);
                         }
                     }
                 } else {
-                    RleCursor::flush_state(out, state.rle);
+                    SubCursor::flush_state(out, state.rle);
                 }
             }
         }
@@ -109,9 +112,9 @@ impl ColumnCursor for DeltaCursor {
         if let Some(item) = item {
             let delta = item - state.abs;
             state.abs = item;
-            RleCursor::append(&mut state.rle, slab, Some(delta));
+            SubCursor::append(&mut state.rle, slab, Some(delta));
         } else {
-            RleCursor::append(&mut state.rle, slab, None);
+            SubCursor::append(&mut state.rle, slab, None);
         }
     }
 
@@ -120,7 +123,7 @@ impl ColumnCursor for DeltaCursor {
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
 
-        let (rle, post) = RleCursor::encode_inner(&cursor.rle, run, index, slab);
+        let (rle, post) = SubCursor::encode_inner(&cursor.rle, run, index, slab);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
@@ -143,7 +146,7 @@ impl ColumnCursor for DeltaCursor {
     }
 
     fn export(data: &[u8]) -> Vec<ColExport<i64>> {
-        RleCursor::<i64>::export(data)
+        SubCursor::export(data)
     }
 
     fn try_next<'a>(

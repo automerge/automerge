@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(crate) enum Slab {
     External(ReadOnlySlab),
-    Owned(WritableSlab),
+    Owned(OwnedSlab),
 }
 
 #[derive(Debug, Clone)]
@@ -19,14 +19,21 @@ pub(crate) struct ReadOnlySlab {
 }
 
 #[derive(Debug, Default, Clone)]
+pub(crate) struct OwnedSlab {
+    data: Vec<u8>,
+    len: usize,
+}
+
+#[derive(Debug, Default, Clone)]
 pub(crate) struct WritableSlab {
     data: Vec<u8>,
+    done: Vec<Slab>,
     len: usize,
 }
 
 impl Default for Slab {
     fn default() -> Self {
-        Self::Owned(WritableSlab::default())
+        Self::Owned(OwnedSlab::default())
     }
 }
 
@@ -68,8 +75,33 @@ impl WritableSlab {
     pub(crate) fn new(bytes: &[u8], len: usize) -> Self {
         WritableSlab {
             data: bytes.to_vec(),
+            done: vec![],
             len,
         }
+    }
+
+    pub(crate) fn bytes_left(&self, max: usize) -> usize {
+        max.saturating_sub(self.data.len())
+    }
+
+    pub(crate) fn next_slab(&mut self) {
+        let mut data = Vec::new();
+        let len = self.len;
+        std::mem::swap(&mut data, &mut self.data);
+        self.len = 0;
+        let slab = OwnedSlab { data, len };
+        self.done.push(Slab::Owned(slab));
+    }
+
+    pub(crate) fn finish(mut self) -> Vec<Slab> {
+        let slab = OwnedSlab {
+            data: self.data,
+            len: self.len,
+        };
+        if slab.data.len() > 0 {
+            self.done.push(Slab::Owned(slab));
+        }
+        self.done
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -109,14 +141,14 @@ impl Slab {
     pub(crate) fn as_ref(&self) -> &[u8] {
         match self {
             Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
-            Self::Owned(WritableSlab { data, .. }) => &data,
+            Self::Owned(OwnedSlab { data, .. }) => &data,
         }
     }
 
     pub(crate) fn get_mut(&mut self) -> Option<&mut Vec<u8>> {
         match self {
             Self::External(_) => None,
-            Self::Owned(WritableSlab { data, .. }) => Some(data),
+            Self::Owned(OwnedSlab { data, .. }) => Some(data),
         }
     }
 
@@ -135,7 +167,7 @@ impl Slab {
     pub(crate) fn len(&self) -> usize {
         match self {
             Self::External(ReadOnlySlab { len, .. }) => *len,
-            Self::Owned(WritableSlab { len, .. }) => *len,
+            Self::Owned(OwnedSlab { len, .. }) => *len,
         }
     }
 }

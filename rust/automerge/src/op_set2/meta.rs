@@ -54,6 +54,10 @@ impl Packable for ValueMeta {
     type Unpacked<'a> = ValueMeta;
     type Owned = ValueMeta;
 
+    fn width<'a>(item: ValueMeta) -> usize {
+        u64::width(item.0)
+    }
+
     fn own<'a>(item: ValueMeta) -> ValueMeta {
         item
     }
@@ -70,10 +74,12 @@ impl Packable for ValueMeta {
     }
 }
 
+type SubCursor = RleCursor<{ usize::MAX }, ValueMeta>;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct MetaCursor {
     sum: usize,
-    rle: RleCursor<ValueMeta>,
+    rle: SubCursor,
 }
 
 impl ColumnCursor for MetaCursor {
@@ -89,11 +95,11 @@ impl ColumnCursor for MetaCursor {
         post: Self::PostState<'a>,
         cursor: Self,
     ) {
-        RleCursor::finish(slab, out, state, post, cursor.rle)
+        SubCursor::finish(slab, out, state, post, cursor.rle)
     }
 
     fn append<'a>(state: &mut Self::State<'a>, slab: &mut WritableSlab, item: Option<ValueMeta>) {
-        RleCursor::append(state, slab, item)
+        SubCursor::append(state, slab, item)
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
@@ -101,7 +107,7 @@ impl ColumnCursor for MetaCursor {
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
 
-        let (state, post) = RleCursor::encode_inner(&cursor.rle, run, index, slab);
+        let (state, post) = SubCursor::encode_inner(&cursor.rle, run, index, slab);
 
         let current = cursor.rle.start_copy(slab, last_run_count);
 
@@ -120,7 +126,7 @@ impl ColumnCursor for MetaCursor {
     }
 
     fn export(data: &[u8]) -> Vec<ColExport<ValueMeta>> {
-        RleCursor::<ValueMeta>::export(data)
+        SubCursor::export(data)
     }
 
     fn try_next<'a>(

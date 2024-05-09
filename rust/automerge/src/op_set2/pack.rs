@@ -1,3 +1,4 @@
+use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 
@@ -18,6 +19,7 @@ pub(crate) trait Packable: PartialEq + Debug {
     type Owned: Clone + PartialEq + Debug;
 
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
+    fn width<'a>(item: Self::Unpacked<'a>) -> usize;
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
     fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, PackError>;
 }
@@ -28,6 +30,9 @@ impl Packable for i64 {
 
     fn own<'a>(item: i64) -> i64 {
         item
+    }
+    fn width<'a>(item: i64) -> usize {
+        lebsize(item) as usize
     }
     fn unpack<'a>(mut buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         let start_len = buff.len();
@@ -45,6 +50,9 @@ impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
 
+    fn width<'a>(item: u64) -> usize {
+        ulebsize(item) as usize
+    }
     fn own<'a>(item: u64) -> u64 {
         item
     }
@@ -64,6 +72,9 @@ impl Packable for usize {
     type Unpacked<'a> = usize;
     type Owned = usize;
 
+    fn width<'a>(item: usize) -> usize {
+        ulebsize(item as u64) as usize
+    }
     fn own<'a>(item: usize) -> usize {
         item
     }
@@ -86,6 +97,10 @@ impl Packable for bool {
         item
     }
 
+    fn width<'a>(item: bool) -> usize {
+        panic!()
+    }
+
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         panic!()
     }
@@ -101,6 +116,10 @@ impl Packable for [u8] {
 
     fn own<'a>(item: &'a [u8]) -> Vec<u8> {
         item.to_vec()
+    }
+
+    fn width<'a>(item: &'a [u8]) -> usize {
+        usize::width(item.len()) + item.len()
     }
 
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
@@ -121,6 +140,10 @@ impl Packable for [u8] {
 impl Packable for str {
     type Unpacked<'a> = &'a str;
     type Owned = String;
+
+    fn width<'a>(item: &'a str) -> usize {
+        <[u8]>::width(item.as_bytes())
+    }
 
     fn own<'a>(item: &'a str) -> String {
         item.to_owned()

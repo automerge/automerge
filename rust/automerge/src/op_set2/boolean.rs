@@ -133,20 +133,6 @@ impl ColumnCursor for BooleanCursor {
         slab: &'a [u8],
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
         let data = &slab[self.offset..];
-        if data.len() == 0 {
-            if slab.len() > self.index {
-                let mut cursor = *self;
-                cursor.index = slab.len();
-                cursor.value = !cursor.value;
-                let run = Run {
-                    count: slab.len() - self.index,
-                    value: Some(self.value),
-                };
-                return Ok(Some((run, cursor)));
-            } else {
-                return Ok(None);
-            }
-        }
         let (bytes, count) = u64::unpack(data)?;
         let count = count as usize;
         let mut cursor = *self;
