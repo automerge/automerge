@@ -490,10 +490,9 @@ describe("Automerge", () => {
         assert.strictEqual(s1.prop, true)
       })
 
-      it("should require property names to be valid", () => {
-        assert.throws(() => {
-          Automerge.change(s1, "foo", doc => (doc[""] = "x"))
-        }, /must not be an empty string/)
+      it("should not error on empty string keys", () => {
+        s2 = Automerge.change(s1, "set empty string key", doc => (doc[""] = "x"))
+        assert.strictEqual(s2[""], "x")
       })
 
       it("should not allow assignment of unsupported datatypes", () => {
@@ -680,16 +679,6 @@ describe("Automerge", () => {
         s1 = Automerge.change(s1, doc => delete doc.textStyle)
         assert.strictEqual(s1.textStyle, undefined)
         assert.deepStrictEqual(s1, { title: "Hello" })
-      })
-
-      it("should validate field names", () => {
-        s1 = Automerge.change(s1, doc => (doc.nested = {}))
-        assert.throws(() => {
-          Automerge.change(s1, doc => (doc.nested[""] = "x"))
-        }, /must not be an empty string/)
-        assert.throws(() => {
-          Automerge.change(s1, doc => (doc.nested = { "": "x" }))
-        }, /must not be an empty string/)
       })
     })
 
