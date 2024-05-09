@@ -12,8 +12,6 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
-    #[error("key must not be an empty string")]
-    EmptyStringKey,
     #[error("general failure")]
     Fail,
     #[error("invalid actor ID `{0}`")]

@@ -404,10 +404,6 @@ impl TransactionInner {
         prop: String,
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
-        if prop.is_empty() {
-            return Err(AutomergeError::EmptyStringKey);
-        }
-
         let id = self.next_id();
         let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
         let key = Key::Map(prop_index);

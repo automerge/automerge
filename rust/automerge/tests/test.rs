@@ -2216,3 +2216,15 @@ fn missing_actors_when_docs_are_forked() {
     // error occurs here
     doc2.save_and_verify().unwrap();
 }
+
+#[test]
+fn allows_empty_keys_in_mappings() {
+    let mut doc = AutoCommit::new();
+    doc.put(&automerge::ROOT, "", 1).unwrap();
+    assert_doc!(
+        &doc,
+        map! {
+            "" => { 1 },
+        }
+    );
+}
