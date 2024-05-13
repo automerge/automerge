@@ -99,6 +99,23 @@ describe("Proxies", () => {
   })
 
   describe("map proxy", () => {
+    it("does allow null values", () => {
+      let doc = from<any>({})
+      doc = change(doc, doc => {
+        doc.foo = null
+      })
+      assert.equal(doc.foo, null)
+    })
+
+    it("does not allow undefined values", () => {
+      let doc = from<any>({})
+      assert.throws(() => {
+        doc = change(doc, doc => {
+          doc.foo = undefined
+        })
+      }, "Cannot assign undefined")
+    })
+
     it("should print the property path in the error when setting an undefined key", () => {
       const doc = from({ map: {} })
       change(doc, d => {
