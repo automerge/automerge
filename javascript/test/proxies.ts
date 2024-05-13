@@ -93,7 +93,7 @@ describe("Proxies", () => {
       change(doc, d => {
         assert.throws(() => {
           d.list.splice(0, 0, 5, undefined)
-        }, /Unsupported type undefined for path \/list at index 1 in the input/)
+        }, /Cannot assign undefined value at \/list.*at index 1 in the input/)
       })
     })
   })
