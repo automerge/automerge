@@ -499,16 +499,16 @@ describe("Automerge", () => {
         Automerge.change(s1, doc => {
           assert.throws(() => {
             doc.foo = undefined
-          }, /Unsupported type undefined for path \/foo/)
+          }, /Cannot assign undefined value at \/foo/)
           assert.throws(() => {
             doc.foo = { prop: undefined }
-          }, /Unsupported type undefined for path \/foo\/prop/)
+          }, /Cannot assign undefined value at \/foo\/prop/)
           assert.throws(() => {
             doc.foo = () => {}
-          }, /Unsupported type function for path \/foo/)
+          }, /Cannot assign function value at \/foo/)
           assert.throws(() => {
             doc.foo = Symbol("foo")
-          }, /Unsupported type symbol for path \/foo/)
+          }, /Cannot assign symbol value at \/foo/)
         })
       })
     })
