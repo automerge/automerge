@@ -144,7 +144,8 @@ function import_value(
   path: Prop[],
   context: Automerge,
 ): ImportedValue {
-  switch (typeof value) {
+  const type = typeof value
+  switch (type) {
     case "object":
       if (value == null) {
         return [null, "null"]
@@ -189,9 +190,22 @@ function import_value(
       } else {
         return [value, "str"]
       }
+    case "undefined":
+      throw new RangeError(
+        [
+          `Cannot assign undefined value at ${printPath(path)}, `,
+          "because `undefined` is not a valid JSON data type. ",
+          "You might consider setting the property's value to `null`, ",
+          "or using `delete` to remove it altogether.",
+        ].join(""),
+      )
     default:
       throw new RangeError(
-        `Unsupported type ${typeof value} for path ${printPath(path)}`,
+        [
+          `Cannot assign ${type} value at ${printPath(path)}. `,
+          `All JSON primitive datatypes (object, array, string, number, boolean, null) `,
+          `are supported in an Automerge document; ${type} values are not. `,
+        ].join(""),
       )
   }
 }
@@ -685,7 +699,9 @@ function listMethods<T extends Target>(target: T) {
           return import_value(val, textV2, [...path], context)
         } catch (e) {
           if (e instanceof RangeError) {
-            throw new RangeError(`${e.message} at index ${index} in the input`)
+            throw new RangeError(
+              `${e.message} (at index ${index} in the input)`,
+            )
           } else {
             throw e
           }
