@@ -3,7 +3,7 @@ use crate::storage::{ColumnSpec, ColumnType};
 use super::rle::{ActionCursor, ActorCursor};
 use super::{
     BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MaybePackable, MetaCursor, PackError,
-    Packable, RawCursor, RleState, Slab, SlabIter, StrCursor, WritableSlab,
+    Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
 };
 
 use std::fmt::Debug;
@@ -11,10 +11,19 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Run<'a, T: Packable + ?Sized> {
+#[derive(Debug, Copy)]
+pub(crate) struct Run<'a, P: Packable + ?Sized> {
     pub(crate) count: usize,
-    pub(crate) value: Option<T::Unpacked<'a>>,
+    pub(crate) value: Option<P::Unpacked<'a>>,
+}
+
+impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
+    fn clone(&self) -> Self {
+        Self {
+            count: self.count,
+            value: self.value,
+        }
+    }
 }
 
 impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
@@ -57,10 +66,9 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
 pub(crate) struct Encoder<'a, C: ColumnCursor> {
     pub(crate) slab: &'a Slab,
     pub(crate) state: C::State<'a>,
-    pub(crate) current: WritableSlab,
+    pub(crate) current: SlabWriter<'a>,
     pub(crate) post: C::PostState<'a>,
     pub(crate) cursor: C,
-    pub(crate) results: Vec<Slab>,
 }
 
 impl<'a, C: ColumnCursor> Encoder<'a, C> {
@@ -88,6 +96,18 @@ pub(crate) struct ColumnData<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
+        let start = out.len();
+        let mut state = C::State::default();
+        let mut writer = SlabWriter::new(usize::MAX);
+        for s in &self.slabs {
+            state = C::write(&mut writer, s, state);
+        }
+        C::write_finish(out, writer, state);
+        let end = out.len();
+        start..end
+    }
+
     pub(crate) fn raw_reader<'a>(&'a self) -> RawReader<'a> {
         RawReader {
             slabs: self.slabs.iter(),
@@ -171,7 +191,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub(crate) fn splice<E>(&mut self, mut index: usize, values: Vec<E>)
     where
-        E: MaybePackable<C::Item>,
+        E: MaybePackable<C::Item> + Debug,
     {
         assert!(index <= self.len);
         for (i, slab) in self.slabs.iter_mut().enumerate() {
@@ -228,6 +248,43 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
 
+    //fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: Self::State<'a>) -> Self::State<'a>;
+    fn write<'a>(
+        writer: &mut SlabWriter<'a>,
+        slab: &'a Slab,
+        mut state: Self::State<'a>,
+    ) -> Self::State<'a> {
+        let mut size = slab.len();
+
+        if slab.len() == 0 {
+            return state;
+        }
+
+        let (run0, c0) = Self::seek(1, slab.as_ref());
+        let run0 = run0.unwrap();
+        size -= run0.count;
+        Self::append_chunk(&mut state, writer, run0);
+        if size == 0 {
+            return state;
+        }
+
+        let (run1, c1) = Self::seek(slab.len(), slab.as_ref());
+        let run1 = run1.unwrap();
+        size -= run1.count;
+        if size == 0 {
+            Self::append_chunk(&mut state, writer, run1);
+            return state;
+        }
+        Self::flush_state(writer, state);
+
+        Self::copy_between(slab, writer, c0, c1, run1.clone(), size)
+    }
+
+    fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
+        Self::flush_state(&mut writer, state);
+        writer.write(out);
+    }
+
     fn pop<'a>(
         &self,
         mut run: Run<'a, Self::Item>,
@@ -246,7 +303,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
 
     fn finish<'a>(
         slab: &'a Slab,
-        out: &mut WritableSlab,
+        out: &mut SlabWriter<'a>,
         state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
@@ -254,9 +311,28 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
 
     fn append<'a>(
         state: &mut Self::State<'a>,
-        slab: &mut WritableSlab,
-        item: Option<<Self::Item as Packable>::Unpacked<'a>>,
+        out: &mut SlabWriter<'a>,
+        value: Option<<Self::Item as Packable>::Unpacked<'a>>,
+    ) {
+        Self::append_chunk(state, out, Run { count: 1, value })
+    }
+
+    fn append_chunk<'a>(
+        state: &mut Self::State<'a>,
+        out: &mut SlabWriter<'a>,
+        chunk: Run<'a, Self::Item>,
     );
+
+    fn copy_between<'a>(
+        slab: &'a Slab,
+        out: &mut SlabWriter<'a>,
+        c0: Self,
+        c1: Self,
+        run: Run<'a, Self::Item>,
+        size: usize,
+    ) -> Self::State<'a>;
+
+    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>);
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self>;
 
@@ -307,7 +383,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
 
     fn splice<E>(slab: &mut Slab, index: usize, values: Vec<E>) -> SpliceResult
     where
-        E: MaybePackable<Self::Item>,
+        E: MaybePackable<Self::Item> + Debug,
     {
         let mut encoder = Self::encode(index, slab);
         for v in &values {
@@ -332,13 +408,17 @@ pub(crate) enum Column {
 
 impl Column {
     pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
-        let start = out.len();
-        // FIXME more complex once i start splitting slabs
-        for s in self.slabs() {
-            out.extend(s.as_ref())
+        match self {
+            Self::Actor(col) => col.write(out),
+            Self::Str(col) => col.write(out),
+            Self::Integer(col) => col.write(out),
+            Self::Delta(col) => col.write(out),
+            Self::Bool(col) => col.write(out),
+            Self::ValueMeta(col) => col.write(out),
+            Self::Value(col) => col.write(out),
+            Self::Group(col) => col.write(out),
+            Self::Action(col) => col.write(out),
         }
-        let end = out.len();
-        start..end
     }
 
     pub(crate) fn slabs(&self) -> &[Slab] {
@@ -452,6 +532,7 @@ pub(crate) enum ReadRawError {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::RleCursor;
     use super::*;
     use rand::prelude::*;
     use rand::rngs::SmallRng;
@@ -851,7 +932,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
-        let mut col = ColumnData::<IntCursor>::new();
+        let mut col = ColumnData::<RleCursor<{ usize::MAX }, u64>>::new();
         let mut rng = make_rng();
         for i in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
@@ -862,7 +943,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
-        let mut col = ColumnData::<StrCursor>::new();
+        let mut col = ColumnData::<RleCursor<{ usize::MAX }, str>>::new();
         let mut rng = make_rng();
         for i in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);

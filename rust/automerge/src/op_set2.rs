@@ -10,7 +10,7 @@ pub(crate) mod raw;
 pub(crate) mod rle;
 pub(crate) mod slab;
 mod types;
-pub(crate) use types::Key;
+pub(crate) use types::{Action, ActorIdx, Key};
 
 pub(crate) use boolean::BooleanCursor;
 pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};
@@ -21,4 +21,4 @@ pub(crate) use op_set::OpSet;
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;
 pub(crate) use rle::{IntCursor, RleCursor, RleState, StrCursor};
-pub(crate) use slab::{Slab, SlabIter, WritableSlab};
+pub(crate) use slab::{Slab, SlabIter, SlabWriter, WritableSlab, WriteAction, WriteOp};

@@ -1,4 +1,4 @@
-use super::{ColExport, ColumnCursor, Encoder, PackError, Run, Slab, WritableSlab};
+use super::{ColExport, ColumnCursor, Encoder, PackError, Run, Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct RawCursor {
@@ -11,23 +11,44 @@ impl ColumnCursor for RawCursor {
     type PostState<'a> = ();
     type Export = Vec<u8>;
 
-    fn finish<'a>(slab: &'a Slab, out: &mut WritableSlab, state: (), post: (), cursor: Self) {}
+    fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: ()) -> () {
+        writer.flush_bytes(slab.as_ref(), slab.len())
+    }
 
-    fn append<'a>(state: &mut Self::State<'a>, slab: &mut WritableSlab, item: Option<&[u8]>) {
-        if let Some(i) = item {
-            slab.append_bytes(i);
-            slab.add_len(i.len());
+    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'_>, state: (), post: (), cursor: Self) {}
+
+    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {}
+
+    fn copy_between<'a>(
+        _slab: &'a Slab,
+        _out: &mut SlabWriter<'a>,
+        _c0: Self,
+        _c1: Self,
+        _run: Run<'a, [u8]>,
+        _size: usize,
+    ) -> Self::State<'a> {
+        // only called from write and we override that
+    }
+
+    fn append_chunk<'a>(
+        state: &mut Self::State<'a>,
+        slab: &mut SlabWriter<'a>,
+        run: Run<'a, [u8]>,
+    ) {
+        for _ in 0..run.count {
+            if let Some(i) = run.value {
+                slab.flush_bytes(i, i.len());
+            }
         }
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
-        let current = WritableSlab::new(&slab.as_ref()[0..index], index);
+        let current = SlabWriter::new(usize::MAX);
         let state = ();
         let post = ();
         let cursor = Self { offset: index };
         Encoder {
             slab,
-            results: vec![],
             current,
             post,
             state,

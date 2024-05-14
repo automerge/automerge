@@ -1,6 +1,6 @@
 use super::{
     ColExport, ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab,
-    WritableSlab,
+    SlabWriter, WriteOp,
 };
 
 #[derive(Debug)]
@@ -50,9 +50,19 @@ impl From<u64> for ValueMeta {
     }
 }
 
+impl<'a> Into<WriteOp<'a>> for ValueMeta {
+    fn into(self) -> WriteOp<'static> {
+        WriteOp::UInt(self.0)
+    }
+}
+
 impl Packable for ValueMeta {
     type Unpacked<'a> = ValueMeta;
     type Owned = ValueMeta;
+
+    fn write<'a>(item: ValueMeta) -> WriteOp<'a> {
+        WriteOp::UInt(item.0)
+    }
 
     fn width<'a>(item: ValueMeta) -> usize {
         u64::width(item.0)
@@ -90,7 +100,7 @@ impl ColumnCursor for MetaCursor {
 
     fn finish<'a>(
         slab: &'a Slab,
-        out: &mut WritableSlab,
+        out: &mut SlabWriter<'a>,
         state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
@@ -98,8 +108,27 @@ impl ColumnCursor for MetaCursor {
         SubCursor::finish(slab, out, state, post, cursor.rle)
     }
 
-    fn append<'a>(state: &mut Self::State<'a>, slab: &mut WritableSlab, item: Option<ValueMeta>) {
-        SubCursor::append(state, slab, item)
+    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
+        SubCursor::flush_state(out, state)
+    }
+
+    fn copy_between<'a>(
+        slab: &'a Slab,
+        out: &mut SlabWriter<'a>,
+        c0: Self,
+        c1: Self,
+        run: Run<'a, ValueMeta>,
+        size: usize,
+    ) -> Self::State<'a> {
+        SubCursor::copy_between(slab, out, c0.rle, c1.rle, run, size)
+    }
+
+    fn append_chunk<'a>(
+        state: &mut Self::State<'a>,
+        slab: &mut SlabWriter<'a>,
+        run: Run<'a, ValueMeta>,
+    ) {
+        SubCursor::append_chunk(state, slab, run)
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
@@ -113,7 +142,6 @@ impl ColumnCursor for MetaCursor {
 
         Encoder {
             slab,
-            results: vec![],
             current,
             post,
             state,

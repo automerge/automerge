@@ -1,3 +1,4 @@
+use super::WriteOp;
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
@@ -28,9 +29,10 @@ impl PackError {
 }
 
 pub(crate) trait Packable: PartialEq + Debug {
-    type Unpacked<'a>: Clone + Copy + Debug + PartialEq + ToOwned + Borrow<Self>;
+    type Unpacked<'a>: Clone + Copy + Debug + PartialEq + ToOwned + Borrow<Self> + Into<WriteOp<'a>>;
     type Owned: Clone + PartialEq + Debug;
 
+    fn write<'a>(item: Self::Unpacked<'a>) -> WriteOp<'a>;
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
     fn width<'a>(item: Self::Unpacked<'a>) -> usize;
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
@@ -40,6 +42,10 @@ pub(crate) trait Packable: PartialEq + Debug {
 impl Packable for i64 {
     type Unpacked<'a> = i64;
     type Owned = i64;
+
+    fn write<'a>(item: i64) -> WriteOp<'a> {
+        WriteOp::Int(item)
+    }
 
     fn own<'a>(item: i64) -> i64 {
         item
@@ -63,6 +69,10 @@ impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
 
+    fn write<'a>(item: u64) -> WriteOp<'a> {
+        WriteOp::UInt(item)
+    }
+
     fn width<'a>(item: u64) -> usize {
         ulebsize(item) as usize
     }
@@ -85,6 +95,10 @@ impl Packable for usize {
     type Unpacked<'a> = usize;
     type Owned = usize;
 
+    fn write<'a>(item: usize) -> WriteOp<'a> {
+        WriteOp::UInt(item as u64)
+    }
+
     fn width<'a>(item: usize) -> usize {
         ulebsize(item as u64) as usize
     }
@@ -106,6 +120,10 @@ impl Packable for bool {
     type Unpacked<'a> = bool;
     type Owned = bool;
 
+    fn write<'a>(item: bool) -> WriteOp<'a> {
+        panic!()
+    }
+
     fn own<'a>(item: bool) -> bool {
         item
     }
@@ -126,6 +144,10 @@ impl Packable for bool {
 impl Packable for [u8] {
     type Unpacked<'a> = &'a [u8];
     type Owned = Vec<u8>;
+
+    fn write<'a>(item: Self::Unpacked<'a>) -> WriteOp<'a> {
+        WriteOp::Bytes(item)
+    }
 
     fn own<'a>(item: &'a [u8]) -> Vec<u8> {
         item.to_vec()
@@ -153,6 +175,10 @@ impl Packable for [u8] {
 impl Packable for str {
     type Unpacked<'a> = &'a str;
     type Owned = String;
+
+    fn write<'a>(item: Self::Unpacked<'a>) -> WriteOp<'a> {
+        WriteOp::Bytes(item.as_bytes())
+    }
 
     fn width<'a>(item: &'a str) -> usize {
         <[u8]>::width(item.as_bytes())
@@ -254,6 +280,10 @@ impl Packable for Action {
 
     type Owned = Action;
 
+    fn write<'a>(item: Action) -> WriteOp<'a> {
+        WriteOp::UInt(u64::from(item))
+    }
+
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
         item
     }
@@ -284,17 +314,7 @@ impl Packable for Action {
     }
 
     fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
-        let as_u64: u64 = match element {
-            Action::MakeMap => 0,
-            Action::MakeList => 1,
-            Action::MakeText => 2,
-            Action::MakeTable => 6,
-            Action::Set => 3,
-            Action::Delete => 4,
-            Action::Increment => 5,
-            Action::Mark => 7,
-        };
-        u64::pack(buff, &as_u64)
+        u64::pack(buff, &u64::from(*element))
     }
 }
 
@@ -302,6 +322,10 @@ impl Packable for ActorIdx {
     type Unpacked<'a> = ActorIdx;
 
     type Owned = ActorIdx;
+
+    fn write<'a>(item: ActorIdx) -> WriteOp<'a> {
+        WriteOp::UInt(u64::from(item))
+    }
 
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
         item

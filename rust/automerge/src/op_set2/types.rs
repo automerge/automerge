@@ -43,6 +43,21 @@ pub(crate) enum Action {
     Mark,
 }
 
+impl From<Action> for u64 {
+    fn from(val: Action) -> Self {
+        match val {
+            Action::MakeMap => 0,
+            Action::MakeList => 1,
+            Action::MakeText => 2,
+            Action::MakeTable => 6,
+            Action::Set => 3,
+            Action::Delete => 4,
+            Action::Increment => 5,
+            Action::Mark => 7,
+        }
+    }
+}
+
 pub(crate) enum OpType<'a> {
     Make(ObjType),
     Delete,
@@ -95,16 +110,6 @@ impl<'a> OpType<'a> {
     }
 }
 
-//impl<'a> PartialEq<ExKey<'a>> for Key<'a> {
-//fn eq(&self, other: &ExKey<'a>) -> bool {
-//match (self, other) {
-//(Key::Map(a), ExKey::Map(b)) => a == &b.as_bytes(),
-//(Key::Seq(a), ExKey::Seq(b)) => a == b,
-//_ => false,
-//}
-//}
-//}
-
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) enum ScalarValue<'a> {
     Bytes(&'a [u8]),
@@ -151,7 +156,7 @@ impl<'a> ScalarValue<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum ReadScalarError {
+pub(crate) enum ReadScalarError {
     #[error("invalid type code: {0}")]
     InvalidTypeCode(u8),
     #[error("invalid uleb128")]

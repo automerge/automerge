@@ -1,5 +1,5 @@
 use super::{
-    ColExport, ColumnCursor, Encoder, PackError, RleCursor, RleState, Run, Slab, WritableSlab,
+    ColExport, ColumnCursor, Encoder, PackError, RleCursor, RleState, Run, Slab, SlabWriter,
 };
 
 const B: usize = usize::MAX;
@@ -20,7 +20,7 @@ impl ColumnCursor for GroupCursor {
 
     fn finish<'a>(
         slab: &'a Slab,
-        out: &mut WritableSlab,
+        out: &mut SlabWriter<'a>,
         state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
@@ -28,8 +28,23 @@ impl ColumnCursor for GroupCursor {
         SubCursor::finish(slab, out, state, post, cursor.rle)
     }
 
-    fn append<'a>(state: &mut Self::State<'a>, slab: &mut WritableSlab, item: Option<u64>) {
-        SubCursor::append(state, slab, item)
+    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
+        SubCursor::flush_state(out, state)
+    }
+
+    fn copy_between<'a>(
+        slab: &'a Slab,
+        out: &mut SlabWriter<'a>,
+        c0: Self,
+        c1: Self,
+        run: Run<'a, u64>,
+        size: usize,
+    ) -> Self::State<'a> {
+        SubCursor::copy_between(slab, out, c0.rle, c1.rle, run, size)
+    }
+
+    fn append_chunk<'a>(state: &mut Self::State<'a>, slab: &mut SlabWriter<'a>, run: Run<'a, u64>) {
+        SubCursor::append_chunk(state, slab, run)
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
@@ -43,7 +58,6 @@ impl ColumnCursor for GroupCursor {
 
         Encoder {
             slab,
-            results: vec![],
             current,
             post,
             state,
