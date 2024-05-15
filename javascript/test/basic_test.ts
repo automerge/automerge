@@ -233,6 +233,7 @@ describe("Automerge", () => {
       assert.deepEqual(doc3.list[2], 3)
       assert.deepEqual(doc3, { list: [1, "a", 3] })
     })
+
     it("handle simple lists", () => {
       let doc1 = Automerge.init<any>()
       let doc2 = Automerge.change(doc1, d => {
@@ -243,6 +244,7 @@ describe("Automerge", () => {
       let [docB2] = Automerge.applyChanges(docB1, changes)
       assert.deepEqual(docB2, doc2)
     })
+
     it("handle text", () => {
       let doc1 = Automerge.init<any>()
       let doc2 = Automerge.change(doc1, d => {
@@ -571,6 +573,7 @@ describe("Automerge", () => {
       assert.notEqual(Automerge.getObjectId(s1.map), null)
     })
   })
+
   describe("load", () => {
     it("can load a doc without checking the heads", () => {
       assert.throws(() => {
@@ -580,6 +583,7 @@ describe("Automerge", () => {
       assert.deepEqual(doc, { count: 260 })
     })
   })
+
   describe("diff", () => {
     it("can diff a document with before and hafter heads", () => {
       let doc = Automerge.from({ value: "" })
@@ -599,6 +603,7 @@ describe("Automerge", () => {
       ])
     })
   })
+
   describe("cursor", () => {
     it("can use cursors in splice calls", () => {
       let doc = Automerge.from({
@@ -723,6 +728,7 @@ describe("Automerge", () => {
       })
     })
   })
+
   describe("saveSince", () => {
     it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
       let doc = Automerge.init<any>()
@@ -736,6 +742,7 @@ describe("Automerge", () => {
       assert.deepEqual(incremental, since)
     })
   })
+
   describe("any function which takes a path should not mutate the argument path", () => {
     let doc: Automerge.Doc<{ wrapper: { text: string } }>
     let path: Automerge.Prop[]
@@ -799,6 +806,43 @@ describe("Automerge", () => {
     it("marksAt", () => {
       Automerge.marksAt(doc, path, 0)
       assert.deepEqual(path, pathCopy)
+    })
+  })
+
+  describe("independent creation of documents", () => {
+    // These tests document the behavior of Automerge when two peers create documents independently
+    // and then try to merge them.
+
+    it("merges non-conflicting fields", () => {
+      let doc1 = Automerge.init<any>()
+      let doc2 = Automerge.init<any>()
+      doc1 = Automerge.change(doc1, d => (d.x = 1))
+      doc2 = Automerge.change(doc2, d => (d.y = 2))
+      const merged = Automerge.merge(doc1, doc2)
+      // both properties are preserved
+      assert.deepEqual(merged, { x: 1, y: 2 })
+    })
+
+    it("merges non-conflicting fields, using Automerge.from", () => {
+      // shorthand for the above
+      let doc1 = Automerge.from<any>({ x: 1 })
+      let doc2 = Automerge.from<any>({ y: 2 })
+      const merged = Automerge.merge(doc1, doc2)
+      // both properties are preserved
+      assert.deepEqual(merged, { x: 1, y: 2 })
+    })
+
+    it("can't merge independently created arrays", () => {
+      let doc1 = Automerge.from<any>({ list: [] })
+      let doc2 = Automerge.from<any>({ list: [] })
+      let doc1a = Automerge.change(doc1, d => d.list.push(1))
+      let doc2a = Automerge.change(doc2, d => d.list.push(2))
+      const merged = Automerge.merge(doc1a, doc2a)
+      // the arrays are not merged
+      assert.notDeepEqual(merged.list.sort(), [1, 2])
+      // the array will be either [1] or [2]
+      assert.equal(merged.list.length, 1)
+      assert.equal(merged.list[0] === 1 || merged.list[0] === 2, true)
     })
   })
 })
