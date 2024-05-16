@@ -1,6 +1,8 @@
+use crate::columnar::encoding::leb128::{lebsize, ulebsize};
+
 use super::{
-    ColExport, ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab,
-    WritableSlab,
+    types::ScalarValue, ColExport, ColumnCursor, Encoder, MaybePackable, PackError, Packable,
+    RleCursor, RleState, Run, Slab, WritableSlab,
 };
 
 #[derive(Debug)]
@@ -50,6 +52,50 @@ impl From<u64> for ValueMeta {
     }
 }
 
+impl From<&crate::ScalarValue> for ValueMeta {
+    fn from(p: &crate::ScalarValue) -> Self {
+        match p {
+            crate::ScalarValue::Uint(i) => Self((ulebsize(*i) << 4) | 3),
+            crate::ScalarValue::Int(i) => Self((lebsize(*i) << 4) | 4),
+            crate::ScalarValue::Null => Self(0),
+            crate::ScalarValue::Boolean(b) => Self(match b {
+                false => 1,
+                true => 2,
+            }),
+            crate::ScalarValue::Timestamp(i) => Self((lebsize(*i) << 4) | 9),
+            crate::ScalarValue::F64(_) => Self((8 << 4) | 5),
+            crate::ScalarValue::Counter(i) => Self((lebsize(i.start) << 4) | 8),
+            crate::ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
+            crate::ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
+            crate::ScalarValue::Unknown { type_code, bytes } => {
+                Self(((bytes.len() as u64) << 4) | (*type_code as u64))
+            }
+        }
+    }
+}
+
+impl<'a> From<&'a ScalarValue<'a>> for ValueMeta {
+    fn from(p: &'a ScalarValue<'a>) -> Self {
+        match p {
+            ScalarValue::Uint(i) => Self((ulebsize(*i) << 4) | 3),
+            ScalarValue::Int(i) => Self((lebsize(*i) << 4) | 4),
+            ScalarValue::Null => Self(0),
+            ScalarValue::Boolean(b) => Self(match b {
+                false => 1,
+                true => 2,
+            }),
+            ScalarValue::Timestamp(i) => Self((lebsize(*i) << 4) | 9),
+            ScalarValue::F64(_) => Self((8 << 4) | 5),
+            ScalarValue::Counter(i) => Self((lebsize(*i) << 4) | 8),
+            ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
+            ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
+            ScalarValue::Unknown { type_code, bytes } => {
+                Self(((bytes.len() as u64) << 4) | (*type_code as u64))
+            }
+        }
+    }
+}
+
 impl Packable for ValueMeta {
     type Unpacked<'a> = ValueMeta;
     type Owned = ValueMeta;
@@ -71,6 +117,12 @@ impl Packable for ValueMeta {
     fn pack(buff: &mut Vec<u8>, element: &ValueMeta) -> Result<usize, PackError> {
         let len = leb128::write::unsigned(buff, element.0).unwrap();
         Ok(len)
+    }
+}
+
+impl MaybePackable<ValueMeta> for ValueMeta {
+    fn maybe_packable(&self) -> Option<ValueMeta> {
+        Some(*self)
     }
 }
 

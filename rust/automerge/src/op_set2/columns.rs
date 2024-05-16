@@ -11,10 +11,19 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy)]
 pub(crate) struct Run<'a, T: Packable + ?Sized> {
     pub(crate) count: usize,
     pub(crate) value: Option<T::Unpacked<'a>>,
+}
+
+impl<'a, T: Packable + ?Sized> std::clone::Clone for Run<'a, T> {
+    fn clone(&self) -> Self {
+        Run {
+            count: self.count,
+            value: self.value,
+        }
+    }
 }
 
 impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
@@ -64,11 +73,11 @@ pub(crate) struct Encoder<'a, C: ColumnCursor> {
 }
 
 impl<'a, C: ColumnCursor> Encoder<'a, C> {
-    fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) {
+    pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) {
         C::append(&mut self.state, &mut self.current, v);
     }
 
-    fn finish(mut self) -> Vec<Slab> {
+    pub(crate) fn finish(mut self) -> Vec<Slab> {
         C::finish(
             &self.slab,
             &mut self.current,
@@ -78,6 +87,19 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
         );
         self.current.finish()
     }
+}
+
+pub(crate) enum RunStep {
+    Skip,
+    Process,
+}
+
+pub(crate) trait Seek<T: Packable + ?Sized> {
+    type Output;
+    fn process_run<'a, 'b>(&mut self, r: &'b Run<'a, T>) -> RunStep;
+    fn process_element<'a>(&mut self, e: Option<T::Unpacked<'a>>);
+    fn done<'a>(&self) -> bool;
+    fn finish(self) -> Self::Output;
 }
 
 #[derive(Debug, Default, Clone)]
@@ -103,8 +125,6 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
 }
 
 impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C>
-where
-    C::Item: Clone,
 {
     fn clone(&self) -> Self {
         ColumnDataIter {
@@ -119,6 +139,113 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         ColumnDataIter {
             slabs: [].iter(),
             iter: None,
+        }
+    }
+
+    pub(crate) fn advance_by(&mut self, amount: usize) {
+        struct SeekBy<T: ?Sized> {
+            amount_left: usize,
+            _phantom: PhantomData<T>,
+        }
+
+        impl<T: Packable + ?Sized> Seek<T> for SeekBy<T> {
+            type Output = ();
+            fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep {
+                if r.count < self.amount_left {
+                    self.amount_left -= r.count;
+                    RunStep::Skip
+                } else {
+                    RunStep::Process
+                }
+            }
+            fn process_element<'a>(&mut self, _e: Option<<T as Packable>::Unpacked<'a>>) {
+                if self.amount_left > 0 {
+                    self.amount_left -= 1;
+                }
+            }
+            fn done<'a>(&self) -> bool {
+                self.amount_left == 0
+            }
+            fn finish(self) -> Self::Output {
+                ()
+            }
+        }
+
+        self.seek_to(SeekBy {
+            amount_left: amount + 1,
+            _phantom: PhantomData,
+        });
+    }
+
+    pub(crate) fn seek_to_value<'b, V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>>>(
+        &mut self,
+        value: V,
+    ) -> usize
+    where
+        C::Item: Sized,
+    {
+        struct SeekValue<T, V> {
+            target: V,
+            advanced_by: usize,
+            found: bool,
+            _phantom: PhantomData<T>,
+        }
+
+        impl<T, V> Seek<T> for SeekValue<T, V>
+        where
+            T: Packable,
+            V: for<'a> PartialEq<T::Unpacked<'a>>,
+        {
+            type Output = usize;
+            fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
+                if let Some(c) = r.value {
+                    if self.target == c {
+                        return RunStep::Process
+                    }
+                }
+                self.advanced_by += r.count;
+                RunStep::Skip
+            }
+            fn process_element<'b>(&mut self, e: Option<<T as Packable>::Unpacked<'b>>) {
+                if let Some(e) = e {
+                    if self.target == e {
+                        self.found = true;
+                        return;
+                    }
+                }
+                self.advanced_by += 1;
+            }
+            fn done<'b>(&self) -> bool {
+                self.found
+            }
+            fn finish(self) -> Self::Output {
+                self.advanced_by
+            }
+        }
+
+        self.seek_to(SeekValue {
+            target: value,
+            found: false,
+            advanced_by: 0,
+            _phantom: PhantomData,
+        })
+    }
+
+    pub(crate) fn seek_to<S: Seek<C::Item>>(&mut self, mut seek: S) -> S::Output {
+        loop {
+            if let Some(iter) = &mut self.iter {
+                if iter.seek(&mut seek) {
+                    return seek.finish();
+                } else {
+                    self.iter = self.slabs.next().map(|s| s.iter());
+                }
+            } else {
+                if let Some(slab) = self.slabs.next() {
+                    self.iter = Some(slab.iter());
+                } else {
+                    return seek.finish();
+                }
+            }
         }
     }
 }
@@ -203,6 +330,10 @@ impl<C: ColumnCursor> ColumnData<C> {
             slabs: vec![slab],
             _phantom: PhantomData,
         })
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len
     }
 }
 
@@ -467,6 +598,24 @@ pub(crate) mod tests {
         vec.splice(index..index, values.clone());
         col.splice(index, values);
         assert_eq!(vec, &col.to_vec());
+    }
+
+    fn test_advance_by<'a, C: ColumnCursor>(
+        rng: &mut SmallRng,
+        data: &'a [C::Export],
+        col: &'a mut ColumnData<C>,
+    )
+    {
+        let mut advanced_by = 0;
+        let mut iter = col.iter();
+        while advanced_by < data.len() - 1 {
+            let advance_by = rng.gen_range(1..(data.len() - advanced_by));
+            iter.advance_by(advance_by);
+            let expected = data[advance_by + advanced_by..].to_vec();
+            let actual = iter.clone().map(|e| C::export_item(e)).collect::<Vec<_>>();
+            assert_eq!(expected, actual);
+            advanced_by += advance_by;
+        }
     }
 
     #[test]
@@ -860,6 +1009,44 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn column_data_fuzz_test_advance_by_int() {
+        let mut rng = make_rng();
+        for _ in 0..1000 {
+            let mut col = ColumnData::<IntCursor>::new();
+            let values = Option::<u64>::rand_vec(&mut rng);
+            col.splice(0, values.clone());
+            test_advance_by(&mut rng, &values, &mut col);
+        }
+    }
+
+    #[test]
+    fn column_data_fuzz_test_seek_to_value_int() {
+        let mut rng = make_rng();
+        for _ in 0..1000 {
+            let mut col = ColumnData::<IntCursor>::new();
+            let values = Option::<u64>::rand_vec(&mut rng);
+            col.splice(0, values.clone());
+            
+            // choose a random value  from `values` and record the index of the
+            // first occurrence of that value
+            let non_empty_values = values.iter().filter_map(|value| value.clone()).collect::<Vec<_>>();
+            if non_empty_values.len() == 0 {
+                continue;
+            }
+            let target = non_empty_values.choose(&mut rng).unwrap();
+            let index = values.iter().position(|v| v.map(|v| v == *target).unwrap_or(false)).unwrap();
+
+            // Now seek to that index
+            let mut iter = col.iter();
+            let skipped = iter.seek_to_value(*target);
+            assert_eq!(skipped, index);
+            let remaining = iter.collect::<Vec<_>>();
+            let expected = values[index..].to_vec();
+            assert_eq!(remaining, expected);
+        }
+    }
+
+    #[test]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<StrCursor>::new();
@@ -871,6 +1058,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn column_data_fuzz_test_advance_by_str() {
+        let mut rng = make_rng();
+        for _ in 0..1000 {
+            let mut col = ColumnData::<StrCursor>::new();
+            let values = Option::<String>::rand_vec(&mut rng);
+            col.splice(0, values.clone());
+            test_advance_by(&mut rng, &values, &mut col);
+        }
+    }
+
+    #[test]
     fn column_data_fuzz_test_delta() {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursor>::new();
@@ -878,6 +1076,17 @@ pub(crate) mod tests {
         for i in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
+        }
+    }
+
+    #[test]
+    fn column_data_fuzz_test_advance_by_delta() {
+        let mut rng = make_rng();
+        for _ in 0..1000 {
+            let mut col = ColumnData::<DeltaCursor>::new();
+            let values = Option::<i64>::rand_vec(&mut rng);
+            col.splice(0, values.clone());
+            test_advance_by(&mut rng, &values, &mut col);
         }
     }
 
@@ -945,6 +1154,17 @@ pub(crate) mod tests {
         for i in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, 0, values);
+        }
+    }
+
+    #[test]
+    fn column_data_fuzz_test_advance_by_boolean() {
+        let mut rng = make_rng();
+        for _ in 0..1000 {
+            let mut col = ColumnData::<BooleanCursor>::new();
+            let values = bool::rand_vec(&mut rng);
+            col.splice(0, values.clone());
+            test_advance_by(&mut rng, &values, &mut col);
         }
     }
 }

@@ -1,11 +1,10 @@
+use super::columns::{RunStep, Seek};
 use super::{ColumnCursor, PackError, Packable, Run};
 
 use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::ops::{Index, Range};
-use std::sync::Arc;
-
-#[derive(Debug, Clone)]
+use std::sync::Arc; #[derive(Debug, Clone)]
 pub(crate) enum Slab {
     External(ReadOnlySlab),
     Owned(OwnedSlab),
@@ -50,30 +49,110 @@ impl Default for Slab {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Debug)]
 pub(crate) struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
     cursor: C,
-    state: Option<Run<'a, C::Item>>,
+    state: Option<IterState<'a, C::Item>>,
+}
+
+impl<'a, C: ColumnCursor + Clone> std::clone::Clone for SlabIter<'a, C> {
+    fn clone(&self) -> Self {
+        Self {
+            slab: self.slab,
+            cursor: self.cursor.clone(),
+            state: self.state.clone(),
+        }
+    }
+}
+
+#[derive(Copy, Debug)]
+enum IterState<'a, I: Packable + ?Sized> {
+    PoppedRun(Option<I::Unpacked<'a>>, Option<Run<'a, I>>),
+    AtStartOfRun(Run<'a, I>),
+    InRun(Run<'a, I>),
+}
+
+impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::PoppedRun(value, run) => Self::PoppedRun(value.clone(), run.clone()),
+            Self::AtStartOfRun(run) => Self::AtStartOfRun(run.clone()),
+            Self::InRun(run) => Self::InRun(run.clone()),
+        }
+    }
+}
+
+impl<'a, C: ColumnCursor> SlabIter<'a, C> {
+    pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
+        //let mut state = None;
+        //std::mem::swap(&mut state, &mut self.state);
+        loop {
+            println!("seeking in state {:?}", self.state);
+            match self.state.take() {
+                Some(IterState::AtStartOfRun(run)) => {
+                    match seek.process_run(&run) {
+                        RunStep::Skip => {
+                            self.state = None;
+                        }
+                        RunStep::Process => {
+                            let (value, next_state) = self.cursor.pop(run);
+                            self.state = Some(IterState::PoppedRun(value, next_state));
+                        }
+                    }
+                },
+                Some(IterState::InRun(run)) => {
+                    let (value, next_state) = self.cursor.pop(run);
+                    self.state = Some(IterState::PoppedRun(value, next_state));
+                },
+                Some(IterState::PoppedRun(elem, run)) => {
+                    seek.process_element(elem);
+                    if seek.done() {
+                        self.state = Some(IterState::PoppedRun(elem, run));
+                        return true;
+                    }
+                    if let Some(run) = run {
+                        let (value, next_state) = self.cursor.pop(run);
+                        self.state = Some(IterState::PoppedRun(value, next_state));
+                    } else {
+                        self.state = None
+                    }
+                }
+                None => {
+                    if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
+                        self.cursor = cursor;
+                        self.state = Some(IterState::AtStartOfRun(run));
+                    } else {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        println!("iterating in state: {:?}", self.state);
         let mut state = None;
         std::mem::swap(&mut state, &mut self.state);
         match state {
-            Some(run) => {
+            Some(IterState::PoppedRun(value, next_run)) => {
+                self.state = next_run.map(IterState::InRun);
+                Some(value)
+            }
+            Some(IterState::InRun(run) | IterState::AtStartOfRun(run)) => {
                 let (value, next_state) = self.cursor.pop(run);
-                self.state = next_state;
+                self.state = next_state.map(IterState::InRun);
                 Some(value)
             }
             None => {
                 if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
                     self.cursor = cursor;
                     let (value, next_state) = self.cursor.pop(run);
-                    self.state = next_state;
+                    self.state = next_state.map(IterState::InRun);
                     Some(value)
                 } else {
                     self.state = None;
