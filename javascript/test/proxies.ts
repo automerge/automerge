@@ -119,4 +119,12 @@ describe("Proxies", () => {
       })
     })
   })
+
+  describe("structuredClone support", () => {
+    it("should support objects cloned with structuredClone", () => {
+      const doc = from({ map: structuredClone({ key: 'value', number: 2 }) });
+
+      assert.deepEqual(doc, { map: { key: 'value', number: 2 } })
+    });
+  })
 })
