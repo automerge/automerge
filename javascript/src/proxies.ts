@@ -165,7 +165,7 @@ function import_value(
         return [value, "bytes"]
       } else if (value instanceof Array) {
         return [value, "list"]
-      } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
+      } else if (Object.prototype.toString.call(value) === '[object Object]') {
         return [value, "map"]
       } else if (isSameDocument(value, context)) {
         throw new RangeError(
