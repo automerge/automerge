@@ -12,6 +12,18 @@ describe("Proxies", () => {
     doc = from({ list: ["a", "b", "c"] })
   })
 
+  describe("recursive document", () => {
+    it("should throw a useful RangeError when attempting to set a document inside itself", () => {
+      type RecursiveDoc = { [key: string]: RecursiveDoc };
+      const doc = from<RecursiveDoc>({});
+      change(doc, d => {
+        assert.throws(() => {
+          d.doc = doc
+        }, /Cannot create a reference to an existing document object/)
+      })
+    })
+  })
+
   describe("List Iterators", () => {
     it("should return iterable entries", () => {
       change(doc, d => {
