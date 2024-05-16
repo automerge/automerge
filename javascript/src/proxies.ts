@@ -142,6 +142,7 @@ function import_value(
   value: any,
   textV2: boolean,
   path: Prop[],
+  context: Automerge,
 ): ImportedValue {
   switch (typeof value) {
     case "object":
@@ -255,7 +256,8 @@ const MapHandler = {
     if (key === CLEAR_CACHE) {
       return true
     }
-    const [value, datatype] = import_value(val, textV2, [...path, key])
+
+    const [value, datatype] = import_value(val, textV2, [...path, key], context)
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
@@ -374,7 +376,7 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2, [...path, index])
+    const [value, datatype] = import_value(val, textV2, [...path, index], context)
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -588,7 +590,7 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2, [...path, start])
+      const [value, datatype] = import_value(val, textV2, [...path, start], context)
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
@@ -680,7 +682,7 @@ function listMethods<T extends Target>(target: T) {
       }
       const values = vals.map((val, index) => {
         try {
-          return import_value(val, textV2, [...path])
+          return import_value(val, textV2, [...path], context)
         } catch (e) {
           if (e instanceof RangeError) {
             throw new RangeError(`${e.message} at index ${index} in the input`)
