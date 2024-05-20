@@ -1,13 +1,14 @@
 use crate::storage::columns::ColumnId;
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
-use crate::types::ActorId;
+use crate::types::{ActorId, ElemId};
 
-use super::columns::{ColumnDataIter, RawReader};
+use super::columns::{ColumnData, ColumnDataIter, RawReader};
 use super::rle::{ActionCursor, ActorCursor};
+use super::types::ActorIdx;
 use super::{
-    BooleanCursor, Column, DeltaCursor, GroupCursor, IntCursor, MetaCursor, Packable, RawCursor,
-    Slab, StrCursor,
+    BooleanCursor, Column, DeltaCursor, GroupCursor, IntCursor, Key, MetaCursor, Packable,
+    RawCursor, Slab, StrCursor, ValueMeta,
 };
 
 use std::collections::BTreeMap;
@@ -48,6 +49,25 @@ mod ids {
     pub(super) const VALUE_COL_SPEC:          ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
     pub(super) const MARK_NAME_COL_SPEC:      ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
     pub(super) const EXPAND_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
+
+    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 16] = [
+        ID_ACTOR_COL_SPEC,
+        ID_COUNTER_COL_SPEC,
+        OBJ_ID_ACTOR_COL_SPEC,
+        OBJ_ID_COUNTER_COL_SPEC,
+        KEY_ACTOR_COL_SPEC,
+        KEY_COUNTER_COL_SPEC,
+        KEY_STR_COL_SPEC,
+        SUCC_COUNT_COL_SPEC,
+        SUCC_ACTOR_COL_SPEC,
+        SUCC_COUNTER_COL_SPEC,
+        INSERT_COL_SPEC,
+        ACTION_COL_SPEC,
+        VALUE_META_COL_SPEC,
+        VALUE_COL_SPEC,
+        MARK_NAME_COL_SPEC,
+        EXPAND_COL_SPEC,
+    ];
 }
 pub(super) use ids::*;
 
@@ -64,6 +84,18 @@ impl OpSet {
         let data = Arc::new(doc.op_raw_bytes().to_vec());
         let actors = doc.actors().to_vec();
         Self::from_parts(doc.op_metadata.raw_columns(), data, actors)
+    }
+
+    pub(crate) fn from_doc_ops<
+        'a,
+        I: Iterator<Item = super::op::Op<'a>> + ExactSizeIterator + Clone,
+    >(
+        actors: Vec<ActorId>,
+        ops: I,
+    ) -> Self {
+        let len = ops.len();
+        let cols = Columns::new(ops);
+        OpSet { actors, cols, len }
     }
 
     fn from_parts(
@@ -153,6 +185,159 @@ impl OpSet {
 struct Columns(BTreeMap<ColumnSpec, Column>);
 
 impl Columns {
+    fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
+        let mut columns = BTreeMap::new();
+
+        let mut id_actor = ColumnData::<ActorCursor>::new();
+        id_actor.splice(
+            0,
+            ops.clone()
+                .map(|op| ActorIdx::from(op.id.actor()))
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(ID_ACTOR_COL_SPEC, Column::Actor(id_actor));
+
+        let mut id_counter = ColumnData::<DeltaCursor>::new();
+        id_counter.splice(
+            0,
+            ops.clone()
+                .map(|op| op.id.counter() as i64)
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(ID_COUNTER_COL_SPEC, Column::Delta(id_counter));
+
+        let mut obj_actor_col = ColumnData::<ActorCursor>::new();
+        obj_actor_col.splice(
+            0,
+            ops.clone()
+                .map(|op| ActorIdx::from(op.obj.0.actor()))
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(OBJ_ID_ACTOR_COL_SPEC, Column::Actor(obj_actor_col));
+
+        let mut obj_counter_col = ColumnData::<IntCursor>::new();
+        obj_counter_col.splice(
+            0,
+            ops.clone().map(|op| op.obj.0.counter()).collect::<Vec<_>>(),
+        );
+        columns.insert(OBJ_ID_COUNTER_COL_SPEC, Column::Integer(obj_counter_col));
+
+        let mut key_actor = ColumnData::<ActorCursor>::new();
+        key_actor.splice(
+            0,
+            ops.clone()
+                .map(|op| match op.key {
+                    Key::Map(_) => None,
+                    Key::Seq(e) => {
+                        if e.is_head() {
+                            None
+                        } else {
+                            Some(ActorIdx::from(e.0.actor()))
+                        }
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(KEY_ACTOR_COL_SPEC, Column::Actor(key_actor));
+
+        let mut key_counter = ColumnData::<DeltaCursor>::new();
+        key_counter.splice(
+            0,
+            ops.clone()
+                .map(|op| match op.key {
+                    Key::Map(_) => None,
+                    Key::Seq(e) => {
+                        if e.is_head() {
+                            None
+                        } else {
+                            Some(e.0.counter() as i64)
+                        }
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(KEY_COUNTER_COL_SPEC, Column::Delta(key_counter));
+
+        let mut key_str = ColumnData::<StrCursor>::new();
+        key_str.splice(
+            0,
+            ops.clone()
+                .map(|op| match op.key {
+                    Key::Map(s) => Some(s),
+                    Key::Seq(_) => None,
+                })
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(KEY_STR_COL_SPEC, Column::Str(key_str));
+
+        let mut succ_count = ColumnData::<GroupCursor>::new();
+        succ_count.splice(
+            0,
+            ops.clone()
+                .map(|op| op.succ().len() as u64)
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(SUCC_COUNT_COL_SPEC, Column::Group(succ_count));
+
+        let mut succ_actor = ColumnData::<ActorCursor>::new();
+        succ_actor.splice(
+            0,
+            ops.clone()
+                .flat_map(|op| op.succ().map(|n| ActorIdx::from(n.actor())))
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(SUCC_ACTOR_COL_SPEC, Column::Actor(succ_actor));
+
+        let mut succ_counter = ColumnData::<DeltaCursor>::new();
+        succ_counter.splice(
+            0,
+            ops.clone()
+                .flat_map(|op| op.succ().map(|n| n.counter() as i64))
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(SUCC_COUNTER_COL_SPEC, Column::Delta(succ_counter));
+
+        let mut insert = ColumnData::<BooleanCursor>::new();
+        insert.splice(0, ops.clone().map(|op| op.insert).collect::<Vec<_>>());
+        columns.insert(INSERT_COL_SPEC, Column::Bool(insert));
+
+        let mut action = ColumnData::<ActionCursor>::new();
+        action.splice(0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
+        columns.insert(ACTION_COL_SPEC, Column::Action(action));
+
+        let mut value_meta = ColumnData::<MetaCursor>::new();
+        value_meta.splice(
+            0,
+            ops.clone()
+                .map(|op| ValueMeta::from(&op.value))
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(VALUE_META_COL_SPEC, Column::ValueMeta(value_meta));
+
+        let mut value = ColumnData::<RawCursor>::new();
+        let values = ops
+            .clone()
+            .filter_map(|op| op.value.to_raw())
+            .collect::<Vec<_>>();
+        value.splice(0, values);
+        columns.insert(VALUE_COL_SPEC, Column::Value(value));
+
+        let mut mark_name = ColumnData::<StrCursor>::new();
+        mark_name.splice(
+            0,
+            ops.clone()
+                .map(|op| op.mark_name.clone())
+                .collect::<Vec<_>>(),
+        );
+        columns.insert(MARK_NAME_COL_SPEC, Column::Str(mark_name));
+
+        let mut expand = ColumnData::<BooleanCursor>::new();
+        expand.splice(0, ops.clone().map(|op| op.expand).collect::<Vec<_>>());
+        columns.insert(EXPAND_COL_SPEC, Column::Bool(expand));
+
+        Columns(columns)
+    }
+
     fn len(&self) -> usize {
         self.0.get(&ID_ACTOR_COL_SPEC).map(|c| c.len()).unwrap_or(0)
     }
@@ -248,9 +433,21 @@ mod tests {
     };
 
     use crate::{
-        indexed_cache::IndexedCache, storage::Document, transaction::Transactable,
-        types::OpBuilder, AutoCommit, ObjType, OpType,
+        indexed_cache::IndexedCache,
+        op_set2::{
+            columns::ColumnData,
+            op::SuccCursors,
+            rle::ActorCursor,
+            types::{Action, ActorIdx, ScalarValue},
+            ColumnCursor, DeltaCursor, GroupCursor, Key, Slab, WritableSlab,
+        },
+        storage::Document,
+        transaction::Transactable,
+        types::{ObjId, OpBuilder, OpId},
+        ActorId, AutoCommit, ObjType, OpType,
     };
+
+    use super::OpSet;
 
     #[test]
     fn basic_iteration() {
@@ -289,6 +486,155 @@ mod tests {
             panic!("expected document chunk");
         };
         doc
+    }
+
+    #[derive(Debug)]
+    struct TestOp {
+        id: OpId,
+        obj: ObjId,
+        action: Action,
+        value: ScalarValue<'static>,
+        key: Key<'static>,
+        insert: bool,
+        succs: Vec<OpId>,
+        expand: bool,
+        mark_name: Option<&'static str>,
+    }
+
+    impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
+        fn eq(&self, other: &super::super::op::Op<'a>) -> bool {
+            self.id == other.id
+                && self.obj == other.obj
+                && self.action == other.action
+                && self.value == other.value
+                && self.key == other.key
+                && self.insert == other.insert
+                && self.succs == other.succ().collect::<Vec<_>>()
+                && self.expand == other.expand
+                && self.mark_name == other.mark_name
+        }
+    }
+
+    fn with_test_ops<F>(actors: Vec<ActorId>, test_ops: &[TestOp], f: F)
+    where
+        F: FnOnce(super::OpSet),
+    {
+        let mut ops = Vec::new();
+
+        let mut group_data = ColumnData::<GroupCursor>::new();
+        let mut succ_actor_data = ColumnData::<ActorCursor>::new();
+        let mut succ_counter_data = ColumnData::<DeltaCursor>::new();
+        group_data.splice(
+            0,
+            test_ops
+                .iter()
+                .map(|o| o.succs.len() as u64)
+                .collect::<Vec<_>>(),
+        );
+        succ_actor_data.splice(
+            0,
+            test_ops
+                .iter()
+                .flat_map(|o| o.succs.iter().map(|s| ActorIdx::from(s.actor())))
+                .collect::<Vec<_>>(),
+        );
+        succ_counter_data.splice(
+            0,
+            test_ops
+                .iter()
+                .flat_map(|o| o.succs.iter().map(|s| s.counter() as i64))
+                .collect::<Vec<_>>()
+        );
+
+        let mut group_iter = group_data.iter();
+        let mut actor_iter = succ_actor_data.iter();
+        let mut counter_iter = succ_counter_data.iter();
+
+        // first encode the succs
+        for test_op in test_ops {
+            let group_count = group_iter.next().unwrap().unwrap();
+            let op = super::super::op::Op {
+                id: test_op.id,
+                obj: test_op.obj,
+                action: test_op.action,
+                value: test_op.value.clone(),
+                key: test_op.key.clone(),
+                insert: test_op.insert,
+                expand: test_op.expand,
+                mark_name: test_op.mark_name,
+                succ_cursors: SuccCursors {
+                    len: group_count as usize,
+                    succ_counter: counter_iter.clone(),
+                    succ_actor: actor_iter.clone(),
+                },
+            };
+            for _ in 0..group_count {
+                counter_iter.next();
+                actor_iter.next();
+            }
+            ops.push(op);
+        }
+        let op_set = OpSet::from_doc_ops(actors, ops.iter().cloned());
+        f(op_set);
+    }
+
+    #[test]
+    fn seek_to_obj() {
+        let actors = vec![crate::ActorId::random()];
+
+        let ops = vec![
+            TestOp {
+                id: OpId::new(1, 1),
+                obj: ObjId::root(),
+                action: Action::MakeMap,
+                value: ScalarValue::Null,
+                key: Key::Map("key"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(2, 1),
+                obj: ObjId::root(),
+                action: Action::Set,
+                value: ScalarValue::Str("value"),
+                key: Key::Map("key"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(2, 1),
+                obj: ObjId::root(),
+                action: Action::Set,
+                value: ScalarValue::Str("value"),
+                key: Key::Map("key"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(2, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::MakeMap,
+                value: ScalarValue::Null,
+                key: Key::Map("inner_key"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+        ];
+
+        with_test_ops(actors, &ops, |opset| {
+            let mut iter = opset.iter();
+            iter.seek_to_obj(&ObjId(OpId::new(1, 1)));
+            let op = iter.next().unwrap().unwrap();
+            assert_eq!(ops[3], op);
+        });
     }
 
     proptest::proptest! {

@@ -1,13 +1,10 @@
 use crate::{
     op_set2::{
-        self,
-        columns::{ColumnDataIter, RawReader},
-        op::SuccCursors,
-        rle::{ActionCursor, ActorCursor},
-        BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MetaCursor, RleCursor, StrCursor,
-    },
-    types::{ElemId, ObjId, OpId},
+        self, columns::{ColumnDataIter, RawReader, RunStep, Seek}, op::SuccCursors, rle::{ActionCursor, ActorCursor}, types::ActorIdx, BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor
+    }, storage::ColumnSpec, types::{ElemId, ObjId, OpId}
 };
+
+use super::{ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC, INSERT_COL_SPEC, KEY_ACTOR_COL_SPEC, KEY_COUNTER_COL_SPEC, KEY_STR_COL_SPEC, MARK_NAME_COL_SPEC, OBJ_ID_ACTOR_COL_SPEC, OBJ_ID_COUNTER_COL_SPEC, SUCC_ACTOR_COL_SPEC, SUCC_COUNTER_COL_SPEC, SUCC_COUNT_COL_SPEC, VALUE_COL_SPEC, VALUE_META_COL_SPEC};
 
 pub(crate) trait OpReadState {}
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +80,71 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
             mark_name,
             succ_cursors: successors,
         }))
+    }
+
+    pub(crate) fn seek_to_obj(&mut self, obj: &ObjId) {
+        let counter_skipped = self.obj_id_counter.seek_to_value(obj.0.counter() as u64);
+        println!("counter_skipped: {:?}", counter_skipped);
+        self.advance_all_columns_except(&[OBJ_ID_COUNTER_COL_SPEC], counter_skipped);
+        let actor_skipped = self.obj_id_actor.seek_to_value(ActorIdx::from(obj.0.actor()));
+        println!("actor_skipped: {:?}", actor_skipped);
+        self.advance_all_columns_except(&[OBJ_ID_ACTOR_COL_SPEC, OBJ_ID_COUNTER_COL_SPEC], actor_skipped);
+    }
+
+    fn advance_all_columns_except(&mut self, except_columns: &[ColumnSpec], advance_by: usize) {
+        for column_spec in ALL_COLUMN_SPECS {
+            if except_columns.iter().position(|&c| c == column_spec).is_some() {
+                continue;
+            }
+            match column_spec {
+                ID_ACTOR_COL_SPEC => {
+                    self.id_actor.advance_by(advance_by);
+                },
+                ID_COUNTER_COL_SPEC => {
+                    self.id_counter.advance_by(advance_by);
+                }
+                OBJ_ID_ACTOR_COL_SPEC => {
+                    self.obj_id_actor.advance_by(advance_by);
+                }
+                OBJ_ID_COUNTER_COL_SPEC => {
+                    self.obj_id_counter.advance_by(advance_by);
+                }
+                KEY_ACTOR_COL_SPEC => {
+                    self.key_actor.advance_by(advance_by);
+                }
+                KEY_COUNTER_COL_SPEC => {
+                    self.key_counter.advance_by(advance_by);
+                }
+                KEY_STR_COL_SPEC => {
+                    self.key_str.advance_by(advance_by);
+                }
+                SUCC_COUNT_COL_SPEC => {
+                    self.succ_count.advance_by(advance_by);
+                }
+                SUCC_ACTOR_COL_SPEC => {
+                    self.succ_actor.advance_by(advance_by);
+                }
+                SUCC_COUNTER_COL_SPEC => {
+                    self.succ_counter.advance_by(advance_by);
+                }
+                INSERT_COL_SPEC => {
+                    self.insert.advance_by(advance_by);
+                }
+                ACTION_COL_SPEC => {
+                    self.action.advance_by(advance_by);
+                }
+                MARK_NAME_COL_SPEC => {
+                    self.mark_name.advance_by(advance_by);
+                }
+                EXPAND_COL_SPEC => {
+                    self.expand.advance_by(advance_by);
+                }
+                _ => {}
+            };
+        }
+        for _ in 0..advance_by {
+            self.read_value();
+        }
     }
 
     fn read_opid(&mut self) -> Result<Option<OpId>, ReadOpError> {

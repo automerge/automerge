@@ -1,9 +1,9 @@
 use super::WriteOp;
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
-use super::types::{Action, ActorIdx};
+use super::types::{Action, ActorIdx, ScalarValue};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PackError {
@@ -318,6 +318,13 @@ impl Packable for Action {
     }
 }
 
+impl MaybePackable<Action> for Action {
+    fn maybe_packable(&self) -> Option<Action> {
+        Some(*self)
+    }
+}
+
+
 impl Packable for ActorIdx {
     type Unpacked<'a> = ActorIdx;
 
@@ -342,5 +349,23 @@ impl Packable for ActorIdx {
 
     fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
         u64::pack(buff, &(u64::from(*element)))
+    }
+}
+
+impl MaybePackable<ActorIdx> for ActorIdx {
+    fn maybe_packable(&self) -> Option<ActorIdx> {
+        Some(*self)
+    }
+}
+
+impl MaybePackable<ActorIdx> for Option<ActorIdx> {
+    fn maybe_packable(&self) -> Option<ActorIdx> {
+        *self
+    }
+}
+
+impl<'a> MaybePackable<[u8]> for Cow<'a, [u8]> {
+    fn maybe_packable(&self) -> Option<&[u8]> {
+        Some(self.as_ref())
     }
 }
