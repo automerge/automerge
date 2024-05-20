@@ -671,6 +671,23 @@ describe("Automerge", () => {
       assert.deepEqual(doc.value, "🇫🇷🇩🇪")
     })
 
+    it("should indicate that the op is not present when resolving a cursor in a previous version of the document", () => {
+      const doc = Automerge.from({
+        value: "world",
+      })
+
+      const doc1 = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], 0, 0, "hello ")
+      })
+
+      assert.deepEqual(doc1.value, "hello world")
+
+      const cursor = Automerge.getCursor(doc1, ["value"], 0)
+      const index = Automerge.getCursorPosition(doc, ["value"], cursor)
+
+      assert.deepEqual(index, null)
+    })
+
     it("patch callbacks inform where they came from", () => {
       type DocShape = {
         hello: string
