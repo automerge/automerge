@@ -135,8 +135,7 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
     iter: Option<SlabIter<'a, C>>,
 }
 
-impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C>
-{
+impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
     fn clone(&self) -> Self {
         ColumnDataIter {
             slabs: self.slabs.clone(),
@@ -211,7 +210,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
                 if let Some(c) = r.value {
                     if self.target == c {
-                        return RunStep::Process
+                        return RunStep::Process;
                     }
                 }
                 self.advanced_by += r.count;
@@ -676,8 +675,7 @@ pub(crate) mod tests {
         rng: &mut SmallRng,
         data: &'a [C::Export],
         col: &'a mut ColumnData<C>,
-    )
-    {
+    ) {
         let mut advanced_by = 0;
         let mut iter = col.iter();
         while advanced_by < data.len() - 1 {
@@ -1098,15 +1096,21 @@ pub(crate) mod tests {
             let mut col = ColumnData::<IntCursor>::new();
             let values = Option::<u64>::rand_vec(&mut rng);
             col.splice(0, values.clone());
-            
+
             // choose a random value  from `values` and record the index of the
             // first occurrence of that value
-            let non_empty_values = values.iter().filter_map(|value| value.clone()).collect::<Vec<_>>();
+            let non_empty_values = values
+                .iter()
+                .filter_map(|value| value.clone())
+                .collect::<Vec<_>>();
             if non_empty_values.len() == 0 {
                 continue;
             }
             let target = non_empty_values.choose(&mut rng).unwrap();
-            let index = values.iter().position(|v| v.map(|v| v == *target).unwrap_or(false)).unwrap();
+            let index = values
+                .iter()
+                .position(|v| v.map(|v| v == *target).unwrap_or(false))
+                .unwrap();
 
             // Now seek to that index
             let mut iter = col.iter();

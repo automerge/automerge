@@ -1,4 +1,7 @@
-use super::{Action, ActorIdx, ColumnCursor, PackError, Packable, Run, ValueMeta, columns::{RunStep, Seek}};
+use super::{
+    columns::{RunStep, Seek},
+    Action, ActorIdx, ColumnCursor, PackError, Packable, Run, ValueMeta,
+};
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 
 use std::borrow::Borrow;
@@ -428,21 +431,19 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
         loop {
             println!("seeking in state {:?}", self.state);
             match self.state.take() {
-                Some(IterState::AtStartOfRun(run)) => {
-                    match seek.process_run(&run) {
-                        RunStep::Skip => {
-                            self.state = None;
-                        }
-                        RunStep::Process => {
-                            let (value, next_state) = self.cursor.pop(run);
-                            self.state = Some(IterState::PoppedRun(value, next_state));
-                        }
+                Some(IterState::AtStartOfRun(run)) => match seek.process_run(&run) {
+                    RunStep::Skip => {
+                        self.state = None;
+                    }
+                    RunStep::Process => {
+                        let (value, next_state) = self.cursor.pop(run);
+                        self.state = Some(IterState::PoppedRun(value, next_state));
                     }
                 },
                 Some(IterState::InRun(run)) => {
                     let (value, next_state) = self.cursor.pop(run);
                     self.state = Some(IterState::PoppedRun(value, next_state));
-                },
+                }
                 Some(IterState::PoppedRun(elem, run)) => {
                     seek.process_element(elem);
                     if seek.done() {

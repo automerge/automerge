@@ -12,7 +12,7 @@ pub(crate) struct ActorIdx(u64);
 impl From<usize> for ActorIdx {
     fn from(val: usize) -> Self {
         ActorIdx(val as u64)
-    } 
+    }
 }
 
 impl From<u64> for ActorIdx {
@@ -172,18 +172,18 @@ impl<'a> ScalarValue<'a> {
                 let mut out = Vec::new();
                 leb128::write::unsigned(&mut out, *i).unwrap();
                 Some(Cow::Owned(out))
-            },
+            }
             Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
                 let mut out = Vec::new();
                 leb128::write::signed(&mut out, *i).unwrap();
                 Some(Cow::Owned(out))
-            },
+            }
             Self::F64(f) => {
                 let mut out = Vec::new();
                 out.extend_from_slice(&f.to_le_bytes());
                 Some(Cow::Owned(out))
-            },
-            Self::Unknown { type_code, bytes } => Some(Cow::Borrowed(bytes))
+            }
+            Self::Unknown { type_code, bytes } => Some(Cow::Borrowed(bytes)),
         }
     }
 }

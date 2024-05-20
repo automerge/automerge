@@ -543,7 +543,7 @@ mod tests {
             test_ops
                 .iter()
                 .flat_map(|o| o.succs.iter().map(|s| s.counter() as i64))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
 
         let mut group_iter = group_data.iter();

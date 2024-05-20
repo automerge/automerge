@@ -324,7 +324,6 @@ impl MaybePackable<Action> for Action {
     }
 }
 
-
 impl Packable for ActorIdx {
     type Unpacked<'a> = ActorIdx;
 
