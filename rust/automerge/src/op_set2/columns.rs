@@ -8,7 +8,7 @@ use super::{
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 
 #[derive(Debug, Copy)]
@@ -91,10 +91,14 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
 pub(crate) enum RunStep {
     Skip,
     Process,
+    Done,
 }
 
 pub(crate) trait Seek<T: Packable + ?Sized> {
     type Output;
+    fn process_slab(&mut self, r: &Slab) -> RunStep {
+        RunStep::Process
+    }
     fn process_run<'a, 'b>(&mut self, r: &'b Run<'a, T>) -> RunStep;
     fn process_element<'a>(&mut self, e: Option<T::Unpacked<'a>>);
     fn done<'a>(&self) -> bool;
@@ -160,6 +164,14 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
         impl<T: Packable + ?Sized> Seek<T> for SeekBy<T> {
             type Output = ();
+            fn process_slab(&mut self, r: &Slab) -> RunStep {
+                if r.len() < self.amount_left {
+                    self.amount_left -= r.len();
+                    RunStep::Skip
+                } else {
+                    RunStep::Process
+                }
+            }
             fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep {
                 if r.count < self.amount_left {
                     self.amount_left -= r.count;
@@ -185,6 +197,142 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             amount_left: amount + 1,
             _phantom: PhantomData,
         });
+    }
+
+    pub(crate) fn scope_to_value<
+        'b,
+        V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>> + Debug,
+        R: RangeBounds<usize>,
+    >(
+        &mut self,
+        value: V,
+        range: R,
+    ) -> Range<usize>
+    where
+        C::Item: Sized,
+    {
+        #[derive(Debug, PartialEq)]
+        enum ScopeState {
+            Seek,
+            Found,
+        }
+
+        struct ScopeValue<T, V> {
+            target: V,
+            pos: usize,
+            start: usize,
+            max: usize,
+            state: ScopeState,
+            _phantom: PhantomData<T>,
+        }
+
+        impl<T, V> Seek<T> for ScopeValue<T, V>
+        where
+            T: Packable,
+            V: for<'a> PartialEq<T::Unpacked<'a>> + Debug,
+        {
+            type Output = Range<usize>;
+            fn process_slab(&mut self, r: &Slab) -> RunStep {
+                if self.state == ScopeState::Seek {
+                    if self.pos + r.len() <= self.start {
+                        self.pos += r.len();
+                        return RunStep::Skip;
+                    }
+                }
+                RunStep::Process
+            }
+            fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
+                log!("PROCESS RUN state={:?} run={:?}", self.state, r);
+                match self.state {
+                    ScopeState::Seek => {
+                        if self.pos + r.count <= self.start {
+                            // before start
+                            self.pos += r.count;
+                            RunStep::Skip
+                        } else if self.pos >= self.max {
+                            // after max
+                            //self.max = self.start;
+                            self.pos = self.start;
+                            RunStep::Done
+                        } else {
+                            match (&self.target, &r.value) {
+                                (a, Some(b)) if a == b => {
+                                    // found target
+                                    self.state = ScopeState::Found;
+                                    self.start = std::cmp::max(self.start, self.pos);
+                                    self.pos += r.count;
+                                    RunStep::Skip
+                                }
+                                _ => {
+                                    // not found yet
+                                    self.pos += r.count;
+                                    RunStep::Skip
+                                }
+                            }
+                        }
+                    }
+                    ScopeState::Found => {
+                        if self.pos >= self.max {
+                            // past max
+                            //self.pos = self.max;
+                            log!("PAST END");
+                            RunStep::Done
+                        } else {
+                            log!("DONE? {:?} == {:?}", self.target, r.value);
+                            match (&self.target, &r.value) {
+                                (a, Some(b)) if a != b => {
+                                    //self.pos = self.max;
+                                    log!("DONE {}", self.pos);
+                                    RunStep::Done
+                                }
+                                _ => {
+                                    log!("NOT DONE");
+                                    self.pos += r.count;
+                                    RunStep::Skip
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            fn process_element<'b>(&mut self, e: Option<<T as Packable>::Unpacked<'b>>) {
+                panic!()
+            }
+            fn done<'b>(&self) -> bool {
+                panic!()
+            }
+            fn finish(self) -> Self::Output {
+                log!(
+                    "FINISH state={:?} start={}, pos={}, max={}",
+                    self.state,
+                    self.start,
+                    self.pos,
+                    self.max
+                );
+                self.start..std::cmp::min(self.pos, self.max)
+            }
+        }
+
+        let start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(n) => *n,
+            Bound::Excluded(n) => *n - 1,
+        };
+
+        let max = match range.end_bound() {
+            Bound::Unbounded => usize::MAX,
+            Bound::Included(n) => *n + 1,
+            Bound::Excluded(n) => *n,
+        };
+
+        self.seek_to(ScopeValue {
+            target: value,
+            state: ScopeState::Seek,
+            start,
+            max,
+            pos: 0,
+            _phantom: PhantomData,
+        })
     }
 
     pub(crate) fn seek_to_value<'b, V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>>>(
@@ -1242,5 +1390,36 @@ pub(crate) mod tests {
             col.splice(0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);
         }
+    }
+
+    #[test]
+    fn column_data_scope_to_value() {
+        let mut data = vec![
+            2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 8, 8,
+        ];
+        let mut col = ColumnData::<RleCursor<4, u64>>::new();
+        col.splice(0, data);
+        let range = col.iter().scope_to_value(4, ..);
+        assert_eq!(range, 7..15);
+
+        let range = col.iter().scope_to_value(4, ..11);
+        assert_eq!(range, 7..11);
+        let range = col.iter().scope_to_value(4, ..8);
+        assert_eq!(range, 7..8);
+        let range = col.iter().scope_to_value(4, 0..1);
+        assert_eq!(range, 0..0);
+        let range = col.iter().scope_to_value(4, 8..9);
+        assert_eq!(range, 8..9);
+        let range = col.iter().scope_to_value(4, 9..);
+        assert_eq!(range, 9..15);
+        let range = col.iter().scope_to_value(4, 14..16);
+        assert_eq!(range, 14..15);
+
+        let range = col.iter().scope_to_value(2, ..);
+        assert_eq!(range, 0..3);
+        let range = col.iter().scope_to_value(7, ..);
+        assert_eq!(range, 22..23);
+        let range = col.iter().scope_to_value(8, ..);
+        assert_eq!(range, 23..25);
     }
 }

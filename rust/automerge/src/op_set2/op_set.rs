@@ -12,6 +12,7 @@ use super::{
 };
 
 use std::collections::BTreeMap;
+use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod iter;

@@ -428,6 +428,15 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
         //let mut state = None;
         //std::mem::swap(&mut state, &mut self.state);
+        match seek.process_slab(self.slab) {
+            RunStep::Skip => {
+                return false;
+            }
+            RunStep::Done => {
+                return true;
+            }
+            _ => (),
+        }
         loop {
             println!("seeking in state {:?}", self.state);
             match self.state.take() {
@@ -438,6 +447,9 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
                     RunStep::Process => {
                         let (value, next_state) = self.cursor.pop(run);
                         self.state = Some(IterState::PoppedRun(value, next_state));
+                    }
+                    RunStep::Done => {
+                        return true;
                     }
                 },
                 Some(IterState::InRun(run)) => {
