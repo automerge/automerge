@@ -245,8 +245,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         value: V,
         range: R,
     ) -> Range<usize>
-    where
-        C::Item: Sized,
+    //where
+        //C::Item: Sized,
     {
         #[derive(Debug, PartialEq)]
         enum ScopeState {
@@ -254,7 +254,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             Found,
         }
 
-        struct ScopeValue<T, V> {
+        struct ScopeValue<T: ?Sized, V> {
             target: V,
             pos: usize,
             start: usize,
@@ -265,7 +265,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
         impl<T, V> Seek<T> for ScopeValue<T, V>
         where
-            T: Packable,
+            T: Packable + ?Sized,
             V: for<'a> PartialEq<T::Unpacked<'a>> + Debug,
         {
             type Output = Range<usize>;
