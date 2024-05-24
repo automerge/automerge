@@ -35,6 +35,9 @@ hex = "^0.4.3"
 itertools = "0.12.0"
 thiserror = "^1.0.16"
 fxhash = "^0.2.1"
+# Increased DEFAULT_GRANULARITY to 4 MB to optimize allocations
+dlmalloc = { git = 'https://github.com/dxos/dlmalloc-rs.git', rev = "913b90814fba0dc2e8673cdd651123fc1fe57117", features = ["global"] }
+
 
 [dependencies.wasm-bindgen]
 version = "^0.2.85"
@@ -52,8 +55,6 @@ wasm-opt = false
 [dependencies.web-sys]
 version = "0.3.22"
 features = ["console"]
-
-
 
 [dev-dependencies]
 futures = "^0.1"
