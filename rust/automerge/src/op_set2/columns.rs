@@ -2,8 +2,8 @@ use crate::storage::{ColumnSpec, ColumnType};
 
 use super::rle::{ActionCursor, ActorCursor};
 use super::{
-    BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MaybePackable, MetaCursor, PackError,
-    Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
+    types::normalize_range, BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MaybePackable,
+    MetaCursor, PackError, Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
 };
 
 use std::fmt::Debug;
@@ -36,6 +36,12 @@ impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
                 value: r.value,
             }
         }
+    }
+}
+
+impl<'a, T: Packable + ?Sized> Run<'a, T> {
+    pub(crate) fn group(&self) -> usize {
+        self.count * self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
     }
 }
 
@@ -113,6 +119,17 @@ pub(crate) struct ColumnData<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn seek(&self, mut pos: usize) -> (Option<Run<'_, C::Item>>, C) {
+        for slab in &self.slabs {
+            if slab.len() <= pos {
+                pos -= slab.len();
+            } else {
+                return C::seek(pos + 1, slab.as_ref());
+            }
+        }
+        panic!()
+    }
+
     pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         let mut state = C::State::default();
@@ -125,16 +142,30 @@ impl<C: ColumnCursor> ColumnData<C> {
         start..end
     }
 
-    pub(crate) fn raw_reader<'a>(&'a self) -> RawReader<'a> {
-        RawReader {
+    pub(crate) fn raw_reader<'a>(&'a self, mut advance: usize) -> RawReader<'a> {
+        let mut reader = RawReader {
             slabs: self.slabs.iter(),
             current: None,
+        };
+        if advance > 0 {
+            while let Some(s) = reader.slabs.next() {
+                if s.len() < advance {
+                    advance -= s.len();
+                } else {
+                    reader.current = Some((s, advance));
+                    break;
+                }
+            }
         }
+        reader
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
+    pos: usize,
+    group: usize,
+    max: usize,
     slabs: std::slice::Iter<'a, Slab>,
     iter: Option<SlabIter<'a, C>>,
 }
@@ -142,6 +173,9 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
 impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
     fn clone(&self) -> Self {
         ColumnDataIter {
+            pos: self.pos,
+            max: self.max,
+            group: self.group,
             slabs: self.slabs.clone(),
             iter: self.iter.clone(),
         }
@@ -151,6 +185,9 @@ impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     pub(crate) fn empty() -> Self {
         ColumnDataIter {
+            pos: 0,
+            group: 0,
+            max: usize::MAX,
             slabs: [].iter(),
             iter: None,
         }
@@ -242,7 +279,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 RunStep::Process
             }
             fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
-                log!("PROCESS RUN state={:?} run={:?}", self.state, r);
                 match self.state {
                     ScopeState::Seek => {
                         if self.pos + r.count <= self.start {
@@ -275,18 +311,14 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                         if self.pos >= self.max {
                             // past max
                             //self.pos = self.max;
-                            log!("PAST END");
                             RunStep::Done
                         } else {
-                            log!("DONE? {:?} == {:?}", self.target, r.value);
                             match (&self.target, &r.value) {
                                 (a, Some(b)) if a != b => {
                                     //self.pos = self.max;
-                                    log!("DONE {}", self.pos);
                                     RunStep::Done
                                 }
                                 _ => {
-                                    log!("NOT DONE");
                                     self.pos += r.count;
                                     RunStep::Skip
                                 }
@@ -302,29 +334,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 panic!()
             }
             fn finish(self) -> Self::Output {
-                log!(
-                    "FINISH state={:?} start={}, pos={}, max={}",
-                    self.state,
-                    self.start,
-                    self.pos,
-                    self.max
-                );
                 self.start..std::cmp::min(self.pos, self.max)
             }
         }
 
-        let start = match range.start_bound() {
-            Bound::Unbounded => 0,
-            Bound::Included(n) => *n,
-            Bound::Excluded(n) => *n - 1,
-        };
-
-        let max = match range.end_bound() {
-            Bound::Unbounded => usize::MAX,
-            Bound::Included(n) => *n + 1,
-            Bound::Excluded(n) => *n,
-        };
-
+        let (start, max) = normalize_range(range);
         self.seek_to(ScopeValue {
             target: value,
             state: ScopeState::Seek,
@@ -395,6 +409,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 if iter.seek(&mut seek) {
                     return seek.finish();
                 } else {
+                    self.pos += iter.len();
+                    self.group += iter.max_group();
                     self.iter = self.slabs.next().map(|s| s.iter());
                 }
             } else {
@@ -406,12 +422,38 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             }
         }
     }
+
+    fn len(&self) -> usize {
+        let completed_slabs = self.pos;
+        let future_slabs = self.slabs.clone().map(|s| s.len()).sum::<usize>();
+        let current_slab = self.iter.as_ref().map(|i| i.len()).unwrap_or(0);
+        completed_slabs + future_slabs + current_slab
+    }
+
+    pub(crate) fn pos(&self) -> usize {
+        if let Some(iter) = &self.iter {
+            self.pos + iter.pos()
+        } else {
+            self.pos
+        }
+    }
+
+    pub(crate) fn group(&self) -> usize {
+        if let Some(iter) = &self.iter {
+            self.group + iter.group()
+        } else {
+            self.group
+        }
+    }
 }
 
 impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.max {
+            return None;
+        }
         if self.iter.is_none() {
             if let Some(slab) = self.slabs.next() {
                 self.iter = Some(slab.iter());
@@ -421,6 +463,10 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
             if let Some(item) = iter.next() {
                 Some(item)
             } else {
+                assert_eq!(iter.pos(), iter.cursor.index());
+                assert_eq!(iter.group(), iter.cursor.group());
+                self.pos += iter.pos();
+                self.group += iter.group();
                 self.iter = None;
                 self.next()
             }
@@ -437,9 +483,28 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub(crate) fn iter<'a>(&'a self) -> ColumnDataIter<'a, C> {
         ColumnDataIter::<C> {
+            pos: 0,
+            group: 0,
+            max: usize::MAX,
             slabs: self.slabs.iter(),
             iter: None,
         }
+    }
+
+    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> ColumnDataIter<'a, C> {
+        let mut iter = ColumnDataIter::<C> {
+            pos: 0,
+            group: 0,
+            max: range.end,
+            slabs: self.slabs.iter(),
+            iter: None,
+        };
+        if range.start > 0 {
+            iter.advance_by(range.start);
+            //log!("range.start={:?} iter.group()={}, iter.len()={:?} iter={:?}",range.start, iter.group(), iter.len(), iter);
+            assert_eq!(std::cmp::min(range.start, iter.len()), iter.pos());
+        }
+        iter
     }
 
     pub(crate) fn new() -> Self {
@@ -554,6 +619,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
         writer.write(out);
     }
 
+    // FIXME remove self?
     fn pop<'a>(
         &self,
         mut run: Run<'a, Self::Item>,
@@ -627,6 +693,10 @@ pub(crate) trait ColumnCursor: Debug + Default + Copy {
 
     fn index(&self) -> usize;
 
+    fn group(&self) -> usize {
+        0
+    }
+
     fn seek<'a>(index: usize, data: &'a [u8]) -> (Option<Run<'a, Self::Item>>, Self) {
         if index == 0 {
             return (None, Self::default());
@@ -672,7 +742,7 @@ pub(crate) enum Column {
     Bool(ColumnData<BooleanCursor>),
     ValueMeta(ColumnData<MetaCursor>),
     Value(ColumnData<RawCursor>),
-    Group(ColumnData<GroupCursor>),
+    Group(ColumnData<IntCursor>),
 }
 
 impl Column {
@@ -777,6 +847,7 @@ impl<'a> RawReader<'a> {
                 }
             }
         };
+        log!("READ NEXT {} + {} > {}", offset, length, slab.len());
         if offset + length > slab.len() {
             return Err(ReadRawError::CrossBoundary);
         }

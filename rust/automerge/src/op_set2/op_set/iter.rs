@@ -35,7 +35,7 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) key_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) key_counter: ColumnDataIter<'a, DeltaCursor>,
     pub(super) key_str: ColumnDataIter<'a, StrCursor>,
-    pub(super) succ_count: ColumnDataIter<'a, GroupCursor>,
+    pub(super) succ_count: ColumnDataIter<'a, IntCursor>,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
     pub(super) insert: ColumnDataIter<'a, BooleanCursor>,

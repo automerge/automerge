@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use crate::types;
 use crate::types::{ElemId, ObjType};
 
+use std::ops::{Bound, RangeBounds};
+
 use super::meta::ValueType;
 
 /// An index into an array of actors stored elsewhere
@@ -44,10 +46,10 @@ pub(crate) enum Action {
     MakeMap,
     MakeList,
     MakeText,
-    MakeTable,
     Set,
     Delete,
     Increment,
+    MakeTable,
     Mark,
 }
 
@@ -55,12 +57,12 @@ impl From<Action> for u64 {
     fn from(val: Action) -> Self {
         match val {
             Action::MakeMap => 0,
-            Action::MakeList => 1,
-            Action::MakeText => 2,
-            Action::MakeTable => 6,
-            Action::Set => 3,
-            Action::Delete => 4,
+            Action::Set => 1,
+            Action::MakeList => 2,
+            Action::Delete => 3,
+            Action::MakeText => 4,
             Action::Increment => 5,
+            Action::MakeTable => 6,
             Action::Mark => 7,
         }
     }
@@ -263,4 +265,19 @@ impl<'a> From<i64> for ScalarValue<'a> {
 pub(crate) enum Key<'a> {
     Map(&'a str), // at this point we don't care if its valid UTF8
     Seq(ElemId),
+}
+
+pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
+    let start = match range.start_bound() {
+        Bound::Unbounded => usize::MIN,
+        Bound::Included(n) => *n,
+        Bound::Excluded(n) => *n - 1,
+    };
+
+    let end = match range.end_bound() {
+        Bound::Unbounded => usize::MAX,
+        Bound::Included(n) => *n + 1,
+        Bound::Excluded(n) => *n,
+    };
+    (start, end)
 }

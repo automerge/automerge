@@ -20,12 +20,14 @@ pub(crate) struct ReadOnlySlab {
     data: Arc<Vec<u8>>,
     range: Range<usize>,
     len: usize,
+    group: usize,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct OwnedSlab {
     data: Vec<u8>,
     len: usize,
+    group: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +103,7 @@ impl<'a> Into<WriteOp<'a>> for bool {
 #[derive(Debug, Clone)]
 pub(crate) enum WriteOp<'a> {
     UInt(u64),
+    GroupUInt(u64, usize),
     Int(i64),
     Bytes(&'a [u8]),
     Import(&'a Slab, Range<usize>),
@@ -112,13 +115,21 @@ pub(crate) enum WriteAction<'a> {
     Pair(WriteOp<'a>, WriteOp<'a>),
     Raw(&'a [u8]),
     Run(i64, Vec<WriteOp<'a>>),
-    End(usize),
+    End(usize, usize),
 }
 
 impl<'a> WriteOp<'a> {
+    fn group(&self) -> usize {
+        match self {
+            Self::GroupUInt(_, g) => *g,
+            _ => 0,
+        }
+    }
+
     fn width(&self) -> usize {
         match self {
             Self::UInt(i) => ulebsize(*i) as usize,
+            Self::GroupUInt(i, _) => ulebsize(*i) as usize,
             Self::Int(i) => lebsize(*i) as usize,
             Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
             Self::Import(_, r) => r.end - r.start,
@@ -137,6 +148,9 @@ impl<'a> WriteOp<'a> {
             Self::UInt(i) => {
                 leb128::write::unsigned(buff, i).unwrap();
             }
+            Self::GroupUInt(i, _) => {
+                leb128::write::unsigned(buff, i).unwrap();
+            }
             Self::Int(i) => {
                 leb128::write::signed(buff, i).unwrap();
             }
@@ -152,13 +166,23 @@ impl<'a> WriteOp<'a> {
 }
 
 impl<'a> WriteAction<'a> {
+    fn group(&self) -> usize {
+        match self {
+            Self::Op(op) => op.group(),
+            Self::Pair(op1, op2) => op1.group() + op2.group(),
+            Self::Raw(data) => 0,
+            Self::Run(_, _) => 0, // already added in
+            Self::End(_, _) => 0,
+        }
+    }
+
     fn width(&self) -> usize {
         match self {
             Self::Op(op) => op.width(),
             Self::Pair(op1, op2) => op1.width() + op2.width(),
             Self::Raw(data) => data.len(),
             Self::Run(_, _) => 0, // already added in
-            Self::End(_) => 0,
+            Self::End(_, _) => 0,
         }
     }
 
@@ -183,7 +207,7 @@ impl<'a> WriteAction<'a> {
                     item.write(buff);
                 }
             }
-            Self::End(_) => {}
+            Self::End(_, _) => {}
         }
     }
 }
@@ -194,6 +218,7 @@ pub(crate) struct SlabWriter<'a> {
     lit: Vec<WriteOp<'a>>,
     width: usize,
     items: usize,
+    group: usize,
     lit_items: usize,
     max: usize,
 }
@@ -203,6 +228,7 @@ impl<'a> SlabWriter<'a> {
         SlabWriter {
             max,
             width: 0,
+            group: 0,
             lit_items: 0,
             items: 0,
             actions: vec![],
@@ -229,6 +255,7 @@ impl<'a> SlabWriter<'a> {
             width += 1;
         }
         self.check_copy_overflow(action.copy_width());
+        self.group += action.group();
         self.width += width;
         self.items += items;
         self.lit_items += lit;
@@ -245,6 +272,7 @@ impl<'a> SlabWriter<'a> {
             return;
         }
         self.check_copy_overflow(action.copy_width());
+        self.group += action.group();
         self.width += width;
         self.items += items;
         self.close_lit();
@@ -265,8 +293,9 @@ impl<'a> SlabWriter<'a> {
     fn check_max(&mut self) {
         if self.width >= self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items));
+            self.actions.push(WriteAction::End(self.items, self.group));
             self.width = 0;
+            self.group = 0;
             self.items = 0;
         }
     }
@@ -274,8 +303,9 @@ impl<'a> SlabWriter<'a> {
     fn check_copy_overflow(&mut self, copy: usize) {
         if self.width + copy >= self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items));
+            self.actions.push(WriteAction::End(self.items, self.group));
             self.width = 0;
+            self.group = 0;
             self.items = 0;
         }
     }
@@ -290,17 +320,19 @@ impl<'a> SlabWriter<'a> {
     pub(crate) fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
-            self.actions.push(WriteAction::End(self.items));
+            self.actions.push(WriteAction::End(self.items, self.group));
         }
         let mut result = vec![];
         let mut slab = OwnedSlab {
             data: vec![],
             len: 0,
+            group: 0,
         };
         for action in self.actions {
             match action {
-                WriteAction::End(n) => {
-                    slab.len = n;
+                WriteAction::End(len, group) => {
+                    slab.len = len;
+                    slab.group = group;
                     let mut next = OwnedSlab::default();
                     std::mem::swap(&mut next, &mut slab);
                     result.push(Slab::Owned(next));
@@ -346,7 +378,14 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn flush_after(&mut self, slab: &'a Slab, index: usize, lit: usize, size: usize) {
+    pub(crate) fn flush_after(
+        &mut self,
+        slab: &'a Slab,
+        index: usize,
+        lit: usize,
+        size: usize,
+        group: usize,
+    ) {
         let range = index..slab.byte_len();
         if lit > 0 {
             self.push_lit(WriteOp::Import(slab, range), lit, size, false)
@@ -393,8 +432,9 @@ impl Default for Slab {
 #[derive(Copy, Debug)]
 pub(crate) struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
-    cursor: C,
+    pub(crate) cursor: C,
     state: Option<IterState<'a, C::Item>>,
+    last: Option<Option<<C::Item as Packable>::Unpacked<'a>>>,
 }
 
 impl<'a, C: ColumnCursor + Clone> std::clone::Clone for SlabIter<'a, C> {
@@ -403,6 +443,7 @@ impl<'a, C: ColumnCursor + Clone> std::clone::Clone for SlabIter<'a, C> {
             slab: self.slab,
             cursor: self.cursor.clone(),
             state: self.state.clone(),
+            last: self.last.clone(),
         }
     }
 }
@@ -424,7 +465,52 @@ impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
     }
 }
 
+//impl<'a, C: ColumnCursor> SlabIter<'a, C> {
+impl<'a, I: Packable + ?Sized> IterState<'a, I> {
+    fn group(&self) -> usize {
+        match self {
+            Self::PoppedRun(None, Some(run)) => run.group(),
+            Self::PoppedRun(Some(val), Some(run)) => I::group(*val) + run.group(),
+            Self::PoppedRun(Some(val), None) => I::group(*val),
+            Self::AtStartOfRun(run) => run.group(),
+            Self::InRun(run) => run.group(),
+            _ => 0,
+        }
+    }
+
+    fn state_length(&self) -> usize {
+        match self {
+            Self::PoppedRun(_, Some(run)) => run.count + 1,
+            Self::PoppedRun(_, None) => 1,
+            Self::AtStartOfRun(run) => run.count,
+            Self::InRun(run) => run.count,
+        }
+    }
+}
+
 impl<'a, C: ColumnCursor> SlabIter<'a, C> {
+    pub(crate) fn pos(&self) -> usize {
+        self.cursor.index() - self.state.as_ref().map(|s| s.state_length()).unwrap_or(0)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.slab.len()
+    }
+
+    pub(crate) fn group(&self) -> usize {
+        // FIXME
+        let state_group = self.state.as_ref().map(|s| s.group()).unwrap_or(0);
+        let last_group = match &self.last {
+            Some(Some(val)) => <C::Item>::group(*val),
+            _ => 0,
+        };
+        self.cursor.group() - state_group - last_group
+    }
+
+    pub(crate) fn max_group(&self) -> usize {
+        self.slab.group()
+    }
+
     pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
         //let mut state = None;
         //std::mem::swap(&mut state, &mut self.state);
@@ -438,7 +524,6 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
             _ => (),
         }
         loop {
-            println!("seeking in state {:?}", self.state);
             match self.state.take() {
                 Some(IterState::AtStartOfRun(run)) => match seek.process_run(&run) {
                     RunStep::Skip => {
@@ -486,31 +571,31 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("iterating in state: {:?}", self.state);
         let mut state = None;
         std::mem::swap(&mut state, &mut self.state);
         match state {
             Some(IterState::PoppedRun(value, next_run)) => {
                 self.state = next_run.map(IterState::InRun);
-                Some(value)
+                self.last = Some(value);
             }
             Some(IterState::InRun(run) | IterState::AtStartOfRun(run)) => {
                 let (value, next_state) = self.cursor.pop(run);
                 self.state = next_state.map(IterState::InRun);
-                Some(value)
+                self.last = Some(value);
             }
             None => {
                 if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
                     self.cursor = cursor;
                     let (value, next_state) = self.cursor.pop(run);
                     self.state = next_state.map(IterState::InRun);
-                    Some(value)
+                    self.last = Some(value);
                 } else {
                     self.state = None;
-                    None
+                    self.last = None;
                 }
             }
-        }
+        };
+        self.last
     }
 }
 
@@ -520,6 +605,7 @@ impl Slab {
             slab: self,
             cursor: C::default(),
             state: None,
+            last: None,
         }
     }
 
@@ -539,6 +625,7 @@ impl Slab {
             data,
             range,
             len: index.index(),
+            group: index.group(),
         }))
     }
 
@@ -553,6 +640,13 @@ impl Slab {
         match self {
             Self::External(ReadOnlySlab { len, .. }) => *len,
             Self::Owned(OwnedSlab { len, .. }) => *len,
+        }
+    }
+
+    pub(crate) fn group(&self) -> usize {
+        match self {
+            Self::External(ReadOnlySlab { group, .. }) => *group,
+            Self::Owned(OwnedSlab { group, .. }) => *group,
         }
     }
 }

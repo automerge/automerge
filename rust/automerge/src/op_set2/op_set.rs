@@ -1,4 +1,3 @@
-use crate::storage::columns::ColumnId;
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
 use crate::types::{ActorId, ElemId};
@@ -129,6 +128,42 @@ impl OpSet {
             }
         }
         (raw.into_iter().collect(), data)
+    }
+
+    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_, iter::Unverified> {
+        let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
+        let value = self
+            .cols
+            .get_value_range(VALUE_COL_SPEC, value_meta.group());
+
+        // FIXME - range limit on succ column
+
+        OpIter {
+            index: range.start,
+            id_actor: self.cols.get_actor_range(ID_ACTOR_COL_SPEC, range),
+            id_counter: self
+                .cols
+                .get_delta_integer_range(ID_COUNTER_COL_SPEC, range),
+            obj_id_actor: self.cols.get_actor_range(OBJ_ID_ACTOR_COL_SPEC, range),
+            obj_id_counter: self.cols.get_integer_range(OBJ_ID_COUNTER_COL_SPEC, range),
+            key_actor: self.cols.get_actor_range(KEY_ACTOR_COL_SPEC, range),
+            key_counter: self
+                .cols
+                .get_delta_integer_range(KEY_COUNTER_COL_SPEC, range),
+            key_str: self.cols.get_str_range(KEY_STR_COL_SPEC, range),
+            succ_count: self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range),
+            succ_actor: self.cols.get_actor_range(SUCC_ACTOR_COL_SPEC, range),
+            succ_counter: self
+                .cols
+                .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, range),
+            insert: self.cols.get_boolean_range(INSERT_COL_SPEC, range),
+            action: self.cols.get_action_range(ACTION_COL_SPEC, range),
+            value_meta,
+            value,
+            mark_name: self.cols.get_str_range(MARK_NAME_COL_SPEC, range),
+            expand: self.cols.get_boolean_range(EXPAND_COL_SPEC, range),
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     fn iter(&self) -> OpIter<'_, iter::Unverified> {
@@ -271,7 +306,7 @@ impl Columns {
         );
         columns.insert(KEY_STR_COL_SPEC, Column::Str(key_str));
 
-        let mut succ_count = ColumnData::<GroupCursor>::new();
+        let mut succ_count = ColumnData::<IntCursor>::new();
         succ_count.splice(
             0,
             ops.clone()
@@ -304,6 +339,11 @@ impl Columns {
 
         let mut action = ColumnData::<ActionCursor>::new();
         action.splice(0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
+        log!(
+            "Action IN {:?}",
+            ops.clone().map(|op| op.action).collect::<Vec<_>>()
+        );
+        log!("Action OUT {:?}", action.iter().collect::<Vec<_>>());
         columns.insert(ACTION_COL_SPEC, Column::Action(action));
 
         let mut value_meta = ColumnData::<MetaCursor>::new();
@@ -354,6 +394,17 @@ impl Columns {
         }
     }
 
+    fn get_actor_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, ActorCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Actor(c)) => c.iter_range(range),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
     fn get_coldata(&self, spec: ColumnSpec) -> &[Slab] {
         self.0.get(&spec).unwrap().slabs()
     }
@@ -365,9 +416,31 @@ impl Columns {
         }
     }
 
+    fn get_integer_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, IntCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Integer(c)) => c.iter_range(range),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
     fn get_action(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActionCursor> {
         match self.0.get(&spec) {
             Some(Column::Action(c)) => c.iter(),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
+    fn get_action_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, ActionCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Action(c)) => c.iter_range(range),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -379,9 +452,31 @@ impl Columns {
         }
     }
 
+    fn get_delta_integer_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, DeltaCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Delta(c)) => c.iter_range(range),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
     fn get_str(&self, spec: ColumnSpec) -> ColumnDataIter<'_, StrCursor> {
         match self.0.get(&spec) {
             Some(Column::Str(c)) => c.iter(),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
+    fn get_str_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, StrCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Str(c)) => c.iter_range(range),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -393,6 +488,17 @@ impl Columns {
         }
     }
 
+    fn get_boolean_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, BooleanCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Bool(c)) => c.iter_range(range),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
     fn get_value_meta(&self, spec: ColumnSpec) -> ColumnDataIter<'_, MetaCursor> {
         match self.0.get(&spec) {
             Some(Column::ValueMeta(c)) => c.iter(),
@@ -400,16 +506,46 @@ impl Columns {
         }
     }
 
+    fn get_value_meta_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, MetaCursor> {
+        match self.0.get(&spec) {
+            Some(Column::ValueMeta(c)) => c.iter_range(range),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
     fn get_value(&self, spec: ColumnSpec) -> RawReader<'_> {
         match self.0.get(&spec) {
-            Some(Column::Value(c)) => c.raw_reader(),
+            Some(Column::Value(c)) => c.raw_reader(0),
             _ => RawReader::empty(),
         }
     }
 
-    fn get_group(&self, spec: ColumnSpec) -> ColumnDataIter<'_, GroupCursor> {
+    fn get_value_range(&self, spec: ColumnSpec, advance: usize) -> RawReader<'_> {
+        // FIXME - range??
+        match self.0.get(&spec) {
+            Some(Column::Value(c)) => c.raw_reader(advance),
+            _ => RawReader::empty(),
+        }
+    }
+
+    fn get_group(&self, spec: ColumnSpec) -> ColumnDataIter<'_, IntCursor> {
         match self.0.get(&spec) {
             Some(Column::Group(c)) => c.iter(),
+            _ => ColumnDataIter::empty(),
+        }
+    }
+
+    fn get_group_range(
+        &self,
+        spec: ColumnSpec,
+        range: &Range<usize>,
+    ) -> ColumnDataIter<'_, IntCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Group(c)) => c.iter_range(range),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -425,6 +561,7 @@ impl<'a> Iterator for &'a Columns {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::sync::Arc;
 
     use proptest::{
@@ -451,7 +588,7 @@ mod tests {
     use super::OpSet;
 
     #[test]
-    fn basic_iteration() {
+    fn column_data_basic_iteration() {
         let mut doc = AutoCommit::new();
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "hello").unwrap();
@@ -522,7 +659,7 @@ mod tests {
     {
         let mut ops = Vec::new();
 
-        let mut group_data = ColumnData::<GroupCursor>::new();
+        let mut group_data = ColumnData::<IntCursor>::new();
         let mut succ_actor_data = ColumnData::<ActorCursor>::new();
         let mut succ_counter_data = ColumnData::<DeltaCursor>::new();
         group_data.splice(
@@ -554,6 +691,7 @@ mod tests {
         // first encode the succs
         for test_op in test_ops {
             let group_count = group_iter.next().unwrap().unwrap();
+            //log!("TEST OP ACTION {:?}", test_op.action);
             let op = super::super::op::Op {
                 id: test_op.id,
                 obj: test_op.obj,
@@ -580,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn seek_to_obj() {
+    fn column_data_seek_to_obj() {
         let actors = vec![crate::ActorId::random()];
 
         let ops = vec![
@@ -638,9 +776,90 @@ mod tests {
         });
     }
 
+    #[test]
+    fn column_data_iter_range() {
+        let actors = vec![crate::ActorId::random()];
+
+        let ops = vec![
+            TestOp {
+                id: OpId::new(1, 1),
+                obj: ObjId::root(),
+                action: Action::MakeMap,
+                value: ScalarValue::Null,
+                key: Key::Map("key"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(2, 1),
+                obj: ObjId::root(),
+                action: Action::Set,
+                value: ScalarValue::Str("value1"),
+                key: Key::Map("key1"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(3, 1),
+                obj: ObjId::root(),
+                action: Action::Set,
+                value: ScalarValue::Str("value2"),
+                key: Key::Map("key2"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(4, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("inner_value1"),
+                key: Key::Map("inner_key1"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(5, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("inner_value2"),
+                key: Key::Map("inner_key2"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+        ];
+
+        with_test_ops(actors, &ops, |opset| {
+            let range = opset
+                .cols
+                .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+                .scope_to_value(1, ..);
+            let range = opset
+                .cols
+                .get_actor(OBJ_ID_ACTOR_COL_SPEC)
+                .scope_to_value(ActorIdx::from(1 as usize), range);
+            let mut iter = opset.iter_range(&range);
+            let op = iter.next().unwrap().unwrap();
+            assert_eq!(ops[3], op);
+            let op = iter.next().unwrap().unwrap();
+            assert_eq!(ops[4], op);
+            let op = iter.next();
+            assert!(op.is_none());
+        });
+    }
+
     proptest::proptest! {
         #[test]
-        fn same_as_old_encoding(Scenario{opset, actors, keys} in arbitrary_opset()) {
+        fn column_data_same_as_old_encoding(Scenario{opset, actors, keys} in arbitrary_opset()) {
 
             // encode with old encoders
             let actor_lookup = actors

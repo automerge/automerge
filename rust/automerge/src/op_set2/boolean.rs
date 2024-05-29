@@ -45,16 +45,22 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             } else {
                 out.flush_bool_run(state.count);
                 out.flush_bool_run(post.count);
-                out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index);
+                out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
             }
         } else {
             if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_ref()) {
                 if val.value == Some(state.value) {
                     out.flush_bool_run(state.count + val.count);
-                    out.flush_after(slab, next_cursor.offset, 0, slab.len() - next_cursor.index);
+                    out.flush_after(
+                        slab,
+                        next_cursor.offset,
+                        0,
+                        slab.len() - next_cursor.index,
+                        0,
+                    );
                 } else {
                     out.flush_bool_run(state.count);
-                    out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index);
+                    out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
                 }
             } else {
                 out.flush_bool_run(state.count);

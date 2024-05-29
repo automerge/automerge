@@ -52,9 +52,17 @@ impl From<u64> for ValueMeta {
     }
 }
 
+/*
+impl<'a> Run<'a, ValueMeta> {
+    pub(crate) fn group(&self) -> usize {
+        self.count * self.value.unwrap_or(ValueMeta(0)).length()
+    }
+}
+*/
+
 impl<'a> Into<WriteOp<'a>> for ValueMeta {
     fn into(self) -> WriteOp<'static> {
-        WriteOp::UInt(self.0)
+        WriteOp::GroupUInt(self.0, self.length())
     }
 }
 
@@ -106,8 +114,8 @@ impl Packable for ValueMeta {
     type Unpacked<'a> = ValueMeta;
     type Owned = ValueMeta;
 
-    fn write<'a>(item: ValueMeta) -> WriteOp<'a> {
-        WriteOp::UInt(item.0)
+    fn group(item: ValueMeta) -> usize {
+        item.length()
     }
 
     fn width<'a>(item: ValueMeta) -> usize {
@@ -136,108 +144,54 @@ impl MaybePackable<ValueMeta> for ValueMeta {
     }
 }
 
-type SubCursor = RleCursor<{ usize::MAX }, ValueMeta>;
+pub(crate) type MetaCursor = RleCursor<1024, ValueMeta>;
 
-#[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct MetaCursor {
-    sum: usize,
-    rle: SubCursor,
-}
+#[cfg(test)]
+mod tests {
+    use super::super::columns::ColumnData;
+    use super::*;
 
-impl ColumnCursor for MetaCursor {
-    type Item = ValueMeta;
-    type State<'a> = RleState<'a, ValueMeta>;
-    type PostState<'a> = Option<Run<'a, ValueMeta>>;
-    type Export = Option<ValueMeta>;
+    #[test]
+    fn column_data_meta_group() {
+        let mut data = vec![
+            ValueMeta(1),
+            ValueMeta(6 + (30 << 4)),
+            ValueMeta(6 + (10 << 4)),
+            ValueMeta(3),
+            ValueMeta(4),
+        ];
+        let mut col = ColumnData::<MetaCursor>::new();
+        col.splice(0, data);
 
-    fn finish<'a>(
-        slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
-        state: Self::State<'a>,
-        post: Self::PostState<'a>,
-        cursor: Self,
-    ) {
-        SubCursor::finish(slab, out, state, post, cursor.rle)
-    }
+        let mut iter = col.iter();
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        SubCursor::flush_state(out, state)
-    }
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(1))));
+        assert_eq!(iter.group(), 0);
 
-    fn copy_between<'a>(
-        slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
-        c0: Self,
-        c1: Self,
-        run: Run<'a, ValueMeta>,
-        size: usize,
-    ) -> Self::State<'a> {
-        SubCursor::copy_between(slab, out, c0.rle, c1.rle, run, size)
-    }
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(6 + (30 << 4)))));
+        assert_eq!(iter.group(), 0);
 
-    fn append_chunk<'a>(
-        state: &mut Self::State<'a>,
-        slab: &mut SlabWriter<'a>,
-        run: Run<'a, ValueMeta>,
-    ) {
-        SubCursor::append_chunk(state, slab, run)
-    }
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(6 + (10 << 4)))));
+        assert_eq!(iter.group(), 30);
 
-    fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
-        let (run, cursor) = Self::seek(index, slab.as_ref());
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(3))));
+        assert_eq!(iter.group(), 40);
 
-        let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
+        let mut iter = col.iter();
+        iter.advance_by(3);
 
-        let (state, post) = SubCursor::encode_inner(&cursor.rle, run, index, slab);
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(3))));
+        assert_eq!(iter.group(), 40);
 
-        let current = cursor.rle.start_copy(slab, last_run_count);
+        let mut iter = col.iter_range(&(3..5));
 
-        Encoder {
-            slab,
-            current,
-            post,
-            state,
-            cursor,
-        }
-    }
-
-    fn export_item(item: Option<ValueMeta>) -> Option<ValueMeta> {
-        item
-    }
-
-    fn export(data: &[u8]) -> Vec<ColExport<ValueMeta>> {
-        SubCursor::export(data)
-    }
-
-    fn try_next<'a>(
-        &self,
-        slab: &'a [u8],
-    ) -> Result<Option<(Run<'a, ValueMeta>, Self)>, PackError> {
-        match self.rle.try_next(slab)? {
-            Some((
-                Run {
-                    count,
-                    value: Some(value),
-                },
-                rle,
-            )) => {
-                let sum = self.sum + count * value.length();
-                Ok(Some((
-                    Run {
-                        count,
-                        value: Some(value),
-                    },
-                    Self { sum, rle },
-                )))
-            }
-            Some((Run { count, value }, rle)) => {
-                Ok(Some((Run { count, value }, Self { sum: self.sum, rle })))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    fn index(&self) -> usize {
-        self.rle.index()
+        let value = iter.next();
+        assert_eq!(value, Some(Some(ValueMeta(3))));
+        assert_eq!(iter.group(), 40);
     }
 }

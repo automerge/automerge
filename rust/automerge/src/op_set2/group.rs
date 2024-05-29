@@ -28,6 +28,10 @@ impl ColumnCursor for GroupCursor {
         SubCursor::finish(slab, out, state, post, cursor.rle)
     }
 
+    fn group(&self) -> usize {
+        self.sum as usize
+    }
+
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
         SubCursor::flush_state(out, state)
     }
