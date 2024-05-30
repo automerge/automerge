@@ -136,7 +136,14 @@ impl OpSet {
             .cols
             .get_value_range(VALUE_COL_SPEC, value_meta.group());
 
-        // FIXME - range limit on succ column
+        let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
+        log!("SUCC GROUP = {}", succ_count.group());
+        let succ_actor = self
+            .cols
+            .get_actor_range(SUCC_ACTOR_COL_SPEC, &(succ_count.group()..usize::MAX));
+        let succ_counter = self
+            .cols
+            .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, &(succ_count.group()..usize::MAX));
 
         OpIter {
             index: range.start,
@@ -151,11 +158,9 @@ impl OpSet {
                 .cols
                 .get_delta_integer_range(KEY_COUNTER_COL_SPEC, range),
             key_str: self.cols.get_str_range(KEY_STR_COL_SPEC, range),
-            succ_count: self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range),
-            succ_actor: self.cols.get_actor_range(SUCC_ACTOR_COL_SPEC, range),
-            succ_counter: self
-                .cols
-                .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, range),
+            succ_count,
+            succ_actor,
+            succ_counter,
             insert: self.cols.get_boolean_range(INSERT_COL_SPEC, range),
             action: self.cols.get_action_range(ACTION_COL_SPEC, range),
             value_meta,
@@ -641,13 +646,15 @@ mod tests {
 
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
         fn eq(&self, other: &super::super::op::Op<'a>) -> bool {
+            let other_succ = other.succ().collect::<Vec<_>>();
+            log!("PARTIAL EQ {:?} == {:?}", self.succs, other_succ);
             self.id == other.id
                 && self.obj == other.obj
                 && self.action == other.action
                 && self.value == other.value
                 && self.key == other.key
                 && self.insert == other.insert
-                && self.succs == other.succ().collect::<Vec<_>>()
+                && self.succs == other_succ
                 && self.expand == other.expand
                 && self.mark_name == other.mark_name
         }
@@ -693,6 +700,7 @@ mod tests {
             let group_count = group_iter.next().unwrap().unwrap();
             //log!("TEST OP ACTION {:?}", test_op.action);
             let op = super::super::op::Op {
+                index: 0, // not relevent for this equality test
                 id: test_op.id,
                 obj: test_op.obj,
                 action: test_op.action,
@@ -718,65 +726,6 @@ mod tests {
     }
 
     #[test]
-    fn column_data_seek_to_obj() {
-        let actors = vec![crate::ActorId::random()];
-
-        let ops = vec![
-            TestOp {
-                id: OpId::new(1, 1),
-                obj: ObjId::root(),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: Key::Map("key"),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(2, 1),
-                obj: ObjId::root(),
-                action: Action::Set,
-                value: ScalarValue::Str("value"),
-                key: Key::Map("key"),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(2, 1),
-                obj: ObjId::root(),
-                action: Action::Set,
-                value: ScalarValue::Str("value"),
-                key: Key::Map("key"),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-            TestOp {
-                id: OpId::new(2, 1),
-                obj: ObjId(OpId::new(1, 1)),
-                action: Action::MakeMap,
-                value: ScalarValue::Null,
-                key: Key::Map("inner_key"),
-                insert: false,
-                succs: vec![],
-                expand: false,
-                mark_name: None,
-            },
-        ];
-
-        with_test_ops(actors, &ops, |opset| {
-            let mut iter = opset.iter();
-            iter.seek_to_obj(&ObjId(OpId::new(1, 1)));
-            let op = iter.next().unwrap().unwrap();
-            assert_eq!(ops[3], op);
-        });
-    }
-
-    #[test]
     fn column_data_iter_range() {
         let actors = vec![crate::ActorId::random()];
 
@@ -788,7 +737,7 @@ mod tests {
                 value: ScalarValue::Null,
                 key: Key::Map("key"),
                 insert: false,
-                succs: vec![],
+                succs: vec![OpId::new(5, 1), OpId::new(6, 1), OpId::new(10, 1)],
                 expand: false,
                 mark_name: None,
             },
@@ -810,7 +759,7 @@ mod tests {
                 value: ScalarValue::Str("value2"),
                 key: Key::Map("key2"),
                 insert: false,
-                succs: vec![],
+                succs: vec![OpId::new(6, 1)],
                 expand: false,
                 mark_name: None,
             },
@@ -821,7 +770,7 @@ mod tests {
                 value: ScalarValue::Str("inner_value1"),
                 key: Key::Map("inner_key1"),
                 insert: false,
-                succs: vec![],
+                succs: vec![OpId::new(7, 1), OpId::new(8, 1), OpId::new(9, 1)],
                 expand: false,
                 mark_name: None,
             },

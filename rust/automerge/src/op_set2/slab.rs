@@ -429,32 +429,35 @@ impl Default for Slab {
     }
 }
 
-#[derive(Copy, Debug)]
+#[derive(Debug)]
 pub(crate) struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
     pub(crate) cursor: C,
     state: Option<IterState<'a, C::Item>>,
-    last: Option<Option<<C::Item as Packable>::Unpacked<'a>>>,
+    last_group: usize,
 }
 
-impl<'a, C: ColumnCursor + Clone> std::clone::Clone for SlabIter<'a, C> {
+impl<'a, C: ColumnCursor> Copy for SlabIter<'a, C> {}
+
+impl<'a, C: ColumnCursor> std::clone::Clone for SlabIter<'a, C> {
     fn clone(&self) -> Self {
         Self {
             slab: self.slab,
             cursor: self.cursor.clone(),
             state: self.state.clone(),
-            last: self.last.clone(),
+            last_group: self.last_group,
         }
     }
 }
 
-#[derive(Copy, Debug)]
+#[derive(Debug)]
 enum IterState<'a, I: Packable + ?Sized> {
     PoppedRun(Option<I::Unpacked<'a>>, Option<Run<'a, I>>),
     AtStartOfRun(Run<'a, I>),
     InRun(Run<'a, I>),
 }
 
+impl<'a, I: Packable + ?Sized> Copy for IterState<'a, I> {}
 impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
     fn clone(&self) -> Self {
         match self {
@@ -500,11 +503,7 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     pub(crate) fn group(&self) -> usize {
         // FIXME
         let state_group = self.state.as_ref().map(|s| s.group()).unwrap_or(0);
-        let last_group = match &self.last {
-            Some(Some(val)) => <C::Item>::group(*val),
-            _ => 0,
-        };
-        self.cursor.group() - state_group - last_group
+        self.cursor.group() - state_group - self.last_group
     }
 
     pub(crate) fn max_group(&self) -> usize {
@@ -512,8 +511,6 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 
     pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
-        //let mut state = None;
-        //std::mem::swap(&mut state, &mut self.state);
         match seek.process_slab(self.slab) {
             RunStep::Skip => {
                 return false;
@@ -567,6 +564,13 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 }
 
+fn item_group<'a, P: Packable + ?Sized>(item: &Option<P::Unpacked<'a>>) -> usize {
+    match item {
+        Some(i) => P::group(*i),
+        None => 0,
+    }
+}
+
 impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
@@ -576,26 +580,29 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
         match state {
             Some(IterState::PoppedRun(value, next_run)) => {
                 self.state = next_run.map(IterState::InRun);
-                self.last = Some(value);
+                self.last_group = item_group::<C::Item>(&value);
+                Some(value)
             }
             Some(IterState::InRun(run) | IterState::AtStartOfRun(run)) => {
                 let (value, next_state) = self.cursor.pop(run);
                 self.state = next_state.map(IterState::InRun);
-                self.last = Some(value);
+                self.last_group = item_group::<C::Item>(&value);
+                Some(value)
             }
             None => {
                 if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
                     self.cursor = cursor;
                     let (value, next_state) = self.cursor.pop(run);
                     self.state = next_state.map(IterState::InRun);
-                    self.last = Some(value);
+                    self.last_group = item_group::<C::Item>(&value);
+                    Some(value)
                 } else {
                     self.state = None;
-                    self.last = None;
+                    self.last_group = 0;
+                    None
                 }
             }
-        };
-        self.last
+        }
     }
 }
 
@@ -605,7 +612,7 @@ impl Slab {
             slab: self,
             cursor: C::default(),
             state: None,
-            last: None,
+            last_group: 0,
         }
     }
 

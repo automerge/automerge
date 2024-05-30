@@ -3,10 +3,11 @@ use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::DeltaCursor;
 use crate::op_set;
-use crate::types::{ObjId, OpId};
+use crate::types::{Clock, ElemId, ObjId, OpId};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
+    pub(crate) index: usize,
     pub(crate) id: OpId,
     pub(crate) action: Action,
     pub(crate) obj: ObjId,
@@ -18,23 +19,7 @@ pub(crate) struct Op<'a> {
     pub(super) succ_cursors: SuccCursors<'a>,
 }
 
-impl<'a> Clone for Op<'_> {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            action: self.action,
-            obj: self.obj,
-            key: self.key,
-            insert: self.insert,
-            value: self.value,
-            expand: self.expand,
-            mark_name: self.mark_name,
-            succ_cursors: self.succ_cursors.clone(),
-        }
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(super) struct SuccCursors<'a> {
     pub(super) len: usize,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
@@ -77,6 +62,49 @@ impl<'a> ExactSizeIterator for SuccCursors<'a> {
 impl<'a> Op<'a> {
     pub(crate) fn succ(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator + 'a {
         self.succ_cursors.clone()
+    }
+
+    pub(crate) fn elemid_or_key(&self) -> Key<'a> {
+        if self.insert {
+            Key::Seq(ElemId(self.id))
+        } else {
+            self.key
+        }
+    }
+
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
+        if let Some(clock) = clock {
+            if self.is_inc() || self.is_mark() {
+                false
+            } else {
+                clock.covers(&self.id) && !self.succ().any(|i| clock.covers(&i))
+            }
+        } else {
+            self.visible()
+        }
+    }
+
+    pub(crate) fn visible(&self) -> bool {
+        if self.is_inc() || self.is_mark() {
+            false
+        } else if self.is_counter() {
+            todo!()
+            //self.succ().all(|op| op.is_inc())
+        } else {
+            self.succ().len() == 0
+        }
+    }
+
+    pub(crate) fn is_inc(&self) -> bool {
+        self.action == Action::Increment
+    }
+
+    pub(crate) fn is_counter(&self) -> bool {
+        matches!(&self.value, ScalarValue::Counter(_))
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        self.action == Action::Mark
     }
 }
 

@@ -11,12 +11,13 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 
-#[derive(Debug, Copy)]
+#[derive(Debug)]
 pub(crate) struct Run<'a, P: Packable + ?Sized> {
     pub(crate) count: usize,
     pub(crate) value: Option<P::Unpacked<'a>>,
 }
 
+impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> {}
 impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
     fn clone(&self) -> Self {
         Self {
@@ -161,25 +162,36 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct NextSlab<'a> {
+    slabs: &'a [Slab],
+}
+
+impl<'a> NextSlab<'a> {
+    fn new(slabs: &'a [Slab]) -> Self {
+        Self { slabs }
+    }
+}
+
+impl<'a> Iterator for NextSlab<'a> {
+    type Item = &'a Slab;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.slabs.first();
+        if result.is_some() {
+            self.slabs = &self.slabs[1..];
+        }
+        result
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     group: usize,
     max: usize,
-    slabs: std::slice::Iter<'a, Slab>,
+    slabs: NextSlab<'a>,
     iter: Option<SlabIter<'a, C>>,
-}
-
-impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
-    fn clone(&self) -> Self {
-        ColumnDataIter {
-            pos: self.pos,
-            max: self.max,
-            group: self.group,
-            slabs: self.slabs.clone(),
-            iter: self.iter.clone(),
-        }
-    }
 }
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
@@ -188,7 +200,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             pos: 0,
             group: 0,
             max: usize::MAX,
-            slabs: [].iter(),
+            slabs: NextSlab::new(&[]),
             iter: None,
         }
     }
@@ -411,6 +423,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 } else {
                     self.pos += iter.len();
                     self.group += iter.max_group();
+                    //self.iter = self.slabs.next().map(|s| s.iter());
                     self.iter = self.slabs.next().map(|s| s.iter());
                 }
             } else {
@@ -425,7 +438,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     fn len(&self) -> usize {
         let completed_slabs = self.pos;
-        let future_slabs = self.slabs.clone().map(|s| s.len()).sum::<usize>();
+        let future_slabs = self.slabs.map(|s| s.len()).sum::<usize>();
         let current_slab = self.iter.as_ref().map(|i| i.len()).unwrap_or(0);
         completed_slabs + future_slabs + current_slab
     }
@@ -486,7 +499,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: usize::MAX,
-            slabs: self.slabs.iter(),
+            slabs: NextSlab::new(&self.slabs),
             iter: None,
         }
     }
@@ -496,12 +509,11 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: range.end,
-            slabs: self.slabs.iter(),
+            slabs: NextSlab::new(&self.slabs),
             iter: None,
         };
         if range.start > 0 {
             iter.advance_by(range.start);
-            //log!("range.start={:?} iter.group()={}, iter.len()={:?} iter={:?}",range.start, iter.group(), iter.len(), iter);
             assert_eq!(std::cmp::min(range.start, iter.len()), iter.pos());
         }
         iter
@@ -576,13 +588,12 @@ impl<P: Packable + ?Sized> ColExport<P> {
     }
 }
 
-pub(crate) trait ColumnCursor: Debug + Default + Copy {
+pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
     type Item: Packable + ?Sized;
     type State<'a>: Default;
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
 
-    //fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: Self::State<'a>) -> Self::State<'a>;
     fn write<'a>(
         writer: &mut SlabWriter<'a>,
         slab: &'a Slab,

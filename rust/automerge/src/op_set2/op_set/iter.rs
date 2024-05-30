@@ -2,13 +2,13 @@ use crate::{
     op_set2::{
         self,
         columns::{ColumnDataIter, RawReader, RunStep, Seek},
-        op::SuccCursors,
+        op::{Op, SuccCursors},
         rle::{ActionCursor, ActorCursor},
-        types::ActorIdx,
+        types::{ActorIdx, Key},
         BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
     },
     storage::ColumnSpec,
-    types::{ElemId, ObjId, OpId},
+    types::{Clock, ElemId, ObjId, OpId},
 };
 
 use super::{
@@ -47,6 +47,97 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) _phantom: std::marker::PhantomData<T>,
 }
 
+pub(crate) struct NItemIter<X, I: Iterator<Item = X>> {
+    iter: I,
+    items: usize,
+}
+
+impl<X, I: Iterator<Item = X>> Iterator for NItemIter<X, I> {
+    type Item = X;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.items > 0 {
+            self.items -= 1;
+            self.iter.next()
+        } else {
+            None
+        }
+    }
+}
+
+pub(crate) struct KeyOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
+    iter: I,
+    last_iter: Option<I>,
+    count: usize,
+    last_key: Option<Key<'a>>,
+}
+
+impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
+    type Item = NItemIter<Op<'a>, I>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut last_iter = Some(self.iter.clone());
+        while let Some(op) = self.iter.next() {
+            let key = op.elemid_or_key();
+            if self.last_key != Some(key) {
+                std::mem::swap(&mut last_iter, &mut self.last_iter);
+                let items = self.count;
+                self.last_key = Some(key);
+                self.count = 1;
+                if let Some(iter) = last_iter {
+                    return Some(NItemIter { items, iter });
+                }
+            } else {
+                self.count += 1;
+            }
+        }
+        self.last_iter.clone().map(|iter| NItemIter {
+            items: self.count,
+            iter,
+        })
+    }
+}
+
+pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>>> {
+    iter: I,
+    last_op: Option<Op<'a>>,
+}
+
+impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(op) = self.iter.next() {
+            let mut op = Some(op);
+            std::mem::swap(&mut self.last_op, &mut op);
+            let key1 = self.last_op.as_ref().map(|op| op.elemid_or_key());
+            let key2 = op.as_ref().map(|op| op.elemid_or_key());
+            if key1 != key2 {
+                return op;
+            }
+        }
+        self.last_op
+    }
+}
+
+pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>>> {
+    clock: Option<Clock>,
+    iter: I,
+}
+
+impl<'a, I: Iterator<Item = Op<'a>>> Iterator for VisibleOpIter<'a, I> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(op) = self.iter.next() {
+            if op.visible_at(self.clock.as_ref()) {
+                return Some(op);
+            }
+        }
+        None
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadOpError {
     #[error("invalid OpId: {0}")]
@@ -68,7 +159,7 @@ pub(crate) enum ReadOpError {
 }
 
 impl<'a, T: OpReadState> OpIter<'a, T> {
-    fn try_next(&mut self) -> Result<Option<op_set2::op::Op<'a>>, ReadOpError> {
+    fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
         let Some(id) = self.read_opid()? else {
             return Ok(None);
         };
@@ -80,8 +171,10 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
         let expand = self.read_expand()?;
         let mark_name = self.read_mark_name()?;
         let successors = self.read_successors()?;
+        let index = self.index;
         self.index += 1;
-        Ok(Some(op_set2::op::Op {
+        Ok(Some(Op {
+            index,
             id,
             key,
             insert,
@@ -92,80 +185,6 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
             mark_name,
             succ_cursors: successors,
         }))
-    }
-
-    pub(crate) fn seek_to_obj(&mut self, obj: &ObjId) {
-        let counter_skipped = self.obj_id_counter.seek_to_value(obj.0.counter() as u64);
-        println!("counter_skipped: {:?}", counter_skipped);
-        self.advance_all_columns_except(&[OBJ_ID_COUNTER_COL_SPEC], counter_skipped);
-        let actor_skipped = self
-            .obj_id_actor
-            .seek_to_value(ActorIdx::from(obj.0.actor()));
-        println!("actor_skipped: {:?}", actor_skipped);
-        self.advance_all_columns_except(
-            &[OBJ_ID_ACTOR_COL_SPEC, OBJ_ID_COUNTER_COL_SPEC],
-            actor_skipped,
-        );
-    }
-
-    fn advance_all_columns_except(&mut self, except_columns: &[ColumnSpec], advance_by: usize) {
-        for column_spec in ALL_COLUMN_SPECS {
-            if except_columns
-                .iter()
-                .position(|&c| c == column_spec)
-                .is_some()
-            {
-                continue;
-            }
-            match column_spec {
-                ID_ACTOR_COL_SPEC => {
-                    self.id_actor.advance_by(advance_by);
-                }
-                ID_COUNTER_COL_SPEC => {
-                    self.id_counter.advance_by(advance_by);
-                }
-                OBJ_ID_ACTOR_COL_SPEC => {
-                    self.obj_id_actor.advance_by(advance_by);
-                }
-                OBJ_ID_COUNTER_COL_SPEC => {
-                    self.obj_id_counter.advance_by(advance_by);
-                }
-                KEY_ACTOR_COL_SPEC => {
-                    self.key_actor.advance_by(advance_by);
-                }
-                KEY_COUNTER_COL_SPEC => {
-                    self.key_counter.advance_by(advance_by);
-                }
-                KEY_STR_COL_SPEC => {
-                    self.key_str.advance_by(advance_by);
-                }
-                SUCC_COUNT_COL_SPEC => {
-                    self.succ_count.advance_by(advance_by);
-                }
-                SUCC_ACTOR_COL_SPEC => {
-                    self.succ_actor.advance_by(advance_by);
-                }
-                SUCC_COUNTER_COL_SPEC => {
-                    self.succ_counter.advance_by(advance_by);
-                }
-                INSERT_COL_SPEC => {
-                    self.insert.advance_by(advance_by);
-                }
-                ACTION_COL_SPEC => {
-                    self.action.advance_by(advance_by);
-                }
-                MARK_NAME_COL_SPEC => {
-                    self.mark_name.advance_by(advance_by);
-                }
-                EXPAND_COL_SPEC => {
-                    self.expand.advance_by(advance_by);
-                }
-                _ => {}
-            };
-        }
-        for _ in 0..advance_by {
-            self.read_value();
-        }
     }
 
     fn read_opid(&mut self) -> Result<Option<OpId>, ReadOpError> {
@@ -208,7 +227,6 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
                 ))))
             }
             (None, Some(None), None | Some(None)) => Err(ReadOpError::MissingKey),
-            //_ => Err(ReadOpError::InvalidKey),
             other => {
                 println!("InvalidKey: {:?}", other);
                 Err(ReadOpError::InvalidKey)
@@ -289,7 +307,7 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
 }
 
 impl<'a> Iterator for OpIter<'a, Verified> {
-    type Item = op_set2::op::Op<'a>;
+    type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().unwrap()
@@ -297,7 +315,7 @@ impl<'a> Iterator for OpIter<'a, Verified> {
 }
 
 impl<'a> Iterator for OpIter<'a, Unverified> {
-    type Item = Result<op_set2::op::Op<'a>, ReadOpError>;
+    type Item = Result<Op<'a>, ReadOpError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()

@@ -52,14 +52,6 @@ impl From<u64> for ValueMeta {
     }
 }
 
-/*
-impl<'a> Run<'a, ValueMeta> {
-    pub(crate) fn group(&self) -> usize {
-        self.count * self.value.unwrap_or(ValueMeta(0)).length()
-    }
-}
-*/
-
 impl<'a> Into<WriteOp<'a>> for ValueMeta {
     fn into(self) -> WriteOp<'static> {
         WriteOp::GroupUInt(self.0, self.length())
