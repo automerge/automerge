@@ -572,6 +572,14 @@ impl ObjId {
     pub(crate) fn opid(&self) -> &OpId {
         &self.0
     }
+
+    pub(crate) fn counter(&self) -> u64 {
+        self.0.counter()
+    }
+
+    pub(crate) fn actor(&self) -> usize {
+        self.0.actor()
+    }
 }
 
 #[derive(Debug, Clone)]

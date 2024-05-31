@@ -26,6 +26,7 @@ pub(crate) struct Unverified;
 impl OpReadState for Verified {}
 impl OpReadState for Unverified {}
 
+#[derive(Clone)]
 pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) index: usize,
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
@@ -320,4 +321,12 @@ impl<'a> Iterator for OpIter<'a, Unverified> {
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    //#[test]
+    //fn foo_bar() {}
 }

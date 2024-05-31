@@ -1,6 +1,6 @@
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
-use crate::types::{ActorId, ElemId};
+use crate::types::{ActorId, ElemId, ObjId};
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader};
 use super::rle::{ActionCursor, ActorCursor};
@@ -130,6 +130,34 @@ impl OpSet {
         (raw.into_iter().collect(), data)
     }
 
+    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a, iter::Unverified> {
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter(), ..);
+        let range = self
+            .cols
+            .get_actor(OBJ_ID_ACTOR_COL_SPEC)
+            .scope_to_value(ActorIdx::from(obj.actor() as usize), range);
+        let range = self
+            .cols
+            .get_str(KEY_STR_COL_SPEC)
+            .scope_to_value(prop, range);
+        self.iter_range(&range)
+    }
+
+    pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a, iter::Unverified> {
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter(), ..);
+        let range = self
+            .cols
+            .get_actor(OBJ_ID_ACTOR_COL_SPEC)
+            .scope_to_value(ActorIdx::from(obj.actor() as usize), range);
+        self.iter_range(&range)
+    }
+
     pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_, iter::Unverified> {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
@@ -137,7 +165,6 @@ impl OpSet {
             .get_value_range(VALUE_COL_SPEC, value_meta.group());
 
         let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
-        log!("SUCC GROUP = {}", succ_count.group());
         let succ_actor = self
             .cols
             .get_actor_range(SUCC_ACTOR_COL_SPEC, &(succ_count.group()..usize::MAX));
@@ -647,7 +674,6 @@ mod tests {
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
         fn eq(&self, other: &super::super::op::Op<'a>) -> bool {
             let other_succ = other.succ().collect::<Vec<_>>();
-            log!("PARTIAL EQ {:?} == {:?}", self.succs, other_succ);
             self.id == other.id
                 && self.obj == other.obj
                 && self.action == other.action
@@ -698,7 +724,6 @@ mod tests {
         // first encode the succs
         for test_op in test_ops {
             let group_count = group_iter.next().unwrap().unwrap();
-            //log!("TEST OP ACTION {:?}", test_op.action);
             let op = super::super::op::Op {
                 index: 0, // not relevent for this equality test
                 id: test_op.id,
@@ -727,7 +752,7 @@ mod tests {
 
     #[test]
     fn column_data_iter_range() {
-        let actors = vec![crate::ActorId::random()];
+        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
 
         let ops = vec![
             TestOp {
@@ -770,7 +795,7 @@ mod tests {
                 value: ScalarValue::Str("inner_value1"),
                 key: Key::Map("inner_key1"),
                 insert: false,
-                succs: vec![OpId::new(7, 1), OpId::new(8, 1), OpId::new(9, 1)],
+                succs: vec![OpId::new(7, 1), OpId::new(8, 2), OpId::new(9, 1)],
                 expand: false,
                 mark_name: None,
             },
@@ -803,6 +828,123 @@ mod tests {
             assert_eq!(ops[4], op);
             let op = iter.next();
             assert!(op.is_none());
+        });
+    }
+
+    #[test]
+    fn column_data_op_iterators() {
+        let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
+
+        let test_ops = vec![
+            TestOp {
+                id: OpId::new(1, 1),
+                obj: ObjId::root(),
+                action: Action::MakeMap,
+                value: ScalarValue::Null,
+                key: Key::Map("map"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(2, 1),
+                obj: ObjId::root(),
+                action: Action::MakeMap,
+                value: ScalarValue::Null,
+                key: Key::Map("list"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(3, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value1"),
+                key: Key::Map("key1"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(4, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value2a"),
+                key: Key::Map("key2"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(4, 2),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value2b"),
+                key: Key::Map("key2"),
+                insert: false,
+                succs: vec![OpId::new(5, 2)],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(5, 2),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value2c"),
+                key: Key::Map("key2"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(6, 1),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value3a"),
+                key: Key::Map("key3"),
+                insert: false,
+                succs: vec![OpId::new(7, 2)],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(7, 2),
+                obj: ObjId(OpId::new(1, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("value3b"),
+                key: Key::Map("key3"),
+                insert: false,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+            TestOp {
+                id: OpId::new(8, 1),
+                obj: ObjId(OpId::new(2, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("a"),
+                key: Key::Seq(ElemId::head()),
+                insert: true,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
+        ];
+
+        with_test_ops(actors, &test_ops, |opset| {
+            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let ops = iter.clone().map(|c| c.unwrap()).collect::<Vec<_>>();
+            assert_eq!(&test_ops[2..8], ops.as_slice());
+
+            let mut iter = opset.iter_prop(&ObjId(OpId::new(1, 1)), "key2");
+            let ops = iter.clone().map(|c| c.unwrap()).collect::<Vec<_>>();
+            assert_eq!(&test_ops[3..6], ops.as_slice());
         });
     }
 

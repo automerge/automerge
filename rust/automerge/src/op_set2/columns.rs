@@ -256,16 +256,14 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         &mut self,
         value: V,
         range: R,
-    ) -> Range<usize>
-    //where
-        //C::Item: Sized,
-    {
+    ) -> Range<usize> {
         #[derive(Debug, PartialEq)]
         enum ScopeState {
             Seek,
             Found,
         }
 
+        #[derive(Debug)]
         struct ScopeValue<T: ?Sized, V> {
             target: V,
             pos: usize,
@@ -299,7 +297,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Skip
                         } else if self.pos >= self.max {
                             // after max
-                            //self.max = self.start;
                             self.pos = self.start;
                             RunStep::Done
                         } else {
@@ -322,12 +319,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     ScopeState::Found => {
                         if self.pos >= self.max {
                             // past max
-                            //self.pos = self.max;
                             RunStep::Done
                         } else {
                             match (&self.target, &r.value) {
                                 (a, Some(b)) if a != b => {
-                                    //self.pos = self.max;
+                                    // self.pos = self.max;
                                     RunStep::Done
                                 }
                                 _ => {
@@ -364,18 +360,15 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     pub(crate) fn seek_to_value<'b, V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>>>(
         &mut self,
         value: V,
-    ) -> usize
-    where
-        C::Item: Sized,
-    {
-        struct SeekValue<T, V> {
+    ) -> usize {
+        struct SeekValue<T: ?Sized, V> {
             target: V,
             advanced_by: usize,
             found: bool,
             _phantom: PhantomData<T>,
         }
 
-        impl<T, V> Seek<T> for SeekValue<T, V>
+        impl<T: ?Sized, V> Seek<T> for SeekValue<T, V>
         where
             T: Packable,
             V: for<'a> PartialEq<T::Unpacked<'a>>,
@@ -464,13 +457,13 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.max {
-            return None;
-        }
         if self.iter.is_none() {
             if let Some(slab) = self.slabs.next() {
                 self.iter = Some(slab.iter());
             }
+        }
+        if self.pos() >= self.max {
+            return None;
         }
         if let Some(iter) = &mut self.iter {
             if let Some(item) = iter.next() {
@@ -829,6 +822,7 @@ pub(crate) enum SpliceResult {
     Replace(Vec<Slab>),
 }
 
+#[derive(Clone)]
 pub(crate) struct RawReader<'a> {
     slabs: std::slice::Iter<'a, Slab>,
     current: Option<(&'a Slab, usize)>,
@@ -858,7 +852,6 @@ impl<'a> RawReader<'a> {
                 }
             }
         };
-        log!("READ NEXT {} + {} > {}", offset, length, slab.len());
         if offset + length > slab.len() {
             return Err(ReadRawError::CrossBoundary);
         }
