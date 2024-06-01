@@ -11,6 +11,8 @@ use crate::{
     types::{Clock, ElemId, ObjId, OpId},
 };
 
+use std::fmt::Debug;
+
 use super::{
     ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC,
     INSERT_COL_SPEC, KEY_ACTOR_COL_SPEC, KEY_COUNTER_COL_SPEC, KEY_STR_COL_SPEC,
@@ -48,90 +50,104 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) _phantom: std::marker::PhantomData<T>,
 }
 
-pub(crate) struct NItemIter<X, I: Iterator<Item = X>> {
+#[derive(Debug)]
+pub(crate) struct KeyIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
+    head: Option<Op<'a>>,
     iter: I,
-    items: usize,
 }
 
-impl<X, I: Iterator<Item = X>> Iterator for NItemIter<X, I> {
-    type Item = X;
+impl<'a, I: OpScope<'a>> KeyIter<'a, I> {
+    pub(crate) fn new(op: Op<'a>, iter: I) -> Self {
+        KeyIter {
+            head: Some(op),
+            iter,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyIter<'a, I> {
+    type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.items > 0 {
-            self.items -= 1;
-            self.iter.next()
-        } else {
-            None
+        let head = self.head.take()?;
+        if let Some(next) = self.iter.next() {
+            if next.elemid_or_key() == head.elemid_or_key() {
+                self.head = Some(next);
+            }
         }
+        Some(head)
     }
 }
 
 pub(crate) struct KeyOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
-    last_iter: Option<I>,
+    next_op: Option<Op<'a>>,
     count: usize,
-    last_key: Option<Key<'a>>,
 }
 
 impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
-    type Item = NItemIter<Op<'a>, I>;
+    type Item = KeyIter<'a, I>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut last_iter = Some(self.iter.clone());
-        while let Some(op) = self.iter.next() {
-            let key = op.elemid_or_key();
-            if self.last_key != Some(key) {
-                std::mem::swap(&mut last_iter, &mut self.last_iter);
-                let items = self.count;
-                self.last_key = Some(key);
-                self.count = 1;
-                if let Some(iter) = last_iter {
-                    return Some(NItemIter { items, iter });
-                }
-            } else {
-                self.count += 1;
+        let head = match self.next_op.take() {
+            Some(head) => head,
+            None => self.iter.next()?,
+        };
+        let iter = self.iter.clone();
+        //log!("KeyOpIter head = {:?}", head);
+        let key = head.elemid_or_key();
+        while let Some(next) = self.iter.next() {
+            if next.elemid_or_key() != key {
+                //log!("next_op = {:?}", next);
+                self.next_op = Some(next);
+                break;
             }
         }
-        self.last_iter.clone().map(|iter| NItemIter {
-            items: self.count,
+        Some(KeyIter {
+            head: Some(head),
             iter,
         })
     }
 }
 
-pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>>> {
+#[derive(Clone, Debug)]
+pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
     last_op: Option<Op<'a>>,
 }
 
-impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
+impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for TopOpIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(op) = self.iter.next() {
             let mut op = Some(op);
-            std::mem::swap(&mut self.last_op, &mut op);
+            std::mem::swap(&mut op, &mut self.last_op);
             let key1 = self.last_op.as_ref().map(|op| op.elemid_or_key());
             let key2 = op.as_ref().map(|op| op.elemid_or_key());
-            if key1 != key2 {
+            //log!("key1 {:?} vs key2 {:?}", key1, key2);
+            if key1 != key2 && key2.is_some() {
+                //log!("DONE: {:?}", op);
                 return op;
             }
         }
-        self.last_op
+        //log!("FINAL: {:?}", self.last_op);
+        self.last_op.take()
     }
 }
 
-pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>>> {
+#[derive(Clone, Debug)]
+pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     clock: Option<Clock>,
     iter: I,
 }
 
-impl<'a, I: Iterator<Item = Op<'a>>> Iterator for VisibleOpIter<'a, I> {
+impl<'a, I: OpScope<'a>> Iterator for VisibleOpIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(op) = self.iter.next() {
-            if op.visible_at(self.clock.as_ref()) {
+            if op.visible_at(self.clock.as_ref(), self.get_opiter()) {
                 return Some(op);
             }
         }
@@ -157,6 +173,49 @@ pub(crate) enum ReadOpError {
     MissingObjId,
     #[error("missing mark name")]
     MissingMarkName,
+}
+
+pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone {
+    fn get_opiter(&self) -> &OpIter<'a, Verified> {
+        todo!()
+    }
+
+    fn top_ops(self) -> TopOpIter<'a, Self> {
+        TopOpIter {
+            iter: self,
+            last_op: None,
+        }
+    }
+
+    fn key_ops(self) -> KeyOpIter<'a, Self> {
+        KeyOpIter {
+            iter: self,
+            next_op: None,
+            count: 0,
+        }
+    }
+
+    fn visible_ops(self, clock: Option<Clock>) -> VisibleOpIter<'a, Self> {
+        VisibleOpIter { iter: self, clock }
+    }
+}
+
+impl<'a> OpScope<'a> for OpIter<'a, Verified> {
+    fn get_opiter(&self) -> &OpIter<'a, Verified> {
+        self
+    }
+}
+
+impl<'a, I: OpScope<'a>> OpScope<'a> for TopOpIter<'a, I> {
+    fn get_opiter(&self) -> &OpIter<'a, Verified> {
+        self.iter.get_opiter()
+    }
+}
+
+impl<'a, I: OpScope<'a>> OpScope<'a> for VisibleOpIter<'a, I> {
+    fn get_opiter(&self) -> &OpIter<'a, Verified> {
+        self.iter.get_opiter()
+    }
 }
 
 impl<'a, T: OpReadState> OpIter<'a, T> {

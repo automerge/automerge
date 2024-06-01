@@ -1,13 +1,14 @@
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
-use crate::types::{ActorId, ElemId, ObjId};
+use crate::types::{ActorId, ElemId, ObjId, OpId};
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader};
+use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::ActorIdx;
 use super::{
-    BooleanCursor, Column, DeltaCursor, GroupCursor, IntCursor, Key, MetaCursor, Packable,
-    RawCursor, Slab, StrCursor, ValueMeta,
+    BooleanCursor, Column, DeltaCursor, GroupCursor, IntCursor, Key, MetaCursor, RawCursor, Slab,
+    StrCursor, ValueMeta,
 };
 
 use std::collections::BTreeMap;
@@ -15,7 +16,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod iter;
-pub(crate) use iter::OpIter;
+pub(crate) use iter::{KeyIter, OpIter, Verified};
 
 // Stick all of the column ID initialization in a module so we can turn off
 // rustfmt for the whole thing
@@ -130,7 +131,7 @@ impl OpSet {
         (raw.into_iter().collect(), data)
     }
 
-    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a, iter::Unverified> {
+    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a, Verified> {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
@@ -146,7 +147,11 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a, iter::Unverified> {
+    pub(crate) fn query_opid<'a>(&'a self, id: &OpId) -> Option<Op<'a>> {
+        self.iter().find(|op| &op.id == id)
+    }
+
+    pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a, Verified> {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
@@ -158,7 +163,7 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_, iter::Unverified> {
+    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_, Verified> {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
             .cols
@@ -198,7 +203,7 @@ impl OpSet {
         }
     }
 
-    fn iter(&self) -> OpIter<'_, iter::Unverified> {
+    fn iter(&self) -> OpIter<'_, Verified> {
         OpIter {
             index: 0,
             id_actor: self.cols.get_actor(ID_ACTOR_COL_SPEC),
@@ -630,7 +635,7 @@ mod tests {
         let saved = doc.save();
         let doc_chunk = load_document_chunk(&saved);
         let opset = super::OpSet::new(&doc_chunk);
-        let ops = opset.iter().collect::<Result<Vec<_>, _>>().unwrap();
+        let ops = opset.iter().collect::<Vec<_>>();
         let actual_ops = doc
             .doc
             .ops()
@@ -658,7 +663,7 @@ mod tests {
         doc
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct TestOp {
         id: OpId,
         obj: ObjId,
@@ -822,9 +827,9 @@ mod tests {
                 .get_actor(OBJ_ID_ACTOR_COL_SPEC)
                 .scope_to_value(ActorIdx::from(1 as usize), range);
             let mut iter = opset.iter_range(&range);
-            let op = iter.next().unwrap().unwrap();
+            let op = iter.next().unwrap();
             assert_eq!(ops[3], op);
-            let op = iter.next().unwrap().unwrap();
+            let op = iter.next().unwrap();
             assert_eq!(ops[4], op);
             let op = iter.next();
             assert!(op.is_none());
@@ -833,6 +838,7 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
+        use super::super::op_set::iter::OpScope;
         let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
 
         let test_ops = vec![
@@ -935,16 +941,71 @@ mod tests {
                 expand: false,
                 mark_name: None,
             },
+            TestOp {
+                id: OpId::new(9, 1),
+                obj: ObjId(OpId::new(2, 1)),
+                action: Action::Set,
+                value: ScalarValue::Str("b"),
+                key: Key::Seq(ElemId(OpId::new(8, 1))),
+                insert: true,
+                succs: vec![],
+                expand: false,
+                mark_name: None,
+            },
         ];
 
         with_test_ops(actors, &test_ops, |opset| {
             let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.clone().map(|c| c.unwrap()).collect::<Vec<_>>();
+            let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[2..8], ops.as_slice());
 
             let mut iter = opset.iter_prop(&ObjId(OpId::new(1, 1)), "key2");
-            let ops = iter.clone().map(|c| c.unwrap()).collect::<Vec<_>>();
+            let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
+
+            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let ops = iter.top_ops().collect::<Vec<_>>();
+            assert_eq!(&test_ops[2], &ops[0]);
+            assert_eq!(&test_ops[5], &ops[1]);
+            assert_eq!(&test_ops[7], &ops[2]);
+            assert_eq!(3, ops.len());
+
+            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let ops = iter
+                .key_ops()
+                .map(|n| n.collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            let key1 = ops.get(0).unwrap().as_slice();
+            let key2 = ops.get(1).unwrap().as_slice();
+            let key3 = ops.get(2).unwrap().as_slice();
+            let key4 = ops.get(3);
+            assert_eq!(&test_ops[2..3], key1);
+            assert_eq!(&test_ops[3..6], key2);
+            assert_eq!(&test_ops[6..8], key3);
+            assert!(key4.is_none());
+
+            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let ops = iter
+                .visible_ops(None)
+                .key_ops()
+                .map(|n| n.collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            let key1 = ops.get(0).unwrap().as_slice();
+            let key2 = ops.get(1).unwrap().as_slice();
+            let key3 = ops.get(2).unwrap().as_slice();
+            let key4 = ops.get(3);
+            let key2test = vec![test_ops[3].clone(), test_ops[5].clone()];
+            assert_eq!(&test_ops[2..3], key1);
+            assert_eq!(&key2test, key2);
+            assert_eq!(&test_ops[7..8], key3);
+            assert!(key4.is_none());
+
+            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let ops = iter.visible_ops(None).top_ops().collect::<Vec<_>>();
+            assert_eq!(&test_ops[2], &ops[0]);
+            assert_eq!(&test_ops[5], &ops[1]);
+            assert_eq!(&test_ops[7], &ops[2]);
+            assert_eq!(3, ops.len());
         });
     }
 
@@ -983,7 +1044,7 @@ mod tests {
             );
 
             let actual_ops = objs_and_ops.iter().map(|op_idx| op_idx.as_op(&opset.osd)).collect::<Vec<_>>();
-            let ops = op_set.iter().collect::<Result<Vec<_>, _>>().unwrap();
+            let ops = op_set.iter().collect::<Vec<_>>();
             if !(ops == actual_ops) {
                 for (i, (a, b)) in actual_ops.iter().zip(ops.iter()).enumerate() {
                     if b != a {

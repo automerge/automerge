@@ -1,9 +1,11 @@
 use super::columns::ColumnDataIter;
+use super::op_set::{KeyIter, OpIter, Verified};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::DeltaCursor;
 use crate::op_set;
 use crate::types::{Clock, ElemId, ObjId, OpId};
+use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
@@ -72,7 +74,7 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>, iter: &OpIter<'a, Verified>) -> bool {
         if let Some(clock) = clock {
             if self.is_inc() || self.is_mark() {
                 false
@@ -80,16 +82,17 @@ impl<'a> Op<'a> {
                 clock.covers(&self.id) && !self.succ().any(|i| clock.covers(&i))
             }
         } else {
-            self.visible()
+            self.visible(iter)
         }
     }
 
-    pub(crate) fn visible(&self) -> bool {
+    pub(crate) fn visible(&self, iter: &OpIter<'a, Verified>) -> bool {
         if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
-            todo!()
-            //self.succ().all(|op| op.is_inc())
+            let key_iter = KeyIter::new(*self, iter.clone());
+            let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
+            self.succ().all(|id| sub_ops.contains(&id))
         } else {
             self.succ().len() == 0
         }
@@ -108,6 +111,20 @@ impl<'a> Op<'a> {
     }
 }
 
+impl<'a> PartialEq<Op<'_>> for Op<'a> {
+    fn eq(&self, other: &Op<'_>) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<'a> std::hash::Hash for Op<'a> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
+}
+
+impl<'a> Eq for Op<'a> {}
+
 impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
     fn eq(&self, other: &op_set::Op<'_>) -> bool {
         let action =
@@ -120,3 +137,6 @@ impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
             && self.succ().eq(other.succ().map(|n| *n.id()))
     }
 }
+
+// TODO:
+// needs tests around counter value and visability
