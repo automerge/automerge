@@ -89,6 +89,37 @@ impl OpSet {
       self.actors.binary_search(actor).ok().map(ActorIdx::from)
     }
 
+    pub(crate) fn put_actor(&mut self, actor: ActorId) -> ActorIdx {
+      match self.actors.binary_search(&actor) {
+        Ok(idx) => ActorIdx::from(idx),
+        Err(idx) => {
+          self.actors.insert(idx, actor);
+          for (spec, col) in &mut self.cols.0 {
+            match col {
+              Column::Actor(col_data) => {
+
+                  let new_ids = col_data.iter().map(|a| match a {
+                    Some(ActorIdx(id)) if id as usize >= idx => { Some(ActorIdx(id + 1)) },
+                    old => old,
+                  }).collect::<Vec<_>>();
+                  let mut new_data = ColumnData::<ActorCursor>::new();
+                  new_data.splice(0, new_ids);
+                  std::mem::swap(col_data, &mut new_data);
+/*
+                  match a {
+                    Some(ActorIdx(id)) if id as usize >= idx => { Some(ActorIdx(id + 1)) },
+                    old => old,
+                  }
+*/
+              },
+              _ => {}
+            }
+          }
+          ActorIdx::from(idx)
+        }
+      }
+    }
+
     pub(crate) fn new(doc: &Document<'_>) -> Self {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = Arc::new(doc.op_raw_bytes().to_vec());
