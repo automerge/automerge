@@ -5,7 +5,7 @@ use crate::{
         op::{Op, SuccCursors},
         rle::{ActionCursor, ActorCursor},
         types::{ActorIdx, Key},
-        BooleanCursor, DeltaCursor, GroupCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
+        BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
     },
     storage::ColumnSpec,
     types::{Clock, ElemId, ObjId, OpId},

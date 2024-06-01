@@ -7,7 +7,7 @@ use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::ActorIdx;
 use super::{
-    BooleanCursor, Column, DeltaCursor, GroupCursor, IntCursor, Key, MetaCursor, RawCursor, Slab,
+    BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab,
     StrCursor, ValueMeta,
 };
 
@@ -80,6 +80,15 @@ pub(crate) struct OpSet {
 }
 
 impl OpSet {
+
+    pub(crate) fn get_actor(&self, idx: ActorIdx) -> Option<&ActorId> {
+      self.actors.get(usize::from(idx))
+    }
+
+    pub(crate) fn lookup_actor(&mut self, actor: &ActorId) -> Option<ActorIdx> {
+      self.actors.binary_search(actor).ok().map(ActorIdx::from)
+    }
+
     pub(crate) fn new(doc: &Document<'_>) -> Self {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = Arc::new(doc.op_raw_bytes().to_vec());
@@ -614,7 +623,7 @@ mod tests {
             op::SuccCursors,
             rle::ActorCursor,
             types::{Action, ActorIdx, ScalarValue},
-            ColumnCursor, DeltaCursor, GroupCursor, Key, Slab, WritableSlab,
+            ColumnCursor, DeltaCursor, Key, Slab, WritableSlab,
         },
         storage::Document,
         transaction::Transactable,

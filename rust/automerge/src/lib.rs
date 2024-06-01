@@ -258,6 +258,7 @@ macro_rules! __log {
 
 mod autocommit;
 mod automerge;
+//mod automerge2;
 mod autoserde;
 mod change;
 mod change_graph;

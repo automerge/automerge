@@ -384,7 +384,7 @@ impl<'a> SlabWriter<'a> {
         index: usize,
         lit: usize,
         size: usize,
-        group: usize,
+        group: usize, // FIXME!!
     ) {
         let range = index..slab.byte_len();
         if lit > 0 {

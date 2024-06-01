@@ -1,7 +1,7 @@
 pub(crate) mod boolean;
 pub(crate) mod columns;
 pub(crate) mod delta;
-pub(crate) mod group;
+//pub(crate) mod group;
 pub(crate) mod meta;
 mod op;
 pub(crate) mod op_set;
@@ -15,7 +15,7 @@ pub(crate) use types::{Action, ActorIdx, Key};
 pub(crate) use boolean::BooleanCursor;
 pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};
 pub(crate) use delta::DeltaCursor;
-pub(crate) use group::GroupCursor;
+//pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::OpSet;
 pub(crate) use pack::{MaybePackable, PackError, Packable};

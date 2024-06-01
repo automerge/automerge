@@ -9,7 +9,7 @@ use super::meta::ValueType;
 
 /// An index into an array of actors stored elsewhere
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub(crate) struct ActorIdx(u64);
+pub(crate) struct ActorIdx(pub(crate) u64); // FIXME - shouldnt this be usize? (wasm is 32bit)
 
 impl From<usize> for ActorIdx {
     fn from(val: usize) -> Self {
@@ -26,6 +26,12 @@ impl From<u64> for ActorIdx {
 impl From<ActorIdx> for u64 {
     fn from(val: ActorIdx) -> Self {
         val.0
+    }
+}
+
+impl From<ActorIdx> for usize {
+    fn from(val: ActorIdx) -> Self {
+        val.0 as usize
     }
 }
 
@@ -115,7 +121,7 @@ impl<'a> OpType<'a> {
                 Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
-            _ => unreachable!("validate_action_and_value returned UnknownAction"),
+            //_ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
 }
@@ -185,7 +191,7 @@ impl<'a> ScalarValue<'a> {
                 out.extend_from_slice(&f.to_le_bytes());
                 Some(Cow::Owned(out))
             }
-            Self::Unknown { type_code, bytes } => Some(Cow::Borrowed(bytes)),
+            Self::Unknown { type_code: _, bytes } => Some(Cow::Borrowed(bytes)),
         }
     }
 }
@@ -212,13 +218,13 @@ impl From<crate::storage::parse::leb128::Error> for ReadScalarError {
 
 fn parse_uleb128(input: &[u8]) -> Result<u64, ReadScalarError> {
     crate::storage::parse::leb128_u64::<ReadScalarError>(crate::storage::parse::Input::new(input))
-        .map(|(i, v)| v)
+        .map(|(_, v)| v)
         .map_err(|_| ReadScalarError::InvalidLeb)
 }
 
 fn parse_leb128(input: &[u8]) -> Result<i64, ReadScalarError> {
     crate::storage::parse::leb128_i64::<ReadScalarError>(crate::storage::parse::Input::new(input))
-        .map(|(i, v)| v)
+        .map(|(_, v)| v)
         .map_err(|_| ReadScalarError::InvalidLeb)
 }
 
