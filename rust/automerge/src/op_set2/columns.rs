@@ -545,7 +545,7 @@ impl<C: ColumnCursor> ColumnData<C> {
                 index -= slab.len();
             } else {
                 self.len += values.len();
-                match C::splice(slab, index, values) {
+                match C::splice(slab, index, values.iter()) {
                     SpliceResult::Done => (),
                     SpliceResult::Add(slabs) => {
                         let j = i + 1;
@@ -735,12 +735,12 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         Ok(cursor)
     }
 
-    fn splice<E>(slab: &mut Slab, index: usize, values: Vec<E>) -> SpliceResult
+    fn splice<'a, E, I: Iterator<Item=&'a E>>(slab: &mut Slab, index: usize, values: I) -> SpliceResult
     where
-        E: MaybePackable<Self::Item> + Debug,
+        E: MaybePackable<Self::Item> + Debug + 'a,
     {
         let mut encoder = Self::encode(index, slab);
-        for v in &values {
+        for v in values {
             encoder.append(v.maybe_packable())
         }
         SpliceResult::Replace(encoder.finish())
