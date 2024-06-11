@@ -15,36 +15,71 @@
     "dist/index.d.ts",
     "dist/cjs/**/*.js",
     "dist/cjs/**/*.cjs",
+    "dist/cjs/**/*.wasm",
     "dist/mjs/**/*.js",
-    "dist/*.d.ts"
+    "dist/mjs/**/*.cjs",
+    "dist/mjs/**/*.wasm",
+    "dist/*.d.ts",
+    "dist/wasm_blob.wasm"
   ],
   "type": "module",
   "types": "./dist/index.d.ts",
-  "module": "./dist/mjs/index.js",
-  "main": "./dist/cjs/index.cjs",
+  "module": "./dist/mjs/entrypoints/fullfat_base64.js",
+  "main": "./dist/cjs/fullfat_node.cjs",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/mjs/index.js",
-      "require": "./dist/cjs/index.cjs",
-      "default": "./dist/mjs/index.js"
+      "node": {
+        "import": "./dist/mjs/entrypoints/fullfat_node.js",
+        "require": "./dist/cjs/fullfat_node.cjs"
+      },
+      "browser": {
+        "import": "./dist/mjs/entrypoints/fullfat_bundler.js",
+        "require": "./dist/cjs/fullfat_base64.cjs"
+      },
+      "import": "./dist/mjs/entrypoints/fullfat_base64.js",
+      "require": "./dist/cjs/fullfat_base64.cjs"
     },
     "./next": {
       "types": "./dist/next.d.ts",
-      "import": "./dist/mjs/next.js",
-      "require": "./dist/cjs/next.cjs",
-      "default": "./dist/mjs/next.js"
-    }
+      "node": {
+        "import": "./dist/mjs/entrypoints/fullfat_node_next.js",
+        "require": "./dist/cjs/fullfat_node_next.cjs"
+      },
+      "browser": {
+        "import": "./dist/mjs/entrypoints/fullfat_bundler_next.js",
+        "require": "./dist/cjs/fullfat_next_base64.cjs"
+      },
+      "import": "./dist/mjs/entrypoints/fullfat_next_base64.js",
+      "require": "./dist/cjs/fullfat_next_base64.cjs"
+    },
+    "./slim": {
+      "types": "./dist/index.d.ts",
+      "node": {
+        "import": "./dist/mjs/entrypoints/slim.js",
+        "require": "./dist/cjs/slim.cjs"
+      },
+      "browser": {
+        "import": "./dist/mjs/entrypoints/slim.js",
+        "require": "./dist/cjs/slim.cjs"
+      },
+      "import": "./dist/mjs/entrypoints/slim.js",
+      "require": "./dist/cjs/slim.cjs"
+    },
+    "./slim/next": {
+      "types": "./dist/next.d.ts",
+      "import": "./dist/mjs/entrypoints/slim_next.js",
+      "require": "./dist/cjs/slim_next.cjs"
+    },
+    "./wasm_blob.wasm": "./dist/wasm_blob.wasm"
   },
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
     "check-fmt": "prettier -c .prettierrc --check",
     "fmt": "prettier -c .prettierrc -w",
-    "build": "tsc -p config/mjs.json && node ./scripts/transpile-cjs.mjs && tsc -p config/declonly.json --emitDeclarationOnly",
+    "build": "node ./scripts/build.mjs",
     "test": "ts-mocha --loader=ts-node/esm --experimental-specifier-resolution=node --type-check test/*.ts",
-    "deno:build": "denoify && node ./scripts/deno-prefixer.mjs",
-    "deno:test": "deno test ./deno-tests/deno.ts --allow-read --allow-net",
     "watch-docs": "typedoc src/index.ts --watch --readme none"
   },
   "devDependencies": {
@@ -54,23 +89,22 @@
     "@types/uuid": "^9.0.0",
     "@typescript-eslint/eslint-plugin": "^5.46.0",
     "@typescript-eslint/parser": "^5.46.0",
-    "denoify": "1.4.5",
+    "consola": "^3.2.3",
     "esbuild": "^0.19.2",
     "eslint": "^8.29.0",
     "fast-sha256": "^1.3.0",
     "mocha": "^10.2.0",
     "pako": "^2.1.0",
     "prettier": "3.1.0",
+    "puppeteer": "^22.11.1",
+    "serve-handler": "^6.1.5",
     "ts-mocha": "^10.0.0",
     "ts-node": "^10.9.1",
     "typedoc": "^0.23.22",
     "typescript": "^4.9.4"
   },
-  "resolutions": {
-    "denoify/evt": "2.4.18"
-  },
   "dependencies": {
-    "@automerge/automerge-wasm": "0.17.0",
     "uuid": "^9.0.0"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

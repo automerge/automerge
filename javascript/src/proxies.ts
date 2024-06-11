@@ -1,6 +1,6 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 import { Text } from "./text.js"
-import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
+import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 
 import type {
   AutomergeValue,

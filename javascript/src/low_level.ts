@@ -1,22 +1,32 @@
-import {
-  type API,
+import type {
+  API,
   Automerge,
-  type Change,
-  type DecodedChange,
+  Change,
+  DecodedChange,
+  SyncMessage,
   SyncState,
-  type SyncMessage,
-  type JsSyncState,
-  type DecodedSyncMessage,
-  type ChangeToEncode,
-  type LoadOptions,
-  type InitOptions,
-} from "@automerge/automerge-wasm"
-export type { ChangeToEncode } from "@automerge/automerge-wasm"
+  JsSyncState,
+  DecodedSyncMessage,
+  ChangeToEncode,
+  LoadOptions,
+  InitOptions,
+} from "./wasm_types.js"
+export type { ChangeToEncode } from "./wasm_types.js"
+import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js"
+import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
+
+let _initialized = false
+let _initializeListeners: (() => void)[] = []
+
 
 export function UseApi(api: API) {
   for (const k in api) {
     // eslint-disable-next-line @typescript-eslint/no-extra-semi,@typescript-eslint/no-explicit-any
     ;(ApiHandler as any)[k] = (api as any)[k]
+  }
+  _initialized = true
+  for (const listener of _initializeListeners) {
+    listener()
   }
 }
 
@@ -57,3 +67,16 @@ export const ApiHandler: API = {
   },
 }
 /* eslint-enable */
+
+export function initializeWasm(wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string): Promise<void> {
+  return initWasm(wasmBlob).then(_ => {
+    UseApi(WasmApi)
+  })
+}
+
+export function wasmInitialized(): Promise<void> {
+  if (_initialized) return Promise.resolve()
+  return new Promise(resolve => {
+    _initializeListeners.push(resolve)
+  })
+}

@@ -30,6 +30,7 @@ import { Text } from "./text.js"
 export { Text } from "./text.js"
 
 import type {
+  Automerge,
   API as WasmAPI,
   Actor as ActorId,
   Prop,
@@ -41,7 +42,7 @@ import type {
   JsSyncState,
   SyncMessage,
   DecodedSyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 export type {
   PutPatch,
   DelPatch,
@@ -49,7 +50,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 
 /** @hidden **/
 type API = WasmAPI
@@ -65,8 +66,7 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
-
-import { Automerge } from "@automerge/automerge-wasm"
+export { initializeWasm, wasmInitialized } from "./low_level.js"
 
 import { RawString } from "./raw_string.js"
 
@@ -145,9 +145,6 @@ export interface State<T> {
 export function use(api: API) {
   UseApi(api)
 }
-
-import * as wasm from "@automerge/automerge-wasm"
-use(wasm)
 
 /**
  * Options to be passed to {@link init} or {@link load}
