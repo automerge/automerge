@@ -4,7 +4,7 @@ export { Counter } from "./counter.js"
 export { Int, Uint, Float64 } from "./numbers.js"
 
 import { Counter } from "./counter.js"
-import type { Patch } from "@automerge/automerge-wasm"
+import type { Patch } from "./wasm_types.js"
 export type {
   Cursor,
   MapObjType,
@@ -13,7 +13,7 @@ export type {
   MarkRange,
   MarkPatch,
   Patch,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 
 export type AutomergeValue =
   | ScalarValue

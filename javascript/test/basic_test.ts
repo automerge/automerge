@@ -1,7 +1,6 @@
 import { default as assert } from "assert"
-import { next as Automerge } from "../src/index.js"
-import * as oldAutomerge from "../src/stable.js"
-import { default as WASM } from "@automerge/automerge-wasm"
+import { next as Automerge } from "../src/entrypoints/fullfat_node.js"
+import * as oldAutomerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
 
@@ -256,9 +255,8 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create({ text_v1: true })
-      doc1.put("_root", "text", "hello world")
-      let doc2 = Automerge.load<any>(doc1.save())
+      let doc1 = oldAutomerge.from({ text: "hello world" })
+      let doc2 = Automerge.load<any>(oldAutomerge.save(doc1))
       assert.throws(() => {
         Automerge.change(doc2, d => {
           Automerge.splice(d, ["text"], 1, 0, "Z")

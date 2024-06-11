@@ -3,8 +3,7 @@ import { Text } from "./text.js"
 import { type AutomergeValue as NextAutomergeValue } from "./next_types.js"
 import { type Target, Text1Target, Text2Target } from "./proxies.js"
 import { mapProxy, listProxy, ValueType } from "./proxies.js"
-import type { Prop, ObjID } from "@automerge/automerge-wasm"
-import { Automerge } from "@automerge/automerge-wasm"
+import type { Automerge, Prop, ObjID } from "./wasm_types.js"
 
 export type ConflictsF<T extends Target> = { [key: string]: ValueType<T> }
 export type Conflicts = ConflictsF<Text1Target>

@@ -7,7 +7,7 @@ import {
   decodeSyncState,
   encodeSyncState,
   initSyncState,
-} from "../src"
+} from "../src/index.js"
 
 function getHeads(doc) {
   return Automerge.getHeads(doc)

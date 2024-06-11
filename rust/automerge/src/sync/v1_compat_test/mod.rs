@@ -1,4 +1,3 @@
-#![cfg(test)]
 //! This entire module is a copy of the sync module before we introduced the v2 message type and
 //! only exists in order to be able to write tests against that old implementation.
 
