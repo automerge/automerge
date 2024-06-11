@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automerge IIFE</title>
+    <script src="/automerge.js"></script>
+</head>
+<body>
+    <!-- Load your dependency script here -->
+    <script>
+        const { Automerge } = window;
+
+        let initialized = false
+        Automerge.wasmInitialized().then(() => {
+          initialized = true
+          const element = document.createElement('div');
+          element.id = "result"
+          const doc = Automerge.from({message: "hello automerge"})
+
+          setTimeout(() => {
+            if (!initialized) {
+              throw new Error("wasm not initialized")
+            }
+            const element = document.createElement('div');
+            element.id = "result"
+
+            element.innerHTML = doc.message
+            document.body.appendChild(element);
+          }, 100)
+        })
+    </script>
+</body>
+</html>

@@ -30,6 +30,7 @@ import { Text } from "./text.js"
 export { Text } from "./text.js"
 
 import type {
+  Automerge,
   API as WasmAPI,
   Actor as ActorId,
   Prop,
@@ -41,7 +42,7 @@ import type {
   JsSyncState,
   SyncMessage,
   DecodedSyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 export type {
   PutPatch,
   DelPatch,
@@ -49,7 +50,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 
 /** @hidden **/
 type API = WasmAPI
@@ -65,8 +66,7 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
-
-import { Automerge } from "@automerge/automerge-wasm"
+export { initializeWasm, initializeBase64Wasm, wasmInitialized, isWasmInitialized } from "./low_level.js"
 
 import { RawString } from "./raw_string.js"
 
@@ -110,7 +110,7 @@ export function insertAt<T>(list: T[], index: number, ...values: T[]) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
 
-  (list as List<T>).insertAt(index, ...values)
+  ;(list as List<T>).insertAt(index, ...values)
 }
 
 /**
@@ -124,7 +124,7 @@ export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
 
-  (list as List<T>).deleteAt(index, numDelete)
+  ;(list as List<T>).deleteAt(index, numDelete)
 }
 
 /**
@@ -145,9 +145,6 @@ export interface State<T> {
 export function use(api: API) {
   UseApi(api)
 }
-
-import * as wasm from "@automerge/automerge-wasm"
-use(wasm)
 
 /**
  * Options to be passed to {@link init} or {@link load}
