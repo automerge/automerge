@@ -1,18 +1,21 @@
+use super::parents::Parents;
 use crate::cursor::Cursor;
+use crate::exid::ExId;
+use crate::iter::{Keys, ListRange, MapRange, TopOps};
+use crate::op_set::Parent;
+use crate::op_tree::OpsFound;
+use crate::patches::TextRepresentation;
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
 use crate::types;
-use crate::iter::{Keys, ListRange, MapRange, TopOps};
-use crate::types::{Prop, ListEncoding, ObjMeta, Clock, ObjType, ActorId, ElemId, Export, Exportable, ObjId, OpId};
-use crate::exid::ExId;
-use crate::patches::TextRepresentation;
-use crate::op_tree::OpsFound;
-use crate::parents::Parents;
+use crate::types::{
+    ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
+};
 
-use super::columns::{Run, ColumnData, ColumnDataIter, RawReader};
+use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{ActorIdx};
+use super::types::ActorIdx;
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
@@ -45,6 +48,36 @@ impl OpSet {
             text_rep,
             clock,
         }
+    }
+
+    pub(crate) fn parent_object(
+        &self,
+        obj: &ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<&Clock>,
+    ) -> Option<Parent> {
+        let op = self.find_op_by_id(&obj.0)?;
+        if op.obj.is_root() {
+            return None;
+        }
+        let parent_op = self.find_op_by_id(&op.obj.0)?;
+        // FIXME remote unwrap
+        let parent_typ = parent_op.action.try_into().unwrap();
+        let prop = match op.key {
+            Key::Map(k) => Prop::Map(k.to_string()),
+            Key::Seq(_) => {
+                let FoundOpId { index, .. } = self
+                    .seek_list_opid(parent_op.id, text_rep.encoding(parent_typ), clock)
+                    .unwrap();
+                Prop::Seq(index)
+            }
+        };
+        Some(crate::op_set::Parent {
+            typ: op.action.try_into().unwrap(),
+            obj: op.obj,
+            prop,
+            visible: todo!(),
+        })
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
@@ -177,10 +210,13 @@ impl OpSet {
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_, Verified>)> {
         // FIXME - remove unwraps
         self.iter_obj_ids().map(|(id, range)| {
-            let obj_meta = self.find_op_by_id(&id.0).map(|op| ObjMeta {
-                id,
-                typ: op.action.try_into().unwrap(),
-            }).unwrap();
+            let obj_meta = self
+                .find_op_by_id(&id.0)
+                .map(|op| ObjMeta {
+                    id,
+                    typ: op.action.try_into().unwrap(),
+                })
+                .unwrap();
             (obj_meta, self.iter_range(&range))
         })
     }
@@ -810,7 +846,10 @@ impl<'a> Iterator for IterObjIds<'a> {
                     self.next_actor = self.actor.next_run();
                 }
                 let end = self.pos;
-                Some((ObjId(OpId::new(run1.value?, run2.value?.into())), start..end))
+                Some((
+                    ObjId(OpId::new(run1.value?, run2.value?.into())),
+                    start..end,
+                ))
             }
             (None, None) => None,
         }
