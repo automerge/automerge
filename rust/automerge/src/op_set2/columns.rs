@@ -2,8 +2,8 @@ use crate::storage::{ColumnSpec, ColumnType};
 
 use super::rle::{ActionCursor, ActorCursor};
 use super::{
-    types::normalize_range, BooleanCursor, DeltaCursor, IntCursor, MaybePackable,
-    MetaCursor, PackError, Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
+    types::normalize_range, BooleanCursor, DeltaCursor, IntCursor, MaybePackable, MetaCursor,
+    PackError, Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
 };
 
 use std::fmt::Debug;
@@ -195,6 +195,31 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
 }
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
+    pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
+        if self.iter.is_none() {
+            if let Some(slab) = self.slabs.next() {
+                self.iter = Some(slab.iter());
+            }
+        }
+        if self.pos() >= self.max {
+            return None;
+        }
+        if let Some(iter) = &mut self.iter {
+            if let Some(run) = iter.next_run() {
+                Some(run)
+            } else {
+                assert_eq!(iter.pos(), iter.cursor.index());
+                assert_eq!(iter.group(), iter.cursor.group());
+                self.pos += iter.pos();
+                self.group += iter.group();
+                self.iter = None;
+                self.next_run()
+            }
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn empty() -> Self {
         ColumnDataIter {
             pos: 0,
@@ -481,7 +506,6 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
         }
     }
 }
-
 
 /*
 impl<E, C: ColumnCursor> FromIterator<E> for ColumnData<C> {

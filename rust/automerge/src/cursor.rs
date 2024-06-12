@@ -1,6 +1,7 @@
 use crate::op_set::OpSetData;
 use crate::storage::parse;
 use crate::types::OpId;
+use crate::exid::ExId;
 #[cfg(doc)]
 use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
@@ -23,6 +24,15 @@ pub struct Cursor {
 }
 
 const SERIALIZATION_VERSION_TAG: u8 = 0;
+
+impl From<ExId> for Cursor {
+    fn from(exid: ExId) -> Self {
+        Self {
+            ctr: exid.counter(),
+            actor: exid.actor(),
+        }
+    }
+}
 
 impl Cursor {
     pub(crate) fn new(id: OpId, osd: &OpSetData) -> Self {

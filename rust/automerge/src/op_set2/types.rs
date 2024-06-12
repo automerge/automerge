@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use crate::types;
 use crate::types::{ElemId, ObjType};
+use crate::error::AutomergeError;
 
 use std::ops::{Bound, RangeBounds};
 
@@ -70,6 +71,19 @@ impl From<Action> for u64 {
             Action::Increment => 5,
             Action::MakeTable => 6,
             Action::Mark => 7,
+        }
+    }
+}
+
+impl TryFrom<Action> for ObjType {
+    type Error = AutomergeError;
+    
+    fn try_from(action: Action) -> Result<Self, Self::Error> {
+        match action {
+            Action::MakeMap => Ok(ObjType::Map),
+            Action::MakeList => Ok(ObjType::List),
+            Action::MakeText => Ok(ObjType::Text),
+            _ => Err(AutomergeError::Fail),
         }
     }
 }
@@ -191,7 +205,10 @@ impl<'a> ScalarValue<'a> {
                 out.extend_from_slice(&f.to_le_bytes());
                 Some(Cow::Owned(out))
             }
-            Self::Unknown { type_code: _, bytes } => Some(Cow::Borrowed(bytes)),
+            Self::Unknown {
+                type_code: _,
+                bytes,
+            } => Some(Cow::Borrowed(bytes)),
         }
     }
 }

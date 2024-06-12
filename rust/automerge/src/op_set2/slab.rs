@@ -492,6 +492,16 @@ impl<'a, I: Packable + ?Sized> IterState<'a, I> {
 }
 
 impl<'a, C: ColumnCursor> SlabIter<'a, C> {
+    pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
+        if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
+          self.cursor = cursor;
+          self.last_group = item_group::<C::Item>(&run.value) * run.count;
+          Some(run)
+        } else {
+          None
+        }
+    }
+
     pub(crate) fn pos(&self) -> usize {
         self.cursor.index() - self.state.as_ref().map(|s| s.state_length()).unwrap_or(0)
     }
@@ -553,6 +563,7 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
                 }
                 None => {
                     if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
+                    //if let Some(run) = self.next_run() {
                         self.cursor = cursor;
                         self.state = Some(IterState::AtStartOfRun(run));
                     } else {
@@ -591,6 +602,7 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
             }
             None => {
                 if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
+                //if let Some(run) = self.next_run() {
                     self.cursor = cursor;
                     let (value, next_state) = self.cursor.pop(run);
                     self.state = next_state.map(IterState::InRun);

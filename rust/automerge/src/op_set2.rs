@@ -17,7 +17,7 @@ pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};
 pub(crate) use delta::DeltaCursor;
 //pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
-pub(crate) use op_set::OpSet;
+pub(crate) use op_set::{OpScope, OpSet};
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;
 pub(crate) use rle::{IntCursor, RleCursor, RleState, StrCursor};

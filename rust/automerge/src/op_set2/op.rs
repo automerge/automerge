@@ -4,7 +4,8 @@ use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::DeltaCursor;
 use crate::op_set;
-use crate::types::{Clock, ElemId, ObjId, OpId};
+use crate::text_value::TextValue;
+use crate::types::{ListEncoding, Clock, ElemId, ObjId, OpId};
 use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone)]
@@ -62,6 +63,28 @@ impl<'a> ExactSizeIterator for SuccCursors<'a> {
 }
 
 impl<'a> Op<'a> {
+    pub(crate) fn as_str(&self) -> &'a str {
+        if let ScalarValue::Str(s) = &self.value {
+            s
+        } else if self.is_mark() {
+            ""
+        } else {
+            "\u{fffc}"
+        }
+    }
+
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        if encoding == ListEncoding::List {
+            1
+        } else {
+            TextValue::width(self.to_str()) // FASTER
+        }
+    }
+
+    pub(crate) fn op_type(&self) -> OpType<'_> {
+        OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
+    }
+
     pub(crate) fn succ(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator + 'a {
         self.succ_cursors.clone()
     }

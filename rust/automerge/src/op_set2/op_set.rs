@@ -1,14 +1,21 @@
+use crate::cursor::Cursor;
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
-use crate::types::{ActorId, ElemId, ObjId, OpId};
+use crate::types;
+use crate::iter::{Keys, ListRange, MapRange, TopOps};
+use crate::types::{Prop, ListEncoding, ObjMeta, Clock, ObjType, ActorId, ElemId, Export, Exportable, ObjId, OpId};
+use crate::exid::ExId;
+use crate::patches::TextRepresentation;
+use crate::op_tree::OpsFound;
+use crate::parents::Parents;
 
-use super::columns::{ColumnData, ColumnDataIter, RawReader};
+use super::columns::{Run, ColumnData, ColumnDataIter, RawReader};
 use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::ActorIdx;
+use super::types::{ActorIdx};
 use super::{
-    BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab,
-    StrCursor, ValueMeta,
+    BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
+    ValueMeta,
 };
 
 use std::collections::BTreeMap;
@@ -16,61 +23,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod iter;
-pub(crate) use iter::{KeyIter, OpIter, Verified};
-
-// Stick all of the column ID initialization in a module so we can turn off
-// rustfmt for the whole thing
-#[rustfmt::skip]
-mod ids {
-    use crate::storage::{columns::ColumnId, ColumnSpec};
-
-    pub(super) const OBJ_COL_ID:                ColumnId = ColumnId::new(0);
-    pub(super) const KEY_COL_ID:                ColumnId = ColumnId::new(1);
-    pub(super) const ID_COL_ID:                 ColumnId = ColumnId::new(2);
-    pub(super) const INSERT_COL_ID:             ColumnId = ColumnId::new(3);
-    pub(in crate::op_set2) const ACTION_COL_ID: ColumnId = ColumnId::new(4);
-    pub(super) const VAL_COL_ID:                ColumnId = ColumnId::new(5);
-    pub(super) const SUCC_COL_ID:               ColumnId = ColumnId::new(8);
-    pub(super) const EXPAND_COL_ID:             ColumnId = ColumnId::new(9);
-    pub(super) const MARK_NAME_COL_ID:          ColumnId = ColumnId::new(10);
-
-    pub(super) const ID_ACTOR_COL_SPEC:       ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    pub(super) const ID_COUNTER_COL_SPEC:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
-    pub(super) const OBJ_ID_ACTOR_COL_SPEC:   ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
-    pub(super) const OBJ_ID_COUNTER_COL_SPEC: ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
-    pub(super) const KEY_ACTOR_COL_SPEC:      ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
-    pub(super) const KEY_COUNTER_COL_SPEC:    ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
-    pub(super) const KEY_STR_COL_SPEC:        ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);
-    pub(super) const SUCC_COUNT_COL_SPEC:     ColumnSpec = ColumnSpec::new_group(SUCC_COL_ID);
-    pub(super) const SUCC_ACTOR_COL_SPEC:     ColumnSpec = ColumnSpec::new_actor(SUCC_COL_ID);
-    pub(super) const SUCC_COUNTER_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(SUCC_COL_ID);
-    pub(super) const INSERT_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
-    pub(super) const ACTION_COL_SPEC:         ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
-    pub(super) const VALUE_META_COL_SPEC:     ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);
-    pub(super) const VALUE_COL_SPEC:          ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
-    pub(super) const MARK_NAME_COL_SPEC:      ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
-    pub(super) const EXPAND_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
-
-    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 16] = [
-        ID_ACTOR_COL_SPEC,
-        ID_COUNTER_COL_SPEC,
-        OBJ_ID_ACTOR_COL_SPEC,
-        OBJ_ID_COUNTER_COL_SPEC,
-        KEY_ACTOR_COL_SPEC,
-        KEY_COUNTER_COL_SPEC,
-        KEY_STR_COL_SPEC,
-        SUCC_COUNT_COL_SPEC,
-        SUCC_ACTOR_COL_SPEC,
-        SUCC_COUNTER_COL_SPEC,
-        INSERT_COL_SPEC,
-        ACTION_COL_SPEC,
-        VALUE_META_COL_SPEC,
-        VALUE_COL_SPEC,
-        MARK_NAME_COL_SPEC,
-        EXPAND_COL_SPEC,
-    ];
-}
-pub(super) use ids::*;
+pub(crate) use iter::{KeyIter, OpIter, OpScope, Verified};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -80,44 +33,223 @@ pub(crate) struct OpSet {
 }
 
 impl OpSet {
-
-    pub(crate) fn get_actor(&self, idx: ActorIdx) -> Option<&ActorId> {
-      self.actors.get(usize::from(idx))
-    }
-
-    pub(crate) fn lookup_actor(&mut self, actor: &ActorId) -> Option<ActorIdx> {
-      self.actors.binary_search(actor).ok().map(ActorIdx::from)
-    }
-
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> ActorIdx {
-      match self.actors.binary_search(&actor) {
-        Ok(idx) => ActorIdx::from(idx),
-        Err(idx) => {
-          self.actors.insert(idx, actor);
-          for (spec, col) in &mut self.cols.0 {
-            match col {
-              Column::Actor(col_data) => {
-
-                  let new_ids = col_data.iter().map(|a| match a {
-                    Some(ActorIdx(id)) if id as usize >= idx => { Some(ActorIdx(id + 1)) },
-                    old => old,
-                  }).collect::<Vec<_>>();
-                  let mut new_data = ColumnData::<ActorCursor>::new();
-                  new_data.splice(0, new_ids);
-                  std::mem::swap(col_data, &mut new_data);
-/*
-                  match a {
-                    Some(ActorIdx(id)) if id as usize >= idx => { Some(ActorIdx(id + 1)) },
-                    old => old,
-                  }
-*/
-              },
-              _ => {}
-            }
-          }
-          ActorIdx::from(idx)
+    pub(crate) fn parents(
+        &self,
+        obj: ObjId,
+        text_rep: TextRepresentation,
+        clock: Option<Clock>,
+    ) -> Parents<'_> {
+        Parents {
+            obj,
+            ops: self,
+            text_rep,
+            clock,
         }
-      }
+    }
+
+    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
+        Keys {
+            iter: Some((self.top_ops(obj, clock), self)),
+        }
+    }
+
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        obj: &ObjId,
+        range: R,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+    ) -> ListRange<'_, R> {
+        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
+    }
+
+    pub(crate) fn map_range<R: RangeBounds<String>>(
+        &self,
+        obj: &ObjId,
+        range: R,
+        clock: Option<Clock>,
+    ) -> MapRange<'_, R> {
+        MapRange::new(self.top_ops(obj, clock.clone()), self, range, clock)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
+    pub(crate) fn seq_length(
+        &self,
+        obj: &ObjId,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+    ) -> usize {
+        self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
+    }
+
+    pub(crate) fn seek_ops_by_prop<'a>(
+        &'a self,
+        obj: &ObjId,
+        prop: Prop,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<OpsFound<'a>> {
+        match prop {
+            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, key_name, clock),
+            Prop::Seq(index) => self.seek_ops_by_index(obj, index, encoding, clock),
+        }
+    }
+
+    pub(crate) fn seek_ops_by_map_key<'a>(
+        &'a self,
+        obj: &ObjId,
+        key: &str,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<OpsFound<'a>> {
+        todo!()
+    }
+
+    pub(crate) fn seek_ops_by_index<'a>(
+        &'a self,
+        obj: &ObjId,
+        prop: &str,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<OpsFound<'a>> {
+        todo!()
+    }
+
+    pub(crate) fn seek_list_opid(
+        &self,
+        opid: OpId,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
+        todo!()
+    }
+
+    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
+        self.top_ops(obj, clock).map(|op| op.as_str()).collect()
+    }
+
+    pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(id.counter(), self.actors[id.actor()].clone(), id.actor())
+        }
+    }
+
+    pub(crate) fn id_to_cursor(&self, id: OpId) -> Cursor {
+        if id == types::ROOT {
+            panic!()
+        } else {
+            Cursor {
+                ctr: id.counter(),
+                actor: self.actors[id.actor()].clone(),
+            }
+        }
+    }
+
+    fn get_obj_ctr(&self) -> ColumnDataIter<'_, IntCursor> {
+        self.cols.get_integer(OBJ_ID_COUNTER_COL_SPEC)
+    }
+
+    fn get_obj_actor(&self) -> ColumnDataIter<'_, ActorCursor> {
+        self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC)
+    }
+
+    fn iter_obj_ids(&self) -> IterObjIds<'_> {
+        let ctr = self.get_obj_ctr();
+        let actor = self.get_obj_actor();
+        let next_ctr = ctr.next_run();
+        let next_actor = actor.next_run();
+        let pos = 0;
+
+        IterObjIds {
+            ctr,
+            actor,
+            next_ctr,
+            next_actor,
+            pos,
+        }
+    }
+
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_, Verified>)> {
+        // FIXME - remove unwraps
+        self.iter_obj_ids().map(|(id, range)| {
+            let obj_meta = self.find_op_by_id(&id.0).map(|op| ObjMeta {
+                id,
+                typ: op.action.try_into().unwrap(),
+            }).unwrap();
+            (obj_meta, self.iter_range(&range))
+        })
+    }
+
+    pub(crate) fn top_ops<'a>(
+        &'a self,
+        obj: &ObjId,
+        clock: Option<Clock>,
+    ) -> impl Iterator<Item = Op<'a>> {
+        self.iter_obj(obj).visible_ops(clock).top_ops()
+    }
+
+    pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
+        match id.export() {
+            Export::Id(id) => format!("{}@{}", id.counter(), self.actors[id.actor()]),
+            Export::Prop(index) => panic!(),
+            Export::Special(s) => s,
+        }
+    }
+
+    pub(crate) fn find_op_by_id(&self, id: &OpId) -> Option<Op<'_>> {
+        todo!()
+    }
+
+    pub(crate) fn object_type(&self, obj: &ObjId) -> ObjType {
+        todo!()
+    }
+
+    pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {
+        //&self.actors[usize::from(idx)]
+        &self.actors[idx]
+    }
+
+    pub(crate) fn get_actor_safe(&self, idx: usize) -> Option<&ActorId> {
+        //self.actors.get(usize::from(idx))
+        self.actors.get(idx)
+    }
+
+    pub(crate) fn lookup_actor(&mut self, actor: &ActorId) -> Option<usize> {
+        self.actors.binary_search(actor).ok() // .map(ActorIdx::from)
+    }
+
+    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+        match self.actors.binary_search(&actor) {
+            Ok(idx) => idx, //ActorIdx::from(idx),
+            Err(idx) => {
+                self.actors.insert(idx, actor);
+                for (spec, col) in &mut self.cols.0 {
+                    match col {
+                        Column::Actor(col_data) => {
+                            let new_ids = col_data
+                                .iter()
+                                .map(|a| match a {
+                                    Some(ActorIdx(id)) if id as usize >= idx => {
+                                        Some(ActorIdx(id + 1))
+                                    }
+                                    old => old,
+                                })
+                                .collect::<Vec<_>>();
+                            let mut new_data = ColumnData::<ActorCursor>::new();
+                            new_data.splice(0, new_ids);
+                            std::mem::swap(col_data, &mut new_data);
+                        }
+                        _ => {}
+                    }
+                }
+                idx //ActorIdx::from(idx)
+            }
+        }
     }
 
     pub(crate) fn new(doc: &Document<'_>) -> Self {
@@ -192,6 +324,11 @@ impl OpSet {
     }
 
     pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a, Verified> {
+        /*
+                let range = self.get_obj_ctr().scope_to_value(obj.counter(), ..);
+                let actor = ActorIdx::from(obj.actor() as usize);
+                let range = self.get_obj_actor().scope_to_value(actor, range);
+        */
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
@@ -243,7 +380,7 @@ impl OpSet {
         }
     }
 
-    fn iter(&self) -> OpIter<'_, Verified> {
+    pub(crate) fn iter(&self) -> OpIter<'_, Verified> {
         OpIter {
             index: 0,
             id_actor: self.cols.get_actor(ID_ACTOR_COL_SPEC),
@@ -292,6 +429,13 @@ impl OpSet {
     //    MaybePackable allowing you to pass in Item or Option<Item> to splice
     // * maybe do something with types to make scan required to get
     //    validated bytes
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FoundOpId<'a> {
+    pub(crate) op: Op<'a>,
+    pub(crate) index: usize,
+    pub(crate) visible: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -456,7 +600,7 @@ impl Columns {
         Columns(columns)
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.get(&ID_ACTOR_COL_SPEC).map(|c| c.len()).unwrap_or(0)
     }
 
@@ -636,6 +780,96 @@ impl<'a> Iterator for &'a Columns {
     }
 }
 
+struct IterObjIds<'a> {
+    ctr: ColumnDataIter<'a, IntCursor>,
+    actor: ColumnDataIter<'a, ActorCursor>,
+    next_ctr: Option<Run<'a, u64>>,
+    next_actor: Option<Run<'a, ActorIdx>>,
+    pos: usize,
+}
+
+impl<'a> Iterator for IterObjIds<'a> {
+    type Item = (ObjId, Range<usize>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.pos;
+        match (self.next_ctr, self.next_actor) {
+            (Some(run1), Some(run2)) => {
+                if run1.count < run2.count {
+                    run2.count -= run1.count;
+                    self.pos += run1.count;
+                    self.next_ctr = self.ctr.next_run();
+                } else if run1.count > run2.count {
+                    run1.count -= run2.count;
+                    self.pos += run2.count;
+                    self.next_actor = self.actor.next_run();
+                } else {
+                    // equal
+                    self.pos += run1.count;
+                    self.next_ctr = self.ctr.next_run();
+                    self.next_actor = self.actor.next_run();
+                }
+                let end = self.pos;
+                Some((ObjId(OpId::new(run1.value?, run2.value?.into())), start..end))
+            }
+            (None, None) => None,
+        }
+    }
+}
+
+// Stick all of the column ID initialization in a module so we can turn off
+// rustfmt for the whole thing
+#[rustfmt::skip]
+mod ids {
+    use crate::storage::{columns::ColumnId, ColumnSpec};
+
+    pub(super) const OBJ_COL_ID:                ColumnId = ColumnId::new(0);
+    pub(super) const KEY_COL_ID:                ColumnId = ColumnId::new(1);
+    pub(super) const ID_COL_ID:                 ColumnId = ColumnId::new(2);
+    pub(super) const INSERT_COL_ID:             ColumnId = ColumnId::new(3);
+    pub(in crate::op_set2) const ACTION_COL_ID: ColumnId = ColumnId::new(4);
+    pub(super) const VAL_COL_ID:                ColumnId = ColumnId::new(5);
+    pub(super) const SUCC_COL_ID:               ColumnId = ColumnId::new(8);
+    pub(super) const EXPAND_COL_ID:             ColumnId = ColumnId::new(9);
+    pub(super) const MARK_NAME_COL_ID:          ColumnId = ColumnId::new(10);
+
+    pub(super) const ID_ACTOR_COL_SPEC:       ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
+    pub(super) const ID_COUNTER_COL_SPEC:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
+    pub(super) const OBJ_ID_ACTOR_COL_SPEC:   ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
+    pub(super) const OBJ_ID_COUNTER_COL_SPEC: ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
+    pub(super) const KEY_ACTOR_COL_SPEC:      ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
+    pub(super) const KEY_COUNTER_COL_SPEC:    ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
+    pub(super) const KEY_STR_COL_SPEC:        ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);
+    pub(super) const SUCC_COUNT_COL_SPEC:     ColumnSpec = ColumnSpec::new_group(SUCC_COL_ID);
+    pub(super) const SUCC_ACTOR_COL_SPEC:     ColumnSpec = ColumnSpec::new_actor(SUCC_COL_ID);
+    pub(super) const SUCC_COUNTER_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(SUCC_COL_ID);
+    pub(super) const INSERT_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
+    pub(super) const ACTION_COL_SPEC:         ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
+    pub(super) const VALUE_META_COL_SPEC:     ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);
+    pub(super) const VALUE_COL_SPEC:          ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
+    pub(super) const MARK_NAME_COL_SPEC:      ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
+    pub(super) const EXPAND_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
+
+    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 16] = [
+        ID_ACTOR_COL_SPEC,
+        ID_COUNTER_COL_SPEC,
+        OBJ_ID_ACTOR_COL_SPEC,
+        OBJ_ID_COUNTER_COL_SPEC,
+        KEY_ACTOR_COL_SPEC,
+        KEY_COUNTER_COL_SPEC,
+        KEY_STR_COL_SPEC,
+        SUCC_COUNT_COL_SPEC,
+        SUCC_ACTOR_COL_SPEC,
+        SUCC_COUNTER_COL_SPEC,
+        INSERT_COL_SPEC,
+        ACTION_COL_SPEC,
+        VALUE_META_COL_SPEC,
+        VALUE_COL_SPEC,
+        MARK_NAME_COL_SPEC,
+        EXPAND_COL_SPEC,
+    ];
+}
+pub(super) use ids::*;
 #[cfg(test)]
 mod tests {
     use super::*;

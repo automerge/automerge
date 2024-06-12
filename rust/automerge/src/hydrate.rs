@@ -184,6 +184,49 @@ impl Automerge {
     }
 }
 
+use crate::automerge2;
+
+impl automerge2::Automerge {
+    pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        let mut map = Map::new();
+        for top in self.ops().top_ops(obj, clock.cloned()) {
+            let key = self.ops().to_string(top.op.elemid_or_key());
+            let value = self.hydrate_op(top.op, clock);
+            let id = top.op.exid();
+            let conflict = top.conflict;
+            map.insert(key, MapValue::new(value, id, conflict));
+        }
+        Value::Map(map)
+    }
+
+    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        let mut list = List::new();
+        for top in self.ops().top_ops(obj, clock.cloned()) {
+            let value = self.hydrate_op(top.op, clock);
+            let id = top.op.exid();
+            let conflict = top.conflict;
+            list.push(value, id, conflict);
+        }
+        Value::List(list)
+    }
+
+    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        let text = self.ops().text(obj, clock.cloned());
+        Value::Text(Text::new(text.into()))
+    }
+
+    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
+        match op.action() {
+            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
+            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),
+            OpType::Make(ObjType::List) => self.hydrate_list(&op.id().into(), clock),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id().into(), clock),
+            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
+            _ => panic!("invalid op to hydrate"),
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! hydrate_map {
     {} => {

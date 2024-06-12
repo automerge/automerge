@@ -485,6 +485,7 @@ impl OpSetInternal {
     ) -> ListRange<'_, R> {
         ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
     }
+
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
         obj: &ObjId,
