@@ -24,6 +24,7 @@ export {
   type ScalarValue,
   type PatchInfo,
   type PatchSource,
+  PatchSources,
 } from "./types.js"
 
 import { Text } from "./text.js"
