@@ -5,12 +5,13 @@ use super::types::{Action, Key, OpType, ScalarValue};
 use super::DeltaCursor;
 use crate::op_set;
 use crate::text_value::TextValue;
-use crate::types::{ListEncoding, Clock, ElemId, ObjId, OpId};
+use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId};
 use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
     pub(crate) index: usize,
+    pub(crate) conflict: bool,
     pub(crate) id: OpId,
     pub(crate) action: Action,
     pub(crate) obj: ObjId,
@@ -77,7 +78,7 @@ impl<'a> Op<'a> {
         if encoding == ListEncoding::List {
             1
         } else {
-            TextValue::width(self.to_str()) // FASTER
+            TextValue::width(self.as_str()) // FASTER
         }
     }
 

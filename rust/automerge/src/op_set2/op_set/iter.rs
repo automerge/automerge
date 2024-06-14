@@ -12,6 +12,7 @@ use crate::{
 };
 
 use std::fmt::Debug;
+use std::ops::RangeBounds;
 
 use super::{
     ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC,
@@ -49,6 +50,46 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
     pub(super) _phantom: std::marker::PhantomData<T>,
 }
+
+pub(crate) struct MapRange<'a, R: RangeBounds<String>> {
+    iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    range: R,
+}
+
+impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
+    pub(crate) fn new(
+        iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+        range: R,
+    ) -> Self {
+        Self { iter, range }
+    }
+}
+
+pub(crate) struct ListRange<'a, R: RangeBounds<usize>> {
+    iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    range: R,
+}
+
+impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
+    pub(crate) fn new(
+        iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+        range: R,
+    ) -> Self {
+        Self { iter, range }
+    }
+}
+
+pub(crate) struct Keys<'a> {
+    pub(crate) iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+}
+
+/*
+impl<'a, R: RangeBounds<usize>> ListRange<'a,R> {
+  pub(crate) fn new(iter: KeyIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>, range: R) {
+    Self { iter, range }
+  }
+}
+*/
 
 #[derive(Debug)]
 pub(crate) struct KeyIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
@@ -129,6 +170,11 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for TopOpIter<'a, I> {
             if key1 != key2 && key2.is_some() {
                 //log!("DONE: {:?}", op);
                 return op;
+            }
+            if key1 == key2 {
+                if let Some(last) = &mut self.last_op {
+                    last.conflict == true;
+                }
             }
         }
         //log!("FINAL: {:?}", self.last_op);
@@ -232,9 +278,11 @@ impl<'a, T: OpReadState> OpIter<'a, T> {
         let mark_name = self.read_mark_name()?;
         let successors = self.read_successors()?;
         let index = self.index;
+        let conflict = false;
         self.index += 1;
         Ok(Some(Op {
             index,
+            conflict,
             id,
             key,
             insert,

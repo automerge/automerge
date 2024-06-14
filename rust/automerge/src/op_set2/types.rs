@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
+use crate::error::AutomergeError;
 use crate::types;
 use crate::types::{ElemId, ObjType};
-use crate::error::AutomergeError;
 
 use std::ops::{Bound, RangeBounds};
 
@@ -77,7 +77,7 @@ impl From<Action> for u64 {
 
 impl TryFrom<Action> for ObjType {
     type Error = AutomergeError;
-    
+
     fn try_from(action: Action) -> Result<Self, Self::Error> {
         match action {
             Action::MakeMap => Ok(ObjType::Map),

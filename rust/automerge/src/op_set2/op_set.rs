@@ -1,7 +1,6 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_set::Parent;
 use crate::op_tree::OpsFound;
 use crate::patches::TextRepresentation;
@@ -26,7 +25,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod iter;
-pub(crate) use iter::{KeyIter, OpIter, OpScope, Verified};
+pub(crate) use iter::{KeyIter, Keys, ListRange, MapRange, OpIter, OpScope, TopOpIter, Verified};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -56,7 +55,8 @@ impl OpSet {
         text_rep: TextRepresentation,
         clock: Option<&Clock>,
     ) -> Option<Parent> {
-        let op = self.find_op_by_id(&obj.0)?;
+        // FIXME - not sure this is all right
+        let (op, visible) = self.find_op_by_id_and_vis(&obj.0, clock)?;
         if op.obj.is_root() {
             return None;
         }
@@ -76,14 +76,13 @@ impl OpSet {
             typ: op.action.try_into().unwrap(),
             obj: op.obj,
             prop,
-            visible: todo!(),
+            visible,
         })
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        Keys {
-            iter: Some((self.top_ops(obj, clock), self)),
-        }
+        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
+        Keys { iter }
     }
 
     pub(crate) fn list_range<R: RangeBounds<usize>>(
@@ -93,7 +92,8 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange::new(self.top_ops(obj, clock.clone()), encoding, range, clock)
+        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
+        ListRange::new(iter, range)
     }
 
     pub(crate) fn map_range<R: RangeBounds<String>>(
@@ -102,7 +102,8 @@ impl OpSet {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'_, R> {
-        MapRange::new(self.top_ops(obj, clock.clone()), self, range, clock)
+        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
+        MapRange::new(iter, range)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -126,7 +127,7 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> Option<OpsFound<'a>> {
         match prop {
-            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, key_name, clock),
+            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, &key_name, encoding, clock),
             Prop::Seq(index) => self.seek_ops_by_index(obj, index, encoding, clock),
         }
     }
@@ -144,7 +145,7 @@ impl OpSet {
     pub(crate) fn seek_ops_by_index<'a>(
         &'a self,
         obj: &ObjId,
-        prop: &str,
+        index: usize,
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<OpsFound<'a>> {
@@ -225,7 +226,7 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         clock: Option<Clock>,
-    ) -> impl Iterator<Item = Op<'a>> {
+    ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>> {
         self.iter_obj(obj).visible_ops(clock).top_ops()
     }
 
@@ -238,7 +239,21 @@ impl OpSet {
     }
 
     pub(crate) fn find_op_by_id(&self, id: &OpId) -> Option<Op<'_>> {
-        todo!()
+        self.iter().find(|op| &op.id == id)
+    }
+
+    pub(crate) fn find_op_by_id_and_vis(
+        &self,
+        id: &OpId,
+        clock: Option<&Clock>,
+    ) -> Option<(Op<'_>, bool)> {
+        let mut iter = self.iter();
+        while let Some(op) = iter.next() {
+            if &op.id == id {
+                return Some((op, op.visible_at(clock, iter.get_opiter())));
+            }
+        }
+        None
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> ObjType {

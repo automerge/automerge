@@ -1,7 +1,7 @@
+use crate::exid::ExId;
 use crate::op_set::OpSetData;
 use crate::storage::parse;
 use crate::types::OpId;
-use crate::exid::ExId;
 #[cfg(doc)]
 use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
