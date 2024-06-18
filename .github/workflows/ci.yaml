@@ -80,6 +80,8 @@ jobs:
 
   js_tests:
     runs-on: ubuntu-latest
+    needs: 
+      - build_wasm
     steps:
       - uses: actions/checkout@v2
       - name: Install wasm-bindgen-cli
