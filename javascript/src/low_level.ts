@@ -18,7 +18,6 @@ import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
 let _initialized = false
 let _initializeListeners: (() => void)[] = []
 
-
 export function UseApi(api: API) {
   for (const k in api) {
     // eslint-disable-next-line @typescript-eslint/no-extra-semi,@typescript-eslint/no-explicit-any
@@ -68,7 +67,9 @@ export const ApiHandler: API = {
 }
 /* eslint-enable */
 
-export function initializeWasm(wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string): Promise<void> {
+export function initializeWasm(
+  wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string,
+): Promise<void> {
   return initWasm(wasmBlob).then(_ => {
     UseApi(WasmApi)
   })

@@ -1,1 +1,1 @@
-export * from "../next_slim.js" 
+export * from "../next_slim.js"

@@ -167,7 +167,7 @@ function import_value(
         return [value, "bytes"]
       } else if (value instanceof Array) {
         return [value, "list"]
-      } else if (Object.prototype.toString.call(value) === '[object Object]') {
+      } else if (Object.prototype.toString.call(value) === "[object Object]") {
         return [value, "map"]
       } else if (isSameDocument(value, context)) {
         throw new RangeError(
@@ -390,7 +390,12 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2, [...path, index], context)
+    const [value, datatype] = import_value(
+      val,
+      textV2,
+      [...path, index],
+      context,
+    )
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -604,7 +609,12 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2, [...path, start], context)
+      const [value, datatype] = import_value(
+        val,
+        textV2,
+        [...path, start],
+        context,
+      )
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)

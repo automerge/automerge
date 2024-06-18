@@ -110,7 +110,7 @@ export function insertAt<T>(list: T[], index: number, ...values: T[]) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
 
-  (list as List<T>).insertAt(index, ...values)
+  ;(list as List<T>).insertAt(index, ...values)
 }
 
 /**
@@ -124,7 +124,7 @@ export function deleteAt<T>(list: T[], index: number, numDelete?: number) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
 
-  (list as List<T>).deleteAt(index, numDelete)
+  ;(list as List<T>).deleteAt(index, numDelete)
 }
 
 /**

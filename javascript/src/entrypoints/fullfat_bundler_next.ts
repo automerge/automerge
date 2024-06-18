@@ -4,4 +4,3 @@ import * as api from "../wasm_bindgen_output/bundler/automerge_wasm.js"
 UseApi(api)
 
 export * from "../next_slim.js"
-

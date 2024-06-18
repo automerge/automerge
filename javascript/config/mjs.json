@@ -4,7 +4,7 @@
     "../dist/**/*",
     "../node_modules",
     "../test/**/*",
-    "../src/**/*.deno.ts",
+    "../src/**/*.deno.ts"
   ],
   "compilerOptions": {
     "target": "es6",
