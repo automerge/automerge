@@ -88,8 +88,6 @@ jobs:
         run: cargo install wasm-bindgen-cli wasm-opt
       - name: Install wasm32 target
         run: rustup target add wasm32-unknown-unknown
-      - name: build js
-        run: ./javascript/scripts/build.mjs
       - name: run tests
         run: ./scripts/ci/js_tests
 
