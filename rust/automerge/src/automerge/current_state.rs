@@ -2,16 +2,17 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 
-use crate::iter::{SpanInternal, SpansInternal};
+use super::{SpanInternal, SpansInternal};
 use crate::{
     patches::{PatchLog, TextRepresentation},
-    types::{Key, ObjMeta, Op, OpId},
-    Automerge, ObjType, OpType, Value,
+    types::{ObjMeta, OpId},
+    Automerge, ObjType,
+    op_set2::{Key, Op, Value, OpType },
 };
 
 struct Put<'a> {
     value: Value<'a>,
-    key: Key,
+    key: Key<'a>,
     id: OpId,
 }
 
@@ -33,7 +34,7 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
     for (obj, ops) in doc.ops().iter_objs() {
-        let ops = ops.map(|i| i.as_op(doc.osd()));
+        //let ops = ops.map(|i| i.as_op(doc.osd()));
         if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
             log_text_patches(doc, patch_log, &obj, ops)
         } else if obj.typ.is_sequence() {
@@ -58,7 +59,7 @@ fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
             }
             SpanInternal::Obj(id, index) => {
                 let value = Value::Object(ObjType::Map);
-                patch_log.insert(obj.id, index, value.into(), id, false);
+                patch_log.insert(obj.id, index, value.into_owned().into(), id, false);
             }
         }
     }
@@ -78,8 +79,8 @@ fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
             key_ops
                 .filter(|o| o.visible_or_mark(None))
                 .filter_map(|o| match o.action() {
-                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), *o.id())),
-                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), *o.id())),
+                    OpType::Make(obj_type) => Some((Value::Object(obj_type), o.id)),
+                    OpType::Put(value) => Some((Value::Scalar(value), o.id)),
                     _ => None,
                 })
                 .enumerate()
@@ -92,30 +93,30 @@ fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            patch_log.insert(obj.id, index, value.clone().into(), opid, conflict);
+            patch_log.insert(obj.id, index, value.into_owned().into(), opid, conflict);
         });
 }
 
 fn log_map_key_patches<'a, I: Iterator<Item = Op<'a>>>(
-    (key, key_ops): (Key, I),
+    (key, key_ops): (Key<'a>, I),
 ) -> Option<(usize, Put<'a>)> {
     key_ops
         .filter(|o| o.visible())
         .filter_map(|o| match o.action() {
             OpType::Make(obj_type) => {
-                let value = Value::Object(*obj_type);
+                let value = Value::Object(obj_type);
                 Some(Put {
                     value,
                     key,
-                    id: *o.id(),
+                    id: o.id,
                 })
             }
             OpType::Put(value) => {
-                let value = Value::Scalar(Cow::Borrowed(value));
+                let value = Value::Scalar(value);
                 Some(Put {
                     value,
                     key,
-                    id: *o.id(),
+                    id: o.id,
                 })
             }
             _ => None,
@@ -130,16 +131,14 @@ fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
     obj: &ObjMeta,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| *o.key());
+    let ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
         .filter_map(log_map_key_patches)
         .for_each(|(i, put)| {
-            if let Some(prop_index) = put.key.prop_index() {
-                if let Some(key) = doc.ops().osd.props.safe_get(prop_index) {
-                    let conflict = i > 0;
-                    patch_log.put_map(obj.id, key, put.value.into(), put.id, conflict, false);
-                }
+            if let Some(key) = put.key.map_key() {
+              let conflict = i > 0;
+              patch_log.put_map(obj.id, key, put.value.into(), put.id, conflict, false);
             }
         });
 }

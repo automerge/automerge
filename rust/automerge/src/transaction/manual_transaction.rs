@@ -1,13 +1,15 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::iter::Spans;
-use crate::iter::{Keys, ListRange, MapRange, Values};
+//use crate::iter::Spans;
+//use crate::iter::{Keys, ListRange, MapRange, Values};
+//use crate::parents::Parents;
+use crate::automerge::{Parents, Automerge, Keys, ListRange, MapRange, ReadDoc, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
-use crate::types::Clock;
+use crate::types::{Clock, ScalarValue};
 use crate::{hydrate, AutomergeError};
-use crate::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
+use crate::{ChangeHash, Cursor, ObjType, Prop, Value};
 
 use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 

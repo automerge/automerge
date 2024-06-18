@@ -9,9 +9,9 @@ use std::ops::RangeBounds;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
-use crate::op_set2::{Key, OpScope, OpSet};
+use crate::op_set2::{Keys, ListRange, MapRange, Key, OpType, OpScope, OpSet};
 use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::query;
@@ -22,7 +22,7 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, ListEncoding, MarkData, ObjId, ObjMeta,
-    OpBuilder, OpId, OpIds, OpType, Value,
+    OpBuilder, OpId, OpIds, Value,
 };
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
@@ -1754,8 +1754,9 @@ impl ReadDoc for Automerge {
         self.parents_for(obj.as_ref(), Some(clock))
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.keys_for(obj.as_ref(), None)
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> crate::iter::Keys<'_> {
+        // FIXME
+        //self.keys_for(obj.as_ref(), None)
     }
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {

@@ -167,6 +167,12 @@ pub(crate) struct NextSlab<'a> {
     slabs: &'a [Slab],
 }
 
+impl<'a> Default for NextSlab<'a> {
+    fn default() -> Self {
+        Self { slabs: &[] }
+    }
+}
+
 impl<'a> NextSlab<'a> {
     fn new(slabs: &'a [Slab]) -> Self {
         Self { slabs }
@@ -185,7 +191,7 @@ impl<'a> Iterator for NextSlab<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     group: usize,
@@ -857,10 +863,19 @@ pub(crate) enum SpliceResult {
     Replace(Vec<Slab>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct RawReader<'a> {
     slabs: std::slice::Iter<'a, Slab>,
     current: Option<(&'a Slab, usize)>,
+}
+
+impl<'a> Default for RawReader<'a> {
+    fn default() -> Self {
+        Self {
+            slabs: (&[]).iter(),
+            current: None,
+        }
+    }
 }
 
 impl<'a> RawReader<'a> {

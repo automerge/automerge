@@ -70,6 +70,8 @@ impl<'a> Iterator for TopOpsInner<'a> {
     type Item = TopOp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+/*
         let mut result_op = None;
         loop {
             if let Some(op) = self.iter.next() {
@@ -124,5 +126,6 @@ impl<'a> Iterator for TopOpsInner<'a> {
             conflict: self.num_ops > 1,
             marks,
         })
+*/
     }
 }

@@ -3,9 +3,11 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::op_tree::OpSetData;
+use crate::op_set::OpSetData;
+use crate::op_set2;
+use crate::op_set2::{ OpType };
 use crate::query::RichTextQueryState;
-use crate::types::{OpId, OpType};
+use crate::types::{OpId};
 use crate::value::ScalarValue;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -147,11 +149,14 @@ impl MarkSet {
         q: &RichTextQueryState<'_>,
         osd: &OpSetData,
     ) -> Option<Arc<Self>> {
-        let mut marks = MarkStateMachine::default();
-        for (id, mark_data) in q.iter() {
-            marks.mark_begin(*id, mark_data, osd);
-        }
-        marks.current().cloned()
+        todo!()
+        /*
+                let mut marks = MarkStateMachine::default();
+                for (id, mark_data) in q.iter() {
+                    marks.mark_begin(*id, mark_data, osd);
+                }
+                marks.current().cloned()
+        */
     }
 }
 
@@ -223,12 +228,15 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, opid: OpId, action: &'a OpType, osd: &OpSetData) -> bool {
+    pub(crate) fn process(&mut self, opid: OpId, action: OpType<'a>, osd: &OpSetData) -> bool {
+        todo!()
+/*
         match action {
             OpType::MarkBegin(_, data) => self.mark_begin(opid, data, osd),
             OpType::MarkEnd(_) => self.mark_end(opid, osd),
             _ => false,
         }
+*/
     }
 
     pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {

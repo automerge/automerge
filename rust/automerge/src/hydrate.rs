@@ -1,5 +1,7 @@
-use crate::types::{Clock, ObjId, Op, OpType};
-use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
+use crate::op_set2;
+use crate::op_set2::{ OpType, Op };
+use crate::types::{Clock, ObjId, ScalarValue};
+use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -21,6 +23,41 @@ pub enum Value {
     List(List),
     Text(Text),
 }
+
+/*
+#[derive(PartialEq, Debug, Clone)]
+pub enum ScalarValue {
+    Bytes(Vec<u8>),
+    Str(String),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Unknown { type_code: u8, bytes: Vec<u8> },
+    Null,
+}
+*/
+
+/*
+impl<'a> From<op_set2::ScalarValue<'a>> for ScalarValue {
+  fn from(s: op_set2::ScalarValue<'a>) -> Self {
+    match s {
+      op_set2::ScalarValue::Bytes(b) => ScalarValue::Bytes(b.to_vec()),
+      op_set2::ScalarValue::Str(s) => ScalarValue::Str(s.to_string()),
+      op_set2::ScalarValue::Int(i) => ScalarValue::Int(i),
+      op_set2::ScalarValue::Uint(u) => ScalarValue::Uint(u),
+      op_set2::ScalarValue::F64(f) => ScalarValue::F64(f),
+      op_set2::ScalarValue::Counter(c) => ScalarValue::Counter(c),
+      op_set2::ScalarValue::Timestamp(t) => ScalarValue::Timestamp(t),
+      op_set2::ScalarValue::Boolean(b) => ScalarValue::Boolean(b),
+      op_set2::ScalarValue::Unknown { type_code, bytes } =. ScalarValue::Unknown { type_code, bytes: bytes.to_vec() },
+      op_set2::ScalarValue::Null =. ScalarValue::Null,
+    }
+  }
+}
+*/
 
 impl Value {
     pub fn is_scalar(&self) -> bool {
@@ -89,6 +126,18 @@ impl From<value::Value<'_>> for Value {
     }
 }
 
+impl From<op_set2::Value<'_>> for Value {
+    fn from(value: op_set2::Value<'_>) -> Self {
+        match value {
+            op_set2::Value::Object(ObjType::Map) => Value::Map(Map::default()),
+            op_set2::Value::Object(ObjType::List) => Value::List(List::default()),
+            op_set2::Value::Object(ObjType::Text) => Value::Text(Text::default()),
+            op_set2::Value::Object(ObjType::Table) => Value::Map(Map::default()),
+            op_set2::Value::Scalar(s) => Value::Scalar(s.into_owned()),
+        }
+    }
+}
+
 impl From<Value> for value::Value<'_> {
     fn from(value: Value) -> Self {
         match value {
@@ -147,9 +196,10 @@ impl Automerge {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
         let mut map = Map::new();
         for top in self.ops().top_ops(obj, clock.cloned()) {
-            let key = self.ops().to_string(top.op.elemid_or_key());
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
+            let key = self.ops().to_string(top.elemid_or_key());
+            let value = self.hydrate_op(top, clock);
+            //let id = top.op.exid();
+            let id = self.ops().id_to_exid(top.id);
             let conflict = top.conflict;
             map.insert(key, MapValue::new(value, id, conflict));
         }
@@ -159,8 +209,9 @@ impl Automerge {
     pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
         let mut list = List::new();
         for top in self.ops().top_ops(obj, clock.cloned()) {
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
+            let value = self.hydrate_op(top, clock);
+            //let id = top.exid();
+            let id = self.ops().id_to_exid(top.id);
             let conflict = top.conflict;
             list.push(value, id, conflict);
         }
@@ -174,54 +225,11 @@ impl Automerge {
 
     pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
         match op.action() {
-            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::List) => self.hydrate_list(&op.id().into(), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id().into(), clock),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
-            _ => panic!("invalid op to hydrate"),
-        }
-    }
-}
-
-use crate::automerge2;
-
-impl automerge2::Automerge {
-    pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        let mut map = Map::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
-            let key = self.ops().to_string(top.op.elemid_or_key());
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
-            let conflict = top.conflict;
-            map.insert(key, MapValue::new(value, id, conflict));
-        }
-        Value::Map(map)
-    }
-
-    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        let mut list = List::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
-            let conflict = top.conflict;
-            list.push(value, id, conflict);
-        }
-        Value::List(list)
-    }
-
-    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        let text = self.ops().text(obj, clock.cloned());
-        Value::Text(Text::new(text.into()))
-    }
-
-    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
-        match op.action() {
-            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::List) => self.hydrate_list(&op.id().into(), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id().into(), clock),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
+            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id.into(), clock),
+            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock),
+            OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock),
+            OpType::Put(scalar) => Value::Scalar(scalar.clone().into()),
             _ => panic!("invalid op to hydrate"),
         }
     }

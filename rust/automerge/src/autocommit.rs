@@ -3,15 +3,15 @@ use std::ops::RangeBounds;
 use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
-use crate::iter::Spans;
-use crate::iter::{Keys, ListRange, MapRange, Values};
+//use crate::iter::Spans;
+use crate::automerge::{Keys, ListRange, MapRange, Spans, Values, Parents };
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
 use crate::{hydrate, OnPartialLoad};
-use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
+use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
     Prop, Value,

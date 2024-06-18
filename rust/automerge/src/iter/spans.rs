@@ -79,6 +79,8 @@ where
 
 impl<'a> SpansState<'a> {
     fn process_op(&mut self, op: Op<'a>, doc: &Automerge) -> Option<SpanInternal> {
+        todo!()
+/*
         if self.marks.process(*op.id(), op.action(), doc.osd()) {
             // The marks have changed, so we record what the new marks are. We
             // don't flush yet though because there might not be any characters
@@ -116,6 +118,7 @@ impl<'a> SpansState<'a> {
                 _ => None,
             }
         }
+*/
     }
 
     fn flush(&mut self) -> Option<SpanInternal> {

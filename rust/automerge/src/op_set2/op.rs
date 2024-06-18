@@ -3,9 +3,10 @@ use super::op_set::{KeyIter, OpIter, Verified};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::DeltaCursor;
-use crate::op_set;
+//use crate::op_set;
+use crate::exid::ExId;
 use crate::text_value::TextValue;
-use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId};
+use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId, Value};
 use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone)]
@@ -82,13 +83,23 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn op_type(&self) -> OpType<'_> {
+    pub(crate) fn op_type(&self) -> OpType<'a> {
         OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
     }
 
     pub(crate) fn succ(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator + 'a {
         self.succ_cursors.clone()
     }
+
+    /*
+        pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
+                ExId::Id(
+                    self.id.counter(),
+                    0, // FIXME
+                    self.id.actor(),
+                )
+        }
+    */
 
     pub(crate) fn elemid_or_key(&self) -> Key<'a> {
         if self.insert {
@@ -98,7 +109,52 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn visible_at(&self, clock: Option<&Clock>, iter: &OpIter<'a, Verified>) -> bool {
+    pub(crate) fn predates(&self, clock: &Clock) -> bool {
+        clock.covers(&self.id)
+    }
+
+    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
+        todo!()
+        //self.succ_iter().any(|op| clock.covers(op.id())) 
+    }
+
+    pub(crate) fn tagged_value(&self, clock: Option<&Clock>) -> (Value<'a>, ExId) {
+        todo!()
+    }
+
+    pub(crate) fn inc_at(&self, clock: &Clock) -> i64 {
+        todo!()
+/*
+        self.succ()
+            .filter_map(|o| {
+                if clock.covers(o.id()) {
+                    o.op().get_increment_value()
+                } else {
+                    None
+                }
+            })
+            .sum()
+*/
+    }
+
+    pub(crate) fn is_put(&self) -> bool {
+        todo!()
+        //matches!(&self.action(), OpType::Put(_))
+    }
+
+    pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'a> {
+        todo!()
+/*
+        if let Some(clock) = clock {
+            if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
+                return Value::counter(c.start + self.inc_at(clock));
+            }
+        }
+        self.value()
+*/
+    }
+
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
         if let Some(clock) = clock {
             if self.is_inc() || self.is_mark() {
                 false
@@ -106,17 +162,44 @@ impl<'a> Op<'a> {
                 clock.covers(&self.id) && !self.succ().any(|i| clock.covers(&i))
             }
         } else {
-            self.visible(iter)
+            self.visible()
         }
     }
 
-    pub(crate) fn visible(&self, iter: &OpIter<'a, Verified>) -> bool {
+    pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
+        todo!()
+/*
+        if self.is_inc() {
+            false
+        } else if let Some(clock) = clock {
+            clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
+        } else if self.is_counter() {
+            self.succ().all(|op| op.is_inc())
+        } else {
+            self.succ().len() == 0
+        }   
+*/
+    }
+
+    pub(crate) fn action(&self) -> OpType<'a> {
+          self.op_type()
+    }   
+
+    pub(crate) fn is_noop(&self, action: &OpType) -> bool {
+        todo!()
+        //matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
+    }
+
+    pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
-            let key_iter = KeyIter::new(*self, iter.clone());
+            todo!()
+/*
+            let key_iter = KeyIter::new(*self, self.iter.clone());
             let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
             self.succ().all(|id| sub_ops.contains(&id))
+*/
         } else {
             self.succ().len() == 0
         }
@@ -149,6 +232,7 @@ impl<'a> std::hash::Hash for Op<'a> {
 
 impl<'a> Eq for Op<'a> {}
 
+/*
 impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
     fn eq(&self, other: &op_set::Op<'_>) -> bool {
         let action =
@@ -161,6 +245,7 @@ impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
             && self.succ().eq(other.succ().map(|n| *n.id()))
     }
 }
+*/
 
 // TODO:
 // needs tests around counter value and visability

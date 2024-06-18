@@ -5,6 +5,7 @@ use crate::types;
 use crate::types::{ElemId, ObjType};
 
 use std::ops::{Bound, RangeBounds};
+use std::fmt;
 
 use super::meta::ValueType;
 
@@ -141,7 +142,7 @@ impl<'a> OpType<'a> {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub(crate) enum ScalarValue<'a> {
+pub enum ScalarValue<'a> {
     Bytes(&'a [u8]),
     Str(&'a str),
     Int(i64),
@@ -154,7 +155,48 @@ pub(crate) enum ScalarValue<'a> {
     Null,
 }
 
+impl<'a> fmt::Display for ScalarValue<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScalarValue::Bytes(b) => write!(f, "\"{:?}\"", b),
+            ScalarValue::Str(s) => write!(f, "\"{}\"", s),
+            ScalarValue::Int(i) => write!(f, "{}", i),
+            ScalarValue::Uint(i) => write!(f, "{}", i),
+            ScalarValue::F64(n) => write!(f, "{:.324}", n),
+            ScalarValue::Counter(c) => write!(f, "Counter: {}", c),
+            ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
+            ScalarValue::Boolean(b) => write!(f, "{}", b),
+            ScalarValue::Null => write!(f, "null"),
+            ScalarValue::Unknown { type_code, .. } => write!(f, "unknown type {}", type_code),
+        }
+    }
+}
+
+impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
+    fn from(s: ScalarValue<'a>) -> Self {
+        s.into_owned()
+    }
+}
+
 impl<'a> ScalarValue<'a> {
+    pub(crate) fn into_owned(&self) -> types::ScalarValue {
+        match self {
+            Self::Bytes(b) => types::ScalarValue::Bytes(b.to_vec()),
+            Self::Str(s) => types::ScalarValue::Str(s.to_string().into()),
+            Self::Int(n) => types::ScalarValue::Int(*n),
+            Self::Uint(n) => types::ScalarValue::Uint(*n),
+            Self::F64(n) => types::ScalarValue::F64(*n),
+            Self::Counter(n) => types::ScalarValue::Counter(n.into()),
+            Self::Timestamp(n) => types::ScalarValue::Timestamp(*n),
+            Self::Boolean(b) => types::ScalarValue::Boolean(*b),
+            Self::Unknown { type_code, bytes } => types::ScalarValue::Unknown {
+                type_code: *type_code,
+                bytes: bytes.to_vec(),
+            },
+            Self::Null => types::ScalarValue::Null,
+        }
+    }
+
     pub(super) fn from_raw(
         meta: super::meta::ValueMeta,
         raw: &'a [u8],
@@ -288,6 +330,30 @@ impl<'a> From<i64> for ScalarValue<'a> {
 pub(crate) enum Key<'a> {
     Map(&'a str), // at this point we don't care if its valid UTF8
     Seq(ElemId),
+}
+
+impl<'a> Key<'a> {
+  pub(crate) fn map_key(&self) -> Option<&'a str> {
+        match self {
+            Key::Map(s) => Some(s),
+            Key::Seq(_) => None
+        }
+  }
+}
+
+impl<'a> types::Exportable for Key<'a> {
+    fn export(&self) -> types::Export {
+        match self {
+            Key::Map(p) => types::Export::Special(String::from(*p)),
+            Key::Seq(e) => e.export(),
+        }
+    }
+}
+
+impl<'a> PartialEq<types::Key> for Key<'a> {
+    fn eq(&self, other: &types::Key) -> bool {
+        todo!()
+    }
 }
 
 pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {

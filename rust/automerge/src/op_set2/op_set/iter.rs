@@ -1,18 +1,23 @@
 use crate::{
+    exid::ExId,
+    marks::MarkSet,
     op_set2::{
         self,
         columns::{ColumnDataIter, RawReader, RunStep, Seek},
         op::{Op, SuccCursors},
         rle::{ActionCursor, ActorCursor},
-        types::{ActorIdx, Key},
+        types::{ActorIdx, Key, ScalarValue},
         BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
     },
     storage::ColumnSpec,
-    types::{Clock, ElemId, ObjId, OpId},
+    types::{Clock, ElemId, ObjId, ObjType, OpId},
+    value,
 };
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use super::{
     ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC,
@@ -22,14 +27,14 @@ use super::{
 };
 
 pub(crate) trait OpReadState {}
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Verified;
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Unverified;
 impl OpReadState for Verified {}
 impl OpReadState for Unverified {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) index: usize,
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
@@ -51,9 +56,73 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) _phantom: std::marker::PhantomData<T>,
 }
 
-pub(crate) struct MapRange<'a, R: RangeBounds<String>> {
+#[derive(Debug, PartialEq)]
+pub enum Value<'a> {
+    Object(ObjType),
+    Scalar(ScalarValue<'a>),
+}
+
+impl<'a> Value<'a> {
+    pub(crate) fn into_owned(&self) -> value::Value<'static> {
+        match self {
+            Self::Object(o) => value::Value::Object(*o),
+            Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
+        }
+    }
+}
+
+pub struct Values<'a> {
+    iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+}
+
+impl<'a> Default for Values<'a> {
+  fn default() -> Self {
+    Self { iter: Default::default() }
+  }
+}
+
+impl<'a> Values<'a> {
+    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>, clock: Option<Clock>) -> Self {
+      Self { iter }
+    }
+}
+
+impl<'a> Iterator for Values<'a> {
+    type Item = (Value<'a>, ExId);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MapRangeItem<'a> {
+    pub key: &'a str,
+    pub value: Value<'a>,
+    pub id: ExId,
+    pub conflict: bool,
+}
+
+pub struct MapRange<'a, R: RangeBounds<String>> {
     iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
-    range: R,
+    range: Option<R>,
+}
+
+impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {
+    fn default() -> Self {
+        Self {
+            iter: Default::default(),
+            range: None,
+        }
+    }
+}
+
+impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
+    type Item = MapRangeItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
@@ -61,13 +130,31 @@ impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
         iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
         range: R,
     ) -> Self {
-        Self { iter, range }
+        Self {
+            iter,
+            range: Some(range),
+        }
     }
 }
 
-pub(crate) struct ListRange<'a, R: RangeBounds<usize>> {
+#[derive(Debug)]
+pub struct ListRangeItem<'a> {
+    pub index: usize,
+    pub value: Value<'a>,
+    pub id: ExId,
+    pub conflict: bool,
+    pub(crate) marks: Option<Arc<MarkSet>>,
+}
+
+pub struct ListRange<'a, R: RangeBounds<usize>> {
     iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
-    range: R,
+    range: Option<R>,
+}
+
+impl<'a, R: RangeBounds<usize>> Default for ListRange<'a,R> {
+  fn default() -> Self {
+    Self { iter: Default::default(), range: None }
+  }
 }
 
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
@@ -75,12 +162,32 @@ impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
         iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
         range: R,
     ) -> Self {
-        Self { iter, range }
+        Self {
+            iter,
+            range: Some(range),
+        }
     }
 }
 
-pub(crate) struct Keys<'a> {
+impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
+    type Item = ListRangeItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!();
+    }
+}
+
+#[derive(Default)]
+pub struct Keys<'a> {
     pub(crate) iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+}
+
+impl<'a> Iterator for Keys<'a> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!();
+    }
 }
 
 /*
@@ -120,6 +227,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyIter<'a, I> {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct KeyOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
     next_op: Option<Op<'a>>,
@@ -151,13 +259,13 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
+#[derive(Clone, Default, Debug)]
+pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>> + Clone + Default> {
     iter: I,
     last_op: Option<Op<'a>>,
 }
 
-impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for TopOpIter<'a, I> {
+impl<'a, I: Iterator<Item = Op<'a>> + Clone + Default> Iterator for TopOpIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -182,7 +290,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for TopOpIter<'a, I> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     clock: Option<Clock>,
     iter: I,
@@ -193,7 +301,7 @@ impl<'a, I: OpScope<'a>> Iterator for VisibleOpIter<'a, I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(op) = self.iter.next() {
-            if op.visible_at(self.clock.as_ref(), self.get_opiter()) {
+            if op.visible_at(self.clock.as_ref()) {
                 return Some(op);
             }
         }
@@ -221,7 +329,7 @@ pub(crate) enum ReadOpError {
     MissingMarkName,
 }
 
-pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone {
+pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone + Default {
     fn get_opiter(&self) -> &OpIter<'a, Verified> {
         todo!()
     }
@@ -264,7 +372,7 @@ impl<'a, I: OpScope<'a>> OpScope<'a> for VisibleOpIter<'a, I> {
     }
 }
 
-impl<'a, T: OpReadState> OpIter<'a, T> {
+impl<'a> OpIter<'a, Verified> {
     fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
         let Some(id) = self.read_opid()? else {
             return Ok(None);
@@ -422,6 +530,7 @@ impl<'a> Iterator for OpIter<'a, Verified> {
     }
 }
 
+/*
 impl<'a> Iterator for OpIter<'a, Unverified> {
     type Item = Result<Op<'a>, ReadOpError>;
 
@@ -429,6 +538,7 @@ impl<'a> Iterator for OpIter<'a, Unverified> {
         self.try_next().transpose()
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {

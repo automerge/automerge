@@ -1,5 +1,5 @@
-use crate::op_set;
-use crate::op_set::OpSet;
+use crate::op_set2;
+use crate::op_set2::OpSet;
 use crate::patches::TextRepresentation;
 use crate::types::{ObjId, ObjType};
 use crate::{clock::Clock, exid::ExId, Prop};
@@ -56,7 +56,7 @@ impl<'a> Iterator for Parents<'a> {
         if self.obj.is_root() {
             return None;
         }
-        let op_set::Parent {
+        let op_set2::Parent {
             obj,
             typ,
             prop,

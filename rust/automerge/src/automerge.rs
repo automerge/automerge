@@ -6,26 +6,30 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+pub(crate) use crate::op_set2;
+pub(crate) use crate::op_set2::{
+    Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, OpType,
+    Parents, MarkData, SpanInternal, Spans, SpansInternal, Values,
+};
+pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
+
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
-use crate::op_set::{OpSet, OpSetData};
-use crate::parents::Parents;
+//use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
-use crate::query;
-use crate::read::ReadDocInternal;
+//use crate::query;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId,
-    ObjMeta, OpBuilder, OpId, OpIds, OpType, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta,
+    OpBuilder, OpId, OpIds, Value,
 };
 use crate::{hydrate, ScalarValue};
-use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
+use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
 pub(crate) mod diff;
@@ -175,7 +179,7 @@ pub struct Automerge {
     /// Graph of changes
     change_graph: ChangeGraph,
     /// Mapping from actor index to list of seqs seen for them.
-    states: HashMap<usize, Vec<usize>>,
+    states: HashMap<usize, Vec<usize>>, // FIXME - reordering actor?
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
@@ -210,8 +214,8 @@ impl Automerge {
         &self.ops
     }
 
-    pub(crate) fn osd(&self) -> &OpSetData {
-        &self.ops.osd
+    pub(crate) fn osd(&self) -> &crate::op_set::OpSetData {
+        todo!()
     }
 
     /// Whether this document has any operations
@@ -222,7 +226,7 @@ impl Automerge {
     pub(crate) fn actor_id(&self) -> ActorId {
         match &self.actor {
             Actor::Unused(id) => id.clone(),
-            Actor::Cached(idx) => self.ops.osd.actors[*idx].clone(),
+            Actor::Cached(idx) => self.ops.get_actor(*idx).clone(),
         }
     }
 
@@ -242,7 +246,7 @@ impl Automerge {
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
             Actor::Unused(actor) => actor,
-            Actor::Cached(index) => self.ops.osd.actors.get(*index),
+            Actor::Cached(index) => self.ops.get_actor(*index),
         }
     }
 
@@ -251,10 +255,8 @@ impl Automerge {
             Actor::Unused(actor) => {
                 let index = self
                     .ops
-                    .osd
-                    .actors
-                    .cache(std::mem::replace(actor, ActorId::from(&[][..])));
-                self.actor = Actor::Cached(index);
+                    .put_actor(std::mem::replace(actor, ActorId::from(&[][..])));
+                self.actor = Actor::Cached(usize::from(index));
                 index
             }
             Actor::Cached(index) => *index,
@@ -264,23 +266,28 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args(None);
-        Transaction::new(
-            self,
-            args,
-            PatchLog::inactive(TextRepresentation::default()),
-        )
+        todo!()
+        /*
+                Transaction::new(
+                    self,
+                    args,
+                    PatchLog::inactive(TextRepresentation::default()),
+                )
+        */
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
     pub fn transaction_log_patches(&mut self, patch_log: PatchLog) -> Transaction<'_> {
         let args = self.transaction_args(None);
-        Transaction::new(self, args, patch_log)
+        todo!()
+        //Transaction::new(self, args, patch_log)
     }
 
     /// Start a transaction isolated at a given heads
     pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
         let args = self.transaction_args(Some(heads));
-        Transaction::new(self, args, patch_log)
+        todo!()
+        //Transaction::new(self, args, patch_log)
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
@@ -312,15 +319,18 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
-        let idx_range = self.osd().start_range();
-        TransactionArgs {
-            actor_index,
-            seq,
-            start_op,
-            idx_range,
-            deps,
-            scope,
-        }
+        todo!()
+        /*
+                let idx_range = self.osd().start_range();
+                TransactionArgs {
+                    actor_index,
+                    seq,
+                    start_op,
+                    idx_range,
+                    deps,
+                    scope,
+                }
+        */
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
@@ -438,7 +448,8 @@ impl Automerge {
     /// that has all the current heads of the document as dependencies.
     pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
         let args = self.transaction_args(None);
-        Transaction::empty(self, args, opts)
+        todo!()
+        //Transaction::empty(self, args, opts)
     }
 
     /// Fork this document at the current point for use by a different actor.
@@ -481,9 +492,9 @@ impl Automerge {
         match id {
             ExId::Root => Ok(OpId::new(0, 0)),
             ExId::Id(ctr, actor, idx) => {
-                let opid = if self.ops.osd.actors.cache.get(*idx) == Some(actor) {
+                let opid = if self.ops.get_actor_safe(*idx) == Some(actor) {
                     OpId::new(*ctr, *idx)
-                } else if let Some(backup_idx) = self.ops.osd.actors.lookup(actor) {
+                } else if let Some(backup_idx) = self.ops.lookup_actor(actor) {
                     OpId::new(*ctr, backup_idx)
                 } else {
                     return Err(AutomergeError::InvalidObjId(id.to_string()));
@@ -496,7 +507,7 @@ impl Automerge {
     pub(crate) fn get_obj_meta(&self, id: ObjId) -> Result<ObjMeta, AutomergeError> {
         if id.is_root() {
             Ok(ObjMeta::root())
-        } else if let Some(typ) = self.ops.obj_type(&id) {
+        } else if let Some(typ) = self.ops.object_type(&id) {
             Ok(ObjMeta { id, typ })
         } else {
             Err(AutomergeError::NotAnObject)
@@ -508,7 +519,7 @@ impl Automerge {
         cursor: &Cursor,
         clock: Option<&Clock>,
     ) -> Result<OpId, AutomergeError> {
-        if let Some(idx) = self.ops.osd.actors.lookup(cursor.actor()) {
+        if let Some(idx) = self.ops.lookup_actor(cursor.actor()) {
             let opid = OpId::new(cursor.ctr(), idx);
             match clock {
                 Some(clock) if !clock.covers(&opid) => {
@@ -648,7 +659,8 @@ impl Automerge {
         }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
-                current_state::log_current_state_patches(&am, patch_log);
+                todo!()
+                //current_state::log_current_state_patches(&am, patch_log);
             }
         }
         Ok(am)
@@ -658,7 +670,8 @@ impl Automerge {
     ///
     /// See the documentation for [`PatchLog`] for more details on this
     pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
-        patch_log.make_patches(self)
+        todo!()
+        //patch_log.make_patches(self)
     }
 
     /// Get a set of [`Patch`]es which materialize the current state of the document
@@ -667,9 +680,12 @@ impl Automerge {
     ///
     /// [diff]: Self::diff()
     pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
-        let mut patch_log = PatchLog::active(text_rep);
-        current_state::log_current_state_patches(self, &mut patch_log);
-        patch_log.make_patches(self)
+        todo!()
+        /*
+                let mut patch_log = PatchLog::active(text_rep);
+                current_state::log_current_state_patches(self, &mut patch_log);
+                patch_log.make_patches(self)
+        */
     }
 
     /// Load an incremental save of a document.
@@ -693,6 +709,8 @@ impl Automerge {
         data: &[u8],
         patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
+        todo!()
+        /*
         if self.is_empty() {
             let mut doc = Self::load_with_options(
                 data,
@@ -718,11 +736,12 @@ impl Automerge {
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
         Ok(delta)
+        */
     }
 
     fn duplicate_seq(&self, change: &Change) -> bool {
         let mut dup = false;
-        if let Some(actor_index) = self.ops.osd.actors.lookup(change.actor_id()) {
+        if let Some(actor_index) = self.ops.lookup_actor(change.actor_id().into()) {
             if let Some(s) = self.states.get(&actor_index) {
                 dup = s.len() >= change.seq() as usize;
             }
@@ -810,14 +829,16 @@ impl Automerge {
     }
 
     fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder, OpIds)> {
-        let actor = self.ops.osd.actors.cache(change.actor_id().clone());
+        todo!()
+        /*
+        let actor = self.ops.put_actor(change.actor_id().clone());
         let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
         actors.push(actor);
         actors.extend(
             change
                 .other_actor_ids()
                 .iter()
-                .map(|a| self.ops.osd.actors.cache(a.clone()))
+                .map(|a| self.ops.put_actor(a.clone()))
                 .collect::<Vec<_>>(),
         );
         change
@@ -826,7 +847,7 @@ impl Automerge {
             .map(|(i, c)| {
                 let id = OpId::new(change.start_op().get() + i as u64, actor);
                 let key = match &c.key {
-                    EncodedKey::Prop(n) => Key::Map(self.ops.osd.props.cache(n.to_string())),
+                    EncodedKey::Prop(n) => Key::Map(&n),
                     EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
                     EncodedKey::Elem(ElemId(o)) => {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
@@ -862,6 +883,7 @@ impl Automerge {
                 )
             })
             .collect()
+        */
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
@@ -892,6 +914,8 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
+        todo!()
+        /*
         let heads = self.get_heads();
         let c = self.history.iter();
         let compress = if options.deflate {
@@ -913,6 +937,7 @@ impl Automerge {
             }
         }
         bytes
+        */
     }
 
     /// Save the entirety of this document in a compact form.
@@ -1016,7 +1041,7 @@ impl Automerge {
         } else {
             let base_actor = self.get_actor();
             let new_actor = base_actor.with_concurrency(level);
-            self.ops.osd.actors.cache(new_actor)
+            self.ops.put_actor(new_actor)
         }
     }
 
@@ -1067,7 +1092,7 @@ impl Automerge {
 
         let history_index = self.history.len();
 
-        let actor_index = self.ops.osd.actors.cache(change.actor_id().clone());
+        let actor_index = self.ops.put_actor(change.actor_id().clone());
         self.states
             .entry(actor_index)
             .or_default()
@@ -1117,11 +1142,9 @@ impl Automerge {
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
-                .osd
-                .actors
-                .lookup(&actor)
+                .lookup_actor(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
-            let obj = ExId::Id(counter, self.ops.osd.actors.cache[actor].clone(), actor);
+            let obj = ExId::Id(counter, self.ops.get_actor(actor).clone(), actor);
             Ok(obj)
         }
     }
@@ -1129,11 +1152,11 @@ impl Automerge {
     pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => {
-                let mut actor = self.ops.osd.actors[id.actor()].to_string();
+                let mut actor = self.ops.get_actor(id.actor()).to_string();
                 actor.truncate(6);
                 format!("{}@{}", id.counter(), actor)
             }
-            Export::Prop(index) => self.ops.osd.props[index].clone(),
+            Export::Prop(index) => todo!(),
             Export::Special(s) => s,
         }
     }
@@ -1149,14 +1172,14 @@ impl Automerge {
             "pred",
             "succ"
         );
-        for (obj, _, op) in self.ops.iter() {
-            let id = self.to_short_string(*op.id());
-            let obj = self.to_short_string(obj);
-            let key = match *op.key() {
-                Key::Map(n) => self.ops.osd.props[n].clone(),
+        for op in self.ops.iter() {
+            let id = self.to_short_string(op.id);
+            let obj = self.to_short_string(op.obj);
+            let key = match op.key {
+                Key::Map(n) => n.to_owned(),
                 Key::Seq(n) => self.to_short_string(n),
             };
-            let value: String = match op.action() {
+            let value: String = match op.op_type() {
                 OpType::Put(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
@@ -1166,20 +1189,21 @@ impl Automerge {
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
-            let pred: Vec<_> = op.pred().map(|op| self.to_short_string(*op.id())).collect();
-            let succ: Vec<_> = op.succ().map(|op| self.to_short_string(*op.id())).collect();
-            let insert = match op.insert() {
+            //let pred: Vec<_> = op.pred().map(|id| self.to_short_string(id)).collect();
+            let succ: Vec<_> = op.succ().map(|id| self.to_short_string(id)).collect();
+            let insert = match op.insert {
                 true => "t",
                 false => "f",
             };
             log!(
-                "  {:12} {:3} {:12} {:12} {:12} {:12?} {:12?}",
+                //"  {:12} {:3} {:12} {:12} {:12} {:12?} {:12?}",
+                "  {:12} {:3} {:12} {:12} {:12} {:12?}",
                 id,
                 insert,
                 obj,
                 key,
                 value,
-                pred,
+                //pred,
                 succ
             );
         }
@@ -1209,6 +1233,9 @@ impl Automerge {
         pred: &OpIds,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
+        // FIXME
+        todo!()
+        /*
         let is_delete = op.is_delete();
         let idx = self.ops.load(*obj, op);
         let op = idx.as_op(&self.ops.osd);
@@ -1234,6 +1261,7 @@ impl Automerge {
             self.ops.insert(pos, obj, idx);
         }
         Ok(())
+        */
     }
 
     /// Create patches representing the change in the current state of the document between the
@@ -1245,12 +1273,15 @@ impl Automerge {
         after_heads: &[ChangeHash],
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let before = self.clock_at(before_heads);
-        let after = self.clock_at(after_heads);
-        let mut patch_log = PatchLog::active(text_rep);
-        diff::log_diff(self, &before, &after, &mut patch_log);
-        patch_log.heads = Some(after_heads.to_vec());
-        patch_log.make_patches(self)
+        /*
+                let before = self.clock_at(before_heads);
+                let after = self.clock_at(after_heads);
+                let mut patch_log = PatchLog::active(text_rep);
+                diff::log_diff(self, &before, &after, &mut patch_log);
+                patch_log.heads = Some(after_heads.to_vec());
+                patch_log.make_patches(self)
+        */
+        todo!()
     }
 
     /// Get the heads of this document.
@@ -1329,46 +1360,49 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
-        let mut index = 0;
-        let mut marks = MarkStateMachine::default();
-        let mut acc = MarkAccumulator::default();
-        let mut last_marks = None;
-        let mut mark_len = 0;
-        let mut mark_index = 0;
-        for (_key, key_ops) in ops_by_key.into_iter() {
-            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
-                match o.action() {
-                    OpType::Make(_) | OpType::Put(_) => {
-                        let len = o.width(TextRepresentation::String.encoding(obj.typ));
-                        if last_marks.as_ref() != marks.current() {
-                            match last_marks.as_ref() {
-                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
-                                _ => (),
+        todo!()
+        /*
+                let obj = self.exid_to_obj(obj.as_ref())?;
+                let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
+                let mut index = 0;
+                let mut marks = MarkStateMachine::default();
+                let mut acc = MarkAccumulator::default();
+                let mut last_marks = None;
+                let mut mark_len = 0;
+                let mut mark_index = 0;
+                for (_key, key_ops) in ops_by_key.into_iter() {
+                    if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
+                        match o.action() {
+                            OpType::Make(_) | OpType::Put(_) => {
+                                let len = o.width(TextRepresentation::String.encoding(obj.typ));
+                                if last_marks.as_ref() != marks.current() {
+                                    match last_marks.as_ref() {
+                                        Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                                        _ => (),
+                                    }
+                                    last_marks = marks.current().cloned();
+                                    mark_index = index;
+                                    mark_len = 0;
+                                }
+                                mark_len += len;
+                                index += len;
                             }
-                            last_marks = marks.current().cloned();
-                            mark_index = index;
-                            mark_len = 0;
+                            OpType::MarkBegin(_, data) => {
+                                marks.mark_begin(*o.id(), data, &self.ops.osd);
+                            }
+                            OpType::MarkEnd(_) => {
+                                marks.mark_end(*o.id(), &self.ops.osd);
+                            }
+                            OpType::Increment(_) | OpType::Delete => {}
                         }
-                        mark_len += len;
-                        index += len;
                     }
-                    OpType::MarkBegin(_, data) => {
-                        marks.mark_begin(*o.id(), data, &self.ops.osd);
-                    }
-                    OpType::MarkEnd(_) => {
-                        marks.mark_end(*o.id(), &self.ops.osd);
-                    }
-                    OpType::Increment(_) | OpType::Delete => {}
                 }
-            }
-        }
-        match last_marks.as_ref() {
-            Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
-            _ => (),
-        }
-        Ok(acc.into_iter_no_unmark().collect())
+                match last_marks.as_ref() {
+                    Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                    _ => (),
+                }
+                Ok(acc.into_iter_no_unmark().collect())
+        */
     }
 
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
@@ -1452,7 +1486,7 @@ impl Automerge {
         self.exid_to_obj(obj)
             .map(|obj| {
                 self.ops
-                    .length(&obj.id, TextRepresentation::String.encoding(obj.typ), clock)
+                    .seq_length(&obj.id, TextRepresentation::String.encoding(obj.typ), clock)
             })
             .unwrap_or(0)
     }
@@ -1473,7 +1507,8 @@ impl Automerge {
     ) -> Result<Spans<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let iter = self.ops.iter_obj(&obj.id);
-        Ok(Spans::new(iter, self, clock))
+        //Ok(Spans::new(iter, self, clock))
+        todo!()
     }
 
     pub(crate) fn get_cursor_for(
@@ -1493,7 +1528,7 @@ impl Automerge {
                 clock.as_ref(),
             );
             if let Some(op) = found.ops.last() {
-                Ok(Cursor::new(*op.id(), &self.ops.osd))
+                Ok(self.ops.id_to_cursor(op.id))
             } else {
                 Err(AutomergeError::InvalidIndex(position))
             }
@@ -1583,6 +1618,7 @@ impl Automerge {
         index: usize,
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
+        /*
         let obj = self.exid_to_obj(obj.as_ref())?;
         let result = self
             .ops
@@ -1601,6 +1637,8 @@ impl Automerge {
             .cloned()
             .unwrap_or_default();
         Ok(result)
+        */
+        todo!()
     }
 
     fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
@@ -1614,17 +1652,16 @@ impl Automerge {
             match obj.typ {
                 ObjType::Map | ObjType::List => {
                     for op in ops {
-                        let op = op.as_op(self.osd());
                         if !op.visible() {
                             continue;
                         }
-                        if let OpType::Put(ScalarValue::Str(s)) = op.action() {
-                            let prop = match *op.key() {
-                                Key::Map(prop) => Prop::Map(self.ops.osd.props.get(prop).clone()),
+                        if let OpType::Put(op_set2::ScalarValue::Str(s)) = op.op_type() {
+                            let prop = match op.key {
+                                Key::Map(prop) => Prop::Map(prop.into()),
                                 Key::Seq(_) => {
                                     let Some(found) = self.ops.seek_list_opid(
                                         &obj.id,
-                                        *op.id(),
+                                        op.id,
                                         ListEncoding::List,
                                         None,
                                     ) else {
@@ -1636,7 +1673,7 @@ impl Automerge {
                             to_convert.push(Conversion {
                                 obj_id: self.ops.id_to_exid(obj.id.0),
                                 prop,
-                                text: s.clone(),
+                                text: smol_str::SmolStr::from(s),
                             })
                         }
                     }
@@ -1675,19 +1712,19 @@ impl Automerge {
             if !visible_objs.contains(&obj.id) {
                 continue;
             }
-            for op_idx in ops {
-                let op = op_idx.as_op(self.osd());
+            for op in ops {
+                //let op = op_idx.as_op(self.osd());
                 if op.visible_at(at.as_ref()) {
-                    if let OpType::Make(_) = op.action() {
-                        visible_objs.insert(op.id().into());
+                    if let OpType::Make(_) = op.op_type() {
+                        visible_objs.insert(op.id.into());
                         let (mut path, parent_obj_id) = if obj.id.is_root() {
                             (vec![], ExId::Root)
                         } else {
                             let parent_obj_id = self.ops.id_to_exid(obj.id.into());
                             (paths.get(&parent_obj_id).cloned().unwrap(), parent_obj_id)
                         };
-                        let prop = match op.key() {
-                            Key::Map(prop) => Prop::Map(self.ops.osd.props.get(*prop).clone()),
+                        let prop = match op.key {
+                            Key::Map(prop) => Prop::Map(prop.into()),
                             Key::Seq(_) => {
                                 let encoding = match obj.typ {
                                     ObjType::Text => ListEncoding::Text,
@@ -1695,13 +1732,13 @@ impl Automerge {
                                 };
                                 let found = self
                                     .ops
-                                    .seek_list_opid(&obj.id, *op.id(), encoding, at.as_ref())
+                                    .seek_list_opid(&obj.id, op.id, encoding, at.as_ref())
                                     .unwrap();
                                 Prop::Seq(found.index)
                             }
                         };
                         path.push((parent_obj_id.clone(), prop));
-                        let obj_id = self.ops.id_to_exid(*op.id());
+                        let obj_id = self.ops.id_to_exid(op.id);
                         paths.insert(obj_id, path);
                     }
                 }
@@ -1912,6 +1949,7 @@ impl ReadDoc for Automerge {
         let opid = self.exid_to_opid(obj)?;
         let typ = self.ops.object_type(&ObjId(opid));
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
+        //Ok(typ)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -2007,6 +2045,7 @@ pub(crate) fn reconstruct_document<'a>(
         change_graph.add_change(change, actor_index)?;
     }
     let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+    let op_set = OpSet::new(doc);
     Ok(Automerge {
         queue: vec![],
         history: changes,

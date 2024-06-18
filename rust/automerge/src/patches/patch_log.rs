@@ -1,11 +1,12 @@
 use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
-use crate::iter::{ListRangeItem, MapRangeItem};
+//use crate::iter::{ListRangeItem, MapRangeItem};
+use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::read::ReadDocInternal;
 use crate::types::{ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Patch, ReadDoc};
+use crate::{ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -320,7 +321,7 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
+        self.events.sort_by(|a, b| doc.osd().lamport_cmp(a, b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };
@@ -524,6 +525,7 @@ impl ExposeQueue {
                     ..
                 } in read_doc.list_range(&exid, ..)
                 {
+                    let value = value.into_owned();
                     if value.is_object() {
                         self.insert(id.clone());
                     }
@@ -538,6 +540,7 @@ impl ExposeQueue {
                     conflict,
                 } in read_doc.map_range(&exid, ..)
                 {
+                    let value = value.into_owned();
                     if value.is_object() {
                         self.insert(id.clone());
                     }

@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use crate::{
     convert,
     op_set::OpSetData,
+    op_set2::OpSet,
     storage::AsChangeOp,
     types::{ActorId, Key, MarkData, Op, OpId, OpType, ScalarValue},
 };
@@ -12,7 +13,7 @@ use crate::{
 /// the actor ID stored in the opset data.
 ///
 /// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSetData
-pub(crate) fn op_as_actor_id(op: Op<'_>) -> OpWithMetadata<'_> {
+pub(crate) fn op_as_actor_id<'a>(op: Op<'a>) -> OpWithMetadata<'a> {
     OpWithMetadata { op }
 }
 

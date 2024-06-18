@@ -55,7 +55,7 @@ impl<'a> Iterator for Parents<'a> {
         if self.obj.is_root() {
             return None;
         }
-        let crate::op_set::Parent {
+        let super::op_set::Parent {
             obj,
             typ,
             prop,

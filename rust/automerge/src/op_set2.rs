@@ -4,21 +4,28 @@ pub(crate) mod delta;
 //pub(crate) mod group;
 pub(crate) mod meta;
 mod op;
+pub(crate) use op::Op;
 pub(crate) mod op_set;
 pub(crate) mod pack;
 mod parents;
+pub(crate) use parents::Parents;
 pub(crate) mod raw;
 pub(crate) mod rle;
+//pub(crate) mod read;
 pub(crate) mod slab;
 mod types;
-pub(crate) use types::{Action, ActorIdx, Key};
+pub(crate) use types::{MarkData, Action, ActorIdx, Key, OpType, ScalarValue };
 
+//pub(crate) use read::{ ReadDoc, ReadDocInternal };
 pub(crate) use boolean::BooleanCursor;
 pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};
 pub(crate) use delta::DeltaCursor;
 //pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
-pub(crate) use op_set::{OpScope, OpSet};
+pub(crate) use op_set::{
+    Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, SpanInternal, Spans,
+    Value, Parent, SpansInternal, Values,
+};
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;
 pub(crate) use rle::{IntCursor, RleCursor, RleState, StrCursor};

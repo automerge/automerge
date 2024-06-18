@@ -1,3 +1,4 @@
+use crate::automerge_old::Automerge;
 use crate::marks::MarkSet;
 pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
@@ -5,7 +6,6 @@ use crate::patches::PatchLog;
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
-    Automerge,
 };
 use crate::{
     types::{Key, ListEncoding, ObjMeta, OpId, OpIds, Prop},

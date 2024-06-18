@@ -1,9 +1,9 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::op_set::Parent;
-use crate::op_tree::OpsFound;
+use crate::op_set::{OpIdxRange, OpBuilder, OpIdx};
 use crate::patches::TextRepresentation;
+use crate::query::TreeQuery;
 use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
 use crate::types;
@@ -25,7 +25,12 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod iter;
-pub(crate) use iter::{KeyIter, Keys, ListRange, MapRange, OpIter, OpScope, TopOpIter, Verified};
+pub(crate) use iter::{
+    KeyIter, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpIter, OpScope, TopOpIter,
+    Value, Values, Verified, VisibleOpIter,
+};
+mod spans;
+pub(crate) use spans::{SpanInternal, Spans, SpansInternal};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -49,30 +54,59 @@ impl OpSet {
         }
     }
 
+    pub(crate) fn load_with_range(
+        &mut self,
+        obj: ObjId,
+        op: OpBuilder,
+        range: &mut OpIdxRange,
+    ) -> OpIdx {
+        todo!()
+    }
+
+    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, idx: OpIdx) {
+        todo!()
+    }
+
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
+    where
+        Q: TreeQuery<'a>,
+    {
+        todo!()
+    }
+
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpIdx) {
+        todo!()
+    }
+
     pub(crate) fn parent_object(
         &self,
         obj: &ObjId,
         text_rep: TextRepresentation,
         clock: Option<&Clock>,
     ) -> Option<Parent> {
-        // FIXME - not sure this is all right
-        let (op, visible) = self.find_op_by_id_and_vis(&obj.0, clock)?;
+        let op = self.find_op_by_id(&obj.0)?;
         if op.obj.is_root() {
             return None;
         }
-        let parent_op = self.find_op_by_id(&op.obj.0)?;
+        let (parent_op, visible) = self.find_op_by_id_and_vis(&op.obj.0, clock)?;
         // FIXME remote unwrap
         let parent_typ = parent_op.action.try_into().unwrap();
         let prop = match op.key {
             Key::Map(k) => Prop::Map(k.to_string()),
             Key::Seq(_) => {
                 let FoundOpId { index, .. } = self
-                    .seek_list_opid(parent_op.id, text_rep.encoding(parent_typ), clock)
+                    .seek_list_opid(
+                        &parent_op.obj,
+                        parent_op.id,
+                        text_rep.encoding(parent_typ),
+                        clock,
+                    )
                     .unwrap();
                 Prop::Seq(index)
             }
         };
-        Some(crate::op_set::Parent {
+        //Some(crate::op_set::Parent {
+        Some(Parent {
             typ: op.action.try_into().unwrap(),
             obj: op.obj,
             prop,
@@ -125,7 +159,7 @@ impl OpSet {
         prop: Prop,
         encoding: ListEncoding,
         clock: Option<&Clock>,
-    ) -> Option<OpsFound<'a>> {
+    ) -> OpsFound<'a> {
         match prop {
             Prop::Map(key_name) => self.seek_ops_by_map_key(obj, &key_name, encoding, clock),
             Prop::Seq(index) => self.seek_ops_by_index(obj, index, encoding, clock),
@@ -138,7 +172,7 @@ impl OpSet {
         key: &str,
         encoding: ListEncoding,
         clock: Option<&Clock>,
-    ) -> Option<OpsFound<'a>> {
+    ) -> OpsFound<'a> {
         todo!()
     }
 
@@ -148,12 +182,13 @@ impl OpSet {
         index: usize,
         encoding: ListEncoding,
         clock: Option<&Clock>,
-    ) -> Option<OpsFound<'a>> {
+    ) -> OpsFound<'a> {
         todo!()
     }
 
     pub(crate) fn seek_list_opid(
         &self,
+        obj: &ObjId,
         opid: OpId,
         encoding: ListEncoding,
         clock: Option<&Clock>,
@@ -177,10 +212,12 @@ impl OpSet {
         if id == types::ROOT {
             panic!()
         } else {
-            Cursor {
+            Cursor::new(id, self)
+/*
                 ctr: id.counter(),
                 actor: self.actors[id.actor()].clone(),
             }
+*/
         }
     }
 
@@ -193,8 +230,8 @@ impl OpSet {
     }
 
     fn iter_obj_ids(&self) -> IterObjIds<'_> {
-        let ctr = self.get_obj_ctr();
-        let actor = self.get_obj_actor();
+        let mut ctr = self.get_obj_ctr();
+        let mut actor = self.get_obj_actor();
         let next_ctr = ctr.next_run();
         let next_actor = actor.next_run();
         let pos = 0;
@@ -250,13 +287,13 @@ impl OpSet {
         let mut iter = self.iter();
         while let Some(op) = iter.next() {
             if &op.id == id {
-                return Some((op, op.visible_at(clock, iter.get_opiter())));
+                return Some((op, op.visible_at(clock)));
             }
         }
         None
     }
 
-    pub(crate) fn object_type(&self, obj: &ObjId) -> ObjType {
+    pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
         todo!()
     }
 
@@ -270,7 +307,7 @@ impl OpSet {
         self.actors.get(idx)
     }
 
-    pub(crate) fn lookup_actor(&mut self, actor: &ActorId) -> Option<usize> {
+    pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
         self.actors.binary_search(actor).ok() // .map(ActorIdx::from)
     }
 
@@ -483,10 +520,25 @@ impl OpSet {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Parent {
+    pub(crate) obj: ObjId,
+    pub(crate) typ: ObjType,
+    pub(crate) prop: Prop,
+    pub(crate) visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FoundOpId<'a> {
     pub(crate) op: Op<'a>,
     pub(crate) index: usize,
     pub(crate) visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OpsFound<'a> {
+    pub(crate) ops: Vec<Op<'a>>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) end_pos: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -845,13 +897,15 @@ impl<'a> Iterator for IterObjIds<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.pos;
         match (self.next_ctr, self.next_actor) {
-            (Some(run1), Some(run2)) => {
+            (Some(mut run1), Some(mut run2)) => {
                 if run1.count < run2.count {
                     run2.count -= run1.count;
+                    self.next_actor = Some(run2);
                     self.pos += run1.count;
                     self.next_ctr = self.ctr.next_run();
                 } else if run1.count > run2.count {
                     run1.count -= run2.count;
+                    self.next_ctr = Some(run1);
                     self.pos += run2.count;
                     self.next_actor = self.actor.next_run();
                 } else {
@@ -867,6 +921,7 @@ impl<'a> Iterator for IterObjIds<'a> {
                 ))
             }
             (None, None) => None,
+            _ => panic!(),
         }
     }
 }

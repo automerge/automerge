@@ -2,12 +2,20 @@ use crate::{
     error::AutomergeError,
     exid::ExId,
     hydrate,
-    iter::Spans,
-    iter::{Keys, ListRange, MapRange, Values},
+    //iter::Spans,
+    //iter::{Values},
     marks::{Mark, MarkSet},
-    parents::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, Value,
+    //parents::Parents,
+    op_set2::Parents,
+    Change,
+    ChangeHash,
+    Cursor,
+    ObjType,
+    Prop,
+    Value,
 };
+
+use crate::op_set2::{Keys, ListRange, MapRange, Spans, Values};
 
 use std::{collections::HashMap, ops::RangeBounds};
 

@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::op_set::OpSetData;
+use crate::op_set2::OpSet;
 use crate::storage::parse;
 use crate::types::OpId;
 #[cfg(doc)]
@@ -35,10 +35,10 @@ impl From<ExId> for Cursor {
 }
 
 impl Cursor {
-    pub(crate) fn new(id: OpId, osd: &OpSetData) -> Self {
+    pub(crate) fn new(id: OpId, osd: &OpSet) -> Self {
         Self {
             ctr: id.counter(),
-            actor: osd.actors.cache[id.actor()].clone(),
+            actor: osd.get_actor(id.actor()).clone(),
         }
     }
 

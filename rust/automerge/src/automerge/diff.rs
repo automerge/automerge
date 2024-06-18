@@ -2,20 +2,19 @@ use itertools::Itertools;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use crate::iter::Keys;
-use crate::iter::ListRange;
-use crate::iter::MapRange;
-use crate::iter::Values;
+use crate::automerge::{
+    Parents, Automerge, Keys, ListRange, MapRange, ReadDoc, ReadDocInternal, Spans, Values,
+};
 use crate::marks::Mark;
 use crate::patches::TextRepresentation;
-use crate::read::ReadDocInternal;
 use crate::types::ObjMeta;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
     patches::PatchLog,
-    types::{Clock, ListEncoding, Op, Prop},
+    types::{Clock, ListEncoding, Prop},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, OpType, ReadDoc,
+    op_set2::{ Op, OpType },
+    AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType,
 };
 
 #[derive(Clone, Debug)]
@@ -76,12 +75,12 @@ fn resolve<'a>(
         (Some(before), _) if before.op.is_mark() => None,
         (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
         (Some(before), None) => Some(Patch::Delete(before)),
-        (Some(before), Some(after)) if before.op.id() == after.op.id() => Some(Patch::Old {
+        (Some(before), Some(after)) if before.op.id == after.op.id => Some(Patch::Old {
             before,
             after,
             marks: diff.current(),
         }),
-        (Some(before), Some(after)) if before.op.id() != after.op.id() => Some(Patch::Update {
+        (Some(before), Some(after)) if before.op.id != after.op.id => Some(Patch::Update {
             before,
             after,
             marks: diff.after.current().cloned(),
@@ -120,10 +119,10 @@ impl<'a> Patch<'a> {
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
         let mut diff = RichTextDiff::new(doc);
-        let ops_by_key = ops.group_by(|o| o.as_op(doc.osd()).elemid_or_key());
+        let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key.into_iter().filter_map(|(_key, key_ops)| {
             process(
-                key_ops.map(|i| i.as_op(doc.osd())),
+                key_ops,
                 before,
                 after,
                 &mut diff,
@@ -148,7 +147,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
             let value = winner.op.value_at(Some(winner.clock)).into();
-            let id = *winner.op.id();
+            let id = winner.op.id;
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
             patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
@@ -157,7 +156,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
             let value = after.op.value_at(Some(after.clock)).into();
-            let id = *after.op.id();
+            let id = after.op.id;
             let expose = after.cross_visible;
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);
             index + 1
@@ -171,7 +170,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.flag_conflict_seq(obj.id, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                patch_log.increment_seq(obj.id, index, n, *after.op.id());
+                patch_log.increment_seq(obj.id, index, n, after.op.id);
             }
             if let Some(marks) = &marks {
                 patch_log.mark(obj.id, index, 1, marks)
@@ -198,7 +197,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             } else {
                 // blocks
                 let value = winner.op.value_at(Some(winner.clock)).into();
-                let id = *winner.op.id();
+                let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
                 patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
@@ -239,7 +238,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
                 let value = winner.op.value_at(Some(winner.clock)).into();
-                let id = *winner.op.id();
+                let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
                 patch_log.put_map(obj.id, key, value, id, conflict, expose)
@@ -247,7 +246,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
                 let value = after.op.value_at(Some(after.clock)).into();
-                let id = *after.op.id();
+                let id = after.op.id;
                 let expose = after.cross_visible;
                 patch_log.put_map(obj.id, key, value, id, conflict, expose)
             }
@@ -256,7 +255,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                     patch_log.flag_conflict_map(obj.id, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    patch_log.increment_map(obj.id, key, n, *after.op.id());
+                    patch_log.increment_map(obj.id, key, n, after.op.id);
                 }
             }
             Patch::Delete(_) => patch_log.delete_map(obj.id, key),
@@ -265,7 +264,8 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
 
 // FIXME
 fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
-    Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
+    op.key.map_key()
+    //Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
@@ -309,11 +309,11 @@ impl<'a> RichTextDiff<'a> {
     fn process(&mut self, before: &Option<Winner<'a>>, after: &Option<Winner<'a>>) {
         if let Some(w) = &before {
             self.before
-                .process(*w.op.id(), w.op.action(), self.doc.osd());
+                .process(w.op.id, w.op.action(), self.doc.osd());
         }
         if let Some(w) = &after {
             self.after
-                .process(*w.op.id(), w.op.action(), self.doc.osd());
+                .process(w.op.id, w.op.action(), self.doc.osd());
         }
     }
 }
@@ -479,7 +479,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, self.heads)
     }
 
@@ -487,7 +487,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<crate::Parents<'_>, AutomergeError> {
+    ) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, heads)
     }
 
@@ -499,10 +499,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.get_change_by_hash(hash)
     }
 
-    fn spans<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, crate::AutomergeError> {
         self.doc.spans(obj)
     }
 
@@ -510,7 +507,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+    ) -> Result<Spans<'_>, crate::AutomergeError> {
         self.doc.spans_at(obj, heads)
     }
 
