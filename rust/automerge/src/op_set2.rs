@@ -14,7 +14,7 @@ pub(crate) mod rle;
 //pub(crate) mod read;
 pub(crate) mod slab;
 mod types;
-pub(crate) use types::{MarkData, Action, ActorIdx, Key, OpType, ScalarValue };
+pub(crate) use types::{Action, ActorIdx, Key, MarkData, OpType, ScalarValue};
 
 //pub(crate) use read::{ ReadDoc, ReadDocInternal };
 pub(crate) use boolean::BooleanCursor;
@@ -23,8 +23,8 @@ pub(crate) use delta::DeltaCursor;
 //pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, SpanInternal, Spans,
-    Value, Parent, SpansInternal, Values,
+    Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, Parent, SpanInternal,
+    Spans, SpansInternal, Value, Values,
 };
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;

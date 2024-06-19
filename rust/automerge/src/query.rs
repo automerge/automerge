@@ -1,4 +1,4 @@
-use crate::marks::MarkData;
+use crate::marks::OldMarkData;
 use crate::op_set::Op;
 use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
 use crate::types::{Key, ListEncoding, OpBuilder, OpId, OpType};
@@ -118,7 +118,7 @@ pub(crate) struct Index {
     /// Set of opids found in this node and below.
     ops: HashSet<OpId, FxBuildHasher>,
     never_seen_puts: bool,
-    mark_begin: HashMap<OpId, MarkData, FxBuildHasher>,
+    mark_begin: HashMap<OpId, OldMarkData, FxBuildHasher>,
     mark_end: Vec<OpId>,
     /// The ID of the last block in this index, if any
     pub(crate) block: Option<OpId>,

@@ -1,5 +1,5 @@
 use crate::op_set2;
-use crate::op_set2::{ OpType, Op };
+use crate::op_set2::{Op, OpType};
 use crate::types::{Clock, ObjId, ScalarValue};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;

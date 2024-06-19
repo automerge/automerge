@@ -93,7 +93,8 @@ impl<'a> OpIdSearch<'a> {
     }
 
     pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<MarkSet>> {
-        MarkSet::from_query_state(&self.marks, osd)
+        //MarkSet::from_query_state(&self.marks, osd)
+        todo!()
     }
 }
 

@@ -4,7 +4,7 @@ use crate::{
     convert,
     indexed_cache::IndexedCache,
     storage::AsDocOp,
-    types::{ElemId, Key, MarkData, Op, OpId, OpType, ScalarValue},
+    types::{ElemId, Key, OldMarkData, Op, OpId, OpType, ScalarValue},
 };
 
 /// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
@@ -87,7 +87,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
         match &self.op.action() {
             OpType::Put(v) => Cow::Borrowed(v),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
-            OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Borrowed(value),
             _ => Cow::Owned(ScalarValue::Null),
         }
     }
@@ -117,7 +117,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action() {
+        if let OpType::MarkBegin(_, OldMarkData { name, .. }) = &self.op.action() {
             Some(Cow::Owned(name.clone()))
         } else {
             None

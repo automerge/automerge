@@ -2,20 +2,14 @@ use crate::{
     error::AutomergeError,
     exid::ExId,
     hydrate,
-    //iter::Spans,
-    //iter::{Values},
+    iter::Spans,
+    iter::Values,
     marks::{Mark, MarkSet},
-    //parents::Parents,
-    op_set2::Parents,
-    Change,
-    ChangeHash,
-    Cursor,
-    ObjType,
-    Prop,
-    Value,
+    parents::Parents,
+    Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
-use crate::op_set2::{Keys, ListRange, MapRange, Spans, Values};
+use super::{Keys, ListRange, MapRange};
 
 use std::{collections::HashMap, ops::RangeBounds};
 
@@ -142,14 +136,14 @@ pub trait ReadDoc {
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
 
     /// Get all marks on a current sequence
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError>;
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
     /// Get all marks on a sequence at a given heads
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark>, AutomergeError>;
+    ) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
     fn get_marks<O: AsRef<ExId>>(
         &self,

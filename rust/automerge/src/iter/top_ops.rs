@@ -71,61 +71,61 @@ impl<'a> Iterator for TopOpsInner<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         todo!()
-/*
-        let mut result_op = None;
-        loop {
-            if let Some(op) = self.iter.next() {
-                let key = op.elemid_or_key();
-                let visible = op.visible_at(self.clock.as_ref());
-                match &self.clock {
-                    Some(c) if c.covers(op.id()) => {
-                        self.marks.process(*op.id(), op.action(), self.iter.osd);
-                    }
-                    _ => {}
-                }
-                match &self.key {
-                    Some(k) if k == &key => {
-                        if visible {
-                            self.last_op = Some((self.pos, op, self.marks.current().cloned()));
-                            self.num_ops += 1;
+        /*
+                let mut result_op = None;
+                loop {
+                    if let Some(op) = self.iter.next() {
+                        let key = op.elemid_or_key();
+                        let visible = op.visible_at(self.clock.as_ref());
+                        match &self.clock {
+                            Some(c) if c.covers(op.id()) => {
+                                self.marks.process(*op.id(), op.action(), self.iter.osd);
+                            }
+                            _ => {}
                         }
-                    }
-                    Some(_) => {
+                        match &self.key {
+                            Some(k) if k == &key => {
+                                if visible {
+                                    self.last_op = Some((self.pos, op, self.marks.current().cloned()));
+                                    self.num_ops += 1;
+                                }
+                            }
+                            Some(_) => {
+                                result_op = self.last_op.take().map(|(_op_pos, op, marks)| (op, marks));
+                                if visible {
+                                    self.last_op = Some((self.pos, op, self.marks.current().cloned()));
+                                    self.num_ops = 1;
+                                } else {
+                                    self.num_ops = 0;
+                                }
+                                self.key = Some(key);
+                                self.start_pos = self.pos;
+                            }
+                            None => {
+                                self.key = Some(key);
+                                self.start_pos = self.pos;
+                                if visible {
+                                    self.last_op = Some((self.pos, op, self.marks.current().cloned()));
+                                    self.num_ops = 1;
+                                } else {
+                                    self.num_ops = 0;
+                                }
+                            }
+                        }
+                        self.pos += 1;
+                        if result_op.is_some() {
+                            break;
+                        }
+                    } else {
                         result_op = self.last_op.take().map(|(_op_pos, op, marks)| (op, marks));
-                        if visible {
-                            self.last_op = Some((self.pos, op, self.marks.current().cloned()));
-                            self.num_ops = 1;
-                        } else {
-                            self.num_ops = 0;
-                        }
-                        self.key = Some(key);
-                        self.start_pos = self.pos;
-                    }
-                    None => {
-                        self.key = Some(key);
-                        self.start_pos = self.pos;
-                        if visible {
-                            self.last_op = Some((self.pos, op, self.marks.current().cloned()));
-                            self.num_ops = 1;
-                        } else {
-                            self.num_ops = 0;
-                        }
+                        break;
                     }
                 }
-                self.pos += 1;
-                if result_op.is_some() {
-                    break;
-                }
-            } else {
-                result_op = self.last_op.take().map(|(_op_pos, op, marks)| (op, marks));
-                break;
-            }
-        }
-        result_op.map(|(op, marks)| TopOp {
-            op,
-            conflict: self.num_ops > 1,
-            marks,
-        })
-*/
+                result_op.map(|(op, marks)| TopOp {
+                    op,
+                    conflict: self.num_ops > 1,
+                    marks,
+                })
+        */
     }
 }

@@ -4,7 +4,7 @@ use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
 //use crate::iter::Spans;
-use crate::automerge::{Keys, ListRange, MapRange, Spans, Values, Parents };
+use crate::automerge::{Keys, ListRange, MapRange, Parents, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
@@ -703,7 +703,7 @@ impl ReadDoc for AutoCommit {
         self.doc.object_type(obj)
     }
 
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
         self.doc.marks_for(obj.as_ref(), self.get_scope(None))
     }
 
@@ -711,7 +711,7 @@ impl ReadDoc for AutoCommit {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
@@ -929,7 +929,7 @@ impl Transactable for AutoCommit {
     fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: Mark<'_>,
+        mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();

@@ -6,7 +6,7 @@ use crate::{
     op_set::OpSetData,
     op_set2::OpSet,
     storage::AsChangeOp,
-    types::{ActorId, Key, MarkData, Op, OpId, OpType, ScalarValue},
+    types::{ActorId, Key, OldMarkData, Op, OpId, OpType, ScalarValue},
 };
 
 /// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
@@ -93,7 +93,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             }
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
-            OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Borrowed(value),
         }
     }
 
@@ -132,7 +132,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     }
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action() {
+        if let OpType::MarkBegin(_, OldMarkData { name, .. }) = &self.op.action() {
             Some(Cow::Owned(name.clone()))
         } else {
             None

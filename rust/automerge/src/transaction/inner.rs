@@ -165,43 +165,43 @@ impl TransactionInner {
     /// operations.
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         todo!()
-/*
-        let num = self.pending_ops();
-        // remove in reverse order so sets are removed before makes etc...
-        let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
-        let ops: Vec<_> = self
-            .operations(doc.osd())
-            .rev()
-            .map(|op| {
-                (
-                    op.idx(),
-                    *op.obj(),
-                    *op.id(),
-                    op.pred().map(|op| *op.id()).collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        for (idx, obj, opid, pred) in ops.into_iter() {
-            for pred_id in &pred {
-                if let Some(p) = doc
-                    .ops()
-                    .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
-                    .found()
-                {
-                    doc.ops_mut().remove_succ(&obj, p, idx);
+        /*
+                let num = self.pending_ops();
+                // remove in reverse order so sets are removed before makes etc...
+                let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
+                let ops: Vec<_> = self
+                    .operations(doc.osd())
+                    .rev()
+                    .map(|op| {
+                        (
+                            op.idx(),
+                            *op.obj(),
+                            *op.id(),
+                            op.pred().map(|op| *op.id()).collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect();
+                for (idx, obj, opid, pred) in ops.into_iter() {
+                    for pred_id in &pred {
+                        if let Some(p) = doc
+                            .ops()
+                            .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
+                            .found()
+                        {
+                            doc.ops_mut().remove_succ(&obj, p, idx);
+                        }
+                    }
+                    if let Some(pos) = doc
+                        .ops()
+                        .search(&obj, OpIdSearch::opid(opid, encoding, None))
+                        .found()
+                    {
+                        doc.ops_mut().remove(&obj, pos);
+                    }
                 }
-            }
-            if let Some(pos) = doc
-                .ops()
-                .search(&obj, OpIdSearch::opid(opid, encoding, None))
-                .found()
-            {
-                doc.ops_mut().remove(&obj, pos);
-            }
-        }
 
-        num
-*/
+                num
+        */
     }
 
     /// Set the value of property `P` to value `V` in object `obj`.
@@ -409,54 +409,54 @@ impl TransactionInner {
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
         todo!()
-/*
-        if prop.is_empty() {
-            return Err(AutomergeError::EmptyStringKey);
-        }
+        /*
+                if prop.is_empty() {
+                    return Err(AutomergeError::EmptyStringKey);
+                }
 
-        let id = self.next_id();
-        let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
-        let key = Key::Map(prop_index);
-        let prop: Prop = prop.into();
-        let query = doc.ops().seek_ops_by_prop(
-            &obj.id,
-            prop.clone(),
-            patch_log.text_rep().encoding(obj.typ),
-            self.scope.as_ref(),
-        );
-        // no key present to delete
-        if query.ops.is_empty() && action == OpType::Delete {
-            return Ok(None);
-        }
+                let id = self.next_id();
+                let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
+                let key = Key::Map(prop_index);
+                let prop: Prop = prop.into();
+                let query = doc.ops().seek_ops_by_prop(
+                    &obj.id,
+                    prop.clone(),
+                    patch_log.text_rep().encoding(obj.typ),
+                    self.scope.as_ref(),
+                );
+                // no key present to delete
+                if query.ops.is_empty() && action == OpType::Delete {
+                    return Ok(None);
+                }
 
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
-        }
+                if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+                    return Ok(None);
+                }
 
-        // increment operations are only valid against counter values.
-        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
-            return Err(AutomergeError::MissingCounter);
-        }
+                // increment operations are only valid against counter values.
+                // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+                if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+                    return Err(AutomergeError::MissingCounter);
+                }
 
-        let op = OpBuilder {
-            id,
-            action,
-            key,
-            insert: false,
-        };
-        let pos = query.end_pos;
-        let ops_pos = query.ops_pos;
+                let op = OpBuilder {
+                    id,
+                    action,
+                    key,
+                    insert: false,
+                };
+                let pos = query.end_pos;
+                let ops_pos = query.ops_pos;
 
-        let is_delete = op.is_delete();
-        let idx = doc
-            .ops_mut()
-            .load_with_range(obj.id, op, &mut self.idx_range);
+                let is_delete = op.is_delete();
+                let idx = doc
+                    .ops_mut()
+                    .load_with_range(obj.id, op, &mut self.idx_range);
 
-        self.insert_local_op(doc, patch_log, prop, idx, is_delete, pos, obj, &ops_pos);
+                self.insert_local_op(doc, patch_log, prop, idx, is_delete, pos, obj, &ops_pos);
 
-        Ok(Some(idx))
-*/
+                Ok(Some(idx))
+        */
     }
 
     fn local_list_op(
@@ -468,53 +468,53 @@ impl TransactionInner {
         action: OpType,
     ) -> Result<Option<OpIdx>, AutomergeError> {
         todo!()
-/*
-        let osd = doc.osd();
-        let query = doc.ops().search(
-            &obj.id,
-            query::Nth::new(index, ListEncoding::List, self.scope.clone(), osd),
-        );
+        /*
+                let osd = doc.osd();
+                let query = doc.ops().search(
+                    &obj.id,
+                    query::Nth::new(index, ListEncoding::List, self.scope.clone(), osd),
+                );
 
-        let id = self.next_id();
+                let id = self.next_id();
 
-        let key = query.key()?;
+                let key = query.key()?;
 
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
-        }
+                if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+                    return Ok(None);
+                }
 
-        // increment operations are only valid against counter values.
-        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
-            return Err(AutomergeError::MissingCounter);
-        }
+                // increment operations are only valid against counter values.
+                // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+                if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+                    return Err(AutomergeError::MissingCounter);
+                }
 
-        let op = OpBuilder {
-            id,
-            action,
-            key,
-            insert: false,
-        };
-        let pos = query.pos();
-        let ops_pos = query.ops_pos;
-        let is_delete = op.is_delete();
-        let idx = doc
-            .ops_mut()
-            .load_with_range(obj.id, op, &mut self.idx_range);
+                let op = OpBuilder {
+                    id,
+                    action,
+                    key,
+                    insert: false,
+                };
+                let pos = query.pos();
+                let ops_pos = query.ops_pos;
+                let is_delete = op.is_delete();
+                let idx = doc
+                    .ops_mut()
+                    .load_with_range(obj.id, op, &mut self.idx_range);
 
-        self.insert_local_op(
-            doc,
-            patch_log,
-            Prop::Seq(index),
-            idx,
-            is_delete,
-            pos,
-            obj,
-            &ops_pos,
-        );
+                self.insert_local_op(
+                    doc,
+                    patch_log,
+                    Prop::Seq(index),
+                    idx,
+                    is_delete,
+                    pos,
+                    obj,
+                    &ops_pos,
+                );
 
-        Ok(Some(idx))
-*/
+                Ok(Some(idx))
+        */
     }
 
     pub(crate) fn increment<P: Into<Prop>>(
@@ -733,37 +733,40 @@ impl TransactionInner {
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         ex_obj: &ExId,
-        mark: Mark<'_>,
+        mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        if mark.start == mark.end && expand == ExpandMark::None {
-            // In peritext terms this is the same as a mark which has a begin anchor before one
-            // character and an end anchor after the character preceding that character. E.g in the
-            // following sequence where the "<",">" symbols represent the mark anchor points:
-            //
-            // |   |  |   |  |   |
-            // < a >  < b >  < c >
-            // |   |  |   |  |   |
-            //
-            // A mark from 1 to 1 with expand set to none would begin at the anchor point before
-            // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
-            return Ok(());
-        }
-        let obj = doc.exid_to_obj(ex_obj)?;
-        let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
+        todo!()
+        /*
+                if mark.start == mark.end && expand == ExpandMark::None {
+                    // In peritext terms this is the same as a mark which has a begin anchor before one
+                    // character and an end anchor after the character preceding that character. E.g in the
+                    // following sequence where the "<",">" symbols represent the mark anchor points:
+                    //
+                    // |   |  |   |  |   |
+                    // < a >  < b >  < c >
+                    // |   |  |   |  |   |
+                    //
+                    // A mark from 1 to 1 with expand set to none would begin at the anchor point before
+                    // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
+                    return Ok(());
+                }
+                let obj = doc.exid_to_obj(ex_obj)?;
+                let action = OpType::MarkBegin(expand.before(), mark.data());
 
-        self.do_insert(doc, patch_log, &obj, mark.start, action)?;
-        self.do_insert(
-            doc,
-            patch_log,
-            &obj,
-            mark.end,
-            OpType::MarkEnd(expand.after()),
-        )?;
-        if patch_log.is_active() {
-            patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
-        }
-        Ok(())
+                self.do_insert(doc, patch_log, &obj, mark.start, action)?;
+                self.do_insert(
+                    doc,
+                    patch_log,
+                    &obj,
+                    mark.end,
+                    OpType::MarkEnd(expand.after()),
+                )?;
+                if patch_log.is_active() {
+                    patch_log.mark(obj.id, mark.start, mark.len(), &mark.into_mark_set());
+                }
+                Ok(())
+        */
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::op_set::{OpIdxRange, OpBuilder, OpIdx};
+use crate::op_set::{OpBuilder, OpIdx, OpIdxRange};
 use crate::patches::TextRepresentation;
 use crate::query::TreeQuery;
 use crate::storage::ColumnType;
@@ -213,11 +213,11 @@ impl OpSet {
             panic!()
         } else {
             Cursor::new(id, self)
-/*
-                ctr: id.counter(),
-                actor: self.actors[id.actor()].clone(),
-            }
-*/
+            /*
+                            ctr: id.counter(),
+                            actor: self.actors[id.actor()].clone(),
+                        }
+            */
         }
     }
 

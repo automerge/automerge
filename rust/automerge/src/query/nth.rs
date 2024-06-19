@@ -43,13 +43,16 @@ impl<'a> Nth<'a> {
     }
 
     pub(crate) fn marks(&self) -> Option<Arc<MarkSet>> {
-        let mut marks = MarkStateMachine::default();
-        if let Some(m) = &self.marks {
-            for (id, mark_data) in m.iter() {
-                marks.mark_begin(*id, mark_data, self.osd);
-            }
-        }
-        marks.current().cloned()
+        /*
+                let mut marks = MarkStateMachine::default();
+                if let Some(m) = &self.marks {
+                    for (id, mark_data) in m.iter() {
+                        marks.mark_begin(*id, mark_data, self.osd);
+                    }
+                }
+                marks.current().cloned()
+        */
+        todo!()
     }
 
     /// Get the key

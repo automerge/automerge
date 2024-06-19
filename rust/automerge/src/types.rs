@@ -15,7 +15,7 @@ mod opids;
 pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
-pub(crate) use crate::marks::MarkData;
+pub(crate) use crate::marks::OldMarkData;
 pub(crate) use crate::op_set::{Op, OpBuilder};
 pub(crate) use crate::value::{ScalarValue, Value};
 
@@ -210,7 +210,7 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
-    MarkBegin(bool, MarkData),
+    MarkBegin(bool, OldMarkData),
     MarkEnd(bool),
 }
 
@@ -266,7 +266,7 @@ impl OpType {
             },
             6 => Self::Make(ObjType::Table),
             7 => match mark_name {
-                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
+                Some(name) => Self::MarkBegin(expand, OldMarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
             _ => unreachable!("validate_action_and_value returned UnknownAction"),

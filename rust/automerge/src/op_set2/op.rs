@@ -115,7 +115,7 @@ impl<'a> Op<'a> {
 
     pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
         todo!()
-        //self.succ_iter().any(|op| clock.covers(op.id())) 
+        //self.succ_iter().any(|op| clock.covers(op.id()))
     }
 
     pub(crate) fn tagged_value(&self, clock: Option<&Clock>) -> (Value<'a>, ExId) {
@@ -124,17 +124,17 @@ impl<'a> Op<'a> {
 
     pub(crate) fn inc_at(&self, clock: &Clock) -> i64 {
         todo!()
-/*
-        self.succ()
-            .filter_map(|o| {
-                if clock.covers(o.id()) {
-                    o.op().get_increment_value()
-                } else {
-                    None
-                }
-            })
-            .sum()
-*/
+        /*
+                self.succ()
+                    .filter_map(|o| {
+                        if clock.covers(o.id()) {
+                            o.op().get_increment_value()
+                        } else {
+                            None
+                        }
+                    })
+                    .sum()
+        */
     }
 
     pub(crate) fn is_put(&self) -> bool {
@@ -144,14 +144,14 @@ impl<'a> Op<'a> {
 
     pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'a> {
         todo!()
-/*
-        if let Some(clock) = clock {
-            if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
-                return Value::counter(c.start + self.inc_at(clock));
-            }
-        }
-        self.value()
-*/
+        /*
+                if let Some(clock) = clock {
+                    if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
+                        return Value::counter(c.start + self.inc_at(clock));
+                    }
+                }
+                self.value()
+        */
     }
 
     pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
@@ -168,22 +168,22 @@ impl<'a> Op<'a> {
 
     pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
         todo!()
-/*
-        if self.is_inc() {
-            false
-        } else if let Some(clock) = clock {
-            clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
-        } else if self.is_counter() {
-            self.succ().all(|op| op.is_inc())
-        } else {
-            self.succ().len() == 0
-        }   
-*/
+        /*
+                if self.is_inc() {
+                    false
+                } else if let Some(clock) = clock {
+                    clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
+                } else if self.is_counter() {
+                    self.succ().all(|op| op.is_inc())
+                } else {
+                    self.succ().len() == 0
+                }
+        */
     }
 
     pub(crate) fn action(&self) -> OpType<'a> {
-          self.op_type()
-    }   
+        self.op_type()
+    }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
         todo!()
@@ -195,11 +195,11 @@ impl<'a> Op<'a> {
             false
         } else if self.is_counter() {
             todo!()
-/*
-            let key_iter = KeyIter::new(*self, self.iter.clone());
-            let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
-            self.succ().all(|id| sub_ops.contains(&id))
-*/
+        /*
+                    let key_iter = KeyIter::new(*self, self.iter.clone());
+                    let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
+                    self.succ().all(|id| sub_ops.contains(&id))
+        */
         } else {
             self.succ().len() == 0
         }

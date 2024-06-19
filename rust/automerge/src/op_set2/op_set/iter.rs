@@ -76,14 +76,19 @@ pub struct Values<'a> {
 }
 
 impl<'a> Default for Values<'a> {
-  fn default() -> Self {
-    Self { iter: Default::default() }
-  }
+    fn default() -> Self {
+        Self {
+            iter: Default::default(),
+        }
+    }
 }
 
 impl<'a> Values<'a> {
-    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>, clock: Option<Clock>) -> Self {
-      Self { iter }
+    pub(crate) fn new(
+        iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+        clock: Option<Clock>,
+    ) -> Self {
+        Self { iter }
     }
 }
 
@@ -151,10 +156,13 @@ pub struct ListRange<'a, R: RangeBounds<usize>> {
     range: Option<R>,
 }
 
-impl<'a, R: RangeBounds<usize>> Default for ListRange<'a,R> {
-  fn default() -> Self {
-    Self { iter: Default::default(), range: None }
-  }
+impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {
+    fn default() -> Self {
+        Self {
+            iter: Default::default(),
+            range: None,
+        }
+    }
 }
 
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {

@@ -1,5 +1,5 @@
 use crate::clock::Clock;
-use crate::marks::MarkData;
+use crate::marks::OldMarkData;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::{Index, QueryResult};
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct RichTextQueryState<'a> {
-    map: HashMap<OpId, &'a MarkData, FxBuildHasher>,
+    map: HashMap<OpId, &'a OldMarkData, FxBuildHasher>,
     block: Option<OpId>,
 }
 
@@ -35,11 +35,11 @@ impl<'a> RichTextQueryState<'a> {
         }
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &&MarkData)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &&OldMarkData)> {
         self.map.iter()
     }
 
-    pub(crate) fn insert(&mut self, op: OpId, data: &'a MarkData) {
+    pub(crate) fn insert(&mut self, op: OpId, data: &'a OldMarkData) {
         self.map.insert(op, data);
     }
 

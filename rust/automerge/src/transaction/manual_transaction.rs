@@ -4,7 +4,7 @@ use crate::exid::ExId;
 //use crate::iter::Spans;
 //use crate::iter::{Keys, ListRange, MapRange, Values};
 //use crate::parents::Parents;
-use crate::automerge::{Parents, Automerge, Keys, ListRange, MapRange, ReadDoc, Spans, Values};
+use crate::automerge::{Automerge, Keys, ListRange, MapRange, Parents, ReadDoc, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
 use crate::types::{Clock, ScalarValue};
@@ -239,7 +239,7 @@ impl<'a> ReadDoc for Transaction<'a> {
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
     }
 
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
         self.doc.marks_for(obj.as_ref(), self.get_scope(None))
     }
 
@@ -247,7 +247,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
@@ -424,7 +424,7 @@ impl<'a> Transactable for Transaction<'a> {
     fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: Mark<'_>,
+        mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| tx.mark(doc, hist, obj.as_ref(), mark, expand))

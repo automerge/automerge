@@ -4,8 +4,8 @@ use crate::error::AutomergeError;
 use crate::types;
 use crate::types::{ElemId, ObjType};
 
-use std::ops::{Bound, RangeBounds};
 use std::fmt;
+use std::ops::{Bound, RangeBounds};
 
 use super::meta::ValueType;
 
@@ -43,11 +43,13 @@ pub(crate) struct MarkData<'a> {
     pub(crate) value: ScalarValue<'a>,
 }
 
+/*
 impl<'a> PartialEq<types::MarkData> for MarkData<'a> {
     fn eq(&self, other: &types::MarkData) -> bool {
         self.value == other.value && self.name == other.name
     }
 }
+*/
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Action {
@@ -98,6 +100,7 @@ pub(crate) enum OpType<'a> {
     MarkEnd(bool),
 }
 
+/*
 impl<'a> PartialEq<types::OpType> for OpType<'a> {
     fn eq(&self, other: &types::OpType) -> bool {
         match (self, other) {
@@ -112,6 +115,7 @@ impl<'a> PartialEq<types::OpType> for OpType<'a> {
         }
     }
 }
+*/
 
 impl<'a> OpType<'a> {
     pub(crate) fn from_action_and_value(
@@ -175,6 +179,26 @@ impl<'a> fmt::Display for ScalarValue<'a> {
 impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
     fn from(s: ScalarValue<'a>) -> Self {
         s.into_owned()
+    }
+}
+
+impl<'a> From<&'a types::ScalarValue> for ScalarValue<'a> {
+    fn from(s: &'a types::ScalarValue) -> Self {
+        match s {
+            types::ScalarValue::Bytes(b) => ScalarValue::Bytes(b.as_slice()),
+            types::ScalarValue::Str(s) => ScalarValue::Str(s.as_str()),
+            types::ScalarValue::Int(n) => ScalarValue::Int(*n),
+            types::ScalarValue::Uint(n) => ScalarValue::Uint(*n),
+            types::ScalarValue::F64(n) => ScalarValue::F64(*n),
+            types::ScalarValue::Counter(n) => ScalarValue::Counter(n.into()),
+            types::ScalarValue::Timestamp(n) => ScalarValue::Timestamp(*n),
+            types::ScalarValue::Boolean(b) => ScalarValue::Boolean(*b),
+            types::ScalarValue::Unknown { type_code, bytes } => ScalarValue::Unknown {
+                type_code: *type_code,
+                bytes: bytes.as_slice(),
+            },
+            types::ScalarValue::Null => ScalarValue::Null,
+        }
     }
 }
 
@@ -333,12 +357,12 @@ pub(crate) enum Key<'a> {
 }
 
 impl<'a> Key<'a> {
-  pub(crate) fn map_key(&self) -> Option<&'a str> {
+    pub(crate) fn map_key(&self) -> Option<&'a str> {
         match self {
             Key::Map(s) => Some(s),
-            Key::Seq(_) => None
+            Key::Seq(_) => None,
         }
-  }
+    }
 }
 
 impl<'a> types::Exportable for Key<'a> {
