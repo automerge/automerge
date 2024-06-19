@@ -21,6 +21,8 @@ jobs:
           version: '0.2.92'
       - name: Install wasm32 target
         run: rustup target add wasm32-unknown-unknown
+      - name: yarn install
+        run: yarn install
       - name: build js
         run: node ./scripts/build.mjs
       - name: "npm publish pre-release"
@@ -50,8 +52,10 @@ jobs:
         run: cargo install wasm-bindgen-cli wasm-opt
       - name: Install wasm32 target
         run: rustup target add wasm32-unknown-unknown
+      - name: yarn install
+        run: yarn install
       - name: build js
-        run: ./scripts/build.mjs
+        run: node ./scripts/build.mjs
       - name: build js docs
         id: build_release
         run: |
