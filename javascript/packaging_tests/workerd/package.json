@@ -9,8 +9,5 @@
   },
   "devDependencies": {
     "wrangler": "^3.60.3"
-  },
-  "dependencies": {
-    "@automerge/automerge": "^2.2.3-packaging-revamp.6"
   }
 }

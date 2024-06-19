@@ -129,7 +129,10 @@ async function runViteDevServerTest(tmpProjectDir) {
     }
   })
   try {
-    await loadTestPage(`http://localhost:${port}`)
+    const result = await loadTestPage(`http://localhost:${port}`)
+    if (!result) {
+      throw new Error("Test page failed")
+    }
   } finally {
     viteProcess.kill()
   }
@@ -189,7 +192,7 @@ async function loadTestPage(url) {
   await page.waitForSelector("#result")
   const result = await page.evaluate(() => {
     // @ts-ignore
-    return document.querySelector("#result").textContent === "hello webpack"
+    return document.querySelector("#result").textContent === "hello automerge"
   })
   await browser.close()
   return result
@@ -357,18 +360,18 @@ async function run() {
   }
 
   for (const testCase of testCases) {
-    let name = testCase.name || testCase.dir
-    consola.box(`Running test: ${name}`)
-    const tmpProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), `automerge-packaging-test`))
-
-    await fs.cp(testCase.dir, tmpProjectDir, { recursive: true })
-
-    consola.info("npm install in ", tmpProjectDir)
-    await exec("npm install", { cwd: tmpProjectDir })
-    consola.info("npm install ", tarballPath)
-    await exec(`npm install ${tarballPath}`, { cwd: tmpProjectDir })
-
     for (const scenario of testCase.scenarios) {
+        let name = testCase.name || testCase.dir
+        consola.box(`Running test: ${name}`)
+        const tmpProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), `automerge-packaging-test`))
+
+        await fs.cp(path.join(__dirname, testCase.dir), tmpProjectDir, { recursive: true })
+
+        consola.info("npm install in ", tmpProjectDir)
+        await exec("npm install", { cwd: tmpProjectDir })
+        consola.info("npm install ", tarballPath)
+        await exec(`npm install ${tarballPath}`, { cwd: tmpProjectDir })
+
       if (scenario.name) {
         consola.info(`Running ${scenario.name}`)
       }

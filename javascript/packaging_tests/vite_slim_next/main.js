@@ -10,7 +10,7 @@ function component() {
   am.initializeWasm(fetch(wasmBlob)).then(() => {
     const element = document.createElement('div');
     element.id = "result"
-    const doc = am.from({message: "hello webpack"})
+    const doc = am.from({message: "hello automerge"})
 
     setTimeout(() => {
       if (!initialized) {

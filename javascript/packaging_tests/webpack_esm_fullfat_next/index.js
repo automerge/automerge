@@ -3,7 +3,7 @@ import  * as am from "@automerge/automerge/next"
 function component() {
   const element = document.createElement('div');
   element.id = "result"
-  const doc = am.from({message: "hello webpack"})
+  const doc = am.from({message: "hello automerge"})
 
   let initialized = false
   am.wasmInitialized().then(() => {
@@ -16,7 +16,7 @@ function component() {
     }
     const element = document.createElement('div');
     element.id = "result"
-    const doc = am.from({message: "hello webpack"})
+    const doc = am.from({message: "hello automerge"})
 
     element.innerHTML = doc.message
     document.body.appendChild(element);
