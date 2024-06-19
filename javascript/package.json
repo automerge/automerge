@@ -29,6 +29,10 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "workerd": {
+        "import": "./dist/mjs/entrypoints/fullfat_workerd.js",
+        "require": "./dist/cjs/fullfat_base64.cjs"
+      },
       "node": {
         "import": "./dist/mjs/entrypoints/fullfat_node.js",
         "require": "./dist/cjs/fullfat_node.cjs"
@@ -42,6 +46,10 @@
     },
     "./next": {
       "types": "./dist/next.d.ts",
+      "workerd": {
+        "import": "./dist/mjs/entrypoints/fullfat_workerd_next.js",
+        "require": "./dist/cjs/fullfat_next_base64.cjs"
+      },
       "node": {
         "import": "./dist/mjs/entrypoints/fullfat_node_next.js",
         "require": "./dist/cjs/fullfat_node_next.cjs"

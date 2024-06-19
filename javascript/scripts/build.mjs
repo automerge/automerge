@@ -126,6 +126,10 @@ function buildWasmTarball(outputLocation) {
  * @param {string | null} wasmBuildTarball
  */
 function copyAndFixupWasm(wasmBuildTarball) {
+  const outputPath = path.join(jsProjectDir, "src", "wasm_bindgen_output")
+  fs.rmSync(outputPath, { recursive: true, force: true })
+
+
   const automergeWasmPath = path.join(
     __dirname,
     "..",
@@ -134,11 +138,9 @@ function copyAndFixupWasm(wasmBuildTarball) {
     "automerge-wasm",
   )
   if (wasmBuildTarball == null) {
-    const outputPath = path.join(jsProjectDir, "src", "wasm_bindgen_output")
     buildWasm(outputPath)
   } else {
     console.log(`using prebuilt wasm tarball at ${wasmBuildTarball}`)
-    const outputPath = path.join(jsProjectDir, "src", "wasm_bindgen_output")
     execSync(`tar -xzf ${wasmBuildTarball} -C ${outputPath}`)
   }
 
@@ -156,14 +158,27 @@ function copyAndFixupWasm(wasmBuildTarball) {
     path.join(nodeOutputPath, "automerge_wasm.cjs"),
   )
 
-  console.log(
-    "encoding the 'wasm' blob in the 'web' target into a base64 string",
-  )
+  console.log("copying the 'web' target to 'workerd' directory")
   const webOutputPath = path.join(
     jsProjectDir,
     "src",
     "wasm_bindgen_output",
     "web",
+  )
+  const workerdOutputPath = path.join(
+    jsProjectDir,
+    "src",
+    "wasm_bindgen_output",
+    "workerd"
+  )
+  fs.cpSync(
+    webOutputPath,
+    workerdOutputPath,
+    { recursive: true, dereference: true }
+  )
+
+  console.log(
+    "encoding the 'wasm' blob in the 'web' target into a base64 string",
   )
   const webWasmPath = path.join(webOutputPath, "automerge_wasm_bg.wasm")
   const wasmBlob = fs.readFileSync(webWasmPath)
@@ -237,7 +252,7 @@ function compileTypescript() {
     "copying wasm_bindgen_output directory to dist/mjs/wasm_bindgen_output",
   )
   fs.mkdirSync(mjsWasmDir, { recursive: true })
-  fs.cpSync(wasmBindgenSrcDir, mjsWasmDir, { recursive: true })
+  fs.cpSync(wasmBindgenSrcDir, mjsWasmDir, { recursive: true, dereference: true })
 
   fs.copyFileSync(
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),

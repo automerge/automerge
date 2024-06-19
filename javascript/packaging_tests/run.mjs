@@ -203,6 +203,77 @@ async function runNodeTest(tmpProjectDir) {
   }
 }
 
+async function runWorkerdTest(tmpProjectDir) {
+  consola.info("starting wrangler dev server")
+
+  // Start wrangler and wait for it to be ready
+  const port = await findFreePort()
+  const wranglerProcess = child_process.spawn(
+    "./node_modules/.bin/wrangler",
+    ["dev", "--port", port.toString()],
+    { 
+      cwd: tmpProjectDir,
+      env: {
+        ...process.env,
+        PWD: tmpProjectDir,
+      }
+    },
+  )
+  /** @type { null | "started" | "errored"} */
+  let status = null
+  let resolveReady
+  let rejectReady
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = resolve
+    rejectReady = reject
+  })
+  let interval = setInterval(() => {
+    if (status === "started") {
+      resolveReady()
+      clearInterval(interval)
+    } else if (status === "errored") {
+      rejectReady()
+      clearInterval(interval)
+    }
+  }, 500)
+  wranglerProcess.stdout.on("data", (data) => {
+    for (const line of data.toString().split("\n")) {
+      if (line.includes("Ready") && status === null) {
+        status = "started"
+      }
+      if (line.includes("ERROR")) {
+        status = "errored"
+      }
+      consola.info("wrangler: " + line)
+    }
+  })
+  wranglerProcess.stderr.on("data", (data) => {
+    for (const line of data.toString().split("\n")) {
+      if (line.includes("Ready") && status === null) {
+        status = "started"
+      }
+      if (line.includes("ERROR")) {
+        status = "errored"
+      }
+      consola.info("wrangler: " + line)
+    }
+  })
+
+  try {
+    await ready
+    const resp = await fetch(`http://localhost:${port}`)
+    if (resp.status !== 200) {
+      throw new Error("Wrangler dev server failed")
+    }
+    const data = await resp.json()
+    if (typeof data != "object" ||data["message"] !== "hello workerd") {
+      throw new Error("unexpected response from workerd")
+    }
+  } finally {
+    wranglerProcess.kill()
+  }
+}
+
 /**
   * @returns {Promise<string>} - the path to the tarball produced by `npm pack`
   */
@@ -251,6 +322,9 @@ async function run() {
       { run: runViteBuildTest, name: "vite_build_slim_next"}
     ] },
     { dir: "vite_iife_fullfat", scenarios: [{ run: runViteBuildTest}] },
+    { dir: "workerd", scenarios: [{run: runWorkerdTest}] },
+    { dir: "workerd_next", scenarios: [{run: runWorkerdTest}] },
+    { dir: "workerd_slim", scenarios: [{run: runWorkerdTest}] },
   ]
 
   let testCase = null
