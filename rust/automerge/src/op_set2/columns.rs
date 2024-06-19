@@ -513,16 +513,6 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     }
 }
 
-/*
-impl<E, C: ColumnCursor> FromIterator<E> for ColumnData<C> {
-    fn from_iter<T>(iter: T) -> Self
-       where T: IntoIterator<Item = E>
-    {
-        todo!()
-    }
-}
-*/
-
 impl<C: ColumnCursor> ColumnData<C> {
     pub(crate) fn to_vec<'a>(&'a self) -> Vec<C::Export> {
         self.iter().map(|i| C::export_item(i)).collect()

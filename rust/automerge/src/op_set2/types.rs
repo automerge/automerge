@@ -43,14 +43,6 @@ pub(crate) struct MarkData<'a> {
     pub(crate) value: ScalarValue<'a>,
 }
 
-/*
-impl<'a> PartialEq<types::MarkData> for MarkData<'a> {
-    fn eq(&self, other: &types::MarkData) -> bool {
-        self.value == other.value && self.name == other.name
-    }
-}
-*/
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Action {
     MakeMap,
@@ -99,23 +91,6 @@ pub(crate) enum OpType<'a> {
     MarkBegin(bool, MarkData<'a>),
     MarkEnd(bool),
 }
-
-/*
-impl<'a> PartialEq<types::OpType> for OpType<'a> {
-    fn eq(&self, other: &types::OpType) -> bool {
-        match (self, other) {
-            //(OpType::Map(a) , types::OpType::Map(b)) => a == &b.as_bytes(),
-            (OpType::Make(a), types::OpType::Make(b)) => a == b,
-            (OpType::Delete, types::OpType::Delete) => true,
-            (OpType::Increment(a), types::OpType::Increment(b)) => a == b,
-            (OpType::Put(a), types::OpType::Put(b)) => a == b,
-            (OpType::MarkBegin(a1, a2), types::OpType::MarkBegin(b1, b2)) => a1 == b1 && a2 == b2,
-            (OpType::MarkEnd(a), types::OpType::MarkEnd(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-*/
 
 impl<'a> OpType<'a> {
     pub(crate) fn from_action_and_value(
@@ -371,12 +346,6 @@ impl<'a> types::Exportable for Key<'a> {
             Key::Map(p) => types::Export::Special(String::from(*p)),
             Key::Seq(e) => e.export(),
         }
-    }
-}
-
-impl<'a> PartialEq<types::Key> for Key<'a> {
-    fn eq(&self, other: &types::Key) -> bool {
-        todo!()
     }
 }
 

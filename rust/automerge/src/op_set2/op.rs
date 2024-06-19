@@ -2,11 +2,13 @@ use super::columns::ColumnDataIter;
 use super::op_set::{KeyIter, OpIter, Verified};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
-use super::DeltaCursor;
+use super::{DeltaCursor, Value};
 //use crate::op_set;
 use crate::exid::ExId;
 use crate::text_value::TextValue;
-use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId, Value};
+use crate::types;
+use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId};
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 #[derive(Debug, Copy, Clone)]
@@ -118,7 +120,7 @@ impl<'a> Op<'a> {
         //self.succ_iter().any(|op| clock.covers(op.id()))
     }
 
-    pub(crate) fn tagged_value(&self, clock: Option<&Clock>) -> (Value<'a>, ExId) {
+    pub(crate) fn tagged_value(&self, clock: Option<&Clock>) -> (types::Value<'a>, ExId) {
         todo!()
     }
 
@@ -140,6 +142,16 @@ impl<'a> Op<'a> {
     pub(crate) fn is_put(&self) -> bool {
         todo!()
         //matches!(&self.action(), OpType::Put(_))
+    }
+
+    pub(crate) fn value(&self) -> Value<'a> {
+        match &self.action() {
+            OpType::Make(obj_type) => Value::Object(*obj_type),
+            OpType::Put(scalar) => Value::Scalar(*scalar),
+            OpType::MarkBegin(_, mark) => Value::Scalar(ScalarValue::Str("markBegin")),
+            OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str("markEnd")),
+            _ => panic!("cant convert op into a value - {:?}", self),
+        }
     }
 
     pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'a> {

@@ -115,8 +115,11 @@ impl OpSet {
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
-        Keys { iter }
+        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        Keys {
+            iter,
+            op_set: Some(self),
+        }
     }
 
     pub(crate) fn list_range<R: RangeBounds<usize>>(
@@ -126,8 +129,8 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
-        ListRange::new(iter, range)
+        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        ListRange::new(iter, range, encoding, self)
     }
 
     pub(crate) fn map_range<R: RangeBounds<String>>(
@@ -136,8 +139,8 @@ impl OpSet {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'_, R> {
-        let iter = self.iter_obj(obj).visible_ops(clock).key_ops();
-        MapRange::new(iter, range)
+        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        MapRange::new(iter, range, &self)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -209,16 +212,7 @@ impl OpSet {
     }
 
     pub(crate) fn id_to_cursor(&self, id: OpId) -> Cursor {
-        if id == types::ROOT {
-            panic!()
-        } else {
-            Cursor::new(id, self)
-            /*
-                            ctr: id.counter(),
-                            actor: self.actors[id.actor()].clone(),
-                        }
-            */
-        }
+        Cursor::new(id, self)
     }
 
     fn get_obj_ctr(&self) -> ColumnDataIter<'_, IntCursor> {

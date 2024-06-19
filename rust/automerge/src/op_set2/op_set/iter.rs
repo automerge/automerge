@@ -10,7 +10,8 @@ use crate::{
         BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
     },
     storage::ColumnSpec,
-    types::{Clock, ElemId, ObjId, ObjType, OpId},
+    types,
+    types::{Clock, ElemId, ListEncoding, ObjId, ObjType, OpId},
     value,
 };
 
@@ -73,12 +74,14 @@ impl<'a> Value<'a> {
 
 pub struct Values<'a> {
     iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    op_set: Option<&'a super::OpSet>,
 }
 
 impl<'a> Default for Values<'a> {
     fn default() -> Self {
         Self {
             iter: Default::default(),
+            op_set: None,
         }
     }
 }
@@ -87,16 +90,24 @@ impl<'a> Values<'a> {
     pub(crate) fn new(
         iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
         clock: Option<Clock>,
+        op_set: &'a super::OpSet,
     ) -> Self {
-        Self { iter }
+        Self {
+            iter,
+            op_set: Some(op_set),
+        }
     }
 }
 
 impl<'a> Iterator for Values<'a> {
-    type Item = (Value<'a>, ExId);
+    type Item = (types::Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        let op = self.iter.next()?;
+        let value = op.value().into_owned();
+        let op_set = self.op_set?;
+        let id = op_set.id_to_exid(op.id);
+        Some((value, id))
     }
 }
 
@@ -109,8 +120,9 @@ pub struct MapRangeItem<'a> {
 }
 
 pub struct MapRange<'a, R: RangeBounds<String>> {
-    iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
     range: Option<R>,
+    op_set: Option<&'a super::OpSet>,
 }
 
 impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {
@@ -118,6 +130,7 @@ impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {
         Self {
             iter: Default::default(),
             range: None,
+            op_set: None,
         }
     }
 }
@@ -126,18 +139,39 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     type Item = MapRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        let op_set = self.op_set?;
+        let range = self.range.as_ref()?;
+        while let Some(op) = self.iter.next() {
+            let key = op.key.map_key()?;
+            let s_key = key.to_string(); // FIXME
+            if !range.contains(&s_key) {
+                // return None if > end
+                continue;
+            }
+            let value = op.value();
+            let id = op_set.id_to_exid(op.id);
+            let conflict = op.conflict;
+            return Some(MapRangeItem {
+                key,
+                value,
+                id,
+                conflict,
+            });
+        }
+        None
     }
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
     pub(crate) fn new(
-        iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+        iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
         range: R,
+        op_set: &'a super::OpSet,
     ) -> Self {
         Self {
             iter,
             range: Some(range),
+            op_set: Some(op_set),
         }
     }
 }
@@ -148,12 +182,15 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    //pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
 pub struct ListRange<'a, R: RangeBounds<usize>> {
-    iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
     range: Option<R>,
+    state: usize,
+    encoding: ListEncoding,
+    op_set: Option<&'a super::OpSet>,
 }
 
 impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {
@@ -161,18 +198,26 @@ impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {
         Self {
             iter: Default::default(),
             range: None,
+            state: 0,
+            encoding: ListEncoding::default(),
+            op_set: None,
         }
     }
 }
 
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
     pub(crate) fn new(
-        iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+        iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
         range: R,
+        encoding: ListEncoding,
+        op_set: &'a super::OpSet,
     ) -> Self {
         Self {
             iter,
             range: Some(range),
+            state: 0,
+            encoding,
+            op_set: Some(op_set),
         }
     }
 }
@@ -181,20 +226,50 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
     type Item = ListRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!();
+        let op_set = self.op_set?;
+        while let Some(op) = self.iter.next() {
+            let index = self.state;
+            self.state += op.width(self.encoding);
+            if !self.range.as_ref()?.contains(&index) {
+                // stop if past end
+                continue;
+            }
+            let conflict = op.conflict;
+            let value = op.value(); // value_at()
+            let id = op_set.id_to_exid(op.id);
+            // todo : need a marks iterator!!
+            // todo : need a value_at (vis?) iterator!!
+            //for mark begin/end operations
+            //marks: MarkStateMachine<'a>,
+            // --
+            //if c.covers(&op.id) => {
+            //    self.marks.process(op.id, op.action());
+            //}
+            // let marks = self.marks.current().cloned()
+            return Some(ListRangeItem {
+                index,
+                value,
+                id,
+                conflict,
+                //marks,
+            });
+        }
+        None
     }
 }
 
 #[derive(Default)]
 pub struct Keys<'a> {
-    pub(crate) iter: KeyOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    pub(crate) iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
+    pub(crate) op_set: Option<&'a super::OpSet>,
 }
 
 impl<'a> Iterator for Keys<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!();
+        let op = self.iter.next()?;
+        Some(self.op_set?.to_string(op.elemid_or_key()))
     }
 }
 
@@ -289,7 +364,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone + Default> Iterator for TopOpIter<'a
             }
             if key1 == key2 {
                 if let Some(last) = &mut self.last_op {
-                    last.conflict == true;
+                    last.conflict = true;
                 }
             }
         }
@@ -338,9 +413,7 @@ pub(crate) enum ReadOpError {
 }
 
 pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone + Default {
-    fn get_opiter(&self) -> &OpIter<'a, Verified> {
-        todo!()
-    }
+    fn get_opiter(&self) -> &OpIter<'a, Verified>;
 
     fn top_ops(self) -> TopOpIter<'a, Self> {
         TopOpIter {
