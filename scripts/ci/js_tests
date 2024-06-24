@@ -8,3 +8,4 @@ JS_PROJECT=$THIS_SCRIPT/../../javascript;
 yarn --cwd $JS_PROJECT install
 node $JS_PROJECT/scripts/build.mjs
 yarn --cwd $JS_PROJECT test
+yarn --cwd $JS_PROJECT packaging-tests
