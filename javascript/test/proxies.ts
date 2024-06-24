@@ -14,8 +14,8 @@ describe("Proxies", () => {
 
   describe("recursive document", () => {
     it("should throw a useful RangeError when attempting to set a document inside itself", () => {
-      type RecursiveDoc = { [key: string]: RecursiveDoc };
-      const doc = from<RecursiveDoc>({});
+      type RecursiveDoc = { [key: string]: RecursiveDoc }
+      const doc = from<RecursiveDoc>({})
       change(doc, d => {
         assert.throws(() => {
           d.doc = doc
@@ -151,9 +151,9 @@ describe("Proxies", () => {
 
   describe("structuredClone support", () => {
     it("should support objects cloned with structuredClone", () => {
-      const doc = from({ map: structuredClone({ key: 'value', number: 2 }) });
+      const doc = from({ map: structuredClone({ key: "value", number: 2 }) })
 
-      assert.deepEqual(doc, { map: { key: 'value', number: 2 } })
-    });
+      assert.deepEqual(doc, { map: { key: "value", number: 2 } })
+    })
   })
 })

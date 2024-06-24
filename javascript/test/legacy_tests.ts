@@ -491,7 +491,11 @@ describe("Automerge", () => {
       })
 
       it("should not error on empty string keys", () => {
-        s2 = Automerge.change(s1, "set empty string key", doc => (doc[""] = "x"))
+        s2 = Automerge.change(
+          s1,
+          "set empty string key",
+          doc => (doc[""] = "x"),
+        )
         assert.strictEqual(s2[""], "x")
       })
 
