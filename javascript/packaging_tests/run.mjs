@@ -10,6 +10,7 @@ import { consola } from "consola"
 import http from "node:http"
 import serveHandler from "serve-handler"
 import puppeteer from "puppeteer"
+import { setTimeout } from "timers/promises"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.join(__dirname, "..")
@@ -188,7 +189,25 @@ async function loadTestPage(url) {
   const browser = await puppeteer.launch()
   const page = await browser.newPage()
   page.setDefaultTimeout(5000)
-  await page.goto(url)
+
+  // Retry loading the page a few times in case the server is slow to start
+  const MAX_RETRIES = 5
+  let retryCount = 0
+  while (true) {
+    try {
+      await page.goto(url)
+      break
+    } catch(e) {
+      if (retryCount >= MAX_RETRIES) {
+        consola.error("Failed to connect to test page")
+        throw e
+      } else {
+        consola.warn("connection refused, retrying in 1s")
+        retryCount++
+        await setTimeout(1000)
+      }
+    }
+  }
   await page.waitForSelector("#result")
   const result = await page.evaluate(() => {
     // @ts-ignore
