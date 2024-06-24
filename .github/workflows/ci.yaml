@@ -84,8 +84,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: 
       - build_wasm
+
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/setup-node@v2
+        with:
+          node-version: '22'
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
