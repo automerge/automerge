@@ -192,7 +192,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
   )
   fs.writeFileSync(
     wasmBlobBase64Path,
-    `export const wasmBlobBase64 = "${wasmBlobBase64}"`,
+    `export const automergeWasmBase64 = "${wasmBlobBase64}"`,
   )
 
   console.log(
@@ -208,9 +208,9 @@ function copyAndFixupWasm(wasmBuildTarball) {
   fs.writeFileSync(
     wasmBlobBase64ShimPath,
     `
-    import { wasmBlobBase64 } from "./automerge_wasm_bg_base64.js";
+    import { automergeWasmBase64 } from "./automerge_wasm_bg_base64.js";
     import { initSync } from "./automerge_wasm.js";
-    const wasmBlob = Uint8Array.from(atob(wasmBlobBase64), c => c.charCodeAt(0));
+    const wasmBlob = Uint8Array.from(atob(automergeWasmBase64), c => c.charCodeAt(0));
     initSync(wasmBlob);
     export * from "./automerge_wasm.js";
     `,
@@ -273,6 +273,7 @@ async function transpileCjs() {
       `${inDir}/entrypoints/fullfat_node_next.js`,
       `${inDir}/entrypoints/slim.js`,
       `${inDir}/entrypoints/slim_next.js`,
+      `${inDir}/entrypoints/iife.js`,
     ],
     outdir: outDir,
     bundle: true,
@@ -281,6 +282,18 @@ async function transpileCjs() {
     target: "node14",
     platform: "node",
     outExtension: { ".js": ".cjs" },
+  })
+
+  const iifeDir = path.join(distDir, "iife")
+  await build({
+    absWorkingDir: distDir,
+    entryPoints: [
+      `${inDir}/entrypoints/iife.js`,
+    ],
+    outdir: iifeDir,
+    bundle: true,
+    format: "iife",
+    target: "es2020",
   })
 
   console.log("building bundler CommonJS modules")

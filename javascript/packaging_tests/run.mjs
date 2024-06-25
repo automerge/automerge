@@ -296,6 +296,38 @@ async function runWorkerdTest(tmpProjectDir) {
   }
 }
 
+async function runIifeTest(tmpProjectDir) {
+  // Copy the iife.js file from node modules to the local directory
+  const iifePath = path.join(
+      tmpProjectDir,
+      "node_modules",
+      "@automerge",
+      "automerge",
+      "dist",
+      "iife",
+      "iife.js"
+  )
+  await fs.copyFile(iifePath, path.join(tmpProjectDir, "automerge.js"))
+  const server = await serveStatic(tmpProjectDir)
+
+  /** @type {Promise<{type: "serverDied"}>} */
+  const serverDied = once(server, "close").then(() => {return {type: "serverDied"}})
+  /** @type {Promise<{type: "finished", result: boolean}>} */
+  const success = loadTestPage("http://localhost:3000/index.html").then((success) => {return {type: "finished", result: success}})
+
+  const result = await Promise.race([serverDied, success])
+  try {
+    if (result.type === "serverDied") {
+      throw new Error("serve handler died")
+    }
+    if (result.result === false) {
+      throw new Error("Test page failed to load")
+    }
+  } finally {
+    server.close()
+  }
+}
+
 /**
   * @returns {Promise<string>} - the path to the tarball produced by `npm pack`
   */
@@ -347,6 +379,7 @@ async function run() {
     { dir: "workerd", scenarios: [{run: runWorkerdTest}] },
     { dir: "workerd_next", scenarios: [{run: runWorkerdTest}] },
     { dir: "workerd_slim", scenarios: [{run: runWorkerdTest}] },
+    { dir: "iife", scenarios: [{run: runIifeTest}] },
   ]
 
   let testCase = null

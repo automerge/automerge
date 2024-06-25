@@ -75,9 +75,17 @@ export function initializeWasm(
   })
 }
 
+export function initializeBase64Wasm(wasmBase64: string): Promise<void> {
+  return initializeWasm(Uint8Array.from(atob(wasmBase64), c => c.charCodeAt(0)))
+}
+
 export function wasmInitialized(): Promise<void> {
   if (_initialized) return Promise.resolve()
   return new Promise(resolve => {
     _initializeListeners.push(resolve)
   })
+}
+
+export function isWasmInitialized(): boolean {
+  return _initialized
 }

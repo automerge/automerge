@@ -132,7 +132,9 @@ export {
   deleteAt,
   saveSince,
   initializeWasm,
+  initializeBase64Wasm,
   wasmInitialized,
+  isWasmInitialized,
 } from "./stable.js"
 
 export type InitOptions<T> = {

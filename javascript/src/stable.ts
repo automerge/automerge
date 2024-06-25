@@ -66,7 +66,7 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
-export { initializeWasm, wasmInitialized } from "./low_level.js"
+export { initializeWasm, initializeBase64Wasm, wasmInitialized, isWasmInitialized } from "./low_level.js"
 
 import { RawString } from "./raw_string.js"
 
