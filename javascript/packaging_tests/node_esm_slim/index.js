@@ -6,7 +6,7 @@ am.wasmInitialized().then(() => {
   initialized = true
 })
 
-const wasm = fs.readFileSync("./node_modules/@automerge/automerge/dist/wasm_blob.wasm")
+const wasm = fs.readFileSync("./node_modules/@automerge/automerge/dist/automerge.wasm")
 await am.initializeWasm(wasm)
 
 const doc = am.from({message: "hello webpack"})

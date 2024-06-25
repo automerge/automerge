@@ -1,5 +1,5 @@
 const am = require("@automerge/automerge/slim")
-const wasmBlob = require("@automerge/automerge/wasm_blob.wasm")
+const wasmBlob = require("@automerge/automerge/automerge.wasm")
 
 function component() {
   let initialized = false

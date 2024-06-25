@@ -1,5 +1,5 @@
 import * as am from "@automerge/automerge/slim/next"
-import wasmBlob from "@automerge/automerge/wasm_blob.wasm"
+import wasmBlob from "@automerge/automerge/automerge.wasm"
 
 function component() {
 

@@ -217,7 +217,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
   )
 
   console.log("moving wasm blob to top level of '/dist'")
-  const wasmBlobDistPath = path.join(jsProjectDir, "dist", "wasm_blob.wasm")
+  const wasmBlobDistPath = path.join(jsProjectDir, "dist", "automerge.wasm")
   fs.cpSync(webWasmPath, wasmBlobDistPath)
 
   console.log("copying 'automerge-wasm/index.d.ts' to 'src/wasm_types.d.ts'")

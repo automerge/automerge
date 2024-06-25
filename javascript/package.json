@@ -20,7 +20,7 @@
     "dist/mjs/**/*.cjs",
     "dist/mjs/**/*.wasm",
     "dist/*.d.ts",
-    "dist/wasm_blob.wasm"
+    "dist/automerge.wasm"
   ],
   "type": "module",
   "types": "./dist/index.d.ts",
@@ -79,7 +79,7 @@
       "import": "./dist/mjs/entrypoints/slim_next.js",
       "require": "./dist/cjs/slim_next.cjs"
     },
-    "./wasm_blob.wasm": "./dist/wasm_blob.wasm"
+    "./automerge.wasm": "./dist/automerge.wasm"
   },
   "license": "MIT",
   "scripts": {

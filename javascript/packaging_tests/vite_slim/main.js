@@ -1,5 +1,5 @@
 import { next as am} from "@automerge/automerge/slim"
-import wasmBlob from "@automerge/automerge/wasm_blob.wasm?url"
+import wasmBlob from "@automerge/automerge/automerge.wasm?url"
 
 function component() {
   let initialized = false

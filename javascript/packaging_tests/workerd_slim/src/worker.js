@@ -9,7 +9,7 @@
  */
 
 import { next as Automerge } from "@automerge/automerge/slim"
-import wasm from "@automerge/automerge/wasm_blob.wasm"
+import wasm from "@automerge/automerge/automerge.wasm"
 
 Automerge.initializeWasm(wasm)
 
