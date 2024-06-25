@@ -1360,49 +1360,55 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
-        /*
-                        let obj = self.exid_to_obj(obj.as_ref())?;
-                        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
-                        let mut index = 0;
-                        let mut marks = MarkStateMachine::default();
-                        let mut acc = MarkAccumulator::default();
-                        let mut last_marks = None;
-                        let mut mark_len = 0;
-                        let mut mark_index = 0;
-                        for (_key, key_ops) in ops_by_key.into_iter() {
-                            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
-                                match o.action() {
-                                    OpType::Make(_) | OpType::Put(_) => {
-                                        let len = o.width(TextRepresentation::String.encoding(obj.typ));
-                                        if last_marks.as_ref() != marks.current() {
-                                            match last_marks.as_ref() {
-                                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
-                                                _ => (),
-                                            }
-                                            last_marks = marks.current().cloned();
-                                            mark_index = index;
-                                            mark_len = 0;
-                                        }
-                                        mark_len += len;
-                                        index += len;
-                                    }
-                                    OpType::MarkBegin(_, data) => {
-                                        marks.mark_begin(*o.id(), data, &self.ops.osd);
-                                    }
-                                    OpType::MarkEnd(_) => {
-                                        marks.mark_end(*o.id(), &self.ops.osd);
-                                    }
-                                    OpType::Increment(_) | OpType::Delete => {}
-                                }
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let ops_by_key = self.ops().iter_obj(&obj.id).marks(None).top_ops();
+      todo!()
+/*
+        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
+        //let ops_by_key = self.ops().iter_obj(&obj).key_ops(); //.group_by(|o| o.elemid_or_key());
+        //let ops_by_key = self.ops().iter_obj(&obj).marks().top_ops();
+
+
+        let mut index = 0;
+        let mut marks = MarkStateMachine::default();
+        let mut acc = MarkAccumulator::default();
+        let mut last_marks = None;
+        let mut mark_len = 0;
+        let mut mark_index = 0;
+        for (_key, key_ops) in ops_by_key.into_iter() {
+            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
+                match o.action() {
+                    OpType::Make(_) | OpType::Put(_) => {
+                        let len = o.width(TextRepresentation::String.encoding(obj.typ));
+                        if last_marks.as_ref() != marks.current() {
+                            match last_marks.as_ref() {
+                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                                _ => (),
                             }
+                            last_marks = marks.current().cloned();
+                            mark_index = index;
+                            mark_len = 0;
                         }
-                        match last_marks.as_ref() {
-                            Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
-                            _ => (),
-                        }
-                        Ok(acc.into_iter_no_unmark().collect())
-        */
-        todo!()
+                        mark_len += len;
+                        index += len;
+                    }
+                    OpType::MarkBegin(_, data) => {
+                        marks.mark_begin(o.id, data);
+                    }
+                    OpType::MarkEnd(_) => {
+                        marks.mark_end(o.id);
+                    }
+                    OpType::Increment(_) | OpType::Delete => {}
+                }
+            }
+        }
+        match last_marks.as_ref() {
+            Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+            _ => (),
+        }
+        Ok(acc.into_iter_no_unmark().collect())
+
+*/
     }
 
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {

@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
+use crate::value;
 use crate::types::{ElemId, ObjType};
 
 use std::fmt;
@@ -362,4 +363,19 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
         Bound::Excluded(n) => *n,
     };
     (start, end)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Value<'a> {
+    Object(ObjType),
+    Scalar(ScalarValue<'a>),
+}
+
+impl<'a> Value<'a> {
+    pub(crate) fn into_owned(&self) -> value::Value<'static> {
+        match self {
+            Self::Object(o) => value::Value::Object(*o),
+            Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
+        }
+    }
 }

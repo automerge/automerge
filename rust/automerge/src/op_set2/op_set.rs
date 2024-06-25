@@ -1,6 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
+use crate::marks::MarkStateMachine;
 use crate::op_set::{OpBuilder, OpIdx, OpIdxRange};
 use crate::patches::TextRepresentation;
 use crate::query::TreeQuery;
@@ -14,7 +15,7 @@ use crate::types::{
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::ActorIdx;
+use super::types::{ ActorIdx, Value };
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
@@ -24,13 +25,27 @@ use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
-mod iter;
-pub(crate) use iter::{
-    KeyIter, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpIter, OpScope, TopOpIter,
-    Value, Values, Verified, VisibleOpIter,
-};
+mod op_iter;
+mod visible;
+mod values;
+mod map_range;
+mod list_range;
 mod spans;
+mod keys;
+mod marks;
+mod top_op;
+mod op_scope;
+
+pub(crate) use op_iter::{ OpIter, Verified };
+pub(crate) use visible::{VisibleOpIter};
+pub(crate) use values::{Values};
+pub(crate) use map_range::{MapRange, MapRangeItem};
+pub(crate) use list_range::{ListRange, ListRangeItem};
 pub(crate) use spans::{SpanInternal, Spans, SpansInternal};
+pub(crate) use keys::{Keys, KeyIter, KeyOpIter};
+pub(crate) use marks::{ MarkIter};
+pub(crate) use top_op::{ TopOpIter };
+pub(crate) use op_scope::{ OpScope };
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -129,7 +144,11 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        let iter = self
+            .iter_obj(obj)
+            .marks(clock.clone())
+            .visible_ops(clock)
+            .top_ops();
         ListRange::new(iter, range, encoding, self)
     }
 

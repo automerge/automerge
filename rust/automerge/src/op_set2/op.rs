@@ -3,13 +3,13 @@ use super::op_set::{KeyIter, OpIter, Verified};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::{DeltaCursor, Value};
-//use crate::op_set;
 use crate::exid::ExId;
 use crate::text_value::TextValue;
 use crate::types;
 use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId};
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {

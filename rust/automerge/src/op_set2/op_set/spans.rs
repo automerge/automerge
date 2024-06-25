@@ -1,8 +1,5 @@
-//use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine};
-//use crate::port::HasMetadata;
 use crate::op_set2::{Key, Op, OpType};
-//use crate::op_tree::{OpTreeIter, OpTreeOpIter};
 use super::{OpIter, Verified};
 use crate::types::Clock;
 use crate::types::{ListEncoding, ObjType, OpId};
