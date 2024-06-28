@@ -799,4 +799,22 @@ describe("Automerge", () => {
       assert.deepEqual(path, pathCopy)
     })
   })
+
+  describe("the hasHeads function", () => {
+    it("should return true if the document in question has all the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+      assert(Automerge.hasHeads(doc, heads))
+    })
+
+    it("should return false if the document does not have the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+
+      let otherDoc = Automerge.init<any>()
+      assert(!Automerge.hasHeads(otherDoc, heads))
+    })
+  })
 })
