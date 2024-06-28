@@ -323,13 +323,13 @@ else()
             COMMAND
                 ${CMAKE_COMMAND} -E make_directory ${BINDINGS_OBJECTS_DIR}
             COMMAND
-                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -x  --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>"
+                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -x  $<TARGET_FILE:${BINDINGS_NAME}>"
             COMMAND
-                ${CMAKE_COMMAND} -E chdir ${BINDINGS_OBJECTS_DIR} ${CMAKE_AR} -x --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>
+                ${CMAKE_COMMAND} -E chdir ${BINDINGS_OBJECTS_DIR} ${CMAKE_AR} -x $<TARGET_FILE:${BINDINGS_NAME}>
             COMMAND
-                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o"
+                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -rs $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o"
             COMMAND
-                ${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o
+                ${CMAKE_AR} -rs $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o
             WORKING_DIRECTORY
                 ${PROJECT_BINARY_DIR}
             COMMENT
