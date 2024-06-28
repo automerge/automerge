@@ -51,6 +51,9 @@ use value::Datatype;
 
 use crate::interop::SubValIter;
 
+#[global_allocator]
+static GLOBAL: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
+
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
