@@ -66,7 +66,12 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
-export { initializeWasm, initializeBase64Wasm, wasmInitialized, isWasmInitialized } from "./low_level.js"
+export {
+  initializeWasm,
+  initializeBase64Wasm,
+  wasmInitialized,
+  isWasmInitialized,
+} from "./low_level.js"
 
 import { RawString } from "./raw_string.js"
 
@@ -1169,6 +1174,19 @@ export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
   const state = _state(doc)
   const result = state.handle.saveSince(heads)
   return result
+}
+
+/**
+ * Returns true if the document has all of the given heads somewhere in its history
+ */
+export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean {
+  const state = _state(doc)
+  for (const hash of heads) {
+    if (!state.handle.getChangeByHash(hash)) {
+      return false
+    }
+  }
+  return true
 }
 
 export type {

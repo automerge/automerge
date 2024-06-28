@@ -135,6 +135,7 @@ export {
   initializeBase64Wasm,
   wasmInitialized,
   isWasmInitialized,
+  hasHeads,
 } from "./stable.js"
 
 export type InitOptions<T> = {
