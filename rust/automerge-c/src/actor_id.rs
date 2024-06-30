@@ -36,7 +36,7 @@ impl AMactorId {
         }
     }
 
-    pub fn as_hex_str(&self) -> AMbyteSpan {
+    fn to_str(&self) -> AMbyteSpan {
         let mut hex_str = self.hex_str.borrow_mut();
         match hex_str.as_mut() {
             None => {
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn AMactorIdFromStr(value: AMbyteSpan) -> *mut AMresult {
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdStr(actor_id: *const AMactorId) -> AMbyteSpan {
     match actor_id.as_ref() {
-        Some(actor_id) => actor_id.as_hex_str(),
+        Some(actor_id) => actor_id.to_str(),
         None => Default::default(),
     }
 }

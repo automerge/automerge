@@ -117,7 +117,11 @@ impl From<&[u8]> for AMbyteSpan {
 
 impl From<&AMbyteSpan> for &[u8] {
     fn from(byte_span: &AMbyteSpan) -> Self {
-        unsafe { std::slice::from_raw_parts(byte_span.src, byte_span.count) }
+        return if byte_span.is_null() {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(byte_span.src, byte_span.count) }
+        };
     }
 }
 
