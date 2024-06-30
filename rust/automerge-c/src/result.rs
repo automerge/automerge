@@ -223,6 +223,15 @@ impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     }
 }
 
+impl From<Result<am::Cursor, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::Cursor, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(cursor) => Self::item(cursor.into()),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
 impl From<(Result<am::ObjId, am::AutomergeError>, &str, am::ObjType)> for AMresult {
     fn from(
         (maybe, key, obj_type): (Result<am::ObjId, am::AutomergeError>, &str, am::ObjType),
@@ -501,7 +510,7 @@ pub fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
 /// \enum AMstatus
 /// \installed_headerfile
 /// \brief The status of an API call.
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub enum AMstatus {
     /// Success.
