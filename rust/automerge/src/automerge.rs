@@ -8,8 +8,8 @@ use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::{
-    Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpScope, OpSet, OpType,
-    Parents, SpanInternal, Spans, SpansInternal, Values,
+    HasOpScope, Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpScope,
+    OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
@@ -1361,54 +1361,39 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let ops_by_key = self.ops().iter_obj(&obj.id).marks(None).top_ops();
-      todo!()
-/*
-        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
-        //let ops_by_key = self.ops().iter_obj(&obj).key_ops(); //.group_by(|o| o.elemid_or_key());
-        //let ops_by_key = self.ops().iter_obj(&obj).marks().top_ops();
+        let mut top_ops = self
+            .ops()
+            .iter_obj(&obj.id)
+            .visible_ops(clock)
+            .marks()
+            .top_ops();
 
-
+        let text_rep = TextRepresentation::String.encoding(obj.typ);
         let mut index = 0;
-        let mut marks = MarkStateMachine::default();
         let mut acc = MarkAccumulator::default();
         let mut last_marks = None;
         let mut mark_len = 0;
         let mut mark_index = 0;
-        for (_key, key_ops) in ops_by_key.into_iter() {
-            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(clock.as_ref())).last() {
-                match o.action() {
-                    OpType::Make(_) | OpType::Put(_) => {
-                        let len = o.width(TextRepresentation::String.encoding(obj.typ));
-                        if last_marks.as_ref() != marks.current() {
-                            match last_marks.as_ref() {
-                                Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
-                                _ => (),
-                            }
-                            last_marks = marks.current().cloned();
-                            mark_index = index;
-                            mark_len = 0;
-                        }
-                        mark_len += len;
-                        index += len;
-                    }
-                    OpType::MarkBegin(_, data) => {
-                        marks.mark_begin(o.id, data);
-                    }
-                    OpType::MarkEnd(_) => {
-                        marks.mark_end(o.id);
-                    }
-                    OpType::Increment(_) | OpType::Delete => {}
+        while let Some(o) = top_ops.next() {
+            let marks = top_ops.get_marks();
+            let len = o.width(text_rep);
+            if last_marks.as_ref() != marks {
+                match last_marks.as_ref() {
+                    Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
+                    _ => (),
                 }
+                last_marks = marks.cloned();
+                mark_index = index;
+                mark_len = 0;
             }
+            mark_len += len;
+            index += len;
         }
         match last_marks.as_ref() {
             Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
             _ => (),
         }
         Ok(acc.into_iter_no_unmark().collect())
-
-*/
     }
 
     pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
@@ -1483,7 +1468,7 @@ impl Automerge {
     pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
         self.exid_to_obj(obj)
             .ok()
-            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), clock, &self.ops))
+            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), clock))
             .unwrap_or_default()
     }
 
@@ -1587,7 +1572,7 @@ impl Automerge {
             .ops
             .into_iter()
             .last()
-            .map(|op| op.tagged_value(clock.as_ref())))
+            .map(|op| op.tagged_value()))
     }
 
     pub(crate) fn get_all_for<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1608,7 +1593,7 @@ impl Automerge {
             )
             .ops
             .into_iter()
-            .map(|op| op.tagged_value(clock.as_ref()))
+            .map(|op| op.tagged_value())
             .collect::<Vec<_>>();
         // this is a test to make sure opid and exid are always sorting the same way
         assert_eq!(

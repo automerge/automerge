@@ -1,25 +1,26 @@
-use crate::{
-    marks::{MarkSet},
-};
+use crate::marks::MarkSet;
 
-use super::{Op, OpIter, OpScope, Verified};
+use super::{HasOpScope, Op, OpIter, OpScope, Verified};
 
 use std::fmt::Debug;
 use std::sync::Arc;
 
-#[derive(Clone, Default, Debug)]
-pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>> + Clone + Default> {
+#[derive(Clone, Debug)]
+pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>>> {
     iter: I,
     last_op: Option<Op<'a>>,
 }
 
-impl<'a, I: Iterator<Item = Op<'a>> + Clone + Default> TopOpIter<'a, I> {
-  pub(crate) fn new(iter: I) -> Self {
-      Self { iter, last_op: None }
-  }
+impl<'a, I: Iterator<Item = Op<'a>>> TopOpIter<'a, I> {
+    pub(crate) fn new(iter: I) -> Self {
+        Self {
+            iter,
+            last_op: None,
+        }
+    }
 }
 
-impl<'a, I: Iterator<Item = Op<'a>> + Clone + Default> Iterator for TopOpIter<'a, I> {
+impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -38,13 +39,12 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone + Default> Iterator for TopOpIter<'a
     }
 }
 
-impl<'a, I: OpScope<'a>> OpScope<'a> for TopOpIter<'a, I> {
+impl<'a, I: HasOpScope<'a>> HasOpScope<'a> for TopOpIter<'a, I> {
     fn get_opiter(&self) -> &OpIter<'a, Verified> {
         self.iter.get_opiter()
     }
 
-    fn get_marks(&self) -> Option<Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         self.iter.get_marks()
     }
 }
-

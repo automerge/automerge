@@ -1,19 +1,23 @@
-use crate::{
-    marks::{MarkSet},
-    types::{Clock},
-};
+use crate::{marks::MarkSet, types::Clock};
 
-use super::{Op, OpIter, Verified, VisibleOpIter, TopOpIter, MarkIter, KeyOpIter};
+use super::{KeyOpIter, MarkIter, Op, OpIter, TopOpIter, Verified, VisibleOpIter};
 
 use std::sync::Arc;
 
-pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone + Default {
+// is visible needs to compute counter
+// op_iter().is_visible(clock)
+//    id, succ, action, *value
+// op_iter().visible(clock)
+
+pub(crate) trait HasOpScope<'a>: Iterator<Item = Op<'a>> {
     fn get_opiter(&self) -> &OpIter<'a, Verified>;
 
-    fn get_marks(&self) -> Option<Arc<MarkSet>>;
+    fn get_marks(&self) -> Option<&Arc<MarkSet>>;
+}
 
-    fn marks(self, clock: Option<Clock>) -> MarkIter<'a, Self> {
-        MarkIter::new(self, clock)
+pub(crate) trait OpScope<'a>: HasOpScope<'a> + Clone {
+    fn marks(self) -> MarkIter<'a, Self> {
+        MarkIter::new(self)
     }
 
     fn top_ops(self) -> TopOpIter<'a, Self> {
@@ -29,14 +33,16 @@ pub(crate) trait OpScope<'a>: Iterator<Item = Op<'a>> + Clone + Default {
     }
 }
 
-impl<'a> OpScope<'a> for OpIter<'a, Verified> {
+impl<'a> HasOpScope<'a> for OpIter<'a, Verified> {
     fn get_opiter(&self) -> &OpIter<'a, Verified> {
         self
     }
 
-    fn get_marks(&self) -> Option<Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         None
     }
 }
 
+//impl<'a> OpScope<'a> for OpIter<'a, Verified> {}
 
+impl<'a, I: HasOpScope<'a> + Clone> OpScope<'a> for I {}

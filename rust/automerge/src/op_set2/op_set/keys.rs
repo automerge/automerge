@@ -1,24 +1,34 @@
-
-use super::{ Op, OpScope, TopOpIter, VisibleOpIter, OpIter, Verified };
+use super::{HasOpScope, Op, OpIter, OpScope, TopOpIter, Verified, VisibleOpIter};
 
 use std::fmt::Debug;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Keys<'a> {
-    pub(crate) iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
-    pub(crate) op_set: Option<&'a super::OpSet>,
+    pub(crate) iter: Option<TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>>,
 }
 
 impl<'a> Iterator for Keys<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let op = self.iter.next()?;
-        Some(self.op_set?.to_string(op.elemid_or_key()))
+        let op = self.iter.as_mut()?.next()?;
+        Some(
+            self.iter
+                .as_ref()?
+                .get_opiter()
+                .op_set
+                .to_string(op.elemid_or_key()),
+        )
     }
 }
 
-#[derive(Debug)]
+impl<'a> Keys<'a> {
+    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>) -> Self {
+        Self { iter: Some(iter) }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     head: Option<Op<'a>>,
     iter: I,
@@ -47,21 +57,20 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyIter<'a, I> {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct KeyOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
     next_op: Option<Op<'a>>,
     count: usize,
 }
 
-impl<'a, I: Iterator<Item = Op<'a>> + Clone> KeyOpIter<'a,I> {
-  pub(crate) fn new(iter: I) -> Self {
-      KeyOpIter {
-          iter,
-          next_op: None,
-          count: 0,
-      }
-  }
+impl<'a, I: Iterator<Item = Op<'a>> + Clone> KeyOpIter<'a, I> {
+    pub(crate) fn new(iter: I) -> Self {
+        KeyOpIter {
+            iter,
+            next_op: None,
+            count: 0,
+        }
+    }
 }
 
 impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
@@ -73,7 +82,6 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
             None => self.iter.next()?,
         };
         let iter = self.iter.clone();
-        //log!("KeyOpIter head = {:?}", head);
         let key = head.elemid_or_key();
         while let Some(next) = self.iter.next() {
             if next.elemid_or_key() != key {
@@ -88,4 +96,3 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
         })
     }
 }
-

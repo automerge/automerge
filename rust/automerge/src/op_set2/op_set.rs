@@ -15,7 +15,7 @@ use crate::types::{
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{ ActorIdx, Value };
+use super::types::{ActorIdx, OpType, Value};
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
@@ -25,27 +25,27 @@ use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
-mod op_iter;
-mod visible;
-mod values;
-mod map_range;
-mod list_range;
-mod spans;
 mod keys;
+mod list_range;
+mod map_range;
 mod marks;
-mod top_op;
+mod op_iter;
 mod op_scope;
+mod spans;
+mod top_op;
+mod values;
+mod visible;
 
-pub(crate) use op_iter::{ OpIter, Verified };
-pub(crate) use visible::{VisibleOpIter};
-pub(crate) use values::{Values};
-pub(crate) use map_range::{MapRange, MapRangeItem};
+pub(crate) use keys::{KeyIter, KeyOpIter, Keys};
 pub(crate) use list_range::{ListRange, ListRangeItem};
+pub(crate) use map_range::{MapRange, MapRangeItem};
+pub(crate) use marks::MarkIter;
+pub(crate) use op_iter::{OpIter, Verified};
+pub(crate) use op_scope::{HasOpScope, OpScope};
 pub(crate) use spans::{SpanInternal, Spans, SpansInternal};
-pub(crate) use keys::{Keys, KeyIter, KeyOpIter};
-pub(crate) use marks::{ MarkIter};
-pub(crate) use top_op::{ TopOpIter };
-pub(crate) use op_scope::{ OpScope };
+pub(crate) use top_op::TopOpIter;
+pub(crate) use values::Values;
+pub(crate) use visible::VisibleOpIter;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -75,22 +75,22 @@ impl OpSet {
         op: OpBuilder,
         range: &mut OpIdxRange,
     ) -> OpIdx {
-        todo!()
+        todo!() // TX
     }
 
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, idx: OpIdx) {
-        todo!()
+        todo!() // TX
     }
 
     pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
     where
         Q: TreeQuery<'a>,
     {
-        todo!()
+        todo!() // READ
     }
 
     pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpIdx) {
-        todo!()
+        todo!() // TX
     }
 
     pub(crate) fn parent_object(
@@ -131,10 +131,7 @@ impl OpSet {
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
         let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
-        Keys {
-            iter,
-            op_set: Some(self),
-        }
+        Keys::new(iter)
     }
 
     pub(crate) fn list_range<R: RangeBounds<usize>>(
@@ -144,12 +141,8 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        let iter = self
-            .iter_obj(obj)
-            .marks(clock.clone())
-            .visible_ops(clock)
-            .top_ops();
-        ListRange::new(iter, range, encoding, self)
+        let iter = self.iter_obj(obj).visible_ops(clock).marks().top_ops();
+        ListRange::new(iter, range, encoding)
     }
 
     pub(crate) fn map_range<R: RangeBounds<String>>(
@@ -159,7 +152,7 @@ impl OpSet {
         clock: Option<Clock>,
     ) -> MapRange<'_, R> {
         let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
-        MapRange::new(iter, range, &self)
+        MapRange::new(iter, range)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -195,7 +188,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        todo!()
+        todo!() // READ
     }
 
     pub(crate) fn seek_ops_by_index<'a>(
@@ -205,7 +198,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        todo!()
+        todo!() // READ
     }
 
     pub(crate) fn seek_list_opid(
@@ -215,7 +208,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        todo!()
+        todo!() // READ
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
@@ -307,7 +300,7 @@ impl OpSet {
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
-        todo!()
+        todo!() // READ
     }
 
     pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {
@@ -477,6 +470,7 @@ impl OpSet {
             value,
             mark_name: self.cols.get_str_range(MARK_NAME_COL_SPEC, range),
             expand: self.cols.get_boolean_range(EXPAND_COL_SPEC, range),
+            op_set: &self,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -500,6 +494,7 @@ impl OpSet {
             value: self.cols.get_value(VALUE_COL_SPEC),
             mark_name: self.cols.get_str(MARK_NAME_COL_SPEC),
             expand: self.cols.get_boolean(EXPAND_COL_SPEC),
+            op_set: &self,
             _phantom: std::marker::PhantomData,
         }
     }

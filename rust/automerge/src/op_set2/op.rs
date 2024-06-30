@@ -1,5 +1,5 @@
 use super::columns::ColumnDataIter;
-use super::op_set::{KeyIter, OpIter, Verified};
+use super::op_set::{KeyIter, OpIter, OpSet, Verified};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::{DeltaCursor, Value};
@@ -24,6 +24,7 @@ pub(crate) struct Op<'a> {
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<&'a str>,
     pub(super) succ_cursors: SuccCursors<'a>,
+    pub(super) op_set: &'a OpSet,
 }
 
 #[derive(Clone, Copy)]
@@ -93,15 +94,18 @@ impl<'a> Op<'a> {
         self.succ_cursors.clone()
     }
 
-    /*
-        pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
-                ExId::Id(
-                    self.id.counter(),
-                    0, // FIXME
-                    self.id.actor(),
-                )
+    pub(crate) fn exid(&self) -> ExId {
+        let id = self.id;
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(
+                id.counter(),
+                self.op_set.get_actor(id.actor()).clone(),
+                id.actor(),
+            )
         }
-    */
+    }
 
     pub(crate) fn elemid_or_key(&self) -> Key<'a> {
         if self.insert {
@@ -116,32 +120,39 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
-        todo!()
-        //self.succ_iter().any(|op| clock.covers(op.id()))
+        // todo - counters? DIFF
+        self.succ().any(|id| clock.covers(&id))
     }
 
-    pub(crate) fn tagged_value(&self, clock: Option<&Clock>) -> (types::Value<'a>, ExId) {
-        todo!()
+    pub(crate) fn tagged_value(&self) -> (types::Value<'static>, ExId) {
+        (self.value().into_owned(), self.exid())
+    }
+
+    pub(crate) fn get_increment_value(&self) -> Option<i64> {
+        match (self.action, self.value) {
+            (Action::Increment, ScalarValue::Int(i)) => Some(i),
+            (Action::Increment, ScalarValue::Uint(i)) => Some(i as i64),
+            _ => None,
+        }
     }
 
     pub(crate) fn inc_at(&self, clock: &Clock) -> i64 {
-        todo!()
-        /*
-                self.succ()
-                    .filter_map(|o| {
-                        if clock.covers(o.id()) {
-                            o.op().get_increment_value()
-                        } else {
-                            None
-                        }
-                    })
-                    .sum()
-        */
+        todo!() // DIFF
+                /*
+                                self.succ()
+                                    .filter_map(|o| {
+                                        if clock.covers(o.id()) {
+                                            o.op().get_increment_value()
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .sum()
+                */
     }
 
     pub(crate) fn is_put(&self) -> bool {
-        todo!()
-        //matches!(&self.action(), OpType::Put(_))
+        self.action == Action::Set
     }
 
     pub(crate) fn value(&self) -> Value<'a> {
@@ -155,15 +166,15 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'a> {
-        todo!()
-        /*
-                if let Some(clock) = clock {
-                    if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
-                        return Value::counter(c.start + self.inc_at(clock));
-                    }
-                }
-                self.value()
-        */
+        todo!() // DIFF
+                /*
+                        if let Some(clock) = clock {
+                            if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
+                                return Value::counter(c.start + self.inc_at(clock));
+                            }
+                        }
+                        self.value()
+                */
     }
 
     pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
@@ -179,18 +190,18 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
-        todo!()
-        /*
-                if self.is_inc() {
-                    false
-                } else if let Some(clock) = clock {
-                    clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
-                } else if self.is_counter() {
-                    self.succ().all(|op| op.is_inc())
-                } else {
-                    self.succ().len() == 0
-                }
-        */
+        todo!() // READ
+                /*
+                        if self.is_inc() {
+                            false
+                        } else if let Some(clock) = clock {
+                            clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
+                        } else if self.is_counter() {
+                            self.succ().all(|op| op.is_inc())
+                        } else {
+                            self.succ().len() == 0
+                        }
+                */
     }
 
     pub(crate) fn action(&self) -> OpType<'a> {
@@ -198,20 +209,19 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
-        todo!()
-        //matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
+        matches!((&self.action(), action), (OpType::Put(n), OpType::Put(m)) if n == m)
     }
 
     pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
-            todo!()
-        /*
-                    let key_iter = KeyIter::new(*self, self.iter.clone());
-                    let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
-                    self.succ().all(|id| sub_ops.contains(&id))
-        */
+            todo!() // READ
+                    /*
+                                let key_iter = KeyIter::new(*self, self.iter.clone());
+                                let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
+                                self.succ().all(|id| sub_ops.contains(&id))
+                    */
         } else {
             self.succ().len() == 0
         }

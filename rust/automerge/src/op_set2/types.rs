@@ -2,8 +2,8 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::value;
 use crate::types::{ElemId, ObjType};
+use crate::value;
 
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
@@ -155,6 +155,12 @@ impl<'a> fmt::Display for ScalarValue<'a> {
 impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
     fn from(s: ScalarValue<'a>) -> Self {
         s.into_owned()
+    }
+}
+
+impl<'a> From<Value<'a>> for types::Value<'static> {
+    fn from(v: Value<'a>) -> Self {
+        v.into_owned()
     }
 }
 

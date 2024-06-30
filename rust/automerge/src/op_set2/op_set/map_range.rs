@@ -1,9 +1,6 @@
-use crate::{
-    exid::ExId,
-    op_set2::Value,
-};
+use crate::{exid::ExId, op_set2::Value};
 
-use super::{Op, OpIter};
+use super::{HasOpScope, Op, OpIter};
 
 use std::fmt::Debug;
 use std::ops::RangeBounds;
@@ -17,18 +14,15 @@ pub struct MapRangeItem<'a> {
 }
 
 pub struct MapRange<'a, R: RangeBounds<String>> {
-    //iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
-    iter: Box<dyn Iterator<Item = Op<'a>> + 'a>,
+    iter: Option<Box<dyn HasOpScope<'a> + 'a>>,
     range: Option<R>,
-    op_set: Option<&'a super::OpSet>,
 }
 
 impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {
     fn default() -> Self {
         Self {
-            iter: Box::new(OpIter::default()),
+            iter: None,
             range: None,
-            op_set: None,
         }
     }
 }
@@ -37,9 +31,9 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     type Item = MapRangeItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let op_set = self.op_set?;
         let range = self.range.as_ref()?;
-        while let Some(op) = self.iter.next() {
+        let iter = self.iter.as_mut()?;
+        while let Some(op) = iter.next() {
             let key = op.key.map_key()?;
             let s_key = key.to_string(); // FIXME
             if !range.contains(&s_key) {
@@ -47,7 +41,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
                 continue;
             }
             let value = op.value();
-            let id = op_set.id_to_exid(op.id);
+            let id = op.exid();
             let conflict = op.conflict;
             return Some(MapRangeItem {
                 key,
@@ -61,17 +55,10 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new<I: Iterator<Item = Op<'a>> + 'a>(
-        //iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>,
-        iter: I,
-        range: R,
-        op_set: &'a super::OpSet,
-    ) -> Self {
+    pub(crate) fn new<I: HasOpScope<'a> + 'a>(iter: I, range: R) -> Self {
         Self {
-            iter: Box::new(iter),
+            iter: Some(Box::new(iter)),
             range: Some(range),
-            op_set: Some(op_set),
         }
     }
 }
-

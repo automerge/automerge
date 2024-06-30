@@ -23,8 +23,8 @@ pub(crate) use delta::DeltaCursor;
 //pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, Parent, SpanInternal,
-    Spans, SpansInternal, Values,
+    HasOpScope, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpScope, OpSet, Parent,
+    SpanInternal, Spans, SpansInternal, Values,
 };
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;

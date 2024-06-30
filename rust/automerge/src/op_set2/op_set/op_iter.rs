@@ -1,8 +1,8 @@
 use crate::{
     op_set2,
     op_set2::{
-        op::{SuccCursors},
         columns::{ColumnDataIter, RawReader, RunStep, Seek},
+        op::SuccCursors,
         rle::{ActionCursor, ActorCursor},
         types::{Key, ScalarValue},
         BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
@@ -11,7 +11,7 @@ use crate::{
     types::{Clock, ElemId, ObjId, OpId},
 };
 
-use super::{Op, OpScope, VisibleOpIter, TopOpIter, MarkIter, KeyOpIter};
+use super::{KeyOpIter, MarkIter, Op, OpScope, OpSet, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 
@@ -30,7 +30,7 @@ pub(crate) struct Unverified;
 impl OpReadState for Verified {}
 impl OpReadState for Unverified {}
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) index: usize,
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
@@ -49,6 +49,7 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) value: RawReader<'a>,
     pub(super) mark_name: ColumnDataIter<'a, StrCursor>,
     pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
+    pub(super) op_set: &'a OpSet,
     pub(super) _phantom: std::marker::PhantomData<T>,
 }
 
@@ -104,6 +105,7 @@ impl<'a> OpIter<'a, Verified> {
         let expand = self.read_expand()?;
         let mark_name = self.read_mark_name()?;
         let successors = self.read_successors()?;
+        let op_set = self.op_set;
         let index = self.index;
         let conflict = false;
         self.index += 1;
@@ -119,6 +121,7 @@ impl<'a> OpIter<'a, Verified> {
             expand,
             mark_name,
             succ_cursors: successors,
+            op_set,
         }))
     }
 

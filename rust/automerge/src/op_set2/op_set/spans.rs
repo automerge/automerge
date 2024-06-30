@@ -1,6 +1,6 @@
+use super::{OpIter, Verified};
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set2::{Key, Op, OpType};
-use super::{OpIter, Verified};
 use crate::types::Clock;
 use crate::types::{ListEncoding, ObjType, OpId};
 use crate::Automerge;
