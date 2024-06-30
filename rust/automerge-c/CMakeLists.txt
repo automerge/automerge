@@ -160,6 +160,7 @@ add_custom_command(
         src/actor_id.rs
         src/byte_span.rs
         src/change.rs
+        src/cursor.rs
         src/doc.rs
         src/doc/list.rs
         src/doc/map.rs
