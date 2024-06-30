@@ -31,14 +31,14 @@ impl AMchange {
         }
     }
 
-    pub fn message(&self) -> AMbyteSpan {
+    fn message(&self) -> AMbyteSpan {
         if let Some(message) = unsafe { (*self.body).message() } {
             return message.as_str().as_bytes().into();
         }
         Default::default()
     }
 
-    pub fn hash(&self) -> AMbyteSpan {
+    fn hash(&self) -> AMbyteSpan {
         let mut change_hash = self.change_hash.borrow_mut();
         if let Some(change_hash) = change_hash.as_ref() {
             change_hash.into()
