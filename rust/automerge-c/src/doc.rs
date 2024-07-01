@@ -443,6 +443,9 @@ pub unsafe extern "C" fn AMgetCursor(
 ///                  items to select a historical object or `NULL` to select the
 ///                  current object.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_UINT` item.
+///         For an `AM_OBJ_TYPE_TEXT` object, if `AUTOMERGE_C_UTF8` is defined
+///         then the item's value is in bytes but if `AUTOMERGE_C_UTF32` is
+///         defined then the item's value is in Unicode code points.
 /// \pre \p doc `!= NULL`
 /// \pre \p cursor `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to
