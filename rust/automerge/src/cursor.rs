@@ -46,6 +46,7 @@ impl Cursor {
         let actor = s[(n + 1)..].try_into().ok()?;
         Some(Cursor { ctr, actor })
     }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         // The serialized format is
         //

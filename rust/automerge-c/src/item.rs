@@ -9,6 +9,7 @@ use std::rc::Rc;
 use crate::actor_id::AMactorId;
 use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change::AMchange;
+use crate::cursor::AMcursor;
 use crate::doc::mark::AMmark;
 use crate::doc::AMdoc;
 use crate::index::{AMidxType, AMindex};
@@ -32,6 +33,7 @@ pub enum Value {
     ActorId(am::ActorId, UnsafeCell<Option<AMactorId>>),
     Change(Box<am::Change>, UnsafeCell<Option<AMchange>>),
     ChangeHash(am::ChangeHash),
+    Cursor(AMcursor),
     Doc(RefCell<AMdoc>),
     Mark(AMmark<'static>),
     SyncHave(AMsyncHave),
@@ -42,7 +44,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn try_into_bytes(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_bytes(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
         use am::ScalarValue::*;
         use am::Value::*;
@@ -58,7 +60,7 @@ impl Value {
         })
     }
 
-    pub fn try_into_change_hash(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_change_hash(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Self::ChangeHash(change_hash) = &self {
@@ -70,7 +72,7 @@ impl Value {
         })
     }
 
-    pub fn try_into_counter(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_counter(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
         use am::ScalarValue::*;
         use am::Value::*;
@@ -86,7 +88,7 @@ impl Value {
         })
     }
 
-    pub fn try_into_int(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_int(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
         use am::ScalarValue::*;
         use am::Value::*;
@@ -102,7 +104,7 @@ impl Value {
         })
     }
 
-    pub fn try_into_str(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_str(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
         use am::ScalarValue::*;
         use am::Value::*;
@@ -118,7 +120,7 @@ impl Value {
         })
     }
 
-    pub fn try_into_timestamp(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_timestamp(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
         use am::ScalarValue::*;
         use am::Value::*;
@@ -156,6 +158,12 @@ impl From<am::Change> for Value {
 impl From<am::ChangeHash> for Value {
     fn from(change_hash: am::ChangeHash) -> Self {
         Self::ChangeHash(change_hash)
+    }
+}
+
+impl From<am::Cursor> for Value {
+    fn from(cursor: am::Cursor) -> Self {
+        Self::Cursor(AMcursor::new(cursor))
     }
 }
 
@@ -229,6 +237,23 @@ impl<'a> TryFrom<&'a Value> for &'a am::ChangeHash {
 
         match value {
             ChangeHash(change_hash) => Ok(change_hash),
+            _ => Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<self::Value>().to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a AMcursor {
+    type Error = am::AutomergeError;
+
+    fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
+        use self::Value::*;
+        use am::AutomergeError::InvalidValueType;
+
+        match value {
+            Cursor(cursor) => Ok(cursor),
             _ => Err(InvalidValueType {
                 expected: type_name::<Self>().to_string(),
                 unexpected: type_name::<self::Value>().to_string(),
@@ -493,7 +518,7 @@ pub struct Item {
 }
 
 impl Item {
-    pub fn try_into_bytes(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_bytes(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -505,7 +530,7 @@ impl Item {
         })
     }
 
-    pub fn try_into_change_hash(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_change_hash(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -517,7 +542,7 @@ impl Item {
         })
     }
 
-    pub fn try_into_counter(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_counter(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -529,7 +554,7 @@ impl Item {
         })
     }
 
-    pub fn try_into_int(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_int(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -541,7 +566,7 @@ impl Item {
         })
     }
 
-    pub fn try_into_str(&self) -> Result<AMbyteSpan, am::AutomergeError> {
+    fn try_into_str(&self) -> Result<AMbyteSpan, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -553,7 +578,7 @@ impl Item {
         })
     }
 
-    pub fn try_into_timestamp(&self) -> Result<i64, am::AutomergeError> {
+    fn try_into_timestamp(&self) -> Result<i64, am::AutomergeError> {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &self.value {
@@ -587,6 +612,12 @@ impl From<am::Change> for Item {
 impl From<am::ChangeHash> for Item {
     fn from(change_hash: am::ChangeHash) -> Self {
         Value::from(change_hash).into()
+    }
+}
+
+impl From<am::Cursor> for Item {
+    fn from(cursor: am::Cursor) -> Self {
+        Value::from(cursor).into()
     }
 }
 
@@ -733,6 +764,22 @@ impl<'a> TryFrom<&'a mut Item> for &'a mut AMchange {
         use am::AutomergeError::InvalidValueType;
 
         if let Some(value) = &mut item.value {
+            value.try_into()
+        } else {
+            Err(InvalidValueType {
+                expected: type_name::<Self>().to_string(),
+                unexpected: type_name::<Option<Value>>().to_string(),
+            })
+        }
+    }
+}
+impl<'a> TryFrom<&'a Item> for &'a AMcursor {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
+
+        if let Some(value) = &item.value {
             value.try_into()
         } else {
             Err(InvalidValueType {
@@ -933,6 +980,10 @@ impl TryFrom<&Item> for (am::Value<'static>, am::ObjId) {
                     expected,
                     unexpected: type_name::<AMchange>().to_string(),
                 }),
+                Cursor(_) => Err(InvalidValueType {
+                    expected,
+                    unexpected: type_name::<AMcursor>().to_string(),
+                }),
                 Doc(_) => Err(InvalidValueType {
                     expected,
                     unexpected: type_name::<AMdoc>().to_string(),
@@ -1020,6 +1071,12 @@ impl From<am::Change> for AMitem {
 impl From<am::ChangeHash> for AMitem {
     fn from(change_hash: am::ChangeHash) -> Self {
         Value::from(change_hash).into()
+    }
+}
+
+impl From<am::Cursor> for AMitem {
+    fn from(cursor: am::Cursor) -> Self {
+        Value::from(cursor).into()
     }
 }
 
@@ -1127,6 +1184,14 @@ impl<'a> TryFrom<&'a mut AMitem> for &'a mut AMchange {
     }
 }
 
+impl<'a> TryFrom<&'a AMitem> for &'a AMcursor {
+    type Error = am::AutomergeError;
+
+    fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
+        item.as_ref().try_into()
+    }
+}
+
 impl<'a> TryFrom<&'a mut AMitem> for &'a mut AMdoc {
     type Error = am::AutomergeError;
 
@@ -1219,7 +1284,7 @@ impl TryFrom<&AMitem> for (am::Value<'static>, am::ObjId) {
 /// \enum AMvalType
 /// \installed_headerfile
 /// \brief The type of an item's value.
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub enum AMvalType {
     /// An actor identifier value.
@@ -1234,34 +1299,36 @@ pub enum AMvalType {
     ChangeHash = 1 << 5,
     /// A CRDT counter value.
     Counter = 1 << 6,
+    /// A cursor value.
+    Cursor = 1 << 7,
     /// The default tag, not a type signifier.
     Default = 0,
     /// A document value.
-    Doc = 1 << 7,
+    Doc = 1 << 8,
     /// A 64-bit float value.
-    F64 = 1 << 8,
+    F64 = 1 << 9,
     /// A 64-bit signed integer value.
-    Int = 1 << 9,
+    Int = 1 << 10,
     /// A mark.
-    Mark = 1 << 10,
+    Mark = 1 << 11,
     /// A null value.
-    Null = 1 << 11,
+    Null = 1 << 12,
     /// An object type value.
-    ObjType = 1 << 12,
+    ObjType = 1 << 13,
     /// A UTF-8 string view value.
-    Str = 1 << 13,
+    Str = 1 << 14,
     /// A synchronization have value.
-    SyncHave = 1 << 14,
+    SyncHave = 1 << 15,
     /// A synchronization message value.
-    SyncMessage = 1 << 15,
+    SyncMessage = 1 << 16,
     /// A synchronization state value.
-    SyncState = 1 << 16,
+    SyncState = 1 << 17,
     /// A *nix timestamp (milliseconds) value.
-    Timestamp = 1 << 17,
+    Timestamp = 1 << 18,
     /// A 64-bit unsigned integer value.
-    Uint = 1 << 18,
+    Uint = 1 << 19,
     /// An unknown type of value.
-    Unknown = 1 << 19,
+    Unknown = 1 << 20,
     /// A void.
     Void = 1 << 0,
 }
@@ -1303,6 +1370,7 @@ impl From<&Value> for AMvalType {
             ActorId(_, _) => Self::ActorId,
             Change(_, _) => Self::Change,
             ChangeHash(_) => Self::ChangeHash,
+            Cursor(_) => Self::Cursor,
             Doc(_) => Self::Doc,
             Mark(_) => Self::Mark,
             SyncHave(_) => Self::SyncHave,
@@ -1766,6 +1834,31 @@ pub unsafe extern "C" fn AMitemToCounter(item: *const AMitem, value: *mut i64) -
         if let Ok(counter) = item.as_ref().try_into_counter() {
             if !value.is_null() {
                 *value = counter;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// \memberof AMitem
+/// \brief Gets the cursor value of an item.
+///
+/// \param[in] item A pointer to an `AMitem` struct.
+/// \param[out] value A pointer to an `AMcursor` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_CURSOR` and
+///         \p *value has been reassigned, `false` otherwise.
+/// \pre \p item `!= NULL`
+/// \internal
+///
+/// # Safety
+/// item must be a valid pointer to an AMitem
+#[no_mangle]
+pub unsafe extern "C" fn AMitemToCursor(item: *const AMitem, value: *mut *const AMcursor) -> bool {
+    if let Some(item) = item.as_ref() {
+        if let Ok(cursor) = <&AMcursor>::try_from(item) {
+            if !value.is_null() {
+                *value = cursor;
                 return true;
             }
         }

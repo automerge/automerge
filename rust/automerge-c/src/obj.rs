@@ -45,7 +45,7 @@ impl AMobjId {
         }
     }
 
-    pub fn actor_id(&self) -> *const AMactorId {
+    fn actor_id(&self) -> *const AMactorId {
         let mut c_actor_id = self.c_actor_id.borrow_mut();
         match c_actor_id.as_mut() {
             None => {
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \enum AMobjType
 /// \installed_headerfile
 /// \brief The type of an object.
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub enum AMobjType {
     /// The default tag, not a type signifier.
