@@ -254,13 +254,8 @@ impl OpSet {
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_, Verified>)> {
         // FIXME - remove unwraps
         self.iter_obj_ids().map(|(id, range)| {
-            let obj_meta = self
-                .find_op_by_id(&id.0)
-                .map(|op| ObjMeta {
-                    id,
-                    typ: op.action.try_into().unwrap(),
-                })
-                .unwrap();
+            let typ = self.object_type(&id).unwrap(); // FIXME
+            let obj_meta = ObjMeta { id, typ };
             (obj_meta, self.iter_range(&range))
         })
     }
@@ -300,7 +295,8 @@ impl OpSet {
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
-        todo!() // READ
+        self.find_op_by_id(&obj.0)
+            .and_then(|op| op.action.try_into().ok())
     }
 
     pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {

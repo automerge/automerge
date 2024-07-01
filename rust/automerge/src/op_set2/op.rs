@@ -189,21 +189,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
-        todo!() // READ
-                /*
-                        if self.is_inc() {
-                            false
-                        } else if let Some(clock) = clock {
-                            clock.covers(&self.op().id) && self.succ().all(|o| o.is_inc() || !clock.covers(o.id()))
-                        } else if self.is_counter() {
-                            self.succ().all(|op| op.is_inc())
-                        } else {
-                            self.succ().len() == 0
-                        }
-                */
-    }
-
     pub(crate) fn action(&self) -> OpType<'a> {
         self.op_type()
     }
