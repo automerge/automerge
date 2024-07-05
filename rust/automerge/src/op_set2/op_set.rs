@@ -9,13 +9,13 @@ use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
+    ActorId, Clock, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
 };
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::Op;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{ActorIdx, OpType, Value};
+use super::types::{Action, ActorIdx, OpType, Value};
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
@@ -25,27 +25,29 @@ use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
+mod found_op;
 mod keys;
 mod list_range;
 mod map_range;
 mod marks;
 mod op_iter;
-mod op_scope;
+mod op_query;
 mod spans;
 mod top_op;
 mod values;
 mod visible;
 
+pub(crate) use found_op::OpsFoundIter;
 pub(crate) use keys::{KeyIter, KeyOpIter, Keys};
 pub(crate) use list_range::{ListRange, ListRangeItem};
 pub(crate) use map_range::{MapRange, MapRangeItem};
-pub(crate) use marks::MarkIter;
-pub(crate) use op_iter::{OpIter, Verified};
-pub(crate) use op_scope::{HasOpScope, OpScope};
+pub(crate) use marks::{MarkIter, NoMarkIter};
+pub(crate) use op_iter::OpIter;
+pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use spans::{SpanInternal, Spans, SpansInternal};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use values::Values;
-pub(crate) use visible::VisibleOpIter;
+pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -130,7 +132,7 @@ impl OpSet {
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        let iter = self.iter_obj(obj).visible(clock).top_ops();
         Keys::new(iter)
     }
 
@@ -141,7 +143,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        let iter = self.iter_obj(obj).visible_ops(clock).marks().top_ops();
+        let iter = self.iter_obj(obj).visible(clock).marks().top_ops();
         ListRange::new(iter, range, encoding)
     }
 
@@ -151,7 +153,7 @@ impl OpSet {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'_, R> {
-        let iter = self.iter_obj(obj).visible_ops(clock).top_ops();
+        let iter = self.iter_obj(obj).visible(clock).top_ops();
         MapRange::new(iter, range)
     }
 
@@ -188,7 +190,15 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        todo!() // READ
+        let mut iter = self.iter_prop(obj, key);
+        let end_pos = iter.end_pos();
+        let ops = iter.visible(clock.cloned()).collect::<Vec<_>>();
+        let ops_pos = ops.iter().map(|op| op.index).collect::<Vec<_>>();
+        OpsFound {
+            ops,
+            ops_pos,
+            end_pos,
+        }
     }
 
     pub(crate) fn seek_ops_by_index<'a>(
@@ -198,7 +208,15 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        todo!() // READ
+        let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
+        let mut len = 0;
+        for ops in iter {
+            len += ops.width(encoding);
+            if len > index {
+                return ops;
+            }
+        }
+        OpsFound::default()
     }
 
     pub(crate) fn seek_list_opid(
@@ -208,7 +226,19 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        todo!() // READ
+        // this iterates over the ops twice
+        // needs faster rewrite
+        let op = self.iter_obj(obj).find(|op| op.id == opid)?;
+        let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
+        let mut index = 0;
+        for ops in iter {
+            if ops.end_pos > op.index {
+                let visible = ops.ops.contains(&op);
+                return Some(FoundOpId { op, index, visible });
+            }
+            index += ops.width(encoding);
+        }
+        None
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
@@ -251,12 +281,12 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_, Verified>)> {
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_>)> {
         // FIXME - remove unwraps
-        self.iter_obj_ids().map(|(id, range)| {
-            let typ = self.object_type(&id).unwrap(); // FIXME
+        self.iter_obj_ids().filter_map(|(id, range)| {
+            let typ = self.object_type(&id)?;
             let obj_meta = ObjMeta { id, typ };
-            (obj_meta, self.iter_range(&range))
+            Some((obj_meta, self.iter_range(&range)))
         })
     }
 
@@ -264,8 +294,8 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         clock: Option<Clock>,
-    ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>> {
-        self.iter_obj(obj).visible_ops(clock).top_ops()
+    ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>> {
+        self.iter_obj(obj).visible(clock).top_ops()
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -277,6 +307,7 @@ impl OpSet {
     }
 
     pub(crate) fn find_op_by_id(&self, id: &OpId) -> Option<Op<'_>> {
+        // FIXME - index goes here
         self.iter().find(|op| &op.id == id)
     }
 
@@ -286,9 +317,11 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
         let mut iter = self.iter();
-        while let Some(op) = iter.next() {
+        // FIXME - index goes here
+        while let Some(mut op) = iter.next() {
             if &op.id == id {
-                return Some((op, op.visible_at(clock)));
+                let visible = op.scope_to_clock(clock, &iter);
+                return Some((op, visible));
             }
         }
         None
@@ -393,7 +426,7 @@ impl OpSet {
         (raw.into_iter().collect(), data)
     }
 
-    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a, Verified> {
+    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
@@ -413,12 +446,7 @@ impl OpSet {
         self.iter().find(|op| &op.id == id)
     }
 
-    pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a, Verified> {
-        /*
-                let range = self.get_obj_ctr().scope_to_value(obj.counter(), ..);
-                let actor = ActorIdx::from(obj.actor() as usize);
-                let range = self.get_obj_actor().scope_to_value(actor, range);
-        */
+    pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a> {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
@@ -430,7 +458,7 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_, Verified> {
+    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_> {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
             .cols
@@ -467,11 +495,10 @@ impl OpSet {
             mark_name: self.cols.get_str_range(MARK_NAME_COL_SPEC, range),
             expand: self.cols.get_boolean_range(EXPAND_COL_SPEC, range),
             op_set: &self,
-            _phantom: std::marker::PhantomData,
         }
     }
 
-    pub(crate) fn iter(&self) -> OpIter<'_, Verified> {
+    pub(crate) fn iter(&self) -> OpIter<'_> {
         OpIter {
             index: 0,
             id_actor: self.cols.get_actor(ID_ACTOR_COL_SPEC),
@@ -491,7 +518,6 @@ impl OpSet {
             mark_name: self.cols.get_str(MARK_NAME_COL_SPEC),
             expand: self.cols.get_boolean(EXPAND_COL_SPEC),
             op_set: &self,
-            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -538,11 +564,17 @@ pub(crate) struct FoundOpId<'a> {
     pub(crate) visible: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct OpsFound<'a> {
     pub(crate) ops: Vec<Op<'a>>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) end_pos: usize,
+}
+
+impl<'a> OpsFound<'a> {
+    fn width(&self, encoding: ListEncoding) -> usize {
+        self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1225,7 +1257,7 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        use super::super::op_set::iter::OpScope;
+        use super::super::op_set::iter::OpQuery;
         let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
 
         let test_ops = vec![
@@ -1373,7 +1405,7 @@ mod tests {
 
             let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter
-                .visible_ops(None)
+                .visible(None)
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
                 .collect::<Vec<_>>();
@@ -1388,7 +1420,7 @@ mod tests {
             assert!(key4.is_none());
 
             let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.visible_ops(None).top_ops().collect::<Vec<_>>();
+            let ops = iter.visible(None).top_ops().collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);

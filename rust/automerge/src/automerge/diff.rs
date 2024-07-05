@@ -10,7 +10,7 @@ use crate::patches::TextRepresentation;
 use crate::types::ObjMeta;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
-    op_set2::{Op, OpType},
+    op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
     types::{Clock, ListEncoding, Prop},
     value::Value,
@@ -20,13 +20,25 @@ use crate::{
 #[derive(Clone, Debug)]
 struct Winner<'a> {
     op: Op<'a>,
-    clock: &'a Clock,
+    value_at: Option<ScalarValue<'a>>,
+    // clock: &'a Clock,
     // Whether the op was in the history of the other clock
     cross_visible: bool,
     conflict: bool,
 }
 
-fn process<'a, T: Iterator<Item = Op<'a>>>(
+impl<'a> Winner<'a> {
+    fn value(&self) -> &ScalarValue<'a> {
+        if let Some(v) = &self.value_at {
+            v
+        } else {
+            &self.op.value
+        }
+    }
+}
+
+/*
+fn process2<'a, T: Iterator<Item = Op<'a>>>(
     ops: T,
     before: &'a Clock,
     after: &'a Clock,
@@ -49,14 +61,45 @@ fn process<'a, T: Iterator<Item = Op<'a>>>(
     }
     resolve(before_op, after_op, diff)
 }
+*/
 
-fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
+fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
+    ops: T,
+    before: &'a Clock,
+    after: &'a Clock,
+    diff: &mut RichTextDiff<'a>,
+) -> Option<Patch<'a>> {
+    let mut before_op = None;
+    let mut after_op = None;
+
+    for dop in ops {
+        let predates_before = dop.predates_before;
+        let predates_after = dop.predates_after;
+
+        if predates_before && !dop.was_deleted_before {
+            push_top(&mut before_op, dop.op, predates_after, dop.value_before);
+        }
+
+        if predates_after && !dop.was_deleted_after {
+            push_top(&mut after_op, dop.op, predates_before, dop.value_after);
+        }
+    }
+    resolve(before_op, after_op, diff)
+}
+
+fn push_top<'a>(
+    top: &mut Option<Winner<'a>>,
+    op: Op<'a>,
+    cross_visible: bool,
+    value_at: Option<ScalarValue<'a>>,
+) {
     match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
             top.replace(Winner {
                 op,
-                clock,
+                //clock,
+                value_at,
                 cross_visible,
                 conflict: top.is_some(),
             });
@@ -119,7 +162,7 @@ impl<'a> Patch<'a> {
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
         let mut diff = RichTextDiff::new(doc);
-        let ops_by_key = ops.group_by(|o| o.elemid_or_key());
+        let ops_by_key = ops.diff(before, after).group_by(|d| d.op.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
@@ -141,7 +184,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
-            let value = winner.op.value_at(Some(winner.clock)).into();
+            let value = winner.value().into();
             let id = winner.op.id;
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
@@ -150,7 +193,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
-            let value = after.op.value_at(Some(after.clock)).into();
+            let value = after.value().into();
             let id = after.op.id;
             let expose = after.cross_visible;
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);
@@ -191,7 +234,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = winner.op.value_at(Some(winner.clock)).into();
+                let value = winner.value().into();
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -232,7 +275,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
-                let value = winner.op.value_at(Some(winner.clock)).into();
+                let value = winner.value().into();
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -240,7 +283,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
-                let value = after.op.value_at(Some(after.clock)).into();
+                let value = after.value().into();
                 let id = after.op.id;
                 let expose = after.cross_visible;
                 patch_log.put_map(obj.id, key, value, id, conflict, expose)
@@ -265,7 +308,8 @@ fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if before.op.is_counter() && after.op.is_counter() {
-        let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
+        //let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
+        let n = after.value().as_i64() - before.value().as_i64();
         if n != 0 {
             return Some(n);
         }

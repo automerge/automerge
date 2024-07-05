@@ -1,6 +1,6 @@
 use crate::{exid::ExId, op_set2::Value};
 
-use super::{HasOpScope, Op, OpIter};
+use super::OpQueryTerm;
 
 use std::fmt::Debug;
 use std::ops::RangeBounds;
@@ -14,7 +14,7 @@ pub struct MapRangeItem<'a> {
 }
 
 pub struct MapRange<'a, R: RangeBounds<String>> {
-    iter: Option<Box<dyn HasOpScope<'a> + 'a>>,
+    iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
     range: Option<R>,
 }
 
@@ -55,7 +55,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new<I: HasOpScope<'a> + 'a>(iter: I, range: R) -> Self {
+    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(iter: I, range: R) -> Self {
         Self {
             iter: Some(Box::new(iter)),
             range: Some(range),

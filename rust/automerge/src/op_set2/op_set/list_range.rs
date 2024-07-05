@@ -1,4 +1,4 @@
-use super::{HasOpScope, MarkIter, Op, OpIter, TopOpIter, Value, Verified, VisibleOpIter};
+use super::{MarkIter, Op, OpIter, OpQueryTerm, TopOpIter, Value, VisibleOpIter};
 use crate::{exid::ExId, marks::MarkSet, types::ListEncoding};
 
 use std::fmt::Debug;
@@ -15,7 +15,7 @@ pub struct ListRangeItem<'a> {
 }
 
 pub struct ListRange<'a, R: RangeBounds<usize>> {
-    iter: Option<Box<dyn HasOpScope<'a> + 'a>>,
+    iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
     range: Option<R>,
     state: usize,
     encoding: ListEncoding,
@@ -34,7 +34,7 @@ impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {
 
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
     pub(crate) fn new(
-        iter: TopOpIter<'a, MarkIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>>,
+        iter: TopOpIter<'a, MarkIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
         range: R,
         encoding: ListEncoding,
     ) -> Self {

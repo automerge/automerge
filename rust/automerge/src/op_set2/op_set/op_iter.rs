@@ -11,27 +11,29 @@ use crate::{
     types::{Clock, ElemId, ObjId, OpId},
 };
 
-use super::{KeyOpIter, MarkIter, Op, OpScope, OpSet, TopOpIter, VisibleOpIter};
+use super::{Op, OpSet};
 
 use std::fmt::Debug;
 
+/*
 use super::{
     ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC,
     INSERT_COL_SPEC, KEY_ACTOR_COL_SPEC, KEY_COUNTER_COL_SPEC, KEY_STR_COL_SPEC,
     MARK_NAME_COL_SPEC, OBJ_ID_ACTOR_COL_SPEC, OBJ_ID_COUNTER_COL_SPEC, SUCC_ACTOR_COL_SPEC,
     SUCC_COUNTER_COL_SPEC, SUCC_COUNT_COL_SPEC, VALUE_COL_SPEC, VALUE_META_COL_SPEC,
 };
+*/
 
-pub(crate) trait OpReadState {}
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct Verified;
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct Unverified;
-impl OpReadState for Verified {}
-impl OpReadState for Unverified {}
+//pub(crate) trait OpReadState {}
+//#[derive(Debug, Clone, PartialEq, Default)]
+//pub(crate) struct Verified;
+//#[derive(Debug, Clone, PartialEq, Default)]
+//pub(crate) struct Unverified;
+//impl OpReadState for Verified {}
+//impl OpReadState for Unverified {}
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpIter<'a, T: OpReadState> {
+pub(crate) struct OpIter<'a> {
     pub(super) index: usize,
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) id_counter: ColumnDataIter<'a, DeltaCursor>,
@@ -50,27 +52,7 @@ pub(crate) struct OpIter<'a, T: OpReadState> {
     pub(super) mark_name: ColumnDataIter<'a, StrCursor>,
     pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
     pub(super) op_set: &'a OpSet,
-    pub(super) _phantom: std::marker::PhantomData<T>,
 }
-
-/*
-#[derive(Clone, Debug, Default)]
-pub(crate) struct ScopeOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
-    clock: Option<Clock>,
-    iter: I,
-}
-
-impl<'a, I: OpScope<'a>> Iterator for ScopeOpIter<'a, I> {
-    type Item = Op<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(op) = self.iter.next() {
-          todo!()
-        }
-        None
-    }
-}
-*/
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadOpError {
@@ -92,7 +74,11 @@ pub(crate) enum ReadOpError {
     MissingMarkName,
 }
 
-impl<'a> OpIter<'a, Verified> {
+impl<'a> OpIter<'a> {
+    pub(crate) fn end_pos(&self) -> usize {
+        self.id_actor.end_pos()
+    }
+
     fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
         let Some(id) = self.read_opid()? else {
             return Ok(None);
@@ -244,7 +230,7 @@ impl<'a> OpIter<'a, Verified> {
     }
 }
 
-impl<'a> Iterator for OpIter<'a, Verified> {
+impl<'a> Iterator for OpIter<'a> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -1,6 +1,7 @@
 use crate::marks::MarkSet;
+use crate::types::Clock;
 
-use super::{HasOpScope, Op, OpIter, OpScope, Verified};
+use super::{Key, Op, OpIter, OpQuery, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -39,8 +40,8 @@ impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
     }
 }
 
-impl<'a, I: HasOpScope<'a>> HasOpScope<'a> for TopOpIter<'a, I> {
-    fn get_opiter(&self) -> &OpIter<'a, Verified> {
+impl<'a, I: OpQueryTerm<'a>> OpQueryTerm<'a> for TopOpIter<'a, I> {
+    fn get_opiter(&self) -> &OpIter<'a> {
         self.iter.get_opiter()
     }
 

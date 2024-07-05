@@ -5,13 +5,13 @@ use crate::{
     types::Clock,
 };
 
-use super::{HasOpScope, Op, OpIter, OpScope};
+use super::{Op, OpIter, OpQuery, OpQueryTerm};
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Values<'a> {
-    iter: Option<Box<dyn HasOpScope<'a> + 'a>>,
+    iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
 }
 
 impl<'a> Default for Values<'a> {
@@ -21,7 +21,7 @@ impl<'a> Default for Values<'a> {
 }
 
 impl<'a> Values<'a> {
-    pub(crate) fn new<I: HasOpScope<'a> + 'a>(iter: I, clock: Option<Clock>) -> Self {
+    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(iter: I, clock: Option<Clock>) -> Self {
         Self {
             iter: Some(Box::new(iter)),
         }

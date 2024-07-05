@@ -1,5 +1,5 @@
 use super::columns::ColumnDataIter;
-use super::op_set::{KeyIter, OpIter, OpSet, Verified};
+use super::op_set::{KeyIter, OpIter, OpSet};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::{DeltaCursor, Value};
@@ -7,13 +7,12 @@ use crate::exid::ExId;
 use crate::text_value::TextValue;
 use crate::types;
 use crate::types::{Clock, ElemId, ListEncoding, ObjId, OpId};
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
-    pub(crate) index: usize,
+    pub(crate) index: usize, // rename to pos
     pub(crate) conflict: bool,
     pub(crate) id: OpId,
     pub(crate) action: Action,
@@ -115,15 +114,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn predates(&self, clock: &Clock) -> bool {
-        clock.covers(&self.id)
-    }
-
-    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
-        // todo - counters? DIFF
-        self.succ().any(|id| clock.covers(&id))
-    }
-
     pub(crate) fn tagged_value(&self) -> (types::Value<'static>, ExId) {
         (self.value().into_owned(), self.exid())
     }
@@ -134,21 +124,6 @@ impl<'a> Op<'a> {
             (Action::Increment, ScalarValue::Uint(i)) => Some(i as i64),
             _ => None,
         }
-    }
-
-    pub(crate) fn inc_at(&self, clock: &Clock) -> i64 {
-        todo!() // DIFF
-                /*
-                                self.succ()
-                                    .filter_map(|o| {
-                                        if clock.covers(o.id()) {
-                                            o.op().get_increment_value()
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .sum()
-                */
     }
 
     pub(crate) fn is_put(&self) -> bool {
@@ -165,51 +140,12 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'a> {
-        todo!() // DIFF
-                /*
-                        if let Some(clock) = clock {
-                            if let OpType::Put(ScalarValue::Counter(c)) = &self.op().action {
-                                return Value::counter(c.start + self.inc_at(clock));
-                            }
-                        }
-                        self.value()
-                */
-    }
-
-    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
-        if let Some(clock) = clock {
-            if self.is_inc() || self.is_mark() {
-                false
-            } else {
-                clock.covers(&self.id) && !self.succ().any(|i| clock.covers(&i))
-            }
-        } else {
-            self.visible()
-        }
-    }
-
     pub(crate) fn action(&self) -> OpType<'a> {
         self.op_type()
     }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
         matches!((&self.action(), action), (OpType::Put(n), OpType::Put(m)) if n == m)
-    }
-
-    pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() || self.is_mark() {
-            false
-        } else if self.is_counter() {
-            todo!() // READ
-                    /*
-                                let key_iter = KeyIter::new(*self, self.iter.clone());
-                                let sub_ops = key_iter.map(|op| op.id).collect::<HashSet<_>>();
-                                self.succ().all(|id| sub_ops.contains(&id))
-                    */
-        } else {
-            self.succ().len() == 0
-        }
     }
 
     pub(crate) fn is_inc(&self) -> bool {
@@ -238,21 +174,6 @@ impl<'a> std::hash::Hash for Op<'a> {
 }
 
 impl<'a> Eq for Op<'a> {}
-
-/*
-impl<'a> PartialEq<op_set::Op<'_>> for Op<'a> {
-    fn eq(&self, other: &op_set::Op<'_>) -> bool {
-        let action =
-            OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand);
-        self.id == *other.id()
-            && self.obj == *other.obj()
-            && self.key == other.ex_key()
-            && self.insert == other.insert()
-            && &action == other.action()
-            && self.succ().eq(other.succ().map(|n| *n.id()))
-    }
-}
-*/
 
 // TODO:
 // needs tests around counter value and visability

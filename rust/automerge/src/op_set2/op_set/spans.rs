@@ -1,6 +1,6 @@
-use super::{OpIter, Verified};
+use super::OpIter;
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set2::{Key, Op, OpType};
+use crate::op_set2::{Key, Op, OpQuery, OpType, VisibleOpIter};
 use crate::types::Clock;
 use crate::types::{ListEncoding, ObjType, OpId};
 use crate::Automerge;
@@ -21,11 +21,8 @@ struct SpansState<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct SpansInternal<'a, I>
-where
-    I: Iterator<Item = Op<'a>>,
-{
-    iter: I,
+pub(crate) struct SpansInternal<'a> {
+    iter: VisibleOpIter<'a, OpIter<'a>>,
     doc: &'a Automerge,
     clock: Option<Clock>,
     state: SpansState<'a>,
@@ -34,7 +31,7 @@ where
 /// A sequence of block markers and text spans. Returned by [`crate::ReadDoc::spans`] and
 /// [`crate::ReadDoc::spans_at`]
 pub struct Spans<'a> {
-    internal: Option<SpansInternal<'a, OpIter<'a, Verified>>>,
+    internal: Option<SpansInternal<'a>>,
 }
 
 // clippy made me do this :/
@@ -61,13 +58,10 @@ pub enum Span {
     Block(crate::hydrate::Map),
 }
 
-impl<'a, I> SpansInternal<'a, I>
-where
-    I: Iterator<Item = Op<'a>>,
-{
-    pub(crate) fn new(iter: I, doc: &'a Automerge, clock: Option<Clock>) -> Self {
+impl<'a> SpansInternal<'a> {
+    pub(crate) fn new(iter: OpIter<'a>, doc: &'a Automerge, clock: Option<Clock>) -> Self {
         Self {
-            iter,
+            iter: iter.visible(clock.clone()),
             doc,
             clock,
             state: Default::default(),
@@ -76,7 +70,7 @@ where
 }
 
 impl<'a> SpansState<'a> {
-    fn process_op(&mut self, op: Op<'a>, doc: &Automerge) -> Option<SpanInternal> {
+    fn process_op(&mut self, op: Op<'a>) -> Option<SpanInternal> {
         if self.marks.process(op.id, op.action()) {
             // The marks have changed, so we record what the new marks are. We
             // don't flush yet though because there might not be any characters
@@ -144,10 +138,7 @@ impl<'a> SpansState<'a> {
     }
 }
 
-impl<'a, I> Iterator for SpansInternal<'a, I>
-where
-    I: Iterator<Item = Op<'a>>,
-{
+impl<'a> Iterator for SpansInternal<'a> {
     type Item = SpanInternal;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -157,15 +148,15 @@ where
             self.state.index += width;
             return Some(block);
         }
-        for op in &mut self.iter {
-            if !(op.is_mark() || op.visible_at(self.clock.as_ref())) {
-                continue;
-            }
+        while let Some(op) = self.iter.next() {
+            //if !(op.is_mark() || op.visible_at(self.clock.as_ref())) {
+            //    continue;
+            //}
             let key = op.elemid_or_key();
             match &self.state.key {
                 Some(k) if k != &key => {
                     if let Some(op) = self.state.last_op.replace(op) {
-                        if let Some(span) = self.state.process_op(op, self.doc) {
+                        if let Some(span) = self.state.process_op(op) {
                             return Some(span);
                         }
                     }
@@ -182,14 +173,14 @@ where
         self.state
             .last_op
             .take()
-            .and_then(|op| self.state.process_op(op, self.doc))
+            .and_then(|op| self.state.process_op(op))
             .or_else(|| self.state.flush())
     }
 }
 
 impl<'a> Spans<'a> {
     pub(crate) fn new(
-        op_iter: Option<OpIter<'a, Verified>>,
+        op_iter: Option<OpIter<'a>>,
         doc: &'a Automerge,
         clock: Option<Clock>,
     ) -> Self {

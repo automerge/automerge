@@ -201,6 +201,10 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
 }
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
+    pub(crate) fn end_pos(&self) -> usize {
+        self.max.saturating_sub(1)
+    }
+
     pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
         if self.iter.is_none() {
             if let Some(slab) = self.slabs.next() {

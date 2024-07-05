@@ -158,6 +158,12 @@ impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
     }
 }
 
+impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
+    fn from(s: &ScalarValue<'a>) -> Self {
+        s.into_owned()
+    }
+}
+
 impl<'a> From<Value<'a>> for types::Value<'static> {
     fn from(v: Value<'a>) -> Self {
         v.into_owned()
@@ -257,6 +263,14 @@ impl<'a> ScalarValue<'a> {
                 type_code: _,
                 bytes,
             } => Some(Cow::Borrowed(bytes)),
+        }
+    }
+
+    pub(crate) fn as_i64(&self) -> i64 {
+        match self {
+            Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => *i,
+            Self::Uint(i) => *i as i64,
+            _ => 0,
         }
     }
 }

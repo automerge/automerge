@@ -5,7 +5,6 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::op_set::OpSetData;
 use crate::op_set2;
 use crate::op_set2::{MarkData, Op, OpType};
 use crate::types::Clock;

@@ -1,10 +1,8 @@
-use std::borrow::Cow;
-
 use itertools::Itertools;
 
 use super::{SpanInternal, SpansInternal};
 use crate::{
-    op_set2::{Key, Op, OpScope, OpType, Value},
+    op_set2::{Key, Op, OpIter, OpQuery, OpType, Value},
     patches::{PatchLog, TextRepresentation},
     types::{ObjMeta, OpId},
     Automerge, ObjType,
@@ -45,11 +43,11 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     }
 }
 
-fn log_text_patches<'a, I: OpScope<'a>>(
+fn log_text_patches<'a>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
-    ops: I,
+    ops: OpIter<'a>,
 ) {
     let spans = SpansInternal::new(ops, doc, None);
     for span in spans {
@@ -65,52 +63,24 @@ fn log_text_patches<'a, I: OpScope<'a>>(
     }
 }
 
-fn log_list_patches<'a, I: OpScope<'a>>(
+fn log_list_patches<'a, I: OpQuery<'a>>(
     _doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     ops: I,
 ) {
-    for (index, op) in ops.visible_ops(None).top_ops().enumerate() {
+    for (index, op) in ops.visible(None).top_ops().enumerate() {
         patch_log.insert(obj.id, index, op.value().into(), op.id, op.conflict);
     }
 }
 
-fn log_map_key_patches<'a, I: Iterator<Item = Op<'a>>>(
-    (key, key_ops): (Key<'a>, I),
-) -> Option<(usize, Put<'a>)> {
-    key_ops
-        .filter(|o| o.visible())
-        .filter_map(|o| match o.action() {
-            OpType::Make(obj_type) => {
-                let value = Value::Object(obj_type);
-                Some(Put {
-                    value,
-                    key,
-                    id: o.id,
-                })
-            }
-            OpType::Put(value) => {
-                let value = Value::Scalar(value);
-                Some(Put {
-                    value,
-                    key,
-                    id: o.id,
-                })
-            }
-            _ => None,
-        })
-        .enumerate()
-        .last()
-}
-
-fn log_map_patches<'a, I: OpScope<'a>>(
+fn log_map_patches<'a, I: OpQuery<'a>>(
     doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     ops: I,
 ) {
-    for op in ops.visible_ops(None).top_ops() {
+    for op in ops.visible(None).top_ops() {
         if let Some(key) = op.key.map_key() {
             patch_log.put_map(obj.id, key, op.value.into(), op.id, op.conflict, false);
         }

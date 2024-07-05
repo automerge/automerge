@@ -1,10 +1,10 @@
-use super::{HasOpScope, Op, OpIter, OpScope, TopOpIter, Verified, VisibleOpIter};
+use super::{Op, OpIter, OpQuery, OpQueryTerm, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 
 #[derive(Clone, Default)]
 pub struct Keys<'a> {
-    pub(crate) iter: Option<TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>>,
+    pub(crate) iter: Option<TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
 }
 
 impl<'a> Iterator for Keys<'a> {
@@ -23,7 +23,7 @@ impl<'a> Iterator for Keys<'a> {
 }
 
 impl<'a> Keys<'a> {
-    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a, Verified>>>) -> Self {
+    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>) -> Self {
         Self { iter: Some(iter) }
     }
 }
@@ -34,7 +34,7 @@ pub(crate) struct KeyIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
 }
 
-impl<'a, I: OpScope<'a>> KeyIter<'a, I> {
+impl<'a, I: OpQuery<'a>> KeyIter<'a, I> {
     pub(crate) fn new(op: Op<'a>, iter: I) -> Self {
         KeyIter {
             head: Some(op),
