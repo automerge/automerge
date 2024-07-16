@@ -117,6 +117,7 @@ export {
   decodeSyncState,
   generateSyncMessage,
   receiveSyncMessage,
+  hasOurChanges,
   initSyncState,
   encodeChange,
   decodeChange,
