@@ -2132,6 +2132,38 @@ describe('Automerge', () => {
       doc5.splice("/bad_text", 0, 2, "X");
       assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
+
+    it.only("should report whether the other end has our changes", () => {
+      const left = create()
+      left.put("/", "foo", "bar")
+
+      const right = create()
+      right.put("/", "baz", "qux")
+
+      const leftSync = initSyncState()
+      const rightSync = initSyncState()
+
+      while (!(left.hasOurChanges(leftSync)) && !(right.hasOurChanges(rightSync))) {
+        let quiet = true
+        let msg = left.generateSyncMessage(leftSync)
+        if (msg) {
+          right.receiveSyncMessage(rightSync, msg)
+          quiet = false
+        }
+
+        msg = right.generateSyncMessage(rightSync)
+        if (msg) {
+          left.receiveSyncMessage(leftSync, msg)
+          quiet = false
+        }
+        if (quiet) {
+          throw new Error("no message generated but the sync states think we're done")
+        }
+      }
+
+      assert(left.hasOurChanges(leftSync))
+      assert(right.hasOurChanges(rightSync))
+    })
   })
 
   describe("the legacy text implementation", () => {
