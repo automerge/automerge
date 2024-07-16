@@ -1096,6 +1096,22 @@ export function receiveSyncMessage<T>(
 }
 
 /**
+ * Check whether the replica represented by `remoteState` has all our changes
+ *
+ * @param doc - The doc to check whether the remote has changes for
+ * @param remoteState - The {@link SyncState} representing the peer we are talking to
+ *
+ * @group sync
+ *
+ * @returns true if the remote has all of our changes
+ */
+export function hasOurChanges<T>(doc: Doc<T>, remoteState: SyncState): boolean {
+  const state = _state(doc)
+  const syncState = ApiHandler.importSyncState(remoteState)
+  return state.handle.hasOurChanges(syncState)
+}
+
+/**
  * Create a new, blank {@link SyncState}
  *
  * When communicating with a peer for the first time use this to generate a new
