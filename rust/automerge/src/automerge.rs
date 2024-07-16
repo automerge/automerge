@@ -1709,6 +1709,11 @@ impl Automerge {
         }
         paths
     }
+
+    /// Whether the peer represented by `other` has all the changes we have
+    pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
+        other.shared_heads == self.get_heads()
+    }
 }
 
 impl ReadDoc for Automerge {
