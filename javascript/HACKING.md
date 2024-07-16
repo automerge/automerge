@@ -7,7 +7,7 @@ do two things:
 1. We compile the Rust code to WebAssembly with a thin JavaScript binding
    around it. This is implemented in the rust codebase in `../rust/automerge-wasm`
 2. We implement a higher level, more idiomatic JavaScript API which exposes the
-   automerge document as a POJO using JavaScript proxies. This is the code 
+   automerge document as a POJO using JavaScript proxies. This is the code
    implemented in this directory.
 
 Due to the complexity of WebAssembly loading we have to do some fiddly things
@@ -26,7 +26,7 @@ yarn run build
 yarn run test
 ```
 
-Any time you change the rust code in `../rust/*` you'll need to re-run the 
+Any time you change the rust code in `../rust/*` you'll need to re-run the
 `yarn run build` command.
 
 Read on to understand what the `build` step is doing.
@@ -107,20 +107,20 @@ different implementations of the same module for different environments.
 
 Our objective is to provide conditional exports which do the following:
 
-* If you are using a bundler which supports WebAssembly (e.g. Webpack) then
+- If you are using a bundler which supports WebAssembly (e.g. Webpack) then
   import the webassembly file as an ES module and allow the bundler to handle
   initializing it
-* If you are in node or a cloudflare worker, directly import the WebAssembly
+- If you are in node or a cloudflare worker, directly import the WebAssembly
   file as these platforms support WebAssembly as modules
-* Otherwise, provide an alternative import which allows you to load the
+- Otherwise, provide an alternative import which allows you to load the
   WebAssembly yourself.
 
 We need to do this in a manner which allows libraries to depend on automerge
-without forcing their users into any particular initialization strategy. We 
+without forcing their users into any particular initialization strategy. We
 can do this with conditional exports on the "." path.
 
 To allow the client to choose their own initialization strategy we also provide
-a `/slim` subpath export. This export only includes the javascript code and 
+a `/slim` subpath export. This export only includes the javascript code and
 allows the user to figure out how to load the WebAssembly themselves. This is
 also the path which libraries should depend on.
 
@@ -129,24 +129,24 @@ and it's types (this is mainly for convenience when importing types in
 typescript). This subpath export also needs to be conditional.
 
 In order to allow choosing initialization on the `/next` subpath we
-also expose a `/slim/next` subpath. Altogether then we have the following 
+also expose a `/slim/next` subpath. Altogether then we have the following
 subpaths:
 
 Finally, we also want to make it easy for the user to obtain the WebAssembly
 file from this package, so we expose two subpath exports, one which provides
-the WebAssembly file directly and another which exposes a base64 encoded 
+the WebAssembly file directly and another which exposes a base64 encoded
 version of it.
 
 Altogether then we have the following exports:
 
-* `/`: The full package with WebAssembly initialization
-* `/slim`: Only the JavaScript code, no WebAssembly initialization
-* `/next`: Only the "next" API and it's types, performs WebAssembly
+- `/`: The full package with WebAssembly initialization
+- `/slim`: Only the JavaScript code, no WebAssembly initialization
+- `/next`: Only the "next" API and it's types, performs WebAssembly
   initialization
-* `/slim/next`: Only the "next" API, no WebAssembly initialization
-* `/automerge.wasm`: The WebAssembly file
-* `/automerge.wasm.base64.js`: The WebAssembly file as a module with a single
-                               export which is a base64 encoded string
+- `/slim/next`: Only the "next" API, no WebAssembly initialization
+- `/automerge.wasm`: The WebAssembly file
+- `/automerge.wasm.base64.js`: The WebAssembly file as a module with a single
+  export which is a base64 encoded string
 
 These subpath exports are then mapped - using conditional exports - to platform
 specific files in the `src/entrypoints` directory. For example, here are the
