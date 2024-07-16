@@ -276,6 +276,7 @@ export class Automerge {
   // sync over network
   receiveSyncMessage(state: SyncState, message: SyncMessage): void;
   generateSyncMessage(state: SyncState): SyncMessage | null;
+  hasOurChanges(state: SyncState): boolean;
 
   // low level change functions
   applyChanges(changes: Change[]): void;

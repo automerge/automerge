@@ -1151,6 +1151,11 @@ impl Automerge {
             Ok(self.doc.text(obj)?)
         }
     }
+
+    #[wasm_bindgen(js_name = hasOurChanges)]
+    pub fn has_our_changes(&mut self, state: &mut SyncState) -> JsValue {
+        self.doc.has_our_changes(&state.0).into()
+    }
 }
 
 #[wasm_bindgen(js_name = create)]
