@@ -1253,3 +1253,11 @@ function registerDatatypes(handle: Automerge, textV2: boolean) {
     )
   }
 }
+
+/**
+ * @hidden
+ */
+export function topoHistoryTraversal(doc: Doc<any>): string[] {
+  const state = _state(doc)
+  return state.handle.topoHistoryTraversal()
+}

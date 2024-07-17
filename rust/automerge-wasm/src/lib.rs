@@ -1156,6 +1156,17 @@ impl Automerge {
     pub fn has_our_changes(&mut self, state: &mut SyncState) -> JsValue {
         self.doc.has_our_changes(&state.0).into()
     }
+
+    #[wasm_bindgen(js_name = topoHistoryTraversal)]
+    pub fn topo_history_traversal(&mut self) -> JsValue {
+        let hashes = self
+            .doc
+            .get_changes(&[])
+            .into_iter()
+            .map(|c| c.hash())
+            .collect::<Vec<_>>();
+        AR::from(hashes).into()
+    }
 }
 
 #[wasm_bindgen(js_name = create)]
