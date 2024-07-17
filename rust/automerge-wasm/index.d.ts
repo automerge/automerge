@@ -298,6 +298,8 @@ export class Automerge {
   // experimental api can go here
   applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
   applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
+
+  topoHistoryTraversal(): Hash[];
 }
 
 export interface JsSyncState {

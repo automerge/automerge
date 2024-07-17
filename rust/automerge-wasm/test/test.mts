@@ -2133,7 +2133,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
 
-    it.only("should report whether the other end has our changes", () => {
+    it("should report whether the other end has our changes", () => {
       const left = create()
       left.put("/", "foo", "bar")
 
@@ -2344,6 +2344,28 @@ describe('Automerge', () => {
         assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'b' ], value: 'b5' },
         ]);
+    })
+  })
+
+  describe("the topoHistoryTraversal function", () => {
+    it("should return a topological traverssal of the hashes of the changes", () => {
+      const doc = create({actor: "aaaaaa"})
+      doc.put("/", "foo", "bar")
+      let hash1 = decodeChange(doc.getLastLocalChange()!).hash
+
+      const doc2 = doc.clone("bbbbbb")
+
+      doc.put("/", "baz", "qux")
+      let hash2 = decodeChange(doc.getLastLocalChange()!).hash
+
+      doc2.put("/", "baz", "qux")
+      let hash3 = decodeChange(doc2.getLastLocalChange()!).hash
+
+      doc.merge(doc2)
+
+      let hashes = [hash1, hash2, hash3]
+      const traversal = doc.topoHistoryTraversal()
+      assert.deepStrictEqual(hashes, traversal)
     })
   })
 })

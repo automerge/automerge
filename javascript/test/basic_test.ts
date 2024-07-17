@@ -817,4 +817,32 @@ describe("Automerge", () => {
       assert(!Automerge.hasHeads(otherDoc, heads))
     })
   })
+
+  describe("the topoHistoryTraversal function", () => {
+    it("should return the correct history", () => {
+      let doc = Automerge.from({ a: "a" }, { actor: "aaaaaa" })
+      let hash1 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      let doc2 = Automerge.clone(doc, { actor: "bbbbbb" })
+
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let hash2 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      doc2 = Automerge.change(doc2, d => (d.a = "c"))
+      let hash3 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc2)!,
+      ).hash
+
+      doc = Automerge.merge(doc, doc2)
+
+      let hashes = [hash1, hash2, hash3]
+      let topo = Automerge.topoHistoryTraversal(doc)
+      console.log(`topo ${topo}`)
+      assert.deepStrictEqual(topo, hashes)
+    })
+  })
 })
