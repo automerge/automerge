@@ -115,7 +115,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn lit_num(&self) -> usize {
+    pub(super) fn lit_num(&self) -> usize {
         if let Some(lit) = &self.lit {
             lit.index
         } else {
@@ -123,7 +123,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn lit_range(&self) -> Range<usize> {
+    pub(super) fn lit_range(&self) -> Range<usize> {
         if let Some(lit) = &self.lit {
             lit.offset..self.last_offset
         } else {
@@ -263,7 +263,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         old_state: &mut Self::State<'a>,
         out: &mut SlabWriter<'a>,
         value: Option<<Self::Item as Packable>::Unpacked<'a>>,
-    ) {
+    ) -> usize {
         Self::append_chunk(old_state, out, Run { count: 1, value })
     }
 
@@ -288,7 +288,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         old_state: &mut RleState<'a, P>,
         out: &mut SlabWriter<'a>,
         chunk: Run<'a, P>,
-    ) {
+    ) -> usize {
         let mut state = RleState::Empty;
         std::mem::swap(&mut state, old_state);
         let new_state = match state {
@@ -330,6 +330,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             }
         };
         *old_state = new_state;
+        chunk.count
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {

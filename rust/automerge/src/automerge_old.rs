@@ -32,8 +32,8 @@ use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 pub(crate) mod current_state;
 pub(crate) mod diff;
 
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {

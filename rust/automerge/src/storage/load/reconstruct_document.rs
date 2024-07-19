@@ -111,61 +111,65 @@ pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
 ) -> Result<ReconOpSet, Error> {
-    let mut state = ReconstructionState::new(doc)?;
-    let mut iter_ops = doc.iter_ops();
-    let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
-    while let Some(NextDocOp {
-        op,
-        succ,
-        key,
-        opid,
-        obj,
-    }) = next
-    {
-        state.max_op = std::cmp::max(state.max_op, opid.counter());
+    // FIXME
+    todo!()
+    /*
+        let mut state = ReconstructionState::new(doc)?;
+        let mut iter_ops = doc.iter_ops();
+        let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
+        while let Some(NextDocOp {
+            op,
+            succ,
+            key,
+            opid,
+            obj,
+        }) = next
+        {
+            state.max_op = std::cmp::max(state.max_op, opid.counter());
 
-        let idx = state.op_set.load(obj, op);
+            let idx = state.op_set.load(obj, op);
 
-        for id in &succ {
-            state
-                .pred
-                .entry(*id)
-                .and_modify(|v| v.push(idx))
-                .or_insert_with(|| vec![idx]);
-        }
-
-        if let Some(pred_idxs) = state.pred.get(&opid) {
-            for p in pred_idxs {
-                state.op_set.osd.add_pred(*p, idx);
+            for id in &succ {
+                state
+                    .pred
+                    .entry(*id)
+                    .and_modify(|v| v.push(idx))
+                    .or_insert_with(|| vec![idx]);
             }
-            state.pred.remove(&opid);
+
+            if let Some(pred_idxs) = state.pred.get(&opid) {
+                for p in pred_idxs {
+                    state.op_set.osd.add_pred(*p, idx);
+                }
+                state.pred.remove(&opid);
+            }
+
+            state.ops_collecter.push(idx);
+            state.change_collector.collect(opid, idx)?;
+
+            state.last_key = Some(key);
+            state.last_obj = Some(obj);
+
+            next = next_op(&mut iter_ops, &mut state.op_set)?;
+
+            flush_ops(&obj, next.as_ref(), &mut state)?;
         }
 
-        state.ops_collecter.push(idx);
-        state.change_collector.collect(opid, idx)?;
+        state.op_set.add_indexes();
 
-        state.last_key = Some(key);
-        state.last_obj = Some(obj);
+        let op_set = state.op_set;
+        let change_collector = state.change_collector;
+        let max_op = state.max_op;
 
-        next = next_op(&mut iter_ops, &mut state.op_set)?;
+        let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set.osd)?;
 
-        flush_ops(&obj, next.as_ref(), &mut state)?;
-    }
-
-    state.op_set.add_indexes();
-
-    let op_set = state.op_set;
-    let change_collector = state.change_collector;
-    let max_op = state.max_op;
-
-    let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set.osd)?;
-
-    Ok(ReconOpSet {
-        changes,
-        max_op,
-        op_set,
-        heads,
-    })
+        Ok(ReconOpSet {
+            changes,
+            max_op,
+            op_set,
+            heads,
+        })
+    */
 }
 
 // create all binary changes
@@ -202,40 +206,44 @@ fn flush_ops(
     next: Option<&NextDocOp>,
     state: &mut ReconstructionState<'_>,
 ) -> Result<(), Error> {
-    let next_key = next.map(|n| n.key);
-    let next_obj = next.map(|n| n.obj);
+    // FIXME
+    todo!()
+    /*
+        let next_key = next.map(|n| n.key);
+        let next_obj = next.map(|n| n.obj);
 
-    if next_obj.is_some() && next_obj < state.last_obj {
-        return Err(Error::OpsOutOfOrder);
-    }
+        if next_obj.is_some() && next_obj < state.last_obj {
+            return Err(Error::OpsOutOfOrder);
+        }
 
-    if next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
-        for (opid, preds) in &state.pred {
-            let del = OpBuilder {
-                id: *opid,
-                insert: false,
-                key: state.last_key.unwrap(),
-                action: OpType::Delete,
-            };
-            state.max_op = std::cmp::max(state.max_op, opid.counter());
-            let del_idx = state.op_set.load(state.last_obj.unwrap(), del);
-            for p in preds {
-                state.op_set.osd.add_dep(*p, del_idx);
+        if next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
+            for (opid, preds) in &state.pred {
+                let del = OpBuilder {
+                    id: *opid,
+                    insert: false,
+                    key: state.last_key.unwrap(),
+                    action: OpType::Delete,
+                };
+                state.max_op = std::cmp::max(state.max_op, opid.counter());
+                let del_idx = state.op_set.load(state.last_obj.unwrap(), del);
+                for p in preds {
+                    state.op_set.osd.add_dep(*p, del_idx);
+                }
+                state.change_collector.collect(*opid, del_idx)?;
             }
-            state.change_collector.collect(*opid, del_idx)?;
-        }
-        state.pred.clear();
+            state.pred.clear();
 
-        for idx in &state.ops_collecter {
-            state
-                .op_set
-                .load_idx(obj, *idx)
-                .map_err(|e| Error::ReadOp(Box::new(e)))?;
-        }
+            for idx in &state.ops_collecter {
+                state
+                    .op_set
+                    .load_idx(obj, *idx)
+                    .map_err(|e| Error::ReadOp(Box::new(e)))?;
+            }
 
-        state.ops_collecter.truncate(0)
-    }
-    Ok(())
+            state.ops_collecter.truncate(0)
+        }
+        Ok(())
+    */
 }
 
 pub(crate) struct ReconOpSet {

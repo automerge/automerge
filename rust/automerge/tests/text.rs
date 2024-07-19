@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use automerge::{
     hydrate_list, hydrate_map,
-    iter::Span,
     marks::{ExpandMark, Mark},
+    op_set2::Span,
     op_tree::B,
     transaction::Transactable,
     ActorId, AutoCommit, ObjType, Patch, PatchAction, ReadDoc, ScalarValue, ROOT,

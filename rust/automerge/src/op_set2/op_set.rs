@@ -9,18 +9,19 @@ use crate::storage::ColumnType;
 use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, Clock, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
+    ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
 };
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
-use super::op::Op;
+use super::op::{Op, OpBuilder2, SuccCursors};
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{Action, ActorIdx, OpType, Value};
+use super::types::{Action, ActorIdx, OpType, ScalarValue, Value};
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
 };
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -37,16 +38,19 @@ mod top_op;
 mod values;
 mod visible;
 
+pub use keys::Keys;
+pub use list_range::{ListRange, ListRangeItem};
+pub use map_range::{MapRange, MapRangeItem};
+pub use spans::{Span, Spans};
+pub use values::Values;
+
 pub(crate) use found_op::OpsFoundIter;
-pub(crate) use keys::{KeyIter, KeyOpIter, Keys};
-pub(crate) use list_range::{ListRange, ListRangeItem};
-pub(crate) use map_range::{MapRange, MapRangeItem};
+pub(crate) use keys::{KeyIter, KeyOpIter};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::OpIter;
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
-pub(crate) use spans::{SpanInternal, Spans, SpansInternal};
+pub(crate) use spans::{SpanInternal, SpansInternal};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use values::Values;
 pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
@@ -57,6 +61,13 @@ pub(crate) struct OpSet {
 }
 
 impl OpSet {
+    pub(crate) fn dump(&self) {
+        log!("OpSet");
+        log!("  len: {}", self.len);
+        log!("  actors: {:?}", self.actors);
+        self.cols.dump();
+    }
+
     pub(crate) fn parents(
         &self,
         obj: ObjId,
@@ -81,7 +92,13 @@ impl OpSet {
     }
 
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, idx: OpIdx) {
-        todo!() // TX
+        todo!();
+    }
+
+    pub(crate) fn insert2<'a>(&'a mut self, op: &OpBuilder2) {
+        self.cols.insert(op.pos, op);
+        self.len += 1;
+        // do succ later
     }
 
     pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
@@ -178,7 +195,7 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         match prop {
-            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, &key_name, encoding, clock),
+            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, &key_name, clock),
             Prop::Seq(index) => self.seek_ops_by_index(obj, index, encoding, clock),
         }
     }
@@ -187,7 +204,6 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         key: &str,
-        encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         let mut iter = self.iter_prop(obj, key);
@@ -577,11 +593,279 @@ impl<'a> OpsFound<'a> {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct Columns(BTreeMap<ColumnSpec, Column>);
 
+impl Default for Columns {
+    fn default() -> Self {
+        let mut btree = BTreeMap::new();
+        for spec in &ALL_COLUMN_SPECS {
+            let col = Column::new(*spec);
+            assert!(col.slabs().len() > 0);
+            btree.insert(*spec, col);
+        }
+        Self(btree)
+    }
+}
+
+pub(super) trait OpLike {
+    fn id(&self) -> OpId;
+    fn obj(&self) -> ObjId;
+    fn action(&self) -> Action;
+    fn map_key(&self) -> Option<&str>;
+    fn elemid(&self) -> Option<ElemId>;
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
+    fn meta_value(&self) -> ValueMeta;
+    fn insert(&self) -> bool {
+        false
+    }
+    fn expand(&self) -> bool {
+        false
+    }
+    // allocation
+    fn succ(&self) -> Vec<OpId> {
+        vec![]
+    }
+    fn mark_name(&self) -> Option<&str> {
+        None
+    }
+}
+
+// TODO? add inc value to the succ column
+
+const NONE: &'static str = ".";
+
+fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
+    match t {
+        None => NONE.to_owned(),
+        Some(None) => "null".to_owned(),
+        Some(Some(t)) => format!("{}", t).to_owned(),
+    }
+}
+
 impl Columns {
+    fn dump(&self) {
+        let mut id_a = self.get_actor(ID_ACTOR_COL_SPEC);
+        let mut id_c = self.get_delta_integer(ID_COUNTER_COL_SPEC);
+        let mut obj_a = self.get_actor(OBJ_ID_ACTOR_COL_SPEC);
+        let mut obj_c = self.get_integer(OBJ_ID_COUNTER_COL_SPEC);
+        let mut key_str = self.get_str(KEY_STR_COL_SPEC);
+        let mut meta = self.get_value_meta(VALUE_META_COL_SPEC);
+        let mut value = self.get_value(VALUE_COL_SPEC);
+        log!(":: ida  idc  obja objc key      value ");
+        while true {
+            let id_a = fmt(id_a.next());
+            let id_c = fmt(id_c.next());
+            let obj_a = fmt(obj_a.next());
+            let obj_c = fmt(obj_c.next());
+            let key = fmt(key_str.next());
+            let m = meta.next();
+            let v = if let Some(Some(m)) = m {
+                let raw_data = value.read_next(m.length()).unwrap();
+                ScalarValue::from_raw(m, raw_data).unwrap()
+            } else {
+                ScalarValue::Null
+            };
+            if id_a == NONE && id_c == NONE && obj_a == NONE && obj_c == NONE {
+                break;
+            }
+            log!(
+                ":: {:4} {:4} {:4} {:4} {:8} {}",
+                id_a,
+                id_c,
+                obj_a,
+                obj_c,
+                key,
+                v
+            );
+        }
+    }
+
+    fn insert<O: OpLike + std::fmt::Debug>(&mut self, pos: usize, op: &O) {
+        //log!("INSERT op {:?}", op);
+        let mut group = None;
+        let mut group_pos = 0;
+        for (spec, col) in self.0.iter_mut() {
+            //log!("::SPLICE spec={:?}", spec);
+            if group == Some(spec.id()) {
+                match col {
+                    Column::Actor(c) => {
+                        let values = if *spec == SUCC_ACTOR_COL_SPEC {
+                            op.succ().iter().map(|s| s.actoridx()).collect()
+                        } else {
+                            vec![]
+                        };
+                        //log!("::SPLICE SUCC_A i={} {:?} {:?}", group_pos, *spec, values);
+                        c.splice(group_pos, values);
+                    }
+                    Column::Delta(c) => {
+                        let values = if *spec == SUCC_COUNTER_COL_SPEC {
+                            op.succ().iter().map(|s| s.counter() as i64).collect()
+                        } else {
+                            vec![]
+                        };
+                        //log!("::SPLICE SUCC_C i={} {:?} {:?}", group_pos, *spec, values);
+                        c.splice(group_pos, values);
+                    }
+                    Column::Value(c) => {
+                        let value = if *spec == VALUE_COL_SPEC {
+                            op.raw_value()
+                        } else {
+                            None
+                        };
+                        if let Some(v) = value {
+                            //log!("::SPLICE VALUE i={} {:?}", group_pos, v);
+                            c.splice(group_pos, vec![v])
+                        }
+                    }
+                    _ => {
+                        log!("unknown group column %{:?}", spec);
+                    }
+                }
+            } else {
+                group = spec.group_id();
+                match col {
+                    Column::Actor(c) => {
+                        let value = match *spec {
+                            ID_ACTOR_COL_SPEC => Some(ActorIdx(op.id().actor() as u64)),
+                            OBJ_ID_ACTOR_COL_SPEC => Some(ActorIdx(op.obj().actor() as u64)),
+                            KEY_ACTOR_COL_SPEC => op.elemid().map(|e| ActorIdx(e.actor() as u64)),
+                            _ => None,
+                        };
+                        //log!("::SPLICE ACTOR pos={} {:?} {:?}", pos, *spec, value);
+                        c.splice(pos, vec![value]);
+                    }
+                    Column::Delta(c) => {
+                        let value = match *spec {
+                            ID_COUNTER_COL_SPEC => Some(op.id().counter() as i64),
+                            KEY_COUNTER_COL_SPEC => op.elemid().map(|e| e.counter() as i64),
+                            _ => None,
+                        };
+                        //log!("::SPLICE DELTA pos={} {:?} {:?}", pos, *spec, value);
+                        c.splice(pos, vec![value]);
+                    }
+                    Column::Integer(c) => {
+                        let value = if *spec == OBJ_ID_COUNTER_COL_SPEC {
+                            Some(op.obj().counter())
+                        } else {
+                            None
+                        };
+                        //log!("::SPLICE INT pos={} {:?} {:?}", pos, *spec, value);
+                        c.splice(pos, vec![value])
+                    }
+                    Column::Str(c) => {
+                        let value = match *spec {
+                            KEY_STR_COL_SPEC => op.map_key(),
+                            MARK_NAME_COL_SPEC => op.mark_name(),
+                            _ => None,
+                        };
+                        //log!("::SPLICE STR pos={} {:?} {:?}", pos, *spec, value);
+                        c.splice(pos, vec![value])
+                    }
+                    Column::Bool(c) => {
+                        let value = match *spec {
+                            INSERT_COL_SPEC => Some(op.insert()),
+                            EXPAND_COL_SPEC => Some(op.expand()),
+                            _ => None,
+                        };
+                        //log!("::SPLICE BOOL pos={} {:?} {:?}", pos, *spec, value);
+                        c.splice(pos, vec![value])
+                    }
+                    Column::Action(c) => {
+                        let value = if *spec == ACTION_COL_SPEC {
+                            Some(op.action())
+                        } else {
+                            None
+                        };
+                        c.splice(pos, vec![value])
+                    }
+                    Column::Value(c) => {
+                        panic!("VALUE spliced outside of a group");
+                    }
+                    Column::ValueMeta(c) => {
+                        let value = if *spec == VALUE_META_COL_SPEC {
+                            Some(op.meta_value())
+                        } else {
+                            None
+                        };
+                        //log!("::SPLICE VALUE META pos={} meta={:?} meta.len={}", pos, value, value.as_ref().map(|v| v.length()).unwrap_or(0));
+                        c.splice(pos, vec![value]);
+                        // FIXME if value > 0
+                        let mut iter = c.iter();
+                        iter.advance_by(pos);
+                        group_pos = iter.group();
+                        //log!("VALUE META group_pos={}", group_pos);
+                    }
+                    Column::Group(c) => {
+                        let value = if *spec == SUCC_COUNT_COL_SPEC {
+                            Some(op.succ().iter().len() as u64)
+                        } else {
+                            None
+                        };
+                        c.splice(pos, vec![value]);
+                        // FIXME if value > 0
+                        // FIXME would be nice if splice did this
+                        let mut iter = c.iter();
+                        iter.advance_by(pos);
+                        group_pos = iter.group();
+                        //log!("GROUP group_pos={}", group_pos);
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+        fn insert<O: OpCols>(&mut self, pos: usize, op: &O) {
+          let mut group = None;
+          let mut group_pos = 0;
+          for (spec, col) in self.0.iter_mut() {
+            if group == Some(spec.id()) {
+              match col {
+                Column::Actor(c) => c.splice(group_pos, op.get_group_actor(*spec)),
+                Column::Delta(c) => c.splice(group_pos, op.get_group_int(*spec)),
+                _ => log!("unknown group column %{:?}",spec),
+              }
+            } else {
+              match col {
+                Column::Actor(c) => c.splice(pos, vec![op.get_actor(*spec)]),
+                Column::Delta(c) => c.splice(pos, vec![op.get_int(*spec)]),
+                Column::Integer(c) => c.splice(pos, vec![op.get_uint(*spec)]),
+                Column::Str(c) => c.splice(pos, vec![op.get_str(*spec)]),
+                Column::Bool(c) => c.splice(pos, vec![op.get_bool(*spec)]),
+                Column::Value(c) => c.splice(pos, vec![op.get_value(*spec)]),
+                Column::ValueMeta(c) => c.splice(pos, vec![op.get_meta(*spec)]),
+                Column::Action(c) => c.splice(pos, vec![op.get_action(*spec)]),
+                Column::Group(c) => {
+                  group = Some(spec.id());
+                  c.splice(pos, vec![op.get_uint(*spec)]);
+                  group_pos = 0; // FIXME
+                }
+              }
+            }
+          }
+          self.get_delta_mut(ID_COUNTER_COL_SPEC);
+          self.get_integer_mut(OBJ_ID_COUNTER_COL_SPEC);
+          self.get_delta_mut(KEY_COUNTER_COL_SPEC);
+          self.get_str_mut(KEY_STR_COL_SPEC);
+          self.get_integer_mut(SUCC_COUNT_COL_SPEC);
+          self.get_delta_mut(SUCC_COUNTER_COL_SPEC);
+          self.get_boolean_mut(INSERT_COL_SPEC);
+          self.get_action_mut(ACTION_COL_SPEC);
+          self.get_value_meta_mut(VALUE_META_COL_SPEC);
+          self.get_value_mut(VALUE_COL_SPEC);
+          self.get_str_mut(MARK_NAME_COL_SPEC);
+          self.get_boolean_mut(EXPAND_COL_SPEC);
+        }
+    */
+
+    fn add_succ(&mut self, id: OpId, pos: usize) {
+        todo!()
+    }
+
     fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
+        // FIXME this should insert NULL values into columns we dont recognize
+
         let mut columns = BTreeMap::new();
 
         let mut id_actor = ColumnData::<ActorCursor>::new();
@@ -699,11 +983,6 @@ impl Columns {
 
         let mut action = ColumnData::<ActionCursor>::new();
         action.splice(0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
-        log!(
-            "Action IN {:?}",
-            ops.clone().map(|op| op.action).collect::<Vec<_>>()
-        );
-        log!("Action OUT {:?}", action.iter().collect::<Vec<_>>());
         columns.insert(ACTION_COL_SPEC, Column::Action(action));
 
         let mut value_meta = ColumnData::<MetaCursor>::new();
@@ -743,8 +1022,60 @@ impl Columns {
         self.0.get(&ID_ACTOR_COL_SPEC).map(|c| c.len()).unwrap_or(0)
     }
 
-    fn get_actor_coldata(&self, spec: ColumnSpec) -> &Column {
-        self.0.get(&spec).unwrap()
+    fn get_actor_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActorCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Actor(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_delta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<DeltaCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Delta(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_integer_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Integer(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_boolean_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<BooleanCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Bool(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_str_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<StrCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Str(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_action_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActionCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Action(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_value_meta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<MetaCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::ValueMeta(c)) => c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_value_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<RawCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Value(c)) => c,
+            _ => panic!(),
+        }
     }
 
     fn get_actor(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActorCursor> {
@@ -965,37 +1296,37 @@ impl<'a> Iterator for IterObjIds<'a> {
 // Stick all of the column ID initialization in a module so we can turn off
 // rustfmt for the whole thing
 #[rustfmt::skip]
-mod ids {
+pub(crate) mod ids {
     use crate::storage::{columns::ColumnId, ColumnSpec};
 
-    pub(super) const OBJ_COL_ID:                ColumnId = ColumnId::new(0);
-    pub(super) const KEY_COL_ID:                ColumnId = ColumnId::new(1);
-    pub(super) const ID_COL_ID:                 ColumnId = ColumnId::new(2);
-    pub(super) const INSERT_COL_ID:             ColumnId = ColumnId::new(3);
-    pub(in crate::op_set2) const ACTION_COL_ID: ColumnId = ColumnId::new(4);
-    pub(super) const VAL_COL_ID:                ColumnId = ColumnId::new(5);
-    pub(super) const SUCC_COL_ID:               ColumnId = ColumnId::new(8);
-    pub(super) const EXPAND_COL_ID:             ColumnId = ColumnId::new(9);
-    pub(super) const MARK_NAME_COL_ID:          ColumnId = ColumnId::new(10);
+    pub(crate) const OBJ_COL_ID:                ColumnId = ColumnId::new(0);
+    pub(crate) const KEY_COL_ID:                ColumnId = ColumnId::new(1);
+    pub(crate) const ID_COL_ID:                 ColumnId = ColumnId::new(2);
+    pub(crate) const INSERT_COL_ID:             ColumnId = ColumnId::new(3);
+    pub(crate) const ACTION_COL_ID:             ColumnId = ColumnId::new(4);
+    pub(crate) const VAL_COL_ID:                ColumnId = ColumnId::new(5);
+    pub(crate) const SUCC_COL_ID:               ColumnId = ColumnId::new(8);
+    pub(crate) const EXPAND_COL_ID:             ColumnId = ColumnId::new(9);
+    pub(crate) const MARK_NAME_COL_ID:          ColumnId = ColumnId::new(10);
 
-    pub(super) const ID_ACTOR_COL_SPEC:       ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
-    pub(super) const ID_COUNTER_COL_SPEC:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
-    pub(super) const OBJ_ID_ACTOR_COL_SPEC:   ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
-    pub(super) const OBJ_ID_COUNTER_COL_SPEC: ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
-    pub(super) const KEY_ACTOR_COL_SPEC:      ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
-    pub(super) const KEY_COUNTER_COL_SPEC:    ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
-    pub(super) const KEY_STR_COL_SPEC:        ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);
-    pub(super) const SUCC_COUNT_COL_SPEC:     ColumnSpec = ColumnSpec::new_group(SUCC_COL_ID);
-    pub(super) const SUCC_ACTOR_COL_SPEC:     ColumnSpec = ColumnSpec::new_actor(SUCC_COL_ID);
-    pub(super) const SUCC_COUNTER_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(SUCC_COL_ID);
-    pub(super) const INSERT_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
-    pub(super) const ACTION_COL_SPEC:         ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
-    pub(super) const VALUE_META_COL_SPEC:     ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);
-    pub(super) const VALUE_COL_SPEC:          ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
-    pub(super) const MARK_NAME_COL_SPEC:      ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
-    pub(super) const EXPAND_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
+    pub(crate) const ID_ACTOR_COL_SPEC:       ColumnSpec = ColumnSpec::new_actor(ID_COL_ID);
+    pub(crate) const ID_COUNTER_COL_SPEC:     ColumnSpec = ColumnSpec::new_delta(ID_COL_ID);
+    pub(crate) const OBJ_ID_ACTOR_COL_SPEC:   ColumnSpec = ColumnSpec::new_actor(OBJ_COL_ID);
+    pub(crate) const OBJ_ID_COUNTER_COL_SPEC: ColumnSpec = ColumnSpec::new_integer(OBJ_COL_ID);
+    pub(crate) const KEY_ACTOR_COL_SPEC:      ColumnSpec = ColumnSpec::new_actor(KEY_COL_ID);
+    pub(crate) const KEY_COUNTER_COL_SPEC:    ColumnSpec = ColumnSpec::new_delta(KEY_COL_ID);
+    pub(crate) const KEY_STR_COL_SPEC:        ColumnSpec = ColumnSpec::new_string(KEY_COL_ID);
+    pub(crate) const SUCC_COUNT_COL_SPEC:     ColumnSpec = ColumnSpec::new_group(SUCC_COL_ID);
+    pub(crate) const SUCC_ACTOR_COL_SPEC:     ColumnSpec = ColumnSpec::new_actor(SUCC_COL_ID);
+    pub(crate) const SUCC_COUNTER_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(SUCC_COL_ID);
+    pub(crate) const INSERT_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(INSERT_COL_ID);
+    pub(crate) const ACTION_COL_SPEC:         ColumnSpec = ColumnSpec::new_integer(ACTION_COL_ID);
+    pub(crate) const VALUE_META_COL_SPEC:     ColumnSpec = ColumnSpec::new_value_metadata(VAL_COL_ID);
+    pub(crate) const VALUE_COL_SPEC:          ColumnSpec = ColumnSpec::new_value(VAL_COL_ID);
+    pub(crate) const MARK_NAME_COL_SPEC:      ColumnSpec = ColumnSpec::new_string(MARK_NAME_COL_ID);
+    pub(crate) const EXPAND_COL_SPEC:         ColumnSpec = ColumnSpec::new_boolean(EXPAND_COL_ID);
 
-    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 16] = [
+    pub(crate) const ALL_COLUMN_SPECS: [ColumnSpec; 16] = [
         ID_ACTOR_COL_SPEC,
         ID_COUNTER_COL_SPEC,
         OBJ_ID_ACTOR_COL_SPEC,
@@ -1059,7 +1390,7 @@ mod tests {
             .doc
             .ops()
             .iter()
-            .map(|(_, _, op)| op)
+            //.map(|(_, _, op)| op)
             .collect::<Vec<_>>();
         if ops != actual_ops {
             for (i, (a, b)) in actual_ops.iter().zip(ops.iter()).enumerate() {
@@ -1144,6 +1475,7 @@ mod tests {
         let mut group_iter = group_data.iter();
         let mut actor_iter = succ_actor_data.iter();
         let mut counter_iter = succ_counter_data.iter();
+        let tmp_op_set = OpSet::default();
 
         // first encode the succs
         for test_op in test_ops {
@@ -1158,6 +1490,8 @@ mod tests {
                 insert: test_op.insert,
                 expand: test_op.expand,
                 mark_name: test_op.mark_name,
+                conflict: false,
+                op_set: &tmp_op_set,
                 succ_cursors: SuccCursors {
                     len: group_count as usize,
                     succ_counter: counter_iter.clone(),
@@ -1257,7 +1591,7 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        use super::super::op_set::iter::OpQuery;
+        //use super::super::op_set::iter::OpQuery;
         let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
 
         let test_ops = vec![
@@ -1546,7 +1880,7 @@ mod tests {
             (any::<String>(), arbitrary_value(), any::<bool>()).prop_map(|(k, v, expand)| {
                 OpType::MarkBegin(
                     expand,
-                    crate::marks::MarkData {
+                    crate::marks::OldMarkData {
                         name: k.into(),
                         value: v,
                     },

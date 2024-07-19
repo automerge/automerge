@@ -8,14 +8,20 @@ pub(crate) struct RawCursor {
 impl ColumnCursor for RawCursor {
     type Item = [u8];
     type State<'a> = ();
-    type PostState<'a> = ();
+    type PostState<'a> = &'a [u8];
     type Export = Vec<u8>;
 
-    fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: ()) -> () {
-        writer.flush_bytes(slab.as_ref(), slab.len())
-    }
+    fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: ()) -> () {}
 
-    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'_>, state: (), post: (), cursor: Self) {}
+    fn finish<'a>(
+        slab: &'a Slab,
+        out: &mut SlabWriter<'a>,
+        state: (),
+        post: Self::PostState<'a>,
+        cursor: Self,
+    ) {
+        out.flush_bytes(post, post.len())
+    }
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {}
 
@@ -34,19 +40,28 @@ impl ColumnCursor for RawCursor {
         state: &mut Self::State<'a>,
         slab: &mut SlabWriter<'a>,
         run: Run<'a, [u8]>,
-    ) {
+    ) -> usize {
+        let mut len = 0;
         for _ in 0..run.count {
             if let Some(i) = run.value {
+                len += i.len();
                 slab.flush_bytes(i, i.len());
             }
         }
+        len
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
-        let current = SlabWriter::new(usize::MAX);
         let state = ();
-        let post = ();
         let cursor = Self { offset: index };
+
+        // everything before...
+        let mut current = SlabWriter::new(usize::MAX);
+        current.flush_bytes(&slab.as_ref()[0..index], index);
+
+        // everything after
+        let post = &slab.as_ref()[index..];
+
         Encoder {
             slab,
             current,

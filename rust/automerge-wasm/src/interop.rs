@@ -4,12 +4,10 @@ use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
+use automerge::op_set2::{Span, Spans};
 use automerge::ReadDoc;
 use automerge::ROOT;
-use automerge::{
-    iter::{Span, Spans},
-    Change, ChangeHash, ObjType, Prop,
-};
+use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};

@@ -1,4 +1,5 @@
-use super::{MarkIter, Op, OpIter, OpQueryTerm, TopOpIter, Value, VisibleOpIter};
+use super::{MarkIter, Op, OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
+use crate::Value;
 use crate::{exid::ExId, marks::MarkSet, types::ListEncoding};
 
 use std::fmt::Debug;
@@ -14,6 +15,7 @@ pub struct ListRangeItem<'a> {
     pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
+#[derive(Debug)]
 pub struct ListRange<'a, R: RangeBounds<usize>> {
     iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
     range: Option<R>,
@@ -60,11 +62,9 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
                 continue;
             }
             let conflict = op.conflict;
-            let value = op.value(); // value_at()
+            let value = op.value().into();
             let id = op.exid();
             let marks = iter.get_marks().cloned();
-            // todo : need a value_at (vis?) iterator!!
-            // let marks = self.marks.current().cloned()
             return Some(ListRangeItem {
                 index,
                 value,

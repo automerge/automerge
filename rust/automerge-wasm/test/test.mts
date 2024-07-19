@@ -46,22 +46,33 @@ describe('Automerge', () => {
       assert.deepEqual(result, undefined)
     })
 
-    it('should be able to set and get a simple value', () => {
+    it.only('should be able to set and get a simple value', () => {
       const doc: Automerge = create({ actor: "aabbcc"})
       const root = "_root"
       let result
 
       doc.put(root, "hello", "world")
+      //doc.dump();
       doc.put(root, "number1", 5, "uint")
+      //doc.dump();
       doc.put(root, "number2", 5)
+      //doc.dump();
       doc.put(root, "number3", 5.5)
+      //doc.dump();
       doc.put(root, "number4", 5.5, "f64")
+      //doc.dump();
       doc.put(root, "number5", 5.5, "int")
+      //doc.dump();
       doc.put(root, "bool", true)
+      //doc.dump();
       doc.put(root, "time1", 1000, "timestamp")
+      //doc.dump();
       doc.put(root, "time2", new Date(1001))
+      //doc.dump();
       doc.putObject(root, "list", []);
+      //doc.dump();
       doc.put(root, "null", null)
+      //doc.dump();
 
       result = doc.getWithType(root, "hello")
       assert.deepEqual(result, ["str", "world"])
@@ -87,6 +98,7 @@ describe('Automerge', () => {
       assert.deepEqual(result, ["boolean", true])
 
       doc.put(root, "bool", false, "boolean")
+      //doc.dump()
 
       result = doc.getWithType(root, "bool")
       assert.deepEqual(result, ["boolean", false])

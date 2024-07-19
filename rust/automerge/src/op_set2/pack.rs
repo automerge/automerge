@@ -35,6 +35,10 @@ pub(crate) trait Packable: PartialEq + Debug {
     fn group<'a>(item: Self::Unpacked<'a>) -> usize {
         0
     }
+
+    fn len<'a>(item: Option<Self::Unpacked<'a>>) -> usize {
+        1
+    }
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
     fn width<'a>(item: Self::Unpacked<'a>) -> usize;
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
@@ -227,6 +231,12 @@ impl MaybePackable<[u8]> for &[u8] {
     }
 }
 
+impl<'a> MaybePackable<[u8]> for Option<Cow<'a, [u8]>> {
+    fn maybe_packable(&self) -> Option<&[u8]> {
+        self.as_ref().map(|c| c.borrow())
+    }
+}
+
 impl MaybePackable<str> for &str {
     fn maybe_packable(&self) -> Option<&str> {
         Some(self)
@@ -299,6 +309,12 @@ impl Packable for Action {
 impl MaybePackable<Action> for Action {
     fn maybe_packable(&self) -> Option<Action> {
         Some(*self)
+    }
+}
+
+impl MaybePackable<Action> for Option<Action> {
+    fn maybe_packable(&self) -> Option<Action> {
+        *self
     }
 }
 

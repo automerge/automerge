@@ -6,6 +6,7 @@ use super::{
     PackError, Packable, RawCursor, RleState, Slab, SlabIter, SlabWriter, StrCursor,
 };
 
+use std::cmp::PartialOrd;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
@@ -79,8 +80,8 @@ pub(crate) struct Encoder<'a, C: ColumnCursor> {
 }
 
 impl<'a, C: ColumnCursor> Encoder<'a, C> {
-    pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) {
-        C::append(&mut self.state, &mut self.current, v);
+    pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) -> usize {
+        C::append(&mut self.state, &mut self.current, v)
     }
 
     pub(crate) fn finish(mut self) -> Vec<Slab> {
@@ -120,6 +121,10 @@ pub(crate) struct ColumnData<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn slabs(&self) -> &[Slab] {
+        &self.slabs
+    }
+
     pub(crate) fn seek(&self, mut pos: usize) -> (Option<Run<'_, C::Item>>, C) {
         for slab in &self.slabs {
             if slab.len() <= pos {
@@ -202,7 +207,7 @@ pub(crate) struct ColumnDataIter<'a, C: ColumnCursor> {
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     pub(crate) fn end_pos(&self) -> usize {
-        self.max.saturating_sub(1)
+        self.max
     }
 
     pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
@@ -285,7 +290,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     pub(crate) fn scope_to_value<
         'b,
-        V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>> + Debug,
+        V: for<'c> PartialOrd<<C::Item as Packable>::Unpacked<'c>> + Debug,
         R: RangeBounds<usize>,
     >(
         &mut self,
@@ -311,7 +316,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         impl<T, V> Seek<T> for ScopeValue<T, V>
         where
             T: Packable + ?Sized,
-            V: for<'a> PartialEq<T::Unpacked<'a>> + Debug,
+            V: for<'a> PartialOrd<T::Unpacked<'a>> + Debug, //+ PartialOrd<T::Unpacked<'a>>
         {
             type Output = Range<usize>;
             fn process_slab(&mut self, r: &Slab) -> RunStep {
@@ -332,16 +337,22 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Skip
                         } else if self.pos >= self.max {
                             // after max
-                            self.pos = self.start;
                             RunStep::Done
                         } else {
                             match (&self.target, &r.value) {
-                                (a, Some(b)) if a == b => {
+                                (a, Some(b)) if a <= b => {
                                     // found target
+                                    // TODO write a test where we have many objects w
+                                    // one big key run
                                     self.state = ScopeState::Found;
                                     self.start = std::cmp::max(self.start, self.pos);
-                                    self.pos += r.count;
-                                    RunStep::Skip
+                                    if a == b {
+                                        self.pos += r.count;
+                                        RunStep::Skip
+                                    } else {
+                                        self.pos = self.start;
+                                        RunStep::Done
+                                    }
                                 }
                                 _ => {
                                     // not found yet
@@ -357,10 +368,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Done
                         } else {
                             match (&self.target, &r.value) {
-                                (a, Some(b)) if a != b => {
-                                    // self.pos = self.max;
-                                    RunStep::Done
-                                }
+                                (a, Some(b)) if a != b => RunStep::Done,
                                 _ => {
                                     self.pos += r.count;
                                     RunStep::Skip
@@ -377,7 +385,12 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 panic!()
             }
             fn finish(self) -> Self::Output {
-                self.start..std::cmp::min(self.pos, self.max)
+                let end = std::cmp::min(self.pos, self.max);
+                if self.state == ScopeState::Found {
+                    self.start..end
+                } else {
+                    end..end
+                }
             }
         }
 
@@ -392,7 +405,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         })
     }
 
-    pub(crate) fn seek_to_value<'b, V: for<'c> PartialEq<<C::Item as Packable>::Unpacked<'c>>>(
+    pub(crate) fn seek_to_value<'b, V: for<'c> PartialOrd<<C::Item as Packable>::Unpacked<'c>>>(
         &mut self,
         value: V,
     ) -> usize {
@@ -406,7 +419,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         impl<T: ?Sized, V> Seek<T> for SeekValue<T, V>
         where
             T: Packable,
-            V: for<'a> PartialEq<T::Unpacked<'a>>,
+            V: for<'a> PartialOrd<T::Unpacked<'a>>,
         {
             type Output = usize;
             fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
@@ -561,27 +574,50 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub(crate) fn splice<E>(&mut self, mut index: usize, values: Vec<E>)
     where
-        E: MaybePackable<C::Item> + Debug,
+        E: MaybePackable<C::Item> + Debug + Clone,
     {
         assert!(index <= self.len);
+        assert!(self.slabs.len() > 0);
+        if values.is_empty() {
+            return;
+        }
+        let before = self.to_vec();
+        let tmp_values = values.clone();
+        let old_len = self.len;
+        let mut slab_offset = 0;
         for (i, slab) in self.slabs.iter_mut().enumerate() {
             if slab.len() < index {
-                index -= slab.len();
+                slab_offset += slab.len();
             } else {
-                self.len += values.len();
-                match C::splice(slab, index, values) {
-                    SpliceResult::Done => (),
-                    SpliceResult::Add(slabs) => {
+                match C::splice(slab, index - slab_offset, values) {
+                    SpliceResult::Done(len) => {
+                        self.len += len;
+                    }
+                    SpliceResult::Add(len, slabs) => {
+                        self.len += len;
                         let j = i + 1;
                         self.slabs.splice(j..j, slabs);
+                        assert!(self.slabs.len() > 0);
                     }
-                    SpliceResult::Replace(slabs) => {
+                    SpliceResult::Replace(len, slabs) => {
+                        self.len += len;
                         let j = i + 1;
                         self.slabs.splice(i..j, slabs);
+                        assert!(self.slabs.len() > 0);
                     }
                 }
                 break;
             }
+        }
+
+        let after = self.to_vec();
+        let delta = self.len - old_len;
+        if before.len() + delta != after.len() {
+            log!(":::SPLICE FAIL (index={}):::", index);
+            log!(":::before={:?}", before);
+            log!(":::values={:?}", tmp_values);
+            log!(":::after={:?}", after);
+            panic!()
         }
     }
 
@@ -687,7 +723,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         state: &mut Self::State<'a>,
         out: &mut SlabWriter<'a>,
         value: Option<<Self::Item as Packable>::Unpacked<'a>>,
-    ) {
+    ) -> usize {
         Self::append_chunk(state, out, Run { count: 1, value })
     }
 
@@ -695,7 +731,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         state: &mut Self::State<'a>,
         out: &mut SlabWriter<'a>,
         chunk: Run<'a, Self::Item>,
-    );
+    ) -> usize;
 
     fn copy_between<'a>(
         slab: &'a Slab,
@@ -764,10 +800,11 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         E: MaybePackable<Self::Item> + Debug,
     {
         let mut encoder = Self::encode(index, slab);
+        let mut len = 0;
         for v in &values {
-            encoder.append(v.maybe_packable())
+            len += encoder.append(v.maybe_packable());
         }
-        SpliceResult::Replace(encoder.finish())
+        SpliceResult::Replace(len, encoder.finish())
     }
 }
 
@@ -785,6 +822,24 @@ pub(crate) enum Column {
 }
 
 impl Column {
+    // FIXME
+    /*
+        pub(crate) fn splice(&mut self, mut index: usize, op: &OpBuilder) {
+            todo!()
+            match self {
+                Self::Actor(col) => col.write(out),
+                Self::Str(col) => col.write(out),
+                Self::Integer(col) => col.write(out),
+                Self::Delta(col) => col.write(out),
+                Self::Bool(col) => col.write(out),
+                Self::ValueMeta(col) => col.write(out),
+                Self::Value(col) => col.write(out),
+                Self::Group(col) => col.write(out),
+                Self::Action(col) => col.write(out),
+            }
+        }
+    */
+
     pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         match self {
             Self::Actor(col) => col.write(out),
@@ -827,6 +882,25 @@ impl Column {
         }
     }
 
+    pub(crate) fn new(spec: ColumnSpec) -> Self {
+        match spec.col_type() {
+            ColumnType::Actor => Column::Actor(ColumnData::new()),
+            ColumnType::String => Column::Str(ColumnData::new()),
+            ColumnType::Integer => {
+                if spec.id() == super::op_set::ACTION_COL_ID {
+                    Column::Action(ColumnData::new())
+                } else {
+                    Column::Integer(ColumnData::new())
+                }
+            }
+            ColumnType::DeltaInteger => Column::Delta(ColumnData::new()),
+            ColumnType::Boolean => Column::Bool(ColumnData::new()),
+            ColumnType::Group => Column::Group(ColumnData::new()),
+            ColumnType::ValueMetadata => Column::ValueMeta(ColumnData::new()),
+            ColumnType::Value => Column::Value(ColumnData::new()),
+        }
+    }
+
     pub(crate) fn external(
         spec: ColumnSpec,
         data: Arc<Vec<u8>>,
@@ -852,9 +926,9 @@ impl Column {
 }
 
 pub(crate) enum SpliceResult {
-    Done,
-    Add(Vec<Slab>),
-    Replace(Vec<Slab>),
+    Done(usize),
+    Add(usize, Vec<Slab>),
+    Replace(usize, Vec<Slab>),
 }
 
 #[derive(Debug, Clone)]

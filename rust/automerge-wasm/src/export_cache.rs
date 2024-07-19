@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 
 use am::ObjId;
 
-use am::iter::{ListRange, ListRangeItem, MapRange, MapRangeItem};
+use am::op_set2::{ListRange, ListRangeItem, MapRange, MapRangeItem};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";

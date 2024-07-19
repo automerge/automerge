@@ -11,8 +11,14 @@ use std::ops::{Bound, RangeBounds};
 use super::meta::ValueType;
 
 /// An index into an array of actors stored elsewhere
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Debug, Clone, Copy)]
 pub(crate) struct ActorIdx(pub(crate) u64); // FIXME - shouldnt this be usize? (wasm is 32bit)
+
+impl fmt::Display for ActorIdx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl From<usize> for ActorIdx {
     fn from(val: usize) -> Self {
@@ -54,6 +60,21 @@ pub(crate) enum Action {
     Increment,
     MakeTable,
     Mark,
+}
+
+impl crate::types::OpType {
+    pub(crate) fn action(&self) -> Action {
+        match self {
+            Self::Make(ObjType::Map) => Action::MakeMap,
+            Self::Put(_) => Action::Set,
+            Self::Make(ObjType::List) => Action::MakeList,
+            Self::Delete => Action::Delete,
+            Self::Make(ObjType::Text) => Action::MakeText,
+            Self::Increment(_) => Action::Increment,
+            Self::Make(ObjType::Table) => Action::MakeTable,
+            Self::MarkBegin(_, _) | Self::MarkEnd(_) => Action::Mark,
+        }
+    }
 }
 
 impl From<Action> for u64 {
@@ -142,7 +163,7 @@ impl<'a> fmt::Display for ScalarValue<'a> {
             ScalarValue::Str(s) => write!(f, "\"{}\"", s),
             ScalarValue::Int(i) => write!(f, "{}", i),
             ScalarValue::Uint(i) => write!(f, "{}", i),
-            ScalarValue::F64(n) => write!(f, "{:.324}", n),
+            ScalarValue::F64(n) => write!(f, "{:.2}", n),
             ScalarValue::Counter(c) => write!(f, "Counter: {}", c),
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
@@ -275,6 +296,60 @@ impl<'a> ScalarValue<'a> {
     }
 }
 
+// FIXME - this is a temporary fix - we ideally want
+// to be writing the bytes directly into memory
+// vs into a temp vec and then into memory
+
+impl crate::types::OpType {
+    pub(crate) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+        match self {
+            Self::Put(v) => v.to_raw(),
+            Self::Increment(i) => {
+                let mut out = Vec::new();
+                leb128::write::signed(&mut out, *i).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::MarkBegin(_, crate::types::OldMarkData { value, .. }) => value.to_raw(),
+            _ => None,
+        }
+    }
+}
+
+impl crate::types::ScalarValue {
+    pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+        match self {
+            Self::Bytes(b) => Some(Cow::Borrowed(b)),
+            Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
+            Self::Null => None,
+            Self::Boolean(_) => None,
+            Self::Uint(i) => {
+                let mut out = Vec::new();
+                leb128::write::unsigned(&mut out, *i).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::Counter(i) => {
+                let mut out = Vec::new();
+                leb128::write::signed(&mut out, i.start).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::Int(i) | Self::Timestamp(i) => {
+                let mut out = Vec::new();
+                leb128::write::signed(&mut out, *i).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::F64(f) => {
+                let mut out = Vec::new();
+                out.extend_from_slice(&f.to_le_bytes());
+                Some(Cow::Owned(out))
+            }
+            Self::Unknown {
+                type_code: _,
+                bytes,
+            } => Some(Cow::Borrowed(bytes)),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadScalarError {
     #[error("invalid type code: {0}")]
@@ -334,6 +409,32 @@ impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
     }
 }
 
+impl<'a> PartialEq<types::OldMarkData> for MarkData<'a> {
+    fn eq(&self, other: &types::OldMarkData) -> bool {
+        self.name == other.name && self.value == other.value
+    }
+}
+
+impl<'a> PartialEq<types::OpType> for OpType<'a> {
+    fn eq(&self, other: &types::OpType) -> bool {
+        match (self, other) {
+            (OpType::Make(a), types::OpType::Make(b)) => a == b,
+            (OpType::Delete, types::OpType::Delete) => true,
+            (OpType::Increment(a), types::OpType::Increment(b)) => a == b,
+            (OpType::Put(a), types::OpType::Put(b)) => a == b,
+            (OpType::MarkBegin(a1, a2), types::OpType::MarkBegin(b1, b2)) => a1 == b1 && a2 == b2,
+            (OpType::MarkEnd(a), types::OpType::MarkEnd(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl<'a> PartialEq<OpType<'a>> for types::OpType {
+    fn eq(&self, other: &OpType<'a>) -> bool {
+        other.eq(self)
+    }
+}
+
 impl<'a> From<u64> for ScalarValue<'a> {
     fn from(n: u64) -> Self {
         ScalarValue::Uint(n)
@@ -357,6 +458,13 @@ impl<'a> Key<'a> {
         match self {
             Key::Map(s) => Some(s),
             Key::Seq(_) => None,
+        }
+    }
+
+    pub(crate) fn elemid(&self) -> Option<ElemId> {
+        match self {
+            Key::Map(_) => None,
+            Key::Seq(e) => Some(*e),
         }
     }
 }

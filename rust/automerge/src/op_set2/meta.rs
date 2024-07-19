@@ -136,6 +136,12 @@ impl MaybePackable<ValueMeta> for ValueMeta {
     }
 }
 
+impl MaybePackable<ValueMeta> for Option<ValueMeta> {
+    fn maybe_packable(&self) -> Option<ValueMeta> {
+        *self
+    }
+}
+
 pub(crate) type MetaCursor = RleCursor<1024, ValueMeta>;
 
 #[cfg(test)]

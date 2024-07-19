@@ -30,7 +30,7 @@ pub(crate) use op::{Op, OpBuilder, OpDepIdx, OpDepRaw, OpIdx, OpRaw};
 
 pub(crate) type OpSet = OpSetInternal;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub(crate) struct OpIdxRange {
     start: u32,
     end: u32,

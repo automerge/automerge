@@ -1,6 +1,7 @@
 use crate::error;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Eq;
 use std::cmp::Ordering;
 use std::fmt;
@@ -228,6 +229,15 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+        }
+    }
+
+    pub(crate) fn value<'a>(&'a self) -> Cow<'a, ScalarValue> {
+        match self {
+            OpType::Put(v) => Cow::Borrowed(v),
+            OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
+            OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Borrowed(value),
+            _ => Cow::Owned(ScalarValue::Null),
         }
     }
 
@@ -522,6 +532,10 @@ impl OpId {
         self.1.try_into().unwrap()
     }
 
+    pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
+        crate::op_set2::ActorIdx(self.1 as u64)
+    }
+
     #[inline]
     pub(crate) fn lamport_cmp(&self, other: &OpId, actors: &[ActorId]) -> Ordering {
         self.0
@@ -582,7 +596,7 @@ impl ObjId {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct ObjMeta {
     pub(crate) id: ObjId,
     pub(crate) typ: ObjType,
@@ -627,6 +641,14 @@ impl From<Option<ObjType>> for ListEncoding {
 pub(crate) struct ElemId(pub(crate) OpId);
 
 impl ElemId {
+    pub(crate) fn counter(&self) -> u64 {
+        self.0.counter()
+    }
+
+    pub(crate) fn actor(&self) -> usize {
+        self.0.actor()
+    }
+
     pub(crate) fn is_head(&self) -> bool {
         *self == HEAD
     }

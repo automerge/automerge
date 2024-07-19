@@ -11,7 +11,7 @@ pub(crate) struct DeltaCursorInternal<const B: usize> {
     rle: SubCursor<B>,
 }
 
-pub(crate) type DeltaCursor = DeltaCursorInternal<1024>;
+pub(crate) type DeltaCursor = DeltaCursorInternal<{ usize::MAX }>;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct DeltaState<'a> {
@@ -48,7 +48,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             }) => {
                 //let delta = cursor.abs - state.abs;
                 Self::append(&mut state, out, Some(cursor.abs));
-                SubCursor::<B>::finish(slab, out, RleState::Empty, None, cursor.rle);
+                SubCursor::<B>::finish(slab, out, state.rle, None, cursor.rle);
             }
             Some(Run {
                 count,
@@ -133,14 +133,22 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         DeltaState { abs: c1.abs, rle }
     }
 
-    fn append<'a>(state: &mut Self::State<'a>, slab: &mut SlabWriter<'a>, item: Option<i64>) {
+    fn append<'a>(
+        state: &mut Self::State<'a>,
+        slab: &mut SlabWriter<'a>,
+        item: Option<i64>,
+    ) -> usize {
         let value = item.map(|i| i - state.abs);
         Self::append_chunk(state, slab, Run { count: 1, value })
     }
 
-    fn append_chunk<'a>(state: &mut Self::State<'a>, slab: &mut SlabWriter<'a>, run: Run<'a, i64>) {
+    fn append_chunk<'a>(
+        state: &mut Self::State<'a>,
+        slab: &mut SlabWriter<'a>,
+        run: Run<'a, i64>,
+    ) -> usize {
         state.abs += run.delta();
-        SubCursor::<B>::append_chunk(&mut state.rle, slab, run);
+        SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
@@ -154,7 +162,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         let abs = cursor.abs - abs_delta;
         let state = DeltaState { abs, rle };
 
-        let current = cursor.rle.start_copy(slab, last_run_count);
+        let mut current = cursor.rle.start_copy(slab, last_run_count);
+
+        if cursor.rle.lit_num() > 1 {
+            let num = cursor.rle.lit_num() - 1;
+            current.flush_before(slab, cursor.rle.lit_range(), num, num);
+        }
 
         Encoder {
             slab,
@@ -197,7 +210,32 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
-    fn column_data_bool_split_merge_semantics() {
+    fn column_data_delta_simple() {
+        let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
+        col1.splice(0, vec![1]);
+        assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1])],);
+        col1.splice(0, vec![1]);
+        assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1, 0])],);
+        col1.splice(1, vec![1]);
+        assert_eq!(
+            col1.export()[0],
+            vec![ColExport::litrun(vec![1]), ColExport::run(2, 0)],
+        );
+        col1.splice(2, vec![1]);
+        assert_eq!(
+            col1.export()[0],
+            vec![ColExport::litrun(vec![1]), ColExport::run(3, 0)],
+        );
+
+        let mut col2: ColumnData<DeltaCursorInternal<100>> = ColumnData::new();
+        col2.splice(0, vec![2, 3, 1]);
+        assert_eq!(col2.to_vec(), vec![Some(2), Some(3), Some(1)]);
+        col2.splice(2, vec![4]);
+        assert_eq!(col2.to_vec(), vec![Some(2), Some(3), Some(4), Some(1)]);
+    }
+
+    #[test]
+    fn column_data_delta_split_merge_semantics() {
         // lit run spanning multiple slabs
         let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         col1.splice(0, vec![1, 10, 2, 11, 4, 27, 19, 3, 21, 14, 2, 8]);

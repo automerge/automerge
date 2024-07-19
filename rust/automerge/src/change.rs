@@ -410,6 +410,8 @@ pub(crate) mod gen {
                 message in proptest::option::of("[a-z]{200}"),
                 this_actor in Just(this_actor),
             ) -> Change {
+            todo!()
+            /*
             let ops = ops.iter().map(|(_, op)| op_as_actor_id(op.as_op(&osd)));
             Change::new(ChangeBuilder::new()
                 .with_dependencies(deps)
@@ -420,6 +422,7 @@ pub(crate) mod gen {
                 .with_timestamp(timestamp)
                 .build(ops.into_iter())
                 .unwrap())
+            */
         }
 
     }

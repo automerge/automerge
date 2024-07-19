@@ -570,8 +570,8 @@ mod tests {
 
     use crate::{
         hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
-        transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop,
-        ScalarValue, Value, ROOT,
+        transaction::Transactable, types::OldMarkData, AutoCommit, ObjType, Patch, PatchAction,
+        Prop, ScalarValue, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -668,15 +668,22 @@ mod tests {
                     action: ObservedAction::Mark(
                         marks
                             .into_iter()
-                            .map(|Mark { start, end, data }| {
-                                let MarkData { name, value } = data.as_ref();
-                                ObservedMark {
-                                    start,
-                                    end,
-                                    name: name.to_string(),
-                                    value: value.clone(),
-                                }
-                            })
+                            .map(
+                                |Mark {
+                                     start,
+                                     end,
+                                     name,
+                                     value,
+                                 }| {
+                                    //let MarkData { name, value } = data.as_ref();
+                                    ObservedMark {
+                                        start,
+                                        end,
+                                        name: name.to_string(),
+                                        value: value.clone(),
+                                    }
+                                },
+                            )
                             .collect(),
                     ),
                     path: format!("/{}", path.clone().join("/")),

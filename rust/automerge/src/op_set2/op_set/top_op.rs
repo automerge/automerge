@@ -27,7 +27,7 @@ impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(mut next) = self.iter.next() {
             if let Some(last) = self.last_op.take() {
-                if next.elemid_or_key() != last.elemid_or_key() {
+                if next.obj != last.obj || next.elemid_or_key() != last.elemid_or_key() {
                     self.last_op = Some(next);
                     return Some(last);
                 } else {

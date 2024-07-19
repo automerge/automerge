@@ -97,7 +97,11 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         out.flush_bool_run(state.count);
     }
 
-    fn append_chunk<'a>(state: &mut Self::State<'a>, out: &mut SlabWriter<'a>, run: Run<'_, bool>) {
+    fn append_chunk<'a>(
+        state: &mut Self::State<'a>,
+        out: &mut SlabWriter<'a>,
+        run: Run<'_, bool>,
+    ) -> usize {
         let item = run.value.unwrap_or_default();
         if state.value == item {
             state.count += run.count;
@@ -106,6 +110,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             state.value = item;
             state.count = run.count;
         }
+        run.count
     }
 
     fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {

@@ -51,21 +51,18 @@ fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
     obj: &ObjMeta,
     ops: I,
 ) {
-    todo!()
-    /*
-        let spans = SpansInternal::new(ops, doc, None);
-        for span in spans {
-            match span {
-                SpanInternal::Text(text, index, marks) => {
-                    patch_log.splice(obj.id, index, &text, marks);
-                }
-                SpanInternal::Obj(id, index) => {
-                    let value = Value::Object(ObjType::Map);
-                    patch_log.insert(obj.id, index, value.into(), id, false);
-                }
+    let spans = SpansInternal::new(ops, doc, None);
+    for span in spans {
+        match span {
+            SpanInternal::Text(text, index, marks) => {
+                patch_log.splice(obj.id, index, &text, marks);
+            }
+            SpanInternal::Obj(id, index) => {
+                let value = Value::Object(ObjType::Map);
+                patch_log.insert(obj.id, index, value.into(), id, false);
             }
         }
-    */
+    }
 }
 
 fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(

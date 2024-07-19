@@ -322,56 +322,59 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut osd = OpSetData::from_actors(self.actors.clone());
-            let key = osd.props.cache("key".to_string());
+            todo!()
+            /*
+                        let mut osd = OpSetData::from_actors(self.actors.clone());
+                        let key = osd.props.cache("key".to_string());
 
-            let start_op = parents
-                .iter()
-                .map(|c| {
-                    self.changes
-                        .iter()
-                        .find(|change| change.hash() == *c)
-                        .unwrap()
-                        .max_op()
-                })
-                .max()
-                .unwrap_or(0)
-                + 1;
+                        let start_op = parents
+                            .iter()
+                            .map(|c| {
+                                self.changes
+                                    .iter()
+                                    .find(|change| change.hash() == *c)
+                                    .unwrap()
+                                    .max_op()
+                            })
+                            .max()
+                            .unwrap_or(0)
+                            + 1;
 
-            let actor_idx = self.index(actor);
-            let ops = (0..num_new_ops)
-                .map(|opnum| OpBuilder {
-                    id: OpId::new(start_op + opnum as u64, actor_idx),
-                    action: crate::OpType::Put("value".into()),
-                    key: Key::Map(key),
-                    insert: false,
-                })
-                .collect::<Vec<_>>();
+                        let actor_idx = self.index(actor);
+                        let ops = (0..num_new_ops)
+                            .map(|opnum| OpBuilder {
+                                id: OpId::new(start_op + opnum as u64, actor_idx),
+                                action: crate::OpType::Put("value".into()),
+                                key: Key::Map(key),
+                                insert: false,
+                            })
+                            .collect::<Vec<_>>();
 
-            let root = ObjId::root();
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
-            let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
-            let ops = ops
-                .into_iter()
-                .map(|op| osd.push(root, op))
-                .collect::<Vec<_>>();
-            let change = Change::new(
-                ChangeBuilder::new()
-                    .with_dependencies(parents.to_vec())
-                    .with_start_op(NonZeroU64::new(start_op).unwrap())
-                    .with_actor(actor.clone())
-                    .with_seq(*seq)
-                    .with_timestamp(timestamp)
-                    .build(ops.iter().map(|op| op_as_actor_id(op.as_op(&osd))))
-                    .unwrap(),
-            );
-            *seq = seq.checked_add(1).unwrap();
-            let hash = change.hash();
-            self.changes.push(change);
-            hash
+                        let root = ObjId::root();
+                        let timestamp = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
+                        let ops = ops
+                            .into_iter()
+                            .map(|op| osd.push(root, op))
+                            .collect::<Vec<_>>();
+                        let change = Change::new(
+                            ChangeBuilder::new()
+                                .with_dependencies(parents.to_vec())
+                                .with_start_op(NonZeroU64::new(start_op).unwrap())
+                                .with_actor(actor.clone())
+                                .with_seq(*seq)
+                                .with_timestamp(timestamp)
+                                .build(ops.iter().map(|op| op_as_actor_id(op.as_op(&osd))))
+                                .unwrap(),
+                        );
+                        *seq = seq.checked_add(1).unwrap();
+                        let hash = change.hash();
+                        self.changes.push(change);
+                        hash
+            */
         }
 
         fn build(&self) -> ChangeGraph {

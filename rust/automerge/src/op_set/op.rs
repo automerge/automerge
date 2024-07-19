@@ -161,6 +161,14 @@ impl<'a> Op<'a> {
         }
     }
 
+    pub(crate) fn map_key(&self) -> Option<&str> {
+        if let Key::Map(m) = &self.op().key {
+            Some(self.osd.props.safe_get(*m)?)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn action(&self) -> &'a OpType {
         &self.op().action
     }
@@ -224,6 +232,10 @@ impl<'a> Op<'a> {
 
     pub(crate) fn elemid_or_key(&self) -> Key {
         self.op().elemid_or_key()
+    }
+
+    pub(crate) fn raw_elemid(&self) -> Option<ElemId> {
+        self.op().raw_elemid()
     }
 
     pub(crate) fn is_counter(&self) -> bool {
@@ -471,6 +483,14 @@ impl OpBuilder {
         if self.insert {
             Some(ElemId(self.id))
         } else if let Key::Seq(e) = self.key {
+            Some(e)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn raw_elemid(&self) -> Option<ElemId> {
+        if let Key::Seq(e) = self.key {
             Some(e)
         } else {
             None

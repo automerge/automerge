@@ -149,6 +149,17 @@ impl From<Value> for value::Value<'_> {
     }
 }
 
+impl From<ObjType> for Value {
+    fn from(o: ObjType) -> Self {
+        match o {
+            ObjType::Map => Value::Map(Map::default()),
+            ObjType::Table => Value::Map(Map::default()),
+            ObjType::List => Value::List(List::default()),
+            ObjType::Text => Value::Text(Text::default()),
+        }
+    }
+}
+
 impl From<Map> for Value {
     fn from(value: Map) -> Self {
         Value::Map(value)
@@ -232,6 +243,24 @@ impl Automerge {
             OpType::Put(scalar) => Value::Scalar(scalar.clone().into()),
             _ => panic!("invalid op to hydrate"),
         }
+    }
+}
+
+impl crate::automerge_old::Automerge {
+    pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        todo!()
+    }
+
+    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        todo!()
+    }
+
+    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        todo!()
+    }
+
+    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
+        todo!()
     }
 }
 

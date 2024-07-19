@@ -7,7 +7,7 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_set::OpIdx,
+    op_set2::Op,
     op_tree::OpSetData,
     storage::{
         change::{PredOutOfOrder, Verified},
@@ -82,7 +82,7 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[instrument(skip(self))]
-    pub(crate) fn collect(&mut self, opid: OpId, idx: OpIdx) -> Result<(), Error> {
+    pub(crate) fn collect(&mut self, opid: OpId, op: Op<'a>) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
             .get_mut(&opid.actor())
@@ -95,7 +95,7 @@ impl<'a> ChangeCollector<'a> {
             tracing::error!(missing_change_index = change_index, "missing change for op");
             Error::MissingChange
         })?;
-        change.ops.push(idx);
+        change.ops.push(op);
         Ok(())
     }
 
@@ -147,7 +147,7 @@ struct PartialChange<'a> {
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
-    ops: Vec<OpIdx>,
+    ops: Vec<Op<'a>>,
 }
 
 impl<'a> PartialChange<'a> {
@@ -178,8 +178,8 @@ impl<'a> PartialChange<'a> {
         )?;
         deps.sort();
         let num_ops = self.ops.len() as u64;
-        self.ops.sort_by_key(|o| o.as_op(osd).id().counter());
-        let converted_ops = self.ops.iter().map(|idx| op_as_actor_id(idx.as_op(osd)));
+        self.ops.sort();
+        let converted_ops = self.ops.clone().into_iter();
         let actor = osd
             .actors
             .safe_get(self.actor)

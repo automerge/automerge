@@ -1,4 +1,5 @@
-use crate::{exid::ExId, op_set2::Value};
+use crate::exid::ExId;
+use crate::Value;
 
 use super::OpQueryTerm;
 
@@ -13,6 +14,7 @@ pub struct MapRangeItem<'a> {
     pub conflict: bool,
 }
 
+#[derive(Debug)]
 pub struct MapRange<'a, R: RangeBounds<String>> {
     iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
     range: Option<R>,
@@ -40,7 +42,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
                 // return None if > end
                 continue;
             }
-            let value = op.value();
+            let value = op.value().into();
             let id = op.exid();
             let conflict = op.conflict;
             return Some(MapRangeItem {

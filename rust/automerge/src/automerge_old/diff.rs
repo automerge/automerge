@@ -553,8 +553,8 @@ mod tests {
 
     use crate::{
         hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
-        transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop,
-        ScalarValue, Value, ROOT,
+        transaction::Transactable, types::OldMarkData, AutoCommit, ObjType, Patch, PatchAction,
+        Prop, ScalarValue, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -599,76 +599,79 @@ mod tests {
 
     impl From<&Patch> for ObservedPatch {
         fn from(patch: &Patch) -> Self {
-            let path = patch.path.iter().map(|(_, prop)| prop).cloned();
-            match patch.action.clone() {
-                PatchAction::PutMap {
-                    key,
-                    value,
-                    conflict,
-                    ..
-                } => ObservedPatch {
-                    action: ObservedAction::PutMap {
-                        value: value.0,
-                        conflict,
-                    },
-                    path: ex_path_and(path, key),
-                },
-                PatchAction::PutSeq {
-                    index,
-                    value,
-                    conflict,
-                    ..
-                } => ObservedPatch {
-                    action: ObservedAction::PutSeq {
-                        value: value.0,
-                        conflict,
-                    },
-                    path: ex_path_and(path, index),
-                },
-                PatchAction::DeleteMap { key } => ObservedPatch {
-                    action: ObservedAction::DelMap,
-                    path: ex_path_and(path, key),
-                },
-                PatchAction::DeleteSeq { index, .. } => ObservedPatch {
-                    action: ObservedAction::DelSeq,
-                    path: ex_path_and(path, index),
-                },
-                PatchAction::Increment { prop, value } => ObservedPatch {
-                    action: ObservedAction::Increment(value),
-                    path: ex_path_and(path, prop),
-                },
-                PatchAction::Insert { index, values, .. } => ObservedPatch {
-                    action: ObservedAction::Insert {
-                        values: values.into_iter().map(|(v, _, _)| v.clone()).collect(),
-                    },
-                    path: ex_path_and(path, index),
-                },
-                PatchAction::SpliceText { index, value, .. } => ObservedPatch {
-                    action: ObservedAction::SpliceText(value.make_string()),
-                    path: ex_path_and(path, index),
-                },
-                PatchAction::Mark { marks } => ObservedPatch {
-                    action: ObservedAction::Mark(
-                        marks
-                            .into_iter()
-                            .map(|Mark { start, end, data }| {
-                                let MarkData { name, value } = data.as_ref();
-                                ObservedMark {
-                                    start,
-                                    end,
-                                    name: name.to_string(),
-                                    value: value.clone(),
-                                }
-                            })
-                            .collect(),
-                    ),
-                    path: format!("/{}", path.clone().join("/")),
-                },
-                PatchAction::Conflict { prop } => ObservedPatch {
-                    action: ObservedAction::Conflict(prop),
-                    path: format!("/{}", path.clone().join("/")),
-                },
-            }
+            todo!()
+            /*
+                        let path = patch.path.iter().map(|(_, prop)| prop).cloned();
+                        match patch.action.clone() {
+                            PatchAction::PutMap {
+                                key,
+                                value,
+                                conflict,
+                                ..
+                            } => ObservedPatch {
+                                action: ObservedAction::PutMap {
+                                    value: value.0,
+                                    conflict,
+                                },
+                                path: ex_path_and(path, key),
+                            },
+                            PatchAction::PutSeq {
+                                index,
+                                value,
+                                conflict,
+                                ..
+                            } => ObservedPatch {
+                                action: ObservedAction::PutSeq {
+                                    value: value.0,
+                                    conflict,
+                                },
+                                path: ex_path_and(path, index),
+                            },
+                            PatchAction::DeleteMap { key } => ObservedPatch {
+                                action: ObservedAction::DelMap,
+                                path: ex_path_and(path, key),
+                            },
+                            PatchAction::DeleteSeq { index, .. } => ObservedPatch {
+                                action: ObservedAction::DelSeq,
+                                path: ex_path_and(path, index),
+                            },
+                            PatchAction::Increment { prop, value } => ObservedPatch {
+                                action: ObservedAction::Increment(value),
+                                path: ex_path_and(path, prop),
+                            },
+                            PatchAction::Insert { index, values, .. } => ObservedPatch {
+                                action: ObservedAction::Insert {
+                                    values: values.into_iter().map(|(v, _, _)| v.clone()).collect(),
+                                },
+                                path: ex_path_and(path, index),
+                            },
+                            PatchAction::SpliceText { index, value, .. } => ObservedPatch {
+                                action: ObservedAction::SpliceText(value.make_string()),
+                                path: ex_path_and(path, index),
+                            },
+                            PatchAction::Mark { marks } => ObservedPatch {
+                                action: ObservedAction::Mark(
+                                    marks
+                                        .into_iter()
+                                        .map(|Mark { start, end, data }| {
+                                            let MarkData { name, value } = data.as_ref();
+                                            ObservedMark {
+                                                start,
+                                                end,
+                                                name: name.to_string(),
+                                                value: value.clone(),
+                                            }
+                                        })
+                                        .collect(),
+                                ),
+                                path: format!("/{}", path.clone().join("/")),
+                            },
+                            PatchAction::Conflict { prop } => ObservedPatch {
+                                action: ObservedAction::Conflict(prop),
+                                path: format!("/{}", path.clone().join("/")),
+                            },
+                        }
+            */
         }
     }
 

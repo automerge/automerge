@@ -60,6 +60,11 @@ impl ColumnCursor for GroupCursor {
 
         let current = cursor.rle.start_copy(slab, last_run_count);
 
+        if cursor.rle.lit_num() > 1 {
+            let num = cursor.rle.lit_num() - 1;
+            current.flush_before(slab, cursor.rle.lit_range(), num, num);
+        }
+
         Encoder {
             slab,
             current,
