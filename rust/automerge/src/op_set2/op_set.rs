@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::marks::MarkStateMachine;
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set::{OpBuilder, OpIdx, OpIdxRange};
 use crate::patches::TextRepresentation;
 use crate::query::TreeQuery;
@@ -11,6 +11,7 @@ use crate::types;
 use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
 };
+use crate::AutomergeError;
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::{Op, OpBuilder2, SuccCursors};
@@ -27,6 +28,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod found_op;
+mod index_iter;
 mod keys;
 mod list_range;
 mod map_range;
@@ -45,6 +47,7 @@ pub use spans::{Span, Spans};
 pub use values::Values;
 
 pub(crate) use found_op::OpsFoundIter;
+pub(crate) use index_iter::IndexIter;
 pub(crate) use keys::{KeyIter, KeyOpIter};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::OpIter;
@@ -187,6 +190,27 @@ impl OpSet {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
 
+    pub(crate) fn query_insert_at(
+        &self,
+        obj: &ObjId,
+        index: usize,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+    ) -> Result<QueryNth, AutomergeError> {
+        //let query = doc.ops().query_insert_at(&obj.id, index, encoding, self.scope.clone())?
+        let query = self
+            .iter_obj(obj)
+            .visible(clock)
+            .marks()
+            .top_ops()
+            .index(encoding);
+        Ok(QueryNth {
+            pos: 0,
+            marks: None,
+            elemid: None,
+        })
+    }
+
     pub(crate) fn seek_ops_by_prop<'a>(
         &'a self,
         obj: &ObjId,
@@ -209,7 +233,7 @@ impl OpSet {
         let mut iter = self.iter_prop(obj, key);
         let end_pos = iter.end_pos();
         let ops = iter.visible(clock.cloned()).collect::<Vec<_>>();
-        let ops_pos = ops.iter().map(|op| op.index).collect::<Vec<_>>();
+        let ops_pos = ops.iter().map(|op| op.pos).collect::<Vec<_>>();
         OpsFound {
             ops,
             ops_pos,
@@ -226,13 +250,19 @@ impl OpSet {
     ) -> OpsFound<'a> {
         let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut len = 0;
+        let mut end_pos = 0;
         for ops in iter {
             len += ops.width(encoding);
             if len > index {
                 return ops;
             }
+            end_pos = ops.end_pos;
         }
-        OpsFound::default()
+        OpsFound {
+            ops: vec![],
+            ops_pos: vec![],
+            end_pos,
+        }
     }
 
     pub(crate) fn seek_list_opid(
@@ -248,7 +278,7 @@ impl OpSet {
         let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut index = 0;
         for ops in iter {
-            if ops.end_pos > op.index {
+            if ops.end_pos > op.pos {
                 let visible = ops.ops.contains(&op);
                 return Some(FoundOpId { op, index, visible });
             }
@@ -489,7 +519,7 @@ impl OpSet {
             .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, &(succ_count.group()..usize::MAX));
 
         OpIter {
-            index: range.start,
+            pos: range.start,
             id_actor: self.cols.get_actor_range(ID_ACTOR_COL_SPEC, range),
             id_counter: self
                 .cols
@@ -516,7 +546,7 @@ impl OpSet {
 
     pub(crate) fn iter(&self) -> OpIter<'_> {
         OpIter {
-            index: 0,
+            pos: 0,
             id_actor: self.cols.get_actor(ID_ACTOR_COL_SPEC),
             id_counter: self.cols.get_delta_integer(ID_COUNTER_COL_SPEC),
             obj_id_actor: self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC),
@@ -571,6 +601,13 @@ pub(crate) struct Parent {
     pub(crate) typ: ObjType,
     pub(crate) prop: Prop,
     pub(crate) visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct QueryNth {
+    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) pos: usize,
+    pub(crate) elemid: Option<ElemId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1481,6 +1518,7 @@ mod tests {
         for test_op in test_ops {
             let group_count = group_iter.next().unwrap().unwrap();
             let op = super::super::op::Op {
+                pos: 0,   // not relevent for this equality test
                 index: 0, // not relevent for this equality test
                 id: test_op.id,
                 obj: test_op.obj,

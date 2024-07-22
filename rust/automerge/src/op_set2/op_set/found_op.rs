@@ -39,14 +39,16 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
                 self.found = Some(OpsFound::default());
             }
             if let Some(found) = &mut self.found {
-                found.end_pos = op.index;
+                found.end_pos = op.pos;
                 if op.scope_to_clock(self.clock.as_ref(), self.iter.get_opiter()) {
-                    found.ops_pos.push(op.index);
+                    // FIXME we dont need this b/c of ops.index
+                    found.ops_pos.push(op.pos);
                     found.ops.push(op);
                 }
             }
-            if result.is_some() {
-                return result;
+            match &result {
+                Some(f) if !f.ops.is_empty() => return result,
+                _ => (),
             }
         }
         self.found.take()

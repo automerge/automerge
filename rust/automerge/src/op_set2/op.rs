@@ -17,15 +17,18 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct OpBuilder2 {
     pub(crate) id: OpId,
     pub(crate) obj: ObjMeta,
     pub(crate) pos: usize,
     pub(crate) prop: Prop,
+    pub(crate) elemid: Option<ElemId>,
     pub(crate) action: types::OpType,
+    //pub(crate) action: Action,
+    //pub(crate) value: types::ScalarValue,
     pub(crate) insert: bool,
-    pub(crate) pred: Vec<usize>,
+    pub(crate) pred: Vec<OpId>,
 }
 
 impl OpBuilder2 {
@@ -69,46 +72,10 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn get_uint(&self, spec: &ColumnSpec) -> Option<u64> {
-        todo!()
-    }
-    pub(crate) fn get_str(&self, spec: &ColumnSpec) -> Option<&str> {
-        todo!()
-    }
-    pub(crate) fn get_bool(&self, spec: &ColumnSpec) -> bool {
-        todo!()
-    }
-    pub(crate) fn get_action(&self, spec: &ColumnSpec) -> Option<Action> {
-        todo!()
-    }
-    pub(crate) fn get_meta(&self, spec: &ColumnSpec) -> Option<ValueMeta> {
-        todo!()
-    }
-    pub(crate) fn get_value(&self, spec: &ColumnSpec) -> &[u8] {
-        todo!()
-    }
-
-    pub(crate) fn map(
-        id: OpId,
-        pos: usize,
-        prop: String,
-        action: types::OpType,
-        pred: Vec<Op<'_>>,
-    ) -> Self {
-        todo!()
-    }
-
-    pub(crate) fn is_mark(&self) -> bool {
-        todo!()
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        todo!()
-    }
-
-    pub(crate) fn get_increment_value(&self) -> Option<i64> {
-        todo!()
-    }
+    //fn op_type(&self) -> OpType<'_> {
+    //OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
+    //OpType::from_action_and_value(self.action, self.value, None, false)
+    //}
 
     pub(crate) fn prop(&self) -> &types::Prop {
         &self.prop
@@ -124,12 +91,28 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn is_delete(&self) -> bool {
-        todo!()
-    }
-
     pub(crate) fn obj(&self) -> &types::ObjMeta {
         &self.obj
+    }
+
+    pub(crate) fn get_increment_value(&self) -> Option<i64> {
+        if let types::OpType::Increment(i) = &self.action {
+            Some(*i)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_delete(&self) -> bool {
+        self.action == OpType::Delete
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        self.action.to_str()
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        self.action.is_mark()
     }
 }
 
@@ -143,8 +126,9 @@ impl OpLike for OpBuilder2 {
     fn action(&self) -> Action {
         self.action.action()
     }
+
     fn elemid(&self) -> Option<ElemId> {
-        None
+        self.elemid
     }
     fn map_key(&self) -> Option<&str> {
         self.prop.as_str()
@@ -167,6 +151,7 @@ impl<'a> OpLike for Op<'a> {
     fn action(&self) -> Action {
         self.action
     }
+
     fn elemid(&self) -> Option<ElemId> {
         self.key.elemid()
     }
@@ -195,7 +180,8 @@ impl<'a> OpLike for Op<'a> {
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
-    pub(crate) index: usize, // rename to pos
+    pub(crate) pos: usize,
+    pub(crate) index: usize,
     pub(crate) conflict: bool,
     pub(crate) id: OpId,
     pub(crate) action: Action,

@@ -11,6 +11,7 @@ use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::op_set2::{Action, Op, OpBuilder2, OpSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
+use crate::storage::convert::{ob_as_actor_id, ObWithMetadata};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, Key, ListEncoding, ObjMeta, OpId, ScalarValue};
 use crate::{op_tree::OpSetData, types::OpBuilder, Change, ChangeHash, Prop};
@@ -26,7 +27,7 @@ pub(crate) struct TransactionInner {
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
     idx_range: OpIdxRange,
-    num_ops: u64,
+    pending: Vec<OpBuilder2>,
 }
 
 /// Arguments required to create a new transaction
@@ -64,8 +65,8 @@ impl TransactionInner {
             time: 0,
             message: None,
             idx_range,
-            num_ops: 0,
             deps,
+            pending: vec![],
             scope,
         }
     }
@@ -81,8 +82,7 @@ impl TransactionInner {
     }
 
     pub(crate) fn pending_ops(&self) -> usize {
-        //self.idx_range.len()
-        self.num_ops as usize
+        self.pending.len()
     }
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
@@ -131,21 +131,26 @@ impl TransactionInner {
         hash
     }
 
-    fn operations<'a>(
-        &self,
-        osd: &'a OpSet,
-    ) -> impl Iterator<Item = Op<'a>> + ExactSizeIterator + Clone {
-        let start = OpId::new(self.start_op.get(), self.actor);
-        let end = OpId::new(self.start_op.get() + self.num_ops, self.actor);
-        let range = start..end;
-        // FIXME - slow AF
-        // these ops just need to support the OpAsChangeOp interface - no need to query
-        osd.iter().filter(|op| range.contains(&op.id)).sorted()
-    }
+    /*
+        fn operations<'a>(
+            &self,
+            osd: &'a OpSet,
+        ) -> impl Iterator<Item = ObWithMetadata> + ExactSizeIterator + Clone {
+            todo!()
+            //self.pending.iter(|o| to_change_op(o,osd))
+            //self.pending.iter().map(|o| ob_as_actor_id(osd, o))
+            let start = OpId::new(self.start_op.get(), self.actor);
+            let end = OpId::new(self.start_op.get() + self.num_ops, self.actor);
+            let range = start..end;
+            // FIXME - slow AF
+            // these ops just need to support the OpAsChangeOp interface - no need to query
+            osd.iter().filter(|op| range.contains(&op.id)).sorted()
+        }
+    */
 
     #[tracing::instrument(skip(self, osd))]
     pub(crate) fn export(self, osd: &OpSet) -> Change {
-        use crate::storage::{change::PredOutOfOrder, convert::op_as_actor_id};
+        use crate::storage::{change::PredOutOfOrder, convert::ob_as_actor_id};
 
         let actor = osd.get_actor(self.actor).clone();
         let deps = self.deps.clone();
@@ -156,7 +161,7 @@ impl TransactionInner {
             .with_message(self.message.clone())
             .with_dependencies(deps)
             .with_timestamp(self.time)
-            .build(self.operations(osd).map(op_as_actor_id))
+            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)))
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
@@ -166,8 +171,8 @@ impl TransactionInner {
         };
         #[cfg(debug_assertions)]
         {
-            let realized_ops = self.operations(osd).collect::<Vec<_>>();
-            tracing::trace!(?stored, ops=?realized_ops, "committing change");
+            //let realized_ops = self.operations(osd).collect::<Vec<_>>();
+            tracing::trace!(?stored, ops=?self.pending, "committing change");
         }
         #[cfg(not(debug_assertions))]
         tracing::trace!(?stored, "committing change");
@@ -305,6 +310,7 @@ impl TransactionInner {
         }
     }
 
+    /*
     #[allow(clippy::too_many_arguments)]
     fn insert_local_op(
         &mut self,
@@ -317,7 +323,6 @@ impl TransactionInner {
         obj: &ObjMeta,
         succ_pos: &[usize],
     ) {
-        /*
                 doc.ops_mut().add_succ(&obj.id, succ_pos, idx);
 
                 if !is_delete {
@@ -325,17 +330,13 @@ impl TransactionInner {
                 }
 
                 self.finalize_op(doc, patch_log, obj, prop, idx, None);
-        */
         todo!()
     }
+        */
 
     #[allow(clippy::too_many_arguments)]
     fn insert_local_op2(&mut self, doc: &mut Automerge, patch_log: &mut PatchLog, op: OpBuilder2) {
-        let prop = op.prop();
-
         doc.ops_mut().insert2(&op);
-
-        self.num_ops += 1;
 
         /*
                 doc.ops_mut().add_succ(&obj.id, succ_pos, idx);
@@ -345,7 +346,8 @@ impl TransactionInner {
                 }
         */
 
-        self.finalize_op2(doc, patch_log, op, None);
+        self.finalize_op2(doc, patch_log, &op, None);
+        self.pending.push(op);
     }
 
     pub(crate) fn insert<V: Into<ScalarValue>>(
@@ -378,8 +380,8 @@ impl TransactionInner {
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let idx = self.do_insert(doc, patch_log, &obj, index, value.into())?;
-        Ok(idx.as_op(doc.osd()).exid())
+        let id = self.do_insert(doc, patch_log, &obj, index, value.into())?;
+        Ok(doc.ops().id_to_exid(id))
     }
 
     fn do_insert(
@@ -389,36 +391,35 @@ impl TransactionInner {
         obj: &ObjMeta,
         index: usize,
         action: OpType,
-    ) -> Result<OpIdx, AutomergeError> {
+    ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc.ops().search(
-            &obj.id,
-            query::InsertNth::new(
-                index,
-                patch_log.text_rep().encoding(obj.typ),
-                self.scope.clone(),
-            ),
-        );
-        let marks = query.marks(doc.osd());
-        let pos = query.pos();
-        let key = query.key()?;
+        let encoding = patch_log.text_rep().encoding(obj.typ);
 
-        let op = OpBuilder {
+        let query = doc
+            .ops()
+            .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+
+        let marks = query.marks;
+        let pos = query.pos;
+        let elemid = query.elemid;
+
+        let op = OpBuilder2 {
             id,
+            obj: *obj,
+            pos,
+            prop: Prop::Seq(index),
             action,
-            key,
+            elemid,
             insert: true,
+            pred: vec![],
         };
 
-        let idx = doc
-            .ops_mut()
-            .load_with_range(obj.id, op.clone(), &mut self.idx_range);
-        doc.ops_mut().insert(pos, &obj.id, idx);
+        doc.ops_mut().insert2(&op);
+        self.finalize_op2(doc, patch_log, &op, marks);
+        self.pending.push(op);
 
-        self.finalize_op(doc, patch_log, obj, Prop::Seq(index), idx, marks);
-
-        Ok(idx)
+        Ok(id)
     }
 
     pub(crate) fn local_op(
@@ -472,59 +473,15 @@ impl TransactionInner {
             pos: query.end_pos,
             prop: Prop::Map(prop),
             action,
+            elemid: None,
             insert: false,
-            pred: query.ops.iter().map(|op| op.index).collect(),
+            //pred: query.ops.iter().map(|op| op.index).collect(),
+            pred: query.ops.iter().map(|op| op.id).collect(),
         };
-
-        //let pos = query.end_pos;
-        //let ops_pos = query.ops_pos;
 
         self.insert_local_op2(doc, patch_log, op);
 
         Ok(Some(id))
-        /*
-                let prop_index = doc.ops_mut().osd.props.cache(prop.clone());
-                let key = Key::Map(prop_index);
-                let prop: Prop = prop.into();
-                let query = doc.ops().seek_ops_by_prop(
-                    &obj.id,
-                    prop.clone(),
-                    patch_log.text_rep().encoding(obj.typ),
-                    self.scope.as_ref(),
-                );
-                // no key present to delete
-                if query.ops.is_empty() && action == OpType::Delete {
-                    return Ok(None);
-                }
-
-                if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-                    return Ok(None);
-                }
-
-                // increment operations are only valid against counter values.
-                // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-                if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
-                    return Err(AutomergeError::MissingCounter);
-                }
-
-                let op = OpBuilder {
-                    id,
-                    action,
-                    key,
-                    insert: false,
-                };
-                let pos = query.end_pos;
-                let ops_pos = query.ops_pos;
-
-                let is_delete = op.is_delete();
-                let idx = doc
-                    .ops_mut()
-                    .load_with_range(obj.id, op, &mut self.idx_range);
-
-                self.insert_local_op(doc, patch_log, prop, idx, is_delete, pos, obj, &ops_pos);
-
-                Ok(Some(idx))
-        */
     }
 
     fn local_list_op(
@@ -535,57 +492,41 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        //let query = doc.ops().seek_ops_by_index(&obj.id, index, ListEncoding::List, self.scope.as_ref());
-        //let id = self.next_id();
-        //let key = query.key()?;
-        todo!() // TX
-                /*
-                        let osd = doc.osd();
-                        let query = doc.ops().search(
-                            &obj.id,
-                            query::Nth::new(index, ListEncoding::List, self.scope.clone(), osd),
-                        );
+        let query =
+            doc.ops()
+                .seek_ops_by_index(&obj.id, index, ListEncoding::List, self.scope.as_ref());
+        let id = self.next_id();
+        let key = query
+            .ops
+            .first()
+            .map(|op| op.elemid_or_key())
+            .ok_or(AutomergeError::InvalidIndex(index))?;
 
-                        let id = self.next_id();
+        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+            return Ok(None);
+        }
 
-                        let key = query.key()?;
+        // increment operations are only valid against counter values.
+        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
 
-                        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-                            return Ok(None);
-                        }
+        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+            return Err(AutomergeError::MissingCounter);
+        }
 
-                        // increment operations are only valid against counter values.
-                        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-                        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
-                            return Err(AutomergeError::MissingCounter);
-                        }
+        let op = OpBuilder2 {
+            id,
+            obj: *obj,
+            pos: query.end_pos,
+            prop: Prop::Seq(index),
+            action,
+            elemid: key.elemid(),
+            insert: false,
+            pred: query.ops.iter().map(|op| op.id).collect(),
+        };
 
-                        let op = OpBuilder {
-                            id,
-                            action,
-                            key,
-                            insert: false,
-                        };
-                        let pos = query.pos();
-                        let ops_pos = query.ops_pos;
-                        let is_delete = op.is_delete();
-                        let idx = doc
-                            .ops_mut()
-                            .load_with_range(obj.id, op, &mut self.idx_range);
+        self.insert_local_op2(doc, patch_log, op);
 
-                        self.insert_local_op(
-                            doc,
-                            patch_log,
-                            Prop::Seq(index),
-                            idx,
-                            is_delete,
-                            pos,
-                            obj,
-                            &ops_pos,
-                        );
-
-                        Ok(Some(idx))
-                */
+        Ok(Some(id))
     }
 
     pub(crate) fn increment<P: Into<Prop>>(
@@ -1045,7 +986,7 @@ impl TransactionInner {
         &mut self,
         doc: &'a Automerge,
         patch_log: &mut PatchLog,
-        op: OpBuilder2,
+        op: &OpBuilder2,
         marks: Option<Arc<MarkSet>>,
     ) {
         let obj = op.obj();

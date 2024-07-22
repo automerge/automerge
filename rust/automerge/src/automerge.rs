@@ -1148,52 +1148,56 @@ impl Automerge {
     }
 
     pub fn dump(&self) {
-        log!(
-            "  {:12} {:3} {:12} {:12} {:12} {:12} {:12}",
-            "id",
-            "ins",
-            "obj",
-            "key",
-            "value",
-            "pred",
-            "succ"
-        );
+        /*
+                log!(
+                    "  {:12} {:3} {:12} {:12} {:12} {:12} {:12}",
+                    "id",
+                    "ins",
+                    "obj",
+                    "key",
+                    "value",
+                    "pred",
+                    "succ"
+                );
+        */
         self.ops.dump();
-        for op in self.ops.iter() {
-            let id = self.to_short_string(op.id);
-            let obj = self.to_short_string(op.obj);
-            let key = match op.key {
-                Key::Map(n) => n.to_owned(),
-                Key::Seq(n) => self.to_short_string(n),
-            };
-            let value: String = match op.op_type() {
-                OpType::Put(value) => format!("{}", value),
-                OpType::Make(obj) => format!("make({})", obj),
-                OpType::Increment(obj) => format!("inc({})", obj),
-                OpType::Delete => format!("del{}", 0),
-                OpType::MarkBegin(_, MarkData { name, value }) => {
-                    format!("mark({},{})", name, value)
+        /*
+                for op in self.ops.iter() {
+                    let id = self.to_short_string(op.id);
+                    let obj = self.to_short_string(op.obj);
+                    let key = match op.key {
+                        Key::Map(n) => n.to_owned(),
+                        Key::Seq(n) => self.to_short_string(n),
+                    };
+                    let value: String = match op.op_type() {
+                        OpType::Put(value) => format!("{}", value),
+                        OpType::Make(obj) => format!("make({})", obj),
+                        OpType::Increment(obj) => format!("inc({})", obj),
+                        OpType::Delete => format!("del{}", 0),
+                        OpType::MarkBegin(_, MarkData { name, value }) => {
+                            format!("mark({},{})", name, value)
+                        }
+                        OpType::MarkEnd(_) => "/mark".to_string(),
+                    };
+                    //let pred: Vec<_> = op.pred().map(|id| self.to_short_string(id)).collect();
+                    let succ: Vec<_> = op.succ().map(|id| self.to_short_string(id)).collect();
+                    let insert = match op.insert {
+                        true => "t",
+                        false => "f",
+                    };
+                    log!(
+                        //"  {:12} {:3} {:12} {:12} {:12} {:12?} {:12?}",
+                        "  {:12} {:3} {:12} {:12} {:12} {:12?}",
+                        id,
+                        insert,
+                        obj,
+                        key,
+                        value,
+                        //pred,
+                        succ
+                    );
                 }
-                OpType::MarkEnd(_) => "/mark".to_string(),
-            };
-            //let pred: Vec<_> = op.pred().map(|id| self.to_short_string(id)).collect();
-            let succ: Vec<_> = op.succ().map(|id| self.to_short_string(id)).collect();
-            let insert = match op.insert {
-                true => "t",
-                false => "f",
-            };
-            log!(
-                //"  {:12} {:3} {:12} {:12} {:12} {:12?} {:12?}",
-                "  {:12} {:3} {:12} {:12} {:12} {:12?}",
-                id,
-                insert,
-                obj,
-                key,
-                value,
-                //pred,
-                succ
-            );
-        }
+        */
     }
 
     /// Return a graphviz representation of the opset.

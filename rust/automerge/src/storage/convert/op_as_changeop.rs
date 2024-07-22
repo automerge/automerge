@@ -4,9 +4,10 @@ use std::borrow::Cow;
 
 use crate::{
     convert,
-    op_set2::{Key, MarkData, Op, OpSet, OpType, ScalarValue},
+    op_set2::{Key, MarkData, Op, OpBuilder2, OpSet, OpType, ScalarValue},
     storage::AsChangeOp,
-    types::{ActorId, OldMarkData, OpId},
+    types,
+    types::{ActorId, OldMarkData, OpId, Prop},
     value,
 };
 
@@ -18,8 +19,17 @@ pub(crate) fn op_as_actor_id<'a>(op: Op<'a>) -> OpWithMetadata<'a> {
     OpWithMetadata { op }
 }
 
+pub(crate) fn ob_as_actor_id<'a>(op_set: &'a OpSet, op: &'a OpBuilder2) -> ObWithMetadata<'a> {
+    ObWithMetadata { op, op_set }
+}
+
 pub(crate) struct OpWithMetadata<'a> {
     op: Op<'a>,
+}
+
+pub(crate) struct ObWithMetadata<'a> {
+    op: &'a OpBuilder2,
+    op_set: &'a OpSet,
 }
 
 impl<'a> OpWithMetadata<'a> {
@@ -70,6 +80,32 @@ impl<'a> Iterator for PredWithMetadata<'a> {
         if let Some(opid) = self.op.pred().nth(self.offset) {
             self.offset += 1;
             Some(OpIdWithMetadata::new(opid, self.op.op_set()))
+        } else {
+            None
+        }
+    }
+}
+
+pub(crate) struct PredWithMetadata2<'a> {
+    ops: &'a [OpId],
+    op_set: &'a OpSet,
+    offset: usize,
+}
+
+impl<'a> ExactSizeIterator for PredWithMetadata2<'a> {
+    fn len(&self) -> usize {
+        self.ops.len()
+    }
+}
+
+impl<'a> Iterator for PredWithMetadata2<'a> {
+    type Item = OpIdWithMetadata<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset < self.ops.len() {
+            let id = self.ops[self.offset];
+            self.offset += 1;
+            Some(OpIdWithMetadata::new(id, self.op_set))
         } else {
             None
         }
@@ -199,6 +235,72 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         if let OpType::MarkBegin(_, MarkData { name, .. }) = self.op.action() {
             Some(Cow::Owned(SmolStr::from(name)))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> AsChangeOp<'a> for ObWithMetadata<'a> {
+    type ActorId = &'a ActorId;
+    type OpId = OpIdWithMetadata<'a>;
+    type PredIter = PredWithMetadata2<'a>;
+
+    fn action(&self) -> u64 {
+        self.op.action.action().into()
+    }
+
+    fn insert(&self) -> bool {
+        self.op.insert
+    }
+
+    fn val(&self) -> Cow<'a, value::ScalarValue> {
+        match &self.op.action {
+            types::OpType::Make(..) | types::OpType::Delete | types::OpType::MarkEnd(..) => {
+                Cow::Owned(value::ScalarValue::Null)
+            }
+            types::OpType::Increment(i) => Cow::Owned(value::ScalarValue::Int(*i)),
+            types::OpType::Put(s) => Cow::Owned(s.clone()), // borrow
+            types::OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Owned(value.clone()),
+        }
+    }
+
+    fn obj(&self) -> convert::ObjId<Self::OpId> {
+        if self.op.obj.id.is_root() {
+            convert::ObjId::Root
+        } else {
+            convert::ObjId::Op(OpIdWithMetadata::new(*self.op.obj.id.opid(), self.op_set))
+        }
+    }
+
+    fn pred(&self) -> Self::PredIter {
+        Self::PredIter {
+            ops: &self.op.pred,
+            offset: 0,
+            op_set: self.op_set,
+        }
+    }
+
+    fn key(&self) -> convert::Key<'a, Self::OpId> {
+        match &self.op.prop {
+            Prop::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+            _ => panic!(),
+            //Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            //Key::Seq(ElemId(e)) => convert::Key::Elem(convert::ElemId::Op(
+            //  OpIdWithMetadata::new(e, self.op_set))),
+        }
+    }
+
+    fn expand(&self) -> bool {
+        matches!(
+            &self.op.action,
+            types::OpType::MarkBegin(true, _) | types::OpType::MarkEnd(true)
+        )
+    }
+
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        if let types::OpType::MarkBegin(_, OldMarkData { name, .. }) = &self.op.action {
+            Some(Cow::Borrowed(name))
         } else {
             None
         }

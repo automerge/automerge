@@ -34,7 +34,7 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpIter<'a> {
-    pub(super) index: usize,
+    pub(super) pos: usize,
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) id_counter: ColumnDataIter<'a, DeltaCursor>,
     pub(super) obj_id_actor: ColumnDataIter<'a, ActorCursor>,
@@ -92,10 +92,12 @@ impl<'a> OpIter<'a> {
         let mark_name = self.read_mark_name()?;
         let successors = self.read_successors()?;
         let op_set = self.op_set;
-        let index = self.index;
+        let pos = self.pos;
         let conflict = false;
-        self.index += 1;
+        let index = 0;
+        self.pos += 1;
         Ok(Some(Op {
+            pos,
             index,
             conflict,
             id,
