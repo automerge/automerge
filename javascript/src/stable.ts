@@ -85,8 +85,11 @@ import { stableConflictAt } from "./conflicts.js"
 export type ChangeOptions<T> = {
   /** A message which describes the changes */
   message?: string
-  /** The unix timestamp (in milliseconds) of the change (purely advisory, not used in conflict resolution), defaults to current timestamp */
-  time?: number
+  /**
+   * The unix timestamp (in milliseconds) of the change (purely advisory, not used in conflict resolution).
+   * When omitted it defaults to the current timestamp. When set to `undefined` no timestamp is used.
+   */
+  time?: number | undefined
   /** A callback which will be called to notify the caller of any changes to the document */
   patchCallback?: PatchCallback<T>
 }
@@ -527,8 +530,8 @@ function _change<T>(
     state.handle.isolate(scope)
     heads = scope
   }
-  if (options.time === undefined) {
-    options.time = new Date().getTime()
+  if (!("time" in options)) {
+    options.time = Date.now()
   }
   try {
     state.heads = heads
@@ -584,8 +587,8 @@ export function emptyChange<T>(
   if (typeof options === "string") {
     options = { message: options }
   }
-  if (options.time === undefined) {
-    options.time = new Date().getTime()
+  if (!("time" in options)) {
+    options.time = Date.now()
   }
 
   const state = _state(doc)
