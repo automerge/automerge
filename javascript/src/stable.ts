@@ -86,7 +86,7 @@ export type ChangeOptions<T> = {
   /** A message which describes the changes */
   message?: string
   /**
-   * The unix timestamp (in milliseconds) of the change (purely advisory, not used in conflict resolution).
+   * The unix timestamp (in seconds) of the change (purely advisory, not used in conflict resolution).
    * When omitted it defaults to the current timestamp. When set to `undefined` no timestamp is used.
    */
   time?: number | undefined
@@ -531,7 +531,7 @@ function _change<T>(
     heads = scope
   }
   if (!("time" in options)) {
-    options.time = Date.now()
+    options.time = Math.floor(Date.now() / 1000)
   }
   try {
     state.heads = heads
@@ -588,7 +588,7 @@ export function emptyChange<T>(
     options = { message: options }
   }
   if (!("time" in options)) {
-    options.time = Date.now()
+    options.time = Math.floor(Date.now() / 1000)
   }
 
   const state = _state(doc)

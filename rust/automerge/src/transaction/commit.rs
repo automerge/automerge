@@ -3,7 +3,7 @@
 pub struct CommitOptions {
     /// A message which describes the commit
     pub message: Option<String>,
-    /// The unix timestamp (in milliseconds) of the commit (purely advisory, not used in conflict resolution)
+    /// The unix timestamp (in seconds) of the commit (purely advisory, not used in conflict resolution)
     pub time: Option<i64>,
 }
 

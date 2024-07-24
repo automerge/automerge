@@ -9,12 +9,14 @@ describe("Automerge", () => {
   describe("change", () => {
     it("should default to current timestamp", () => {
       let doc = Automerge.init<{ answer: number }>()
-      const time = Date.now()
+      const now = Date.now()
+      const time = Math.floor(now / 1000)
       doc = Automerge.change(doc, d => (d.answer = 42))
       const change = getLastLocalChange(doc)
       assert.ok(change)
       const decoded = decodeChange(change)
       assert.equal(decoded.time, time)
+      assert.notEqual(decoded.time, now)
     })
     it("should allow user provided timestamp", () => {
       let doc = Automerge.init<{ answer: number }>()
@@ -37,12 +39,14 @@ describe("Automerge", () => {
   describe("emptyChange", () => {
     it("should default to current timestamp", () => {
       let doc = Automerge.init()
-      const time = Date.now()
+      const now = Date.now()
+      const time = Math.floor(now / 1000)
       doc = Automerge.emptyChange(doc)
       const change = getLastLocalChange(doc)
       assert.ok(change)
       const decoded = decodeChange(change)
       assert.equal(decoded.time, time)
+      assert.notEqual(decoded.time, now)
     })
     it("should allow user provided timestamp", () => {
       let doc = Automerge.init()
