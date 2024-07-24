@@ -417,17 +417,11 @@ pub unsafe extern "C" fn AMgetCursor(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
-    match heads.as_ref() {
-        None => {
-            return to_result(doc.get_cursor(obj_id, position, None));
-        }
+    return match heads.as_ref() {
+        None => to_result(doc.get_cursor(obj_id, position, None)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
-            Ok(heads) => {
-                return to_result(doc.get_cursor(obj_id, position, Some(heads.as_slice())));
-            }
-            Err(e) => {
-                return AMresult::error(&e.to_string()).into();
-            }
+            Ok(heads) => to_result(doc.get_cursor(obj_id, position, Some(heads.as_slice()))),
+            Err(e) => AMresult::error(&e.to_string()).into(),
         },
     };
 }
@@ -467,21 +461,13 @@ pub unsafe extern "C" fn AMgetCursorPosition(
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
     let cursor = to_cursor!(cursor);
-    match heads.as_ref() {
-        None => {
-            return to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), None));
-        }
+    return match heads.as_ref() {
+        None => to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), None)),
         Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
             Ok(heads) => {
-                return to_result(doc.get_cursor_position(
-                    obj_id,
-                    cursor.as_ref(),
-                    Some(heads.as_slice()),
-                ));
+                to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), Some(heads.as_slice())))
             }
-            Err(e) => {
-                return AMresult::error(&e.to_string()).into();
-            }
+            Err(e) => AMresult::error(&e.to_string()).into(),
         },
     };
 }
