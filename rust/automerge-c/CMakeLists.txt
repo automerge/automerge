@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-project(automerge-c VERSION 0.2.2
+project(automerge-c VERSION 0.3.0
                     LANGUAGES C
                     DESCRIPTION "C bindings for the Automerge Rust library.")
 
