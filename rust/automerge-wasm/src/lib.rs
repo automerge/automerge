@@ -58,10 +58,6 @@ macro_rules! log {
     };
 }
 
-#[cfg(feature = "wee_alloc")]
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 /// How text is represented in materialized objects on the JS side
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[wasm_bindgen]
