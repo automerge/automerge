@@ -893,6 +893,22 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = getDecodedChangeByHash)]
+    pub fn get_decoded_change_by_hash(
+        &mut self,
+        hash: JsValue,
+    ) -> Result<JsValue, error::GetDecodedChangeByHash> {
+        let hash = JS(hash).try_into()?;
+        let change = self.doc.get_change_by_hash(&hash);
+        if let Some(c) = change {
+            let change: am::ExpandedChange = c.decode();
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            Ok(change.serialize(&serializer)?)
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
     #[wasm_bindgen(js_name = getChangesAdded)]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
         let changes = self.doc.get_changes_added(&mut other.doc);
@@ -1802,6 +1818,20 @@ pub mod error {
 
     impl From<GetSpans> for JsValue {
         fn from(e: GetSpans) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetDecodedChangeByHash {
+        #[error(transparent)]
+        BadChangeHash(#[from] super::interop::error::BadChangeHash),
+        #[error(transparent)]
+        SerdeWasm(#[from] serde_wasm_bindgen::Error),
+    }
+
+    impl From<GetDecodedChangeByHash> for JsValue {
+        fn from(e: GetDecodedChangeByHash) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

@@ -1270,3 +1270,18 @@ export function topoHistoryTraversal(doc: Doc<any>): string[] {
   const state = _state(doc)
   return state.handle.topoHistoryTraversal()
 }
+
+/**
+ * Decode a change hash into the details of this change
+ *
+ * This should be considered a semi-stable API. We try not to change the
+ * encoding in backwards incompatible ways but we won't bump a major version if
+ * we do have to change it
+ */
+export function inspectChange(
+  doc: Doc<unknown>,
+  changeHash: string,
+): DecodedChange | null {
+  const state = _state(doc)
+  return state.handle.getDecodedChangeByHash(changeHash)
+}

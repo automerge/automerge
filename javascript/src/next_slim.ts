@@ -138,6 +138,7 @@ export {
   isWasmInitialized,
   hasHeads,
   topoHistoryTraversal,
+  inspectChange,
 } from "./stable.js"
 
 export type InitOptions<T> = {

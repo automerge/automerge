@@ -282,6 +282,7 @@ export class Automerge {
   applyChanges(changes: Change[]): void;
   getChanges(have_deps: Heads): Change[];
   getChangeByHash(hash: Hash): Change | null;
+  getDecodedChangeByHash(hash: Hash): DecodedChange | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
   getLastLocalChange(): Change | null;
