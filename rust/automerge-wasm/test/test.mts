@@ -2368,4 +2368,23 @@ describe('Automerge', () => {
       assert.deepStrictEqual(hashes, traversal)
     })
   })
+
+  describe("the getDecodedChangeByHash function", () => {
+    it("should return the change with the given heads", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      let hash = doc.topoHistoryTraversal()[0]
+      let change = doc.getDecodedChangeByHash(hash)!
+      assert.deepStrictEqual(change.hash, hash)
+      assert.deepStrictEqual(change.ops, [
+        {
+          "action": "set",
+          "key": "foo",
+          "obj": "_root",
+          "pred": [],
+          "value": "bar",
+        }
+      ])
+    })
+  })
 })

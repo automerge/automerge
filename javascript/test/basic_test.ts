@@ -841,8 +841,42 @@ describe("Automerge", () => {
 
       let hashes = [hash1, hash2, hash3]
       let topo = Automerge.topoHistoryTraversal(doc)
-      console.log(`topo ${topo}`)
       assert.deepStrictEqual(topo, hashes)
+    })
+  })
+
+  describe("the inspectChange function", () => {
+    it("should return a decoded representation of the change", () => {
+      let doc = Automerge.init<{ a: string | null }>({ actor: "aaaaaa" })
+      doc = Automerge.change(doc, { time: 123 }, d => (d.a = "a"))
+      let hash1 = Automerge.topoHistoryTraversal(doc)[0]
+
+      const change = Automerge.inspectChange(doc, hash1)
+      assert.deepStrictEqual(change, {
+        actor: "aaaaaa",
+        deps: [],
+        hash: hash1,
+        message: null,
+        ops: [
+          {
+            action: "makeText",
+            key: "a",
+            obj: "_root",
+            pred: [],
+          },
+          {
+            action: "set",
+            elemId: "_head",
+            insert: true,
+            obj: "1@aaaaaa",
+            pred: [],
+            value: "a",
+          },
+        ],
+        seq: 1,
+        startOp: 1,
+        time: 123,
+      })
     })
   })
 })
