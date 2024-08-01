@@ -139,6 +139,7 @@ export {
   hasHeads,
   topoHistoryTraversal,
   inspectChange,
+  stats,
 } from "./stable.js"
 
 export type InitOptions<T> = {

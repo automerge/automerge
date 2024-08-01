@@ -301,6 +301,8 @@ export class Automerge {
   applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
 
   topoHistoryTraversal(): Hash[];
+
+  stats(): {numChanges: number, numOps: number};
 }
 
 export interface JsSyncState {

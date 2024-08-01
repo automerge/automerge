@@ -2264,3 +2264,15 @@ fn has_our_changes() {
     }
     assert!(right.has_our_changes(&right_to_left));
 }
+
+#[test]
+fn stats_smoke_test() {
+    let mut doc = AutoCommit::new();
+    doc.put(&automerge::ROOT, "a", 1).unwrap();
+    doc.commit();
+    doc.put(&automerge::ROOT, "b", 2).unwrap();
+    doc.commit();
+    let stats = doc.stats();
+    assert_eq!(stats.num_changes, 2);
+    assert_eq!(stats.num_ops, 2);
+}
