@@ -1285,3 +1285,14 @@ export function inspectChange(
   const state = _state(doc)
   return state.handle.getDecodedChangeByHash(changeHash)
 }
+
+/**
+ * Return some internal statistics about the document
+ */
+export function stats(doc: Doc<unknown>): {
+  numChanges: number
+  numOps: number
+} {
+  const state = _state(doc)
+  return state.handle.stats()
+}

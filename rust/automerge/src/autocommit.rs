@@ -830,6 +830,10 @@ impl ReadDoc for AutoCommit {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn stats(&self) -> crate::read::Stats {
+        self.doc.stats()
+    }
 }
 
 impl Transactable for AutoCommit {

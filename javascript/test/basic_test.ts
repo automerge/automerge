@@ -879,4 +879,17 @@ describe("Automerge", () => {
       })
     })
   })
+
+  describe("the stats function", () => {
+    it("should return stats about the document", () => {
+      let doc = Automerge.init<{ a: number }>()
+      doc = Automerge.change(doc, d => (d.a = 1))
+      doc = Automerge.change(doc, d => (d.a = 2))
+      const stats = Automerge.stats(doc)
+      assert.deepStrictEqual(stats, {
+        numChanges: 2,
+        numOps: 2,
+      })
+    })
+  })
 })

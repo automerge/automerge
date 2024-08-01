@@ -1949,6 +1949,13 @@ impl ReadDoc for Automerge {
             .get(hash)
             .and_then(|index| self.history.get(*index))
     }
+
+    fn stats(&self) -> crate::read::Stats {
+        crate::read::Stats {
+            num_changes: self.history.len() as u64,
+            num_ops: self.ops.len() as u64,
+        }
+    }
 }
 
 impl ReadDocInternal for Automerge {

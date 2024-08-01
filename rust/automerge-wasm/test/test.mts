@@ -2387,4 +2387,16 @@ describe('Automerge', () => {
       ])
     })
   })
+
+  describe("the stats function", () => {
+    it("should return the number of changes and the number of ops", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      doc.commit()
+      doc.put("/", "baz", "qux")
+      doc.commit()
+      const stats = doc.stats()
+      assert.deepStrictEqual(stats, { numChanges: 2, numOps: 2 })
+    })
+  })
 })

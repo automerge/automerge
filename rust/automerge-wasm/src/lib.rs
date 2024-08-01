@@ -1179,6 +1179,20 @@ impl Automerge {
             .collect::<Vec<_>>();
         AR::from(hashes).into()
     }
+
+    #[wasm_bindgen(js_name = stats)]
+    pub fn stats(&mut self) -> JsValue {
+        let stats = self.doc.stats();
+        let result = Object::new();
+        js_set(
+            &result,
+            "numChanges",
+            JsValue::from(stats.num_changes as usize),
+        )
+        .unwrap();
+        js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
+        result.into()
+    }
 }
 
 #[wasm_bindgen(js_name = create)]
