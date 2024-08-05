@@ -5,6 +5,7 @@ use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
 
+use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::storage::ColumnSpec;
@@ -114,6 +115,14 @@ impl OpBuilder2 {
     pub(crate) fn is_mark(&self) -> bool {
         self.action.is_mark()
     }
+
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        if encoding == ListEncoding::List {
+            1
+        } else {
+            TextValue::width(self.as_str()) // FASTER
+        }
+    }
 }
 
 impl OpLike for OpBuilder2 {
@@ -138,6 +147,9 @@ impl OpLike for OpBuilder2 {
     }
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(self.action.value().as_ref())
+    }
+    fn insert(&self) -> bool {
+        self.insert
     }
 }
 
@@ -248,7 +260,7 @@ impl<'a> Op<'a> {
     pub(crate) fn as_str(&self) -> &'a str {
         if let ScalarValue::Str(s) = &self.value {
             s
-        } else if self.is_mark() {
+        } else if self.action == Action::Mark {
             ""
         } else {
             "\u{fffc}"
@@ -259,7 +271,11 @@ impl<'a> Op<'a> {
         if encoding == ListEncoding::List {
             1
         } else {
-            TextValue::width(self.as_str()) // FASTER
+            if self.action == Action::Mark {
+                0
+            } else {
+                TextValue::width(self.as_str()) // FASTER
+            }
         }
     }
 
@@ -289,6 +305,17 @@ impl<'a> Op<'a> {
             Key::Seq(ElemId(self.id))
         } else {
             self.key
+        }
+    }
+
+    pub(crate) fn cursor(&self) -> Result<ElemId, AutomergeError> {
+        if self.insert {
+            Ok(ElemId(self.id))
+        } else {
+            match self.key {
+                Key::Seq(e) => Ok(e),
+                _ => Err(AutomergeError::InvalidCursorOp(self.exid())),
+            }
         }
     }
 

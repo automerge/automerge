@@ -21,6 +21,10 @@ impl<'a, I: Iterator<Item = Op<'a>>> IndexIter<'a, I> {
             encoding,
         }
     }
+
+    pub(crate) fn unwrap(self) -> I {
+        self.iter
+    }
 }
 
 impl<'a, I: Iterator<Item = Op<'a>>> Iterator for IndexIter<'a, I> {

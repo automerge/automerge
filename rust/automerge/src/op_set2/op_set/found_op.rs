@@ -39,7 +39,7 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
                 self.found = Some(OpsFound::default());
             }
             if let Some(found) = &mut self.found {
-                found.end_pos = op.pos;
+                found.end_pos = op.pos + 1;
                 if op.scope_to_clock(self.clock.as_ref(), self.iter.get_opiter()) {
                     // FIXME we dont need this b/c of ops.index
                     found.ops_pos.push(op.pos);

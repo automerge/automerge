@@ -8,12 +8,12 @@ use crate::exid::ExId;
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
-use crate::op_set2::{Action, Op, OpBuilder2, OpSet};
+use crate::op_set2::{Action, Key, Op, OpBuilder2, OpSet};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::convert::{ob_as_actor_id, ObWithMetadata};
 use crate::storage::Change as StoredChange;
-use crate::types::{Clock, Key, ListEncoding, ObjMeta, OpId, ScalarValue};
+use crate::types::{Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, ScalarValue};
 use crate::{op_tree::OpSetData, types::OpBuilder, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 
@@ -292,21 +292,51 @@ impl TransactionInner {
         OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
-    fn next_insert(&mut self, key: Key, value: ScalarValue) -> OpBuilder {
-        OpBuilder {
+    fn next_insert(
+        &mut self,
+        obj: ObjMeta,
+        pos: usize,
+        elemid: ElemId,
+        value: ScalarValue,
+    ) -> OpBuilder2 {
+        /*
+                OpBuilder {
+                    id: self.next_id(),
+                    action: OpType::Put(value),
+                    key,
+                    insert: true,
+                }
+        */
+        OpBuilder2 {
             id: self.next_id(),
+            obj,
+            pos,
+            prop: Prop::Seq(0),
             action: OpType::Put(value),
-            key,
+            elemid: Some(elemid),
             insert: true,
+            pred: vec![],
         }
     }
 
-    fn next_delete(&mut self, key: Key) -> OpBuilder {
-        OpBuilder {
+    fn next_delete(&mut self, obj: ObjMeta, elemid: ElemId, ops: &[Op<'_>]) -> OpBuilder2 {
+        /*
+                OpBuilder2 {
+                    id: self.next_id(),
+                    action: OpType::Delete,
+                    key,
+                    insert: false,
+                }
+        */
+        OpBuilder2 {
             id: self.next_id(),
+            obj,
+            pos: 0,
+            prop: Prop::Seq(0),
             action: OpType::Delete,
-            key,
+            elemid: Some(elemid),
             insert: false,
+            pred: ops.iter().map(|op| op.id).collect(),
         }
     }
 
@@ -402,7 +432,7 @@ impl TransactionInner {
 
         let marks = query.marks;
         let pos = query.pos;
-        let elemid = query.elemid;
+        let elemid = Some(query.elemid);
 
         let op = OpBuilder2 {
             id,
@@ -655,14 +685,25 @@ impl TransactionInner {
         let mut deleted: usize = 0;
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
-            let query = doc.ops().search(
-                &obj.id,
-                query::Nth::new(index, encoding, self.scope.clone(), doc.osd()),
-            );
+
+            let query = doc
+                .ops()
+                .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
+            /*
+                        let query = doc
+                            .ops()
+                            .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+            */
+            /*
+                        let query = doc.ops().search(
+                            &obj.id,
+                            query::Nth::new(index, encoding, self.scope.clone(), doc.osd()),
+                        );
+            */
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
-            let adjusted_index = query.index();
+            let adjusted_index = query.index;
             if adjusted_index < index {
                 del += (index - adjusted_index) as isize;
                 index = adjusted_index;
@@ -674,16 +715,22 @@ impl TransactionInner {
                 break;
             };
 
-            let query_key = query.key()?;
+            let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let ops_pos = query.ops_pos;
-            let op = self.next_delete(query_key);
-            let idx = doc
-                .ops_mut()
-                .load_with_range(obj.id, op, &mut self.idx_range);
+            let op = self.next_delete(obj, query_elemid, &query.ops);
 
-            doc.ops_mut().add_succ(&obj.id, &ops_pos, idx);
+            //doc.ops_mut().insert2(&op);
+            /*
+                        let idx = doc
+                            .ops_mut()
+                            .load_with_range(obj.id, op, &mut self.idx_range);
+
+            */
+            doc.ops_mut().add_succ(&obj.id, &ops_pos, op.id);
 
             deleted += step;
+
+            self.pending.push(op);
         }
 
         if deleted > 0 && patch_log.is_active() {
@@ -693,28 +740,39 @@ impl TransactionInner {
         // do the insert query for the first item and then
         // insert the remaining ops one after the other
         if !values.is_empty() {
+            let query = doc
+                .ops()
+                .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+            /*
             let query = doc.ops().search(
                 &obj.id,
                 query::InsertNth::new(index, encoding, self.scope.clone()),
             );
-            let mut pos = query.pos();
-            let mut key = query.key()?;
-            let marks = query.marks(doc.osd());
+            */
+            let mut pos = query.pos;
+            let mut elemid = query.elemid;
+            let marks = query.marks;
             let mut cursor = index;
             let mut width = 0;
 
             for v in &values {
-                let op = self.next_insert(key, v.clone());
+                let op = self.next_insert(obj, pos, elemid, v.clone());
 
-                key = op.id.into();
+                elemid = ElemId(op.id);
 
-                let idx = doc
-                    .ops_mut()
-                    .load_with_range(obj.id, op, &mut self.idx_range);
-                doc.ops_mut().insert(pos, &obj.id, idx);
+                doc.ops_mut().insert2(&op);
 
-                width = idx.as_op(doc.osd()).width(encoding);
+                width = op.width(encoding);
+                /*
+                                let idx = doc
+                                    .ops_mut()
+                                    .load_with_range(obj.id, op, &mut self.idx_range);
+                                doc.ops_mut().insert(pos, &obj.id, idx);
+
+                                width = idx.as_op(doc.osd()).width(encoding);
+                */
                 cursor += width;
+                self.pending.push(op);
                 pos += 1;
             }
 

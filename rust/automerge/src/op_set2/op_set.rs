@@ -16,7 +16,7 @@ use crate::AutomergeError;
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::{Op, OpBuilder2, SuccCursors};
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{Action, ActorIdx, OpType, ScalarValue, Value};
+use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue, Value};
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
     ValueMeta,
@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 mod found_op;
 mod index_iter;
+mod insert;
 mod keys;
 mod list_range;
 mod map_range;
@@ -48,6 +49,7 @@ pub use values::Values;
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use index_iter::IndexIter;
+pub(crate) use insert::InsertQuery;
 pub(crate) use keys::{KeyIter, KeyOpIter};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::OpIter;
@@ -111,8 +113,8 @@ impl OpSet {
         todo!() // READ
     }
 
-    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpIdx) {
-        todo!() // TX
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpId) {
+        //todo!() // TX
     }
 
     pub(crate) fn parent_object(
@@ -190,6 +192,33 @@ impl OpSet {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
 
+    pub(crate) fn seek_to_nth(
+        &self,
+        obj: &ObjId,
+        index: usize,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+    ) -> Option<usize> {
+        //todo!()
+        let mut iter = self
+            .iter_obj(obj)
+            .visible(clock)
+            .marks()
+            .top_ops()
+            .index(encoding);
+        if index == 0 {
+            None
+        } else {
+            while let Some(op) = iter.next() {
+                if op.index >= index {
+                    let _ = iter.unwrap();
+                    return None;
+                }
+            }
+            None
+        }
+    }
+
     pub(crate) fn query_insert_at(
         &self,
         obj: &ObjId,
@@ -197,18 +226,14 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        //let query = doc.ops().query_insert_at(&obj.id, index, encoding, self.scope.clone())?
-        let query = self
-            .iter_obj(obj)
-            .visible(clock)
-            .marks()
-            .top_ops()
-            .index(encoding);
-        Ok(QueryNth {
-            pos: 0,
-            marks: None,
-            elemid: None,
-        })
+        InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
+        /*
+                Ok(QueryNth {
+                    pos,
+                    marks,
+                    elemid,
+                })
+        */
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -235,6 +260,7 @@ impl OpSet {
         let ops = iter.visible(clock.cloned()).collect::<Vec<_>>();
         let ops_pos = ops.iter().map(|op| op.pos).collect::<Vec<_>>();
         OpsFound {
+            index: 0,
             ops,
             ops_pos,
             end_pos,
@@ -251,14 +277,17 @@ impl OpSet {
         let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut len = 0;
         let mut end_pos = 0;
-        for ops in iter {
-            len += ops.width(encoding);
-            if len > index {
+        for mut ops in iter {
+            let width = ops.width(encoding);
+            if len + width > index {
+                ops.index = len;
                 return ops;
             }
+            len += width;
             end_pos = ops.end_pos;
         }
         OpsFound {
+            index,
             ops: vec![],
             ops_pos: vec![],
             end_pos,
@@ -607,7 +636,7 @@ pub(crate) struct Parent {
 pub(crate) struct QueryNth {
     pub(crate) marks: Option<Arc<MarkSet>>,
     pub(crate) pos: usize,
-    pub(crate) elemid: Option<ElemId>,
+    pub(crate) elemid: ElemId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -619,6 +648,7 @@ pub(crate) struct FoundOpId<'a> {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct OpsFound<'a> {
+    pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) end_pos: usize,
@@ -627,6 +657,10 @@ pub(crate) struct OpsFound<'a> {
 impl<'a> OpsFound<'a> {
     fn width(&self, encoding: ListEncoding) -> usize {
         self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
+    }
+
+    pub(crate) fn elemid(&self) -> Option<ElemId> {
+        self.ops.last().and_then(|o| o.cursor().ok())
     }
 }
 
@@ -653,9 +687,7 @@ pub(super) trait OpLike {
     fn elemid(&self) -> Option<ElemId>;
     fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
     fn meta_value(&self) -> ValueMeta;
-    fn insert(&self) -> bool {
-        false
-    }
+    fn insert(&self) -> bool;
     fn expand(&self) -> bool {
         false
     }
@@ -687,15 +719,28 @@ impl Columns {
         let mut obj_a = self.get_actor(OBJ_ID_ACTOR_COL_SPEC);
         let mut obj_c = self.get_integer(OBJ_ID_COUNTER_COL_SPEC);
         let mut key_str = self.get_str(KEY_STR_COL_SPEC);
+        let mut key_a = self.get_actor(KEY_ACTOR_COL_SPEC);
+        let mut key_c = self.get_delta_integer(KEY_COUNTER_COL_SPEC);
         let mut meta = self.get_value_meta(VALUE_META_COL_SPEC);
         let mut value = self.get_value(VALUE_COL_SPEC);
-        log!(":: ida  idc  obja objc key      value ");
+        let mut insert = self.get_boolean(INSERT_COL_SPEC);
+        log!(":: id       obj    key      ins    value ");
         while true {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
             let obj_a = fmt(obj_a.next());
             let obj_c = fmt(obj_c.next());
-            let key = fmt(key_str.next());
+            let insert = insert.next();
+            let insert = if insert == Some(Some(true)) { "t" } else { "f" };
+            let key_s = key_str.next();
+            let key_a = key_a.next();
+            let key_c = key_c.next();
+            let key = match (key_s, key_a, key_c) {
+                (Some(Some(s)), Some(None), Some(None)) => format!("{}", s),
+                (Some(None), Some(Some(a)), Some(Some(c))) => format!("({},{})", a, c),
+                (Some(None), Some(None), Some(Some(c))) => "(HEAD)".into(),
+                (s, a, c) => format!("({},{},{})", fmt(s), fmt(a), fmt(c)),
+            };
             let m = meta.next();
             let v = if let Some(Some(m)) = m {
                 let raw_data = value.read_next(m.length()).unwrap();
@@ -707,12 +752,11 @@ impl Columns {
                 break;
             }
             log!(
-                ":: {:4} {:4} {:4} {:4} {:8} {}",
-                id_a,
-                id_c,
-                obj_a,
-                obj_c,
+                ":: {:7} {:7} {:8} {:3} {}",
+                format!("({},{})", id_a, id_c),
+                format!("({},{})", obj_a, obj_c),
                 key,
+                insert,
                 v
             );
         }
@@ -766,7 +810,10 @@ impl Columns {
                         let value = match *spec {
                             ID_ACTOR_COL_SPEC => Some(ActorIdx(op.id().actor() as u64)),
                             OBJ_ID_ACTOR_COL_SPEC => Some(ActorIdx(op.obj().actor() as u64)),
-                            KEY_ACTOR_COL_SPEC => op.elemid().map(|e| ActorIdx(e.actor() as u64)),
+                            KEY_ACTOR_COL_SPEC => match op.elemid() {
+                                Some(e) if !e.is_head() => Some(ActorIdx(e.actor() as u64)),
+                                _ => None,
+                            },
                             _ => None,
                         };
                         //log!("::SPLICE ACTOR pos={} {:?} {:?}", pos, *spec, value);
@@ -805,7 +852,7 @@ impl Columns {
                             EXPAND_COL_SPEC => Some(op.expand()),
                             _ => None,
                         };
-                        //log!("::SPLICE BOOL pos={} {:?} {:?}", pos, *spec, value);
+                        log!("::SPLICE BOOL pos={} {:?} {:?}", pos, *spec, value);
                         c.splice(pos, vec![value])
                     }
                     Column::Action(c) => {

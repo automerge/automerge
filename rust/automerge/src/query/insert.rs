@@ -89,10 +89,10 @@ impl<'a> InsertNth<'a> {
         }
     }
 
-    pub(crate) fn marks(&self, osd: &OpSetData) -> Option<Arc<MarkSet>> {
+    pub(crate) fn marks(&self) -> Option<Arc<MarkSet>> {
         /*
                 match self.marks {
-                    QueriedMarks::FromQuery(ref state) => MarkSet::from_query_state(state, osd),
+                    QueriedMarks::FromQuery(ref state) => MarkSet::from_query_state(state),
                     QueriedMarks::FromLastSeen(ref rt) => Some(rt.clone()),
                 }
         */

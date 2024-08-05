@@ -46,7 +46,7 @@ describe('Automerge', () => {
       assert.deepEqual(result, undefined)
     })
 
-    it.only('should be able to set and get a simple value', () => {
+    it('should be able to set and get a simple value', () => {
       const doc: Automerge = create({ actor: "aabbcc"})
       const root = "_root"
       let result
@@ -153,7 +153,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.length(sublist), 4)
     })
 
-    it('lists have insert, set, splice, and push ops', () => {
+    it.only('lists have insert, set, splice, and push ops', () => {
       const doc = create()
       const root = "_root"
 

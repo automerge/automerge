@@ -1,3 +1,4 @@
+use crate::exid::ExId;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
@@ -36,6 +37,8 @@ pub enum AutomergeError {
     InvalidSeq(u64),
     #[error("cursor {0} is invalid")]
     InvalidCursor(Cursor),
+    #[error("op {0} has no valid cursor")]
+    InvalidCursorOp(ExId),
     #[error("cursor format is invalid")]
     InvalidCursorFormat,
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]

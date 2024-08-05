@@ -1,0 +1,177 @@
+use crate::{
+    error::AutomergeError,
+    marks::{MarkSet, MarkStateMachine, RichTextQueryState},
+    types::{Clock, ElemId, ListEncoding, OpId},
+};
+
+use super::{Action, MarkData, Op, OpIter, OpQueryTerm, OpType, QueryNth};
+
+use std::fmt::Debug;
+use std::sync::Arc;
+
+#[derive(Clone, Debug)]
+pub(crate) struct InsertQuery<'a> {
+    iter: OpIter<'a>,
+    //marks: MarkStateMachine<'a>,
+    marks: RichTextQueryState<'a>,
+    encoding: ListEncoding,
+    clock: Option<Clock>,
+    candidates: Vec<Loc>,
+    last_visible_cursor: Option<ElemId>,
+    target: usize,
+}
+
+impl<'a> InsertQuery<'a> {
+    pub(crate) fn new(
+        iter: OpIter<'a>,
+        target: usize,
+        encoding: ListEncoding,
+        clock: Option<Clock>,
+    ) -> Self {
+        let marks = RichTextQueryState::default();
+        let mut candidates = vec![];
+        let last_visible_cursor = None;
+        if target == 0 {
+            candidates.push(Loc::new(iter.pos, ElemId::head()));
+        };
+        Self {
+            iter,
+            marks,
+            encoding,
+            target,
+            candidates,
+            clock,
+            last_visible_cursor,
+        }
+    }
+
+    fn identify_valid_insertion_spot(&mut self, op: Op<'a>, cursor: ElemId) {
+        // first insert we see after list_state.done()
+        if op.insert && self.candidates.is_empty() {
+            if let Some(cursor) = self.last_visible_cursor {
+                self.candidates.push(Loc::new(op.pos, cursor))
+            }
+        }
+
+        // sticky marks
+        if !self.candidates.is_empty() {
+            // if we find a begin/end pair - ignore them
+            if let OpType::MarkEnd(_) = op.action() {
+                if let Some(pos) = self.candidates.iter().position(|loc| loc.matches(&op)) {
+                    // mark points between begin and end are invalid
+                    self.candidates.truncate(pos);
+                    return;
+                }
+            }
+            if matches!(
+                op.action(),
+                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
+            ) {
+                self.candidates.push(Loc::mark(op.pos + 1, cursor, op.id));
+            }
+        }
+    }
+
+    // this query is particularly tricky b/c
+    // we care about marks, visible ops, and non-visible ops all at once
+
+    pub(crate) fn resolve(&mut self) -> Result<QueryNth, AutomergeError> {
+        let mut last_width = None;
+        let mut index = 0;
+        let mut done = index >= self.target;
+        let mut pos = 0;
+        let mut post_marks = vec![];
+        log!("resolve InsertQuery target={}", self.target);
+        while let Some(mut op) = self.iter.next() {
+            log!(":: op={:?} index={} last={:?}", op.id, index, last_width);
+            let visible = op.scope_to_clock(self.clock.as_ref(), &self.iter);
+            if op.insert {
+                // this is the one place where we need non-visible ops
+                if let Some(last) = last_width.take() {
+                    index += last;
+                    done = index >= self.target;
+                }
+            }
+            log!(":: index={} visble={}, done={}", index, visible, done);
+            if visible {
+                let cursor = op.cursor().unwrap();
+                if !done {
+                    self.marks.process(op, None);
+                    if !op.is_mark() {
+                        self.last_visible_cursor = Some(cursor);
+                        last_width = Some(op.width(self.encoding));
+                        log!(":: :: not done isnt mark");
+                    }
+                } else {
+                    self.identify_valid_insertion_spot(op, cursor);
+                    log!(":: :: done candidates={}", self.candidates.len());
+                    if op.action == Action::Mark {
+                        post_marks.push(op);
+                    } else if !self.candidates.is_empty() {
+                        break;
+                    }
+                }
+            }
+            pos = op.pos;
+        }
+        log!(":: no more ops");
+
+        if let Some(w) = last_width.take() {
+            index += w;
+        }
+
+        if let Some(loc) = self.candidates.pop() {
+            // process all the marks before the final pos
+            for op in post_marks {
+                if op.pos < loc.pos {
+                    self.marks.process(op, None);
+                }
+            }
+            log!(":: candidates cursor {:?}", loc.cursor);
+            Ok(QueryNth {
+                pos: loc.pos,
+                marks: MarkSet::from_query_state(&self.marks),
+                elemid: loc.cursor,
+            })
+        } else if let Some(cursor) = self.last_visible_cursor {
+            log!(":: final cursor {:?}", cursor);
+            //Ok(Loc::new(pos + 1, cursor))
+            Ok(QueryNth {
+                pos: pos + 1,
+                marks: MarkSet::from_query_state(&self.marks),
+                elemid: cursor,
+            })
+        } else {
+            Err(AutomergeError::InvalidIndex(self.target))
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Loc {
+    pub(crate) cursor: ElemId,
+    pub(crate) pos: usize,
+    id: Option<OpId>,
+}
+
+impl Loc {
+    fn new(pos: usize, cursor: ElemId) -> Self {
+        Loc {
+            cursor,
+            pos,
+            id: None,
+        }
+    }
+
+    fn mark(pos: usize, cursor: ElemId, id: OpId) -> Self {
+        Loc {
+            cursor,
+            pos,
+            id: Some(id),
+        }
+    }
+
+    fn matches(&self, op: &Op<'_>) -> bool {
+        self.id == Some(op.id.prev())
+    }
+}

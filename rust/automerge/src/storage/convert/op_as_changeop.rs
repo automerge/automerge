@@ -7,7 +7,7 @@ use crate::{
     op_set2::{Key, MarkData, Op, OpBuilder2, OpSet, OpType, ScalarValue},
     storage::AsChangeOp,
     types,
-    types::{ActorId, OldMarkData, OpId, Prop},
+    types::{ActorId, ElemId, OldMarkData, OpId, Prop},
     value,
 };
 
@@ -282,12 +282,14 @@ impl<'a> AsChangeOp<'a> for ObWithMetadata<'a> {
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match &self.op.prop {
-            Prop::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
-            _ => panic!(),
-            //Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            //Key::Seq(ElemId(e)) => convert::Key::Elem(convert::ElemId::Op(
-            //  OpIdWithMetadata::new(e, self.op_set))),
+        match (&self.op.prop, self.op.elemid) {
+            (Prop::Map(k), None) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+            (_, Some(e)) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            (_, Some(ElemId(id))) => {
+                let id = OpIdWithMetadata::new(id, self.op_set);
+                convert::Key::Elem(convert::ElemId::Op(id))
+            }
+            (_, _) => panic!(),
         }
     }
 

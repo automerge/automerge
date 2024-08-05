@@ -3,7 +3,7 @@ use crate::{
     types::Clock,
 };
 
-use super::{Action, Op, OpIter, OpQueryTerm, OpType};
+use super::{Action, MarkData, Op, OpIter, OpQueryTerm, OpType};
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -26,16 +26,15 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(op) = self.iter.next() {
-            match op.action() {
-                OpType::MarkBegin(_, data) => {
-                    self.marks.mark_begin(op.id, data);
+            if op.action == Action::Mark {
+                if let Some(name) = op.mark_name {
+                    let value = op.value;
+                    self.marks.mark_begin(op.id, MarkData { name, value });
                     continue;
-                }
-                OpType::MarkEnd(_) => {
+                } else {
                     self.marks.mark_end(op.id);
                     continue;
                 }
-                _ => (),
             }
             return Some(op);
         }

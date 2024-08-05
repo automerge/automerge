@@ -154,7 +154,7 @@ impl<'a> OpIter<'a> {
             }
             (None, Some(None), None | Some(None)) => Err(ReadOpError::MissingKey),
             other => {
-                println!("InvalidKey: {:?}", other);
+                log!("InvalidKey: {:?}", other);
                 Err(ReadOpError::InvalidKey)
             }
         }
