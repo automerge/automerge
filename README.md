@@ -55,7 +55,7 @@ not well documented. We will be returning to this over the next few months but
 for now you will need to be comfortable reading the tests and asking questions
 to figure out how to use it. If you are looking to build rust applications which
 use automerge you may want to look into
-[autosurgeon](https://github.com/alexjg/autosurgeon)
+[autosurgeon](https://github.com/automerge/autosurgeon)
 
 ## Repository Organisation
 
