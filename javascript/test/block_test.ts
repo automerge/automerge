@@ -1,9 +1,10 @@
 import * as assert from "assert"
 import { next as Automerge } from "../src/index.js"
-import { mismatched_heads } from "./helpers.js"
+import { mismatched_heads, simplePatch } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
 import { inspect } from "util"
 import { RawString } from "../src/raw_string.js"
+import { simplePatches } from "./helpers.js"
 
 function pathsEqual(a: Automerge.Prop[], b: Automerge.Prop[]) {
   if (a.length !== b.length) return false
@@ -28,7 +29,7 @@ describe("Automerge", () => {
 
       assert.deepStrictEqual(Automerge.block(doc, ["text"], 3), block)
 
-      assert.deepStrictEqual(callbacks[0][0], {
+      assert.deepStrictEqual(simplePatches(callbacks[0])[0], {
         action: "insert",
         path: ["text", 3],
         values: [{}],
@@ -41,7 +42,7 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, { patchCallback }, d => {
         Automerge.splice(d, ["text"], 7, 0, "ADD")
       })
-      assert.deepStrictEqual(callbacks[1], [
+      assert.deepStrictEqual(simplePatches(callbacks[1]), [
         { action: "splice", path: ["text", 7], value: "ADD" },
       ])
       doc = Automerge.change(doc, { patchCallback }, d => {
@@ -127,7 +128,7 @@ describe("Automerge", () => {
       ])
     })
 
-    it("emits insert patches with RawString for attribute updatese", () => {
+    it("emits insert patches with RawString for attribute updates", () => {
       let doc = Automerge.from({ text: "" })
       doc = Automerge.change(doc, d => {
         Automerge.splitBlock(d, ["text"], 0, {
@@ -162,7 +163,7 @@ describe("Automerge", () => {
         },
       )
 
-      assert.deepStrictEqual(patches, [
+      assert.deepStrictEqual(simplePatches(patches), [
         {
           action: "insert",
           path: ["text", 0, "parents", 0],

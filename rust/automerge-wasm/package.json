@@ -43,6 +43,12 @@
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "mocha --loader=ts-node/esm test/**/*.mts"
   },
+  "mocha": {
+    "extension": ["mts"],
+    "require": "ts-node/register",
+    "spec": "test/**/*.mts",
+    "exclude": "test/helpers/*"
+  },
   "devDependencies": {
     "@types/assert": "^1.5.10",
     "@types/mocha": "^10.0.1",

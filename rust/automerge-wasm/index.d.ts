@@ -1,5 +1,6 @@
 export type Actor = string;
 export type ObjID = string;
+export type OpID = string;
 export type Change = Uint8Array;
 export type SyncMessage = Uint8Array;
 export type Prop = string | number;
@@ -14,37 +15,23 @@ export type Span = { type: "text", value: string, "marks"?: MarkSet }
   | { type: "block", value: {[key: string]: MaterializeValue} }
 export type ListObjType = Array<ObjType | Value>
 export type ObjType = string | ListObjType | MapObjType
-export type FullValue =
-  ["str", string] |
-  ["int", number] |
-  ["uint", number] |
-  ["f64", number] |
-  ["boolean", boolean] |
-  ["timestamp", Date] |
-  ["counter", number] |
-  ["bytes", Uint8Array] |
-  ["null", null] |
-  ["map", ObjID] |
-  ["list", ObjID] |
-  ["text", ObjID] |
-  ["table", ObjID]
+
+export type TaggedValue = 
+  { datatype: "str", value: string, opid: OpID } |
+  { datatype: "int", value: number, opid: OpID } |
+  { datatype: "uint", value: number, opid: OpID } |
+  { datatype: "f64", value: number, opid: OpID } |
+  { datatype: "boolean", value: boolean, opid: OpID } |
+  { datatype: "timestamp", value: Date, opid: OpID } |
+  { datatype: "counter", value: number, opid: OpID } |
+  { datatype: "bytes", value: Uint8Array, opid: OpID } |
+  { datatype: "null", value: null, opid: OpID } |
+  { datatype: "map", value: ObjID, opid: OpID } |
+  { datatype: "list", value: ObjID, opid: OpID } |
+  { datatype: "text", value: ObjID, opid: OpID } |
+  { datatype: "table", value: ObjID, opid: OpID }
 
 export type Cursor = string;
-
-export type FullValueWithId =
-  ["str", string, ObjID ] |
-  ["int", number, ObjID ] |
-  ["uint", number, ObjID ] |
-  ["f64", number, ObjID ] |
-  ["boolean", boolean, ObjID ] |
-  ["timestamp", Date, ObjID ] |
-  ["counter", number, ObjID ] |
-  ["bytes", Uint8Array, ObjID ] |
-  ["null", null, ObjID ] |
-  ["map", ObjID ] |
-  ["list", ObjID] |
-  ["text", ObjID] |
-  ["table", ObjID]
 
 export enum ObjTypeName {
   list = "list",
@@ -109,6 +96,7 @@ export type PutPatch = {
   action: 'put'
   path: Prop[],
   value: PatchValue,
+  taggedValue: TaggedValue,
   conflict?: boolean
 }
 
@@ -159,6 +147,7 @@ export type InsertPatch = {
   action: 'insert'
   path: Prop[],
   values: PatchValue[],
+  taggedValues: TaggedValue[],
   marks?: MarkSet,
   conflicts?: boolean[]
 }
@@ -239,9 +228,9 @@ export class Automerge {
 
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
-  getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
+  getWithType(obj: ObjID, prop: Prop, heads?: Heads): TaggedValue | null;
   // return all values in case of a conflict
-  getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
+  getAll(obj: ObjID, arg: Prop, heads?: Heads): TaggedValue[];
   objInfo(obj: ObjID, heads?: Heads): ObjInfo;
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;

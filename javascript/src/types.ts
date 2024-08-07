@@ -12,6 +12,8 @@ export type {
   Mark,
   MarkRange,
   MarkPatch,
+  UnmarkPatch,
+  ConflictPatch,
   Patch,
 } from "./wasm_types.js"
 

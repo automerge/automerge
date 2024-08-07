@@ -2,6 +2,7 @@
 import { describe, it } from 'mocha';
 import assert from 'assert'
 import { create } from '../nodejs/automerge_wasm.cjs'
+import { simplePatches } from "./helpers/patches.mjs"
 
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
 
@@ -99,7 +100,7 @@ describe('Automerge', () => {
       const doc1 = create()
       doc1.putObject("/", "list", "abc");
       const patches = doc1.diffIncremental()
-      assert.deepEqual( patches, [
+      assert.deepEqual(simplePatches( patches), [
         { action: 'put', path: [ 'list' ], value: "" },
         { action: 'splice', path: [ 'list', 0 ], value: 'abc' }])
     })

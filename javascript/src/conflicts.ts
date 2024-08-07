@@ -53,16 +53,16 @@ function conflictAt<T extends Target>(
     return
   }
   const result: ConflictsF<T> = {}
-  for (const fullVal of values) {
-    switch (fullVal[0]) {
+  for (const { datatype, value, opid } of values) {
+    switch (datatype) {
       case "map":
-        result[fullVal[1]] = mapProxy<T>(context, fullVal[1], textV2, [prop])
+        result[value] = mapProxy<T>(context, value, textV2, [prop])
         break
       case "list":
-        result[fullVal[1]] = listProxy<T>(context, fullVal[1], textV2, [prop])
+        result[value] = listProxy<T>(context, value, textV2, [prop])
         break
       case "text":
-        result[fullVal[1]] = handleText(context, fullVal[1] as ObjID)
+        result[value] = handleText(context, value as ObjID)
         break
       case "str":
       case "uint":
@@ -71,16 +71,16 @@ function conflictAt<T extends Target>(
       case "boolean":
       case "bytes":
       case "null":
-        result[fullVal[2]] = fullVal[1] as ValueType<T>
+        result[opid] = value as ValueType<T>
         break
       case "counter":
-        result[fullVal[2]] = new Counter(fullVal[1]) as ValueType<T>
+        result[opid] = new Counter(value) as ValueType<T>
         break
       case "timestamp":
-        result[fullVal[2]] = new Date(fullVal[1]) as ValueType<T>
+        result[opid] = new Date(value) as ValueType<T>
         break
       default:
-        throw RangeError(`datatype ${fullVal[0]} unimplemented`)
+        throw RangeError(`datatype ${datatype} unimplemented`)
     }
   }
   return result

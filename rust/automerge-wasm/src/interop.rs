@@ -1508,6 +1508,25 @@ pub(crate) fn export_patches<I: IntoIterator<Item = Patch>>(
         .collect()
 }
 
+pub(crate) fn make_tagged_value(
+    datatype: Datatype,
+    value: &JsValue,
+    id: &automerge::ObjId,
+) -> Result<JsValue, error::Export> {
+    let result = Object::new();
+    js_set(&result, "datatype", datatype.to_string())?;
+    let value = match datatype {
+        Datatype::List => &JsValue::from(id.to_string()),
+        Datatype::Map => &JsValue::from(id.to_string()),
+        Datatype::Text => &JsValue::from(id.to_string()),
+        Datatype::Table => &JsValue::from(id.to_string()),
+        _ => value,
+    };
+    js_set(&result, "value", value)?;
+    js_set(&result, "opid", JsValue::from(id.to_string()))?;
+    Ok(result.into())
+}
+
 fn export_patch(
     externals: &HashMap<Datatype, ExternalTypeConstructor>,
     p: Patch,
@@ -1524,7 +1543,13 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
 
+            let id = value.1;
             let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            js_set(
+                &result,
+                "taggedValue",
+                make_tagged_value(datatype, &value, &id)?,
+            )?;
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1545,7 +1570,13 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
 
+            let id = value.1;
             let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            js_set(
+                &result,
+                "taggedValue",
+                make_tagged_value(datatype, &value, &id)?,
+            )?;
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1559,6 +1590,14 @@ fn export_patch(
         }
         PatchAction::Insert { index, values, .. } => {
             let conflicts = values.iter().map(|v| v.2).collect::<Vec<_>>();
+            let full_values = values
+                .iter()
+                .map(|v| {
+                    let id = &v.1;
+                    let (datatype, value) = alloc(&v.0, TextRepresentation::String);
+                    make_tagged_value(datatype, &value, id)
+                })
+                .collect::<Result<Array, _>>()?;
             let values = values
                 .iter()
                 .map(|v| {
@@ -1574,6 +1613,7 @@ fn export_patch(
             js_set(&result, "action", "insert")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
             js_set(&result, "values", values)?;
+            js_set(&result, "taggedValues", full_values)?;
             if conflicts.iter().any(|c| *c) {
                 js_set(
                     &result,

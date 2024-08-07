@@ -3,6 +3,7 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { create } from '../nodejs/automerge_wasm.cjs'
+import { simplePatches } from "./helpers/patches.mjs"
 
 describe('Automerge', () => {
   describe('diff', () => {
@@ -16,13 +17,13 @@ describe('Automerge', () => {
         let patches12 = doc1.diff(heads1,heads2);
         let patches21 = doc1.diff(heads2,heads1);
         let patches11 = doc1.diff(heads1,heads1);
-        assert.deepStrictEqual(patches12, [
+        assert.deepStrictEqual(simplePatches(patches12), [
           { action: "put", path: ["key1"], value: "value2" }
         ])
-        assert.deepStrictEqual(patches21, [
+        assert.deepStrictEqual(simplePatches(patches21), [
           { action: "put", path: ["key1"], value: "value1" }
         ])
-        assert.deepStrictEqual(patches11, [])
+        assert.deepStrictEqual(simplePatches(patches11), [])
     })
 
     it('it should be able to handle diffs in sub objects', ()=> {
@@ -36,15 +37,15 @@ describe('Automerge', () => {
         let patches12 = doc1.diff(heads1,heads2);
         let patches21 = doc1.diff(heads2,heads1);
         let patches11 = doc1.diff(heads1,heads1);
-        assert.deepStrictEqual(patches12, [
+        assert.deepStrictEqual(simplePatches(patches12), [
           { action: "del", path: ["list", 2 ]  },
           { action: "put", path: ["list", 2, "hello"], value: "everyone" }
         ])
-        assert.deepStrictEqual(patches21, [
+        assert.deepStrictEqual(simplePatches(patches21), [
           { action: "insert", path: ["list", 2 ], values: [2]  },
           { action: "put", path: ["list", 3, "hello"], value: "world" }
         ])
-        assert.deepStrictEqual(patches11, [])
+        assert.deepStrictEqual(simplePatches(patches11), [])
     })
     it('it should be able to handle text splices', ()=> {
         let doc1 = create();
@@ -148,7 +149,7 @@ describe('Automerge', () => {
       doc1.putObject("/map", "foo", { from: "doc1", other: 1 })
       let patches1 = doc1.diffIncremental();
       let heads1 = doc1.getHeads()
-      assert.deepStrictEqual(patches1, [
+      assert.deepStrictEqual(simplePatches(patches1), [
         { action: 'put', path: [ 'map', 'foo' ], value: {} },
         { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc1' },
         { action: 'put', path: [ 'map', 'foo', 'other' ], value: 1 }
@@ -158,7 +159,7 @@ describe('Automerge', () => {
       doc1.merge(doc2)
       let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
-      assert.deepStrictEqual(patches2, [
+      assert.deepStrictEqual(simplePatches(patches2), [
         { action: 'put', path: [ 'map', 'foo' ], conflict: true, value: {} },
         { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc2' },
         { action: 'put', path: [ 'map', 'foo', 'something' ], value: 2 }
@@ -167,7 +168,7 @@ describe('Automerge', () => {
       doc1.merge(doc2)
       let patches3 = doc1.diffIncremental();
       let heads3 = doc1.getHeads()
-      assert.deepStrictEqual(patches3, [
+      assert.deepStrictEqual(simplePatches(patches3), [
         { action: 'put', path: [ 'map', 'foo' ], value: {} },
         { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc1' },
         { action: 'put', path: [ 'map', 'foo', 'other' ], value: 10 }
@@ -184,7 +185,7 @@ describe('Automerge', () => {
       let heads1 = doc1.getHeads()
       doc1.putObject("/list", 1, { from: "doc1", other: 1 })
       let patches1 = doc1.diffIncremental();
-      assert.deepStrictEqual(patches1, [
+      assert.deepStrictEqual(simplePatches(patches1), [
         { action: 'put', path: [ 'list', 1 ], value: {} },
         { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc1' },
         { action: 'put', path: [ 'list', 1, 'other' ], value: 1 }
@@ -194,7 +195,7 @@ describe('Automerge', () => {
       doc1.merge(doc2)
       let patches2 = doc1.diffIncremental();
       let heads2 = doc1.getHeads()
-      assert.deepStrictEqual(patches2, [
+      assert.deepStrictEqual(simplePatches(patches2), [
         { action: 'put', path: [ 'list', 1 ], conflict: true, value: {} },
         { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc2' },
         { action: 'put', path: [ 'list', 1, 'something' ], value: 2 }
@@ -203,7 +204,7 @@ describe('Automerge', () => {
       doc1.merge(doc2)
       let patches3 = doc1.diffIncremental();
       let heads3 = doc1.getHeads()
-      assert.deepStrictEqual(patches3, [
+      assert.deepStrictEqual(simplePatches(patches3), [
         { action: 'put', path: [ 'list', 1 ], value: {} },
         { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc1' },
         { action: 'put', path: [ 'list', 1, 'other' ], value: 10 }
@@ -230,7 +231,7 @@ describe('Automerge', () => {
       doc1.merge(doc2)
 
       let patches = doc1.diff(heads1, doc1.getHeads())
-      assert.deepStrictEqual(patches, [{
+      assert.deepStrictEqual(simplePatches(patches), [{
           action: "insert",
           path: [ "list", 2 ],
           values: [ "B", "B", "A" ],

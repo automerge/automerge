@@ -1,6 +1,7 @@
 import { describe, it } from 'mocha';
 import assert from 'assert'
 import { create, Automerge, ObjID } from '../nodejs/automerge_wasm.cjs'
+import { simplePatches } from "./helpers/patches.mjs"
 
 describe('blocks', () => {
   describe("when splitting a block", () => {
@@ -237,7 +238,7 @@ describe('blocks', () => {
         ])
 
         const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
+        assert.deepStrictEqual(simplePatches(patches), [{
           action: "insert",
           path: ["text", 0, "parents", 1],
           values: [new RawString("someotherparent")]
@@ -252,7 +253,7 @@ describe('blocks', () => {
         ])
 
         const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
+        assert.deepStrictEqual(simplePatches(patches), [{
           action: "put",
           path: ["text", 0, "flavor"],
           value: new RawString("chocolate")
@@ -267,7 +268,7 @@ describe('blocks', () => {
         ])
 
         const patches = doc.diffIncremental();
-        assert.deepStrictEqual(patches, [{
+        assert.deepStrictEqual(simplePatches(patches), [{
           action: "put",
           path: ["text", 0, "parents", 0],
           value: new RawString("grandparent")
