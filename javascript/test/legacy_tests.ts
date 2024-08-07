@@ -1,7 +1,8 @@
 import * as assert from "assert"
 import { next as Automerge } from "../src/index.js"
-import { assertEqualsOneOf } from "./helpers.js"
+import { assertEqualsOneOf, simplePatch, SimplePatch } from "./helpers.js"
 import { decodeChange } from "./legacy/columnar.js"
+import { simplePatches } from "./helpers.js"
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@([0-9a-f][0-9a-f])*$/
@@ -333,7 +334,7 @@ describe("Automerge", () => {
 
       it("should call patchCallback if supplied", () => {
         const callbacks: Array<{
-          patches: Array<Automerge.Patch>
+          patches: Array<SimplePatch>
           before: Automerge.Doc<any>
           after: Automerge.Doc<any>
         }> = []
@@ -342,7 +343,7 @@ describe("Automerge", () => {
           {
             patchCallback: (patches, info) =>
               callbacks.push({
-                patches,
+                patches: simplePatches(patches),
                 before: info.before,
                 after: info.after,
               }),
@@ -373,13 +374,17 @@ describe("Automerge", () => {
 
       it("should call a patchCallback set up on document initialisation", () => {
         const callbacks: Array<{
-          patches: Array<Automerge.Patch>
+          patches: Array<SimplePatch>
           before: Automerge.Doc<any>
           after: Automerge.Doc<any>
         }> = []
         s1 = Automerge.init({
           patchCallback: (patches, info) =>
-            callbacks.push({ patches, before: info.before, after: info.after }),
+            callbacks.push({
+              patches: simplePatches(patches),
+              before: info.before,
+              after: info.after,
+            }),
         })
         const s2 = Automerge.change(s1, doc => (doc.bird = "Goldfinch"))
         assert.strictEqual(callbacks.length, 1)
@@ -1577,7 +1582,7 @@ describe("Automerge", () => {
         actor = Automerge.getActorId(s1)
       const reloaded = Automerge.load<any>(Automerge.save(s2), {
         patchCallback(patches, opts) {
-          callbacks.push({ patches, opts })
+          callbacks.push({ patches: simplePatches(patches), opts })
         },
       })
       assert.strictEqual(callbacks.length, 1)
@@ -1783,7 +1788,7 @@ describe("Automerge", () => {
         doc => (doc.birds = ["Goldfinch"]),
       )
       const callbacks: Array<{
-        patch: Automerge.Patch[]
+        patch: SimplePatch[]
         before: Automerge.Doc<any>
         after: Automerge.Doc<any>
       }> = []
@@ -1793,7 +1798,11 @@ describe("Automerge", () => {
         Automerge.getAllChanges(s1),
         {
           patchCallback(patch, info) {
-            callbacks.push({ patch, before: info.before, after: info.after })
+            callbacks.push({
+              patch: simplePatches(patch),
+              before: info.before,
+              after: info.after,
+            })
           },
         },
       )
@@ -1827,7 +1836,7 @@ describe("Automerge", () => {
       Automerge.applyChanges(Automerge.init(), Automerge.getAllChanges(s2), {
         patchCallback: p => patches.push(...p),
       })
-      assert.deepStrictEqual(patches, [
+      assert.deepStrictEqual(simplePatches(patches), [
         { action: "put", path: ["birds"], value: [] },
         { action: "insert", path: ["birds", 0], values: ["", ""] },
         { action: "splice", path: ["birds", 0, 0], value: "Goldfinch" },
@@ -1845,7 +1854,7 @@ describe("Automerge", () => {
         patchCallback: p => patches.push(...p),
       })
       Automerge.applyChanges(before, Automerge.getAllChanges(s1))
-      assert.deepStrictEqual(patches, [
+      assert.deepStrictEqual(simplePatches(patches), [
         { action: "put", path: ["bird"], value: "" },
         { action: "splice", path: ["bird", 0], value: "Goldfinch" },
       ])

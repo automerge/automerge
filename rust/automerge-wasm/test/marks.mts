@@ -4,6 +4,7 @@ import assert from 'assert'
 //@ts-ignore
 import { create, load, Automerge, encodeChange, decodeChange } from '../nodejs/automerge_wasm.cjs'
 import { v4 as uuid } from "uuid"
+import { simplePatches } from "./helpers/patches.mjs"
 
 describe('Automerge', () => {
   describe('marks', () => {
@@ -222,7 +223,7 @@ describe('Automerge', () => {
       doc.commit("marks");
       let h2 = doc.getHeads()
       let patches = doc.diffIncremental();
-      assert.deepEqual(patches, [
+      assert.deepEqual(simplePatches(patches), [
         { action: 'put', path: [ 'list' ], value: '' },
         {
           action: 'splice', path: [ 'list', 0 ],
@@ -278,7 +279,7 @@ describe('Automerge', () => {
 
       let patches = doc3.diffIncremental();
 
-      assert.deepEqual(patches, [
+      assert.deepEqual(simplePatches(patches), [
           { action: 'put', path: [ 'foo' ], value: 'bar' },
           {
             action: 'mark',
@@ -570,7 +571,7 @@ describe('Automerge', () => {
           { start: 20, end: 25, name: 'mark2', value: 'B' },
       ])
 
-      assert.deepEqual(patches1, [
+      assert.deepEqual(simplePatches(patches1), [
         { action: 'mark', path: ['text'], marks: [
           { end: 25, name: 'mark1', start: 5, value: 'A' },
           { end: 25, name: 'mark2', start: 10, value: 'B' },
@@ -581,7 +582,7 @@ describe('Automerge', () => {
       let doc2 = load(doc1.save())
       let patches2 = doc2.diffIncremental();
       // this should run current_state since the doc was empty
-      assert.deepEqual(patches2, [
+      assert.deepEqual(simplePatches(patches2), [
         { action: 'put', path: [ 'text' ], value: '' },
         { action: 'splice', path: [ 'text', 0 ], value: 'aaaaa' },
         { action: 'splice', marks: { mark1: 'A' }, path: [ 'text', 5 ], value: 'bbbbb' },
@@ -597,7 +598,7 @@ describe('Automerge', () => {
       doc3.updateDiffCursor();
       doc3.merge(doc1)
       let patches3 = doc3.diffIncremental();
-      assert.deepEqual(patches3, [
+      assert.deepEqual(simplePatches(patches3), [
         { action: 'put', path: [ 'text' ], value: '' },
         { action: 'splice', path: [ 'text', 0 ], value: 'aaaaabbbbbcccccdddddeeeeeffff' },
         { action: 'mark', path: ['text'], marks: [
@@ -609,7 +610,7 @@ describe('Automerge', () => {
 
       let headsABPlusTextObj = [ ... heads0, ... headsLocal ];
       let patches4 = doc3.diff(doc3.getHeads(), headsABPlusTextObj);
-      assert.deepEqual(patches4, [
+      assert.deepEqual(simplePatches(patches4), [
         { action: 'del', length: 29, path: [ 'text', 0 ] }
       ]);
     })

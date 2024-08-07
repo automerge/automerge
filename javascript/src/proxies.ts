@@ -75,8 +75,7 @@ function valueAt<T extends Target>(
   if (value === null) {
     return
   }
-  const datatype = value[0]
-  const val = value[1]
+  const { datatype, value: val } = value
   switch (datatype) {
     case undefined:
       return
@@ -644,7 +643,7 @@ function listMethods<T extends Target>(target: T) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
         const value = context.getWithType(objectId, i)
-        if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
+        if (value && (value.value === o[OBJECT_ID] || value.value === o)) {
           return i
         }
       }

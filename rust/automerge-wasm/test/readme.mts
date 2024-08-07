@@ -73,10 +73,12 @@ describe('Automerge', () => {
       // Anywhere Object Ids are being used a path can also be used.
       // The following two statements are equivalent:
 
-      const id = doc.getWithType("/", "config")
-      if (id && id[0] === 'map') {
-        doc.put(id[1], "align", "right")
-      }
+      const result = doc.getWithType("/", "config")
+      if (result == null) throw new Error("unexpected null for /config")
+      if (result.datatype !== "map") throw new Error("unexpected datatype for /config")
+
+      const {datatype, value: id }= result
+      doc.put(id, "align", "right")
 
       doc.put("/config", "align", "right")
 
@@ -125,7 +127,7 @@ describe('Automerge', () => {
       const key2 = doc1.putObject("_root", "key2", [])
 
       assert.deepEqual(doc1.get("_root", "key1"), "val1")
-      assert.deepEqual(doc1.getWithType("_root", "key2"), ["list", "2@aabbcc"])
+      assert.deepEqual(doc1.getWithType("_root", "key2"), { datatype: "list", value: "2@aabbcc", opid: '2@aabbcc' })
       assert.deepEqual(doc1.keys("_root"), ["key1", "key2"])
 
       const doc2 = doc1.fork("ffaaff")
@@ -137,7 +139,10 @@ describe('Automerge', () => {
       doc1.merge(doc2)
 
       assert.deepEqual(doc1.get("_root","key3"), "doc2val")
-      assert.deepEqual(doc1.getAll("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
+      assert.deepEqual(doc1.getAll("_root","key3"),[
+        { datatype: "str", value: "doc1val", opid: "3@aabbcc" },
+        { datatype: "str", value: "doc2val", opid: "3@ffaaff" }
+      ])
     })
     it('Counters (1)', () => {
       const doc1 = create({ actor: "aaaaaa" })

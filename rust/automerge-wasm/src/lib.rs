@@ -32,6 +32,7 @@ use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
+use interop::make_tagged_value;
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -601,21 +602,8 @@ impl Automerge {
                 self.doc.get(&obj, prop)?
             };
             if let Some(value) = value {
-                match &value {
-                    (Value::Object(obj_type), obj_id) => {
-                        let result = Array::new();
-                        result.push(&obj_type.to_string().into());
-                        result.push(&obj_id.to_string().into());
-                        Ok(result.into())
-                    }
-                    (Value::Scalar(_), _) => {
-                        let result = Array::new();
-                        let (datatype, value) = alloc(&value.0, self.text_rep);
-                        result.push(&datatype.into());
-                        result.push(&value);
-                        Ok(result.into())
-                    }
-                }
+                let (datatype, js_val) = alloc(&value.0, self.text_rep);
+                Ok(make_tagged_value(datatype, &js_val, &value.1)?)
             } else {
                 Ok(JsValue::null())
             }
@@ -661,14 +649,9 @@ impl Automerge {
                 self.doc.get_all(&obj, prop)
             }?;
             for (value, id) in values {
-                let sub = Array::new();
                 let (datatype, js_value) = alloc(&value, self.text_rep);
-                sub.push(&datatype.into());
-                if value.is_scalar() {
-                    sub.push(&js_value);
-                }
-                sub.push(&id.to_string().into());
-                result.push(&JsValue::from(&sub));
+                let tagged = make_tagged_value(datatype, &js_value, &id)?;
+                result.push(&tagged);
             }
         }
         Ok(result)
@@ -1432,6 +1415,8 @@ pub mod error {
         InvalidProp(#[from] interop::error::InvalidProp),
         #[error(transparent)]
         ExportError(#[from] interop::error::SetProp),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
     }
 
     impl From<Get> for JsValue {

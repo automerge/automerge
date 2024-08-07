@@ -24,6 +24,9 @@ export {
   type ScalarValue,
   type PatchInfo,
   type PatchSource,
+  type MarkPatch,
+  type UnmarkPatch,
+  type ConflictPatch,
 } from "./types.js"
 
 import { Text } from "./text.js"

@@ -1,7 +1,7 @@
 import { default as assert } from "assert"
 import { next as Automerge } from "../src/entrypoints/fullfat_node.js"
 import * as oldAutomerge from "../src/entrypoints/fullfat_node.js"
-import { mismatched_heads } from "./helpers.js"
+import { mismatched_heads, simplePatches } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
 
 describe("Automerge", () => {
@@ -579,7 +579,7 @@ describe("Automerge", () => {
     })
   })
   describe("diff", () => {
-    it("can diff a document with before and hafter heads", () => {
+    it("can diff a document with before and after heads", () => {
       let doc = Automerge.from({ value: "" })
       doc = Automerge.change(doc, d => (d.value = "aaa"))
       let heads1 = Automerge.getHeads(doc)
@@ -587,11 +587,11 @@ describe("Automerge", () => {
       let heads2 = Automerge.getHeads(doc)
       let patch12 = Automerge.diff(doc, heads1, heads2)
       let patch21 = Automerge.diff(doc, heads2, heads1)
-      assert.deepEqual(patch12, [
+      assert.deepEqual(simplePatches(patch12), [
         { action: "put", path: ["value"], value: "" },
         { action: "splice", path: ["value", 0], value: "bbb" },
       ])
-      assert.deepEqual(patch21, [
+      assert.deepEqual(simplePatches(patch21), [
         { action: "put", path: ["value"], value: "" },
         { action: "splice", path: ["value", 0], value: "aaa" },
       ])

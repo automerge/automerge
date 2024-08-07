@@ -1,5 +1,16 @@
 import { default as assert } from "assert"
 import { Encoder } from "./legacy/encoding.js"
+import type {
+  Patch,
+  PutPatch,
+  DelPatch,
+  SpliceTextPatch,
+  IncPatch,
+  InsertPatch,
+  MarkPatch,
+  UnmarkPatch,
+  ConflictPatch,
+} from "../src/index.js"
 
 const mismatched_heads_base64 =
   "hW9Kg5UNrBwA5wcGECHMwVs7qkheqCNbdnoIHqYQJ29iI2m8TlG5JFV/oCCjPBAn/BHQorRPAYz5Cmxmp4LXEGk3mwjwqU8QscL8Bi6OvosQfNoTH+LZTKaDF8vS2ruNthCWyiL7jGVD35LQ5FQxiXibAkq9pVwJR+aY+PV3dEbyCpfAQkLuNBL4MqIUhtQHQpAg5klZYF4yr0f8XnVkaFxHE72W0gKgSCi4eaXBwxxJo7wHARkDLxMMIwNAGUMoVgMKFQghQSMzNAJCA1YGX/QCgAEVgQE5gwEvfwXLAAEPBAUDLQIZAA8CBQAKAhkALQIPAH4BAMoAAX+2fw4Bf3IEAX98LAF/VBgBfxUOAX9eBAF/HwkBf1kYAX8QLAF/RQ4BugEBf3zPAAF/VA4BmQIAfwClAQF/Ag4BfwIJAX8CBAF/AhgBfwI7AX8ApQEBfmcaDgF+cRADAX58BgQBfnsGAwF+dwoZAX5nGisBflQuDQGZAgeZAgVjb3VudH8FywABDwQFAy0CGQAPAncAAgACAAIAAgAGAhkAfQIAAgIAAgJrAAIAAgACAAIAAgACAAIAAgACAAIABAJ/ABsCtgEBdwABAAEAAQABACABfAB/AgACAWsAAQABAAEAAQABAAEAAQABAAEAAQADAX5yDxoBmQKZAgHAABTZASQNy9N2ZQEURcE1T9u2bdu/FrVt24pt27yxbRt71HMJZ9bsOXPnzV+wcNHiJUuXLV+xctXqNWvXrd+wcdPmLVu3bd+xc9fuPXv37T9w8NDhI0ePHT9x8tTpM2fPnb9w8dLlK1evxSpO8UpQopKUrBSlKk3pylCmspStHOUqT/kqUKGKVKwSuVSqMpWrQpWqUrVqVKs61atBjWpSs1rUqja1q0Od6lK3etSrPvVrQIMa0rBGNKoxjWtCk5rStNxwxwNPvLjODW5yi9vc4S73uM8DHvKIxzzhKc94zgte8orXvOEt73jPBz7yic984Svf+M4PfvKL3/zhL//4jzc++OKHPwEEEmSCTYgJNWEmnAgiiSKaGGKJI54EEkkimRRSSSOdDDLJIpsccskjnwIKKaKYElyUGhdlppwKU2mqTLWpMbWmztSbBtNomkwzLbTaaaOdDjrpopseeumjnwEGGWKYEUYZY5wJJpliGjfH3fFwPB0vZwa0AQF/AisBfwAXAX8ABAF/ABoBfwDLAAEPBAUDLQIZAA8CdwACAAIAAgACAAcCGQACAn0AAgACAm0AAgACAAIAAgACAAIAAgACAAIAHwJ/ArQBAXUAAQABAAEAAQABACABfQABAAIBbQABAAEAAQABAAEAAQABAAEAAQAeAZgCiQI="
@@ -36,5 +47,52 @@ export function checkEncoded(encoder, bytes, detail?) {
   assert(encoded.byteLength === expected.byteLength, message)
   for (let i = 0; i < encoded.byteLength; i++) {
     assert(encoded[i] === expected[i], message)
+  }
+}
+
+export type SimplePatch =
+  | Omit<PutPatch, "taggedValue">
+  | DelPatch
+  | SpliceTextPatch
+  | IncPatch
+  | Omit<InsertPatch, "taggedValues">
+  | MarkPatch
+  | UnmarkPatch
+  | ConflictPatch
+
+// Remove the 'taggedValue' and 'taggedValues' fields from the patches for ease
+// of testing
+export function simplePatches(patches: Patch[]): SimplePatch[] {
+  return patches.map(simplePatch)
+}
+
+// Remove the 'taggedValue' and 'taggedValues' fields from the patches for ease
+// of testing
+export function simplePatch(patch: Patch): SimplePatch {
+  if (patch.action === "put") {
+    let result: SimplePatch = {
+      action: "put",
+      path: patch.path,
+      value: patch.value,
+    }
+    if (patch.conflict !== undefined) {
+      result.conflict = patch.conflict
+    }
+    return result
+  } else if (patch.action === "insert") {
+    let result: SimplePatch = {
+      action: "insert",
+      path: patch.path,
+      values: patch.values,
+    }
+    if (patch.marks !== undefined) {
+      result.marks = patch.marks
+    }
+    if (patch.conflicts !== undefined) {
+      result.conflicts = patch.conflicts
+    }
+    return result
+  } else {
+    return patch
   }
 }

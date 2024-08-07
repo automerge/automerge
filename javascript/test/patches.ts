@@ -1,6 +1,7 @@
 import * as assert from "assert"
 import { next as Automerge } from "../src/index.js"
 import { type List } from "../src/index.js"
+import { simplePatches } from "./helpers.js"
 
 describe("patches", () => {
   describe("the patchCallback", () => {
@@ -84,7 +85,7 @@ describe("patches", () => {
       })
       const after = Automerge.getHeads(newDoc)
       const patches = Automerge.diff(newDoc, before, after)
-      assert.deepEqual(patches, [
+      assert.deepEqual(simplePatches(patches), [
         { action: "put", path: ["fish"], value: [] },
         { action: "insert", path: ["birds", 1], values: [""] },
         { action: "splice", path: ["birds", 1, 0], value: "greenfinch" },
@@ -126,7 +127,7 @@ describe("patches", () => {
             Automerge.getHeads(patchInfo.after),
             Automerge.getHeads(patchInfo.before),
           )
-          assert.deepEqual(reverse, [
+          assert.deepEqual(simplePatches(reverse), [
             { action: "insert", path: ["list", 1], values: [""] },
             { action: "splice", path: ["list", 1, 0], value: "b" },
           ])
