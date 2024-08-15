@@ -80,7 +80,7 @@ export const ApiHandler: API = {
 export function initializeWasm(
   wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string,
 ): Promise<void> {
-  return initWasm(wasmBlob).then(_ => {
+  return initWasm({ module_or_path: wasmBlob }).then(_ => {
     UseApi(WasmApi)
   })
 }
