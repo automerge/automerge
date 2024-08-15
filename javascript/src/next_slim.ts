@@ -560,7 +560,7 @@ export function getCursorPosition<T>(
   const state = _state(doc, false)
 
   try {
-    return state.handle.getCursorPosition(objPath, cursor)
+    return state.handle.getCursorPosition(objPath, cursor, state.heads)
   } catch (e) {
     throw new RangeError(`Cannot getCursorPosition: ${e}`)
   }

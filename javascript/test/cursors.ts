@@ -124,4 +124,22 @@ describe("cursors", () => {
       doc.dates[0] = originalDoc.dates[0]
     })
   })
+
+  it("should work with Automerge.view", () => {
+    let doc = Automerge.from({ text: "abc" })
+    const cursor = Automerge.getCursor(doc, ["text"], 1)
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], 1, 0, "x")
+    })
+    const heads = Automerge.getHeads(doc)
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], 1, 0, "y")
+    })
+    const view = Automerge.view(doc, heads)
+
+    const position = Automerge.getCursorPosition(view, ["text"], cursor)
+    assert.equal(position, 2)
+  })
 })
