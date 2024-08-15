@@ -37,7 +37,7 @@ thiserror = "^1.0.16"
 fxhash = "^0.2.1"
 
 [dependencies.wasm-bindgen]
-version = "^0.2.85"
+version = "^0.2.93"
 #features = ["std"]
 features = ["serde-serialize", "std"]
 
