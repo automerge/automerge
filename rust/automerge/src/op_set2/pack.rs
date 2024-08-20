@@ -231,6 +231,12 @@ impl MaybePackable<[u8]> for &[u8] {
     }
 }
 
+impl MaybePackable<[u8]> for Vec<u8> {
+    fn maybe_packable(&self) -> Option<&[u8]> {
+        Some(self.as_slice())
+    }
+}
+
 impl<'a> MaybePackable<[u8]> for Option<Cow<'a, [u8]>> {
     fn maybe_packable(&self) -> Option<&[u8]> {
         self.as_ref().map(|c| c.borrow())

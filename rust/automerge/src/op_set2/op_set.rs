@@ -14,7 +14,7 @@ use crate::types::{
 use crate::AutomergeError;
 
 use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
-use super::op::{Op, OpBuilder2, SuccCursors};
+use super::op::{Op, OpBuilder2, SuccCursors, SuccInsert};
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue, Value};
 use super::{
@@ -61,7 +61,7 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
     len: usize,
-    actors: Vec<ActorId>,
+    pub(crate) actors: Vec<ActorId>,
     cols: Columns,
 }
 
@@ -87,34 +87,30 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn load_with_range(
-        &mut self,
-        obj: ObjId,
-        op: OpBuilder,
-        range: &mut OpIdxRange,
-    ) -> OpIdx {
-        todo!() // TX
-    }
-
-    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, idx: OpIdx) {
-        todo!();
-    }
-
     pub(crate) fn insert2<'a>(&'a mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
         self.len += 1;
         // do succ later
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
-    where
-        Q: TreeQuery<'a>,
-    {
-        todo!() // READ
-    }
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_pos: &[SuccInsert], op: OpId) {
+        for i in op_pos.iter().rev() {
+            let mut succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
+            succ_num.splice(i.pos, 1, vec![i.len + 1]);
+            /*
+                        let mut iter = succ_num.iter();
+                        iter.advance_by(*pos);
+                        let group_pos = iter.group();
+                        let num = iter.next().flatten().unwrap_or(0);
+                        succ_num.update(*pos, num + 1);
+            */
 
-    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: OpId) {
-        //todo!() // TX
+            let mut succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
+            succ_actor.splice(i.sub_pos, 0, vec![ActorIdx(op.actor() as u64)]);
+
+            let mut succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
+            succ_counter.splice(i.sub_pos, 0, vec![op.counter() as i64]);
+        }
     }
 
     pub(crate) fn parent_object(
@@ -199,7 +195,6 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Option<usize> {
-        //todo!()
         let mut iter = self
             .iter_obj(obj)
             .visible(clock)
@@ -227,13 +222,6 @@ impl OpSet {
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
-        /*
-                Ok(QueryNth {
-                    pos,
-                    marks,
-                    elemid,
-                })
-        */
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -274,9 +262,10 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
+        let mut sub_iter = self.iter_obj(obj);
+        let mut end_pos = sub_iter.pos();
+        let mut iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
         let mut len = 0;
-        let mut end_pos = 0;
         for mut ops in iter {
             let width = ops.width(encoding);
             if len + width > index {
@@ -338,6 +327,17 @@ impl OpSet {
 
     fn get_obj_actor(&self) -> ColumnDataIter<'_, ActorCursor> {
         self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC)
+    }
+
+    fn get_succ_num(&self) -> ColumnDataIter<'_, IntCursor> {
+        self.cols.get_group(SUCC_COUNT_COL_SPEC)
+    }
+    fn get_succ_actor(&self) -> ColumnDataIter<'_, ActorCursor> {
+        self.cols.get_actor(SUCC_ACTOR_COL_SPEC)
+    }
+
+    fn get_succ_counter(&self) -> ColumnDataIter<'_, DeltaCursor> {
+        self.cols.get_delta_integer(SUCC_COUNTER_COL_SPEC)
     }
 
     fn iter_obj_ids(&self) -> IterObjIds<'_> {
@@ -439,7 +439,7 @@ impl OpSet {
                                 })
                                 .collect::<Vec<_>>();
                             let mut new_data = ColumnData::<ActorCursor>::new();
-                            new_data.splice(0, new_ids);
+                            new_data.splice(0, 0, new_ids);
                             std::mem::swap(col_data, &mut new_data);
                         }
                         _ => {}
@@ -763,11 +763,9 @@ impl Columns {
     }
 
     fn insert<O: OpLike + std::fmt::Debug>(&mut self, pos: usize, op: &O) {
-        //log!("INSERT op {:?}", op);
         let mut group = None;
         let mut group_pos = 0;
         for (spec, col) in self.0.iter_mut() {
-            //log!("::SPLICE spec={:?}", spec);
             if group == Some(spec.id()) {
                 match col {
                     Column::Actor(c) => {
@@ -776,8 +774,7 @@ impl Columns {
                         } else {
                             vec![]
                         };
-                        //log!("::SPLICE SUCC_A i={} {:?} {:?}", group_pos, *spec, values);
-                        c.splice(group_pos, values);
+                        c.splice(group_pos, 0, values);
                     }
                     Column::Delta(c) => {
                         let values = if *spec == SUCC_COUNTER_COL_SPEC {
@@ -785,8 +782,7 @@ impl Columns {
                         } else {
                             vec![]
                         };
-                        //log!("::SPLICE SUCC_C i={} {:?} {:?}", group_pos, *spec, values);
-                        c.splice(group_pos, values);
+                        c.splice(group_pos, 0, values);
                     }
                     Column::Value(c) => {
                         let value = if *spec == VALUE_COL_SPEC {
@@ -795,8 +791,7 @@ impl Columns {
                             None
                         };
                         if let Some(v) = value {
-                            //log!("::SPLICE VALUE i={} {:?}", group_pos, v);
-                            c.splice(group_pos, vec![v])
+                            c.splice(group_pos, 0, vec![v])
                         }
                     }
                     _ => {
@@ -816,8 +811,7 @@ impl Columns {
                             },
                             _ => None,
                         };
-                        //log!("::SPLICE ACTOR pos={} {:?} {:?}", pos, *spec, value);
-                        c.splice(pos, vec![value]);
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Delta(c) => {
                         let value = match *spec {
@@ -825,8 +819,7 @@ impl Columns {
                             KEY_COUNTER_COL_SPEC => op.elemid().map(|e| e.counter() as i64),
                             _ => None,
                         };
-                        //log!("::SPLICE DELTA pos={} {:?} {:?}", pos, *spec, value);
-                        c.splice(pos, vec![value]);
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Integer(c) => {
                         let value = if *spec == OBJ_ID_COUNTER_COL_SPEC {
@@ -834,8 +827,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        //log!("::SPLICE INT pos={} {:?} {:?}", pos, *spec, value);
-                        c.splice(pos, vec![value])
+                        c.splice(pos, 0, vec![value])
                     }
                     Column::Str(c) => {
                         let value = match *spec {
@@ -843,8 +835,7 @@ impl Columns {
                             MARK_NAME_COL_SPEC => op.mark_name(),
                             _ => None,
                         };
-                        //log!("::SPLICE STR pos={} {:?} {:?}", pos, *spec, value);
-                        c.splice(pos, vec![value])
+                        c.splice(pos, 0, vec![value])
                     }
                     Column::Bool(c) => {
                         let value = match *spec {
@@ -852,8 +843,7 @@ impl Columns {
                             EXPAND_COL_SPEC => Some(op.expand()),
                             _ => None,
                         };
-                        log!("::SPLICE BOOL pos={} {:?} {:?}", pos, *spec, value);
-                        c.splice(pos, vec![value])
+                        c.splice(pos, 0, vec![value])
                     }
                     Column::Action(c) => {
                         let value = if *spec == ACTION_COL_SPEC {
@@ -861,7 +851,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, vec![value])
+                        c.splice(pos, 0, vec![value])
                     }
                     Column::Value(c) => {
                         panic!("VALUE spliced outside of a group");
@@ -872,13 +862,11 @@ impl Columns {
                         } else {
                             None
                         };
-                        //log!("::SPLICE VALUE META pos={} meta={:?} meta.len={}", pos, value, value.as_ref().map(|v| v.length()).unwrap_or(0));
-                        c.splice(pos, vec![value]);
+                        c.splice(pos, 0, vec![value]);
                         // FIXME if value > 0
                         let mut iter = c.iter();
                         iter.advance_by(pos);
                         group_pos = iter.group();
-                        //log!("VALUE META group_pos={}", group_pos);
                     }
                     Column::Group(c) => {
                         let value = if *spec == SUCC_COUNT_COL_SPEC {
@@ -886,13 +874,12 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, vec![value]);
+                        c.splice(pos, 0, vec![value]);
                         // FIXME if value > 0
                         // FIXME would be nice if splice did this
                         let mut iter = c.iter();
                         iter.advance_by(pos);
                         group_pos = iter.group();
-                        //log!("GROUP group_pos={}", group_pos);
                     }
                 }
             }
@@ -906,23 +893,23 @@ impl Columns {
           for (spec, col) in self.0.iter_mut() {
             if group == Some(spec.id()) {
               match col {
-                Column::Actor(c) => c.splice(group_pos, op.get_group_actor(*spec)),
-                Column::Delta(c) => c.splice(group_pos, op.get_group_int(*spec)),
+                Column::Actor(c) => c.splice(group_pos, 0, op.get_group_actor(*spec)),
+                Column::Delta(c) => c.splice(group_pos, 0, op.get_group_int(*spec)),
                 _ => log!("unknown group column %{:?}",spec),
               }
             } else {
               match col {
-                Column::Actor(c) => c.splice(pos, vec![op.get_actor(*spec)]),
-                Column::Delta(c) => c.splice(pos, vec![op.get_int(*spec)]),
-                Column::Integer(c) => c.splice(pos, vec![op.get_uint(*spec)]),
-                Column::Str(c) => c.splice(pos, vec![op.get_str(*spec)]),
-                Column::Bool(c) => c.splice(pos, vec![op.get_bool(*spec)]),
-                Column::Value(c) => c.splice(pos, vec![op.get_value(*spec)]),
-                Column::ValueMeta(c) => c.splice(pos, vec![op.get_meta(*spec)]),
-                Column::Action(c) => c.splice(pos, vec![op.get_action(*spec)]),
+                Column::Actor(c) => c.splice(pos, 0, vec![op.get_actor(*spec)]),
+                Column::Delta(c) => c.splice(pos, 0, vec![op.get_int(*spec)]),
+                Column::Integer(c) => c.splice(pos, 0, vec![op.get_uint(*spec)]),
+                Column::Str(c) => c.splice(pos, 0, vec![op.get_str(*spec)]),
+                Column::Bool(c) => c.splice(pos, 0, vec![op.get_bool(*spec)]),
+                Column::Value(c) => c.splice(pos, 0, vec![op.get_value(*spec)]),
+                Column::ValueMeta(c) => c.splice(pos, 0, vec![op.get_meta(*spec)]),
+                Column::Action(c) => c.splice(pos, 0, vec![op.get_action(*spec)]),
                 Column::Group(c) => {
                   group = Some(spec.id());
-                  c.splice(pos, vec![op.get_uint(*spec)]);
+                  c.splice(pos, 0, vec![op.get_uint(*spec)]);
                   group_pos = 0; // FIXME
                 }
               }
@@ -943,9 +930,11 @@ impl Columns {
         }
     */
 
-    fn add_succ(&mut self, id: OpId, pos: usize) {
-        todo!()
-    }
+    /*
+        fn add_succ(&mut self, id: OpId, pos: usize) {
+            todo!()
+        }
+    */
 
     fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
         // FIXME this should insert NULL values into columns we dont recognize
@@ -954,6 +943,7 @@ impl Columns {
 
         let mut id_actor = ColumnData::<ActorCursor>::new();
         id_actor.splice(
+            0,
             0,
             ops.clone()
                 .map(|op| ActorIdx::from(op.id.actor()))
@@ -964,6 +954,7 @@ impl Columns {
         let mut id_counter = ColumnData::<DeltaCursor>::new();
         id_counter.splice(
             0,
+            0,
             ops.clone()
                 .map(|op| op.id.counter() as i64)
                 .collect::<Vec<_>>(),
@@ -972,6 +963,7 @@ impl Columns {
 
         let mut obj_actor_col = ColumnData::<ActorCursor>::new();
         obj_actor_col.splice(
+            0,
             0,
             ops.clone()
                 .map(|op| ActorIdx::from(op.obj.0.actor()))
@@ -982,12 +974,14 @@ impl Columns {
         let mut obj_counter_col = ColumnData::<IntCursor>::new();
         obj_counter_col.splice(
             0,
+            0,
             ops.clone().map(|op| op.obj.0.counter()).collect::<Vec<_>>(),
         );
         columns.insert(OBJ_ID_COUNTER_COL_SPEC, Column::Integer(obj_counter_col));
 
         let mut key_actor = ColumnData::<ActorCursor>::new();
         key_actor.splice(
+            0,
             0,
             ops.clone()
                 .map(|op| match op.key {
@@ -1007,6 +1001,7 @@ impl Columns {
         let mut key_counter = ColumnData::<DeltaCursor>::new();
         key_counter.splice(
             0,
+            0,
             ops.clone()
                 .map(|op| match op.key {
                     Key::Map(_) => None,
@@ -1025,6 +1020,7 @@ impl Columns {
         let mut key_str = ColumnData::<StrCursor>::new();
         key_str.splice(
             0,
+            0,
             ops.clone()
                 .map(|op| match op.key {
                     Key::Map(s) => Some(s),
@@ -1037,6 +1033,7 @@ impl Columns {
         let mut succ_count = ColumnData::<IntCursor>::new();
         succ_count.splice(
             0,
+            0,
             ops.clone()
                 .map(|op| op.succ().len() as u64)
                 .collect::<Vec<_>>(),
@@ -1045,6 +1042,7 @@ impl Columns {
 
         let mut succ_actor = ColumnData::<ActorCursor>::new();
         succ_actor.splice(
+            0,
             0,
             ops.clone()
                 .flat_map(|op| op.succ().map(|n| ActorIdx::from(n.actor())))
@@ -1055,6 +1053,7 @@ impl Columns {
         let mut succ_counter = ColumnData::<DeltaCursor>::new();
         succ_counter.splice(
             0,
+            0,
             ops.clone()
                 .flat_map(|op| op.succ().map(|n| n.counter() as i64))
                 .collect::<Vec<_>>(),
@@ -1062,15 +1061,16 @@ impl Columns {
         columns.insert(SUCC_COUNTER_COL_SPEC, Column::Delta(succ_counter));
 
         let mut insert = ColumnData::<BooleanCursor>::new();
-        insert.splice(0, ops.clone().map(|op| op.insert).collect::<Vec<_>>());
+        insert.splice(0, 0, ops.clone().map(|op| op.insert).collect::<Vec<_>>());
         columns.insert(INSERT_COL_SPEC, Column::Bool(insert));
 
         let mut action = ColumnData::<ActionCursor>::new();
-        action.splice(0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
+        action.splice(0, 0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
         columns.insert(ACTION_COL_SPEC, Column::Action(action));
 
         let mut value_meta = ColumnData::<MetaCursor>::new();
         value_meta.splice(
+            0,
             0,
             ops.clone()
                 .map(|op| ValueMeta::from(&op.value))
@@ -1083,11 +1083,12 @@ impl Columns {
             .clone()
             .filter_map(|op| op.value.to_raw())
             .collect::<Vec<_>>();
-        value.splice(0, values);
+        value.splice(0, 0, values);
         columns.insert(VALUE_COL_SPEC, Column::Value(value));
 
         let mut mark_name = ColumnData::<StrCursor>::new();
         mark_name.splice(
+            0,
             0,
             ops.clone()
                 .map(|op| op.mark_name.clone())
@@ -1096,7 +1097,7 @@ impl Columns {
         columns.insert(MARK_NAME_COL_SPEC, Column::Str(mark_name));
 
         let mut expand = ColumnData::<BooleanCursor>::new();
-        expand.splice(0, ops.clone().map(|op| op.expand).collect::<Vec<_>>());
+        expand.splice(0, 0, ops.clone().map(|op| op.expand).collect::<Vec<_>>());
         columns.insert(EXPAND_COL_SPEC, Column::Bool(expand));
 
         Columns(columns)
@@ -1304,6 +1305,13 @@ impl Columns {
         match self.0.get(&spec) {
             Some(Column::Value(c)) => c.raw_reader(advance),
             _ => RawReader::empty(),
+        }
+    }
+
+    fn get_group_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
+        match self.0.get_mut(&spec) {
+            Some(Column::Group(c)) => c,
+            _ => panic!(),
         }
     }
 
@@ -1536,6 +1544,7 @@ mod tests {
         let mut succ_counter_data = ColumnData::<DeltaCursor>::new();
         group_data.splice(
             0,
+            0,
             test_ops
                 .iter()
                 .map(|o| o.succs.len() as u64)
@@ -1543,12 +1552,14 @@ mod tests {
         );
         succ_actor_data.splice(
             0,
+            0,
             test_ops
                 .iter()
                 .flat_map(|o| o.succs.iter().map(|s| ActorIdx::from(s.actor())))
                 .collect::<Vec<_>>(),
         );
         succ_counter_data.splice(
+            0,
             0,
             test_ops
                 .iter()

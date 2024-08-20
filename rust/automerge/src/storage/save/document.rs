@@ -5,6 +5,7 @@ use itertools::Itertools;
 
 use crate::{
     indexed_cache::IndexedCache,
+    op_set2::OpSet,
     storage::{
         change::DEFLATE_MIN_SIZE, convert::op_as_docop, AsChangeMeta, CompressConfig, Document,
     },
@@ -18,6 +19,7 @@ use crate::{
 /// * If any of ops in `ops` reference an actor which is not in `actors`
 /// * If any of ops in `ops` reference a property which is not in `props`
 /// * If any of the changes reference a dependency index which is not in `changes`
+/*
 #[tracing::instrument(skip(changes, ops, actors, props, config))]
 pub(crate) fn save_document<'a, I, O>(
     changes: I,
@@ -58,6 +60,53 @@ where
         config.unwrap_or(CompressConfig::Threshold(DEFLATE_MIN_SIZE)),
     );
     doc.into_bytes()
+}
+*/
+
+pub(crate) fn save_document<'a, I, O>(
+    changes: I,
+    ops: &OpSet,
+    //actors: &'a IndexedCache<ActorId>,
+    //props: &IndexedCache<String>,
+    heads: &[ChangeHash],
+    config: Option<CompressConfig>,
+) -> Vec<u8>
+where
+    I: Iterator<Item = &'a Change> + Clone + 'a,
+    //    O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
+{
+    /*
+    //let actor_ids = changes
+    //    .clone()
+    //    .map(|c| c.actor_id().clone())
+    //    .unique()
+    //    .collect::<Vec<_>>();
+
+    //let actor_lookup = actors.encode_index();
+    //let doc_ops = ops
+    //    .clone()
+    //    .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
+
+    let actor_lookup = vec![];
+
+    let actors = ops.actors.clone();
+    let hash_graph = HashGraph::new(changes.clone());
+    let changes = changes.map(|c| ChangeWithGraph {
+        actors,
+        actor_lookup: &actor_lookup,
+        change: c,
+        graph: &hash_graph,
+    });
+
+    let doc = Document::new(
+        ops,
+        hash_graph.heads_with_indices(heads.to_vec()),
+        changes,
+        config.unwrap_or(CompressConfig::Threshold(DEFLATE_MIN_SIZE)),
+    );
+    doc.into_bytes()
+    */
+    todo!()
 }
 
 struct HashGraph {

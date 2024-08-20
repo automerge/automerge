@@ -214,6 +214,12 @@ pub(super) struct SuccCursors<'a> {
     pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
 }
 
+impl<'a> SuccCursors<'a> {
+    pub(crate) fn pos(&self) -> usize {
+        self.succ_actor.pos()
+    }
+}
+
 impl<'a> std::fmt::Debug for SuccCursors<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SuccCursors")
@@ -247,10 +253,30 @@ impl<'a> ExactSizeIterator for SuccCursors<'a> {
     }
 }
 
+pub(crate) struct SuccInsert {
+    pub(crate) pos: usize,
+    pub(crate) len: u64,
+    pub(crate) sub_pos: usize,
+}
+
 impl<'a> Op<'a> {
     pub(crate) fn pred(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator {
         // FIXME
         vec![].into_iter()
+    }
+
+    pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
+        let pos = self.pos;
+        let mut succ = self.succ_cursors.clone();
+        let len = succ.len() as u64;
+        let mut sub_pos = succ.pos();
+        while let Some(i) = succ.next() {
+            if i > id {
+                break;
+            }
+            sub_pos = succ.pos();
+        }
+        SuccInsert { pos, len, sub_pos }
     }
 
     pub(crate) fn op_set(&self) -> &'a OpSet {

@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Run<'a, P: Packable + ?Sized> {
     pub(crate) count: usize,
     pub(crate) value: Option<P::Unpacked<'a>>,
@@ -76,6 +76,8 @@ pub(crate) struct Encoder<'a, C: ColumnCursor> {
     pub(crate) state: C::State<'a>,
     pub(crate) current: SlabWriter<'a>,
     pub(crate) post: C::PostState<'a>,
+    pub(crate) deleted: usize,
+    pub(crate) overflow: usize,
     pub(crate) cursor: C,
 }
 
@@ -572,13 +574,20 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.slabs.iter().map(|s| C::export(s.as_ref())).collect()
     }
 
-    pub(crate) fn splice<E>(&mut self, mut index: usize, values: Vec<E>)
+    pub(crate) fn update<'a>(
+        &mut self,
+        mut index: usize,
+        values: <C::Item as Packable>::Unpacked<'a>,
+    ) {
+    }
+
+    pub(crate) fn splice<E>(&mut self, mut index: usize, del: usize, values: Vec<E>)
     where
         E: MaybePackable<C::Item> + Debug + Clone,
     {
         assert!(index <= self.len);
         assert!(self.slabs.len() > 0);
-        if values.is_empty() {
+        if values.is_empty() && del == 0 {
             return;
         }
         let before = self.to_vec();
@@ -586,21 +595,21 @@ impl<C: ColumnCursor> ColumnData<C> {
         let old_len = self.len;
         let mut slab_offset = 0;
         for (i, slab) in self.slabs.iter_mut().enumerate() {
-            if slab.len() < index {
+            if slab.len() < index - slab_offset {
                 slab_offset += slab.len();
             } else {
-                match C::splice(slab, index - slab_offset, values) {
-                    SpliceResult::Done(len) => {
-                        self.len += len;
+                match C::splice(slab, index - slab_offset, del, values) {
+                    SpliceResult::Done(add, del) => {
+                        self.len = self.len + add - del;
                     }
-                    SpliceResult::Add(len, slabs) => {
-                        self.len += len;
+                    SpliceResult::Add(add, del, slabs) => {
+                        self.len = self.len + add - del;
                         let j = i + 1;
                         self.slabs.splice(j..j, slabs);
                         assert!(self.slabs.len() > 0);
                     }
-                    SpliceResult::Replace(len, slabs) => {
-                        self.len += len;
+                    SpliceResult::Replace(add, del, slabs) => {
+                        self.len = self.len + add - del;
                         let j = i + 1;
                         self.slabs.splice(i..j, slabs);
                         assert!(self.slabs.len() > 0);
@@ -611,8 +620,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
 
         let after = self.to_vec();
-        let delta = self.len - old_len;
-        if before.len() + delta != after.len() {
+        if self.len != after.len() {
             log!(":::SPLICE FAIL (index={}):::", index);
             log!(":::before={:?}", before);
             log!(":::values={:?}", tmp_values);
@@ -640,6 +648,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 pub(crate) enum ColExport<P: Packable + ?Sized> {
     LitRun(Vec<P::Owned>),
     Run(usize, P::Owned),
+    Raw(Vec<u8>),
     Null(usize),
 }
 
@@ -744,7 +753,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>);
 
-    fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self>;
+    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self>;
 
     fn try_next<'a>(
         &self,
@@ -772,11 +781,27 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         0
     }
 
+    fn advance_by<'a>(
+        count: usize,
+        mut cursor: Self,
+        data: &'a [u8],
+    ) -> (Option<Run<'a, Self::Item>>, Self) {
+        let index = cursor.index() + count;
+        while let Some((val, next_cursor)) = cursor.next(data) {
+            if next_cursor.index() >= index {
+                return (Some(val), next_cursor);
+            }
+            cursor = next_cursor;
+        }
+        panic!() // we reached the end of the buffer without finding our item - return an error
+    }
+
     fn seek<'a>(index: usize, data: &'a [u8]) -> (Option<Run<'a, Self::Item>>, Self) {
         if index == 0 {
             return (None, Self::default());
         } else {
             let mut cursor = Self::default();
+            //return Self::advance_by(index, cursor, data);
             while let Some((val, next_cursor)) = cursor.next(data) {
                 if next_cursor.index() >= index {
                     return (Some(val), next_cursor);
@@ -784,7 +809,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
                 cursor = next_cursor;
             }
         }
-        panic!() // we reached the end of the buffer without finding our item - return an error
+        panic!()
     }
 
     fn scan(data: &[u8]) -> Result<Self, PackError> {
@@ -795,17 +820,74 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         Ok(cursor)
     }
 
-    fn splice<E>(slab: &mut Slab, index: usize, values: Vec<E>) -> SpliceResult
+    fn splice<E>(slab: &mut Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
     where
         E: MaybePackable<Self::Item> + Debug,
     {
-        let mut encoder = Self::encode(index, slab);
-        let mut len = 0;
+        let mut encoder = Self::encode(index, del, slab);
+        let mut add = 0;
         for v in &values {
-            len += encoder.append(v.maybe_packable());
+            add += encoder.append(v.maybe_packable());
         }
-        SpliceResult::Replace(len, encoder.finish())
+        assert!(encoder.overflow == 0);
+        SpliceResult::Replace(add, encoder.deleted, encoder.finish())
     }
+
+    fn splice_delete<'a>(
+        _post: Option<Run<'a, Self::Item>>,
+        _cursor: Self,
+        _del: usize,
+        slab: &'a Slab,
+    ) -> SpliceDel<'a, Self> {
+        let mut cursor = _cursor;
+        let mut post = _post;
+        let mut del = _del;
+        let mut overflow = 0;
+        let mut deleted = 0;
+        while del > 0 {
+            match post {
+                // if del is less than the current run
+                Some(Run { count, value }) if del < count => {
+                    deleted += del;
+                    post = Some(Run {
+                        count: count - del,
+                        value,
+                    });
+                    del = 0;
+                }
+                // if del is greather than or equal the current run
+                Some(Run { count, .. }) => {
+                    del -= count;
+                    deleted += count;
+                    post = None;
+                }
+                None => {
+                    if let Some((p, c)) = Self::next(&cursor, slab.as_ref()) {
+                        post = Some(p);
+                        cursor = c;
+                    } else {
+                        post = None;
+                        overflow = del;
+                        del = 0;
+                    }
+                }
+            }
+        }
+        assert!(_del == deleted + overflow);
+        SpliceDel {
+            deleted,
+            overflow,
+            cursor,
+            post,
+        }
+    }
+}
+
+pub(crate) struct SpliceDel<'a, C: ColumnCursor> {
+    pub(crate) deleted: usize,
+    pub(crate) overflow: usize,
+    pub(crate) cursor: C,
+    pub(crate) post: Option<Run<'a, C::Item>>,
 }
 
 #[derive(Debug, Clone)]
@@ -926,9 +1008,9 @@ impl Column {
 }
 
 pub(crate) enum SpliceResult {
-    Done(usize),
-    Add(usize, Vec<Slab>),
-    Replace(usize, Vec<Slab>),
+    Done(usize, usize),
+    Add(usize, usize, Vec<Slab>),
+    Replace(usize, usize, Vec<Slab>),
 }
 
 #[derive(Debug, Clone)]
@@ -1008,7 +1090,7 @@ pub(crate) mod tests {
         E: MaybePackable<C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
     {
         vec.splice(index..index, values.clone());
-        col.splice(index, values);
+        col.splice(index, 0, values);
         assert_eq!(vec, &col.to_vec());
     }
 
@@ -1033,22 +1115,22 @@ pub(crate) mod tests {
     fn column_data_breaking_literal_runs_in_int_column() {
         let numbers = vec![1, 2, 3];
         let mut start = ColumnData::<IntCursor>::new();
-        start.splice(0, numbers);
+        start.splice(0, 0, numbers);
         assert_eq!(start.export(), vec![vec![ColExport::LitRun(vec![1, 2, 3])]]);
         let mut col = start.clone();
-        col.splice(2, vec![3, 3, 3]);
+        col.splice(2, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::LitRun(vec![1, 2]), ColExport::Run(4, 3)]]
         );
         let mut col = start.clone();
-        col.splice(3, vec![3, 3, 3]);
+        col.splice(3, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::LitRun(vec![1, 2]), ColExport::Run(4, 3)]]
         );
         let mut col = start.clone();
-        col.splice(1, vec![2, 2]);
+        col.splice(1, 0, vec![2, 2]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1058,7 +1140,7 @@ pub(crate) mod tests {
             ]]
         );
         let mut col = start.clone();
-        col.splice(2, vec![2, 2]);
+        col.splice(2, 0, vec![2, 2]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1068,13 +1150,13 @@ pub(crate) mod tests {
             ]]
         );
         let mut col = start.clone();
-        col.splice(0, vec![1, 1]);
+        col.splice(0, 0, vec![1, 1]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::Run(3, 1), ColExport::LitRun(vec![2, 3]),]]
         );
         let mut col = start.clone();
-        col.splice(1, vec![1, 1]);
+        col.splice(1, 0, vec![1, 1]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::Run(3, 1), ColExport::LitRun(vec![2, 3]),]]
@@ -1085,10 +1167,10 @@ pub(crate) mod tests {
     fn column_data_breaking_runs_in_int_column() {
         let numbers = vec![2, 2, 2];
         let mut start = ColumnData::<IntCursor>::new();
-        start.splice(0, numbers);
+        start.splice(0, 0, numbers);
         assert_eq!(start.export(), vec![vec![ColExport::Run(3, 2)]]);
         let mut col = start.clone();
-        col.splice(1, vec![3, 3, 3]);
+        col.splice(1, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1098,7 +1180,7 @@ pub(crate) mod tests {
             ]]
         );
         let mut col = start.clone();
-        col.splice(2, vec![3, 3, 3]);
+        col.splice(2, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1108,13 +1190,13 @@ pub(crate) mod tests {
             ]]
         );
         let mut col = start.clone();
-        col.splice(0, vec![3, 3, 3]);
+        col.splice(0, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::Run(3, 3), ColExport::Run(3, 2),]]
         );
         let mut col = start.clone();
-        col.splice(3, vec![3, 3, 3]);
+        col.splice(3, 0, vec![3, 3, 3]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::Run(3, 2), ColExport::Run(3, 3),]]
@@ -1125,7 +1207,7 @@ pub(crate) mod tests {
     fn column_data_breaking_null_runs_in_int_column() {
         let numbers = vec![None, None, Some(2), Some(2), None, None, None];
         let mut start = ColumnData::<IntCursor>::new();
-        start.splice(0, numbers);
+        start.splice(0, 0, numbers);
         assert_eq!(
             start.export(),
             vec![vec![
@@ -1139,7 +1221,7 @@ pub(crate) mod tests {
             vec![None, None, Some(2), Some(2), None, None, None]
         );
         let mut col = start.clone();
-        col.splice(2, vec![None, None, Some(2), Some(2)]);
+        col.splice(2, 0, vec![None, None, Some(2), Some(2)]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1150,7 +1232,7 @@ pub(crate) mod tests {
         );
         assert_eq!(col.len, 11);
         assert_eq!(col.slabs.iter().map(|s| s.len()).sum::<usize>(), 11);
-        col.splice(8, vec![Some(2), Some(2), None, None]);
+        col.splice(8, 0, vec![Some(2), Some(2), None, None]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1159,7 +1241,7 @@ pub(crate) mod tests {
                 ColExport::Null(5)
             ]]
         );
-        col.splice(4, vec![None, Some(2), Some(3)]);
+        col.splice(4, 0, vec![None, Some(2), Some(3)]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1169,7 +1251,7 @@ pub(crate) mod tests {
                 ColExport::Null(5)
             ]]
         );
-        col.splice(2, vec![4]);
+        col.splice(2, 0, vec![4]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1181,7 +1263,7 @@ pub(crate) mod tests {
                 ColExport::Null(5)
             ]]
         );
-        col.splice(6, vec![None, None, Some(2), Some(2)]);
+        col.splice(6, 0, vec![None, None, Some(2), Some(2)]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1196,6 +1278,7 @@ pub(crate) mod tests {
         );
         col.splice(
             12,
+            0,
             vec![Some(3), Some(3), None, Some(7), Some(8), Some(9), Some(2)],
         );
         assert_eq!(
@@ -1212,7 +1295,7 @@ pub(crate) mod tests {
                 ColExport::Null(5)
             ]]
         );
-        col.splice(15, vec![5, 6]);
+        col.splice(15, 0, vec![5, 6]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1234,13 +1317,13 @@ pub(crate) mod tests {
     fn column_data_strings() {
         let strings = vec!["one", "two", "three"];
         let mut start = ColumnData::<StrCursor>::new();
-        start.splice(0, strings);
+        start.splice(0, 0, strings);
         assert_eq!(
             start.export(),
             vec![vec![ColExport::litrun(vec!["one", "two", "three"])]]
         );
         let mut col = start.clone();
-        col.splice(1, vec![None, None, Some("two"), Some("two")]);
+        col.splice(1, 0, vec![None, None, Some("two"), Some("two")]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1250,7 +1333,7 @@ pub(crate) mod tests {
                 ColExport::litrun(vec!["three"]),
             ]]
         );
-        col.splice(0, vec![None, None, Some("three"), Some("one")]);
+        col.splice(0, 0, vec![None, None, Some("three"), Some("one")]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1268,7 +1351,7 @@ pub(crate) mod tests {
     fn column_data_delta() {
         let numbers = vec![1, 2, 3, 4, 5, 6, 6, 6, 6, 6, 7, 8, 9];
         let mut start = ColumnData::<DeltaCursor>::new();
-        start.splice(0, numbers.clone());
+        start.splice(0, 0, numbers.clone());
         assert_eq!(
             start.export(),
             vec![vec![
@@ -1281,7 +1364,7 @@ pub(crate) mod tests {
         let numbers2 = start.to_vec();
         assert_eq!(numbers1, numbers2);
         let mut col = start.clone();
-        col.splice(1, vec![2]);
+        col.splice(1, 0, vec![2]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1292,7 +1375,7 @@ pub(crate) mod tests {
                 ColExport::Run(3, 1),
             ]]
         );
-        col.splice(0, vec![0]);
+        col.splice(0, 0, vec![0]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1425,7 +1508,7 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut col = ColumnData::<IntCursor>::new();
             let values = Option::<u64>::rand_vec(&mut rng);
-            col.splice(0, values.clone());
+            col.splice(0, 0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);
         }
     }
@@ -1436,7 +1519,7 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut col = ColumnData::<IntCursor>::new();
             let values = Option::<u64>::rand_vec(&mut rng);
-            col.splice(0, values.clone());
+            col.splice(0, 0, values.clone());
 
             // choose a random value  from `values` and record the index of the
             // first occurrence of that value
@@ -1480,7 +1563,7 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut col = ColumnData::<StrCursor>::new();
             let values = Option::<String>::rand_vec(&mut rng);
-            col.splice(0, values.clone());
+            col.splice(0, 0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);
         }
     }
@@ -1502,7 +1585,7 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut col = ColumnData::<DeltaCursor>::new();
             let values = Option::<i64>::rand_vec(&mut rng);
-            col.splice(0, values.clone());
+            col.splice(0, 0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);
         }
     }
@@ -1511,14 +1594,14 @@ pub(crate) mod tests {
     fn column_data_test_boolean() {
         let mut data: Vec<bool> = vec![true, true, true];
         let mut col = ColumnData::<BooleanCursor>::new();
-        col.splice(0, data.clone());
+        col.splice(0, 0, data.clone());
         assert_eq!(col.export(), vec![vec![ColExport::Run(3, true)]]);
-        col.splice(0, vec![false, false, false]);
+        col.splice(0, 0, vec![false, false, false]);
         assert_eq!(
             col.export(),
             vec![vec![ColExport::Run(3, false), ColExport::Run(3, true)]]
         );
-        col.splice(6, vec![false, false, false]);
+        col.splice(6, 0, vec![false, false, false]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1527,7 +1610,7 @@ pub(crate) mod tests {
                 ColExport::Run(3, false),
             ]]
         );
-        col.splice(9, vec![true, true, true]);
+        col.splice(9, 0, vec![true, true, true]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1537,7 +1620,7 @@ pub(crate) mod tests {
                 ColExport::Run(3, true),
             ]]
         );
-        col.splice(0, vec![true, true, true]);
+        col.splice(0, 0, vec![true, true, true]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1548,7 +1631,7 @@ pub(crate) mod tests {
                 ColExport::Run(3, true),
             ]]
         );
-        col.splice(1, vec![false, false, false]);
+        col.splice(1, 0, vec![false, false, false]);
         assert_eq!(
             col.export(),
             vec![vec![
@@ -1580,7 +1663,7 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut col = ColumnData::<BooleanCursor>::new();
             let values = bool::rand_vec(&mut rng);
-            col.splice(0, values.clone());
+            col.splice(0, 0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);
         }
     }
@@ -1591,7 +1674,7 @@ pub(crate) mod tests {
             2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 8, 8,
         ];
         let mut col = ColumnData::<RleCursor<4, u64>>::new();
-        col.splice(0, data);
+        col.splice(0, 0, data);
         let range = col.iter().scope_to_value(4, ..);
         assert_eq!(range, 7..15);
 

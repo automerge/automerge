@@ -1,6 +1,6 @@
 use super::{
     ColExport, ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab,
-    SlabWriter,
+    SlabWriter, SpliceDel,
 };
 
 type SubCursor<const B: usize> = RleCursor<B, i64>;
@@ -151,7 +151,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
     }
 
-    fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+        // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
@@ -169,11 +170,20 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             current.flush_before(slab, cursor.rle.lit_range(), num, num);
         }
 
+        let SpliceDel {
+            deleted,
+            overflow,
+            cursor,
+            post,
+        } = Self::splice_delete(post, cursor, del, slab);
+
         Encoder {
             slab,
             current,
             post,
             state,
+            deleted,
+            overflow,
             cursor,
         }
     }
@@ -212,25 +222,25 @@ pub(crate) mod tests {
     #[test]
     fn column_data_delta_simple() {
         let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        col1.splice(0, vec![1]);
+        col1.splice(0, 0, vec![1]);
         assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1])],);
-        col1.splice(0, vec![1]);
+        col1.splice(0, 0, vec![1]);
         assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1, 0])],);
-        col1.splice(1, vec![1]);
+        col1.splice(1, 0, vec![1]);
         assert_eq!(
             col1.export()[0],
             vec![ColExport::litrun(vec![1]), ColExport::run(2, 0)],
         );
-        col1.splice(2, vec![1]);
+        col1.splice(2, 0, vec![1]);
         assert_eq!(
             col1.export()[0],
             vec![ColExport::litrun(vec![1]), ColExport::run(3, 0)],
         );
 
         let mut col2: ColumnData<DeltaCursorInternal<100>> = ColumnData::new();
-        col2.splice(0, vec![2, 3, 1]);
+        col2.splice(0, 0, vec![2, 3, 1]);
         assert_eq!(col2.to_vec(), vec![Some(2), Some(3), Some(1)]);
-        col2.splice(2, vec![4]);
+        col2.splice(2, 0, vec![4]);
         assert_eq!(col2.to_vec(), vec![Some(2), Some(3), Some(4), Some(1)]);
     }
 
@@ -238,7 +248,7 @@ pub(crate) mod tests {
     fn column_data_delta_split_merge_semantics() {
         // lit run spanning multiple slabs
         let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        col1.splice(0, vec![1, 10, 2, 11, 4, 27, 19, 3, 21, 14, 2, 8]);
+        col1.splice(0, 0, vec![1, 10, 2, 11, 4, 27, 19, 3, 21, 14, 2, 8]);
         assert_eq!(
             col1.export(),
             vec![
@@ -256,7 +266,7 @@ pub(crate) mod tests {
 
         // lit run capped by runs
         let mut col2: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        col2.splice(0, vec![1, 2, 10, 11, 4, 27, 19, 3, 21, 14, 15, 16]);
+        col2.splice(0, 0, vec![1, 2, 10, 11, 4, 27, 19, 3, 21, 14, 15, 16]);
         assert_eq!(
             col2.export(),
             vec![
@@ -272,7 +282,7 @@ pub(crate) mod tests {
 
         // lit run capped by runs
         let mut col3: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        col3.splice(0, vec![1, 10, 5, 6, 7, 9, 11, 20, 25, 19, 10, 9, 19, 29]);
+        col3.splice(0, 0, vec![1, 10, 5, 6, 7, 9, 11, 20, 25, 19, 10, 9, 19, 29]);
         assert_eq!(
             col3.export(),
             vec![
@@ -291,6 +301,7 @@ pub(crate) mod tests {
         // lit run capped by runs
         let mut col4: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         col4.splice(
+            0,
             0,
             vec![
                 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42, 49, 56, 64, 72, 81, 90,
@@ -329,5 +340,52 @@ pub(crate) mod tests {
         let mut out = Vec::new();
         col5.write(&mut out);
         assert_eq!(out, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn column_data_delta_splice_delete() {
+        // lit run spanning multiple slabs
+        let mut col1: ColumnData<DeltaCursor> = ColumnData::new();
+        col1.splice(0, 0, vec![1, 2, 3, 10, 2, 11, 8, 8, 8]);
+        assert_eq!(
+            col1.to_vec(),
+            vec![
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(10),
+                Some(2),
+                Some(11),
+                Some(8),
+                Some(8),
+                Some(8)
+            ],
+        );
+        col1.splice::<i64>(2, 1, vec![]);
+        assert_eq!(
+            col1.to_vec(),
+            vec![
+                Some(1),
+                Some(2),
+                Some(10),
+                Some(2),
+                Some(11),
+                Some(8),
+                Some(8),
+                Some(8)
+            ],
+        );
+
+        col1.splice::<i64>(4, 3, vec![]);
+
+        assert_eq!(
+            col1.to_vec(),
+            vec![Some(1), Some(2), Some(10), Some(2), Some(8)],
+        );
+
+        assert_eq!(
+            col1.to_vec(),
+            vec![Some(1), Some(2), Some(10), Some(2), Some(8)],
+        );
     }
 }

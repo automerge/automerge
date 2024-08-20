@@ -1,7 +1,6 @@
 pub(crate) mod boolean;
 pub(crate) mod columns;
 pub(crate) mod delta;
-//pub(crate) mod group;
 pub(crate) mod meta;
 mod op;
 pub(crate) use op::{Op, OpBuilder2};
@@ -18,9 +17,8 @@ pub(crate) use types::{Action, ActorIdx, Key, MarkData, OpType, ScalarValue, Val
 
 //pub(crate) use read::{ ReadDoc, ReadDocInternal };
 pub(crate) use boolean::BooleanCursor;
-pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run};
+pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run, SpliceDel};
 pub(crate) use delta::DeltaCursor;
-//pub(crate) use group::GroupCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
     DiffOp, DiffOpIter, OpIter, OpQuery, OpQueryTerm, OpSet, SpanInternal, SpansInternal,

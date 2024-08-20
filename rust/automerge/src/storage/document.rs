@@ -2,6 +2,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 
+use crate::op_set2::OpSet;
 use crate::{convert, ActorId, ChangeHash};
 
 mod doc_op_columns;
@@ -211,101 +212,105 @@ impl<'a> Document<'a> {
         ))
     }
 
-    pub(crate) fn new<'b, I, C, IC, D, O>(
-        mut actors: Vec<ActorId>,
+    pub(crate) fn new<'b, C, IC>(
+        //mut actors: Vec<ActorId>,
+        ops: &OpSet,
         heads_with_indices: Vec<(ChangeHash, usize)>,
-        ops: I,
+        //ops: I,
         changes: IC,
         compress: CompressConfig,
     ) -> Document<'static>
     where
-        I: Iterator<Item = D> + Clone + ExactSizeIterator,
-        O: convert::OpId<usize>,
-        D: AsDocOp<'b, OpId = O>,
+        //I: Iterator<Item = D> + Clone + ExactSizeIterator,
+        //O: convert::OpId<usize>,
+        //D: AsDocOp<'b, OpId = O>,
         C: AsChangeMeta<'b>,
         IC: Iterator<Item = C> + Clone,
     {
-        let mut ops_out = Vec::new();
-        let ops_meta = DocOpColumns::encode(ops, &mut ops_out);
+        /*
+                let mut ops_out = Vec::new();
+                let ops_meta = DocOpColumns::encode(ops, &mut ops_out);
 
-        let mut change_out = Vec::new();
-        let change_meta = DocChangeColumns::encode(changes, &mut change_out);
-        actors.sort_unstable();
+                let mut change_out = Vec::new();
+                let change_meta = DocChangeColumns::encode(changes, &mut change_out);
+                actors.sort_unstable();
 
-        let mut data = Vec::with_capacity(ops_out.len() + change_out.len());
-        leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
-        for actor in &actors {
-            leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
-            data.extend(actor.to_bytes());
-        }
-        leb128::write::unsigned(&mut data, heads_with_indices.len() as u64).unwrap();
-        for (head, _) in &heads_with_indices {
-            data.extend(head.as_bytes());
-        }
-        let prefix_len = data.len();
+                let mut data = Vec::with_capacity(ops_out.len() + change_out.len());
+                leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
+                for actor in &actors {
+                    leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
+                    data.extend(actor.to_bytes());
+                }
+                leb128::write::unsigned(&mut data, heads_with_indices.len() as u64).unwrap();
+                for (head, _) in &heads_with_indices {
+                    data.extend(head.as_bytes());
+                }
+                let prefix_len = data.len();
 
-        change_meta.raw_columns().write(&mut data);
-        ops_meta.raw_columns().write(&mut data);
-        let change_start = data.len();
-        let change_end = change_start + change_out.len();
-        data.extend(change_out);
-        let ops_start = data.len();
-        let ops_end = ops_start + ops_out.len();
-        data.extend(ops_out);
-        let suffix_start = data.len();
+                change_meta.raw_columns().write(&mut data);
+                ops_meta.raw_columns().write(&mut data);
+                let change_start = data.len();
+                let change_end = change_start + change_out.len();
+                data.extend(change_out);
+                let ops_start = data.len();
+                let ops_end = ops_start + ops_out.len();
+                data.extend(ops_out);
+                let suffix_start = data.len();
 
-        let head_indices = heads_with_indices
-            .iter()
-            .map(|(_, i)| *i as u64)
-            .collect::<Vec<_>>();
-        for index in &head_indices {
-            leb128::write::unsigned(&mut data, *index).unwrap();
-        }
+                let head_indices = heads_with_indices
+                    .iter()
+                    .map(|(_, i)| *i as u64)
+                    .collect::<Vec<_>>();
+                for index in &head_indices {
+                    leb128::write::unsigned(&mut data, *index).unwrap();
+                }
 
-        let header = Header::new(ChunkType::Document, &data);
-        let mut bytes = Vec::with_capacity(data.len() + header.len());
-        header.write(&mut bytes);
-        let header_len = bytes.len();
-        bytes.extend(&data);
+                let header = Header::new(ChunkType::Document, &data);
+                let mut bytes = Vec::with_capacity(data.len() + header.len());
+                header.write(&mut bytes);
+                let header_len = bytes.len();
+                bytes.extend(&data);
 
-        let op_bytes = shift_range(ops_start..ops_end, header.len());
-        let change_bytes = shift_range(change_start..change_end, header.len());
+                let op_bytes = shift_range(ops_start..ops_end, header.len());
+                let change_bytes = shift_range(change_start..change_end, header.len());
 
-        let compressed_bytes = if let CompressConfig::Threshold(threshold) = compress {
-            let compressed = Cow::Owned(compression::compress(compression::Args {
-                prefix: prefix_len + header.len(),
-                suffix: suffix_start + header.len(),
-                ops: compression::Cols {
-                    raw_columns: ops_meta.raw_columns(),
-                    data: op_bytes.clone(),
-                },
-                changes: compression::Cols {
-                    raw_columns: change_meta.raw_columns(),
-                    data: change_bytes.clone(),
-                },
-                original: Cow::Borrowed(&bytes),
-                extra_args: compression::CompressArgs {
-                    threshold,
-                    original_header_len: header_len,
-                },
-            }));
-            Some(compressed)
-        } else {
-            None
-        };
+                let compressed_bytes = if let CompressConfig::Threshold(threshold) = compress {
+                    let compressed = Cow::Owned(compression::compress(compression::Args {
+                        prefix: prefix_len + header.len(),
+                        suffix: suffix_start + header.len(),
+                        ops: compression::Cols {
+                            raw_columns: ops_meta.raw_columns(),
+                            data: op_bytes.clone(),
+                        },
+                        changes: compression::Cols {
+                            raw_columns: change_meta.raw_columns(),
+                            data: change_bytes.clone(),
+                        },
+                        original: Cow::Borrowed(&bytes),
+                        extra_args: compression::CompressArgs {
+                            threshold,
+                            original_header_len: header_len,
+                        },
+                    }));
+                    Some(compressed)
+                } else {
+                    None
+                };
 
-        Document {
-            actors,
-            bytes: Cow::Owned(bytes),
-            compressed_bytes,
-            header,
-            heads: heads_with_indices.into_iter().map(|(h, _)| h).collect(),
-            op_metadata: ops_meta,
-            op_bytes,
-            change_metadata: change_meta,
-            change_bytes,
-            head_indices,
-        }
+                Document {
+                    actors,
+                    bytes: Cow::Owned(bytes),
+                    compressed_bytes,
+                    header,
+                    heads: heads_with_indices.into_iter().map(|(h, _)| h).collect(),
+                    op_metadata: ops_meta,
+                    op_bytes,
+                    change_metadata: change_meta,
+                    change_bytes,
+                    head_indices,
+                }
+        */
+        todo!()
     }
 
     pub(crate) fn iter_ops(

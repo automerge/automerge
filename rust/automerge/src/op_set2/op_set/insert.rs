@@ -32,7 +32,7 @@ impl<'a> InsertQuery<'a> {
         let mut candidates = vec![];
         let last_visible_cursor = None;
         if target == 0 {
-            candidates.push(Loc::new(iter.pos, ElemId::head()));
+            candidates.push(Loc::new(iter.pos(), ElemId::head()));
         };
         Self {
             iter,
@@ -79,11 +79,9 @@ impl<'a> InsertQuery<'a> {
         let mut last_width = None;
         let mut index = 0;
         let mut done = index >= self.target;
-        let mut pos = 0;
+        let mut pos = self.iter.pos();
         let mut post_marks = vec![];
-        log!("resolve InsertQuery target={}", self.target);
         while let Some(mut op) = self.iter.next() {
-            log!(":: op={:?} index={} last={:?}", op.id, index, last_width);
             let visible = op.scope_to_clock(self.clock.as_ref(), &self.iter);
             if op.insert {
                 // this is the one place where we need non-visible ops
@@ -92,7 +90,6 @@ impl<'a> InsertQuery<'a> {
                     done = index >= self.target;
                 }
             }
-            log!(":: index={} visble={}, done={}", index, visible, done);
             if visible {
                 let cursor = op.cursor().unwrap();
                 if !done {
@@ -100,11 +97,9 @@ impl<'a> InsertQuery<'a> {
                     if !op.is_mark() {
                         self.last_visible_cursor = Some(cursor);
                         last_width = Some(op.width(self.encoding));
-                        log!(":: :: not done isnt mark");
                     }
                 } else {
                     self.identify_valid_insertion_spot(op, cursor);
-                    log!(":: :: done candidates={}", self.candidates.len());
                     if op.action == Action::Mark {
                         post_marks.push(op);
                     } else if !self.candidates.is_empty() {
@@ -114,7 +109,6 @@ impl<'a> InsertQuery<'a> {
             }
             pos = op.pos;
         }
-        log!(":: no more ops");
 
         if let Some(w) = last_width.take() {
             index += w;
@@ -127,15 +121,12 @@ impl<'a> InsertQuery<'a> {
                     self.marks.process(op, None);
                 }
             }
-            log!(":: candidates cursor {:?}", loc.cursor);
             Ok(QueryNth {
                 pos: loc.pos,
                 marks: MarkSet::from_query_state(&self.marks),
                 elemid: loc.cursor,
             })
         } else if let Some(cursor) = self.last_visible_cursor {
-            log!(":: final cursor {:?}", cursor);
-            //Ok(Loc::new(pos + 1, cursor))
             Ok(QueryNth {
                 pos: pos + 1,
                 marks: MarkSet::from_query_state(&self.marks),

@@ -159,7 +159,7 @@ mod tests {
             ValueMeta(4),
         ];
         let mut col = ColumnData::<MetaCursor>::new();
-        col.splice(0, data);
+        col.splice(0, 0, data);
 
         let mut iter = col.iter();
 

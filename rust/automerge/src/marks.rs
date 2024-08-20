@@ -68,6 +68,13 @@ impl Mark {
         }
     }
 
+    pub(crate) fn old_data(&self) -> OldMarkData {
+        OldMarkData {
+            name: SmolStr::from(self.name.as_str()),
+            value: self.value.clone(),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }

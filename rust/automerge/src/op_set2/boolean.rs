@@ -1,6 +1,8 @@
-use super::{ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter};
+use super::{
+    ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel,
+};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub(crate) struct BooleanState {
     value: bool,
     count: usize,
@@ -113,21 +115,24 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run.count
     }
 
-    fn encode<'a>(index: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+        // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
         let count = run.map(|r| r.count).unwrap_or(0);
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
 
         let mut state = BooleanState { count, value };
+        let mut state2 = BooleanState::from(run.unwrap_or_default());
+        assert_eq!(state, state2);
         let mut post = None;
 
         let delta = cursor.index - index;
         if delta > 0 {
             state.count -= delta;
-            post = Some(BooleanState {
+            post = Some(Run {
                 count: delta,
-                value,
+                value: Some(value),
             });
         }
 
@@ -136,11 +141,21 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let mut current = SlabWriter::new(B);
         current.flush_before(slab, range, 0, size);
 
+        let SpliceDel {
+            deleted,
+            overflow,
+            cursor,
+            post,
+        } = Self::splice_delete(post, cursor, del, slab);
+        let post = post.map(|r| BooleanState::from(r));
+
         Encoder {
             slab,
             current,
             post,
             state,
+            deleted,
+            overflow,
             cursor,
         }
     }
@@ -188,6 +203,51 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 }
 
+/*
+struct SpliceDel<'a, C: ColumnCursor> {
+  deleted: usize,
+  overflow: usize,
+  cursor: C,
+  post: Option<Run<'a, C::Item>>
+}
+
+fn splice_delete<'a, C: ColumnCursor>(_post: Option<Run<'a, C::Item>>, _cursor: C, _del: usize, slab: &'a Slab) -> SpliceDel<'a, C> {
+    let mut cursor = _cursor;
+    let mut post = _post;
+    let mut del = _del;
+    let mut overflow = 0;
+    let mut deleted = 0;
+    while del > 0 {
+      match post {
+        // if del is less than the current run
+        Some(Run { count, value }) if del < count => {
+          deleted += del;
+          post = Some(Run { count: count - del, value });
+          del = 0;
+        },
+        // if del is greather than or equal the current run
+        Some(Run { count, .. }) => {
+          del -= count;
+          deleted += count;
+          post = None;
+        },
+        None => {
+          if let Some((p, c)) = C::next(&cursor, slab.as_ref()) {
+            post = Some(p);
+            cursor = c;
+          } else {
+            post = None;
+            overflow = del;
+            del = 0;
+          }
+        }
+      }
+    }
+    assert!(_del == deleted + overflow );
+    SpliceDel { deleted, overflow, cursor, post }
+}
+*/
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columns::{ColExport, ColumnData};
@@ -198,6 +258,7 @@ pub(crate) mod tests {
         // lit run spanning multiple slabs
         let mut col1: ColumnData<BooleanCursorInternal<4>> = ColumnData::new();
         col1.splice(
+            0,
             0,
             vec![
                 true, false, true, false, true, false, true, false, true, false,
@@ -230,6 +291,7 @@ pub(crate) mod tests {
 
         let mut col2: ColumnData<BooleanCursorInternal<4>> = ColumnData::new();
         col2.splice(
+            0,
             0,
             vec![
                 false, false, false, true, true, true, false, false, false, true, true, true,
@@ -270,5 +332,84 @@ pub(crate) mod tests {
         let mut out = Vec::new();
         col5.write(&mut out);
         assert_eq!(out, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn column_data_boolean_splice_del() {
+        let mut col1: ColumnData<BooleanCursorInternal<4>> = ColumnData::new();
+        col1.splice(
+            0,
+            0,
+            vec![
+                true, true, true, true, false, false, false, false, true, true,
+            ],
+        );
+        assert_eq!(
+            col1.export(),
+            vec![vec![
+                ColExport::run(4, true),
+                ColExport::run(4, false),
+                ColExport::run(2, true),
+            ]]
+        );
+
+        let mut col2 = col1.clone();
+        col2.splice::<bool>(2, 2, vec![]);
+
+        assert_eq!(
+            col2.export(),
+            vec![vec![
+                ColExport::run(2, true),
+                ColExport::run(4, false),
+                ColExport::run(2, true),
+            ]]
+        );
+
+        let mut col3 = col1.clone();
+        col3.splice::<bool>(2, 2, vec![false, false]);
+
+        assert_eq!(
+            col3.export(),
+            vec![vec![
+                ColExport::run(2, true),
+                ColExport::run(6, false),
+                ColExport::run(2, true),
+            ]]
+        );
+
+        let mut col4 = col1.clone();
+        col4.splice::<bool>(2, 4, vec![]);
+
+        assert_eq!(
+            col4.export(),
+            vec![vec![
+                ColExport::run(2, true),
+                ColExport::run(2, false),
+                ColExport::run(2, true),
+            ]]
+        );
+
+        let mut col5 = col1.clone();
+        col5.splice::<bool>(2, 7, vec![]);
+
+        assert_eq!(col5.export(), vec![vec![ColExport::run(3, true),]]);
+
+        let mut col6 = col1.clone();
+        col6.splice::<bool>(0, 4, vec![]);
+
+        assert_eq!(
+            col6.export(),
+            vec![vec![ColExport::run(4, false), ColExport::run(2, true),]]
+        );
+
+        let mut col7 = col1.clone();
+        col7.splice::<bool>(0, 10, vec![false]);
+
+        assert_eq!(col7.export(), vec![vec![ColExport::run(1, false),]]);
+
+        let mut col8 = col1.clone();
+        col8.splice::<bool>(4, 4, vec![]);
+
+        assert_eq!(col8.export(), vec![vec![ColExport::run(6, true),]]);
     }
 }

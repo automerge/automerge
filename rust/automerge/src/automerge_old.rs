@@ -319,12 +319,12 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
-        let idx_range = self.osd().start_range();
+        //let idx_range = self.osd().start_range();
         TransactionArgs {
             actor_index,
             seq,
             start_op,
-            idx_range,
+            //idx_range,
             deps,
             scope,
         }
@@ -904,27 +904,30 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        let heads = self.get_heads();
-        let c = self.history.iter();
-        let compress = if options.deflate {
-            None
-        } else {
-            Some(CompressConfig::None)
-        };
-        let mut bytes = crate::storage::save::save_document(
-            c,
-            self.ops.iter().map(|(objid, _, op)| (objid, op)),
-            &self.ops.osd.actors,
-            &self.ops.osd.props,
-            &heads,
-            compress,
-        );
-        if options.retain_orphans {
-            for orphaned in self.queue.iter() {
-                bytes.extend(orphaned.raw_bytes());
-            }
-        }
-        bytes
+        todo!()
+        /*
+                let heads = self.get_heads();
+                let c = self.history.iter();
+                let compress = if options.deflate {
+                    None
+                } else {
+                    Some(CompressConfig::None)
+                };
+                let mut bytes = crate::storage::save::save_document(
+                    c,
+                    self.ops.iter().map(|(objid, _, op)| (objid, op)),
+                    &self.ops.osd.actors,
+                    &self.ops.osd.props,
+                    &heads,
+                    compress,
+                );
+                if options.retain_orphans {
+                    for orphaned in self.queue.iter() {
+                        bytes.extend(orphaned.raw_bytes());
+                    }
+                }
+                bytes
+        */
     }
 
     /// Save the entirety of this document in a compact form.

@@ -102,7 +102,6 @@ describe('Automerge', () => {
 
       result = doc.getWithType(root, "null")
       assert.deepEqual(result, ["null", null]);
-      doc.dump()
     })
 
     it('should be able to use bytes', () => {
@@ -153,7 +152,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.length(sublist), 4)
     })
 
-    it.only('lists have insert, set, splice, and push ops', () => {
+    it('lists have insert, set, splice, and push ops', () => {
       const doc = create()
       const root = "_root"
 
