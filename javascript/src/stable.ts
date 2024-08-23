@@ -1065,10 +1065,14 @@ export function generateSyncMessage<T>(
  *                  {@link PatchCallback} which will be informed of any changes
  *                  in `doc` which occur because of the received sync message.
  *
- * @returns An array of `[newDoc, newSyncState, syncMessage | null]` where
+ * @returns An array of `[newDoc, newSyncState, null]` where
  * `newDoc` is the updated state of `doc`, `newSyncState` should replace
- * `inState` and `syncMessage` should be sent to the peer if it is not null. If
- * `syncMessage` is null then we are up to date.
+ * `inState`.
+ *
+ * @remarks Note that this function has three return values for legacy reasons.
+ * The third value used to be a sync message to send back but this is now
+ * always null and you should instead call `generateSyncMessage` after calling
+ * `receiveSyncMessage` to see if there are new messages to send.
  */
 export function receiveSyncMessage<T>(
   doc: Doc<T>,
