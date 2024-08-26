@@ -5,13 +5,17 @@ use super::rle::ActorCursor;
 use super::types::{Action, Key, OpType, ScalarValue};
 use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
 
+//use crate::storage::document::doc_op_columns::AsDocOp;
+use crate::convert;
+use crate::storage::document::AsDocOp;
+
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate;
 use crate::storage::ColumnSpec;
 use crate::text_value::TextValue;
 use crate::types;
-use crate::types::{Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, Prop};
+use crate::types::{ActorId, Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, Prop};
 
 use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
@@ -208,7 +212,7 @@ pub(crate) struct Op<'a> {
 }
 
 #[derive(Clone, Default, Copy)]
-pub(super) struct SuccCursors<'a> {
+pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
@@ -450,6 +454,67 @@ impl<'a> std::hash::Hash for Op<'a> {
 }
 
 impl<'a> Eq for Op<'a> {}
+
+impl<'a> AsDocOp<'a> for Op<'a> {
+    type ActorId = usize;
+    type OpId = OpId;
+    type SuccIter = SuccCursors<'a>;
+
+    fn obj(&self) -> convert::ObjId<Self::OpId> {
+        self.obj.into()
+    }
+    fn id(&self) -> Self::OpId {
+        self.id
+    }
+    fn key(&self) -> convert::Key<'a, Self::OpId> {
+        match self.key {
+            Key::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s))),
+            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            Key::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(op)),
+        }
+    }
+    fn insert(&self) -> bool {
+        self.insert
+    }
+    fn action(&self) -> u64 {
+        self.action.into()
+    }
+    fn val(&self) -> Cow<'a, crate::value::ScalarValue> {
+        Cow::Owned(self.value.into())
+    }
+    fn succ(&self) -> Self::SuccIter {
+        self.succ_cursors.clone()
+    }
+    fn expand(&self) -> bool {
+        self.expand
+    }
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        self.mark_name
+            .map(|s| Cow::Owned(smol_str::SmolStr::from(s)))
+    }
+}
+
+/*
+pub(crate) trait AsDocOp<'a> {
+    /// The type of the Actor ID component of the op IDs for this impl. This is typically either
+    /// `&'a ActorID` or `usize`
+    type ActorId;
+    /// The type of the op IDs this impl produces.
+    type OpId: convert::OpId<Self::ActorId>;
+    /// The type of the successor iterator returned by `Self::pred`. This can often be omitted
+    type SuccIter: Iterator<Item = Self::OpId> + ExactSizeIterator;
+
+    fn obj(&self) -> convert::ObjId<Self::OpId>;
+    fn id(&self) -> Self::OpId;
+    fn key(&self) -> convert::Key<'a, Self::OpId>;
+    fn insert(&self) -> bool;
+    fn action(&self) -> u64;
+    fn val(&self) -> Cow<'a, ScalarValue>;
+    fn succ(&self) -> Self::SuccIter;
+    fn expand(&self) -> bool;
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+}
+*/
 
 // TODO:
 // needs tests around counter value and visability

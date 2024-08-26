@@ -59,19 +59,21 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
                 SubCursor::<B>::finish(slab, out, state.rle, next_post, cursor.rle);
             }
             Some(Run { count, value: None }) => {
-                let next_state = DeltaState::new(state.abs);
-                SubCursor::<B>::flush_state(out, state.rle);
-                SubCursor::<B>::flush_run(out, count, None);
-                Self::finish(slab, out, next_state, None, cursor);
+                //let next_state = DeltaState::new(state.abs);
+                //SubCursor::<B>::flush_state(out, state.rle);
+                //SubCursor::<B>::flush_run(out, count, None);
+                Self::append_chunk(&mut state, out, Run { count, value: None });
+                Self::finish(slab, out, state, None, cursor);
             }
             None => {
                 if let Some((run, next_cursor)) = cursor.next(slab.as_ref()) {
                     match run {
                         Run { count, value: None } => {
-                            let next_state = DeltaState::new(state.abs);
-                            SubCursor::<B>::flush_state(out, state.rle);
-                            SubCursor::<B>::flush_run(out, count, None);
-                            Self::finish(slab, out, next_state, None, next_cursor);
+                            //let next_state = DeltaState::new(state.abs);
+                            //SubCursor::<B>::flush_state(out, state.rle);
+                            //SubCursor::<B>::flush_run(out, count, None);
+                            Self::append_chunk(&mut state, out, Run { count, value: None });
+                            Self::finish(slab, out, state, None, next_cursor);
                         }
                         Run {
                             count: 1,

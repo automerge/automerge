@@ -45,7 +45,7 @@ pub(crate) struct MismatchingColumn {
 pub(crate) mod compression {
     #[derive(Clone, Debug)]
     pub(crate) struct Unknown;
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub(crate) struct Uncompressed;
 
     /// A witness for what we know about whether or not a column is compressed

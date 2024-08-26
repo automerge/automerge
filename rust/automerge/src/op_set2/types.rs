@@ -11,7 +11,7 @@ use std::ops::{Bound, RangeBounds};
 use super::meta::ValueType;
 
 /// An index into an array of actors stored elsewhere
-#[derive(PartialEq, PartialOrd, Debug, Clone, Copy)]
+#[derive(PartialEq, PartialOrd, Debug, Clone, Default, Copy)]
 pub(crate) struct ActorIdx(pub(crate) u64); // FIXME - shouldnt this be usize? (wasm is 32bit)
 
 impl fmt::Display for ActorIdx {
@@ -50,8 +50,9 @@ pub(crate) struct MarkData<'a> {
     pub(crate) value: ScalarValue<'a>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) enum Action {
+    #[default]
     MakeMap,
     MakeList,
     MakeText,

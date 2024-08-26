@@ -10,7 +10,7 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     nodes: Vec<ChangeNode>,
     edges: Vec<Edge>,
@@ -55,6 +55,18 @@ impl ChangeGraph {
             nodes_by_hash: BTreeMap::new(),
             hashes: Vec::new(),
             clock_cache: Vec::new(),
+        }
+    }
+
+    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+        for node in &mut self.nodes {
+            if node.actor_index >= idx {
+                node.actor_index += 1;
+            }
+        }
+        // FIXME - this could get expensive - lookout
+        for clock in &mut self.clock_cache {
+            clock.rewrite_with_new_actor(idx)
         }
     }
 

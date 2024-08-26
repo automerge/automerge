@@ -1,5 +1,6 @@
 use crate::error;
 use crate::legacy as amp;
+use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
@@ -529,7 +530,7 @@ impl OpId {
 
     #[inline]
     pub(crate) fn actor(&self) -> usize {
-        self.1.try_into().unwrap()
+        self.1 as usize
     }
 
     pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
@@ -587,12 +588,20 @@ impl ObjId {
         &self.0
     }
 
-    pub(crate) fn counter(&self) -> u64 {
-        self.0.counter()
+    pub(crate) fn counter(&self) -> Option<u64> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.0.counter())
+        }
     }
 
-    pub(crate) fn actor(&self) -> usize {
-        self.0.actor()
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.0.actoridx())
+        }
     }
 }
 
@@ -645,8 +654,12 @@ impl ElemId {
         self.0.counter()
     }
 
-    pub(crate) fn actor(&self) -> usize {
-        self.0.actor()
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        if self.is_head() {
+            None
+        } else {
+            Some(self.0.actoridx())
+        }
     }
 
     pub(crate) fn is_head(&self) -> bool {

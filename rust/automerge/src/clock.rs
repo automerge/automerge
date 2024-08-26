@@ -47,6 +47,22 @@ impl Clock {
         Clock(Default::default())
     }
 
+    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+        let mut keys = self
+            .0
+            .keys()
+            .cloned()
+            .filter(|k| *k >= idx)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        // iterate from high to low so we don't step on other keys
+        for k in keys.iter().rev() {
+            if let Some(v) = self.0.remove(k) {
+                self.0.insert(*k + 1, v);
+            }
+        }
+    }
+
     pub(crate) fn merge(a: &Clock, b: &Clock) -> Clock {
         if a.0.len() > b.0.len() {
             Self::merge(b, a)

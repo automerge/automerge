@@ -2051,6 +2051,8 @@ pub(crate) fn reconstruct_document<'a>(
     doc: &'a storage::Document<'a>,
     mode: VerificationMode,
 ) -> Result<Automerge, AutomergeError> {
+    todo!()
+    /*
     let storage::load::ReconOpSet {
         changes,
         op_set,
@@ -2082,4 +2084,5 @@ pub(crate) fn reconstruct_document<'a>(
         actor: Actor::Unused(ActorId::random()),
         max_op,
     })
+    */
 }

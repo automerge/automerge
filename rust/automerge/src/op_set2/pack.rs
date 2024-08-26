@@ -29,7 +29,14 @@ impl PackError {
 }
 
 pub(crate) trait Packable: PartialEq + Debug {
-    type Unpacked<'a>: Clone + Copy + Debug + PartialEq + ToOwned + Borrow<Self> + Into<WriteOp<'a>>;
+    type Unpacked<'a>: Clone
+        + Copy
+        + Debug
+        + PartialEq
+        + ToOwned
+        + Borrow<Self>
+        + Into<WriteOp<'a>>
+        + Default;
     type Owned: Clone + PartialEq + Debug;
 
     fn group<'a>(item: Self::Unpacked<'a>) -> usize {

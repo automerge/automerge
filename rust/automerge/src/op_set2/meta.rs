@@ -20,7 +20,7 @@ pub(crate) enum ValueType {
     Unknown(u8),
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub(crate) struct ValueMeta(u64);
 
 impl ValueMeta {

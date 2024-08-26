@@ -72,10 +72,14 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
         // write nothing if its all false
-        if !(state.value == false && writer.len() == 0) {
-            Self::flush_state(&mut writer, state);
-        }
+        //if !(state.value == false && writer.len() == 0) {
+        Self::flush_state(&mut writer, state);
+        //}
         writer.write(out);
+    }
+
+    fn is_empty<'a>(v: Option<bool>) -> bool {
+        !(v == Some(true))
     }
 
     fn copy_between<'a>(
@@ -331,7 +335,7 @@ pub(crate) mod tests {
         assert_eq!(col5.export(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);
-        assert_eq!(out, Vec::<u8>::new());
+        assert_eq!(out, vec![0]);
     }
 
     #[test]

@@ -8,8 +8,8 @@ use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::{
-    Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpQuery, OpQueryTerm,
-    OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
+    Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpBuilder2, OpQuery,
+    OpQueryTerm, OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
@@ -177,9 +177,10 @@ pub struct Automerge {
     history: Vec<Change>,
     /// Mapping from change hash to index into the history list.
     history_index: HashMap<ChangeHash, usize>,
-    /// Graph of changes
-    change_graph: ChangeGraph,
+    // /// Graph of changes
+    // change_graph: ChangeGraph,
     /// Mapping from actor index to list of seqs seen for them.
+    // FIXME make key be ActorId so we dont have to reindex it
     states: HashMap<usize, Vec<usize>>, // FIXME - reordering actor?
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
@@ -198,7 +199,7 @@ impl Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
-            change_graph: ChangeGraph::new(),
+            //change_graph: ChangeGraph::new(),
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
@@ -786,8 +787,8 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
-        for (obj, op, pred) in ops {
-            self.insert_op(&obj, op, &pred, patch_log)?;
+        for op in ops {
+            self.insert_op(op, patch_log)?;
         }
         Ok(())
     }
@@ -810,7 +811,7 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder, OpIds)> {
+    fn import_ops(&mut self, change: &Change) -> Vec<OpBuilder2> {
         /*
                 let actor = self.ops.put_actor(change.actor_id().clone());
                 let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
@@ -896,8 +897,6 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        todo!()
-        /*
         let heads = self.get_heads();
         let c = self.history.iter();
         let compress = if options.deflate {
@@ -905,21 +904,13 @@ impl Automerge {
         } else {
             Some(CompressConfig::None)
         };
-        let mut bytes = crate::storage::save::save_document(
-            c,
-            self.ops.iter().map(|(objid, _, op)| (objid, op)),
-            &self.ops.osd.actors,
-            &self.ops.osd.props,
-            &heads,
-            compress,
-        );
+        let mut bytes = crate::storage::save::save_document(c, &self.ops, &heads, compress);
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
             }
         }
         bytes
-        */
     }
 
     /// Save the entirety of this document in a compact form.
@@ -971,7 +962,7 @@ impl Automerge {
             .copied()
             .collect::<Vec<_>>();
 
-        self.change_graph.remove_ancestors(changes, &heads);
+        self.ops.change_graph.remove_ancestors(changes, &heads);
 
         Ok(())
     }
@@ -1014,7 +1005,7 @@ impl Automerge {
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        self.change_graph.clock_for_heads(heads)
+        self.ops.change_graph.clock_for_heads(heads)
     }
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
@@ -1081,7 +1072,8 @@ impl Automerge {
             .push(history_index);
 
         self.history_index.insert(change.hash(), history_index);
-        self.change_graph
+        self.ops
+            .change_graph
             .add_change(&change, actor_index)
             .expect("Change's deps should already be in the document");
 
@@ -1215,39 +1207,34 @@ impl Automerge {
 
     pub(crate) fn insert_op(
         &mut self,
-        obj: &ObjId,
-        op: OpBuilder,
-        pred: &OpIds,
+        op: OpBuilder2,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        todo!()
         /*
-                let is_delete = op.is_delete();
-                let idx = self.ops.load(*obj, op);
-                let op = idx.as_op(&self.ops.osd);
+               let is_delete = op.is_delete();
 
-                let (pos, succ) = if patch_log.is_active() {
-                    let obj = self.get_obj_meta(*obj)?;
-                    let found = self.ops.find_op_with_patch_log(
-                        &obj,
-                        patch_log.text_rep().encoding(obj.typ),
-                        op,
-                        pred,
-                    );
-                    found.log_patches(&obj, op, pred, self, patch_log);
-                    (found.pos, found.succ)
-                } else {
-                    let found = self.ops.find_op_without_patch_log(obj, op, pred);
-                    (found.pos, found.succ)
-                };
+               let (pos, succ) = if patch_log.is_active() {
+                   //let obj = self.get_obj_meta(*obj)?;
+                   let found = self.ops.find_op_with_patch_log(
+                       op,
+                       patch_log.text_rep().encoding(op.obj.typ),
+                   );
+                   //found.log_patches(&op.obj, op, pred, self, patch_log);
+                   (found.pos, found.succ)
+               } else {
+               //    let found = self.ops.find_op_without_patch_log(obj, op, pred);
+               //    (found.pos, found.succ)
+                   todo!()
+               };
 
-                self.ops.add_succ(obj, &succ, idx);
+               //self.ops.add_succ(obj, &succ, idx);
 
-                if !is_delete {
-                    self.ops.insert(pos, obj, idx);
-                }
-                Ok(())
+               if !is_delete {
+                   //self.ops.insert(pos, obj, idx);
+               }
+               Ok(())
         */
+        todo!()
     }
 
     /// Create patches representing the change in the current state of the document between the
@@ -1985,7 +1972,7 @@ pub(crate) fn reconstruct_document<'a>(
 ) -> Result<Automerge, AutomergeError> {
     let storage::load::ReconOpSet {
         changes,
-        op_set,
+        mut op_set,
         heads,
         max_op,
     } = storage::load::reconstruct_opset(doc, mode)
@@ -1993,23 +1980,24 @@ pub(crate) fn reconstruct_document<'a>(
 
     let mut hashes_by_index = HashMap::new();
     let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut change_graph = ChangeGraph::new();
+    //let mut change_graph = ChangeGraph::new();
     for (index, change) in changes.iter().enumerate() {
         // SAFETY: This should be fine because we just constructed an opset containing
         // all the changes
-        let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
+        let actor_index = op_set.lookup_actor(change.actor_id()).unwrap();
+        //let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
         actor_to_history.entry(actor_index).or_default().push(index);
         hashes_by_index.insert(index, change.hash());
-        change_graph.add_change(change, actor_index)?;
+        op_set.change_graph.add_change(change, actor_index)?;
     }
+    //let op_set = OpSet::new(doc, change_graph);
     let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
-    let op_set = OpSet::new(doc);
     Ok(Automerge {
         queue: vec![],
         history: changes,
         history_index,
         states: actor_to_history,
-        change_graph,
+        //change_graph,
         ops: op_set,
         deps: heads.into_iter().collect(),
         actor: Actor::Unused(ActorId::random()),

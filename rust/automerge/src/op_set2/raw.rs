@@ -13,7 +13,19 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type PostState<'a> = &'a [u8];
     type Export = Vec<u8>;
 
-    fn write<'a>(writer: &mut SlabWriter<'a>, slab: &'a Slab, state: ()) -> () {}
+    fn write<'a>(
+        writer: &mut SlabWriter<'a>,
+        slab: &'a Slab,
+        mut state: Self::State<'a>,
+    ) -> Self::State<'a> {
+        let len = slab.len();
+        writer.flush_before(slab, 0..len, 0, len);
+    }
+
+    fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
+        Self::flush_state(&mut writer, state);
+        writer.write(out);
+    }
 
     fn finish<'a>(
         slab: &'a Slab,

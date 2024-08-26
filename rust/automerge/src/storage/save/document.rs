@@ -63,9 +63,9 @@ where
 }
 */
 
-pub(crate) fn save_document<'a, I, O>(
+pub(crate) fn save_document<'a, I>(
     changes: I,
-    ops: &OpSet,
+    op_set: &OpSet,
     //actors: &'a IndexedCache<ActorId>,
     //props: &IndexedCache<String>,
     heads: &[ChangeHash],
@@ -75,7 +75,6 @@ where
     I: Iterator<Item = &'a Change> + Clone + 'a,
     //    O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
-    /*
     //let actor_ids = changes
     //    .clone()
     //    .map(|c| c.actor_id().clone())
@@ -83,30 +82,36 @@ where
     //    .collect::<Vec<_>>();
 
     //let actor_lookup = actors.encode_index();
-    //let doc_ops = ops
-    //    .clone()
-    //    .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
+    //let doc_ops = op_set.iter()
+    //    .map(|op| op_as_docop2(op));
 
-    let actor_lookup = vec![];
+    //let actor_lookup = vec![];
+    let actor_lookup = op_set
+        .actors
+        .iter()
+        .enumerate()
+        .map(|(i, _)| i)
+        .collect::<Vec<_>>();
 
-    let actors = ops.actors.clone();
+    let actors = op_set.actors.clone().into_iter().collect();
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {
-        actors,
+        actors: &actors,
         actor_lookup: &actor_lookup,
         change: c,
         graph: &hash_graph,
     });
 
+    let doc_ops = op_set.iter().collect::<Vec<_>>();
+
     let doc = Document::new(
-        ops,
+        op_set,
         hash_graph.heads_with_indices(heads.to_vec()),
+        doc_ops.into_iter(),
         changes,
         config.unwrap_or(CompressConfig::Threshold(DEFLATE_MIN_SIZE)),
     );
     doc.into_bytes()
-    */
-    todo!()
 }
 
 struct HashGraph {

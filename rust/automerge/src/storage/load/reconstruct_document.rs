@@ -5,7 +5,8 @@ use crate::storage::document::ReadDocOpError;
 use crate::{
     change::Change,
     columnar::Key as DocOpKey,
-    op_set::{OpIdx, OpSet, OpSetData},
+    op_set::{OpIdx, OpSetData},
+    op_set2::OpSet,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
     types::{ChangeHash, ElemId, Key, ObjId, OpBuilder, OpId, OpIds, OpType},
 };
@@ -63,6 +64,8 @@ fn next_op<'a, I>(iter: &mut I, op_set: &mut OpSet) -> Result<Option<NextDocOp>,
 where
     I: Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a,
 {
+    todo!()
+    /*
     let op_res = iter.next();
     if let Some(op_res) = op_res {
         let doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))?;
@@ -81,6 +84,7 @@ where
     } else {
         Ok(None)
     }
+    */
 }
 
 struct ReconstructionState<'a> {

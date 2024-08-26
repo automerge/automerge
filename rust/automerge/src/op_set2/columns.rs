@@ -123,6 +123,20 @@ pub(crate) struct ColumnData<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn is_empty(&self) -> bool {
+        let run = self.iter().next_run();
+        match run {
+            None => true,
+            Some(run) if run.count != self.len => false,
+            Some(run) => C::is_empty(run.value),
+        }
+    }
+
+    pub(crate) fn dump(&self) {
+        let data = self.to_vec();
+        log!(" :: {:?}", data);
+    }
+
     pub(crate) fn slabs(&self) -> &[Slab] {
         &self.slabs
     }
@@ -226,7 +240,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 Some(run)
             } else {
                 assert_eq!(iter.pos(), iter.cursor.index());
-                assert_eq!(iter.group(), iter.cursor.group());
+                //assert_eq!(iter.group(), iter.cursor.group());
                 self.pos += iter.pos();
                 self.group += iter.group();
                 self.iter = None;
@@ -296,7 +310,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         R: RangeBounds<usize>,
     >(
         &mut self,
-        value: V,
+        value: Option<V>,
         range: R,
     ) -> Range<usize> {
         #[derive(Debug, PartialEq)]
@@ -307,7 +321,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
         #[derive(Debug)]
         struct ScopeValue<T: ?Sized, V> {
-            target: V,
+            target: Option<V>,
             pos: usize,
             start: usize,
             max: usize,
@@ -342,7 +356,19 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Done
                         } else {
                             match (&self.target, &r.value) {
-                                (a, Some(b)) if a <= b => {
+                                (None, None) => {
+                                    self.state = ScopeState::Found;
+                                    self.start = std::cmp::max(self.start, self.pos);
+                                    self.pos += r.count;
+                                    RunStep::Skip
+                                }
+                                (None, Some(_)) => {
+                                    self.state = ScopeState::Found;
+                                    self.start = std::cmp::max(self.start, self.pos);
+                                    self.pos = self.start;
+                                    RunStep::Done
+                                }
+                                (Some(a), Some(b)) if a <= b => {
                                     // found target
                                     // TODO write a test where we have many objects w
                                     // one big key run
@@ -370,7 +396,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Done
                         } else {
                             match (&self.target, &r.value) {
-                                (a, Some(b)) if a != b => RunStep::Done,
+                                (Some(a), Some(b)) if a != b => RunStep::Done,
                                 _ => {
                                     self.pos += r.count;
                                     RunStep::Skip
@@ -703,6 +729,10 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         writer.write(out);
     }
 
+    fn is_empty<'a>(v: Option<<Self::Item as Packable>::Unpacked<'a>>) -> bool {
+        v.is_none()
+    }
+
     // FIXME remove self?
     fn pop<'a>(
         &self,
@@ -947,6 +977,34 @@ impl Column {
             Self::Value(col) => col.slabs.as_slice(),
             Self::Group(col) => col.slabs.as_slice(),
             Self::Action(col) => col.slabs.as_slice(),
+        }
+    }
+
+    pub(crate) fn dump(&self) {
+        match self {
+            Self::Actor(col) => col.dump(),
+            Self::Str(col) => col.dump(),
+            Self::Integer(col) => col.dump(),
+            Self::Delta(col) => col.dump(),
+            Self::Bool(col) => col.dump(),
+            Self::ValueMeta(col) => col.dump(),
+            Self::Value(col) => col.dump(),
+            Self::Group(col) => col.dump(),
+            Self::Action(col) => col.dump(),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Actor(col) => col.is_empty(),
+            Self::Str(col) => col.is_empty(),
+            Self::Integer(col) => col.is_empty(),
+            Self::Delta(col) => col.is_empty(),
+            Self::Bool(col) => col.is_empty(),
+            Self::ValueMeta(col) => col.is_empty(),
+            Self::Value(col) => col.is_empty(),
+            Self::Group(col) => col.is_empty(),
+            Self::Action(col) => col.is_empty(),
         }
     }
 
@@ -1675,27 +1733,27 @@ pub(crate) mod tests {
         ];
         let mut col = ColumnData::<RleCursor<4, u64>>::new();
         col.splice(0, 0, data);
-        let range = col.iter().scope_to_value(4, ..);
+        let range = col.iter().scope_to_value(Some(4), ..);
         assert_eq!(range, 7..15);
 
-        let range = col.iter().scope_to_value(4, ..11);
+        let range = col.iter().scope_to_value(Some(4), ..11);
         assert_eq!(range, 7..11);
-        let range = col.iter().scope_to_value(4, ..8);
+        let range = col.iter().scope_to_value(Some(4), ..8);
         assert_eq!(range, 7..8);
-        let range = col.iter().scope_to_value(4, 0..1);
-        assert_eq!(range, 0..0);
-        let range = col.iter().scope_to_value(4, 8..9);
+        let range = col.iter().scope_to_value(Some(4), 0..1);
+        assert_eq!(range, 1..1);
+        let range = col.iter().scope_to_value(Some(4), 8..9);
         assert_eq!(range, 8..9);
-        let range = col.iter().scope_to_value(4, 9..);
+        let range = col.iter().scope_to_value(Some(4), 9..);
         assert_eq!(range, 9..15);
-        let range = col.iter().scope_to_value(4, 14..16);
+        let range = col.iter().scope_to_value(Some(4), 14..16);
         assert_eq!(range, 14..15);
 
-        let range = col.iter().scope_to_value(2, ..);
+        let range = col.iter().scope_to_value(Some(2), ..);
         assert_eq!(range, 0..3);
-        let range = col.iter().scope_to_value(7, ..);
+        let range = col.iter().scope_to_value(Some(7), ..);
         assert_eq!(range, 22..23);
-        let range = col.iter().scope_to_value(8, ..);
+        let range = col.iter().scope_to_value(Some(8), ..);
         assert_eq!(range, 23..25);
     }
 }

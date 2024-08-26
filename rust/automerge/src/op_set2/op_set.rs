@@ -1,4 +1,5 @@
 use super::parents::Parents;
+use crate::change_graph::ChangeGraph;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine};
@@ -6,7 +7,9 @@ use crate::op_set::{OpBuilder, OpIdx, OpIdxRange};
 use crate::patches::TextRepresentation;
 use crate::query::TreeQuery;
 use crate::storage::ColumnType;
-use crate::storage::{columns::compression, ColumnSpec, Document, RawColumn, RawColumns};
+use crate::storage::{
+    columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
+};
 use crate::types;
 use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
@@ -62,10 +65,20 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
+    pub(crate) change_graph: ChangeGraph,
     cols: Columns,
 }
 
 impl OpSet {
+    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+        OpSet {
+            len: 0,
+            actors,
+            change_graph: ChangeGraph::new(),
+            cols: Columns::default(),
+        }
+    }
+
     pub(crate) fn dump(&self) {
         log!("OpSet");
         log!("  len: {}", self.len);
@@ -93,7 +106,7 @@ impl OpSet {
         // do succ later
     }
 
-    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_pos: &[SuccInsert], op: OpId) {
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_pos: &[SuccInsert], id: OpId) {
         for i in op_pos.iter().rev() {
             let mut succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
             succ_num.splice(i.pos, 1, vec![i.len + 1]);
@@ -106,10 +119,10 @@ impl OpSet {
             */
 
             let mut succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
-            succ_actor.splice(i.sub_pos, 0, vec![ActorIdx(op.actor() as u64)]);
+            succ_actor.splice(i.sub_pos, 0, vec![id.actoridx()]);
 
             let mut succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
-            succ_counter.splice(i.sub_pos, 0, vec![op.counter() as i64]);
+            succ_counter.splice(i.sub_pos, 0, vec![id.counter() as i64]);
         }
     }
 
@@ -421,30 +434,23 @@ impl OpSet {
         self.actors.binary_search(actor).ok() // .map(ActorIdx::from)
     }
 
+    /*
+        pub(crate) fn find_op_with_patch_log(&self, op: OpBuilder2, encoding: ListEncoding) -> FoundOpWithPatchLog<'a> {
+            todo!()
+        }
+    */
+
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.actors.binary_search(&actor) {
             Ok(idx) => idx, //ActorIdx::from(idx),
             Err(idx) => {
-                self.actors.insert(idx, actor);
-                for (spec, col) in &mut self.cols.0 {
-                    match col {
-                        Column::Actor(col_data) => {
-                            let new_ids = col_data
-                                .iter()
-                                .map(|a| match a {
-                                    Some(ActorIdx(id)) if id as usize >= idx => {
-                                        Some(ActorIdx(id + 1))
-                                    }
-                                    old => old,
-                                })
-                                .collect::<Vec<_>>();
-                            let mut new_data = ColumnData::<ActorCursor>::new();
-                            new_data.splice(0, 0, new_ids);
-                            std::mem::swap(col_data, &mut new_data);
-                        }
-                        _ => {}
-                    }
+                // only rewrite if there are actors higher than idx
+                if self.actors.len() != idx {
+                    self.cols.rewrite_with_new_actor(idx);
+                    self.change_graph.rewrite_with_new_actor(idx);
                 }
+                self.actors.insert(idx, actor);
+                // FIXME - should replace all actor_index's with ActorIdx
                 idx //ActorIdx::from(idx)
             }
         }
@@ -466,7 +472,13 @@ impl OpSet {
     ) -> Self {
         let len = ops.len();
         let cols = Columns::new(ops);
-        OpSet { actors, cols, len }
+        let change_graph = ChangeGraph::new();
+        OpSet {
+            actors,
+            cols,
+            change_graph,
+            len,
+        }
     }
 
     fn from_parts(
@@ -485,17 +497,25 @@ impl OpSet {
                 .collect(),
         );
         let len = cols.len();
-        let op_set = OpSet { actors, cols, len };
+        let change_graph = ChangeGraph::new();
+        let op_set = OpSet {
+            actors,
+            cols,
+            change_graph,
+            len,
+        };
         op_set
     }
 
-    fn export(&self) -> (RawColumns<compression::Uncompressed>, Vec<u8>) {
+    pub(crate) fn export(&self) -> (RawColumns<compression::Uncompressed>, Vec<u8>) {
         let mut data = vec![]; // should be able to do with_capacity here
         let mut raw = vec![];
-        for (spec, c) in &self.cols {
-            let range = c.write(&mut data);
-            if !range.is_empty() {
-                raw.push(RawColumn::new(*spec, range));
+        for (spec, c) in self.cols.iter() {
+            if !c.is_empty() || spec.id() == ColumnId::new(3) {
+                let range = c.write(&mut data);
+                if !range.is_empty() {
+                    raw.push(RawColumn::new(*spec, range));
+                }
             }
         }
         (raw.into_iter().collect(), data)
@@ -509,11 +529,11 @@ impl OpSet {
         let range = self
             .cols
             .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-            .scope_to_value(ActorIdx::from(obj.actor() as usize), range);
+            .scope_to_value(obj.actor(), range);
         let range = self
             .cols
             .get_str(KEY_STR_COL_SPEC)
-            .scope_to_value(prop, range);
+            .scope_to_value(Some(prop), range);
         self.iter_range(&range)
     }
 
@@ -529,7 +549,7 @@ impl OpSet {
         let range = self
             .cols
             .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-            .scope_to_value(ActorIdx::from(obj.actor() as usize), range);
+            .scope_to_value(obj.actor(), range);
         self.iter_range(&range)
     }
 
@@ -713,6 +733,27 @@ fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
 }
 
 impl Columns {
+    // FIXME - this could be much much more efficient
+    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+        for (spec, col) in &mut self.0 {
+            match col {
+                Column::Actor(col_data) => {
+                    let new_ids = col_data
+                        .iter()
+                        .map(|a| match a {
+                            Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
+                            old => old,
+                        })
+                        .collect::<Vec<_>>();
+                    let mut new_data = ColumnData::<ActorCursor>::new();
+                    new_data.splice(0, 0, new_ids);
+                    std::mem::swap(col_data, &mut new_data);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn dump(&self) {
         let mut id_a = self.get_actor(ID_ACTOR_COL_SPEC);
         let mut id_c = self.get_delta_integer(ID_COUNTER_COL_SPEC);
@@ -724,7 +765,7 @@ impl Columns {
         let mut meta = self.get_value_meta(VALUE_META_COL_SPEC);
         let mut value = self.get_value(VALUE_COL_SPEC);
         let mut insert = self.get_boolean(INSERT_COL_SPEC);
-        log!(":: id       obj    key      ins    value ");
+        log!(":: id       obj        key      elem        ins    value ");
         while true {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
@@ -732,15 +773,9 @@ impl Columns {
             let obj_c = fmt(obj_c.next());
             let insert = insert.next();
             let insert = if insert == Some(Some(true)) { "t" } else { "f" };
-            let key_s = key_str.next();
-            let key_a = key_a.next();
-            let key_c = key_c.next();
-            let key = match (key_s, key_a, key_c) {
-                (Some(Some(s)), Some(None), Some(None)) => format!("{}", s),
-                (Some(None), Some(Some(a)), Some(Some(c))) => format!("({},{})", a, c),
-                (Some(None), Some(None), Some(Some(c))) => "(HEAD)".into(),
-                (s, a, c) => format!("({},{},{})", fmt(s), fmt(a), fmt(c)),
-            };
+            let key_s = fmt(key_str.next());
+            let key_a = fmt(key_a.next());
+            let key_c = fmt(key_c.next());
             let m = meta.next();
             let v = if let Some(Some(m)) = m {
                 let raw_data = value.read_next(m.length()).unwrap();
@@ -752,10 +787,11 @@ impl Columns {
                 break;
             }
             log!(
-                ":: {:7} {:7} {:8} {:3} {}",
-                format!("({},{})", id_a, id_c),
-                format!("({},{})", obj_a, obj_c),
-                key,
+                ":: {:7} {:7} {:8} {:8} {:3} {}",
+                format!("({},{})", id_c, id_a),
+                format!("({},{})", obj_c, obj_a),
+                key_s,
+                format!("({},{})", key_c, key_a),
                 insert,
                 v
             );
@@ -803,12 +839,9 @@ impl Columns {
                 match col {
                     Column::Actor(c) => {
                         let value = match *spec {
-                            ID_ACTOR_COL_SPEC => Some(ActorIdx(op.id().actor() as u64)),
-                            OBJ_ID_ACTOR_COL_SPEC => Some(ActorIdx(op.obj().actor() as u64)),
-                            KEY_ACTOR_COL_SPEC => match op.elemid() {
-                                Some(e) if !e.is_head() => Some(ActorIdx(e.actor() as u64)),
-                                _ => None,
-                            },
+                            ID_ACTOR_COL_SPEC => Some(op.id().actoridx()),
+                            OBJ_ID_ACTOR_COL_SPEC => op.obj().actor(),
+                            KEY_ACTOR_COL_SPEC => op.elemid().and_then(|e| e.actor()),
                             _ => None,
                         };
                         c.splice(pos, 0, vec![value]);
@@ -823,7 +856,7 @@ impl Columns {
                     }
                     Column::Integer(c) => {
                         let value = if *spec == OBJ_ID_COUNTER_COL_SPEC {
-                            Some(op.obj().counter())
+                            op.obj().counter()
                         } else {
                             None
                         };
@@ -945,9 +978,7 @@ impl Columns {
         id_actor.splice(
             0,
             0,
-            ops.clone()
-                .map(|op| ActorIdx::from(op.id.actor()))
-                .collect::<Vec<_>>(),
+            ops.clone().map(|op| op.id.actoridx()).collect::<Vec<_>>(),
         );
         columns.insert(ID_ACTOR_COL_SPEC, Column::Actor(id_actor));
 
@@ -965,9 +996,7 @@ impl Columns {
         obj_actor_col.splice(
             0,
             0,
-            ops.clone()
-                .map(|op| ActorIdx::from(op.obj.0.actor()))
-                .collect::<Vec<_>>(),
+            ops.clone().map(|op| op.obj.actor()).collect::<Vec<_>>(),
         );
         columns.insert(OBJ_ID_ACTOR_COL_SPEC, Column::Actor(obj_actor_col));
 
@@ -986,13 +1015,7 @@ impl Columns {
             ops.clone()
                 .map(|op| match op.key {
                     Key::Map(_) => None,
-                    Key::Seq(e) => {
-                        if e.is_head() {
-                            None
-                        } else {
-                            Some(ActorIdx::from(e.0.actor()))
-                        }
-                    }
+                    Key::Seq(e) => e.actor(),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -1045,7 +1068,7 @@ impl Columns {
             0,
             0,
             ops.clone()
-                .flat_map(|op| op.succ().map(|n| ActorIdx::from(n.actor())))
+                .flat_map(|op| op.succ().map(|n| n.actoridx()))
                 .collect::<Vec<_>>(),
         );
         columns.insert(SUCC_ACTOR_COL_SPEC, Column::Actor(succ_actor));
@@ -1332,13 +1355,9 @@ impl Columns {
             _ => ColumnDataIter::empty(),
         }
     }
-}
 
-impl<'a> Iterator for &'a Columns {
-    type Item = (&'a ColumnSpec, &'a Column);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.iter().next()
+    fn iter(&self) -> impl Iterator<Item = (&ColumnSpec, &Column)> {
+        self.0.iter()
     }
 }
 
@@ -1555,7 +1574,7 @@ mod tests {
             0,
             test_ops
                 .iter()
-                .flat_map(|o| o.succs.iter().map(|s| ActorIdx::from(s.actor())))
+                .flat_map(|o| o.succs.iter().map(|s| s.actoridx()))
                 .collect::<Vec<_>>(),
         );
         succ_counter_data.splice(
@@ -1670,11 +1689,11 @@ mod tests {
             let range = opset
                 .cols
                 .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                .scope_to_value(1, ..);
+                .scope_to_value(Some(1), ..);
             let range = opset
                 .cols
                 .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-                .scope_to_value(ActorIdx::from(1 as usize), range);
+                .scope_to_value(Some(ActorIdx::from(1 as usize)), range);
             let mut iter = opset.iter_range(&range);
             let op = iter.next().unwrap();
             assert_eq!(ops[3], op);
