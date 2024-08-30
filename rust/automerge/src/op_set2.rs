@@ -13,7 +13,9 @@ pub(crate) mod rle;
 //pub(crate) mod read;
 pub(crate) mod slab;
 mod types;
-pub(crate) use types::{Action, ActorIdx, Key, MarkData, OpType, ScalarValue, Value};
+pub(crate) use types::{
+    Action, ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value,
+};
 
 //pub(crate) use read::{ ReadDoc, ReadDocInternal };
 pub(crate) use boolean::BooleanCursor;

@@ -1,7 +1,7 @@
 use super::{
     ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel,
 };
-use crate::columnar::encoding::leb128::ulebsize;
+use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::marker::PhantomData;
 use std::ops::Range;
 
@@ -208,7 +208,9 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             (Some(a), Some(b)) => {
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
-                writer.flush_before2(slab, c0.offset..b.offset, lit1, size - lit2);
+                // need to remove the lit-run header
+                let b_start = b.offset - lebsize(-1 * b.len as i64) as usize;
+                writer.flush_before2(slab, c0.offset..b_start, lit1, size - lit2);
                 writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
             }
             (Some(a), None) => {
@@ -217,7 +219,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             }
             (None, Some(b)) => {
                 let lit2 = b.len - 1;
-                writer.flush_before2(slab, c0.offset..b.offset, 0, size - lit2);
+                let b_start = b.offset - lebsize(-1 * b.len as i64) as usize;
+                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2);
                 writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
             }
             _ => {

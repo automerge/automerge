@@ -218,38 +218,12 @@ impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
 impl Mark {
     pub fn new<V: Into<ScalarValue>>(name: String, value: V, start: usize, end: usize) -> Mark {
         Mark {
-            /*
-                        data: Cow::Owned(MarkData {
-                            name: name.into(),
-                            value: value.into(),
-                        }),
-            */
             name: SmolStr::from(&name),
             value: value.into(),
             start,
             end,
         }
     }
-
-    /*
-        pub(crate) fn from_data(start: usize, end: usize, data: MarkData<'a>) -> Mark<'a> {
-            Mark {
-                data, // data: Cow::Borrowed(data),
-                start,
-                end,
-            }
-        }
-    */
-
-    /*
-        pub fn into_owned(self) -> Mark<'static> {
-            Mark {
-                data: Cow::Owned(self.data.into_owned()),
-                start: self.start,
-                end: self.end,
-            }
-        }
-    */
 
     pub fn name(&self) -> &str {
         &self.name //.as_str()

@@ -1,6 +1,6 @@
 use super::OpIter;
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set2::{Key, Op, OpQuery, OpType, VisibleOpIter};
+use crate::op_set2::{KeyRef, Op, OpQuery, OpType, VisibleOpIter};
 use crate::types::Clock;
 use crate::types::{ListEncoding, ObjType, OpId};
 use crate::Automerge;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 #[derive(Default, Debug)]
 struct SpansState<'a> {
-    key: Option<Key<'a>>,
+    key: Option<KeyRef<'a>>,
     last_op: Option<Op<'a>>,
     current_marks: Option<Arc<MarkSet>>,
     next_marks: Option<Option<Arc<MarkSet>>>,

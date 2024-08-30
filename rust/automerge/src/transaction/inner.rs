@@ -8,7 +8,7 @@ use crate::exid::ExId;
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
-use crate::op_set2::{Action, Key, Op, OpBuilder2, OpSet};
+use crate::op_set2::{Action, Op, OpBuilder2, OpSet, PropRef};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
 use crate::storage::convert::{ob_as_actor_id, ObWithMetadata};
@@ -282,42 +282,26 @@ impl TransactionInner {
         elemid: ElemId,
         value: ScalarValue,
     ) -> OpBuilder2 {
-        /*
-                OpBuilder {
-                    id: self.next_id(),
-                    action: OpType::Put(value),
-                    key,
-                    insert: true,
-                }
-        */
         OpBuilder2 {
             id: self.next_id(),
             obj,
             pos,
-            prop: Prop::Seq(0),
+            index: 0,
             action: OpType::Put(value),
-            elemid: Some(elemid),
+            key: elemid.into(),
             insert: true,
             pred: vec![],
         }
     }
 
     fn next_delete(&mut self, obj: ObjMeta, elemid: ElemId, ops: &[Op<'_>]) -> OpBuilder2 {
-        /*
-                OpBuilder2 {
-                    id: self.next_id(),
-                    action: OpType::Delete,
-                    key,
-                    insert: false,
-                }
-        */
         OpBuilder2 {
             id: self.next_id(),
             obj,
             pos: 0,
-            prop: Prop::Seq(0),
+            index: 0,
             action: OpType::Delete,
-            elemid: Some(elemid),
+            key: elemid.into(),
             insert: false,
             pred: ops.iter().map(|op| op.id).collect(),
         }
@@ -391,15 +375,15 @@ impl TransactionInner {
 
         let marks = query.marks;
         let pos = query.pos;
-        let elemid = Some(query.elemid);
+        let key = query.elemid.into();
 
         let op = OpBuilder2 {
             id,
             obj: *obj,
             pos,
-            prop: Prop::Seq(index),
+            index,
             action,
-            elemid,
+            key,
             insert: true,
             pred: vec![],
         };
@@ -460,11 +444,10 @@ impl TransactionInner {
             id,
             obj: *obj,
             pos: query.end_pos,
-            prop: Prop::Map(prop),
+            index: 0,
             action,
-            elemid: None,
+            key: prop.into(),
             insert: false,
-            //pred: query.ops.iter().map(|op| op.index).collect(),
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
 
@@ -506,9 +489,9 @@ impl TransactionInner {
             id,
             obj: *obj,
             pos: query.end_pos,
-            prop: Prop::Seq(index),
+            index,
             action,
-            elemid: key.elemid(),
+            key: key.to_own(),
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
@@ -835,7 +818,7 @@ impl TransactionInner {
             .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
 
         let pos = query.pos;
-        let elemid = Some(query.elemid);
+        let key = query.elemid.into();
 
         let id = self.next_id();
 
@@ -843,9 +826,9 @@ impl TransactionInner {
             id,
             obj,
             pos,
-            prop: Prop::Seq(index),
+            index,
             action,
-            elemid,
+            key,
             insert: true,
             pred: vec![],
         };
@@ -1013,14 +996,14 @@ impl TransactionInner {
                 if op.is_mark() {
                     assert!(obj.typ.is_sequence());
                     match (obj.typ, op.prop()) {
-                        (ObjType::List, Prop::Seq(index)) => {
-                            patch_log.insert(obj.id, *index, op.value(), op.id, false);
+                        (ObjType::List, PropRef::Seq(index)) => {
+                            patch_log.insert(obj.id, index, op.value(), op.id, false);
                         }
-                        (ObjType::Text, Prop::Seq(index)) => {
+                        (ObjType::Text, PropRef::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                patch_log.insert(obj.id, *index, op.value(), op.id, false);
+                                patch_log.insert(obj.id, index, op.value(), op.id, false);
                             } else {
-                                patch_log.splice(obj.id, *index, op.as_str(), marks);
+                                patch_log.splice(obj.id, index, op.as_str(), marks);
                             }
                         }
                         _ => {}
@@ -1028,13 +1011,13 @@ impl TransactionInner {
                 }
             } else if op.is_delete() {
                 match op.prop() {
-                    Prop::Seq(index) => patch_log.delete_seq(obj.id, *index, 1),
-                    Prop::Map(key) => patch_log.delete_map(obj.id, &key),
+                    PropRef::Seq(index) => patch_log.delete_seq(obj.id, index, 1),
+                    PropRef::Map(key) => patch_log.delete_map(obj.id, key),
                 }
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment(obj.id, op.prop(), value, op.id);
+                patch_log.increment2(obj.id, op.prop(), value, op.id);
             } else {
-                patch_log.put(obj.id, op.prop(), op.value(), op.id, false, false);
+                patch_log.put2(obj.id, op.prop(), op.value(), op.id, false, false);
             }
         }
     }

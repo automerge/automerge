@@ -156,6 +156,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         let start = out.len();
         let mut state = C::State::default();
         let mut writer = SlabWriter::new(usize::MAX);
+        // TODO if just 1 slab - copy it
         for s in &self.slabs {
             state = C::write(&mut writer, s, state);
         }
@@ -793,6 +794,25 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
     fn export(data: &[u8]) -> Vec<ColExport<Self::Item>>;
 
     fn export_item(item: Option<<Self::Item as Packable>::Unpacked<'_>>) -> Self::Export;
+
+    fn decode(data: &[u8]) {
+        let mut cursor = Self::default();
+        log!("::DECODE");
+        while true {
+            match cursor.try_next(data) {
+                Ok(Some((run, next_cursor))) => {
+                    log!(" {:?}", run);
+                    cursor = next_cursor;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    log!(" decode error: {:?}", e);
+                    break;
+                }
+            }
+        }
+        log!("::/DECODE");
+    }
 
     fn next<'a>(&self, data: &'a [u8]) -> Option<(Run<'a, Self::Item>, Self)> {
         match self.try_next(data) {

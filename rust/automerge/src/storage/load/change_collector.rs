@@ -7,7 +7,7 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_set2::Op,
+    op_set2::{Op, OpSet},
     op_tree::OpSetData,
     storage::{
         change::{PredOutOfOrder, Verified},
@@ -99,8 +99,8 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    #[instrument(skip(self, osd))]
-    pub(crate) fn finish(self, osd: &OpSetData) -> Result<CollectedChanges<'static>, Error> {
+    #[instrument(skip(self, op_set))]
+    pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
         for (_, changes) in self.changes_by_actor {
@@ -123,7 +123,7 @@ impl<'a> ChangeCollector<'a> {
         let mut history = Vec::new();
         let mut heads = BTreeSet::new();
         for (index, change) in changes_in_order.into_iter().enumerate() {
-            let finished = change.finish(&hashes_by_index, osd)?;
+            let finished = change.finish(&hashes_by_index, op_set)?;
             let hash = finished.hash();
             hashes_by_index.insert(index, hash);
             for dep in finished.dependencies() {
@@ -155,11 +155,11 @@ impl<'a> PartialChange<'a> {
     ///
     /// * If any op references a property index which is not in `props`
     /// * If any op references an actor index which is not in `actors`
-    #[instrument(skip(self, known_changes, osd))]
+    #[instrument(skip(self, known_changes, op_set))]
     fn finish(
         mut self,
         known_changes: &HashMap<usize, ChangeHash, FxBuildHasher>,
-        osd: &OpSetData,
+        op_set: &OpSet,
     ) -> Result<StoredChange<'a, Verified>, Error> {
         let deps_len = self.deps.len();
         let mut deps = self.deps.into_iter().try_fold::<_, _, Result<_, Error>>(
@@ -180,9 +180,8 @@ impl<'a> PartialChange<'a> {
         let num_ops = self.ops.len() as u64;
         self.ops.sort();
         let converted_ops = self.ops.clone().into_iter();
-        let actor = osd
-            .actors
-            .safe_get(self.actor)
+        let actor = op_set
+            .get_actor_safe(self.actor)
             .ok_or_else(|| {
                 tracing::error!(actor_index = self.actor, "actor out of bounds");
                 Error::MissingActor

@@ -19,6 +19,23 @@ impl<'a, I: OpQueryTerm<'a> + Clone> VisibleOpIter<'a, I> {
     }
 }
 
+pub(crate) fn is_visible(op: &Op<'_>, next_ops: &[Op<'_>], clock: Option<&Clock>) -> bool {
+    if op.action == Action::Increment {
+        return false;
+    }
+    if let ScalarValue::Counter(_) = &op.value {
+        let mut succ = op.succ().filter(|i| vis(clock, &i)).collect::<HashSet<_>>();
+        for o in next_ops.iter() {
+            if o.action == Action::Increment {
+                succ.remove(&o.id);
+            }
+        }
+        succ.is_empty()
+    } else {
+        !op.succ().any(|i| vis(clock, &i))
+    }
+}
+
 fn vis(clock: Option<&Clock>, id: &OpId) -> bool {
     if let Some(c) = clock {
         c.covers(id)

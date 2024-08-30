@@ -64,14 +64,12 @@ fn next_op<'a, I>(iter: &mut I, op_set: &mut OpSet) -> Result<Option<NextDocOp>,
 where
     I: Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a,
 {
-    todo!()
-    /*
     let op_res = iter.next();
     if let Some(op_res) = op_res {
         let doc_op = op_res.map_err(|e| Error::ReadOp(Box::new(e)))?;
         let obj = doc_op.object;
-        check_opid(&op_set.osd, *obj.opid())?;
-        let (op, succ) = import_op(&mut op_set.osd, doc_op)?;
+        check_opid(op_set, *obj.opid())?;
+        let (op, succ) = import_op(op_set, doc_op)?;
         let opid = op.id;
         let key = op.elemid_or_key();
         Ok(Some(NextDocOp {
@@ -84,7 +82,6 @@ where
     } else {
         Ok(None)
     }
-    */
 }
 
 struct ReconstructionState<'a> {
@@ -92,8 +89,8 @@ struct ReconstructionState<'a> {
     max_op: u64,
     last_obj: Option<ObjId>,
     last_key: Option<Key>,
-    pred: HashMap<OpId, Vec<OpIdx>>,
-    ops_collecter: Vec<OpIdx>,
+    pred: HashMap<OpId, Vec<usize>>,
+    ops_collecter: Vec<usize>,
     change_collector: ChangeCollector<'a>,
 }
 
@@ -115,64 +112,87 @@ pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
 ) -> Result<ReconOpSet, Error> {
-    // FIXME
+    let op_set = OpSet::new(doc);
+    let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
+    let mut max_op = 0;
+    for op in op_set.iter() {
+        max_op = std::cmp::max(max_op, op.id.counter());
+        change_collector.collect(op.id, op)?;
+        // build pred - include deletes
+        // check opids
+    }
+    let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set)?;
+
+    Ok(ReconOpSet {
+        changes,
+        max_op,
+        op_set,
+        heads,
+    })
+}
+
+pub(crate) fn reconstruct_opset_old<'a>(
+    doc: &'a Document<'a>,
+    mode: VerificationMode,
+) -> Result<ReconOpSet, Error> {
     todo!()
     /*
-        let mut state = ReconstructionState::new(doc)?;
-        let mut iter_ops = doc.iter_ops();
-        let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
-        while let Some(NextDocOp {
-            op,
-            succ,
-            key,
-            opid,
-            obj,
-        }) = next
-        {
-            state.max_op = std::cmp::max(state.max_op, opid.counter());
+            let mut state = ReconstructionState::new(doc)?;
+            let mut iter_ops = doc.iter_ops();
+            let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
+            let mut idx = 0;
+            while let Some(NextDocOp {
+                op,
+                succ,
+                key,
+                opid,
+                obj,
+            }) = next
+            {
+                state.max_op = std::cmp::max(state.max_op, opid.counter());
 
-            let idx = state.op_set.load(obj, op);
+                //let idx = state.op_set.load(obj, op);
 
-            for id in &succ {
-                state
-                    .pred
-                    .entry(*id)
-                    .and_modify(|v| v.push(idx))
-                    .or_insert_with(|| vec![idx]);
-            }
-
-            if let Some(pred_idxs) = state.pred.get(&opid) {
-                for p in pred_idxs {
-                    state.op_set.osd.add_pred(*p, idx);
+                for id in &succ {
+                    state
+                        .pred
+                        .entry(*id)
+                        .and_modify(|v| v.push(idx))
+                        .or_insert_with(|| vec![idx]);
                 }
-                state.pred.remove(&opid);
+
+                if let Some(pred_idxs) = state.pred.get(&opid) {
+                    for p in pred_idxs {
+                        // fixme
+                        //state.op_set.osd.add_pred(*p, idx);
+                    }
+                    state.pred.remove(&opid);
+                }
+
+                state.ops_collecter.push(idx);
+                state.change_collector.collect(opid, op)?;
+
+                state.last_key = Some(key);
+                state.last_obj = Some(obj);
+
+                idx += 1;
+                next = next_op(&mut iter_ops, &mut state.op_set)?;
+
+                flush_ops(&obj, next.as_ref(), &mut state)?;
             }
 
-            state.ops_collecter.push(idx);
-            state.change_collector.collect(opid, idx)?;
+            let op_set = state.op_set;
+            let change_collector = state.change_collector;
+            let max_op = state.max_op;
 
-            state.last_key = Some(key);
-            state.last_obj = Some(obj);
+            let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set)?;
 
-            next = next_op(&mut iter_ops, &mut state.op_set)?;
-
-            flush_ops(&obj, next.as_ref(), &mut state)?;
-        }
-
-        state.op_set.add_indexes();
-
-        let op_set = state.op_set;
-        let change_collector = state.change_collector;
-        let max_op = state.max_op;
-
-        let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set.osd)?;
-
-        Ok(ReconOpSet {
-            changes,
-            max_op,
-            op_set,
-            heads,
-        })
+            Ok(ReconOpSet {
+                changes,
+                max_op,
+                op_set,
+                heads,
+            })
     */
 }
 
@@ -183,10 +203,10 @@ fn flush_changes(
     change_collector: ChangeCollector<'_>,
     doc: &Document<'_>,
     mode: VerificationMode,
-    osd: &OpSetData,
+    op_set: &OpSet,
 ) -> Result<(Vec<Change>, BTreeSet<ChangeHash>), Error> {
     let super::change_collector::CollectedChanges { history, heads } =
-        change_collector.finish(osd)?;
+        change_collector.finish(op_set)?;
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
         if expected_heads != heads {
@@ -210,43 +230,42 @@ fn flush_ops(
     next: Option<&NextDocOp>,
     state: &mut ReconstructionState<'_>,
 ) -> Result<(), Error> {
-    // FIXME
     todo!()
     /*
-        let next_key = next.map(|n| n.key);
-        let next_obj = next.map(|n| n.obj);
+            let next_key = next.map(|n| n.key);
+            let next_obj = next.map(|n| n.obj);
 
-        if next_obj.is_some() && next_obj < state.last_obj {
-            return Err(Error::OpsOutOfOrder);
-        }
+            if next_obj.is_some() && next_obj < state.last_obj {
+                return Err(Error::OpsOutOfOrder);
+            }
 
-        if next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
-            for (opid, preds) in &state.pred {
-                let del = OpBuilder {
-                    id: *opid,
-                    insert: false,
-                    key: state.last_key.unwrap(),
-                    action: OpType::Delete,
-                };
-                state.max_op = std::cmp::max(state.max_op, opid.counter());
-                let del_idx = state.op_set.load(state.last_obj.unwrap(), del);
-                for p in preds {
-                    state.op_set.osd.add_dep(*p, del_idx);
+            if next.is_none() || next_key != state.last_key || next_obj != state.last_obj {
+                for (opid, preds) in &state.pred {
+                    let del = OpBuilder {
+                        id: *opid,
+                        insert: false,
+                        key: state.last_key.unwrap(),
+                        action: OpType::Delete,
+                    };
+                    state.max_op = std::cmp::max(state.max_op, opid.counter());
+                    let del_idx = state.op_set.load(state.last_obj.unwrap(), del);
+                    for p in preds {
+                        state.op_set.osd.add_dep(*p, del_idx);
+                    }
+                    state.change_collector.collect(*opid, del_idx)?;
                 }
-                state.change_collector.collect(*opid, del_idx)?;
-            }
-            state.pred.clear();
+                state.pred.clear();
 
-            for idx in &state.ops_collecter {
-                state
-                    .op_set
-                    .load_idx(obj, *idx)
-                    .map_err(|e| Error::ReadOp(Box::new(e)))?;
-            }
+                for idx in &state.ops_collecter {
+                    state
+                        .op_set
+                        .load_idx(obj, *idx)
+                        .map_err(|e| Error::ReadOp(Box::new(e)))?;
+                }
 
-            state.ops_collecter.truncate(0)
-        }
-        Ok(())
+                state.ops_collecter.truncate(0)
+            }
+            Ok(())
     */
 }
 
@@ -257,35 +276,38 @@ pub(crate) struct ReconOpSet {
     pub(crate) heads: BTreeSet<ChangeHash>,
 }
 
-fn import_op(osd: &mut OpSetData, op: DocOp) -> Result<(OpBuilder, OpIds), Error> {
-    let key = match op.key {
-        DocOpKey::Prop(s) => Key::Map(osd.import_prop(s)),
-        DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(osd, op)?)),
-    };
-    for opid in &op.succ {
-        if osd.actors.safe_get(opid.actor()).is_none() {
-            tracing::error!(?opid, "missing actor");
-            return Err(Error::MissingActor);
+fn import_op(op_set: &mut OpSet, op: DocOp) -> Result<(OpBuilder, OpIds), Error> {
+    /*
+        let key = match op.key {
+            DocOpKey::Prop(s) => Key::Map(s),
+            DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(op_set, op)?)),
+        };
+        for opid in &op.succ {
+            if op_set.get_actor_safe(opid.actor()).is_none() {
+                tracing::error!(?opid, "missing actor");
+                return Err(Error::MissingActor);
+            }
         }
-    }
-    let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
-    let succ = osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?;
-    Ok((
-        OpBuilder {
-            id: check_opid(osd, op.id)?,
-            action,
-            key,
-            insert: op.insert,
-        },
-        succ,
-    ))
+        let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
+        let succ = osd.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?;
+        Ok((
+            OpBuilder {
+                id: check_opid(osd, op.id)?,
+                action,
+                key,
+                insert: op.insert,
+            },
+            succ,
+        ))
+    */
+    todo!()
 }
 
 /// We construct the OpSetData directly from the vector of actors which are encoded in the
 /// start of the document. Therefore we need to check for each opid in the docuemnt that the actor
 /// ID which it references actually exists in the op set data.
-fn check_opid(osd: &OpSetData, opid: OpId) -> Result<OpId, Error> {
-    match osd.actors.safe_get(opid.actor()) {
+fn check_opid(op_set: &OpSet, opid: OpId) -> Result<OpId, Error> {
+    match op_set.get_actor_safe(opid.actor()) {
         Some(_) => Ok(opid),
         None => {
             tracing::error!("missing actor");

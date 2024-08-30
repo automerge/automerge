@@ -2,7 +2,7 @@ use super::columns::ColumnDataIter;
 use super::op_set::ids::*;
 use super::op_set::{KeyIter, OpIter, OpLike, OpSet};
 use super::rle::ActorCursor;
-use super::types::{Action, Key, OpType, ScalarValue};
+use super::types::{Action, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
 
 //use crate::storage::document::doc_op_columns::AsDocOp;
@@ -15,7 +15,7 @@ use crate::hydrate;
 use crate::storage::ColumnSpec;
 use crate::text_value::TextValue;
 use crate::types;
-use crate::types::{ActorId, Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, Prop};
+use crate::types::{ActorId, Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId};
 
 use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
@@ -27,11 +27,11 @@ pub(crate) struct OpBuilder2 {
     pub(crate) id: OpId,
     pub(crate) obj: ObjMeta,
     pub(crate) pos: usize,
-    pub(crate) prop: Prop,
-    pub(crate) elemid: Option<ElemId>,
+    pub(crate) index: usize,
+    //pub(crate) map_key: Option<String>,
+    //pub(crate) elemid: Option<ElemId>,
+    pub(crate) key: Key,
     pub(crate) action: types::OpType,
-    //pub(crate) action: Action,
-    //pub(crate) value: types::ScalarValue,
     pub(crate) insert: bool,
     pub(crate) pred: Vec<OpId>,
 }
@@ -82,8 +82,12 @@ impl OpBuilder2 {
     //OpType::from_action_and_value(self.action, self.value, None, false)
     //}
 
-    pub(crate) fn prop(&self) -> &types::Prop {
-        &self.prop
+    pub(crate) fn prop(&self) -> PropRef<'_> {
+        if let Key::Map(s) = &self.key {
+            PropRef::Map(s)
+        } else {
+            PropRef::Seq(self.index)
+        }
     }
 
     pub(crate) fn value(&self) -> hydrate::Value {
@@ -94,10 +98,6 @@ impl OpBuilder2 {
             types::OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
-    }
-
-    pub(crate) fn obj(&self) -> &types::ObjMeta {
-        &self.obj
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
@@ -127,6 +127,14 @@ impl OpBuilder2 {
             TextValue::width(self.as_str()) // FASTER
         }
     }
+
+    pub(crate) fn is_list_op(&self) -> bool {
+        self.elemid().is_some()
+    }
+
+    pub(crate) fn obj(&self) -> ObjMeta {
+        self.obj
+    }
 }
 
 impl OpLike for OpBuilder2 {
@@ -141,10 +149,16 @@ impl OpLike for OpBuilder2 {
     }
 
     fn elemid(&self) -> Option<ElemId> {
-        self.elemid
+        match &self.key {
+            Key::Seq(e) => Some(*e),
+            _ => None,
+        }
     }
     fn map_key(&self) -> Option<&str> {
-        self.prop.as_str()
+        match &self.key {
+            Key::Map(s) => Some(s),
+            _ => None,
+        }
     }
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.action.to_raw()
@@ -202,7 +216,7 @@ pub(crate) struct Op<'a> {
     pub(crate) id: OpId,
     pub(crate) action: Action,
     pub(crate) obj: ObjId,
-    pub(crate) key: Key<'a>,
+    pub(crate) key: KeyRef<'a>,
     pub(crate) insert: bool,
     pub(crate) value: ScalarValue<'a>,
     pub(crate) expand: bool,
@@ -330,9 +344,9 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn elemid_or_key(&self) -> Key<'a> {
+    pub(crate) fn elemid_or_key(&self) -> KeyRef<'a> {
         if self.insert {
-            Key::Seq(ElemId(self.id))
+            KeyRef::Seq(ElemId(self.id))
         } else {
             self.key
         }
@@ -343,14 +357,14 @@ impl<'a> Op<'a> {
             Ok(ElemId(self.id))
         } else {
             match self.key {
-                Key::Seq(e) => Ok(e),
+                KeyRef::Seq(e) => Ok(e),
                 _ => Err(AutomergeError::InvalidCursorOp(self.exid())),
             }
         }
     }
 
     pub(crate) fn raw_elemid(&self) -> Option<ElemId> {
-        if let Key::Seq(e) = self.key {
+        if let KeyRef::Seq(e) = self.key {
             Some(e)
         } else {
             None
@@ -358,7 +372,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn map_key(&self) -> Option<&'a str> {
-        if let Key::Map(s) = self.key {
+        if let KeyRef::Map(s) = self.key {
             Some(s)
         } else {
             None
@@ -468,9 +482,9 @@ impl<'a> AsDocOp<'a> for Op<'a> {
     }
     fn key(&self) -> convert::Key<'a, Self::OpId> {
         match self.key {
-            Key::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s))),
-            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(op)),
+            KeyRef::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s))),
+            KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            KeyRef::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(op)),
         }
     }
     fn insert(&self) -> bool {

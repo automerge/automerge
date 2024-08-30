@@ -1,6 +1,6 @@
 use crate::{
     exid::ExId,
-    op_set2::types::{ActorIdx, Key, ScalarValue},
+    op_set2::types::{ActorIdx, ScalarValue},
     types,
     types::Clock,
 };

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use crate::{
     convert,
-    op_set2::{Key, MarkData, Op, OpBuilder2, OpSet, OpType, ScalarValue},
+    op_set2::{Key, KeyRef, MarkData, Op, OpBuilder2, OpSet, OpType, ScalarValue},
     storage::AsChangeOp,
     types,
     types::{ActorId, ElemId, OldMarkData, OpId, Prop},
@@ -153,9 +153,9 @@ impl<'a> AsChangeOp<'a> for Op<'a> {
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
         match self.key {
-            Key::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
-            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(e) => {
+            KeyRef::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+            KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            KeyRef::Seq(e) => {
                 let id = OpIdWithMetadata::new(e.0, self.op_set());
                 convert::Key::Elem(convert::ElemId::Op(id))
             }
@@ -219,9 +219,9 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
         match self.op.key {
-            Key::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
-            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(e.0))),
+            KeyRef::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+            KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            KeyRef::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(e.0))),
         }
     }
 
@@ -282,14 +282,13 @@ impl<'a> AsChangeOp<'a> for ObWithMetadata<'a> {
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match (&self.op.prop, self.op.elemid) {
-            (Prop::Map(k), None) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
-            (_, Some(e)) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            (_, Some(ElemId(id))) => {
-                let id = OpIdWithMetadata::new(id, self.op_set);
+        match &self.op.key {
+            Key::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            Key::Seq(ElemId(id)) => {
+                let id = OpIdWithMetadata::new(*id, self.op_set);
                 convert::Key::Elem(convert::ElemId::Op(id))
             }
-            (_, _) => panic!(),
         }
     }
 

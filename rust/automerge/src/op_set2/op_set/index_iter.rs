@@ -1,7 +1,7 @@
 use crate::marks::MarkSet;
 use crate::types::{Clock, ListEncoding};
 
-use super::{Key, Op, OpIter, OpQuery, OpQueryTerm};
+use super::{Op, OpIter, OpQuery, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::sync::Arc;

@@ -230,7 +230,41 @@ impl<'a> Document<'a> {
         let ops_meta = DocOpColumns::encode(ops, &mut ops_out);
 
         let (ops_meta2, ops_out2) = op_set.export();
-        assert_eq!(ops_meta.raw_columns(), ops_meta2);
+        op_set.dump();
+        let ops_meta1 = ops_meta.raw_columns();
+        if ops_meta1 != ops_meta2 {
+            let specs: std::collections::BTreeSet<_> = ops_meta1
+                .0
+                .iter()
+                .chain(ops_meta2.0.iter())
+                .map(|c| c.spec())
+                .collect();
+            for s in specs {
+                let d1 = ops_meta1
+                    .0
+                    .iter()
+                    .find(|c| c.spec() == s)
+                    .map(|c| c.data())
+                    .unwrap();
+                let d2 = ops_meta2
+                    .0
+                    .iter()
+                    .find(|c| c.spec() == s)
+                    .map(|c| c.data())
+                    .unwrap();
+                let d1 = &ops_out[d1];
+                let d2 = &ops_out2[d2];
+                if d1 != d2 {
+                    log!(" s={:?}|{:?} ", s.id(), s.col_type());
+                    log!(" {:?} ", d1);
+                    log!(" {:?} ", d2);
+                    OpSet::decode(s, d1);
+                    OpSet::decode(s, d2);
+                }
+                //log!(" s={:?}|{:14}   d1={:?}   d2={:?}",s.id(),format!("{:?}",s.col_type()),d1,d2);
+            }
+            panic!()
+        }
         assert_eq!(ops_out, ops_out2);
 
         let mut change_out = Vec::new();

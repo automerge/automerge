@@ -144,22 +144,28 @@ impl<'a> WriteOp<'a> {
     }
 
     fn write(self, buff: &mut Vec<u8>) {
+        //let start = buff.len();
         match self {
             Self::UInt(i) => {
                 leb128::write::unsigned(buff, i).unwrap();
+                //log!("write uint {} {:?}",i, &buff[start..]);
             }
             Self::GroupUInt(i, _) => {
                 leb128::write::unsigned(buff, i).unwrap();
+                //log!("write group uint {} {:?}",i, &buff[start..]);
             }
             Self::Int(i) => {
                 leb128::write::signed(buff, i).unwrap();
+                //log!("write int {} {:?}",i, &buff[start..]);
             }
             Self::Bytes(b) => {
                 leb128::write::unsigned(buff, b.len() as u64).unwrap();
                 buff.extend(b);
+                //log!("write bytes {:?}",&buff[start..]);
             }
             Self::Import(s, r) => {
                 buff.extend(&s[r]);
+                //log!("write import {:?}",&buff[start..]);
             }
         }
     }
@@ -194,15 +200,20 @@ impl<'a> WriteAction<'a> {
     }
 
     fn write(self, buff: &mut Vec<u8>) {
+        //let start = buff.len();
         match self {
             Self::Op(op) => op.write(buff),
             Self::Pair(op1, op2) => {
                 op1.write(buff);
                 op2.write(buff)
             }
-            Self::Raw(b) => buff.extend(b),
+            Self::Raw(b) => {
+                buff.extend(b);
+                //log!("write raw {:?}", &buff[start..]);
+            }
             Self::Run(n, b) => {
                 leb128::write::signed(buff, -1 * n).unwrap();
+                //log!("write lit run of {:?} {:?}", n, &buff[start..]);
                 for item in b {
                     item.write(buff);
                 }

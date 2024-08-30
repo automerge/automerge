@@ -449,32 +449,72 @@ impl<'a> From<i64> for ScalarValue<'a> {
 }
 
 #[derive(Clone, Debug, Copy, PartialEq)]
-pub(crate) enum Key<'a> {
-    Map(&'a str), // at this point we don't care if its valid UTF8
+pub(crate) enum PropRef<'a> {
+    Map(&'a str),
+    Seq(usize),
+}
+
+#[derive(Clone, Debug, Copy, PartialEq)]
+pub(crate) enum KeyRef<'a> {
+    Map(&'a str),
     Seq(ElemId),
 }
 
-impl<'a> Key<'a> {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Key {
+    Map(String),
+    Seq(ElemId),
+}
+
+impl Key {
+    pub(crate) fn to_ref<'a>(&'a self) -> KeyRef<'a> {
+        match self {
+            Key::Map(s) => KeyRef::Map(s),
+            Key::Seq(e) => KeyRef::Seq(*e),
+        }
+    }
+}
+
+impl From<ElemId> for Key {
+    fn from(e: ElemId) -> Key {
+        Key::Seq(e)
+    }
+}
+
+impl From<String> for Key {
+    fn from(s: String) -> Key {
+        Key::Map(s)
+    }
+}
+
+impl<'a> KeyRef<'a> {
+    pub(crate) fn to_own(self) -> Key {
+        match self {
+            KeyRef::Map(s) => Key::Map(String::from(s)),
+            KeyRef::Seq(e) => Key::Seq(e),
+        }
+    }
+
     pub(crate) fn map_key(&self) -> Option<&'a str> {
         match self {
-            Key::Map(s) => Some(s),
-            Key::Seq(_) => None,
+            KeyRef::Map(s) => Some(s),
+            KeyRef::Seq(_) => None,
         }
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
-            Key::Map(_) => None,
-            Key::Seq(e) => Some(*e),
+            KeyRef::Map(_) => None,
+            KeyRef::Seq(e) => Some(*e),
         }
     }
 }
 
-impl<'a> types::Exportable for Key<'a> {
+impl<'a> types::Exportable for KeyRef<'a> {
     fn export(&self) -> types::Export {
         match self {
-            Key::Map(p) => types::Export::Special(String::from(*p)),
-            Key::Seq(e) => e.export(),
+            KeyRef::Map(p) => types::Export::Special(String::from(*p)),
+            KeyRef::Seq(e) => e.export(),
         }
     }
 }

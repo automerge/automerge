@@ -4,6 +4,7 @@ use crate::hydrate::Value;
 //use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
+use crate::op_set2::PropRef;
 use crate::read::ReadDocInternal;
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{ChangeHash, Patch, ReadDoc};
@@ -168,6 +169,13 @@ impl PatchLog {
         }
     }
 
+    pub(crate) fn increment2(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
+        match prop {
+            PropRef::Map(key) => self.increment_map(obj, key, value, id),
+            PropRef::Seq(index) => self.increment_seq(obj, index, value, id),
+        }
+    }
+
     pub(crate) fn increment_map(&mut self, obj: ObjId, key: &str, n: i64, id: OpId) {
         self.events.push((
             obj,
@@ -212,6 +220,21 @@ impl PatchLog {
         match prop {
             Prop::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
             Prop::Seq(index) => self.put_seq(obj, *index, value, id, conflict, expose),
+        }
+    }
+
+    pub(crate) fn put2(
+        &mut self,
+        obj: ObjId,
+        prop: PropRef<'_>,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        match prop {
+            PropRef::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
+            PropRef::Seq(index) => self.put_seq(obj, index, value, id, conflict, expose),
         }
     }
 
@@ -321,7 +344,7 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|a, b| doc.osd().lamport_cmp(a, b));
+        self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };

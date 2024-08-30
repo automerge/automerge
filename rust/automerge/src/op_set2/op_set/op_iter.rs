@@ -4,7 +4,7 @@ use crate::{
         columns::{ColumnDataIter, RawReader, RunStep, Seek},
         op::SuccCursors,
         rle::{ActionCursor, ActorCursor},
-        types::{Key, ScalarValue},
+        types::{KeyRef, ScalarValue},
         BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
     },
     types,
@@ -138,20 +138,20 @@ impl<'a> OpIter<'a> {
         }
     }
 
-    fn read_key(&mut self) -> Result<op_set2::types::Key<'a>, ReadOpError> {
+    fn read_key(&mut self) -> Result<op_set2::types::KeyRef<'a>, ReadOpError> {
         let key_str = self.key_str.next().flatten();
         let key_counter = self.key_counter.next();
         let key_actor = self.key_actor.next();
         match (key_str, key_counter, key_actor) {
             (Some(key_str), None | Some(None), None | Some(None)) => {
-                Ok(op_set2::types::Key::Map(key_str))
+                Ok(op_set2::types::KeyRef::Map(key_str))
             }
             (None, Some(Some(0)) | None, Some(None) | None) => {
                 // ElemId::Head is represented as a counter of 0 and a null actor
-                Ok(op_set2::types::Key::Seq(ElemId(OpId::new(0, 0))))
+                Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(0, 0))))
             }
             (None, Some(Some(counter)), Some(Some(actor))) if counter > 0 => {
-                Ok(op_set2::types::Key::Seq(ElemId(OpId::new(
+                Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(
                     counter as u64,
                     u64::from(actor) as usize,
                 ))))

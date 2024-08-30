@@ -177,10 +177,10 @@ impl<'a> Op<'a> {
         &self.op().key
     }
 
-    pub(crate) fn ex_key(&self) -> crate::op_set2::Key<'_> {
+    pub(crate) fn ex_key(&self) -> crate::op_set2::KeyRef<'_> {
         match self.key() {
-            Key::Map(idx) => crate::op_set2::Key::Map(self.osd.props.get(*idx)),
-            Key::Seq(ElemId(e)) => crate::op_set2::Key::Seq(crate::types::ElemId(*e)),
+            Key::Map(idx) => crate::op_set2::KeyRef::Map(self.osd.props.get(*idx)),
+            Key::Seq(ElemId(e)) => crate::op_set2::KeyRef::Seq(crate::types::ElemId(*e)),
         }
     }
 

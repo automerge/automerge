@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use super::{SpanInternal, SpansInternal};
 use crate::{
-    op_set2::{Key, Op, OpIter, OpQuery, OpType, Value},
+    op_set2::{KeyRef, Op, OpIter, OpQuery, OpType, Value},
     patches::{PatchLog, TextRepresentation},
     types::{ObjMeta, OpId},
     Automerge, ObjType,
@@ -10,7 +10,7 @@ use crate::{
 
 struct Put<'a> {
     value: Value<'a>,
-    key: Key<'a>,
+    key: KeyRef<'a>,
     id: OpId,
 }
 

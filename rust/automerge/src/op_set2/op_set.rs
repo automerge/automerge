@@ -15,14 +15,15 @@ use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
 };
 use crate::AutomergeError;
+use crate::{Automerge, PatchLog};
 
-use super::columns::{ColumnData, ColumnDataIter, RawReader, Run};
+use super::columns::{ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::{Op, OpBuilder2, SuccCursors, SuccInsert};
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue, Value};
 use super::{
-    BooleanCursor, Column, DeltaCursor, IntCursor, Key, MetaCursor, RawCursor, Slab, StrCursor,
-    ValueMeta,
+    BooleanCursor, Column, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, RawCursor, Slab,
+    StrCursor, ValueMeta,
 };
 
 use std::borrow::Cow;
@@ -59,7 +60,7 @@ pub(crate) use op_iter::OpIter;
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use spans::{SpanInternal, SpansInternal};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
+pub(crate) use visible::{is_visible, DiffOp, DiffOpIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -103,6 +104,7 @@ impl OpSet {
     pub(crate) fn insert2<'a>(&'a mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
         self.len += 1;
+        self.validate()
         // do succ later
     }
 
@@ -140,8 +142,8 @@ impl OpSet {
         // FIXME remote unwrap
         let parent_typ = parent_op.action.try_into().unwrap();
         let prop = match op.key {
-            Key::Map(k) => Prop::Map(k.to_string()),
-            Key::Seq(_) => {
+            KeyRef::Map(k) => Prop::Map(k.to_string()),
+            KeyRef::Seq(_) => {
                 let FoundOpId { index, .. } = self
                     .seek_list_opid(
                         &parent_op.obj,
@@ -296,6 +298,50 @@ impl OpSet {
         }
     }
 
+    pub(crate) fn seek_list_op(
+        &self,
+        obj: &ObjId,
+        target: ElemId,
+        id: OpId,
+        insert: bool,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> SeekOpIdResult {
+        let mut iter = self.iter_obj(&obj);
+        let mut pos = iter.end_pos();
+        let mut ops = vec![];
+        let mut found = (target.is_head());
+        let mut index = 0;
+        let mut current = 0;
+        let mut marks = None;
+        for op in iter {
+            if op.insert {
+                index += current;
+                current = 0;
+                if found && op.id > id {
+                    pos = op.pos;
+                    break;
+                }
+                if !found && ElemId(op.id) == target {
+                    found = true;
+                }
+            }
+            if found && !insert {
+                ops.push(op);
+            }
+            let visible = (op.succ().len() == 0); // FIXME - ignore clock and counters for now
+            if visible && !found {
+                current = op.width(encoding);
+            }
+        }
+        SeekOpIdResult {
+            index,
+            pos,
+            ops,
+            marks,
+        }
+    }
+
     pub(crate) fn seek_list_opid(
         &self,
         obj: &ObjId,
@@ -351,6 +397,16 @@ impl OpSet {
 
     fn get_succ_counter(&self) -> ColumnDataIter<'_, DeltaCursor> {
         self.cols.get_delta_integer(SUCC_COUNTER_COL_SPEC)
+    }
+
+    fn validate(&self) {
+        let mut ctr = self.get_obj_ctr();
+        let mut last = 0;
+        while let Some(Run { value, .. }) = ctr.next_run() {
+            let value = value.unwrap_or(0);
+            assert!(last <= value);
+            last = value;
+        }
     }
 
     fn iter_obj_ids(&self) -> IterObjIds<'_> {
@@ -434,11 +490,77 @@ impl OpSet {
         self.actors.binary_search(actor).ok() // .map(ActorIdx::from)
     }
 
-    /*
-        pub(crate) fn find_op_with_patch_log(&self, op: OpBuilder2, encoding: ListEncoding) -> FoundOpWithPatchLog<'a> {
-            todo!()
+    pub(crate) fn find_op_with_patch_log<'a>(
+        &'a self,
+        op: &OpBuilder2,
+        encoding: ListEncoding,
+    ) -> FoundOpWithPatchLog<'a> {
+        match &op.key {
+            Key::Seq(e) => {
+                let obj = &op.obj.id;
+                let r = self.seek_list_op(obj, *e, op.id, op.insert, encoding, None);
+                self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
+            }
+            Key::Map(s) => {
+                let query = self.seek_ops_by_map_key(&op.obj.id, &s, None);
+                self.found_op_with_patch_log(op, &query.ops, query.end_pos, 0, None)
+            }
         }
-    */
+    }
+
+    pub(crate) fn found_op_with_patch_log<'a>(
+        &'a self,
+        new_op: &OpBuilder2,
+        ops: &[Op<'a>],
+        end_pos: usize,
+        index: usize,
+        marks: Option<Arc<MarkSet>>,
+    ) -> FoundOpWithPatchLog<'a> {
+        let mut found = None;
+        let mut before = None;
+        let mut num_before = 0;
+        let mut overwritten = None;
+        let mut after = None;
+        let mut succ = vec![];
+        for i in 0..ops.len() {
+            let op = &ops[i];
+
+            let visible = is_visible(op, &ops[(i + 1)..], None);
+
+            if found.is_none() && op.id > new_op.id {
+                found = Some(op.pos);
+            }
+
+            if new_op.pred.contains(&op.id) {
+                // overwrites
+                succ.push(op.pos);
+
+                if visible {
+                    overwritten = Some(*op);
+                }
+            } else if visible {
+                if found.is_none() && overwritten.is_none() {
+                    before = Some(*op);
+                    num_before += 1;
+                } else {
+                    after = Some(*op);
+                }
+            }
+        }
+
+        let pos = found.unwrap_or(end_pos);
+
+        FoundOpWithPatchLog {
+            before,
+            num_before,
+            after,
+            overwritten,
+            succ,
+            pos,
+            index,
+            marks,
+        }
+    }
 
     pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.actors.binary_search(&actor) {
@@ -511,7 +633,7 @@ impl OpSet {
         let mut data = vec![]; // should be able to do with_capacity here
         let mut raw = vec![];
         for (spec, c) in self.cols.iter() {
-            if !c.is_empty() || spec.id() == ColumnId::new(3) {
+            if !c.is_empty() || (spec.id() == ColumnId::new(3) && self.len > 0) {
                 let range = c.write(&mut data);
                 if !range.is_empty() {
                     raw.push(RawColumn::new(*spec, range));
@@ -642,6 +764,19 @@ impl OpSet {
     //    MaybePackable allowing you to pass in Item or Option<Item> to splice
     // * maybe do something with types to make scan required to get
     //    validated bytes
+
+    pub(crate) fn decode(spec: ColumnSpec, data: &[u8]) {
+        match spec.col_type() {
+            ColumnType::Actor => ActorCursor::decode(data),
+            ColumnType::String => StrCursor::decode(data),
+            ColumnType::Integer => IntCursor::decode(data),
+            ColumnType::DeltaInteger => DeltaCursor::decode(data),
+            ColumnType::Boolean => BooleanCursor::decode(data),
+            ColumnType::Group => IntCursor::decode(data),
+            ColumnType::ValueMetadata => MetaCursor::decode(data),
+            ColumnType::Value => log!("raw :: {:?}", data),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -657,6 +792,119 @@ pub(crate) struct QueryNth {
     pub(crate) marks: Option<Arc<MarkSet>>,
     pub(crate) pos: usize,
     pub(crate) elemid: ElemId,
+}
+
+struct SeekOpIdResult<'a> {
+    index: usize,
+    pos: usize,
+    ops: Vec<Op<'a>>,
+    marks: Option<Arc<MarkSet>>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub(crate) struct FoundOpWithPatchLog<'a> {
+    pub(crate) before: Option<Op<'a>>,
+    pub(crate) num_before: usize,
+    pub(crate) overwritten: Option<Op<'a>>,
+    pub(crate) after: Option<Op<'a>>,
+    pub(crate) succ: Vec<usize>,
+    pub(crate) pos: usize,
+    pub(crate) index: usize,
+    pub(crate) marks: Option<Arc<MarkSet>>,
+}
+
+impl<'a> FoundOpWithPatchLog<'a> {
+    pub(crate) fn log_patches(
+        &self,
+        obj: &ObjMeta,
+        op: &OpBuilder2,
+        pred: &[OpId],
+        doc: &Automerge,
+        patch_log: &mut PatchLog,
+    ) {
+        if op.insert {
+            if op.is_mark() {
+                if let crate::types::OpType::MarkEnd(_) = op.action {
+                    /*
+                    let q = doc.ops().search(
+                        &obj.id,
+                        query::SeekMark::new(
+                            op.id.prev(),
+                            self.pos,
+                            patch_log.text_rep().encoding(obj.typ),
+                        ),
+                    );
+                    for mark in q.finish() {
+                        let index = mark.start;
+                        let len = mark.len();
+                        let marks = mark.into_mark_set();
+                        patch_log.mark(obj.id, index, len, &marks);
+                    }
+                    */
+                    todo!()
+                }
+            // TODO - move this into patch_log()
+            } else if obj.typ == ObjType::Text && !op.action.is_block() {
+                patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
+            } else {
+                patch_log.insert(obj.id, self.index, op.value().into(), op.id, false);
+            }
+            return;
+        }
+
+        let key: Prop = match &op.key {
+            Key::Map(s) => Prop::from(s),
+            Key::Seq(_) => Prop::from(self.index),
+        };
+
+        if op.is_delete() {
+            match (self.before, self.overwritten, self.after) {
+                (None, Some(over), None) => match key {
+                    Prop::Map(k) => patch_log.delete_map(obj.id, &k),
+                    Prop::Seq(index) => patch_log.delete_seq(
+                        obj.id,
+                        index,
+                        over.width(patch_log.text_rep().encoding(obj.typ)),
+                    ),
+                },
+                (Some(before), Some(_), None) => {
+                    let conflict = self.num_before > 1;
+                    patch_log.put(
+                        obj.id,
+                        &key,
+                        before.value().into(),
+                        before.id,
+                        conflict,
+                        true,
+                    );
+                }
+                _ => { /* do nothing */ }
+            }
+        } else if let Some(value) = op.get_increment_value() {
+            if self.after.is_none() {
+                if let Some(counter) = self.overwritten {
+                    if pred.contains(&counter.id()) {
+                        patch_log.increment(obj.id, &key, value, op.id);
+                    }
+                }
+            }
+        } else {
+            let conflict = self.before.is_some();
+            if op.is_list_op()
+                && self.overwritten.is_none()
+                && self.before.is_none()
+                && self.after.is_none()
+            {
+                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict);
+            } else if self.after.is_some() {
+                if self.before.is_none() {
+                    patch_log.flag_conflict(obj.id, &key);
+                }
+            } else {
+                patch_log.put(obj.id, &key, op.value().into(), op.id, conflict, false);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1014,8 +1262,8 @@ impl Columns {
             0,
             ops.clone()
                 .map(|op| match op.key {
-                    Key::Map(_) => None,
-                    Key::Seq(e) => e.actor(),
+                    KeyRef::Map(_) => None,
+                    KeyRef::Seq(e) => e.actor(),
                 })
                 .collect::<Vec<_>>(),
         );
@@ -1027,8 +1275,8 @@ impl Columns {
             0,
             ops.clone()
                 .map(|op| match op.key {
-                    Key::Map(_) => None,
-                    Key::Seq(e) => {
+                    KeyRef::Map(_) => None,
+                    KeyRef::Seq(e) => {
                         if e.is_head() {
                             None
                         } else {
@@ -1046,8 +1294,8 @@ impl Columns {
             0,
             ops.clone()
                 .map(|op| match op.key {
-                    Key::Map(s) => Some(s),
-                    Key::Seq(_) => None,
+                    KeyRef::Map(s) => Some(s),
+                    KeyRef::Seq(_) => None,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -1475,7 +1723,7 @@ mod tests {
             op::SuccCursors,
             rle::ActorCursor,
             types::{Action, ActorIdx, ScalarValue},
-            ColumnCursor, DeltaCursor, Key, Slab, WritableSlab,
+            ColumnCursor, DeltaCursor, KeyRef, Slab, WritableSlab,
         },
         storage::Document,
         transaction::Transactable,
@@ -1530,7 +1778,7 @@ mod tests {
         obj: ObjId,
         action: Action,
         value: ScalarValue<'static>,
-        key: Key<'static>,
+        key: KeyRef<'static>,
         insert: bool,
         succs: Vec<OpId>,
         expand: bool,
@@ -1633,7 +1881,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: Key::Map("key"),
+                key: KeyRef::Map("key"),
                 insert: false,
                 succs: vec![OpId::new(5, 1), OpId::new(6, 1), OpId::new(10, 1)],
                 expand: false,
@@ -1644,7 +1892,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::Set,
                 value: ScalarValue::Str("value1"),
-                key: Key::Map("key1"),
+                key: KeyRef::Map("key1"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1655,7 +1903,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::Set,
                 value: ScalarValue::Str("value2"),
-                key: Key::Map("key2"),
+                key: KeyRef::Map("key2"),
                 insert: false,
                 succs: vec![OpId::new(6, 1)],
                 expand: false,
@@ -1666,7 +1914,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("inner_value1"),
-                key: Key::Map("inner_key1"),
+                key: KeyRef::Map("inner_key1"),
                 insert: false,
                 succs: vec![OpId::new(7, 1), OpId::new(8, 2), OpId::new(9, 1)],
                 expand: false,
@@ -1677,7 +1925,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("inner_value2"),
-                key: Key::Map("inner_key2"),
+                key: KeyRef::Map("inner_key2"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1715,7 +1963,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: Key::Map("map"),
+                key: KeyRef::Map("map"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1726,7 +1974,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: Key::Map("list"),
+                key: KeyRef::Map("list"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1737,7 +1985,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value1"),
-                key: Key::Map("key1"),
+                key: KeyRef::Map("key1"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1748,7 +1996,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2a"),
-                key: Key::Map("key2"),
+                key: KeyRef::Map("key2"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1759,7 +2007,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2b"),
-                key: Key::Map("key2"),
+                key: KeyRef::Map("key2"),
                 insert: false,
                 succs: vec![OpId::new(5, 2)],
                 expand: false,
@@ -1770,7 +2018,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2c"),
-                key: Key::Map("key2"),
+                key: KeyRef::Map("key2"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1781,7 +2029,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value3a"),
-                key: Key::Map("key3"),
+                key: KeyRef::Map("key3"),
                 insert: false,
                 succs: vec![OpId::new(7, 2)],
                 expand: false,
@@ -1792,7 +2040,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value3b"),
-                key: Key::Map("key3"),
+                key: KeyRef::Map("key3"),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -1803,7 +2051,7 @@ mod tests {
                 obj: ObjId(OpId::new(2, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("a"),
-                key: Key::Seq(ElemId::head()),
+                key: KeyRef::Seq(ElemId::head()),
                 insert: true,
                 succs: vec![],
                 expand: false,
@@ -1814,7 +2062,7 @@ mod tests {
                 obj: ObjId(OpId::new(2, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("b"),
-                key: Key::Seq(ElemId(OpId::new(8, 1))),
+                key: KeyRef::Seq(ElemId(OpId::new(8, 1))),
                 insert: true,
                 succs: vec![],
                 expand: false,

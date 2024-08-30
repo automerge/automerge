@@ -1,6 +1,6 @@
 use crate::types::Clock;
 
-use super::{Action, Key, Op, OpQueryTerm, OpsFound};
+use super::{Action, KeyRef, Op, OpQueryTerm, OpsFound};
 
 use std::fmt::Debug;
 
@@ -8,7 +8,7 @@ use std::fmt::Debug;
 pub(crate) struct OpsFoundIter<'a, I: Iterator<Item = Op<'a>>> {
     iter: I,
     clock: Option<Clock>,
-    last_key: Option<Key<'a>>,
+    last_key: Option<KeyRef<'a>>,
     found: Option<OpsFound<'a>>,
 }
 

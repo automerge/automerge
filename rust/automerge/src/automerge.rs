@@ -8,8 +8,8 @@ use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::{
-    Key, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpBuilder2, OpQuery,
-    OpQueryTerm, OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
+    Key, KeyRef, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData, OpBuilder2,
+    OpQuery, OpQueryTerm, OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
@@ -214,10 +214,6 @@ impl Automerge {
 
     pub(crate) fn ops(&self) -> &OpSet {
         &self.ops
-    }
-
-    pub(crate) fn osd(&self) -> &crate::op_set::OpSetData {
-        todo!()
     }
 
     /// Whether this document has any operations
@@ -785,7 +781,7 @@ impl Automerge {
         change: Change,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let ops = self.import_ops(&change);
+        let ops = self.import_ops(&change)?;
         self.update_history(change, ops.len());
         for op in ops {
             self.insert_op(op, patch_log)?;
@@ -811,62 +807,65 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change) -> Vec<OpBuilder2> {
-        /*
-                let actor = self.ops.put_actor(change.actor_id().clone());
-                let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
-                actors.push(actor);
-                actors.extend(
-                    change
-                        .other_actor_ids()
-                        .iter()
-                        .map(|a| self.ops.put_actor(a.clone()))
-                        .collect::<Vec<_>>(),
-                );
-                change
-                    .iter_ops()
-                    .enumerate()
-                    .map(|(i, c)| {
-                        let id = OpId::new(change.start_op().get() + i as u64, actor);
-                        let key = match &c.key {
-                            EncodedKey::Prop(n) => Key::Map(&n),
-                            EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
-                            EncodedKey::Elem(ElemId(o)) => {
-                                Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
-                            }
-                        };
-                        let obj = if c.obj.is_root() {
-                            ObjId::root()
-                        } else {
-                            ObjId(OpId::new(
-                                c.obj.opid().counter(),
-                                actors[c.obj.opid().actor()],
-                            ))
-                        };
-                        let pred = c
-                            .pred
-                            .iter()
-                            .map(|p| OpId::new(p.counter(), actors[p.actor()]));
-                        let pred = self.ops.osd.sorted_opids(pred);
-                        (
-                            obj,
-                            OpBuilder {
-                                id,
-                                action: OpType::from_action_and_value(
-                                    c.action,
-                                    c.val,
-                                    c.mark_name,
-                                    c.expand,
-                                ),
-                                key,
-                                insert: c.insert,
-                            },
-                            pred,
-                        )
-                    })
-                    .collect()
-        */
-        todo!()
+    fn import_ops(&mut self, change: &Change) -> Result<Vec<OpBuilder2>, AutomergeError> {
+        let actor = self.ops.put_actor(change.actor_id().clone());
+        let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
+        actors.push(actor);
+        actors.extend(
+            change
+                .other_actor_ids()
+                .iter()
+                .map(|a| self.ops.put_actor(a.clone()))
+                .collect::<Vec<_>>(),
+        );
+        change
+            .iter_ops()
+            .enumerate()
+            .map(|(i, c)| {
+                let id = OpId::new(change.start_op().get() + i as u64, actor);
+                let key = match &c.key {
+                    EncodedKey::Prop(n) => Key::Map(String::from(n.as_ref())),
+                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
+                    EncodedKey::Elem(ElemId(o)) => {
+                        Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
+                    }
+                };
+                let obj = if c.obj.is_root() {
+                    ObjMeta {
+                        id: ObjId::root(),
+                        typ: ObjType::Map,
+                    }
+                } else {
+                    let counter = c.obj.opid().counter();
+                    let actor = actors[c.obj.opid().actor()];
+                    let id = ObjId(OpId::new(counter, actor));
+                    ObjMeta {
+                        id,
+                        typ: ObjType::Map,
+                    }
+                };
+                let pred = c
+                    .pred
+                    .iter()
+                    .map(|p| OpId::new(p.counter(), actors[p.actor()]))
+                    .collect();
+                Ok(OpBuilder2 {
+                    id,
+                    obj,
+                    pos: 0,
+                    index: 0,
+                    key,
+                    action: crate::types::OpType::from_action_and_value(
+                        c.action,
+                        c.val,
+                        c.mark_name,
+                        c.expand,
+                    ),
+                    insert: c.insert,
+                    pred,
+                })
+            })
+            .collect()
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
@@ -1130,7 +1129,7 @@ impl Automerge {
                 actor.truncate(6);
                 format!("{}@{}", id.counter(), actor)
             }
-            Export::Prop(index) => todo!(),
+            Export::Prop(index) => todo!(), // FIXME - remove when automerge_old goes away
             Export::Special(s) => s,
         }
     }
@@ -1154,8 +1153,8 @@ impl Automerge {
                     let id = self.to_short_string(op.id);
                     let obj = self.to_short_string(op.obj);
                     let key = match op.key {
-                        Key::Map(n) => n.to_owned(),
-                        Key::Seq(n) => self.to_short_string(n),
+                        KeyRef::Map(n) => n.to_owned(),
+                        KeyRef::Seq(n) => self.to_short_string(n),
                     };
                     let value: String = match op.op_type() {
                         OpType::Put(value) => format!("{}", value),
@@ -1207,34 +1206,28 @@ impl Automerge {
 
     pub(crate) fn insert_op(
         &mut self,
-        op: OpBuilder2,
+        mut op: OpBuilder2,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        /*
-               let is_delete = op.is_delete();
+        let encoding = patch_log.text_rep().encoding(op.obj.typ);
 
-               let (pos, succ) = if patch_log.is_active() {
-                   //let obj = self.get_obj_meta(*obj)?;
-                   let found = self.ops.find_op_with_patch_log(
-                       op,
-                       patch_log.text_rep().encoding(op.obj.typ),
-                   );
-                   //found.log_patches(&op.obj, op, pred, self, patch_log);
-                   (found.pos, found.succ)
-               } else {
-               //    let found = self.ops.find_op_without_patch_log(obj, op, pred);
-               //    (found.pos, found.succ)
-                   todo!()
-               };
+        let found = self.ops.find_op_with_patch_log(&op, encoding);
 
-               //self.ops.add_succ(obj, &succ, idx);
+        if patch_log.is_active() {
+            // FIXME - op.obj is wrong here - always shows map
+            found.log_patches(&op.obj, &op, &op.pred, self, patch_log);
+        }
 
-               if !is_delete {
-                   //self.ops.insert(pos, obj, idx);
-               }
-               Ok(())
-        */
-        todo!()
+        op.pos = found.pos;
+
+        let succ = found.succ;
+
+        if !op.is_delete() {
+            self.ops.insert2(&op);
+        }
+
+        // FIXME succ
+        Ok(())
     }
 
     /// Create patches representing the change in the current state of the document between the
@@ -1603,8 +1596,8 @@ impl Automerge {
                         //}
                         if let OpType::Put(op_set2::ScalarValue::Str(s)) = op.op_type() {
                             let prop = match op.key {
-                                Key::Map(prop) => Prop::Map(prop.into()),
-                                Key::Seq(_) => {
+                                KeyRef::Map(prop) => Prop::Map(prop.into()),
+                                KeyRef::Seq(_) => {
                                     let Some(found) = self.ops.seek_list_opid(
                                         &obj.id,
                                         op.id,
@@ -1669,8 +1662,8 @@ impl Automerge {
                         (paths.get(&parent_obj_id).cloned().unwrap(), parent_obj_id)
                     };
                     let prop = match op.key {
-                        Key::Map(prop) => Prop::Map(prop.into()),
-                        Key::Seq(_) => {
+                        KeyRef::Map(prop) => Prop::Map(prop.into()),
+                        KeyRef::Seq(_) => {
                             let encoding = match obj.typ {
                                 ObjType::Text => ListEncoding::Text,
                                 _ => ListEncoding::List,
