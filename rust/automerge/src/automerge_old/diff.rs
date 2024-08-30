@@ -538,6 +538,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
         self.doc.hydrate_obj(obj.as_ref(), heads)
     }
+    fn stats(&self) -> crate::read::Stats { todo!() }
 }
 
 impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {

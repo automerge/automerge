@@ -328,6 +328,10 @@ impl<'a> ReadDoc for Transaction<'a> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn stats(&self) -> crate::read::Stats {
+        self.doc.stats()
+    }
 }
 
 impl<'a> Transactable for Transaction<'a> {

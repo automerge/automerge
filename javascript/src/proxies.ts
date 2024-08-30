@@ -1,6 +1,6 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 import { Text } from "./text.js"
-import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
+import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 
 import type {
   AutomergeValue,
@@ -142,8 +142,10 @@ function import_value(
   value: any,
   textV2: boolean,
   path: Prop[],
+  context: Automerge,
 ): ImportedValue {
-  switch (typeof value) {
+  const type = typeof value
+  switch (type) {
     case "object":
       if (value == null) {
         return [null, "null"]
@@ -165,7 +167,7 @@ function import_value(
         return [value, "bytes"]
       } else if (value instanceof Array) {
         return [value, "list"]
-      } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
+      } else if (Object.prototype.toString.call(value) === "[object Object]") {
         return [value, "map"]
       } else if (isSameDocument(value, context)) {
         throw new RangeError(
@@ -188,9 +190,22 @@ function import_value(
       } else {
         return [value, "str"]
       }
+    case "undefined":
+      throw new RangeError(
+        [
+          `Cannot assign undefined value at ${printPath(path)}, `,
+          "because `undefined` is not a valid JSON data type. ",
+          "You might consider setting the property's value to `null`, ",
+          "or using `delete` to remove it altogether.",
+        ].join(""),
+      )
     default:
       throw new RangeError(
-        `Unsupported type ${typeof value} for path ${printPath(path)}`,
+        [
+          `Cannot assign ${type} value at ${printPath(path)}. `,
+          `All JSON primitive datatypes (object, array, string, number, boolean, null) `,
+          `are supported in an Automerge document; ${type} values are not. `,
+        ].join(""),
       )
   }
 }
@@ -255,7 +270,8 @@ const MapHandler = {
     if (key === CLEAR_CACHE) {
       return true
     }
-    const [value, datatype] = import_value(val, textV2, [...path, key])
+
+    const [value, datatype] = import_value(val, textV2, [...path, key], context)
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
@@ -374,7 +390,12 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val, textV2, [...path, index])
+    const [value, datatype] = import_value(
+      val,
+      textV2,
+      [...path, index],
+      context,
+    )
     switch (datatype) {
       case "list": {
         let list: ObjID
@@ -588,7 +609,12 @@ function listMethods<T extends Target>(target: T) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val, textV2, [...path, start])
+      const [value, datatype] = import_value(
+        val,
+        textV2,
+        [...path, start],
+        context,
+      )
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
@@ -680,10 +706,12 @@ function listMethods<T extends Target>(target: T) {
       }
       const values = vals.map((val, index) => {
         try {
-          return import_value(val, textV2, [...path])
+          return import_value(val, textV2, [...path], context)
         } catch (e) {
           if (e instanceof RangeError) {
-            throw new RangeError(`${e.message} at index ${index} in the input`)
+            throw new RangeError(
+              `${e.message} (at index ${index} in the input)`,
+            )
           } else {
             throw e
           }

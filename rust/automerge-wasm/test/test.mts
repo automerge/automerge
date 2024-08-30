@@ -2132,6 +2132,38 @@ describe('Automerge', () => {
       doc5.splice("/bad_text", 0, 2, "X");
       assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
+
+    it("should report whether the other end has our changes", () => {
+      const left = create()
+      left.put("/", "foo", "bar")
+
+      const right = create()
+      right.put("/", "baz", "qux")
+
+      const leftSync = initSyncState()
+      const rightSync = initSyncState()
+
+      while (!(left.hasOurChanges(leftSync)) && !(right.hasOurChanges(rightSync))) {
+        let quiet = true
+        let msg = left.generateSyncMessage(leftSync)
+        if (msg) {
+          right.receiveSyncMessage(rightSync, msg)
+          quiet = false
+        }
+
+        msg = right.generateSyncMessage(rightSync)
+        if (msg) {
+          left.receiveSyncMessage(leftSync, msg)
+          quiet = false
+        }
+        if (quiet) {
+          throw new Error("no message generated but the sync states think we're done")
+        }
+      }
+
+      assert(left.hasOurChanges(leftSync))
+      assert(right.hasOurChanges(rightSync))
+    })
   })
 
   describe("the legacy text implementation", () => {
@@ -2312,6 +2344,59 @@ describe('Automerge', () => {
         assert.deepStrictEqual( doc.diffIncremental(), [
           { action: 'put', path: [ 'b' ], value: 'b5' },
         ]);
+    })
+  })
+
+  describe("the topoHistoryTraversal function", () => {
+    it("should return a topological traverssal of the hashes of the changes", () => {
+      const doc = create({actor: "aaaaaa"})
+      doc.put("/", "foo", "bar")
+      let hash1 = decodeChange(doc.getLastLocalChange()!).hash
+
+      const doc2 = doc.clone("bbbbbb")
+
+      doc.put("/", "baz", "qux")
+      let hash2 = decodeChange(doc.getLastLocalChange()!).hash
+
+      doc2.put("/", "baz", "qux")
+      let hash3 = decodeChange(doc2.getLastLocalChange()!).hash
+
+      doc.merge(doc2)
+
+      let hashes = [hash1, hash2, hash3]
+      const traversal = doc.topoHistoryTraversal()
+      assert.deepStrictEqual(hashes, traversal)
+    })
+  })
+
+  describe("the getDecodedChangeByHash function", () => {
+    it("should return the change with the given heads", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      let hash = doc.topoHistoryTraversal()[0]
+      let change = doc.getDecodedChangeByHash(hash)!
+      assert.deepStrictEqual(change.hash, hash)
+      assert.deepStrictEqual(change.ops, [
+        {
+          "action": "set",
+          "key": "foo",
+          "obj": "_root",
+          "pred": [],
+          "value": "bar",
+        }
+      ])
+    })
+  })
+
+  describe("the stats function", () => {
+    it("should return the number of changes and the number of ops", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      doc.commit()
+      doc.put("/", "baz", "qux")
+      doc.commit()
+      const stats = doc.stats()
+      assert.deepStrictEqual(stats, { numChanges: 2, numOps: 2 })
     })
   })
 })

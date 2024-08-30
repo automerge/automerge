@@ -3,16 +3,11 @@ use crate::op_set::{Op, OpIter};
 use crate::types::{Clock, Key};
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub(crate) enum TopOps<'a> {
+    #[default]
     Empty,
     Ops(TopOpsInner<'a>),
-}
-
-impl<'a> Default for TopOps<'a> {
-    fn default() -> Self {
-        TopOps::Empty
-    }
 }
 
 impl<'a> TopOps<'a> {

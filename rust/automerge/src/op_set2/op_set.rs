@@ -2133,8 +2133,10 @@ mod tests {
             let actor_lookup = actors
                 .iter()
                 .enumerate()
-                .map(|(i, _)| i)
-                .collect::<Vec<_>>();
+                //.map(|(a, b)| (a,usize::from(b)))
+                .map(|(a, _)| (a,a))
+                //.collect::<HashMap<_>>();
+                .collect();
             let objs_and_ops = opset
                 .iter_objs()
                 .flat_map(|(_, ops)| ops.map(move |op| op))

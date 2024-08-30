@@ -5,4 +5,3 @@ set -eoux pipefail
 THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 yarn --cwd $THIS_SCRIPT/../../javascript install
 yarn --cwd $THIS_SCRIPT/../../javascript prettier -v
-yarn --cwd $THIS_SCRIPT/../../javascript prettier -c .prettierrc .

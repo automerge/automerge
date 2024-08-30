@@ -1,4 +1,4 @@
-import type { Value } from "@automerge/automerge-wasm"
+import type { Value } from "./wasm_types.js"
 import { TEXT, STATE } from "./constants.js"
 import type { InternalState } from "./internal_state.js"
 

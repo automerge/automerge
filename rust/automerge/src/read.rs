@@ -267,9 +267,23 @@ pub trait ReadDoc {
 
     /// Get a change by its hash.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+
+    /// Return some statistics about the document
+    fn stats(&self) -> Stats;
 }
 
 pub(crate) trait ReadDocInternal: ReadDoc {
     /// Produce a map from object ID to path for all visible objects in this doc
     fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>>;
+}
+
+/// Statistics about the document
+///
+/// This is returned by [`ReadDoc::stats()`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stats {
+    /// The number of operations in the document
+    pub num_ops: u64,
+    /// The number of changes in the change graph for the document
+    pub num_changes: u64,
 }

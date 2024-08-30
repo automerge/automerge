@@ -1,14 +1,18 @@
-import { type ObjID, type Heads, Automerge } from "@automerge/automerge-wasm"
+import type { Automerge, Heads, ObjID, Patch } from "./wasm_types.js"
 
-import { STATE, OBJECT_ID, CLEAR_CACHE, TRACE, IS_PROXY } from "./constants.js"
+import { CLEAR_CACHE, IS_PROXY, OBJECT_ID, STATE, TRACE } from "./constants.js"
 
-import type { Doc, PatchCallback } from "./types.js"
+import { Doc, PatchCallback } from "./types.js"
 
 export interface InternalState<T> {
   handle: Automerge
   heads: Heads | undefined
   freeze: boolean
-  mostRecentPatch: any // TODO: type this
+  mostRecentPatch: {
+    before: Heads | undefined
+    after: Heads | undefined
+    patches: Patch[]
+  }
   patchCallback?: PatchCallback<T>
   textV2: boolean
 }

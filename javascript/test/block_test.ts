@@ -1,10 +1,9 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src"
-import * as WASM from "@automerge/automerge-wasm"
-import { mismatched_heads } from "./helpers"
-import { PatchSource } from "../src/types"
+import { next as Automerge } from "../src/index.js"
+import { mismatched_heads } from "./helpers.js"
+import { PatchSource } from "../src/types.js"
 import { inspect } from "util"
-import { RawString } from "../src/raw_string"
+import { RawString } from "../src/raw_string.js"
 
 function pathsEqual(a: Automerge.Prop[], b: Automerge.Prop[]) {
   if (a.length !== b.length) return false

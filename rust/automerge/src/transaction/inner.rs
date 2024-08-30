@@ -420,7 +420,6 @@ impl TransactionInner {
         if prop.is_empty() {
             return Err(AutomergeError::EmptyStringKey);
         }
-
         let id = self.next_id();
 
         let query = doc

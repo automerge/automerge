@@ -30,6 +30,7 @@ import { Text } from "./text.js"
 export { Text } from "./text.js"
 
 import type {
+  Automerge,
   API as WasmAPI,
   Actor as ActorId,
   Prop,
@@ -41,7 +42,7 @@ import type {
   JsSyncState,
   SyncMessage,
   DecodedSyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 export type {
   PutPatch,
   DelPatch,
@@ -49,7 +50,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
-} from "@automerge/automerge-wasm"
+} from "./wasm_types.js"
 
 /** @hidden **/
 type API = WasmAPI
@@ -65,8 +66,12 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
-
-import { Automerge } from "@automerge/automerge-wasm"
+export {
+  initializeWasm,
+  initializeBase64Wasm,
+  wasmInitialized,
+  isWasmInitialized,
+} from "./low_level.js"
 
 import { RawString } from "./raw_string.js"
 
@@ -80,8 +85,11 @@ import { stableConflictAt } from "./conflicts.js"
 export type ChangeOptions<T> = {
   /** A message which describes the changes */
   message?: string
-  /** The unix timestamp of the change (purely advisory, not used in conflict resolution) */
-  time?: number
+  /**
+   * The unix timestamp (in seconds) of the change (purely advisory, not used in conflict resolution).
+   * When omitted it defaults to the current timestamp. When set to `undefined` no timestamp is used.
+   */
+  time?: number | undefined
   /** A callback which will be called to notify the caller of any changes to the document */
   patchCallback?: PatchCallback<T>
 }
@@ -145,9 +153,6 @@ export interface State<T> {
 export function use(api: API) {
   UseApi(api)
 }
-
-import * as wasm from "@automerge/automerge-wasm"
-use(wasm)
 
 /**
  * Options to be passed to {@link init} or {@link load}
@@ -486,7 +491,6 @@ function progressDocument<T>(
       before: _state(doc).heads,
       after: newState.handle.getHeads(),
       patches,
-      source,
     }
   }
 
@@ -525,6 +529,9 @@ function _change<T>(
   if (scope) {
     state.handle.isolate(scope)
     heads = scope
+  }
+  if (!("time" in options)) {
+    options.time = Math.floor(Date.now() / 1000)
   }
   try {
     state.heads = heads
@@ -579,6 +586,9 @@ export function emptyChange<T>(
   }
   if (typeof options === "string") {
     options = { message: options }
+  }
+  if (!("time" in options)) {
+    options.time = Math.floor(Date.now() / 1000)
   }
 
   const state = _state(doc)
@@ -1055,10 +1065,14 @@ export function generateSyncMessage<T>(
  *                  {@link PatchCallback} which will be informed of any changes
  *                  in `doc` which occur because of the received sync message.
  *
- * @returns An array of `[newDoc, newSyncState, syncMessage | null]` where
+ * @returns An array of `[newDoc, newSyncState, null]` where
  * `newDoc` is the updated state of `doc`, `newSyncState` should replace
- * `inState` and `syncMessage` should be sent to the peer if it is not null. If
- * `syncMessage` is null then we are up to date.
+ * `inState`.
+ *
+ * @remarks Note that this function has three return values for legacy reasons.
+ * The third value used to be a sync message to send back but this is now
+ * always null and you should instead call `generateSyncMessage` after calling
+ * `receiveSyncMessage` to see if there are new messages to send.
  */
 export function receiveSyncMessage<T>(
   doc: Doc<T>,
@@ -1092,6 +1106,22 @@ export function receiveSyncMessage<T>(
     outSyncState,
     null,
   ]
+}
+
+/**
+ * Check whether the replica represented by `remoteState` has all our changes
+ *
+ * @param doc - The doc to check whether the remote has changes for
+ * @param remoteState - The {@link SyncState} representing the peer we are talking to
+ *
+ * @group sync
+ *
+ * @returns true if the remote has all of our changes
+ */
+export function hasOurChanges<T>(doc: Doc<T>, remoteState: SyncState): boolean {
+  const state = _state(doc)
+  const syncState = ApiHandler.importSyncState(remoteState)
+  return state.handle.hasOurChanges(syncState)
 }
 
 /**
@@ -1175,6 +1205,19 @@ export function saveSince(doc: Doc<unknown>, heads: Heads): Uint8Array {
   return result
 }
 
+/**
+ * Returns true if the document has all of the given heads somewhere in its history
+ */
+export function hasHeads(doc: Doc<unknown>, heads: Heads): boolean {
+  const state = _state(doc)
+  for (const hash of heads) {
+    if (!state.handle.getChangeByHash(hash)) {
+      return false
+    }
+  }
+  return true
+}
+
 export type {
   API,
   SyncState,
@@ -1222,4 +1265,38 @@ function registerDatatypes(handle: Automerge, textV2: boolean) {
       },
     )
   }
+}
+
+/**
+ * @hidden
+ */
+export function topoHistoryTraversal(doc: Doc<any>): string[] {
+  const state = _state(doc)
+  return state.handle.topoHistoryTraversal()
+}
+
+/**
+ * Decode a change hash into the details of this change
+ *
+ * This should be considered a semi-stable API. We try not to change the
+ * encoding in backwards incompatible ways but we won't bump a major version if
+ * we do have to change it
+ */
+export function inspectChange(
+  doc: Doc<unknown>,
+  changeHash: string,
+): DecodedChange | null {
+  const state = _state(doc)
+  return state.handle.getDecodedChangeByHash(changeHash)
+}
+
+/**
+ * Return some internal statistics about the document
+ */
+export function stats(doc: Doc<unknown>): {
+  numChanges: number
+  numOps: number
+} {
+  const state = _state(doc)
+  return state.handle.stats()
 }

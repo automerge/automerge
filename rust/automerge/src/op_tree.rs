@@ -546,7 +546,7 @@ impl OpTreeInternal {
                 let old_root = mem::replace(root, new_root);
 
                 root.length += old_root.len();
-                root.index = old_root.index.clone();
+                root.index.clone_from(&old_root.index);
                 root.children.push(old_root);
                 root.split_child(0, osd);
 

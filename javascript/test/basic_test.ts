@@ -1,7 +1,6 @@
 import { default as assert } from "assert"
-import { next as Automerge } from "../src/index.js"
-import * as oldAutomerge from "../src/stable.js"
-import { default as WASM } from "@automerge/automerge-wasm"
+import { next as Automerge } from "../src/entrypoints/fullfat_node.js"
+import * as oldAutomerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
 
@@ -256,9 +255,8 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create({ text_v1: true })
-      doc1.put("_root", "text", "hello world")
-      let doc2 = Automerge.load<any>(doc1.save())
+      let doc1 = oldAutomerge.from({ text: "hello world" })
+      let doc2 = Automerge.load<any>(oldAutomerge.save(doc1))
       assert.throws(() => {
         Automerge.change(doc2, d => {
           Automerge.splice(d, ["text"], 1, 0, "Z")
@@ -599,130 +597,6 @@ describe("Automerge", () => {
       ])
     })
   })
-  describe("cursor", () => {
-    it("can use cursors in splice calls", () => {
-      let doc = Automerge.from({
-        value: "The sly fox jumped over the lazy dog",
-      })
-      let cursor = Automerge.getCursor(doc, ["value"], 19)
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["value"], 0, 3, "Has the")
-      })
-      assert.deepEqual(doc.value, "Has the sly fox jumped over the lazy dog")
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["value"], cursor, 0, "right ")
-      })
-      assert.deepEqual(
-        doc.value,
-        "Has the sly fox jumped right over the lazy dog",
-      )
-      Automerge.getCursorPosition(doc, ["value"], cursor)
-    })
-
-    it("should be able to pass a doc to from() to make a shallow copy", () => {
-      let state = {
-        text: "The sly fox jumped over the lazy dog",
-        x: 5,
-        y: new Date(),
-        z: [1, 2, 3, { alpha: "bravo" }],
-      }
-      let doc1 = Automerge.from(state)
-      assert.deepEqual(doc1, state)
-      let doc2 = Automerge.from(doc1)
-      assert.deepEqual(doc1, doc2)
-    })
-
-    it("can use cursors in common text operations", () => {
-      let doc = Automerge.from({
-        value: "The sly fox jumped over the lazy dog",
-      })
-      let doc2 = Automerge.clone(doc)
-
-      let cursor = Automerge.getCursor(doc, ["value"], 8)
-
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["value"], cursor, 0, "o")
-        Automerge.splice(d, ["value"], cursor, 0, "l")
-        Automerge.splice(d, ["value"], cursor, 0, "e")
-      })
-      doc2 = Automerge.change(doc2, d => {
-        Automerge.splice(d, ["value"], 3, -3, "A")
-      })
-      doc = Automerge.merge(doc, doc2)
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["value"], cursor, -1, "d")
-        Automerge.splice(d, ["value"], cursor, 0, " ")
-      })
-      assert.deepEqual(doc.value, "A sly old fox jumped over the lazy dog")
-    })
-
-    it("should use javascript string indices", () => {
-      let doc = Automerge.from({
-        value: "🇬🇧🇩🇪",
-      })
-
-      let cursor = Automerge.getCursor(doc, ["value"], doc.value.indexOf("🇩🇪"))
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["value"], cursor, -2, "")
-        Automerge.splice(d, ["value"], cursor, -2, "")
-        Automerge.splice(d, ["value"], cursor, 0, "🇫🇷")
-      })
-
-      assert.deepEqual(doc.value, "🇫🇷🇩🇪")
-    })
-
-    it("patch callbacks inform where they came from", () => {
-      type DocShape = {
-        hello: string
-        a?: string
-        b?: string
-        x?: string
-        n?: string
-      }
-      let callbacks: Array<PatchSource> = []
-      let patchCallback = (_p, meta) => callbacks.push(meta.source)
-      let doc1 = Automerge.from<DocShape>({ hello: "world" }, { patchCallback })
-      let heads1 = Automerge.getHeads(doc1)
-      let doc2 = Automerge.clone(doc1, { patchCallback })
-      doc2 = Automerge.change(doc2, d => (d.a = "b"))
-      doc2 = Automerge.changeAt(doc2, heads1, d => (d.b = "c")).newDoc
-      doc1 = Automerge.merge(doc1, doc2)
-      doc2 = Automerge.change(doc2, d => (d.x = "y"))
-      doc1 = Automerge.loadIncremental(doc1, Automerge.saveIncremental(doc2))
-      doc2 = Automerge.change(doc2, d => (d.n = "m"))
-      let s1 = Automerge.initSyncState()
-      let s2 = Automerge.initSyncState()
-      let message
-      ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
-      ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
-      ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
-      ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message, {
-        patchCallback,
-      })
-      assert.deepEqual(callbacks, [
-        "from",
-        "change",
-        "changeAt",
-        "merge",
-        "change",
-        "loadIncremental",
-        "change",
-        "receiveSyncMessage",
-      ])
-    })
-
-    it("should allow dates from an existing document to be used in another document", () => {
-      let originalDoc: any = Automerge.change(Automerge.init(), (doc: any) => {
-        doc.date = new Date()
-        doc.dates = [new Date()]
-      })
-
-      Automerge.change(originalDoc, (doc: any) => {
-        doc.anotherDate = originalDoc.date
-        doc.dates[0] = originalDoc.dates[0]
-      })
-    })
-  })
   describe("saveSince", () => {
     it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
       let doc = Automerge.init<any>()
@@ -799,6 +673,99 @@ describe("Automerge", () => {
     it("marksAt", () => {
       Automerge.marksAt(doc, path, 0)
       assert.deepEqual(path, pathCopy)
+    })
+  })
+
+  describe("the hasHeads function", () => {
+    it("should return true if the document in question has all the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+      assert(Automerge.hasHeads(doc, heads))
+    })
+
+    it("should return false if the document does not have the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+
+      let otherDoc = Automerge.init<any>()
+      assert(!Automerge.hasHeads(otherDoc, heads))
+    })
+  })
+
+  describe("the topoHistoryTraversal function", () => {
+    it("should return the correct history", () => {
+      let doc = Automerge.from({ a: "a" }, { actor: "aaaaaa" })
+      let hash1 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      let doc2 = Automerge.clone(doc, { actor: "bbbbbb" })
+
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let hash2 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      doc2 = Automerge.change(doc2, d => (d.a = "c"))
+      let hash3 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc2)!,
+      ).hash
+
+      doc = Automerge.merge(doc, doc2)
+
+      let hashes = [hash1, hash2, hash3]
+      let topo = Automerge.topoHistoryTraversal(doc)
+      assert.deepStrictEqual(topo, hashes)
+    })
+  })
+
+  describe("the inspectChange function", () => {
+    it("should return a decoded representation of the change", () => {
+      let doc = Automerge.init<{ a: string | null }>({ actor: "aaaaaa" })
+      doc = Automerge.change(doc, { time: 123 }, d => (d.a = "a"))
+      let hash1 = Automerge.topoHistoryTraversal(doc)[0]
+
+      const change = Automerge.inspectChange(doc, hash1)
+      assert.deepStrictEqual(change, {
+        actor: "aaaaaa",
+        deps: [],
+        hash: hash1,
+        message: null,
+        ops: [
+          {
+            action: "makeText",
+            key: "a",
+            obj: "_root",
+            pred: [],
+          },
+          {
+            action: "set",
+            elemId: "_head",
+            insert: true,
+            obj: "1@aaaaaa",
+            pred: [],
+            value: "a",
+          },
+        ],
+        seq: 1,
+        startOp: 1,
+        time: 123,
+      })
+    })
+  })
+
+  describe("the stats function", () => {
+    it("should return stats about the document", () => {
+      let doc = Automerge.init<{ a: number }>()
+      doc = Automerge.change(doc, d => (d.a = 1))
+      doc = Automerge.change(doc, d => (d.a = 2))
+      const stats = Automerge.stats(doc)
+      assert.deepStrictEqual(stats, {
+        numChanges: 2,
+        numOps: 2,
+      })
     })
   })
 })

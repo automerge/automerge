@@ -1611,7 +1611,7 @@ fn export_patch(
         PatchAction::Increment { prop, value, .. } => {
             js_set(&result, "action", "inc")?;
             js_set(&result, "path", export_path(path, &prop))?;
-            js_set(&result, "value", &JsValue::from_f64(value as f64))?;
+            js_set(&result, "value", JsValue::from_f64(value as f64))?;
             Ok(result.into())
         }
         PatchAction::DeleteMap { key, .. } => {
