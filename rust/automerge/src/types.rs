@@ -19,7 +19,6 @@ pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
 pub(crate) use crate::marks::OldMarkData;
-pub(crate) use crate::op_set::{Op, OpBuilder};
 pub(crate) use crate::value::{ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -798,9 +797,7 @@ impl From<Prop> for wasm_bindgen::JsValue {
 
 #[cfg(test)]
 pub(crate) mod gen {
-    use super::{
-        ChangeHash, ElemId, Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, HASH_SIZE,
-    };
+    use super::{ChangeHash, ElemId, Key, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
     use crate::value::Counter;
 
     use proptest::prelude::*;
@@ -849,26 +846,28 @@ pub(crate) mod gen {
         ]
     }
 
-    /// Generate an arbitrary op
-    ///
-    /// The generated op will have no preds or succs
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - the OpId this op will be given
-    /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
-    ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
-    pub(crate) fn gen_op(
-        id: OpId,
-        key_prop_indices: Vec<usize>,
-    ) -> impl Strategy<Value = OpBuilder> {
-        (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
-            move |(key, insert, action)| OpBuilder {
-                id,
-                key,
-                insert,
-                action,
-            },
-        )
-    }
+    /*
+        /// Generate an arbitrary op
+        ///
+        /// The generated op will have no preds or succs
+        ///
+        /// # Arguments
+        ///
+        /// * `id` - the OpId this op will be given
+        /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
+        ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
+        pub(crate) fn gen_op(
+            id: OpId,
+            key_prop_indices: Vec<usize>,
+        ) -> impl Strategy<Value = OpBuilder> {
+            (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
+                move |(key, insert, action)| OpBuilder {
+                    id,
+                    key,
+                    insert,
+                    action,
+                },
+            )
+        }
+    */
 }

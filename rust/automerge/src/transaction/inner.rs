@@ -7,15 +7,15 @@ use crate::exid::ExId;
 //use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
-use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
+//use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
 use crate::op_set2::{Action, Op, OpBuilder2, OpSet, PropRef, SuccInsert};
 use crate::patches::{PatchLog, TextRepresentation};
-use crate::query::{self, OpIdSearch};
+//use crate::query::{self, OpIdSearch};
 use crate::storage::convert::ObWithMetadata;
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, ScalarValue};
-use crate::{op_tree::OpSetData, types::OpBuilder, Change, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
+use crate::{Change, ChangeHash, Prop};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
@@ -33,7 +33,7 @@ pub(crate) struct TransactionInner {
 /// Arguments required to create a new transaction
 pub(crate) struct TransactionArgs {
     /// The index of the actor ID this transaction will create ops for in the
-    /// [`OpSetData::actors`]
+    /// [`OpSet::actors`]
     pub(crate) actor_index: usize,
     /// The sequence number of the change this transaction will create
     pub(crate) seq: u64,

@@ -253,24 +253,6 @@ impl Automerge {
     }
 }
 
-impl crate::automerge_old::Automerge {
-    pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        todo!()
-    }
-
-    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        todo!()
-    }
-
-    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        todo!()
-    }
-
-    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
-        todo!()
-    }
-}
-
 #[macro_export]
 macro_rules! hydrate_map {
     {} => {

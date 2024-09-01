@@ -247,9 +247,8 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_set::OpSetData,
         storage::change::ChangeBuilder,
-        types::{Key, ObjId, OpBuilder, OpId},
+        types::{Key, ObjId, OpId},
         ActorId,
     };
 

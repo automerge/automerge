@@ -5,10 +5,10 @@ use crate::storage::document::ReadDocOpError;
 use crate::{
     change::Change,
     columnar::Key as DocOpKey,
-    op_set::{OpIdx, OpSetData},
+    //op_set::{OpIdx, OpSetData},
     op_set2::{OpBuilder2, OpSet},
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, OpBuilder, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, OpId, OpIds, OpType},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +51,7 @@ pub enum VerificationMode {
     DontCheck,
 }
 
+/*
 #[derive(Clone, Debug)]
 struct NextDocOp {
     op: OpBuilder,
@@ -59,6 +60,7 @@ struct NextDocOp {
     opid: OpId,
     obj: ObjId,
 }
+*/
 
 /*
 fn next_op<'a, I>(iter: &mut I, op_set: &mut OpSet) -> Result<Option<NextDocOp>, Error>
@@ -243,13 +245,12 @@ fn flush_changes(
 // after we see all ops for a given obj/key we can detect delets (this is more complex with MOVE)
 // also visibility for counters requires all ops to be observed before pushing them into op_tree because of visibility calculations
 
+/*
 fn flush_ops(
     obj: &ObjId,
     next: Option<&NextDocOp>,
     state: &mut ReconstructionState<'_>,
 ) -> Result<(), Error> {
-    todo!()
-    /*
             let next_key = next.map(|n| n.key);
             let next_obj = next.map(|n| n.obj);
 
@@ -284,8 +285,8 @@ fn flush_ops(
                 state.ops_collecter.truncate(0)
             }
             Ok(())
-    */
 }
+    */
 
 pub(crate) struct ReconOpSet {
     pub(crate) changes: Vec<Change>,
@@ -294,8 +295,8 @@ pub(crate) struct ReconOpSet {
     pub(crate) heads: BTreeSet<ChangeHash>,
 }
 
+/*
 fn import_op(op_set: &mut OpSet, op: DocOp) -> Result<(OpBuilder, OpIds), Error> {
-    /*
         let key = match op.key {
             DocOpKey::Prop(s) => Key::Map(s),
             DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(op_set, op)?)),
@@ -317,11 +318,10 @@ fn import_op(op_set: &mut OpSet, op: DocOp) -> Result<(OpBuilder, OpIds), Error>
             },
             succ,
         ))
-    */
-    todo!()
 }
+    */
 
-/// We construct the OpSetData directly from the vector of actors which are encoded in the
+/// We construct the OpSet directly from the vector of actors which are encoded in the
 /// start of the document. Therefore we need to check for each opid in the docuemnt that the actor
 /// ID which it references actually exists in the op set data.
 fn check_opid(op_set: &OpSet, opid: OpId) -> Result<OpId, Error> {

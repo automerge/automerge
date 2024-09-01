@@ -6,10 +6,8 @@ use itertools::Itertools;
 use crate::{
     indexed_cache::IndexedCache,
     op_set2::OpSet,
-    storage::{
-        change::DEFLATE_MIN_SIZE, convert::op_as_docop, AsChangeMeta, CompressConfig, Document,
-    },
-    types::{ActorId, ObjId, Op},
+    storage::{change::DEFLATE_MIN_SIZE, AsChangeMeta, CompressConfig, Document},
+    types::{ActorId, ObjId},
     Change, ChangeHash,
 };
 

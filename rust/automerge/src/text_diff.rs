@@ -4,10 +4,13 @@ use crate::Automerge;
 use crate::{
     clock::Clock,
     op_set2::{SpanInternal, SpansInternal},
-    op_tree::OpTreeOpIter,
+    //op_tree::OpTreeOpIter,
     text_value::TextValue,
     transaction::TransactionInner,
-    BlockOrText, ObjId as ExId, PatchLog, ReadDoc,
+    BlockOrText,
+    ObjId as ExId,
+    PatchLog,
+    ReadDoc,
 };
 mod myers;
 mod replace;

@@ -1,11 +1,8 @@
 use super::parents::Parents;
-use crate::change_graph::ChangeGraph;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set::{OpBuilder, OpIdx, OpIdxRange};
 use crate::patches::TextRepresentation;
-use crate::query::TreeQuery;
 use crate::storage::ColumnType;
 use crate::storage::{
     columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
@@ -66,7 +63,6 @@ pub(crate) use visible::{is_visible, DiffOp, DiffOpIter, VisibleOpIter};
 pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
-    //pub(crate) change_graph: ChangeGraph,
     cols: Columns,
 }
 
@@ -75,7 +71,6 @@ impl OpSet {
         OpSet {
             len: 0,
             actors,
-            //change_graph: ChangeGraph::new(),
             cols: Columns::default(),
         }
     }
@@ -112,13 +107,6 @@ impl OpSet {
         for i in op_pos.iter().rev() {
             let mut succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
             succ_num.splice(i.pos, 1, vec![i.len + 1]);
-            /*
-                        let mut iter = succ_num.iter();
-                        iter.advance_by(*pos);
-                        let group_pos = iter.group();
-                        let num = iter.next().flatten().unwrap_or(0);
-                        succ_num.update(*pos, num + 1);
-            */
 
             let mut succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
             succ_actor.splice(i.sub_pos, 0, vec![id.actoridx()]);
@@ -493,7 +481,6 @@ impl OpSet {
                 self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                //let query = self.seek_ops_by_map_key(&op.obj, &s, None);
                 let mut iter = self.iter_prop(&op.obj, &s);
                 let end_pos = iter.end_pos();
                 let ops = iter.collect::<Vec<_>>();
@@ -584,13 +571,7 @@ impl OpSet {
     ) -> Self {
         let len = ops.len();
         let cols = Columns::new(ops);
-        //let change_graph = ChangeGraph::new();
-        OpSet {
-            actors,
-            cols,
-            //change_graph,
-            len,
-        }
+        OpSet { actors, cols, len }
     }
 
     fn from_parts(
@@ -609,13 +590,7 @@ impl OpSet {
                 .collect(),
         );
         let len = cols.len();
-        //let change_graph = ChangeGraph::new();
-        let op_set = OpSet {
-            actors,
-            cols,
-            //change_graph,
-            len,
-        };
+        let op_set = OpSet { actors, cols, len };
         op_set
     }
 
@@ -1167,56 +1142,6 @@ impl Columns {
         }
     }
 
-    /*
-        fn insert<O: OpCols>(&mut self, pos: usize, op: &O) {
-          let mut group = None;
-          let mut group_pos = 0;
-          for (spec, col) in self.0.iter_mut() {
-            if group == Some(spec.id()) {
-              match col {
-                Column::Actor(c) => c.splice(group_pos, 0, op.get_group_actor(*spec)),
-                Column::Delta(c) => c.splice(group_pos, 0, op.get_group_int(*spec)),
-                _ => log!("unknown group column %{:?}",spec),
-              }
-            } else {
-              match col {
-                Column::Actor(c) => c.splice(pos, 0, vec![op.get_actor(*spec)]),
-                Column::Delta(c) => c.splice(pos, 0, vec![op.get_int(*spec)]),
-                Column::Integer(c) => c.splice(pos, 0, vec![op.get_uint(*spec)]),
-                Column::Str(c) => c.splice(pos, 0, vec![op.get_str(*spec)]),
-                Column::Bool(c) => c.splice(pos, 0, vec![op.get_bool(*spec)]),
-                Column::Value(c) => c.splice(pos, 0, vec![op.get_value(*spec)]),
-                Column::ValueMeta(c) => c.splice(pos, 0, vec![op.get_meta(*spec)]),
-                Column::Action(c) => c.splice(pos, 0, vec![op.get_action(*spec)]),
-                Column::Group(c) => {
-                  group = Some(spec.id());
-                  c.splice(pos, 0, vec![op.get_uint(*spec)]);
-                  group_pos = 0; // FIXME
-                }
-              }
-            }
-          }
-          self.get_delta_mut(ID_COUNTER_COL_SPEC);
-          self.get_integer_mut(OBJ_ID_COUNTER_COL_SPEC);
-          self.get_delta_mut(KEY_COUNTER_COL_SPEC);
-          self.get_str_mut(KEY_STR_COL_SPEC);
-          self.get_integer_mut(SUCC_COUNT_COL_SPEC);
-          self.get_delta_mut(SUCC_COUNTER_COL_SPEC);
-          self.get_boolean_mut(INSERT_COL_SPEC);
-          self.get_action_mut(ACTION_COL_SPEC);
-          self.get_value_meta_mut(VALUE_META_COL_SPEC);
-          self.get_value_mut(VALUE_COL_SPEC);
-          self.get_str_mut(MARK_NAME_COL_SPEC);
-          self.get_boolean_mut(EXPAND_COL_SPEC);
-        }
-    */
-
-    /*
-        fn add_succ(&mut self, id: OpId, pos: usize) {
-            todo!()
-        }
-    */
-
     fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
         // FIXME this should insert NULL values into columns we dont recognize
 
@@ -1725,7 +1650,7 @@ mod tests {
         },
         storage::Document,
         transaction::Transactable,
-        types::{ObjId, OpBuilder, OpId},
+        types::{ObjId, OpId},
         ActorId, AutoCommit, ObjType, OpType,
     };
 
@@ -1743,12 +1668,7 @@ mod tests {
         let doc_chunk = load_document_chunk(&saved);
         let opset = super::OpSet::new(&doc_chunk);
         let ops = opset.iter().collect::<Vec<_>>();
-        let actual_ops = doc
-            .doc
-            .ops()
-            .iter()
-            //.map(|(_, _, op)| op)
-            .collect::<Vec<_>>();
+        let actual_ops = doc.doc.ops().iter().collect::<Vec<_>>();
         if ops != actual_ops {
             for (i, (a, b)) in actual_ops.iter().zip(ops.iter()).enumerate() {
                 if b != a {
@@ -1952,7 +1872,6 @@ mod tests {
 
     #[test]
     fn column_data_op_iterators() {
-        //use super::super::op_set::iter::OpQuery;
         let actors = vec![crate::ActorId::random(), crate::ActorId::random()];
 
         let test_ops = vec![
@@ -2123,115 +2042,123 @@ mod tests {
         });
     }
 
-    proptest::proptest! {
-        #[test]
-        fn column_data_same_as_old_encoding(Scenario{opset, actors, keys} in arbitrary_opset()) {
+    /*
+        proptest::proptest! {
+            #[test]
+            fn column_data_same_as_old_encoding(Scenario{opset, actors, keys} in arbitrary_opset()) {
 
-            // encode with old encoders
-            let actor_lookup = actors
-                .iter()
-                .enumerate()
-                //.map(|(a, b)| (a,usize::from(b)))
-                .map(|(a, _)| (a,a))
-                //.collect::<HashMap<_>>();
-                .collect();
-            let objs_and_ops = opset
-                .iter_objs()
-                .flat_map(|(_, ops)| ops.map(move |op| op))
-                .collect::<Vec<_>>();
-            let doc_ops = objs_and_ops
-                .iter()
-                .map(|op_idx| {
-                    let op = op_idx.as_op(&opset.osd);
-                    crate::storage::convert::op_as_docop(
-                        &actor_lookup,
-                        &keys,
-                        op,
-                    )
-                });
-            let mut old_encoding = Vec::new();
-            let ops_meta = crate::storage::document::DocOpColumns::encode(doc_ops, &mut old_encoding);
+                // encode with old encoders
+                let actor_lookup = actors
+                    .iter()
+                    .enumerate()
+                    //.map(|(a, b)| (a,usize::from(b)))
+                    .map(|(a, _)| (a,a))
+                    //.collect::<HashMap<_>>();
+                    .collect();
+                let objs_and_ops = opset
+                    .iter_objs()
+                    .flat_map(|(_, ops)| ops.map(move |op| op))
+                    .collect::<Vec<_>>();
+                let doc_ops = objs_and_ops
+                    .iter()
+                    .map(|op_idx| {
+                        let op = op_idx.as_op(&opset.osd);
+                        crate::storage::convert::op_as_docop(
+                            &actor_lookup,
+                            &keys,
+                            op,
+                        )
+                    });
+                let mut old_encoding = Vec::new();
+                let ops_meta = crate::storage::document::DocOpColumns::encode(doc_ops, &mut old_encoding);
 
-            // decode with new decoders
-            let op_set = super::OpSet::from_parts(
-                ops_meta.raw_columns(),
-                Arc::new(old_encoding),
-                actors.clone()
-            );
+                // decode with new decoders
+                let op_set = super::OpSet::from_parts(
+                    ops_meta.raw_columns(),
+                    Arc::new(old_encoding),
+                    actors.clone()
+                );
 
-            let actual_ops = objs_and_ops.iter().map(|op_idx| op_idx.as_op(&opset.osd)).collect::<Vec<_>>();
-            let ops = op_set.iter().collect::<Vec<_>>();
-            if !(ops == actual_ops) {
-                for (i, (a, b)) in actual_ops.iter().zip(ops.iter()).enumerate() {
-                    if b != a {
-                        println!("first mismatch: {}", i);
-                        println!("expected: {:?}", a);
-                        println!("actual: {:?}", b);
-                        println!("expected successors: {:?}", a.succ().map(|n| *n.id()).collect::<Vec<_>>());
-                        println!("actual successors: {:?}", b.succ().collect::<Vec<_>>());
-                        break;
+                let actual_ops = objs_and_ops.iter().map(|op_idx| op_idx.as_op(&opset.osd)).collect::<Vec<_>>();
+                let ops = op_set.iter().collect::<Vec<_>>();
+                if !(ops == actual_ops) {
+                    for (i, (a, b)) in actual_ops.iter().zip(ops.iter()).enumerate() {
+                        if b != a {
+                            println!("first mismatch: {}", i);
+                            println!("expected: {:?}", a);
+                            println!("actual: {:?}", b);
+                            println!("expected successors: {:?}", a.succ().map(|n| *n.id()).collect::<Vec<_>>());
+                            println!("actual successors: {:?}", b.succ().collect::<Vec<_>>());
+                            break;
+                        }
+                    }
+                    panic!("ops mismatch");
+                }
+            }
+        }
+    */
+
+    /*
+        struct Scenario {
+            opset: crate::op_set::OpSetInternal,
+            actors: Vec<crate::ActorId>,
+            keys: IndexedCache<String>,
+        }
+    */
+
+    /*
+        prop_compose! {
+            fn arbitrary_opset()(
+                actors in proptest::collection::vec(arbitrary_actor(), 1..10),
+                keys in arbitrary_keys(),
+            )(
+                obj in arbitrary_objid(&actors),
+                ops in proptest::collection::vec(arbitrary_op(&actors, &keys), 0..100),
+                actors in Just(actors),
+                keys in Just(keys)
+            ) -> Scenario {
+                let mut opset = crate::op_set::OpSetInternal::new();
+                opset.osd.props = keys.clone();
+                opset.osd.actors = actors.clone().into_iter().collect();
+                for ArbOp{op, succs} in ops {
+                    let op_idx = opset.load(obj, op);
+                    opset.insert(0, &obj, op_idx);
+                    for succ in succs {
+                        let succ_idx = opset.load(obj, succ);
+                        opset.osd.add_dep(op_idx, succ_idx);
                     }
                 }
-                panic!("ops mismatch");
-            }
-        }
-    }
-
-    struct Scenario {
-        opset: crate::op_set::OpSetInternal,
-        actors: Vec<crate::ActorId>,
-        keys: IndexedCache<String>,
-    }
-
-    prop_compose! {
-        fn arbitrary_opset()(
-            actors in proptest::collection::vec(arbitrary_actor(), 1..10),
-            keys in arbitrary_keys(),
-        )(
-            obj in arbitrary_objid(&actors),
-            ops in proptest::collection::vec(arbitrary_op(&actors, &keys), 0..100),
-            actors in Just(actors),
-            keys in Just(keys)
-        ) -> Scenario {
-            let mut opset = crate::op_set::OpSetInternal::new();
-            opset.osd.props = keys.clone();
-            opset.osd.actors = actors.clone().into_iter().collect();
-            for ArbOp{op, succs} in ops {
-                let op_idx = opset.load(obj, op);
-                opset.insert(0, &obj, op_idx);
-                for succ in succs {
-                    let succ_idx = opset.load(obj, succ);
-                    opset.osd.add_dep(op_idx, succ_idx);
+                Scenario{
+                    opset,
+                    actors,
+                    keys
                 }
             }
-            Scenario{
-                opset,
-                actors,
-                keys
+        }
+    */
+
+    /*
+        impl std::fmt::Debug for Scenario {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let ops_desc = self
+                    .opset
+                    .iter_objs()
+                    .flat_map(|(_, ops)| {
+                        ops.map(|op| {
+                            let op = op.as_op(&self.opset.osd);
+                            let succs = op.succ().map(|n| *n.id()).collect::<Vec<_>>();
+                            format!("{:?}, succs: {:?}", op, succs)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                f.debug_struct("Scenario")
+                    .field("ops", &ops_desc)
+                    .field("actors", &self.actors)
+                    .field("keys", &self.keys)
+                    .finish()
             }
         }
-    }
-
-    impl std::fmt::Debug for Scenario {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let ops_desc = self
-                .opset
-                .iter_objs()
-                .flat_map(|(_, ops)| {
-                    ops.map(|op| {
-                        let op = op.as_op(&self.opset.osd);
-                        let succs = op.succ().map(|n| *n.id()).collect::<Vec<_>>();
-                        format!("{:?}, succs: {:?}", op, succs)
-                    })
-                })
-                .collect::<Vec<_>>();
-            f.debug_struct("Scenario")
-                .field("ops", &ops_desc)
-                .field("actors", &self.actors)
-                .field("keys", &self.keys)
-                .finish()
-        }
-    }
+    */
 
     fn arbitrary_action() -> impl Strategy<Value = OpType> {
         prop_oneof![
@@ -2291,41 +2218,47 @@ mod tests {
         proptest::collection::vec(any::<u8>(), 32).prop_map(|v| crate::ActorId::from(&v))
     }
 
-    #[derive(Debug)]
-    struct ArbOp {
-        op: OpBuilder,
-        succs: Vec<OpBuilder>,
-    }
+    /*
+        #[derive(Debug)]
+        struct ArbOp {
+            op: OpBuilder,
+            succs: Vec<OpBuilder>,
+        }
+    */
 
-    prop_compose! {
-        fn arbitrary_op_builder(actors: &[crate::ActorId], keys: &crate::indexed_cache::IndexedCache<String>)
-        (
-            action in arbitrary_action(),
-            key in arbitrary_key(&actors, &keys),
-            id in arbitrary_opid(&actors),
-            insert in any::<bool>(),
-        )-> OpBuilder {
-            OpBuilder {
-                id,
-                action,
-                key,
-                insert,
+    /*
+        prop_compose! {
+            fn arbitrary_op_builder(actors: &[crate::ActorId], keys: &crate::indexed_cache::IndexedCache<String>)
+            (
+                action in arbitrary_action(),
+                key in arbitrary_key(&actors, &keys),
+                id in arbitrary_opid(&actors),
+                insert in any::<bool>(),
+            )-> OpBuilder {
+                OpBuilder {
+                    id,
+                    action,
+                    key,
+                    insert,
+                }
             }
         }
-    }
+    */
 
-    prop_compose! {
-        fn arbitrary_op(actors: &[crate::ActorId], keys: &IndexedCache<String>)
-        (
-            op in arbitrary_op_builder(&actors, &keys),
-            succs in proptest::collection::vec(arbitrary_op_builder(&actors, &keys), 0..10),
-        )-> ArbOp {
-            ArbOp{
-                op,
-                succs,
+    /*
+        prop_compose! {
+            fn arbitrary_op(actors: &[crate::ActorId], keys: &IndexedCache<String>)
+            (
+                op in arbitrary_op_builder(&actors, &keys),
+                succs in proptest::collection::vec(arbitrary_op_builder(&actors, &keys), 0..10),
+            )-> ArbOp {
+                ArbOp{
+                    op,
+                    succs,
+                }
             }
         }
-    }
+    */
 
     fn arbitrary_objid(actors: &[crate::ActorId]) -> impl Strategy<Value = crate::types::ObjId> {
         prop_oneof![

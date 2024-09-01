@@ -1,11 +1,14 @@
 use automerge::marks::{ExpandMark, Mark};
-use automerge::op_tree::B;
+//use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
     ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
+
+const B: usize = 16;
+
 use std::fs;
 
 // set up logging for all the tests

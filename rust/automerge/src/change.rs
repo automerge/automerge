@@ -355,11 +355,11 @@ impl From<&Change> for crate::ExpandedChange {
 pub(crate) mod gen {
     use super::Change;
     use crate::{
-        op_set::{OpIdx, OpSetData},
         storage::change::ChangeBuilder,
         types::{
-            gen::{gen_hash, gen_op},
-            ObjId, OpId,
+            //gen::{gen_hash, gen_op},
+            ObjId,
+            OpId,
         },
         ActorId,
     };
@@ -375,69 +375,71 @@ pub(crate) mod gen {
         }
     }
 
-    fn gen_ops(
-        this_actor: ActorId,
-        other_actors: Vec<ActorId>,
-    ) -> impl Strategy<Value = (Vec<(ObjId, OpIdx)>, OpSetData)> {
-        let mut all_actors = vec![this_actor];
-        all_actors.extend(other_actors);
-        let mut osd = OpSetData::from_actors(all_actors);
-        osd.props.cache("someprop".to_string());
-        let root_id = ObjId::root();
-        (0_u64..10)
-            .prop_map(|num_ops| {
-                (0..num_ops)
-                    .map(|counter| OpId::new(counter, 0))
-                    .collect::<Vec<_>>()
-            })
-            .prop_flat_map(move |opids| {
-                let mut strat = Just(Vec::new()).boxed();
-                for opid in opids {
-                    strat = (gen_op(opid, vec![0]), strat)
-                        .prop_map(move |(op, ops)| {
-                            let mut result = Vec::with_capacity(ops.len() + 1);
-                            result.extend(ops);
-                            result.push((root_id, op));
-                            result
-                        })
-                        .boxed();
-                }
-                strat
-            })
-            .prop_map(move |ops| {
-                let mut osd = osd.clone();
-                let ops = ops
-                    .into_iter()
-                    .map(|(obj, op)| (obj, osd.push(obj, op)))
-                    .collect();
-                (ops, osd)
-            })
-    }
+    // FIXME - port these tests over to the new op_set
 
-    prop_compose! {
-        pub(crate) fn gen_change()((this_actor, other_actors) in gen_actors())(
-                (ops, osd) in gen_ops(this_actor.clone(), other_actors),
-                start_op in 1_u64..200000,
-                seq in 0_u64..200000,
-                timestamp in 0..i64::MAX,
-                deps in proptest::collection::vec(gen_hash(), 0..100),
-                message in proptest::option::of("[a-z]{200}"),
-                this_actor in Just(this_actor),
-            ) -> Change {
-            todo!()
-            /*
-            let ops = ops.iter().map(|(_, op)| op_as_actor_id(op.as_op(&osd)));
-            Change::new(ChangeBuilder::new()
-                .with_dependencies(deps)
-                .with_start_op(start_op.try_into().unwrap())
-                .with_message(message)
-                .with_actor(this_actor)
-                .with_seq(seq)
-                .with_timestamp(timestamp)
-                .build(ops.into_iter())
-                .unwrap())
-            */
+    /*
+        fn gen_ops(
+            this_actor: ActorId,
+            other_actors: Vec<ActorId>,
+        ) -> impl Strategy<Value = (Vec<(ObjId, OpIdx)>, OpSetData)> {
+            let mut all_actors = vec![this_actor];
+            all_actors.extend(other_actors);
+            let mut osd = OpSetData::from_actors(all_actors);
+            osd.props.cache("someprop".to_string());
+            let root_id = ObjId::root();
+            (0_u64..10)
+                .prop_map(|num_ops| {
+                    (0..num_ops)
+                        .map(|counter| OpId::new(counter, 0))
+                        .collect::<Vec<_>>()
+                })
+                .prop_flat_map(move |opids| {
+                    let mut strat = Just(Vec::new()).boxed();
+                    for opid in opids {
+                        strat = (gen_op(opid, vec![0]), strat)
+                            .prop_map(move |(op, ops)| {
+                                let mut result = Vec::with_capacity(ops.len() + 1);
+                                result.extend(ops);
+                                result.push((root_id, op));
+                                result
+                            })
+                            .boxed();
+                    }
+                    strat
+                })
+                .prop_map(move |ops| {
+                    let mut osd = osd.clone();
+                    let ops = ops
+                        .into_iter()
+                        .map(|(obj, op)| (obj, osd.push(obj, op)))
+                        .collect();
+                    (ops, osd)
+                })
         }
+    */
 
-    }
+    /*
+        prop_compose! {
+            pub(crate) fn gen_change()((this_actor, other_actors) in gen_actors())(
+                    (ops, osd) in gen_ops(this_actor.clone(), other_actors),
+                    start_op in 1_u64..200000,
+                    seq in 0_u64..200000,
+                    timestamp in 0..i64::MAX,
+                    deps in proptest::collection::vec(gen_hash(), 0..100),
+                    message in proptest::option::of("[a-z]{200}"),
+                    this_actor in Just(this_actor),
+                ) -> Change {
+                let ops = ops.iter().map(|(_, op)| op_as_actor_id(op.as_op(&osd)));
+                Change::new(ChangeBuilder::new()
+                    .with_dependencies(deps)
+                    .with_start_op(start_op.try_into().unwrap())
+                    .with_message(message)
+                    .with_actor(this_actor)
+                    .with_seq(seq)
+                    .with_timestamp(timestamp)
+                    .build(ops.into_iter())
+                    .unwrap())
+            }
+        }
+    */
 }

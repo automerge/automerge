@@ -4,10 +4,11 @@ use automerge::{
     hydrate_list, hydrate_map,
     marks::{ExpandMark, Mark},
     op_set2::Span,
-    op_tree::B,
     transaction::Transactable,
     ActorId, AutoCommit, ObjType, Patch, PatchAction, ReadDoc, ScalarValue, ROOT,
 };
+const B: usize = 16;
+
 use proptest::strategy::Strategy;
 use test_log::test;
 

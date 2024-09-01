@@ -5,7 +5,6 @@ use super::rle::ActorCursor;
 use super::types::{Action, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
 
-//use crate::storage::document::doc_op_columns::AsDocOp;
 use crate::convert;
 use crate::storage::document::AsDocOp;
 
@@ -522,6 +521,7 @@ impl<'a> PartialEq<Op<'_>> for Op<'a> {
     }
 }
 
+/*
 impl<'a> PartialEq<Op<'_>> for crate::op_set::Op<'a> {
     fn eq(&self, other: &Op<'_>) -> bool {
         self.id() == &other.id
@@ -538,6 +538,7 @@ impl<'a> PartialEq<crate::op_set::Op<'_>> for Op<'a> {
         other.eq(self)
     }
 }
+*/
 
 impl<'a> PartialOrd for Op<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

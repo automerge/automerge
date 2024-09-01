@@ -18,16 +18,14 @@ use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
-//use crate::parents::Parents;
 use crate::patches::{Patch, PatchLog, TextRepresentation};
-//use crate::query;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta,
-    OpBuilder, OpId, OpIds, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, OpId,
+    OpIds, Value,
 };
 use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
@@ -811,60 +809,22 @@ impl Automerge {
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                //let id = OpId::new(change.start_op().get() + i as u64, actors[0]);
                 let id = OpId::new(change.start_op().get() + i as u64, 0).map(&actors)?;
                 let key = c.key.map(&actors)?;
-                /*
-                                let key = match &c.key {
-                                    EncodedKey::Prop(n) => Key::Map(String::from(n.as_ref())),
-                                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
-                                    EncodedKey::Elem(ElemId(o)) => {
-                                        Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
-                                    }
-                                };
-                */
                 let obj = c.obj.map(&actors)?;
-                /*
-                                let obj = if c.obj.is_root() {
-                                    ObjMeta {
-                                        id: ObjId::root(),
-                                        typ: ObjType::Map,
-                                    }
-                                } else {
-                                    let counter = c.obj.opid().counter();
-                                    let actor = actors[c.obj.opid().actor()];
-                                    let id = ObjId(OpId::new(counter, actor));
-                                    ObjMeta {
-                                        id,
-                                        typ: ObjType::Map,
-                                    }
-                                };
-                */
-                //let obj = ObjMeta { id: obj, typ: ObjType::Map };
                 let pred = c
                     .pred
                     .into_iter()
                     .map(|id| id.map(&actors))
                     .collect::<Result<Vec<_>, _>>()?;
-                /*
-                                let pred = c
-                                    .pred
-                                    .iter()
-                                    .map(|p| OpId::new(p.counter(), actors[p.actor()]))
-                                    .collect();
-                */
                 Ok(ChangeOp {
                     id,
                     obj,
-                    //pos: 0,
-                    //index: 0,
                     key,
-                    //action: crate::types::OpType::from_action_and_value(
                     action: c.action,
                     val: c.val,
                     mark_name: c.mark_name,
                     expand: c.expand,
-                    //),
                     insert: c.insert,
                     pred,
                 })
@@ -2031,7 +1991,6 @@ pub(crate) fn reconstruct_document<'a>(
         // SAFETY: This should be fine because we just constructed an opset containing
         // all the changes
         let actor_index = op_set.lookup_actor(change.actor_id()).unwrap();
-        //let actor_index = op_set.osd.actors.lookup(change.actor_id()).unwrap();
         actor_to_history.entry(actor_index).or_default().push(index);
         hashes_by_index.insert(index, change.hash());
         change_graph.add_change(change, actor_index)?;
