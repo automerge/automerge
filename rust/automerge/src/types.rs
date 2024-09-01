@@ -582,6 +582,14 @@ impl AsRef<OpId> for ObjId {
 pub(crate) struct ObjId(pub(crate) OpId);
 
 impl ObjId {
+    pub(crate) fn load(counter: Option<u64>, actor: Option<ActorIdx>) -> Option<ObjId> {
+        match (counter, actor) {
+            (Some(c), Some(a)) => Some(ObjId(OpId::new(c, a.into()))),
+            (None, None) => Some(ObjId::root()),
+            _ => None, // panic? memory corruption here
+        }
+    }
+
     pub(crate) fn map(self, actor_map: &[usize]) -> Result<ObjId, AutomergeError> {
         if self.is_root() {
             Ok(self)
@@ -598,8 +606,12 @@ impl ObjId {
         self.0.counter() == 0
     }
 
-    pub(crate) fn opid(&self) -> &OpId {
-        &self.0
+    pub(crate) fn id(&self) -> Option<&OpId> {
+        if self.is_root() {
+            None
+        } else {
+            Some(&self.0)
+        }
     }
 
     pub(crate) fn counter(&self) -> Option<u64> {

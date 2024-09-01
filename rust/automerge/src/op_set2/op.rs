@@ -134,7 +134,7 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn value(&self) -> hydrate::Value {
+    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
         match &self.action {
             types::OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
             types::OpType::Put(scalar) => hydrate::Value::from(scalar.clone()),
@@ -469,6 +469,16 @@ impl<'a> Op<'a> {
             OpType::MarkBegin(_, mark) => Value::Scalar(ScalarValue::Str("markBegin")),
             OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str("markEnd")),
             _ => panic!("cant convert op into a value - {:?}", self),
+        }
+    }
+
+    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
+        match &self.action() {
+            OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
+            OpType::Put(scalar) => hydrate::Value::from(scalar.into_owned()),
+            OpType::MarkBegin(_, mark) => hydrate::Value::from(mark.value.clone()),
+            OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
+            _ => panic!("cant convert op into a value"),
         }
     }
 

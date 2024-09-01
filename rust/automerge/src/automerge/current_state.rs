@@ -32,7 +32,6 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
     for (obj, ops) in doc.ops().iter_objs() {
-        //let ops = ops.map(|i| i.as_op(doc.osd()));
         if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
             log_text_patches(doc, patch_log, &obj, ops)
         } else if obj.typ.is_sequence() {
@@ -82,7 +81,7 @@ fn log_map_patches<'a, I: OpQuery<'a>>(
 ) {
     for op in ops.visible(None).top_ops() {
         if let Some(key) = op.key.map_key() {
-            patch_log.put_map(obj.id, key, op.value.into(), op.id, op.conflict, false);
+            patch_log.put_map(obj.id, key, op.value().into(), op.id, op.conflict, false);
         }
     }
 }
@@ -93,6 +92,7 @@ mod tests {
 
     use crate::{
         patches::{PatchLog, TextRepresentation},
+        read::ReadDoc,
         transaction::Transactable,
         Automerge, ObjType, Patch, PatchAction, Prop, Value,
     };
@@ -504,7 +504,15 @@ mod tests {
 
         doc.insert(&list, 0, 1).unwrap();
         doc2.insert(&list, 0, 2).unwrap();
+
         doc.merge(&mut doc2).unwrap();
+
+        doc2.merge(&mut doc).unwrap();
+
+        assert_eq!(
+            doc.hydrate(&crate::ROOT, None),
+            doc2.hydrate(&crate::ROOT, None)
+        );
 
         doc.set_text_rep(TextRepresentation::String);
         let p = doc.document().current_state(TextRepresentation::String);

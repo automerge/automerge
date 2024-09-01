@@ -1247,7 +1247,6 @@ impl Automerge {
         mut op: ChangeOp,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        log!("ChangeOp {:?}", op.pred);
         let obj = self.get_obj_meta(op.obj)?;
         let encoding = patch_log.text_rep().encoding(obj.typ);
 
@@ -1267,7 +1266,6 @@ impl Automerge {
             self.ops.insert2(&op);
         }
 
-        log!("ADD SUCC {:?} {:?}", op.id, succ);
         self.ops.add_succ(&op.obj.id, &succ, op.id);
 
         Ok(())

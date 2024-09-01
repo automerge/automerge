@@ -112,6 +112,13 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_i64(&mut self) -> i64 {
+        match self {
+            Value::Scalar(s) => s.as_i64(),
+            _ => 0,
+        }
+    }
 }
 
 impl From<value::Value<'_>> for Value {

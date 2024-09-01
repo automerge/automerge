@@ -314,13 +314,21 @@ impl From<&Change> for crate::ExpandedChange {
                     }
                     StoredKey::Prop(p) => crate::legacy::Key::Map(p),
                 },
-                obj: if o.obj.is_root() {
-                    crate::legacy::ObjectId::Root
-                } else {
+                //obj: if o.obj.is_root() {
+                obj: if let Some(id) = o.obj.id() {
                     crate::legacy::ObjectId::Id(crate::legacy::OpId::new(
-                        o.obj.opid().counter(),
-                        actors.get(&o.obj.opid().actor()).unwrap(),
+                        id.counter(),
+                        actors.get(&id.actor()).unwrap(),
                     ))
+                } else {
+                    crate::legacy::ObjectId::Root
+                    /*
+                                    } else {
+                                        crate::legacy::ObjectId::Id(crate::legacy::OpId::new(
+                                            o.obj.opid().counter(),
+                                            actors.get(&o.obj.opid().actor()).unwrap(),
+                                        ))
+                    */
                 },
                 pred: o
                     .pred

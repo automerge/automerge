@@ -570,7 +570,7 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
     (start, end)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value<'a> {
     Object(ObjType),
     Scalar(ScalarValue<'a>),
@@ -581,6 +581,13 @@ impl<'a> Value<'a> {
         match self {
             Self::Object(o) => value::Value::Object(*o),
             Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
+        }
+    }
+
+    pub(crate) fn as_i64(&self) -> i64 {
+        match self {
+            Self::Scalar(s) => s.as_i64(),
+            Self::Object(_) => 0,
         }
     }
 }

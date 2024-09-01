@@ -60,6 +60,7 @@ struct NextDocOp {
     obj: ObjId,
 }
 
+/*
 fn next_op<'a, I>(iter: &mut I, op_set: &mut OpSet) -> Result<Option<NextDocOp>, Error>
 where
     I: Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a,
@@ -83,6 +84,7 @@ where
         Ok(None)
     }
 }
+*/
 
 struct ReconstructionState<'a> {
     op_set: OpSet,

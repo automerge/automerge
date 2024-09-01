@@ -217,10 +217,10 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.op.obj.is_root() {
-            convert::ObjId::Root
+        if let Some(id) = self.op.obj.id() {
+            convert::ObjId::Op(OpIdWithMetadata::new(*id, self.op.op_set()))
         } else {
-            convert::ObjId::Op(OpIdWithMetadata::new(*self.op.obj.opid(), self.op.op_set()))
+            convert::ObjId::Root
         }
     }
 
@@ -281,10 +281,10 @@ impl<'a> AsChangeOp<'a> for ObWithMetadata<'a> {
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.op.obj.id.is_root() {
-            convert::ObjId::Root
+        if let Some(id) = self.op.obj.id.id() {
+            convert::ObjId::Op(OpIdWithMetadata::new(*id, self.op_set))
         } else {
-            convert::ObjId::Op(OpIdWithMetadata::new(*self.op.obj.id.opid(), self.op_set))
+            convert::ObjId::Root
         }
     }
 

@@ -63,7 +63,8 @@ impl<'a> Iterator for Parents<'a> {
             ..
         } = self
             .ops
-            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())?;
+            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())
+            .unwrap();
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);
         Some(Parent {

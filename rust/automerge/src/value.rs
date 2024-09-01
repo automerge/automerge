@@ -656,6 +656,15 @@ impl ScalarValue {
     pub fn counter(n: i64) -> ScalarValue {
         ScalarValue::Counter(n.into())
     }
+
+    pub(crate) fn as_i64(&self) -> i64 {
+        match self {
+            Self::Int(i) | Self::Timestamp(i) => *i,
+            Self::Counter(c) => c.current,
+            Self::Uint(i) => *i as i64,
+            _ => 0,
+        }
+    }
 }
 
 impl From<&str> for ScalarValue {

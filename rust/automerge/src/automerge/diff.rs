@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::automerge::{
     Automerge, Keys, ListRange, MapRange, Parents, ReadDoc, ReadDocInternal, Spans, Values,
 };
+use crate::hydrate;
 use crate::marks::Mark;
 use crate::patches::TextRepresentation;
 use crate::types::ObjMeta;
@@ -12,8 +13,7 @@ use crate::{
     marks::{MarkSet, MarkStateMachine},
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ListEncoding, Prop},
-    value::Value,
+    types::{Clock, ListEncoding, Prop, Value},
     AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType,
 };
 
@@ -28,11 +28,11 @@ struct Winner<'a> {
 }
 
 impl<'a> Winner<'a> {
-    fn value(&self) -> &ScalarValue<'a> {
-        if let Some(v) = &self.value_at {
-            v
+    fn value(&self) -> hydrate::Value {
+        if let Some(v) = self.value_at {
+            hydrate::Value::Scalar(v.into_owned())
         } else {
-            &self.op.value
+            self.op.hydrate_value()
         }
     }
 }
@@ -184,7 +184,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
-            let value = winner.value().into();
+            let value = winner.value();
             let id = winner.op.id;
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
@@ -193,7 +193,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
-            let value = after.value().into();
+            let value = after.value();
             let id = after.op.id;
             let expose = after.cross_visible;
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);

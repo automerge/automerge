@@ -1005,11 +1005,11 @@ impl TransactionInner {
                     assert!(obj.typ.is_sequence());
                     match (obj.typ, op.prop()) {
                         (ObjType::List, PropRef::Seq(index)) => {
-                            patch_log.insert(obj.id, index, op.value(), op.id, false);
+                            patch_log.insert(obj.id, index, op.hydrate_value(), op.id, false);
                         }
                         (ObjType::Text, PropRef::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                patch_log.insert(obj.id, index, op.value(), op.id, false);
+                                patch_log.insert(obj.id, index, op.hydrate_value(), op.id, false);
                             } else {
                                 patch_log.splice(obj.id, index, op.as_str(), marks);
                             }
@@ -1025,7 +1025,7 @@ impl TransactionInner {
             } else if let Some(value) = op.get_increment_value() {
                 patch_log.increment2(obj.id, op.prop(), value, op.id);
             } else {
-                patch_log.put2(obj.id, op.prop(), op.value(), op.id, false, false);
+                patch_log.put2(obj.id, op.prop(), op.hydrate_value(), op.id, false, false);
             }
         }
     }

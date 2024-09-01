@@ -134,12 +134,17 @@ impl OpSet {
         text_rep: TextRepresentation,
         clock: Option<&Clock>,
     ) -> Option<Parent> {
-        let op = self.find_op_by_id(&obj.0)?;
+        // im looking each op up twice - could be better
+        let (op, visible) = self.find_op_by_id_and_vis(obj.id()?, clock)?;
         if op.obj.is_root() {
-            return None;
+            return Some(Parent {
+                typ: ObjType::Map,
+                obj: ObjId::root(),
+                prop: Prop::from(op.key.map_key()?),
+                visible,
+            });
         }
-        let (parent_op, visible) = self.find_op_by_id_and_vis(&op.obj.0, clock)?;
-        // FIXME remote unwrap
+        let (parent_op, parent_vis) = self.find_op_by_id_and_vis(op.obj.id()?, clock)?;
         let parent_typ = parent_op.action.try_into().unwrap();
         let prop = match op.key {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
@@ -155,9 +160,8 @@ impl OpSet {
                 Prop::Seq(index)
             }
         };
-        //Some(crate::op_set::Parent {
         Some(Parent {
-            typ: op.action.try_into().unwrap(),
+            typ: parent_typ,
             obj: op.obj,
             prop,
             visible,
@@ -318,7 +322,7 @@ impl OpSet {
             if op.insert {
                 index += current;
                 current = 0;
-                if found && op.id > id {
+                if found && op.id < id {
                     pos = op.pos;
                     break;
                 }
@@ -426,7 +430,6 @@ impl OpSet {
     }
 
     pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (ObjMeta, OpIter<'_>)> {
-        // FIXME - remove unwraps
         self.iter_obj_ids().filter_map(|(id, range)| {
             let typ = self.object_type(&id)?;
             let obj_meta = ObjMeta { id, typ };
@@ -461,7 +464,6 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
         let mut iter = self.iter();
-        // FIXME - index goes here
         while let Some(mut op) = iter.next() {
             if &op.id == id {
                 let visible = op.scope_to_clock(clock, &iter);
@@ -472,8 +474,12 @@ impl OpSet {
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
-        self.find_op_by_id(&obj.0)
-            .and_then(|op| op.action.try_into().ok())
+        if obj.is_root() {
+            Some(ObjType::Map)
+        } else {
+            self.find_op_by_id(&obj.0)
+                .and_then(|op| op.action.try_into().ok())
+        }
     }
 
     pub(crate) fn find_op_with_patch_log<'a>(
@@ -510,10 +516,8 @@ impl OpSet {
         let mut overwritten = None;
         let mut after = None;
         let mut succ = vec![];
-        log!(" :: new_op={:?} {:?}", new_op.id, new_op.val);
         for i in 0..ops.len() {
             let op = &ops[i];
-            log!(" :: op={:?} {:?}", op.id, op.action());
 
             let visible = is_visible(op, &ops[(i + 1)..], None);
 
@@ -521,9 +525,6 @@ impl OpSet {
                 found = Some(op.pos);
             }
 
-            if new_op.pred.len() > 0 {
-                log!(" :: DOES {:?} contain {:?}", new_op.pred, op.id);
-            }
             if new_op.pred.contains(&op.id) {
                 // overwrites
                 succ.push(*op);
@@ -840,7 +841,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
             } else if obj.typ == ObjType::Text && !op.action.is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
-                patch_log.insert(obj.id, self.index, op.value().into(), op.id, false);
+                patch_log.insert(obj.id, self.index, op.hydrate_value(), op.id, false);
             }
             return;
         }
@@ -888,13 +889,13 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict);
+                patch_log.insert(obj.id, self.index, op.hydrate_value(), op.id, conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.value().into(), op.id, conflict, false);
+                patch_log.put(obj.id, &key, op.hydrate_value(), op.id, conflict, false);
             }
         }
     }
@@ -1640,10 +1641,8 @@ impl<'a> Iterator for IterObjIds<'a> {
                     self.next_actor = self.actor.next_run();
                 }
                 let end = self.pos;
-                Some((
-                    ObjId(OpId::new(run1.value?, run2.value?.into())),
-                    start..end,
-                ))
+                let obj = ObjId::load(run1.value, run2.value)?;
+                Some((obj, start..end))
             }
             (None, None) => None,
             _ => panic!(),

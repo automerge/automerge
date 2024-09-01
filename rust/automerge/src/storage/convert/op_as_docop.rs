@@ -67,10 +67,10 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.op.obj().is_root() {
-            convert::ObjId::Root
+        if let Some(id) = self.op.obj().id() {
+            convert::ObjId::Op(translate(self.actor_lookup, id))
         } else {
-            convert::ObjId::Op(translate(self.actor_lookup, self.op.obj().opid()))
+            convert::ObjId::Root
         }
     }
 

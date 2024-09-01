@@ -822,58 +822,61 @@ impl Automerge {
     }
 
     fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, OpBuilder, OpIds)> {
-        let actor = self.ops.osd.actors.cache(change.actor_id().clone());
-        let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
-        actors.push(actor);
-        actors.extend(
-            change
-                .other_actor_ids()
-                .iter()
-                .map(|a| self.ops.osd.actors.cache(a.clone()))
-                .collect::<Vec<_>>(),
-        );
-        change
-            .iter_ops()
-            .enumerate()
-            .map(|(i, c)| {
-                let id = OpId::new(change.start_op().get() + i as u64, actor);
-                let key = match &c.key {
-                    EncodedKey::Prop(n) => Key::Map(self.ops.osd.props.cache(n.to_string())),
-                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
-                    EncodedKey::Elem(ElemId(o)) => {
-                        Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
-                    }
-                };
-                let obj = if c.obj.is_root() {
-                    ObjId::root()
-                } else {
-                    ObjId(OpId::new(
-                        c.obj.opid().counter(),
-                        actors[c.obj.opid().actor()],
-                    ))
-                };
-                let pred = c
-                    .pred
-                    .iter()
-                    .map(|p| OpId::new(p.counter(), actors[p.actor()]));
-                let pred = self.ops.osd.sorted_opids(pred);
-                (
-                    obj,
-                    OpBuilder {
-                        id,
-                        action: OpType::from_action_and_value(
-                            c.action,
-                            c.val,
-                            c.mark_name,
-                            c.expand,
-                        ),
-                        key,
-                        insert: c.insert,
-                    },
-                    pred,
-                )
-            })
-            .collect()
+        /*
+                let actor = self.ops.osd.actors.cache(change.actor_id().clone());
+                let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
+                actors.push(actor);
+                actors.extend(
+                    change
+                        .other_actor_ids()
+                        .iter()
+                        .map(|a| self.ops.osd.actors.cache(a.clone()))
+                        .collect::<Vec<_>>(),
+                );
+                change
+                    .iter_ops()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let id = OpId::new(change.start_op().get() + i as u64, actor);
+                        let key = match &c.key {
+                            EncodedKey::Prop(n) => Key::Map(self.ops.osd.props.cache(n.to_string())),
+                            EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
+                            EncodedKey::Elem(ElemId(o)) => {
+                                Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
+                            }
+                        };
+                        let obj = if c.obj.is_root() {
+                            ObjId::root()
+                        } else {
+                            ObjId(OpId::new(
+                                c.obj.opid().counter(),
+                                actors[c.obj.opid().actor()],
+                            ))
+                        };
+                        let pred = c
+                            .pred
+                            .iter()
+                            .map(|p| OpId::new(p.counter(), actors[p.actor()]));
+                        let pred = self.ops.osd.sorted_opids(pred);
+                        (
+                            obj,
+                            OpBuilder {
+                                id,
+                                action: OpType::from_action_and_value(
+                                    c.action,
+                                    c.val,
+                                    c.mark_name,
+                                    c.expand,
+                                ),
+                                key,
+                                insert: c.insert,
+                            },
+                            pred,
+                        )
+                    })
+                    .collect()
+        */
+        todo!()
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them

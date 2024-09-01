@@ -398,6 +398,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                         } else {
                             match (&self.target, &r.value) {
                                 (Some(a), Some(b)) if a != b => RunStep::Done,
+                                (a, b) if a.is_some() != b.is_some() => RunStep::Done,
                                 _ => {
                                     self.pos += r.count;
                                     RunStep::Skip

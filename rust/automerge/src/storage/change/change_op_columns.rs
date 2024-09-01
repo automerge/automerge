@@ -75,10 +75,10 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
     type PredIter = std::slice::Iter<'a, crate::types::OpId>;
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.obj.is_root() {
-            convert::ObjId::Root
+        if let Some(id) = self.obj.id() {
+            convert::ObjId::Op(id)
         } else {
-            convert::ObjId::Op(self.obj.opid())
+            convert::ObjId::Root
         }
     }
 

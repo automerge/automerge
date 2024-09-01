@@ -1,8 +1,7 @@
 use crate::automerge::diff::ReadDocAt;
+use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::exid::ExId;
 use crate::hydrate::Value;
-//use crate::iter::{ListRangeItem, MapRangeItem};
-use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::read::ReadDocInternal;
