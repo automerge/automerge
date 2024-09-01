@@ -8,10 +8,10 @@ use crate::exid::ExId;
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
-use crate::op_set2::{Action, Op, OpBuilder2, OpSet, PropRef};
+use crate::op_set2::{Action, Op, OpBuilder2, OpSet, PropRef, SuccInsert};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::query::{self, OpIdSearch};
-use crate::storage::convert::{ob_as_actor_id, ObWithMetadata};
+use crate::storage::convert::ObWithMetadata;
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, ScalarValue};
 use crate::{op_tree::OpSetData, types::OpBuilder, Change, ChangeHash, Prop};
@@ -295,28 +295,38 @@ impl TransactionInner {
     }
 
     fn next_delete(&mut self, obj: ObjMeta, elemid: ElemId, ops: &[Op<'_>]) -> OpBuilder2 {
-        OpBuilder2 {
-            id: self.next_id(),
+        OpBuilder2::del(
+            self.next_id(),
             obj,
-            pos: 0,
-            index: 0,
-            action: OpType::Delete,
-            key: elemid.into(),
-            insert: false,
-            pred: ops.iter().map(|op| op.id).collect(),
-        }
+            elemid.into(),
+            ops.iter().map(|op| op.id).collect(),
+        )
+        /*
+                    id: self.next_id(),
+                    obj,
+                    pos: 0,
+                    index: 0,
+                    action: OpType::Delete,
+                    key: elemid.into(),
+                    insert: false,
+                    pred: ops.iter().map(|op| op.id).collect(),
+                }
+        */
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn insert_local_op(&mut self, doc: &mut Automerge, patch_log: &mut PatchLog, op: OpBuilder2) {
-        /*
-                // FIXME add succ
-                doc.ops_mut().add_succ(&obj.id, succ_pos, idx);
-        */
-
+    fn insert_local_op(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        op: OpBuilder2,
+        succ: &[SuccInsert],
+    ) {
         if !op.is_delete() {
             doc.ops_mut().insert2(&op);
         }
+
+        doc.ops_mut().add_succ(&op.obj.id, succ, op.id);
 
         self.finalize_op2(doc, patch_log, &op, None);
 
@@ -450,7 +460,9 @@ impl TransactionInner {
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
 
-        self.insert_local_op(doc, patch_log, op);
+        let succ: Vec<_> = query.ops.iter().map(|op| op.add_succ(id)).collect();
+
+        self.insert_local_op(doc, patch_log, op, &succ);
 
         Ok(Some(id))
     }
@@ -490,12 +502,17 @@ impl TransactionInner {
             pos: query.end_pos,
             index,
             action,
-            key: key.to_own(),
+            key: key.into_owned(),
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
+        let succ = query
+            .ops
+            .iter()
+            .map(|op| op.add_succ(id))
+            .collect::<Vec<_>>();
 
-        self.insert_local_op(doc, patch_log, op);
+        self.insert_local_op(doc, patch_log, op, &succ);
 
         Ok(Some(id))
     }
@@ -657,7 +674,6 @@ impl TransactionInner {
             };
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
-            //let ops_pos = query.ops_pos;
             let op = self.next_delete(obj, query_elemid, &query.ops);
             let ops_pos = query
                 .ops
@@ -665,13 +681,6 @@ impl TransactionInner {
                 .map(|o| o.add_succ(op.id))
                 .collect::<Vec<_>>();
 
-            //doc.ops_mut().insert2(&op);
-            /*
-                        let idx = doc
-                            .ops_mut()
-                            .load_with_range(obj.id, op, &mut self.idx_range);
-
-            */
             doc.ops_mut().add_succ(&obj.id, &ops_pos, op.id);
 
             deleted += step;

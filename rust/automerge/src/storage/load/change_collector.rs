@@ -7,11 +7,10 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_set2::{Op, OpSet},
-    op_tree::OpSetData,
+    op_set2::{Op, OpBuilder2, OpSet},
     storage::{
         change::{PredOutOfOrder, Verified},
-        convert::op_as_actor_id,
+        convert::{ob_as_actor_id, OpWithMetadata},
         Change as StoredChange, ChangeMetadata,
     },
     types::{ChangeHash, OpId},
@@ -56,6 +55,12 @@ impl<'a> ChangeCollector<'a> {
         for (index, change) in changes.into_iter().enumerate() {
             tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
+            log!(
+                " :: change i={} actor={} seq={}",
+                index,
+                change.actor,
+                change.seq
+            );
             let actor_changes = changes_by_actor.entry(change.actor).or_default();
             if let Some(prev) = actor_changes.last() {
                 // Note that we allow max_op to be equal to the previous max_op in case the
@@ -81,16 +86,35 @@ impl<'a> ChangeCollector<'a> {
         Ok(ChangeCollector { changes_by_actor })
     }
 
-    #[instrument(skip(self))]
-    pub(crate) fn collect(&mut self, opid: OpId, op: Op<'a>) -> Result<(), Error> {
+    /*
+        #[instrument(skip(self))]
+        pub(crate) fn collect(&mut self, opid: OpId, op: Op<'a>, pred: Vec<OpId>) -> Result<(), Error> {
+            let actor_changes = self
+                .changes_by_actor
+                .get_mut(&opid.actor())
+                .ok_or_else(|| {
+                    tracing::error!(missing_actor = opid.actor(), "missing actor for op");
+                    Error::MissingActor
+                })?;
+            let change_index = actor_changes.partition_point(|c| c.max_op < opid.counter());
+            let change = actor_changes.get_mut(change_index).ok_or_else(|| {
+                tracing::error!(missing_change_index = change_index, "missing change for op");
+                Error::MissingChange
+            })?;
+            change.ops.push(OpWithMetadata::new(op,pred));
+            Ok(())
+        }
+    */
+
+    pub(crate) fn collect(&mut self, op: OpBuilder2) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
-            .get_mut(&opid.actor())
+            .get_mut(&op.id.actor())
             .ok_or_else(|| {
-                tracing::error!(missing_actor = opid.actor(), "missing actor for op");
+                tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
                 Error::MissingActor
             })?;
-        let change_index = actor_changes.partition_point(|c| c.max_op < opid.counter());
+        let change_index = actor_changes.partition_point(|c| c.max_op < op.id.counter());
         let change = actor_changes.get_mut(change_index).ok_or_else(|| {
             tracing::error!(missing_change_index = change_index, "missing change for op");
             Error::MissingChange
@@ -99,11 +123,55 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
+    /*
+        #[instrument(skip(self, op_set))]
+        pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
+            let mut changes_in_order =
+                Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
+            for (_, changes) in self.changes_by_actor {
+                let mut seq = None;
+                for change in changes {
+                    if let Some(seq) = seq {
+                        if seq != change.seq - 1 {
+                            return Err(Error::ChangesOutOfOrder);
+                        }
+                    } else if change.seq != 1 {
+                        return Err(Error::ChangesOutOfOrder);
+                    }
+                    seq = Some(change.seq);
+                    changes_in_order.push(change);
+                }
+            }
+            changes_in_order.sort_by_key(|c| c.index);
+
+            let mut hashes_by_index = HashMap::default();
+            let mut history = Vec::new();
+            let mut heads = BTreeSet::new();
+            for (index, change) in changes_in_order.into_iter().enumerate() {
+                let finished = change.finish(&hashes_by_index, op_set)?;
+                let hash = finished.hash();
+                hashes_by_index.insert(index, hash);
+                for dep in finished.dependencies() {
+                    heads.remove(dep);
+                }
+                heads.insert(hash);
+                history.push(finished.into_owned());
+            }
+
+            Ok(CollectedChanges { history, heads })
+        }
+    */
+
     #[instrument(skip(self, op_set))]
     pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
-        for (_, changes) in self.changes_by_actor {
+        for (actor, changes) in self.changes_by_actor {
+            log!(
+                " :: CHANGES actor={:?} seq={:?}",
+                actor,
+                changes.iter().map(|c| c.seq).collect::<Vec<_>>()
+            );
             let mut seq = None;
             for change in changes {
                 if let Some(seq) = seq {
@@ -147,7 +215,8 @@ struct PartialChange<'a> {
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
-    ops: Vec<Op<'a>>,
+    //ops: Vec<OpWithMetadata<'a>>,
+    ops: Vec<OpBuilder2>,
 }
 
 impl<'a> PartialChange<'a> {
@@ -179,7 +248,6 @@ impl<'a> PartialChange<'a> {
         deps.sort();
         let num_ops = self.ops.len() as u64;
         self.ops.sort();
-        let converted_ops = self.ops.clone().into_iter();
         let actor = op_set
             .get_actor_safe(self.actor)
             .ok_or_else(|| {
@@ -200,7 +268,7 @@ impl<'a> PartialChange<'a> {
             .with_timestamp(self.timestamp)
             .with_message(self.message.map(|s| s.to_string()))
             .with_extra_bytes(self.extra_bytes.into_owned())
-            .build(converted_ops)
+            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, &op)))
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {

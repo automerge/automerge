@@ -795,7 +795,7 @@ fn save_and_restore_empty() {
 }
 
 #[test]
-fn save_restore_complex() {
+fn save_restore_complex1() {
     let mut doc1 = new_doc();
     let todos = doc1
         .put_object(&automerge::ROOT, "todos", ObjType::List)

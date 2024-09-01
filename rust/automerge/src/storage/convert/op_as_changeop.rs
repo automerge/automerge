@@ -11,20 +11,26 @@ use crate::{
     value,
 };
 
-/// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
-/// the actor ID stored in the opset data.
-///
-/// Note that the methods of `AsChangeOp` will panic if the actor is missing from the OpSet
-pub(crate) fn op_as_actor_id<'a>(op: Op<'a>) -> OpWithMetadata<'a> {
-    OpWithMetadata { op }
-}
-
 pub(crate) fn ob_as_actor_id<'a>(op_set: &'a OpSet, op: &'a OpBuilder2) -> ObWithMetadata<'a> {
     ObWithMetadata { op, op_set }
 }
 
+#[derive(Clone, Debug, Eq, Ord)]
 pub(crate) struct OpWithMetadata<'a> {
     op: Op<'a>,
+    pred: Vec<OpId>,
+}
+
+impl<'a> PartialOrd for OpWithMetadata<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.op.partial_cmp(&other.op)
+    }
+}
+
+impl<'a> PartialEq for OpWithMetadata<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.op.id == other.op.id
+    }
 }
 
 pub(crate) struct ObWithMetadata<'a> {
@@ -33,6 +39,10 @@ pub(crate) struct ObWithMetadata<'a> {
 }
 
 impl<'a> OpWithMetadata<'a> {
+    pub(crate) fn new(op: Op<'a>, pred: Vec<OpId>) -> Self {
+        Self { op, pred }
+    }
+
     fn wrap(&self, opid: OpId) -> OpIdWithMetadata<'a> {
         OpIdWithMetadata::new(opid, self.op.op_set())
     }
@@ -63,13 +73,14 @@ impl<'a> convert::OpId<&'a ActorId> for OpIdWithMetadata<'a> {
 }
 
 pub(crate) struct PredWithMetadata<'a> {
-    op: Op<'a>,
+    op_set: &'a OpSet,
+    pred: Vec<OpId>,
     offset: usize,
 }
 
 impl<'a> ExactSizeIterator for PredWithMetadata<'a> {
     fn len(&self) -> usize {
-        self.op.pred().len()
+        self.pred.len()
     }
 }
 
@@ -77,9 +88,9 @@ impl<'a> Iterator for PredWithMetadata<'a> {
     type Item = OpIdWithMetadata<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(opid) = self.op.pred().nth(self.offset) {
+        if let Some(id) = self.pred.get(self.offset) {
             self.offset += 1;
-            Some(OpIdWithMetadata::new(opid, self.op.op_set()))
+            Some(OpIdWithMetadata::new(*id, self.op_set))
         } else {
             None
         }
@@ -112,6 +123,7 @@ impl<'a> Iterator for PredWithMetadata2<'a> {
     }
 }
 
+/*
 impl<'a> AsChangeOp<'a> for Op<'a> {
     type ActorId = &'a ActorId;
     type OpId = OpIdWithMetadata<'a>;
@@ -177,10 +189,12 @@ impl<'a> AsChangeOp<'a> for Op<'a> {
         }
     }
 }
+*/
 
 impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     type ActorId = &'a ActorId;
     type OpId = OpIdWithMetadata<'a>;
+    //type PredIter = Iterator<Item = Self::OpId>;
     type PredIter = PredWithMetadata<'a>;
 
     fn action(&self) -> u64 {
@@ -212,7 +226,8 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn pred(&self) -> Self::PredIter {
         PredWithMetadata {
-            op: self.op,
+            op_set: self.op.op_set(),
+            pred: self.pred.clone(), // FIXME clone
             offset: 0,
         }
     }

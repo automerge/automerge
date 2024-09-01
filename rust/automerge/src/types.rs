@@ -1,4 +1,5 @@
 use crate::error;
+use crate::error::AutomergeError;
 use crate::legacy as amp;
 use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
@@ -522,6 +523,12 @@ impl OpId {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
 
+    pub(crate) fn map(&self, actor_map: &[usize]) -> Result<OpId, AutomergeError> {
+        let actor = actor_map.get(self.actor()).cloned();
+        let actor = actor.ok_or(AutomergeError::InvalidActorIndex(self.actor()))?;
+        Ok(Self(self.0, actor as u32))
+    }
+
     #[inline]
     pub(crate) fn counter(&self) -> u64 {
         self.0.into()
@@ -575,6 +582,14 @@ impl AsRef<OpId> for ObjId {
 pub(crate) struct ObjId(pub(crate) OpId);
 
 impl ObjId {
+    pub(crate) fn map(self, actor_map: &[usize]) -> Result<ObjId, AutomergeError> {
+        if self.is_root() {
+            Ok(self)
+        } else {
+            Ok(ObjId(self.0.map(actor_map)?))
+        }
+    }
+
     pub(crate) const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
@@ -608,6 +623,15 @@ impl ObjId {
 pub(crate) struct ObjMeta {
     pub(crate) id: ObjId,
     pub(crate) typ: ObjType,
+}
+
+impl From<ObjId> for ObjMeta {
+    fn from(id: ObjId) -> Self {
+        ObjMeta {
+            id,
+            typ: ObjType::Map,
+        }
+    }
 }
 
 impl ObjMeta {
@@ -644,6 +668,14 @@ impl From<Option<ObjType>> for ListEncoding {
 pub(crate) struct ElemId(pub(crate) OpId);
 
 impl ElemId {
+    pub(crate) fn map(self, actor_map: &[usize]) -> Result<ElemId, AutomergeError> {
+        if self.is_head() {
+            Ok(self)
+        } else {
+            Ok(ElemId(self.0.map(actor_map)?))
+        }
+    }
+
     pub(crate) fn counter(&self) -> u64 {
         self.0.counter()
     }

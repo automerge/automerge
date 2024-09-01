@@ -17,6 +17,8 @@ pub enum AutomergeError {
     Fail,
     #[error("invalid actor ID `{0}`")]
     InvalidActorId(String),
+    #[error("invalid actor index `{0}`")]
+    InvalidActorIndex(usize),
     #[error(transparent)]
     InvalidChangeHashBytes(#[from] InvalidChangeHashSlice),
     #[error("invalid UTF-8 character at {0}")]
@@ -61,7 +63,7 @@ pub enum AutomergeError {
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
     #[error("map key cannot be an empty string")]
-    EmptyStringKey
+    EmptyStringKey,
 }
 
 impl PartialEq for AutomergeError {

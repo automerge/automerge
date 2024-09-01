@@ -90,14 +90,14 @@ where
     //    .map(|op| op_as_docop2(op));
 
     //let actor_lookup = vec![];
-/*
-    let actor_lookup = op_set
-        .actors
-        .iter()
-        .enumerate()
-        .map(|(i, _)| i)
-        .collect::<Vec<_>>();
-*/
+    /*
+        let actor_lookup = op_set
+            .actors
+            .iter()
+            .enumerate()
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+    */
     let mut actor_lookup = HashMap::with_capacity(op_set.actors.len());
     let mut actor_ids = changes
         .clone()
@@ -108,7 +108,6 @@ where
     for (index, actor_id) in actor_ids.iter().enumerate() {
         actor_lookup.insert(op_set.lookup_actor(actor_id).unwrap(), index);
     }
-
 
     let actors = op_set.actors.clone().into_iter().collect();
     let hash_graph = HashGraph::new(changes.clone());

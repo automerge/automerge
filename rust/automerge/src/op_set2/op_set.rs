@@ -18,7 +18,7 @@ use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
 use super::columns::{ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
-use super::op::{Op, OpBuilder2, SuccCursors, SuccInsert};
+use super::op::{ChangeOp, Op, OpBuilder2, SuccCursors, SuccInsert};
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue, Value};
 use super::{
@@ -66,7 +66,7 @@ pub(crate) use visible::{is_visible, DiffOp, DiffOpIter, VisibleOpIter};
 pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
-    pub(crate) change_graph: ChangeGraph,
+    //pub(crate) change_graph: ChangeGraph,
     cols: Columns,
 }
 
@@ -75,7 +75,7 @@ impl OpSet {
         OpSet {
             len: 0,
             actors,
-            change_graph: ChangeGraph::new(),
+            //change_graph: ChangeGraph::new(),
             cols: Columns::default(),
         }
     }
@@ -476,41 +476,29 @@ impl OpSet {
             .and_then(|op| op.action.try_into().ok())
     }
 
-    pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {
-        //&self.actors[usize::from(idx)]
-        &self.actors[idx]
-    }
-
-    pub(crate) fn get_actor_safe(&self, idx: usize) -> Option<&ActorId> {
-        //self.actors.get(usize::from(idx))
-        self.actors.get(idx)
-    }
-
-    pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
-        self.actors.binary_search(actor).ok() // .map(ActorIdx::from)
-    }
-
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
-        op: &OpBuilder2,
+        op: &ChangeOp,
         encoding: ListEncoding,
     ) -> FoundOpWithPatchLog<'a> {
         match &op.key {
             Key::Seq(e) => {
-                let obj = &op.obj.id;
-                let r = self.seek_list_op(obj, *e, op.id, op.insert, encoding, None);
+                let r = self.seek_list_op(&op.obj, *e, op.id, op.insert, encoding, None);
                 self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let query = self.seek_ops_by_map_key(&op.obj.id, &s, None);
-                self.found_op_with_patch_log(op, &query.ops, query.end_pos, 0, None)
+                //let query = self.seek_ops_by_map_key(&op.obj, &s, None);
+                let mut iter = self.iter_prop(&op.obj, &s);
+                let end_pos = iter.end_pos();
+                let ops = iter.collect::<Vec<_>>();
+                self.found_op_with_patch_log(op, &ops, end_pos, 0, None)
             }
         }
     }
 
     pub(crate) fn found_op_with_patch_log<'a>(
         &'a self,
-        new_op: &OpBuilder2,
+        new_op: &ChangeOp,
         ops: &[Op<'a>],
         end_pos: usize,
         index: usize,
@@ -522,8 +510,10 @@ impl OpSet {
         let mut overwritten = None;
         let mut after = None;
         let mut succ = vec![];
+        log!(" :: new_op={:?} {:?}", new_op.id, new_op.val);
         for i in 0..ops.len() {
             let op = &ops[i];
+            log!(" :: op={:?} {:?}", op.id, op.action());
 
             let visible = is_visible(op, &ops[(i + 1)..], None);
 
@@ -531,9 +521,12 @@ impl OpSet {
                 found = Some(op.pos);
             }
 
+            if new_op.pred.len() > 0 {
+                log!(" :: DOES {:?} contain {:?}", new_op.pred, op.id);
+            }
             if new_op.pred.contains(&op.id) {
                 // overwrites
-                succ.push(op.pos);
+                succ.push(*op);
 
                 if visible {
                     overwritten = Some(*op);
@@ -562,20 +555,16 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
-        match self.actors.binary_search(&actor) {
-            Ok(idx) => idx, //ActorIdx::from(idx),
-            Err(idx) => {
-                // only rewrite if there are actors higher than idx
-                if self.actors.len() != idx {
-                    self.cols.rewrite_with_new_actor(idx);
-                    self.change_graph.rewrite_with_new_actor(idx);
-                }
-                self.actors.insert(idx, actor);
-                // FIXME - should replace all actor_index's with ActorIdx
-                idx //ActorIdx::from(idx)
-            }
-        }
+    pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {
+        &self.actors[idx]
+    }
+
+    pub(crate) fn get_actor_safe(&self, idx: usize) -> Option<&ActorId> {
+        self.actors.get(idx)
+    }
+
+    pub(crate) fn lookup_actor(&self, actor: &ActorId) -> Option<usize> {
+        self.actors.binary_search(actor).ok()
     }
 
     pub(crate) fn new(doc: &Document<'_>) -> Self {
@@ -594,11 +583,11 @@ impl OpSet {
     ) -> Self {
         let len = ops.len();
         let cols = Columns::new(ops);
-        let change_graph = ChangeGraph::new();
+        //let change_graph = ChangeGraph::new();
         OpSet {
             actors,
             cols,
-            change_graph,
+            //change_graph,
             len,
         }
     }
@@ -619,11 +608,11 @@ impl OpSet {
                 .collect(),
         );
         let len = cols.len();
-        let change_graph = ChangeGraph::new();
+        //let change_graph = ChangeGraph::new();
         let op_set = OpSet {
             actors,
             cols,
-            change_graph,
+            //change_graph,
             len,
         };
         op_set
@@ -777,6 +766,10 @@ impl OpSet {
             ColumnType::Value => log!("raw :: {:?}", data),
         }
     }
+
+    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+        self.cols.rewrite_with_new_actor(idx)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -807,7 +800,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) num_before: usize,
     pub(crate) overwritten: Option<Op<'a>>,
     pub(crate) after: Option<Op<'a>>,
-    pub(crate) succ: Vec<usize>,
+    pub(crate) succ: Vec<Op<'a>>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
     pub(crate) marks: Option<Arc<MarkSet>>,
@@ -975,14 +968,14 @@ const NONE: &'static str = ".";
 fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
     match t {
         None => NONE.to_owned(),
-        Some(None) => "null".to_owned(),
+        Some(None) => "-".to_owned(),
         Some(Some(t)) => format!("{}", t).to_owned(),
     }
 }
 
 impl Columns {
     // FIXME - this could be much much more efficient
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+    fn rewrite_with_new_actor(&mut self, idx: usize) {
         for (spec, col) in &mut self.0 {
             match col {
                 Column::Actor(col_data) => {
@@ -1005,6 +998,7 @@ impl Columns {
     fn dump(&self) {
         let mut id_a = self.get_actor(ID_ACTOR_COL_SPEC);
         let mut id_c = self.get_delta_integer(ID_COUNTER_COL_SPEC);
+        let mut act = self.get_action(ACTION_COL_SPEC);
         let mut obj_a = self.get_actor(OBJ_ID_ACTOR_COL_SPEC);
         let mut obj_c = self.get_integer(OBJ_ID_COUNTER_COL_SPEC);
         let mut key_str = self.get_str(KEY_STR_COL_SPEC);
@@ -1012,18 +1006,21 @@ impl Columns {
         let mut key_c = self.get_delta_integer(KEY_COUNTER_COL_SPEC);
         let mut meta = self.get_value_meta(VALUE_META_COL_SPEC);
         let mut value = self.get_value(VALUE_COL_SPEC);
+        let mut succ = self.get_group(SUCC_COUNT_COL_SPEC);
         let mut insert = self.get_boolean(INSERT_COL_SPEC);
-        log!(":: id       obj        key      elem        ins    value ");
+        log!(":: id      obj     key      elem     ins act  suc value");
         while true {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
             let obj_a = fmt(obj_a.next());
             let obj_c = fmt(obj_c.next());
+            let act = fmt(act.next());
             let insert = insert.next();
             let insert = if insert == Some(Some(true)) { "t" } else { "f" };
             let key_s = fmt(key_str.next());
             let key_a = fmt(key_a.next());
             let key_c = fmt(key_c.next());
+            let succ = fmt(succ.next());
             let m = meta.next();
             let v = if let Some(Some(m)) = m {
                 let raw_data = value.read_next(m.length()).unwrap();
@@ -1035,13 +1032,15 @@ impl Columns {
                 break;
             }
             log!(
-                ":: {:7} {:7} {:8} {:8} {:3} {}",
+                ":: {:7} {:7} {:8} {:8} {:3} {:3}  {:1}   {}",
                 format!("({},{})", id_c, id_a),
                 format!("({},{})", obj_c, obj_a),
                 key_s,
                 format!("({},{})", key_c, key_a),
                 insert,
-                v
+                act,
+                succ,
+                v,
             );
         }
     }

@@ -3,7 +3,7 @@ pub(crate) mod columns;
 pub(crate) mod delta;
 pub(crate) mod meta;
 mod op;
-pub(crate) use op::{Op, OpBuilder2};
+pub(crate) use op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 pub(crate) mod op_set;
 pub(crate) mod pack;
 mod parents;

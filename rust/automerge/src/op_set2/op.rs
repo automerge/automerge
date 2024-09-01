@@ -23,13 +23,44 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
+pub(crate) struct ChangeOp {
+    pub(crate) id: OpId,
+    pub(crate) obj: ObjId,
+    pub(crate) key: Key,
+    pub(crate) insert: bool,
+    pub(crate) action: u64,
+    pub(crate) val: types::ScalarValue,
+    pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) expand: bool,
+    pub(crate) pred: Vec<OpId>,
+}
+
+impl ChangeOp {
+    pub(crate) fn build(self, pos: usize, obj: ObjMeta) -> OpBuilder2 {
+        OpBuilder2 {
+            id: self.id,
+            obj,
+            pos,
+            index: 0,
+            key: self.key,
+            action: crate::types::OpType::from_action_and_value(
+                self.action,
+                self.val,
+                self.mark_name,
+                self.expand,
+            ),
+            insert: self.insert,
+            pred: self.pred,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct OpBuilder2 {
     pub(crate) id: OpId,
     pub(crate) obj: ObjMeta,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    //pub(crate) map_key: Option<String>,
-    //pub(crate) elemid: Option<ElemId>,
     pub(crate) key: Key,
     pub(crate) action: types::OpType,
     pub(crate) insert: bool,
@@ -37,6 +68,19 @@ pub(crate) struct OpBuilder2 {
 }
 
 impl OpBuilder2 {
+    pub(crate) fn del(id: OpId, obj: ObjMeta, key: Key, pred: Vec<OpId>) -> Self {
+        OpBuilder2 {
+            id,
+            obj,
+            pos: 0,
+            index: 0,
+            action: types::OpType::Delete,
+            key,
+            insert: false,
+            pred,
+        }
+    }
+
     pub(crate) fn get_int(&self, spec: &ColumnSpec) -> Option<i64> {
         match *spec {
             super::op_set::ID_COUNTER_COL_SPEC => Some(0),
@@ -171,6 +215,26 @@ impl OpLike for OpBuilder2 {
     }
 }
 
+impl PartialEq<OpBuilder2> for OpBuilder2 {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for OpBuilder2 {}
+
+impl PartialOrd for OpBuilder2 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OpBuilder2 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
 impl<'a> OpLike for Op<'a> {
     fn id(&self) -> OpId {
         self.id
@@ -271,6 +335,7 @@ impl<'a> ExactSizeIterator for SuccCursors<'a> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct SuccInsert {
     pub(crate) pos: usize,
     pub(crate) len: u64,
@@ -278,10 +343,12 @@ pub(crate) struct SuccInsert {
 }
 
 impl<'a> Op<'a> {
-    pub(crate) fn pred(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator {
-        // FIXME
-        vec![].into_iter()
-    }
+    /*
+        pub(crate) fn pred(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator {
+            // FIXME
+            vec![].into_iter()
+        }
+    */
 
     pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
         let pos = self.pos;
@@ -423,6 +490,19 @@ impl<'a> Op<'a> {
 
     pub(crate) fn is_mark(&self) -> bool {
         self.action == Action::Mark
+    }
+
+    pub(crate) fn build(&self, pred: Option<Vec<OpId>>) -> OpBuilder2 {
+        OpBuilder2 {
+            id: self.id,
+            obj: self.obj.into(),
+            pos: 0,
+            index: 0,
+            action: self.op_type().into_owned(),
+            key: self.key.into_owned(),
+            insert: self.insert,
+            pred: pred.unwrap_or_default(),
+        }
     }
 }
 

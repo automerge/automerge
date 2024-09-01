@@ -2008,7 +2008,9 @@ impl ReadDoc for Automerge {
             .get(hash)
             .and_then(|index| self.history.get(*index))
     }
-    fn stats(&self) -> crate::read::Stats { todo!() }
+    fn stats(&self) -> crate::read::Stats {
+        todo!()
+    }
 }
 
 impl ReadDocInternal for Automerge {

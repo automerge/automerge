@@ -10,12 +10,22 @@ use crate::{
     },
     convert,
     types::{ElemId, OpId},
+    AutomergeError,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Key {
     Prop(smol_str::SmolStr),
     Elem(ElemId),
+}
+
+impl Key {
+    pub(crate) fn map(self, actor_map: &[usize]) -> Result<crate::op_set2::Key, AutomergeError> {
+        Ok(match self {
+            Self::Prop(s) => crate::op_set2::Key::Map(String::from(s)),
+            Self::Elem(e) => crate::op_set2::Key::Seq(e.map(actor_map)?),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

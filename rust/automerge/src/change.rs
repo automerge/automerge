@@ -48,6 +48,12 @@ impl Change {
         self.stored.actor()
     }
 
+    pub fn actors(&self) -> impl Iterator<Item = &ActorId> {
+        Some(self.stored.actor())
+            .into_iter()
+            .chain(self.stored.other_actors().iter())
+    }
+
     pub fn other_actor_ids(&self) -> &[ActorId] {
         self.stored.other_actors()
     }
@@ -342,7 +348,7 @@ pub(crate) mod gen {
     use super::Change;
     use crate::{
         op_set::{OpIdx, OpSetData},
-        storage::{change::ChangeBuilder, convert::op_as_actor_id},
+        storage::change::ChangeBuilder,
         types::{
             gen::{gen_hash, gen_op},
             ObjId, OpId,

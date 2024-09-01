@@ -293,8 +293,7 @@ impl<'a> SlabWriter<'a> {
 
     fn close_lit(&mut self) {
         if !self.lit.is_empty() {
-            let mut next = Vec::new();
-            std::mem::swap(&mut next, &mut self.lit);
+            let next = std::mem::take(&mut self.lit);
             self.actions
                 .push(WriteAction::Run(self.lit_items as i64, next));
             self.lit_items = 0;
@@ -344,8 +343,7 @@ impl<'a> SlabWriter<'a> {
                 WriteAction::End(len, group) => {
                     slab.len = len;
                     slab.group = group;
-                    let mut next = OwnedSlab::default();
-                    std::mem::swap(&mut next, &mut slab);
+                    let next = std::mem::take(&mut slab);
                     result.push(Slab::Owned(next));
                 }
                 action => action.write(&mut slab.data),

@@ -6,7 +6,7 @@ use crate::{
     change::Change,
     columnar::Key as DocOpKey,
     op_set::{OpIdx, OpSetData},
-    op_set2::OpSet,
+    op_set2::{OpBuilder2, OpSet},
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
     types::{ChangeHash, ElemId, Key, ObjId, OpBuilder, OpId, OpIds, OpType},
 };
@@ -115,11 +115,27 @@ pub(crate) fn reconstruct_opset<'a>(
     let op_set = OpSet::new(doc);
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut max_op = 0;
+    let mut preds = HashMap::new();
+    let mut last = None;
     for op in op_set.iter() {
+        let next = Some((op.obj, op.elemid_or_key()));
+        if last != next {
+            if let Some((obj, key)) = last.take() {
+                for (id, pred) in preds.drain() {
+                    let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred);
+                    change_collector.collect(del)?;
+                }
+            }
+            last = next;
+        }
+        for id in op.succ() {
+            preds.entry(id).or_default().push(op.id);
+        }
         max_op = std::cmp::max(max_op, op.id.counter());
-        change_collector.collect(op.id, op)?;
-        // build pred - include deletes
-        // check opids
+
+        let pred = preds.remove(&op.id);
+
+        change_collector.collect(op.build(pred))?;
     }
     let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set)?;
 

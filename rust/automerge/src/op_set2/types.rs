@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::types::{ElemId, ObjType};
+use crate::types::{ElemId, ObjType, OldMarkData};
 use crate::value;
 
 use std::fmt;
@@ -50,6 +50,15 @@ pub(crate) struct MarkData<'a> {
     pub(crate) value: ScalarValue<'a>,
 }
 
+impl<'a> MarkData<'a> {
+    fn into_owned(self) -> OldMarkData {
+        OldMarkData {
+            name: self.name.into(),
+            value: self.value.into_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) enum Action {
     #[default]
@@ -61,6 +70,21 @@ pub(crate) enum Action {
     Increment,
     MakeTable,
     Mark,
+}
+
+impl fmt::Display for Action {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MakeMap => write!(f, "MAP"),
+            Self::MakeList => write!(f, "LST"),
+            Self::MakeText => write!(f, "TXT"),
+            Self::Set => write!(f, "SET"),
+            Self::Delete => write!(f, "DEL"),
+            Self::Increment => write!(f, "INC"),
+            Self::MakeTable => write!(f, "TBL"),
+            Self::Mark => write!(f, "MRK"),
+        }
+    }
 }
 
 impl crate::types::OpType {
@@ -106,6 +130,7 @@ impl TryFrom<Action> for ObjType {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum OpType<'a> {
     Make(ObjType),
     Delete,
@@ -116,6 +141,17 @@ pub(crate) enum OpType<'a> {
 }
 
 impl<'a> OpType<'a> {
+    pub(crate) fn into_owned(self) -> types::OpType {
+        match self {
+            Self::Make(t) => types::OpType::Make(t),
+            Self::Delete => types::OpType::Delete,
+            Self::Increment(i) => types::OpType::Increment(i),
+            Self::Put(v) => types::OpType::Put(v.into_owned()),
+            Self::MarkBegin(ex, mark) => types::OpType::MarkBegin(ex, mark.into_owned()),
+            Self::MarkEnd(ex) => types::OpType::MarkEnd(ex),
+        }
+    }
+
     pub(crate) fn from_action_and_value(
         action: Action,
         value: ScalarValue<'a>,
@@ -488,7 +524,7 @@ impl From<String> for Key {
 }
 
 impl<'a> KeyRef<'a> {
-    pub(crate) fn to_own(self) -> Key {
+    pub(crate) fn into_owned(self) -> Key {
         match self {
             KeyRef::Map(s) => Key::Map(String::from(s)),
             KeyRef::Seq(e) => Key::Seq(e),
