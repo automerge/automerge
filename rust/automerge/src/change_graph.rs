@@ -336,7 +336,6 @@ mod tests {
             parents: &[ChangeHash],
         ) -> ChangeHash {
             let mut osd = OpSet::from_actors(self.actors.clone());
-            //let key = osd.props.cache("key".to_string());
 
             let start_op = parents
                 .iter()

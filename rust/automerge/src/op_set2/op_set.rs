@@ -992,7 +992,7 @@ impl Columns {
             let obj_c = fmt(obj_c.next());
             let act = fmt(act.next());
             let insert = insert.next();
-            let insert = if insert == Some(Some(true)) { "t" } else { "f" };
+            let insert = if insert == Some(Some(true)) { "t" } else { "-" };
             let key_s = fmt(key_str.next());
             let key_a = fmt(key_a.next());
             let key_c = fmt(key_c.next());

@@ -82,6 +82,7 @@ impl<'a> InsertQuery<'a> {
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];
         while let Some(mut op) = self.iter.next() {
+            if op.is_inc() { continue }
             let visible = op.scope_to_clock(self.clock.as_ref(), &self.iter);
             if op.insert {
                 // this is the one place where we need non-visible ops
