@@ -212,6 +212,9 @@ impl OpLike for OpBuilder2 {
     fn insert(&self) -> bool {
         self.insert
     }
+    fn mark_name(&self) -> Option<&str> {
+        self.action.mark_name()
+    }
 }
 
 impl PartialEq<OpBuilder2> for OpBuilder2 {

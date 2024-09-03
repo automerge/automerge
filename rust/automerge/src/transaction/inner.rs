@@ -328,7 +328,7 @@ impl TransactionInner {
 
         doc.ops_mut().add_succ(&op.obj.id, succ, op.id);
 
-        self.finalize_op2(doc, patch_log, &op, None);
+        self.finalize_op(doc, patch_log, &op, None);
 
         self.pending.push(op);
     }
@@ -399,7 +399,7 @@ impl TransactionInner {
         };
 
         doc.ops_mut().insert2(&op);
-        self.finalize_op2(doc, patch_log, &op, marks);
+        self.finalize_op(doc, patch_log, &op, marks);
         self.pending.push(op);
 
         Ok(id)
@@ -863,47 +863,54 @@ impl TransactionInner {
         text: &ExId,
         index: usize,
     ) -> Result<(), AutomergeError> {
-        todo!()
-        /*
         let text_obj = doc.exid_to_obj(text)?;
 
         if text_obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(text_obj.typ));
         }
 
+        // FIXME - how is this different than a normal delete?
+        // 1. can only happen on a text
+        // 2. it doesn't seem to validate that what its deleting is a block??
+        // --> self.local_op(doc, patch_log, &obj, Prop::Seq(index), OpType::Delete)?;
+
+        let encoding = patch_log.text_rep().encoding(text_obj.typ);
         let target = doc
             .ops()
-            .seek_ops_by_prop(
-                &text_obj.id,
-                Prop::Seq(index),
-                patch_log.text_rep().encoding(text_obj.typ),
-                self.scope.as_ref(),
-            )
+            .seek_ops_by_index(&text_obj.id, index, encoding, self.scope.as_ref())
             .ops
             .into_iter()
             .last()
             .ok_or(AutomergeError::InvalidIndex(index))?;
         let block_id = target.id;
 
-        let key = Key::Seq(block_id.into());
+        let key = target.elemid_or_key().into_owned();
 
         let action = OpType::Delete;
 
-        let op = OpBuilder {
+        let op = OpBuilder2 {
             id: self.next_id(),
+            obj: text_obj,
+            pos: 0,
+            index,
             action,
             key,
             insert: false,
+            pred: vec![],
         };
 
+        let found = doc.ops().seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref()).unwrap();
+        // FIXME - no clock?
+/*
         let query = doc.ops().search(
             &text_obj.id,
             query::OpIdSearch::opid(block_id, patch_log.text_rep().encoding(text_obj.typ), None),
         );
-        let index = query.index();
-        let mut pos = query.pos();
-        let mut pred_ids = vec![];
-        let mut succ_pos = vec![];
+*/
+        let index = found.index;
+        let mut pos = found.op.pos;
+        let mut succ_pos = vec![found.op.add_succ(op.id)];
+/*
         {
             let mut iter = doc.ops().iter(&text_obj.id);
             let mut next = iter.nth(pos);
@@ -927,10 +934,14 @@ impl TransactionInner {
 
         doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op_idx);
 
+*/
+        doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op.id);
+
         patch_log.delete_seq(text_obj.id, index, 1);
 
+        self.pending.push(op);
+
         Ok(())
-        */
     }
 
     pub(crate) fn replace_block(
@@ -944,54 +955,7 @@ impl TransactionInner {
         self.split_block(doc, patch_log, text, index)
     }
 
-    /*
-        fn finalize_op(
-            &mut self,
-            doc: &Automerge,
-            patch_log: &mut PatchLog,
-            obj: &ObjMeta,
-            prop: Prop,
-            idx: OpIdx,
-            marks: Option<Arc<MarkSet>>,
-        ) {
-            let op = idx.as_op(doc.osd());
-            // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
-            if patch_log.is_active() {
-                //let ex_obj = doc.ops().id_to_exid(obj.0);
-                if op.insert() {
-                    if !op.is_mark() {
-                        assert!(obj.typ.is_sequence());
-                        match (obj.typ, prop) {
-                            (ObjType::List, Prop::Seq(index)) => {
-                                //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                patch_log.insert(obj.id, index, op.value().into(), *op.id(), false);
-                            }
-                            (ObjType::Text, Prop::Seq(index)) => {
-                                if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                    //let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                    patch_log.insert(obj.id, index, op.value().into(), *op.id(), false);
-                                } else {
-                                    patch_log.splice(obj.id, index, op.as_str(), marks);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                } else if op.is_delete() {
-                    match prop {
-                        Prop::Seq(index) => patch_log.delete_seq(obj.id, index, 1),
-                        Prop::Map(key) => patch_log.delete_map(obj.id, &key),
-                    }
-                } else if let Some(value) = op.get_increment_value() {
-                    patch_log.increment(obj.id, &prop, value, *op.id());
-                } else {
-                    patch_log.put(obj.id, &prop, op.value().into(), *op.id(), false, false);
-                }
-            }
-        }
-    */
-
-    fn finalize_op2<'a>(
+    fn finalize_op<'a>(
         &mut self,
         doc: &'a Automerge,
         patch_log: &mut PatchLog,
@@ -1001,7 +965,7 @@ impl TransactionInner {
         let obj = op.obj();
         if patch_log.is_active() {
             if op.insert {
-                if op.is_mark() {
+                if !op.is_mark() {
                     assert!(obj.typ.is_sequence());
                     match (obj.typ, op.prop()) {
                         (ObjType::List, PropRef::Seq(index)) => {
@@ -1204,7 +1168,9 @@ impl TransactionInner {
                         (None, Prop::Seq(index)) => {
                             self.insert(doc, patch_log, parent, *index, val.clone())
                         }
-                        _ => self.put(doc, patch_log, parent, key.clone(), val.clone()),
+                        _ => {
+                            self.put(doc, patch_log, parent, key.clone(), val.clone())
+                        }
                     },
                 }
             }

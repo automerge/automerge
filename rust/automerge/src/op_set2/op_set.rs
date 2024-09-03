@@ -118,38 +118,28 @@ impl OpSet {
 
     pub(crate) fn parent_object(
         &self,
-        obj: &ObjId,
+        child: &ObjId,
         text_rep: TextRepresentation,
         clock: Option<&Clock>,
     ) -> Option<Parent> {
-        // im looking each op up twice - could be better
-        let (op, visible) = self.find_op_by_id_and_vis(obj.id()?, clock)?;
-        if op.obj.is_root() {
-            return Some(Parent {
-                typ: ObjType::Map,
-                obj: ObjId::root(),
-                prop: Prop::from(op.key.map_key()?),
-                visible,
-            });
-        }
-        let (parent_op, parent_vis) = self.find_op_by_id_and_vis(op.obj.id()?, clock)?;
-        let parent_typ = parent_op.action.try_into().unwrap();
+        let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
+        let obj = op.obj;
+        let typ = self.object_type(&obj)?;
         let prop = match op.key {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
             KeyRef::Seq(_) => {
-                let FoundOpId { index, .. } = self
+                let index = self
                     .seek_list_opid(
-                        &parent_op.obj,
-                        parent_op.id,
-                        text_rep.encoding(parent_typ),
+                        &op.obj,
+                        op.id,
+                        text_rep.encoding(typ),
                         clock,
-                    )
-                    .unwrap();
+                    )?.index;
                 Prop::Seq(index)
             }
         };
         Some(Parent {
-            typ: parent_typ,
+            typ,
             obj: op.obj,
             prop,
             visible,
@@ -932,9 +922,7 @@ pub(super) trait OpLike {
     fn succ(&self) -> Vec<OpId> {
         vec![]
     }
-    fn mark_name(&self) -> Option<&str> {
-        None
-    }
+    fn mark_name(&self) -> Option<&str>;
 }
 
 // TODO? add inc value to the succ column

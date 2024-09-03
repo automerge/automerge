@@ -2,7 +2,7 @@ use super::{Op, OpIter, OpQuery, OpQueryTerm, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Keys<'a> {
     pub(crate) iter: Option<TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
 }

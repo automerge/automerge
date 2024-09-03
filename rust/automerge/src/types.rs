@@ -293,6 +293,14 @@ impl OpType {
         }
     }
 
+    pub(crate) fn mark_name(&self) -> Option<&str> {
+      if let OpType::MarkBegin(_,data) = self {
+        Some(&data.name)
+      } else {
+        None
+      }
+    }
+
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
