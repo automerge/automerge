@@ -62,9 +62,9 @@ ignore = [
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
 allow = [
     "MIT",
-    "BSD-2-Clause",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    "MPL-2.0",
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -84,10 +84,6 @@ exceptions = [
     # these are needed by cbindgen and its dependancies
     # should be revied more fully before release
     { allow = ["MPL-2.0"], name = "cbindgen" },
-    { allow = ["BSD-3-Clause"], name = "instant" },
-
-    # we only use prettytable in tests
-    { allow = ["BSD-3-Clause"], name = "prettytable" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -150,14 +146,6 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # redox_syscall has a dupliucate version included by prettytable
-    # which is only used in tests
-    { name = "redox_syscall", version = "0.2.16" },
-
-    # linux-raw-sys and rustix are duplicated due to transitive dependencies of
-    # cbindgen, which we only use at build time in automerge-c
-    { name = "linux-raw-sys", version = "0.3.8" },
-    { name = "rustix", version = "0.37.21" },
     { name = "heck", version = "0.5.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
@@ -165,10 +153,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # // We only ever use criterion in benchmarks
-    { name = "criterion", version = "0.4.0", depth=10},
-
-    { name = "windows-sys", version = "0.48.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
