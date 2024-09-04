@@ -1,9 +1,6 @@
-use crate::{
-    marks::{MarkSet, MarkStateMachine},
-    types::Clock,
-};
+use crate::marks::{MarkSet, MarkStateMachine};
 
-use super::{Action, MarkData, Op, OpIter, OpQueryTerm, OpType};
+use super::{Action, MarkData, Op, OpIter, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::sync::Arc;

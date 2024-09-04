@@ -5,10 +5,8 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::op_set2;
 use crate::op_set2::{MarkData, Op, OpType};
 use crate::types::Clock;
-//use crate::query::RichTextQueryState;
 use crate::types::{ObjType, OpId};
 use crate::value::ScalarValue;
 use std::borrow::Cow;

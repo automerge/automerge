@@ -1,7 +1,6 @@
 use crate::marks::MarkSet;
-use crate::types::Clock;
 
-use super::{Op, OpIter, OpQuery, OpQueryTerm};
+use super::{Op, OpIter, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::sync::Arc;

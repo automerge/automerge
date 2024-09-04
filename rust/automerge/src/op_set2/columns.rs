@@ -1,4 +1,5 @@
 use crate::storage::{ColumnSpec, ColumnType};
+use crate::types::ActorId;
 
 use super::rle::{ActionCursor, ActorCursor};
 use super::{
@@ -9,8 +10,13 @@ use super::{
 use std::cmp::PartialOrd;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
+
+#[derive(Debug)]
+pub(crate) struct ScanMeta {
+    pub(crate) actors: usize,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct Run<'a, P: Packable + ?Sized> {
@@ -106,7 +112,7 @@ pub(crate) enum RunStep {
 
 pub(crate) trait Seek<T: Packable + ?Sized> {
     type Output;
-    fn process_slab(&mut self, r: &Slab) -> RunStep {
+    fn process_slab(&mut self, _r: &Slab) -> RunStep {
         RunStep::Process
     }
     fn process_run<'a, 'b>(&mut self, r: &'b Run<'a, T>) -> RunStep;
@@ -408,7 +414,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     }
                 }
             }
-            fn process_element<'b>(&mut self, e: Option<<T as Packable>::Unpacked<'b>>) {
+            fn process_element<'b>(&mut self, _e: Option<<T as Packable>::Unpacked<'b>>) {
                 panic!()
             }
             fn done<'b>(&self) -> bool {
@@ -604,12 +610,12 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub(crate) fn update<'a>(
         &mut self,
-        mut index: usize,
-        values: <C::Item as Packable>::Unpacked<'a>,
+        _index: usize,
+        _values: <C::Item as Packable>::Unpacked<'a>,
     ) {
     }
 
-    pub(crate) fn splice<E>(&mut self, mut index: usize, del: usize, values: Vec<E>)
+    pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
     where
         E: MaybePackable<C::Item> + Debug + Clone,
     {
@@ -620,7 +626,6 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
         let before = self.to_vec();
         let tmp_values = values.clone();
-        let old_len = self.len;
         let mut slab_offset = 0;
         for (i, slab) in self.slabs.iter_mut().enumerate() {
             if slab.len() < index - slab_offset {
@@ -656,10 +661,24 @@ impl<C: ColumnCursor> ColumnData<C> {
             panic!()
         }
     }
+    pub(crate) fn init_empty(len: usize) -> Self {
+        let mut writer = SlabWriter::new(usize::MAX);
+        writer.flush_null(len);
+        let slabs = writer.finish();
+        ColumnData {
+            len,
+            slabs,
+            _phantom: PhantomData,
+        }
+    }
 
-    pub(crate) fn external(data: Arc<Vec<u8>>, range: Range<usize>) -> Result<Self, PackError> {
-        let slab = Slab::external::<C>(data, range)?;
-        let len = 0;
+    pub(crate) fn external(
+        data: Arc<Vec<u8>>,
+        range: Range<usize>,
+        m: &ScanMeta,
+    ) -> Result<Self, PackError> {
+        let slab = Slab::external::<C>(data, range, m)?;
+        let len = slab.len();
         Ok(ColumnData {
             len,
             slabs: vec![slab],
@@ -798,21 +817,17 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
 
     fn decode(data: &[u8]) {
         let mut cursor = Self::default();
-        log!("::DECODE");
-        while true {
+        loop {
             match cursor.try_next(data) {
-                Ok(Some((run, next_cursor))) => {
-                    log!(" {:?}", run);
+                Ok(Some((_run, next_cursor))) => {
                     cursor = next_cursor;
                 }
                 Ok(None) => break,
-                Err(e) => {
-                    log!(" decode error: {:?}", e);
+                Err(_) => {
                     break;
                 }
             }
         }
-        log!("::/DECODE");
     }
 
     fn next<'a>(&self, data: &'a [u8]) -> Option<(Run<'a, Self::Item>, Self)> {
@@ -863,9 +878,14 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         panic!()
     }
 
-    fn scan(data: &[u8]) -> Result<Self, PackError> {
+    fn validate<'a>(val: &Option<<Self::Item as Packable>::Unpacked<'a>>) -> Result<(), PackError> {
+        Ok(())
+    }
+
+    fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::default();
-        while let Some((_val, next_cursor)) = cursor.try_next(data)? {
+        while let Some((val, next_cursor)) = cursor.try_next(data)? {
+            Self::Item::validate(&val.value, m)?;
             cursor = next_cursor
         }
         Ok(cursor)
@@ -1066,22 +1086,47 @@ impl Column {
         spec: ColumnSpec,
         data: Arc<Vec<u8>>,
         range: Range<usize>,
+        actors: &[ActorId],
     ) -> Result<Self, PackError> {
+        let m = ScanMeta {
+            actors: actors.len(),
+        };
         match spec.col_type() {
-            ColumnType::Actor => Ok(Column::Actor(ColumnData::external(data, range)?)),
-            ColumnType::String => Ok(Column::Str(ColumnData::external(data, range)?)),
+            ColumnType::Actor => Ok(Column::Actor(ColumnData::external(data, range, &m)?)),
+            ColumnType::String => Ok(Column::Str(ColumnData::external(data, range, &m)?)),
             ColumnType::Integer => {
                 if spec.id() == super::op_set::ACTION_COL_ID {
-                    Ok(Column::Action(ColumnData::external(data, range)?))
+                    Ok(Column::Action(ColumnData::external(data, range, &m)?))
                 } else {
-                    Ok(Column::Integer(ColumnData::external(data, range)?))
+                    Ok(Column::Integer(ColumnData::external(data, range, &m)?))
                 }
             }
-            ColumnType::DeltaInteger => Ok(Column::Delta(ColumnData::external(data, range)?)),
-            ColumnType::Boolean => Ok(Column::Bool(ColumnData::external(data, range)?)),
-            ColumnType::Group => Ok(Column::Group(ColumnData::external(data, range)?)),
-            ColumnType::ValueMetadata => Ok(Column::ValueMeta(ColumnData::external(data, range)?)),
-            ColumnType::Value => Ok(Column::Value(ColumnData::external(data, range)?)),
+            ColumnType::DeltaInteger => Ok(Column::Delta(ColumnData::external(data, range, &m)?)),
+            ColumnType::Boolean => Ok(Column::Bool(ColumnData::external(data, range, &m)?)),
+            ColumnType::Group => Ok(Column::Group(ColumnData::external(data, range, &m)?)),
+            ColumnType::ValueMetadata => {
+                Ok(Column::ValueMeta(ColumnData::external(data, range, &m)?))
+            }
+            ColumnType::Value => Ok(Column::Value(ColumnData::external(data, range, &m)?)),
+        }
+    }
+
+    pub(crate) fn init_empty(spec: ColumnSpec, len: usize) -> Self {
+        match spec.col_type() {
+            ColumnType::Actor => Column::Actor(ColumnData::init_empty(len)),
+            ColumnType::String => Column::Str(ColumnData::init_empty(len)),
+            ColumnType::Integer => {
+                if spec.id() == super::op_set::ACTION_COL_ID {
+                    Column::Action(ColumnData::init_empty(len))
+                } else {
+                    Column::Integer(ColumnData::init_empty(len))
+                }
+            }
+            ColumnType::DeltaInteger => Column::Delta(ColumnData::init_empty(len)),
+            ColumnType::Boolean => Column::Bool(ColumnData::init_empty(len)),
+            ColumnType::Group => Column::Group(ColumnData::init_empty(len)),
+            ColumnType::ValueMetadata => Column::ValueMeta(ColumnData::init_empty(len)),
+            ColumnType::Value => Column::Value(ColumnData::init_empty(len)),
         }
     }
 }

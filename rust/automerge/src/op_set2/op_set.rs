@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::MarkSet;
 use crate::patches::TextRepresentation;
 use crate::storage::ColumnType;
 use crate::storage::{
@@ -15,9 +15,10 @@ use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
 use super::columns::{ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
-use super::op::{ChangeOp, Op, OpBuilder2, SuccCursors, SuccInsert};
+use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
+use super::pack::PackError;
 use super::rle::{ActionCursor, ActorCursor};
-use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue, Value};
+use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue};
 use super::{
     BooleanCursor, Column, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, RawCursor, Slab,
     StrCursor, ValueMeta,
@@ -66,7 +67,18 @@ pub(crate) struct OpSet {
     cols: Columns,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct OpSetCheckpoint(OpSet);
+
 impl OpSet {
+    pub(crate) fn save_checkpoint(&self) -> OpSetCheckpoint {
+        OpSetCheckpoint(self.clone())
+    }
+
+    pub(crate) fn load_checkpoint(&mut self, mut checkpoint: OpSetCheckpoint) {
+        std::mem::swap(&mut checkpoint.0, self);
+    }
+
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         OpSet {
             len: 0,
@@ -103,15 +115,15 @@ impl OpSet {
         // do succ later
     }
 
-    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_pos: &[SuccInsert], id: OpId) {
+    pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {
         for i in op_pos.iter().rev() {
-            let mut succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
+            let succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
             succ_num.splice(i.pos, 1, vec![i.len + 1]);
 
-            let mut succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
+            let succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
             succ_actor.splice(i.sub_pos, 0, vec![id.actoridx()]);
 
-            let mut succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
+            let succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
             succ_counter.splice(i.sub_pos, 0, vec![id.counter() as i64]);
         }
     }
@@ -129,12 +141,8 @@ impl OpSet {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
             KeyRef::Seq(_) => {
                 let index = self
-                    .seek_list_opid(
-                        &op.obj,
-                        op.id,
-                        text_rep.encoding(typ),
-                        clock,
-                    )?.index;
+                    .seek_list_opid(&op.obj, op.id, text_rep.encoding(typ), clock)?
+                    .index;
                 Prop::Seq(index)
             }
         };
@@ -240,7 +248,7 @@ impl OpSet {
         key: &str,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        let mut iter = self.iter_prop(obj, key);
+        let iter = self.iter_prop(obj, key);
         let end_pos = iter.end_pos();
         let ops = iter.visible(clock.cloned()).collect::<Vec<_>>();
         let ops_pos = ops.iter().map(|op| op.pos).collect::<Vec<_>>();
@@ -259,9 +267,9 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        let mut sub_iter = self.iter_obj(obj);
+        let sub_iter = self.iter_obj(obj);
         let mut end_pos = sub_iter.pos();
-        let mut iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
+        let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
         let mut len = 0;
         for mut ops in iter {
             let width = ops.width(encoding);
@@ -287,15 +295,15 @@ impl OpSet {
         id: OpId,
         insert: bool,
         encoding: ListEncoding,
-        clock: Option<&Clock>,
-    ) -> SeekOpIdResult {
-        let mut iter = self.iter_obj(&obj);
+        _clock: Option<&Clock>,
+    ) -> SeekOpIdResult<'_> {
+        let iter = self.iter_obj(&obj);
         let mut pos = iter.end_pos();
         let mut ops = vec![];
-        let mut found = (target.is_head());
+        let mut found = target.is_head();
         let mut index = 0;
         let mut current = 0;
-        let mut marks = None;
+        let marks = None; // FIXME
         for op in iter {
             if op.insert {
                 index += current;
@@ -311,7 +319,7 @@ impl OpSet {
             if found && !insert {
                 ops.push(op);
             }
-            let visible = (op.succ().len() == 0); // FIXME - ignore clock and counters for now
+            let visible = op.succ().len() == 0; // FIXME - ignore clock and counters for now
             if visible && !found {
                 current = op.width(encoding);
             }
@@ -334,7 +342,7 @@ impl OpSet {
         // this iterates over the ops twice
         // needs faster rewrite
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;
-        let mut iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
+        let iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut index = 0;
         for ops in iter {
             if ops.end_pos > op.pos {
@@ -426,7 +434,6 @@ impl OpSet {
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => format!("{}@{}", id.counter(), self.actors[id.actor()]),
-            Export::Prop(index) => panic!(),
             Export::Special(s) => s,
         }
     }
@@ -471,7 +478,7 @@ impl OpSet {
                 self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let mut iter = self.iter_prop(&op.obj, &s);
+                let iter = self.iter_prop(&op.obj, &s);
                 let end_pos = iter.end_pos();
                 let ops = iter.collect::<Vec<_>>();
                 self.found_op_with_patch_log(op, &ops, end_pos, 0, None)
@@ -545,7 +552,7 @@ impl OpSet {
         self.actors.binary_search(actor).ok()
     }
 
-    pub(crate) fn new(doc: &Document<'_>) -> Self {
+    pub(crate) fn new(doc: &Document<'_>) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = Arc::new(doc.op_raw_bytes().to_vec());
         let actors = doc.actors().to_vec();
@@ -568,20 +575,30 @@ impl OpSet {
         cols: RawColumns<compression::Uncompressed>,
         data: Arc<Vec<u8>>,
         actors: Vec<ActorId>,
-    ) -> Self {
-        let cols = Columns(
+    ) -> Result<Self, PackError> {
+        let mut cols = Columns(
             cols.iter()
                 .map(|c| {
-                    (
+                    Ok((
                         c.spec(),
-                        Column::external(c.spec(), data.clone(), c.data()).unwrap(),
-                    )
+                        Column::external(c.spec(), data.clone(), c.data(), &actors)?,
+                    ))
                 })
-                .collect(),
+                .collect::<Result<_, PackError>>()?,
         );
+
         let len = cols.len();
+
+        for spec in &ALL_COLUMN_SPECS {
+            if cols.0.get(spec).is_none() {
+                let col = Column::init_empty(*spec, len);
+                cols.0.insert(*spec, col);
+            }
+        }
+
         let op_set = OpSet { actors, cols, len };
-        op_set
+
+        Ok(op_set)
     }
 
     pub(crate) fn export(&self) -> (RawColumns<compression::Uncompressed>, Vec<u8>) {
@@ -778,7 +795,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
         obj: &ObjMeta,
         op: &OpBuilder2,
         pred: &[OpId],
-        doc: &Automerge,
+        _doc: &Automerge,
         patch_log: &mut PatchLog,
     ) {
         if op.insert {
@@ -940,7 +957,7 @@ fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
 impl Columns {
     // FIXME - this could be much much more efficient
     fn rewrite_with_new_actor(&mut self, idx: usize) {
-        for (spec, col) in &mut self.0 {
+        for (_spec, col) in &mut self.0 {
             match col {
                 Column::Actor(col_data) => {
                     let new_ids = col_data
@@ -973,7 +990,7 @@ impl Columns {
         let mut succ = self.get_group(SUCC_COUNT_COL_SPEC);
         let mut insert = self.get_boolean(INSERT_COL_SPEC);
         log!(":: id      obj     key      elem     ins act  suc value");
-        while true {
+        loop {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
             let obj_a = fmt(obj_a.next());
@@ -1097,7 +1114,7 @@ impl Columns {
                         };
                         c.splice(pos, 0, vec![value])
                     }
-                    Column::Value(c) => {
+                    Column::Value(_c) => {
                         panic!("VALUE spliced outside of a group");
                     }
                     Column::ValueMeta(c) => {
@@ -1633,8 +1650,9 @@ mod tests {
             columns::ColumnData,
             op::SuccCursors,
             rle::ActorCursor,
+            slab::WritableSlab,
             types::{Action, ActorIdx, ScalarValue},
-            ColumnCursor, DeltaCursor, KeyRef, Slab, WritableSlab,
+            ColumnCursor, DeltaCursor, KeyRef, Slab,
         },
         storage::Document,
         transaction::Transactable,
@@ -1654,7 +1672,7 @@ mod tests {
         doc.delete(crate::ROOT, "key2").unwrap();
         let saved = doc.save();
         let doc_chunk = load_document_chunk(&saved);
-        let opset = super::OpSet::new(&doc_chunk);
+        let opset = super::OpSet::new(&doc_chunk).unwrap();
         let ops = opset.iter().collect::<Vec<_>>();
         let actual_ops = doc.doc.ops().iter().collect::<Vec<_>>();
         if ops != actual_ops {
@@ -2182,19 +2200,21 @@ mod tests {
         ]
     }
 
-    fn arbitrary_key(
-        actors: &[crate::ActorId],
-        keys: &crate::indexed_cache::IndexedCache<String>,
-    ) -> impl Strategy<Value = crate::types::Key> {
-        prop_oneof![
-            (0..keys.len()).prop_map(|i| crate::types::Key::Map(i)),
+    /*
+        fn arbitrary_key(
+            actors: &[crate::ActorId],
+            keys: &crate::indexed_cache::IndexedCache<String>,
+        ) -> impl Strategy<Value = crate::types::Key> {
             prop_oneof![
-                Just(crate::types::ElemId::head()),
-                arbitrary_opid(actors).prop_map(crate::types::ElemId)
+                (0..keys.len()).prop_map(|i| crate::types::Key::Map(i)),
+                prop_oneof![
+                    Just(crate::types::ElemId::head()),
+                    arbitrary_opid(actors).prop_map(crate::types::ElemId)
+                ]
+                .prop_map(crate::types::Key::Seq)
             ]
-            .prop_map(crate::types::Key::Seq)
-        ]
-    }
+        }
+    */
 
     fn arbitrary_opid(actors: &[crate::ActorId]) -> impl Strategy<Value = crate::types::OpId> {
         (0..actors.len()).prop_flat_map(move |actor_idx| {

@@ -159,7 +159,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
 
-        let (rle, post) = SubCursor::<B>::encode_inner(&cursor.rle, run, index, slab);
+        let (rle, post) = SubCursor::<B>::encode_inner(&cursor.rle, run, index);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;

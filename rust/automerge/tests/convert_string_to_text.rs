@@ -9,14 +9,22 @@ fn test_strings_in_maps_are_converted_to_text() {
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "somestring", "hello").unwrap();
     let saved = doc.save();
+    let val = doc.get(ROOT, "somestring").unwrap();
+    println!(" --- VAL={:?}", val);
 
-    let loaded = AutoCommit::load_with_options(
+    doc.dump();
+
+    let mut loaded = AutoCommit::load_with_options(
         &saved,
         LoadOptions::new().migrate_strings(StringMigration::ConvertToText),
     )
     .unwrap();
 
+    println!(" --- LOADED ----");
+    loaded.dump();
+
     let val = loaded.get(ROOT, "somestring").unwrap();
+    println!(" --- VAL={:?}", val);
     let Some((val, obj_id)) = val else {
         panic!("no value found for key 'somestring'");
     };

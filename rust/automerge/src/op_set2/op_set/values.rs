@@ -1,11 +1,6 @@
-use crate::{
-    exid::ExId,
-    op_set2::types::{ActorIdx, ScalarValue},
-    types,
-    types::Clock,
-};
+use crate::{exid::ExId, types, types::Clock};
 
-use super::{Op, OpIter, OpQuery, OpQueryTerm};
+use super::OpQueryTerm;
 
 use std::fmt::Debug;
 
@@ -21,7 +16,8 @@ impl<'a> Default for Values<'a> {
 }
 
 impl<'a> Values<'a> {
-    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(iter: I, clock: Option<Clock>) -> Self {
+    // FIXME - ignore clock?
+    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(iter: I, _clock: Option<Clock>) -> Self {
         Self {
             iter: Some(Box::new(iter)),
         }

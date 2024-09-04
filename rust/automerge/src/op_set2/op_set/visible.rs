@@ -73,7 +73,7 @@ impl<'a> Op<'a> {
             .filter(|i| vis(clock, &i))
             .collect::<HashSet<_>>();
         // shouldnt need to clone Op
-        let mut key_iter = KeyIter::new(self.clone(), iter.clone());
+        let key_iter = KeyIter::new(self.clone(), iter.clone());
         let mut inc = 0;
         for op in key_iter {
             if op.action == Action::Increment && succ.contains(&op.id) {

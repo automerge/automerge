@@ -5,7 +5,6 @@ use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
-use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -13,9 +12,6 @@ use tinyvec::{ArrayVec, TinyVec};
 
 // thanks to https://qrng.anu.edu.au/ for some random bytes
 pub(crate) const CONCURRENCY_MAGIC_BYTES: [u8; 4] = [0x13, 0xb2, 0x23, 0x09];
-
-mod opids;
-pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
 pub(crate) use crate::marks::OldMarkData;
@@ -294,11 +290,11 @@ impl OpType {
     }
 
     pub(crate) fn mark_name(&self) -> Option<&str> {
-      if let OpType::MarkBegin(_,data) = self {
-        Some(&data.name)
-      } else {
-        None
-      }
+        if let OpType::MarkBegin(_, data) = self {
+            Some(&data.name)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn is_mark(&self) -> bool {
@@ -326,7 +322,6 @@ impl From<ScalarValue> for OpType {
 pub(crate) enum Export {
     Id(OpId),
     Special(String),
-    Prop(usize),
 }
 
 pub(crate) trait Exportable {
@@ -369,6 +364,7 @@ impl Exportable for OpId {
     }
 }
 
+/*
 impl Exportable for Key {
     fn export(&self) -> Export {
         match self {
@@ -377,6 +373,7 @@ impl Exportable for Key {
         }
     }
 }
+*/
 
 impl From<ObjId> for OpId {
     fn from(o: ObjId) -> Self {
@@ -438,17 +435,21 @@ impl From<f64> for Prop {
     }
 }
 
+/*
 impl From<OpId> for Key {
     fn from(id: OpId) -> Self {
         Key::Seq(ElemId(id))
     }
 }
+*/
 
+/*
 impl From<ElemId> for Key {
     fn from(e: ElemId) -> Self {
         Key::Seq(e)
     }
 }
+*/
 
 impl From<Option<ElemId>> for ElemId {
     fn from(e: Option<ElemId>) -> Self {
@@ -456,17 +457,21 @@ impl From<Option<ElemId>> for ElemId {
     }
 }
 
+/*
 impl From<Option<ElemId>> for Key {
     fn from(e: Option<ElemId>) -> Self {
         Key::Seq(e.into())
     }
 }
+*/
 
+/*
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
 pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
 }
+*/
 
 /// A property of an object
 ///
@@ -505,6 +510,7 @@ impl Display for Prop {
     }
 }
 
+/*
 impl Key {
     pub(crate) fn prop_index(&self) -> Option<usize> {
         match self {
@@ -520,6 +526,7 @@ impl Key {
         }
     }
 }
+*/
 
 // FIXME - isn't having ord and partial ord here dangerous?
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
@@ -548,13 +555,6 @@ impl OpId {
 
     pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
         crate::op_set2::ActorIdx(self.1 as u64)
-    }
-
-    #[inline]
-    pub(crate) fn lamport_cmp(&self, other: &OpId, actors: &[ActorId]) -> Ordering {
-        self.0
-            .cmp(&other.0)
-            .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
     }
 
     #[inline]
@@ -654,10 +654,6 @@ impl From<ObjId> for ObjMeta {
 }
 
 impl ObjMeta {
-    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
-        ObjMeta { id, typ }
-    }
-
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -805,7 +801,7 @@ impl From<Prop> for wasm_bindgen::JsValue {
 
 #[cfg(test)]
 pub(crate) mod gen {
-    use super::{ChangeHash, ElemId, Key, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
+    use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
     use crate::value::Counter;
 
     use proptest::prelude::*;
@@ -847,12 +843,14 @@ pub(crate) mod gen {
         ]
     }
 
-    pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
-        prop_oneof![
-            proptest::sample::select(key_indices).prop_map(Key::Map),
-            Just(Key::Seq(ElemId(OpId::new(0, 0)))),
-        ]
-    }
+    /*
+        pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
+            prop_oneof![
+                proptest::sample::select(key_indices).prop_map(Key::Map),
+                Just(Key::Seq(ElemId(OpId::new(0, 0)))),
+            ]
+        }
+    */
 
     /*
         /// Generate an arbitrary op

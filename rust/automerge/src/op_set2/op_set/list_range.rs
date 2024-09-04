@@ -1,4 +1,4 @@
-use super::{MarkIter, Op, OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
+use super::{MarkIter, OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
 use crate::Value;
 use crate::{exid::ExId, marks::MarkSet, types::ListEncoding};
 

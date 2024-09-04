@@ -7,13 +7,13 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_set2::{Op, OpBuilder2, OpSet},
+    op_set2::{OpBuilder2, OpSet},
     storage::{
         change::{PredOutOfOrder, Verified},
-        convert::{ob_as_actor_id, OpWithMetadata},
+        convert::ob_as_actor_id,
         Change as StoredChange, ChangeMetadata,
     },
-    types::{ChangeHash, OpId},
+    types::ChangeHash,
 };
 
 use fxhash::FxBuildHasher;
@@ -55,12 +55,6 @@ impl<'a> ChangeCollector<'a> {
         for (index, change) in changes.into_iter().enumerate() {
             tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
-            log!(
-                " :: change i={} actor={} seq={}",
-                index,
-                change.actor,
-                change.seq
-            );
             let actor_changes = changes_by_actor.entry(change.actor).or_default();
             if let Some(prev) = actor_changes.last() {
                 // Note that we allow max_op to be equal to the previous max_op in case the
@@ -167,11 +161,6 @@ impl<'a> ChangeCollector<'a> {
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
         for (actor, changes) in self.changes_by_actor {
-            log!(
-                " :: CHANGES actor={:?} seq={:?}",
-                actor,
-                changes.iter().map(|c| c.seq).collect::<Vec<_>>()
-            );
             let mut seq = None;
             for change in changes {
                 if let Some(seq) = seq {

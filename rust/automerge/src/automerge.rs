@@ -8,26 +8,23 @@ use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::{
-    ChangeOp, Key, KeyRef, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, MarkData,
-    OpBuilder2, OpQuery, OpQueryTerm, OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal,
-    Values,
+    ChangeOp, KeyRef, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpQuery, OpQueryTerm,
+    OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
 use crate::change_graph::ChangeGraph;
-use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
+use crate::hydrate;
+use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, OpId,
-    OpIds, Value,
+    ActorId, ChangeHash, Clock, Export, Exportable, ListEncoding, ObjId, ObjMeta, OpId, Value,
 };
-use crate::{hydrate, ScalarValue};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -313,6 +310,7 @@ impl Automerge {
             seq,
             start_op,
             deps,
+            checkpoint: self.ops.save_checkpoint(),
             scope,
         }
     }
@@ -1046,7 +1044,7 @@ impl Automerge {
 
     fn rewrite_states_with_new_actor(&mut self, index: usize) {
         // we could index states with ActorID to not have to do this
-        let mut old_states = std::mem::take(&mut self.states);
+        let old_states = std::mem::take(&mut self.states);
         self.states = old_states
             .into_iter()
             .map(|(a, b)| if a >= index { (a + 1, b) } else { (a, b) })
@@ -1127,7 +1125,6 @@ impl Automerge {
                 actor.truncate(6);
                 format!("{}@{}", id.counter(), actor)
             }
-            Export::Prop(index) => todo!(), // FIXME - remove when automerge_old goes away
             Export::Special(s) => s,
         }
     }
@@ -1204,7 +1201,7 @@ impl Automerge {
 
     pub(crate) fn insert_op(
         &mut self,
-        mut op: ChangeOp,
+        op: ChangeOp,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let obj = self.get_obj_meta(op.obj)?;
@@ -1226,7 +1223,7 @@ impl Automerge {
             self.ops.insert2(&op);
         }
 
-        self.ops.add_succ(&op.obj.id, &succ, op.id);
+        self.ops.add_succ(&succ, op.id);
 
         Ok(())
     }
@@ -1978,7 +1975,7 @@ pub(crate) fn reconstruct_document<'a>(
 ) -> Result<Automerge, AutomergeError> {
     let storage::load::ReconOpSet {
         changes,
-        mut op_set,
+        op_set,
         heads,
         max_op,
     } = storage::load::reconstruct_opset(doc, mode)
@@ -1995,7 +1992,7 @@ pub(crate) fn reconstruct_document<'a>(
         hashes_by_index.insert(index, change.hash());
         change_graph.add_change(change, actor_index)?;
     }
-    let op_set = OpSet::new(doc);
+    //let op_set = OpSet::new(doc)?;
     let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
     Ok(Automerge {
         queue: vec![],

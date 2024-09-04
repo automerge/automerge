@@ -150,7 +150,6 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
-        slab: &'a Slab,
     ) -> (RleState<'a, P>, Option<Run<'a, P>>) {
         let mut post = None;
 
@@ -201,7 +200,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         size: usize,
     ) -> Self::State<'a> {
         match (&c0.lit, &c1.lit) {
-            (Some(a), Some(b)) if a.len == slab.len() => {
+            (Some(a), Some(_b)) if a.len == slab.len() => {
                 let lit = a.len - 2;
                 writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size);
             }
@@ -302,7 +301,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             RleState::LoneValue(value) => match (value, chunk.value) {
                 (a, b) if a == b => RleState::from(chunk.plus(1)),
                 (Some(a), Some(b)) if chunk.count == 1 => RleState::lit_run(a, b),
-                (a, b) => {
+                (a, _b) => {
                     Self::flush_run(out, 1, a);
                     RleState::from(chunk)
                 }
@@ -345,7 +344,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
         let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
 
-        let (state, post) = RleCursor::encode_inner(&cursor, run, index, slab);
+        let (state, post) = RleCursor::encode_inner(&cursor, run, index);
 
         let mut current = cursor.start_copy(slab, last_run_count);
 

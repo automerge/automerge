@@ -127,7 +127,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
 
         let mut state = BooleanState { count, value };
-        let mut state2 = BooleanState::from(run.unwrap_or_default());
+        let state2 = BooleanState::from(run.unwrap_or_default());
         assert_eq!(state, state2);
         let mut post = None;
 

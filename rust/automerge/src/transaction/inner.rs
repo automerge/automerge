@@ -1,19 +1,14 @@
-use itertools::Itertools;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use crate::exid::ExId;
-//use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
+use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
-//use crate::op_set::{ChangeOpIter, OpIdx, OpIdxRange};
-use crate::op_set2::{Action, Op, OpBuilder2, OpSet, PropRef, SuccInsert};
+use crate::op_set2::{Op, OpBuilder2, OpSet, OpSetCheckpoint, PropRef, SuccInsert};
 use crate::patches::{PatchLog, TextRepresentation};
-//use crate::query::{self, OpIdSearch};
-use crate::storage::convert::ObWithMetadata;
 use crate::storage::Change as StoredChange;
-use crate::types::{Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId, ScalarValue};
+use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue};
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
 
@@ -26,7 +21,7 @@ pub(crate) struct TransactionInner {
     message: Option<String>,
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
-    //idx_range: OpIdxRange,
+    checkpoint: OpSetCheckpoint,
     pending: Vec<OpBuilder2>,
 }
 
@@ -37,10 +32,10 @@ pub(crate) struct TransactionArgs {
     pub(crate) actor_index: usize,
     /// The sequence number of the change this transaction will create
     pub(crate) seq: u64,
+    /// checkpoint of the op_set state needed for rollback
+    pub(crate) checkpoint: OpSetCheckpoint,
     /// The start op of the change this transaction will create
     pub(crate) start_op: NonZeroU64,
-    /// The index of the first op in the opset
-    //pub(crate) idx_range: OpIdxRange,
     /// The dependencies of the change this transaction will create
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
@@ -53,7 +48,7 @@ impl TransactionInner {
             actor_index: actor,
             seq,
             start_op,
-            //idx_range,
+            checkpoint,
             deps,
             scope,
         }: TransactionArgs,
@@ -64,7 +59,7 @@ impl TransactionInner {
             start_op,
             time: 0,
             message: None,
-            //idx_range,
+            checkpoint,
             deps,
             pending: vec![],
             scope,
@@ -165,44 +160,9 @@ impl TransactionInner {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
-        todo!() // TX
-                /*
-                        let num = self.pending_ops();
-                        // remove in reverse order so sets are removed before makes etc...
-                        let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
-                        let ops: Vec<_> = self
-                            .operations(doc.osd())
-                            .rev()
-                            .map(|op| {
-                                (
-                                    op.idx(),
-                                    *op.obj(),
-                                    *op.id(),
-                                    op.pred().map(|op| *op.id()).collect::<Vec<_>>(),
-                                )
-                            })
-                            .collect();
-                        for (idx, obj, opid, pred) in ops.into_iter() {
-                            for pred_id in &pred {
-                                if let Some(p) = doc
-                                    .ops()
-                                    .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
-                                    .found()
-                                {
-                                    doc.ops_mut().remove_succ(&obj, p, idx);
-                                }
-                            }
-                            if let Some(pos) = doc
-                                .ops()
-                                .search(&obj, OpIdSearch::opid(opid, encoding, None))
-                                .found()
-                            {
-                                doc.ops_mut().remove(&obj, pos);
-                            }
-                        }
-
-                        num
-                */
+        let num = self.pending.len();
+        doc.ops_mut().load_checkpoint(self.checkpoint);
+        num
     }
 
     /// Set the value of property `P` to value `V` in object `obj`.
@@ -326,9 +286,9 @@ impl TransactionInner {
             doc.ops_mut().insert2(&op);
         }
 
-        doc.ops_mut().add_succ(&op.obj.id, succ, op.id);
+        doc.ops_mut().add_succ(succ, op.id);
 
-        self.finalize_op(doc, patch_log, &op, None);
+        self.finalize_op(patch_log, &op, None);
 
         self.pending.push(op);
     }
@@ -399,7 +359,7 @@ impl TransactionInner {
         };
 
         doc.ops_mut().insert2(&op);
-        self.finalize_op(doc, patch_log, &op, marks);
+        self.finalize_op(patch_log, &op, marks);
         self.pending.push(op);
 
         Ok(id)
@@ -681,7 +641,7 @@ impl TransactionInner {
                 .map(|o| o.add_succ(op.id))
                 .collect::<Vec<_>>();
 
-            doc.ops_mut().add_succ(&obj.id, &ops_pos, op.id);
+            doc.ops_mut().add_succ(&ops_pos, op.id);
 
             deleted += step;
 
@@ -707,8 +667,6 @@ impl TransactionInner {
             let mut pos = query.pos;
             let mut elemid = query.elemid;
             let marks = query.marks;
-            let mut cursor = index;
-            let mut width = 0;
 
             for v in &values {
                 let op = self.next_insert(obj, pos, elemid, v.clone());
@@ -717,21 +675,9 @@ impl TransactionInner {
 
                 doc.ops_mut().insert2(&op);
 
-                width = op.width(encoding);
-                /*
-                                let idx = doc
-                                    .ops_mut()
-                                    .load_with_range(obj.id, op, &mut self.idx_range);
-                                doc.ops_mut().insert(pos, &obj.id, idx);
-
-                                width = idx.as_op(doc.osd()).width(encoding);
-                */
-                cursor += width;
                 self.pending.push(op);
                 pos += 1;
             }
-
-            //doc.ops_mut().hint(&obj.id, cursor - width, pos - 1, width, key, marks.clone());
 
             if patch_log.is_active() {
                 match splice_type {
@@ -899,43 +845,46 @@ impl TransactionInner {
             pred: vec![],
         };
 
-        let found = doc.ops().seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref()).unwrap();
+        let found = doc
+            .ops()
+            .seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref())
+            .unwrap();
         // FIXME - no clock?
-/*
-        let query = doc.ops().search(
-            &text_obj.id,
-            query::OpIdSearch::opid(block_id, patch_log.text_rep().encoding(text_obj.typ), None),
-        );
-*/
+        /*
+                let query = doc.ops().search(
+                    &text_obj.id,
+                    query::OpIdSearch::opid(block_id, patch_log.text_rep().encoding(text_obj.typ), None),
+                );
+        */
         let index = found.index;
-        let mut pos = found.op.pos;
-        let mut succ_pos = vec![found.op.add_succ(op.id)];
-/*
-        {
-            let mut iter = doc.ops().iter(&text_obj.id);
-            let mut next = iter.nth(pos);
-            while let Some(e) = next {
-                if e.elemid_or_key() != op.elemid_or_key() {
-                    break;
+        //let pos = found.op.pos;
+        let succ_pos = vec![found.op.add_succ(op.id)];
+        /*
+                {
+                    let mut iter = doc.ops().iter(&text_obj.id);
+                    let mut next = iter.nth(pos);
+                    while let Some(e) = next {
+                        if e.elemid_or_key() != op.elemid_or_key() {
+                            break;
+                        }
+                        let visible = e.visible_at(self.scope.as_ref(), &iter);
+                        if visible {
+                            succ_pos.push(pos);
+                        }
+                        pos += 1;
+                        pred_ids.push(e.id);
+                        next = iter.next();
+                    }
                 }
-                let visible = e.visible_at(self.scope.as_ref(), &iter);
-                if visible {
-                    succ_pos.push(pos);
-                }
-                pos += 1;
-                pred_ids.push(e.id);
-                next = iter.next();
-            }
-        }
 
-        let op_idx = doc
-            .ops_mut()
-            .load_with_range(text_obj.id, op, &mut self.idx_range);
+                let op_idx = doc
+                    .ops_mut()
+                    .load_with_range(text_obj.id, op, &mut self.idx_range);
 
-        doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op_idx);
+                doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op_idx);
 
-*/
-        doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op.id);
+        */
+        doc.ops_mut().add_succ(&succ_pos, op.id);
 
         patch_log.delete_seq(text_obj.id, index, 1);
 
@@ -957,7 +906,6 @@ impl TransactionInner {
 
     fn finalize_op<'a>(
         &mut self,
-        doc: &'a Automerge,
         patch_log: &mut PatchLog,
         op: &OpBuilder2,
         marks: Option<Arc<MarkSet>>,
@@ -1168,9 +1116,7 @@ impl TransactionInner {
                         (None, Prop::Seq(index)) => {
                             self.insert(doc, patch_log, parent, *index, val.clone())
                         }
-                        _ => {
-                            self.put(doc, patch_log, parent, key.clone(), val.clone())
-                        }
+                        _ => self.put(doc, patch_log, parent, key.clone(), val.clone()),
                     },
                 }
             }

@@ -1,8 +1,6 @@
-use itertools::Itertools;
-
 use super::{SpanInternal, SpansInternal};
 use crate::{
-    op_set2::{KeyRef, Op, OpIter, OpQuery, OpType, Value},
+    op_set2::{KeyRef, OpIter, OpQuery, Value},
     patches::{PatchLog, TextRepresentation},
     types::{ObjMeta, OpId},
     Automerge, ObjType,
@@ -74,7 +72,7 @@ fn log_list_patches<'a, I: OpQuery<'a>>(
 }
 
 fn log_map_patches<'a, I: OpQuery<'a>>(
-    doc: &'a Automerge,
+    _doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     ops: I,

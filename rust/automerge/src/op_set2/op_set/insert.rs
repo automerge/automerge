@@ -1,13 +1,12 @@
 use crate::{
     error::AutomergeError,
-    marks::{MarkSet, MarkStateMachine, RichTextQueryState},
+    marks::{MarkSet, RichTextQueryState},
     types::{Clock, ElemId, ListEncoding, OpId},
 };
 
-use super::{Action, MarkData, Op, OpIter, OpQueryTerm, OpType, QueryNth};
+use super::{Action, Op, OpIter, OpType, QueryNth};
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct InsertQuery<'a> {
@@ -77,18 +76,20 @@ impl<'a> InsertQuery<'a> {
 
     pub(crate) fn resolve(&mut self) -> Result<QueryNth, AutomergeError> {
         let mut last_width = None;
-        let mut index = 0;
-        let mut done = index >= self.target;
+        let mut _index = 0;
+        let mut done = _index >= self.target;
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];
         while let Some(mut op) = self.iter.next() {
-            if op.is_inc() { continue }
+            if op.is_inc() {
+                continue;
+            }
             let visible = op.scope_to_clock(self.clock.as_ref(), &self.iter);
             if op.insert {
                 // this is the one place where we need non-visible ops
                 if let Some(last) = last_width.take() {
-                    index += last;
-                    done = index >= self.target;
+                    _index += last;
+                    done = _index >= self.target;
                 }
             }
             if visible {
@@ -112,7 +113,7 @@ impl<'a> InsertQuery<'a> {
         }
 
         if let Some(w) = last_width.take() {
-            index += w;
+            _index += w;
         }
 
         if let Some(loc) = self.candidates.pop() {

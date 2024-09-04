@@ -1,6 +1,5 @@
 use super::columns::ColumnDataIter;
-use super::op_set::ids::*;
-use super::op_set::{KeyIter, OpIter, OpLike, OpSet};
+use super::op_set::{OpLike, OpSet};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
@@ -14,12 +13,10 @@ use crate::hydrate;
 use crate::storage::ColumnSpec;
 use crate::text_value::TextValue;
 use crate::types;
-use crate::types::{ActorId, Clock, ElemId, ListEncoding, ObjId, ObjMeta, OpId};
+use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, OpId};
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
@@ -84,7 +81,7 @@ impl OpBuilder2 {
         match *spec {
             super::op_set::ID_COUNTER_COL_SPEC => Some(0),
             super::op_set::KEY_COUNTER_COL_SPEC => Some(0),
-            s => {
+            _ => {
                 log!("unknown col spec ({:?}) passed to get_int()", spec);
                 None
             }
@@ -104,7 +101,7 @@ impl OpBuilder2 {
         match *spec {
             super::op_set::ID_ACTOR_COL_SPEC => Some(ActorIdx(0)),
             super::op_set::KEY_ACTOR_COL_SPEC => Some(ActorIdx(0)),
-            s => {
+            _ => {
                 log!("unknown col spec ({:?}) passed to get_actor()", spec);
                 None
             }
@@ -468,7 +465,7 @@ impl<'a> Op<'a> {
         match &self.action() {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(*scalar),
-            OpType::MarkBegin(_, mark) => Value::Scalar(ScalarValue::Str("markBegin")),
+            OpType::MarkBegin(_, _) => Value::Scalar(ScalarValue::Str("markBegin")),
             OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str("markEnd")),
             _ => panic!("cant convert op into a value - {:?}", self),
         }

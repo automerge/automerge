@@ -65,8 +65,8 @@ fn process2<'a, T: Iterator<Item = Op<'a>>>(
 
 fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
     ops: T,
-    before: &'a Clock,
-    after: &'a Clock,
+    _before: &'a Clock,
+    _after: &'a Clock,
     diff: &mut RichTextDiff<'a>,
 ) -> Option<Patch<'a>> {
     let mut before_op = None;
@@ -266,13 +266,13 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &'a Automerge,
+    _doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     diffs: I,
 ) {
     diffs
-        .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
+        .filter_map(|patch| Some((patch.op().key.map_key()?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
                 let value = winner.value().into();
@@ -301,7 +301,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 // FIXME
-fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
+fn get_prop<'a>(_doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
     op.key.map_key()
     //Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }

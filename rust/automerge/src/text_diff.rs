@@ -366,34 +366,27 @@ fn spans_as_grapheme(
     text: &crate::types::ObjId,
     clock: Option<Clock>,
 ) -> Result<Vec<BlockOrGrapheme>, crate::AutomergeError> {
-    todo!() // TODO ALEX
-            /*
-                let spans_internal = SpansInternal::new(
-                    OpTreeOpIter::new(doc.ops().iter_obj(text).unwrap(), doc.osd()),
-                    doc,
-                    clock.clone(),
-                );
-                let mut result = Vec::with_capacity(spans_internal.size_hint().0);
-                for span in spans_internal {
-                    match span {
-                        SpanInternal::Obj(b, _) => {
-                            let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), clock.as_ref())
-                            else {
-                                tracing::warn!("unexpected non map object in text");
-                                result.push(BlockOrGrapheme::Block(crate::hydrate::Map::new()));
-                                continue;
-                            };
-                            result.push(BlockOrGrapheme::Block(map));
-                        }
-                        SpanInternal::Text(t, _, _) => {
-                            for g in t.graphemes(true) {
-                                result.push(BlockOrGrapheme::Grapheme(g.to_string()));
-                            }
-                        }
-                    }
+    let spans_internal = SpansInternal::new(doc.ops().iter_obj(text), doc, clock.clone());
+    let mut result = Vec::with_capacity(spans_internal.size_hint().0);
+    for span in spans_internal {
+        match span {
+            SpanInternal::Obj(b, _) => {
+                let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), clock.as_ref())
+                else {
+                    tracing::warn!("unexpected non map object in text");
+                    result.push(BlockOrGrapheme::Block(crate::hydrate::Map::new()));
+                    continue;
+                };
+                result.push(BlockOrGrapheme::Block(map));
+            }
+            SpanInternal::Text(t, _, _) => {
+                for g in t.graphemes(true) {
+                    result.push(BlockOrGrapheme::Grapheme(g.to_string()));
                 }
-                Ok(result)
-            */
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn block_or_text_as_grapheme<'a, I: Iterator<Item = BlockOrText<'a>>>(

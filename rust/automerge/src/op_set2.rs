@@ -10,20 +10,18 @@ mod parents;
 pub use parents::{Parent, Parents};
 pub(crate) mod raw;
 pub(crate) mod rle;
-//pub(crate) mod read;
 pub(crate) mod slab;
 mod types;
 pub(crate) use types::{
     Action, ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value,
 };
 
-//pub(crate) use read::{ ReadDoc, ReadDocInternal };
 pub(crate) use boolean::BooleanCursor;
 pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run, SpliceDel};
 pub(crate) use delta::DeltaCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    DiffOp, DiffOpIter, OpIter, OpQuery, OpQueryTerm, OpSet, SpanInternal, SpansInternal,
+    DiffOp, OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, SpanInternal, SpansInternal,
     VisibleOpIter,
 };
 
@@ -32,4 +30,4 @@ pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, S
 pub(crate) use pack::{MaybePackable, PackError, Packable};
 pub(crate) use raw::RawCursor;
 pub(crate) use rle::{IntCursor, RleCursor, RleState, StrCursor};
-pub(crate) use slab::{Slab, SlabIter, SlabWriter, WritableSlab, WriteAction, WriteOp};
+pub(crate) use slab::{Slab, SlabIter, SlabWriter, WriteOp};

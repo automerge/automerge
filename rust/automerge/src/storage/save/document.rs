@@ -7,7 +7,7 @@ use crate::{
     indexed_cache::IndexedCache,
     op_set2::OpSet,
     storage::{change::DEFLATE_MIN_SIZE, AsChangeMeta, CompressConfig, Document},
-    types::{ActorId, ObjId},
+    types::ActorId,
     Change, ChangeHash,
 };
 

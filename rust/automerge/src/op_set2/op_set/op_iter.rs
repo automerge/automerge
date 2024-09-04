@@ -1,14 +1,12 @@
 use crate::{
     op_set2,
     op_set2::{
-        columns::{ColumnDataIter, RawReader, RunStep, Seek},
+        columns::{ColumnDataIter, RawReader},
         op::SuccCursors,
         rle::{ActionCursor, ActorCursor},
-        types::{KeyRef, ScalarValue},
-        BooleanCursor, DeltaCursor, IntCursor, MetaCursor, RleCursor, Run, StrCursor,
+        BooleanCursor, DeltaCursor, IntCursor, MetaCursor, StrCursor,
     },
-    types,
-    types::{Clock, ElemId, ObjId, OpId},
+    types::{ElemId, ObjId, OpId},
 };
 
 use super::{Op, OpSet};

@@ -1,3 +1,4 @@
+use super::columns::ScanMeta;
 use super::{ColExport, ColumnCursor, Encoder, PackError, Run, Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -16,7 +17,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     fn write<'a>(
         writer: &mut SlabWriter<'a>,
         slab: &'a Slab,
-        mut state: Self::State<'a>,
+        _state: Self::State<'a>,
     ) -> Self::State<'a> {
         let len = slab.len();
         writer.flush_before(slab, 0..len, 0, len);
@@ -28,16 +29,16 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     }
 
     fn finish<'a>(
-        slab: &'a Slab,
+        _slab: &'a Slab,
         out: &mut SlabWriter<'a>,
-        state: (),
+        _state: (),
         post: Self::PostState<'a>,
-        cursor: Self,
+        _cursor: Self,
     ) {
         out.flush_bytes(post, post.len())
     }
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {}
+    fn flush_state<'a>(_out: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
 
     fn copy_between<'a>(
         _slab: &'a Slab,
@@ -51,7 +52,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     }
 
     fn append_chunk<'a>(
-        state: &mut Self::State<'a>,
+        _state: &mut Self::State<'a>,
         slab: &mut SlabWriter<'a>,
         run: Run<'a, [u8]>,
     ) -> usize {
@@ -65,7 +66,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         len
     }
 
-    fn encode<'a>(index: usize, mut del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
         let state = ();
         let cursor = Self { offset: index };
 
@@ -105,7 +106,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         vec![ColExport::Raw(data.to_vec())]
     }
 
-    fn scan(data: &[u8]) -> Result<Self, PackError> {
+    fn scan(data: &[u8], _m: &ScanMeta) -> Result<Self, PackError> {
         Ok(Self { offset: data.len() })
     }
 

@@ -1,9 +1,6 @@
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 
-use super::{
-    types::ScalarValue, ColExport, ColumnCursor, Encoder, MaybePackable, PackError, Packable,
-    RleCursor, RleState, Run, Slab, SlabWriter, WriteOp,
-};
+use super::{types::ScalarValue, MaybePackable, PackError, Packable, RleCursor, WriteOp};
 
 #[derive(Debug)]
 pub(crate) enum ValueType {

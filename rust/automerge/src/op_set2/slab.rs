@@ -1,10 +1,9 @@
 use super::{
-    columns::{RunStep, Seek},
-    Action, ActorIdx, ColumnCursor, PackError, Packable, Run, ValueMeta,
+    columns::{RunStep, ScanMeta, Seek},
+    Action, ActorIdx, ColumnCursor, PackError, Packable, Run,
 };
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 
-use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::ops::{Index, Range};
 use std::sync::Arc;
@@ -176,7 +175,7 @@ impl<'a> WriteAction<'a> {
         match self {
             Self::Op(op) => op.group(),
             Self::Pair(op1, op2) => op1.group() + op2.group(),
-            Self::Raw(data) => 0,
+            Self::Raw(_) => 0,
             Self::Run(_, _) => 0, // already added in
             Self::End(_, _) => 0,
         }
@@ -251,7 +250,7 @@ impl<'a> SlabWriter<'a> {
         self.items
     }
 
-    fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize, force: bool) {
+    fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize) {
         let mut width = action.width();
         if width == 0 {
             return;
@@ -366,7 +365,7 @@ impl<'a> SlabWriter<'a> {
     ) {
         if size > 0 {
             if lit > 0 {
-                self.push_lit(WriteOp::Import(slab, range), lit, size, false)
+                self.push_lit(WriteOp::Import(slab, range), lit, size)
             } else {
                 self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
             }
@@ -381,7 +380,7 @@ impl<'a> SlabWriter<'a> {
         size: usize,
     ) {
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range), lit, size, false)
+            self.push_lit(WriteOp::Import(slab, range), lit, size)
         } else {
             self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
         }
@@ -393,19 +392,19 @@ impl<'a> SlabWriter<'a> {
         index: usize,
         lit: usize,
         size: usize,
-        group: usize, // FIXME!!
+        _group: usize, // FIXME!!
     ) {
         let range = index..slab.byte_len();
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range), lit, size, false)
+            self.push_lit(WriteOp::Import(slab, range), lit, size)
         } else {
             self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
         }
     }
 
     pub(crate) fn flush_lit_run<W: Debug + Copy + Into<WriteOp<'a>>>(&mut self, run: &[W]) {
-        for (i, value) in run.iter().enumerate() {
-            self.push_lit((*value).into(), 1, 1, i == 0);
+        for value in run.iter() {
+            self.push_lit((*value).into(), 1, 1);
         }
     }
 
@@ -647,8 +646,9 @@ impl Slab {
     pub(crate) fn external<C: ColumnCursor>(
         data: Arc<Vec<u8>>,
         range: Range<usize>,
+        m: &ScanMeta,
     ) -> Result<Self, PackError> {
-        let index = C::scan(&data.as_ref()[range.clone()])?;
+        let index = C::scan(&data.as_ref()[range.clone()], m)?;
         Ok(Slab::External(ReadOnlySlab {
             data,
             range,

@@ -4,10 +4,10 @@ use std::borrow::Cow;
 
 use crate::{
     convert,
-    op_set2::{Key, KeyRef, MarkData, Op, OpBuilder2, OpSet, OpType, ScalarValue},
+    op_set2::{Key, KeyRef, MarkData, Op, OpBuilder2, OpSet, OpType},
     storage::AsChangeOp,
     types,
-    types::{ActorId, ElemId, OldMarkData, OpId, Prop},
+    types::{ActorId, ElemId, OldMarkData, OpId},
     value,
 };
 

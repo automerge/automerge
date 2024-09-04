@@ -1,9 +1,10 @@
+use super::columns::ScanMeta;
 use super::WriteOp;
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
-use super::types::{Action, ActorIdx, ScalarValue};
+use super::types::{Action, ActorIdx};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum PackError {
@@ -11,6 +12,10 @@ pub(crate) enum PackError {
     InvalidNumber(#[from] leb128::read::Error),
     #[error("invalid utf8")]
     InvalidUtf8,
+    #[error("actor index out of range {0}/{1}")]
+    ActorIndexOutOfRange(u64, usize),
+    #[error("counter out of range {0}")]
+    CounterOutOfRange(u64),
     #[error("index out of range {0}")]
     IndexOutOfRange(usize),
     #[error("slice out of range {0}..{1}")]
@@ -39,13 +44,18 @@ pub(crate) trait Packable: PartialEq + Debug {
         + Default;
     type Owned: Clone + PartialEq + Debug;
 
-    fn group<'a>(item: Self::Unpacked<'a>) -> usize {
+    fn group<'a>(_item: Self::Unpacked<'a>) -> usize {
         0
     }
 
-    fn len<'a>(item: Option<Self::Unpacked<'a>>) -> usize {
+    fn len<'a>(_item: Option<Self::Unpacked<'a>>) -> usize {
         1
     }
+
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+        Ok(())
+    }
+
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
     fn width<'a>(item: Self::Unpacked<'a>) -> usize;
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
@@ -55,6 +65,15 @@ pub(crate) trait Packable: PartialEq + Debug {
 impl Packable for i64 {
     type Unpacked<'a> = i64;
     type Owned = i64;
+
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(a) = val {
+            if *a >= u32::MAX as Self {
+                return Err(PackError::CounterOutOfRange(*a as u64));
+            }
+        }
+        Ok(())
+    }
 
     fn own<'a>(item: i64) -> i64 {
         item
@@ -77,6 +96,15 @@ impl Packable for i64 {
 impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
+
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(a) = val {
+            if *a >= u32::MAX as Self {
+                return Err(PackError::CounterOutOfRange(*a));
+            }
+        }
+        Ok(())
+    }
 
     fn group<'a>(item: u64) -> usize {
         item as usize
@@ -129,15 +157,15 @@ impl Packable for bool {
         item
     }
 
-    fn width<'a>(item: bool) -> usize {
+    fn width<'a>(_item: bool) -> usize {
         panic!()
     }
 
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack<'a>(_buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         panic!()
     }
 
-    fn pack(buff: &mut Vec<u8>, element: &bool) -> Result<usize, PackError> {
+    fn pack(_buff: &mut Vec<u8>, _element: &bool) -> Result<usize, PackError> {
         panic!()
     }
 }
@@ -335,6 +363,15 @@ impl Packable for ActorIdx {
     type Unpacked<'a> = ActorIdx;
 
     type Owned = ActorIdx;
+
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(ActorIdx(a)) = val {
+            if *a >= m.actors as u64 {
+                return Err(PackError::ActorIndexOutOfRange(*a, m.actors));
+            }
+        }
+        Ok(())
+    }
 
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
         item
