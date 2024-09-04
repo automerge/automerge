@@ -536,7 +536,7 @@ export function getCursor<T>(
   const state = _state(doc, false)
 
   try {
-    return state.handle.getCursor(objPath, index)
+    return state.handle.getCursor(objPath, index, state.heads)
   } catch (e) {
     throw new RangeError(`Cannot getCursor: ${e}`)
   }
