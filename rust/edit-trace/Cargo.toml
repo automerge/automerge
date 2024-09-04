@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 automerge = { path = "../automerge" }
-criterion = "0.4.0"
+criterion = "^0.5"
 jzon = "^0.12.5"
 rand = "^0.8"
 
