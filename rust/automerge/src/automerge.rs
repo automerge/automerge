@@ -1330,7 +1330,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
+        let ops_by_key = self.ops().iter_ops(&obj.id).chunk_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = MarkStateMachine::default();
         let mut acc = MarkAccumulator::default();

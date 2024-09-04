@@ -5,7 +5,7 @@ use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
     let contents = include_str!("../edits.json");
-    let edits = json::parse(contents).expect("cant parse edits");
+    let edits = jzon::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
