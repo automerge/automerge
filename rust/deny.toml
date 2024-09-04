@@ -147,6 +147,10 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "heck", version = "0.5.0" },
+    { crate = "windows-sys@0.52", reason = "this is brought in by the clap dependency in automerge-cli, which is fine as we're not distributing that as a library" },
+    { crate = "regex-syntax@0.6.29", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
