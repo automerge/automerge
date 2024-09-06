@@ -76,8 +76,8 @@ impl<'a> InsertQuery<'a> {
 
     pub(crate) fn resolve(&mut self) -> Result<QueryNth, AutomergeError> {
         let mut last_width = None;
-        let mut _index = 0;
-        let mut done = _index >= self.target;
+        let mut index = 0;
+        let mut done = index >= self.target;
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];
         while let Some(mut op) = self.iter.next() {
@@ -88,32 +88,32 @@ impl<'a> InsertQuery<'a> {
             if op.insert {
                 // this is the one place where we need non-visible ops
                 if let Some(last) = last_width.take() {
-                    _index += last;
-                    done = _index >= self.target;
+                    index += last;
+                    done = index >= self.target;
                 }
             }
-            if visible {
-                let cursor = op.cursor().unwrap();
-                if !done {
-                    self.marks.process(op, None);
-                    if !op.is_mark() {
-                        self.last_visible_cursor = Some(cursor);
-                        last_width = Some(op.width(self.encoding));
-                    }
-                } else {
-                    self.identify_valid_insertion_spot(op, cursor);
+            let cursor = op.cursor().unwrap();
+            if done {
+                self.identify_valid_insertion_spot(op, cursor);
+                if visible {
                     if op.action == Action::Mark {
                         post_marks.push(op);
                     } else if !self.candidates.is_empty() {
                         break;
                     }
                 }
+            } else if visible {
+                self.marks.process(op, None);
+                if !op.is_mark() {
+                    self.last_visible_cursor = Some(cursor);
+                    last_width = Some(op.width(self.encoding));
+                }
             }
             pos = op.pos;
         }
 
         if let Some(w) = last_width.take() {
-            _index += w;
+            index += w;
         }
 
         if let Some(loc) = self.candidates.pop() {

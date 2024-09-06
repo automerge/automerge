@@ -2011,22 +2011,22 @@ mod tests {
         ];
 
         with_test_ops(actors, &test_ops, |opset| {
-            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[2..8], ops.as_slice());
 
-            let mut iter = opset.iter_prop(&ObjId(OpId::new(1, 1)), "key2");
+            let iter = opset.iter_prop(&ObjId(OpId::new(1, 1)), "key2");
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
-            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter.top_ops().collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);
             assert_eq!(3, ops.len());
 
-            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
@@ -2056,7 +2056,7 @@ mod tests {
             assert_eq!(&test_ops[7..8], key3);
             assert!(key4.is_none());
 
-            let mut iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
+            let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter.visible(None).top_ops().collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);

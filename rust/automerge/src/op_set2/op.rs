@@ -429,14 +429,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn raw_elemid(&self) -> Option<ElemId> {
-        if let KeyRef::Seq(e) = self.key {
-            Some(e)
-        } else {
-            None
-        }
-    }
-
     pub(crate) fn map_key(&self) -> Option<&'a str> {
         if let KeyRef::Map(s) = self.key {
             Some(s)
@@ -520,25 +512,6 @@ impl<'a> PartialEq<Op<'_>> for Op<'a> {
         self.id == other.id
     }
 }
-
-/*
-impl<'a> PartialEq<Op<'_>> for crate::op_set::Op<'a> {
-    fn eq(&self, other: &Op<'_>) -> bool {
-        self.id() == &other.id
-            && self.obj() == &other.obj
-            && self.action() == &other.action()
-            && self.map_key() == other.map_key()
-            && self.raw_elemid() == other.raw_elemid()
-            && self.insert() == other.insert
-    }
-}
-
-impl<'a> PartialEq<crate::op_set::Op<'_>> for Op<'a> {
-    fn eq(&self, other: &crate::op_set::Op<'_>) -> bool {
-        other.eq(self)
-    }
-}
-*/
 
 impl<'a> PartialOrd for Op<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
