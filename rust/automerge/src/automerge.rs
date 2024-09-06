@@ -1018,8 +1018,8 @@ impl Automerge {
     }
 
     pub(crate) fn isolate_actor(&mut self, heads: &[ChangeHash]) -> Isolation {
-        let mut clock = self.clock_at(heads);
         let mut actor_index = self.get_isolated_actor_index(0);
+        let mut clock = self.clock_at(heads);
 
         for i in 1.. {
             let max_op = self.max_op_for_actor(actor_index);
@@ -1028,6 +1028,7 @@ impl Automerge {
                 break;
             }
             actor_index = self.get_isolated_actor_index(i);
+            clock = self.clock_at(heads); // need to recompute the clock b/c the actor indexes may have changed
         }
 
         let seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;

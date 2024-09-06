@@ -116,6 +116,7 @@ impl<'a> Op<'a> {
     }
 }
 
+#[derive(Debug)]
 struct Visibility<'a> {
     predates: bool,
     deleted: bool,
