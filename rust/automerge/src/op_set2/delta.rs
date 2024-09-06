@@ -129,7 +129,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         run: Run<'a, i64>,
         size: usize,
     ) -> Self::State<'a> {
-        let rle = SubCursor::<B>::copy_between(slab, out, c0.rle, c1.rle, run, size);
+        SubCursor::<B>::copy_between(slab, out, c0.rle, c1.rle, run, size);
         let mut rle = RleState::Empty;
         SubCursor::<B>::append_chunk(&mut rle, out, run);
         DeltaState { abs: c1.abs, rle }

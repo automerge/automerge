@@ -29,14 +29,6 @@ pub(crate) struct OwnedSlab {
     group: usize,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct WritableSlab<'a> {
-    data: Vec<u8>,
-    done: Vec<Slab>,
-    writer: SlabWriter<'a>,
-    len: usize,
-}
-
 impl Index<Range<usize>> for Slab {
     type Output = [u8];
 
@@ -246,9 +238,9 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.items
-    }
+    //pub(crate) fn len(&self) -> usize {
+    //    self.items
+    //}
 
     fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize) {
         let mut width = action.width();

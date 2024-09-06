@@ -212,21 +212,23 @@ pub enum OpType {
 }
 
 impl OpType {
-    /// The index into the action array as specified in [1]
-    ///
-    /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
-    pub(crate) fn action_index(&self) -> u64 {
-        match self {
-            Self::Make(ObjType::Map) => 0,
-            Self::Put(_) => 1,
-            Self::Make(ObjType::List) => 2,
-            Self::Delete => 3,
-            Self::Make(ObjType::Text) => 4,
-            Self::Increment(_) => 5,
-            Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+    /*
+        /// The index into the action array as specified in [1]
+        ///
+        /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
+        pub(crate) fn action_index(&self) -> u64 {
+            match self {
+                Self::Make(ObjType::Map) => 0,
+                Self::Put(_) => 1,
+                Self::Make(ObjType::List) => 2,
+                Self::Delete => 3,
+                Self::Make(ObjType::Text) => 4,
+                Self::Increment(_) => 5,
+                Self::Make(ObjType::Table) => 6,
+                Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            }
         }
-    }
+    */
 
     pub(crate) fn value<'a>(&'a self) -> Cow<'a, ScalarValue> {
         match self {

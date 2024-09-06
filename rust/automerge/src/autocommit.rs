@@ -86,6 +86,10 @@ impl AutoCommit {
         AutoCommit::default()
     }
 
+    pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
+        self.doc.diff_opset(&other.doc)
+    }
+
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
         let doc = Automerge::load(data)?;
         Ok(Self {

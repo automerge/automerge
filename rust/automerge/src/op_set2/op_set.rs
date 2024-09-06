@@ -587,14 +587,9 @@ impl OpSet {
                 .collect::<Result<_, PackError>>()?,
         );
 
-        let len = cols.len();
+        cols.init_missing();
 
-        for spec in &ALL_COLUMN_SPECS {
-            if cols.0.get(spec).is_none() {
-                let col = Column::init_empty(*spec, len);
-                cols.0.insert(*spec, col);
-            }
-        }
+        let len = cols.len();
 
         let op_set = OpSet { actors, cols, len };
 
@@ -1004,7 +999,7 @@ impl Columns {
             let succ = fmt(succ.next());
             let m = meta.next();
             let v = if let Some(Some(m)) = m {
-                let raw_data = value.read_next(m.length()).unwrap();
+                let raw_data = value.read_next(m.length()).unwrap_or(&[]);
                 ScalarValue::from_raw(m, raw_data).unwrap()
             } else {
                 ScalarValue::Null
@@ -1537,6 +1532,25 @@ impl Columns {
     fn iter(&self) -> impl Iterator<Item = (&ColumnSpec, &Column)> {
         self.0.iter()
     }
+
+    fn init_missing(&mut self) {
+        let len = self.len();
+        let mut group = None;
+        for spec in &ALL_COLUMN_SPECS {
+            if group == Some(spec.id()) {
+                if self.0.get(spec).is_none() {
+                    let col = Column::new(*spec);
+                    self.0.insert(*spec, col);
+                }
+            } else {
+                group = spec.group_id();
+                if self.0.get(spec).is_none() {
+                    let col = Column::init_empty(*spec, len);
+                    self.0.insert(*spec, col);
+                }
+            }
+        }
+    }
 }
 
 struct IterObjIds<'a> {
@@ -1650,9 +1664,12 @@ mod tests {
             columns::ColumnData,
             op::SuccCursors,
             rle::ActorCursor,
-            slab::WritableSlab,
+            //slab::WritableSlab,
             types::{Action, ActorIdx, ScalarValue},
-            ColumnCursor, DeltaCursor, KeyRef, Slab,
+            ColumnCursor,
+            DeltaCursor,
+            KeyRef,
+            Slab,
         },
         storage::Document,
         transaction::Transactable,

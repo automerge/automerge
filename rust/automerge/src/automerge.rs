@@ -277,6 +277,7 @@ impl Automerge {
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
+        let checkpoint = self.ops.save_checkpoint();
         let actor_index;
         let seq;
         let mut deps;
@@ -310,7 +311,7 @@ impl Automerge {
             seq,
             start_op,
             deps,
-            checkpoint: self.ops.save_checkpoint(),
+            checkpoint,
             scope,
         }
     }
@@ -521,6 +522,43 @@ impl Automerge {
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
         self.ops.id_to_exid(id)
+    }
+
+    pub fn diff_opset(&self, other: &Self) -> Result<(), AutomergeError> {
+        let (ops_meta1, ops_out1) = self.ops.export();
+        let (ops_meta2, ops_out2) = other.ops.export();
+        if ops_meta1 != ops_meta2 {
+            let specs: std::collections::BTreeSet<_> = ops_meta1
+                .0
+                .iter()
+                .chain(ops_meta2.0.iter())
+                .map(|c| c.spec())
+                .collect();
+            for s in specs {
+                let d1 = ops_meta1
+                    .0
+                    .iter()
+                    .find(|c| c.spec() == s)
+                    .map(|c| c.data())
+                    .unwrap_or(0..0);
+                let d2 = ops_meta2
+                    .0
+                    .iter()
+                    .find(|c| c.spec() == s)
+                    .map(|c| c.data())
+                    .unwrap_or(0..0);
+                let d1 = &ops_out1[d1];
+                let d2 = &ops_out2[d2];
+                if d1 != d2 {
+                    log!(" s={:?}|{:?} ", s.id(), s.col_type());
+                    log!(" {:?} ", d1);
+                    log!(" {:?} ", d2);
+                    OpSet::decode(s, d1);
+                    OpSet::decode(s, d2);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Load a document.
@@ -1027,6 +1065,7 @@ impl Automerge {
         let history_index = self.history.len();
 
         let actor_index = self.put_actor_ref(change.actor_id());
+
         self.states
             .entry(actor_index)
             .or_default()

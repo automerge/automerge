@@ -3,25 +3,23 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     change::Change,
-    op_set2::{OpBuilder2, OpSet, PackError},
+    op_set2::{KeyRef, OpBuilder2, OpSet, PackError},
     storage::{change::Verified, Change as StoredChange, Document},
-    types::{ChangeHash, OpId},
+    types::{ChangeHash, ObjId, OpId},
 };
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error("the document contained ops which were out of order")]
-    OpsOutOfOrder,
-    #[error("error reading operation: {0:?}")]
-    ReadOp(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("an operation referenced a missing actor id")]
-    MissingActor,
+    // FIXME - I need to do this check
+    //#[error("the document contained ops which were out of order")]
+    //OpsOutOfOrder,
     #[error("invalid changes: {0}")]
     InvalidChanges(#[from] super::change_collector::Error),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
-    #[error("succ out of order")]
-    SuccOutOfOrder,
+    // FIXME - i need to do this check
+    //#[error("succ out of order")]
+    //SuccOutOfOrder,
     #[error(transparent)]
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
@@ -62,12 +60,7 @@ pub(crate) fn reconstruct_opset<'a>(
     for op in op_set.iter() {
         let next = Some((op.obj, op.elemid_or_key()));
         if last != next {
-            if let Some((obj, key)) = last.take() {
-                for (id, pred) in preds.drain() {
-                    let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred);
-                    change_collector.collect(del)?;
-                }
-            }
+            add_del_ops(&mut change_collector, &mut last, &mut preds)?;
             last = next;
         }
         for id in op.succ() {
@@ -79,6 +72,9 @@ pub(crate) fn reconstruct_opset<'a>(
 
         change_collector.collect(op.build(pred))?;
     }
+
+    add_del_ops(&mut change_collector, &mut last, &mut preds)?;
+
     let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set)?;
 
     Ok(ReconOpSet {
@@ -87,6 +83,20 @@ pub(crate) fn reconstruct_opset<'a>(
         op_set,
         heads,
     })
+}
+
+fn add_del_ops(
+    change_collector: &mut ChangeCollector<'_>,
+    last: &mut Option<(ObjId, KeyRef<'_>)>,
+    preds: &mut HashMap<OpId, Vec<OpId>>,
+) -> Result<(), Error> {
+    if let Some((obj, key)) = last.take() {
+        for (id, pred) in preds.drain() {
+            let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred);
+            change_collector.collect(del)?;
+        }
+    }
+    Ok(())
 }
 
 // create all binary changes
@@ -120,17 +130,4 @@ pub(crate) struct ReconOpSet {
     pub(crate) max_op: u64,
     pub(crate) op_set: OpSet,
     pub(crate) heads: BTreeSet<ChangeHash>,
-}
-
-/// We construct the OpSet directly from the vector of actors which are encoded in the
-/// start of the document. Therefore we need to check for each opid in the docuemnt that the actor
-/// ID which it references actually exists in the op set data.
-fn check_opid(op_set: &OpSet, opid: OpId) -> Result<OpId, Error> {
-    match op_set.get_actor_safe(opid.actor()) {
-        Some(_) => Ok(opid),
-        None => {
-            tracing::error!("missing actor");
-            Err(Error::MissingActor)
-        }
-    }
 }

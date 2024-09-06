@@ -38,10 +38,16 @@ pub(crate) struct ObWithMetadata<'a> {
     op_set: &'a OpSet,
 }
 
-impl<'a> OpWithMetadata<'a> {
-    pub(crate) fn new(op: Op<'a>, pred: Vec<OpId>) -> Self {
-        Self { op, pred }
+impl<'a> std::fmt::Debug for ObWithMetadata<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.op.fmt(f)
     }
+}
+
+impl<'a> OpWithMetadata<'a> {
+    //pub(crate) fn new(op: Op<'a>, pred: Vec<OpId>) -> Self {
+    //    Self { op, pred }
+    //}
 
     fn wrap(&self, opid: OpId) -> OpIdWithMetadata<'a> {
         OpIdWithMetadata::new(opid, self.op.op_set())

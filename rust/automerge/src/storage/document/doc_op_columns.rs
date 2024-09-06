@@ -9,8 +9,8 @@ use crate::{
             OpIdListIter, OpIdListRange, OpIdRange, RleRange, ValueEncoder, ValueIter, ValueRange,
         },
         encoding::{
-            BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, MaybeBooleanDecoder,
-            MaybeBooleanEncoder, RleDecoder, RleEncoder,
+            BooleanDecoder, BooleanEncoder, MaybeBooleanDecoder, MaybeBooleanEncoder, RleDecoder,
+            RleEncoder,
         },
     },
     convert,
@@ -31,6 +31,7 @@ const SUCC_COL_ID: ColumnId = ColumnId::new(8);
 const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
 const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
 
+/*
 /// The form operations take in the compressed document format.
 #[derive(Debug)]
 pub(crate) struct DocOp {
@@ -44,6 +45,7 @@ pub(crate) struct DocOp {
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
 }
+*/
 
 #[derive(Debug, Clone)]
 pub(crate) struct DocOpColumns {
@@ -195,19 +197,21 @@ impl DocOpColumns {
         }
     }
 
-    pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> DocOpColumnIter<'a> {
-        DocOpColumnIter {
-            id: self.id.iter(data),
-            action: self.action.decoder(data),
-            objs: self.obj.as_ref().map(|o| o.iter(data)),
-            keys: self.key.iter(data),
-            insert: self.insert.decoder(data),
-            value: self.val.iter(data),
-            succ: self.succ.iter(data),
-            expand: self.expand.decoder(data),
-            mark_name: self.mark_name.decoder(data),
+    /*
+        pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> DocOpColumnIter<'a> {
+            DocOpColumnIter {
+                id: self.id.iter(data),
+                action: self.action.decoder(data),
+                objs: self.obj.as_ref().map(|o| o.iter(data)),
+                keys: self.key.iter(data),
+                insert: self.insert.decoder(data),
+                value: self.val.iter(data),
+                succ: self.succ.iter(data),
+                expand: self.expand.decoder(data),
+                mark_name: self.mark_name.decoder(data),
+            }
         }
-    }
+    */
 
     pub(crate) fn raw_columns(&self) -> RawColumns<compression::Uncompressed> {
         let mut cols = vec![
@@ -296,6 +300,7 @@ impl DocOpColumns {
     }
 }
 
+/*
 #[derive(Clone)]
 pub(crate) struct DocOpColumnIter<'a> {
     id: OpIdIter<'a>,
@@ -308,17 +313,23 @@ pub(crate) struct DocOpColumnIter<'a> {
     expand: MaybeBooleanDecoder<'a>,
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
 }
+*/
 
+/*
 impl<'a> DocOpColumnIter<'a> {
     fn done(&self) -> bool {
         self.id.done()
     }
 }
+*/
 
+/*
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub(crate) struct ReadDocOpError(#[from] DecodeColumnError);
+*/
 
+/*
 impl<'a> Iterator for DocOpColumnIter<'a> {
     type Item = Result<DocOp, ReadDocOpError>;
 
@@ -334,7 +345,9 @@ impl<'a> Iterator for DocOpColumnIter<'a> {
         }
     }
 }
+*/
 
+/*
 impl<'a> DocOpColumnIter<'a> {
     fn try_next(&mut self) -> Result<Option<DocOp>, DecodeColumnError> {
         if self.done() {
@@ -367,6 +380,7 @@ impl<'a> DocOpColumnIter<'a> {
         }
     }
 }
+*/
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {

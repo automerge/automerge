@@ -6,8 +6,8 @@ use crate::op_set2::OpSet;
 use crate::{convert, ActorId, ChangeHash};
 
 mod doc_op_columns;
+pub(crate) use doc_op_columns::AsDocOp;
 pub(crate) use doc_op_columns::DocOpColumns;
-pub(crate) use doc_op_columns::{AsDocOp, DocOp, ReadDocOpError};
 mod doc_change_columns;
 use doc_change_columns::DocChangeColumns;
 pub(crate) use doc_change_columns::{AsChangeMeta, ChangeMetadata, ReadChangeError};
@@ -350,11 +350,13 @@ impl<'a> Document<'a> {
         }
     }
 
-    pub(crate) fn iter_ops(
-        &'a self,
-    ) -> impl Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a {
-        self.op_metadata.iter(&self.bytes[self.op_bytes.clone()])
-    }
+    /*
+        pub(crate) fn iter_ops(
+            &'a self,
+        ) -> impl Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a {
+            self.op_metadata.iter(&self.bytes[self.op_bytes.clone()])
+        }
+    */
 
     pub(crate) fn op_raw_bytes(&self) -> &[u8] {
         &self.bytes[self.op_bytes.clone()]

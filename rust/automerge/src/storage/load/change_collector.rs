@@ -160,7 +160,7 @@ impl<'a> ChangeCollector<'a> {
     pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
-        for (actor, changes) in self.changes_by_actor {
+        for (_actor, changes) in self.changes_by_actor {
             let mut seq = None;
             for change in changes {
                 if let Some(seq) = seq {

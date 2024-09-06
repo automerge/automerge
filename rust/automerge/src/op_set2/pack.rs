@@ -52,7 +52,7 @@ pub(crate) trait Packable: PartialEq + Debug {
         1
     }
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+    fn validate<'a>(_val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
         Ok(())
     }
 
@@ -66,7 +66,7 @@ impl Packable for i64 {
     type Unpacked<'a> = i64;
     type Owned = i64;
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
                 return Err(PackError::CounterOutOfRange(*a as u64));
@@ -97,7 +97,7 @@ impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
                 return Err(PackError::CounterOutOfRange(*a));

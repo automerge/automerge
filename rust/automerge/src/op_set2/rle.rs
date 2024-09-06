@@ -46,14 +46,6 @@ impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
 }
 
 impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
-    pub(crate) fn set_group(&mut self, group: usize) {
-        if let Some(lit) = &mut self.lit {
-            if lit.index == 1 {
-                lit.group = group;
-            }
-        }
-    }
-
     pub(crate) fn flush_run<'a>(
         out: &mut SlabWriter<'a>,
         num: usize,
@@ -74,13 +66,6 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         match &self.lit {
             Some(lit) if lit.num_left() > 0 => Some(lit),
             _ => None,
-        }
-    }
-
-    fn lit_final(&self) -> bool {
-        match &self.lit {
-            Some(lit) if lit.num_left() == 0 => true,
-            _ => false,
         }
     }
 
@@ -105,15 +90,10 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         self.lit.as_ref().map(|l| l.num_left()).unwrap_or(0)
     }
 
-    fn copy<'a>(&self, slab: &'a Slab) -> &'a [u8] {
-        if let Some(lit) = &self.lit {
-            if self.last_offset > lit.offset {
-                &slab[lit.offset..self.last_offset]
-            } else {
-                &[]
-            }
-        } else {
-            &[]
+    fn lit_final(&self) -> bool {
+        match &self.lit {
+            Some(lit) if lit.num_left() == 0 => true,
+            _ => false,
         }
     }
 

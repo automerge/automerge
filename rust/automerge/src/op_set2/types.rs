@@ -324,13 +324,15 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(crate) fn as_i64(&self) -> i64 {
-        match self {
-            Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => *i,
-            Self::Uint(i) => *i as i64,
-            _ => 0,
+    /*
+        pub(crate) fn as_i64(&self) -> i64 {
+            match self {
+                Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => *i,
+                Self::Uint(i) => *i as i64,
+                _ => 0,
+            }
         }
-    }
+    */
 }
 
 // FIXME - this is a temporary fix - we ideally want
@@ -389,8 +391,6 @@ impl crate::types::ScalarValue {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadScalarError {
-    #[error("invalid type code: {0}")]
-    InvalidTypeCode(u8),
     #[error("invalid uleb128")]
     InvalidUleb,
     #[error("invalid leb128")]
@@ -503,12 +503,14 @@ pub(crate) enum Key {
 }
 
 impl Key {
-    pub(crate) fn to_ref<'a>(&'a self) -> KeyRef<'a> {
-        match self {
-            Key::Map(s) => KeyRef::Map(s),
-            Key::Seq(e) => KeyRef::Seq(*e),
+    /*
+        pub(crate) fn to_ref<'a>(&'a self) -> KeyRef<'a> {
+            match self {
+                Key::Map(s) => KeyRef::Map(s),
+                Key::Seq(e) => KeyRef::Seq(*e),
+            }
         }
-    }
+    */
 }
 
 impl From<ElemId> for Key {
@@ -581,13 +583,6 @@ impl<'a> Value<'a> {
         match self {
             Self::Object(o) => value::Value::Object(*o),
             Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
-        }
-    }
-
-    pub(crate) fn as_i64(&self) -> i64 {
-        match self {
-            Self::Scalar(s) => s.as_i64(),
-            Self::Object(_) => 0,
         }
     }
 }

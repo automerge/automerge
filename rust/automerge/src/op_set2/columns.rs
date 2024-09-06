@@ -655,6 +655,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         let after = self.to_vec();
         if self.len != after.len() {
             log!(":::SPLICE FAIL (index={}):::", index);
+            log!(
+                "::: self.len({}) != after.len({}) :::",
+                self.len,
+                after.len()
+            );
             log!(":::before={:?}", before);
             log!(":::values={:?}", tmp_values);
             log!(":::after={:?}", after);
@@ -662,9 +667,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
     pub(crate) fn init_empty(len: usize) -> Self {
-        let mut writer = SlabWriter::new(usize::MAX);
-        writer.flush_null(len);
-        let slabs = writer.finish();
+        let slabs = C::init_empty(len);
         ColumnData {
             len,
             slabs,
@@ -878,10 +881,6 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         panic!()
     }
 
-    fn validate<'a>(val: &Option<<Self::Item as Packable>::Unpacked<'a>>) -> Result<(), PackError> {
-        Ok(())
-    }
-
     fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::default();
         while let Some((val, next_cursor)) = cursor.try_next(data)? {
@@ -951,6 +950,12 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
             cursor,
             post,
         }
+    }
+
+    fn init_empty(len: usize) -> Vec<Slab> {
+        let mut writer = SlabWriter::new(usize::MAX);
+        writer.flush_null(len);
+        writer.finish()
     }
 }
 

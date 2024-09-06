@@ -205,6 +205,12 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     fn index(&self) -> usize {
         self.index
     }
+
+    fn init_empty(len: usize) -> Vec<Slab> {
+        let mut writer = SlabWriter::new(usize::MAX);
+        writer.flush_bool_run(len);
+        writer.finish()
+    }
 }
 
 /*

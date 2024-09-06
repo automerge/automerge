@@ -96,6 +96,7 @@ where
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
     */
+    //let actor_lookup : HashMap<usize,usize> = op_set.actors.iter().enumerate().map(|(a,_)| (a,a)).collect();
     let mut actor_lookup = HashMap::with_capacity(op_set.actors.len());
     let mut actor_ids = changes
         .clone()

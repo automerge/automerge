@@ -457,7 +457,7 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
         ops: I,
     ) -> Result<Change<'static, Verified>, PredOutOfOrder>
     where
-        A: AsChangeOp<'a, OpId = O> + 'a,
+        A: AsChangeOp<'a, OpId = O> + 'a + std::fmt::Debug,
         O: convert::OpId<&'a ActorId> + 'a,
         I: Iterator<Item = A> + Clone + 'a + ExactSizeIterator,
     {
@@ -504,6 +504,8 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
 
         let ops_data = shift_range(ops_data, header.len());
         let extra_bytes = shift_range(extra_bytes, header.len());
+
+        log!(" HASH={:?}", header.hash());
 
         Ok(Change {
             bytes: Cow::Owned(bytes),
