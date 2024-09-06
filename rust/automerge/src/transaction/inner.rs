@@ -387,9 +387,6 @@ impl TransactionInner {
         prop: String,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        if prop.is_empty() {
-            return Err(AutomergeError::EmptyStringKey);
-        }
         let id = self.next_id();
 
         let query = doc

@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     change::Change,
-    op_set2::{KeyRef, OpBuilder2, OpSet, PackError},
+    op_set2::{KeyRef, OpBuilder2, OpSet, PackError, ReadOpError},
     storage::{change::Verified, Change as StoredChange, Document},
     types::{ChangeHash, ObjId, OpId},
 };
@@ -24,6 +24,8 @@ pub(crate) enum Error {
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
     PackError(#[from] PackError),
+    #[error(transparent)]
+    ReadOpError(#[from] ReadOpError),
 }
 
 pub(crate) struct MismatchedHeads {
@@ -57,7 +59,8 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut max_op = 0;
     let mut preds = HashMap::new();
     let mut last = None;
-    for op in op_set.iter() {
+    let mut iter = op_set.iter();
+    while let Some(op) = iter.try_next()? {
         let next = Some((op.obj, op.elemid_or_key()));
         if last != next {
             add_del_ops(&mut change_collector, &mut last, &mut preds)?;

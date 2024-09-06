@@ -63,8 +63,6 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
-    #[error("map key cannot be an empty string")]
-    EmptyStringKey,
 }
 
 impl PartialEq for AutomergeError {

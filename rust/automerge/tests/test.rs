@@ -1411,7 +1411,7 @@ fn fuzz_crashers() {
 
     for path in paths {
         // uncomment this line to figure out which fixture is crashing:
-        // println!("{:?}", path.as_ref().unwrap().path().display());
+        println!("{:?}", path.as_ref().unwrap().path().display());
         let bytes = fs::read(path.as_ref().unwrap().path());
         let res = Automerge::load(&bytes.unwrap());
         assert!(res.is_err());

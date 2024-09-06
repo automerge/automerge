@@ -54,7 +54,7 @@ pub(crate) use index_iter::IndexIter;
 pub(crate) use insert::InsertQuery;
 pub(crate) use keys::{KeyIter, KeyOpIter};
 pub(crate) use marks::{MarkIter, NoMarkIter};
-pub(crate) use op_iter::OpIter;
+pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use spans::{SpanInternal, SpansInternal};
 pub(crate) use top_op::TopOpIter;

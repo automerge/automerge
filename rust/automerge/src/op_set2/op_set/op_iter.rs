@@ -81,7 +81,7 @@ impl<'a> OpIter<'a> {
         self.pos
     }
 
-    fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
+    pub(crate) fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
         let Some(id) = self.read_opid()? else {
             return Ok(None);
         };

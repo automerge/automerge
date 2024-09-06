@@ -21,8 +21,8 @@ pub(crate) use columns::{ColExport, Column, ColumnCursor, Encoder, Run, SpliceDe
 pub(crate) use delta::DeltaCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    DiffOp, OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, SpanInternal, SpansInternal,
-    VisibleOpIter,
+    DiffOp, OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, ReadOpError, SpanInternal,
+    SpansInternal, VisibleOpIter,
 };
 
 pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans, Values};

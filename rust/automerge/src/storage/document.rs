@@ -230,7 +230,6 @@ impl<'a> Document<'a> {
         let ops_meta = DocOpColumns::encode(ops, &mut ops_out);
 
         let (ops_meta2, ops_out2) = op_set.export();
-        op_set.dump();
         let ops_meta1 = ops_meta.raw_columns();
         if ops_meta1 != ops_meta2 {
             let specs: std::collections::BTreeSet<_> = ops_meta1
