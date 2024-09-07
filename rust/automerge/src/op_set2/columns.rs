@@ -655,6 +655,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         let after = self.to_vec();
         if self.len != after.len() {
             log!(":::SPLICE FAIL (index={}):::", index);
+            log!("SLABS={:?}", self.slabs);
             log!(
                 "::: self.len({}) != after.len({}) :::",
                 self.len,
@@ -834,13 +835,13 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
     }
 
     fn next<'a>(&self, data: &'a [u8]) -> Option<(Run<'a, Self::Item>, Self)> {
-        match self.try_next(data) {
+        match self.try_next(data).unwrap() {
             // need one interface that throws away zero length runs (used by bool columns)
             // and one interface that does not
             // this throws out the zero length runs to not complicate the iterator
-            Ok(Some((run, cursor))) if run.count == 0 => cursor.next(data),
-            Ok(result) => result,
-            _ => None,
+            Some((run, cursor)) if run.count == 0 => cursor.next(data),
+            result => result,
+            //_ => None,
         }
     }
 

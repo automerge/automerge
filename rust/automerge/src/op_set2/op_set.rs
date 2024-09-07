@@ -288,42 +288,74 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn seek_list_op(
+    fn seek_list_op(
         &self,
         obj: &ObjId,
         target: ElemId,
         id: OpId,
         insert: bool,
+        pred: &[OpId],
         encoding: ListEncoding,
-        _clock: Option<&Clock>,
+        clock: Option<&Clock>,
     ) -> SeekOpIdResult<'_> {
-        let iter = self.iter_obj(&obj);
+        let mut iter = self.iter_obj(&obj);
         let mut pos = iter.end_pos();
         let mut ops = vec![];
         let mut found = target.is_head();
         let mut index = 0;
         let mut current = 0;
         let marks = None; // FIXME
-        for op in iter {
-            if op.insert {
-                index += current;
-                current = 0;
-                if found && op.id < id {
+        if insert {
+            while let Some(mut op) = iter.next() {
+                if op.insert {
+                    index += current;
+                    current = 0;
+                    if found && op.id < id {
+                        pos = op.pos;
+                        break;
+                    }
+                    if !found && ElemId(op.id) == target {
+                        found = true;
+                    }
+                }
+
+                let visible = op.scope_to_clock(clock, iter.get_opiter());
+
+                if visible {
+                    current = op.width(encoding);
+                }
+            }
+            index += current;
+        } else {
+            while let Some(mut op) = iter.next() {
+                if op.insert {
+                    if found {
+                        pos = op.pos;
+                        break;
+                    } else {
+                        index += current;
+                        current = 0;
+                        if ElemId(op.id) == target {
+                            found = true;
+                        }
+                    }
+                } else if found && op.id > id {
                     pos = op.pos;
                     break;
                 }
-                if !found && ElemId(op.id) == target {
-                    found = true;
+
+                let visible = op.scope_to_clock(clock, iter.get_opiter());
+
+                if found && pred.contains(&op.id) {
+                    ops.push(op);
+                }
+
+                if visible && !found {
+                    current = op.width(encoding);
                 }
             }
-            if found && !insert {
-                ops.push(op);
-            }
-            let visible = op.succ().len() == 0; // FIXME - ignore clock and counters for now
-            if visible && !found {
-                current = op.width(encoding);
-            }
         }
+
         SeekOpIdResult {
             index,
             pos,
@@ -474,14 +506,25 @@ impl OpSet {
     ) -> FoundOpWithPatchLog<'a> {
         match &op.key {
             Key::Seq(e) => {
-                let r = self.seek_list_op(&op.obj, *e, op.id, op.insert, encoding, None);
+                let r = self.seek_list_op(&op.obj, *e, op.id, op.insert, &op.pred, encoding, None);
+                assert_eq!(op.pred.len(), r.ops.len());
                 self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
                 let iter = self.iter_prop(&op.obj, &s);
-                let end_pos = iter.end_pos();
-                let ops = iter.collect::<Vec<_>>();
-                self.found_op_with_patch_log(op, &ops, end_pos, 0, None)
+                let mut pos = iter.end_pos();
+                let mut ops = vec![];
+                for o in iter {
+                    if op.pred.contains(&o.id) {
+                        ops.push(o);
+                    }
+                    if o.id > op.id {
+                        pos = o.pos;
+                        break;
+                    }
+                }
+                assert_eq!(op.pred.len(), ops.len());
+                self.found_op_with_patch_log(op, &ops, pos, 0, None)
             }
         }
     }

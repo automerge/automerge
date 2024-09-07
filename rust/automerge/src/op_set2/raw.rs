@@ -118,7 +118,8 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
         let next_offset = self.offset + 1;
         if next_offset > slab.len() {
-            return Err(PackError::IndexOutOfRange(self.offset));
+            //return Err(PackError::IndexOutOfRange(self.offset));
+            return Ok(None);
         }
         let data = &slab[self.offset..next_offset];
         Ok(Some((

@@ -1,7 +1,7 @@
 use super::{
     ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel,
 };
-use crate::columnar::encoding::leb128::{lebsize, ulebsize};
+use crate::columnar::encoding::leb128::lebsize;
 use std::marker::PhantomData;
 use std::ops::Range;
 
@@ -115,7 +115,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
 
     pub(crate) fn start_copy<'a>(&self, slab: &'a Slab, last_run_count: usize) -> SlabWriter<'a> {
         let (range, size) = if let Some(lit) = self.lit {
-            let end = lit.offset - ulebsize(lit.len as u64) as usize;
+            let end = lit.header_offset();
             let size = self.index - lit.index;
             (0..end, size)
         } else {
@@ -187,8 +187,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             (Some(a), Some(b)) => {
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
-                // need to remove the lit-run header
-                let b_start = b.offset - lebsize(-1 * b.len as i64) as usize;
+                let b_start = b.header_offset();
                 writer.flush_before2(slab, c0.offset..b_start, lit1, size - lit2);
                 writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
             }
@@ -198,7 +197,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             }
             (None, Some(b)) => {
                 let lit2 = b.len - 1;
-                let b_start = b.offset - lebsize(-1 * b.len as i64) as usize;
+                let b_start = b.header_offset();
                 writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2);
                 writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
             }
@@ -433,6 +432,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 }
                 count if count < 0 => {
                     let (value_bytes, value) = P::unpack(data)?;
+                    assert!(count * -1 < slab.len() as i64);
                     let lit = Some(LitRunCursor::new(
                         self.offset + count_bytes,
                         count,
@@ -472,6 +472,7 @@ pub(crate) struct LitRunCursor {
 
 impl LitRunCursor {
     fn new(offset: usize, count: i64, group: usize) -> Self {
+        assert!(count < 0);
         let len = (count * -1) as usize;
         LitRunCursor {
             offset,
@@ -481,7 +482,12 @@ impl LitRunCursor {
         }
     }
 
+    fn header_offset(&self) -> usize {
+        self.offset - lebsize(-1 * (self.len as i64)) as usize
+    }
+
     fn num_left(&self) -> usize {
+        assert!(self.len >= self.index);
         self.len - self.index
     }
 
