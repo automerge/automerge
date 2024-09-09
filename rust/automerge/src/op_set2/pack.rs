@@ -16,10 +16,6 @@ pub(crate) enum PackError {
     ActorIndexOutOfRange(u64, usize),
     #[error("counter out of range {0}")]
     CounterOutOfRange(u64),
-    #[error("index out of range {0}")]
-    IndexOutOfRange(usize),
-    #[error("slice out of range {0}..{1}")]
-    SliceOutOfRange(usize, usize),
     #[error("invalid value for {typ}: {error}")]
     InvalidValue { typ: &'static str, error: String },
 }
@@ -48,18 +44,12 @@ pub(crate) trait Packable: PartialEq + Debug {
         0
     }
 
-    fn len<'a>(_item: Option<Self::Unpacked<'a>>) -> usize {
-        1
-    }
-
     fn validate<'a>(_val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
         Ok(())
     }
 
     fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
-    fn width<'a>(item: Self::Unpacked<'a>) -> usize;
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
-    fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, PackError>;
 }
 
 impl Packable for i64 {
@@ -78,18 +68,10 @@ impl Packable for i64 {
     fn own<'a>(item: i64) -> i64 {
         item
     }
-    fn width<'a>(item: i64) -> usize {
-        lebsize(item) as usize
-    }
     fn unpack<'a>(mut buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::signed(&mut buff)?;
         Ok((start_len - buff.len(), val))
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &i64) -> Result<usize, PackError> {
-        let len = leb128::write::signed(buff, *element).unwrap();
-        Ok(len)
     }
 }
 
@@ -110,9 +92,6 @@ impl Packable for u64 {
         item as usize
     }
 
-    fn width<'a>(item: u64) -> usize {
-        ulebsize(item) as usize
-    }
     fn own<'a>(item: u64) -> u64 {
         item
     }
@@ -121,31 +100,18 @@ impl Packable for u64 {
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), val))
     }
-
-    fn pack(buff: &mut Vec<u8>, element: &u64) -> Result<usize, PackError> {
-        let len = leb128::write::unsigned(buff, *element).unwrap();
-        Ok(len)
-    }
 }
 
 impl Packable for usize {
     type Unpacked<'a> = usize;
     type Owned = usize;
 
-    fn width<'a>(item: usize) -> usize {
-        ulebsize(item as u64) as usize
-    }
     fn own<'a>(item: usize) -> usize {
         item
     }
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         let (len, val) = u64::unpack(buff)?;
         Ok((len, val as usize))
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &usize) -> Result<usize, PackError> {
-        let len = leb128::write::unsigned(buff, *element as u64).unwrap();
-        Ok(len)
     }
 }
 
@@ -157,15 +123,7 @@ impl Packable for bool {
         item
     }
 
-    fn width<'a>(_item: bool) -> usize {
-        panic!()
-    }
-
     fn unpack<'a>(_buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
-        panic!()
-    }
-
-    fn pack(_buff: &mut Vec<u8>, _element: &bool) -> Result<usize, PackError> {
         panic!()
     }
 }
@@ -178,32 +136,17 @@ impl Packable for [u8] {
         item.to_vec()
     }
 
-    fn width<'a>(item: &'a [u8]) -> usize {
-        usize::width(item.len()) + item.len()
-    }
-
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
         let (start, bytes) = usize::unpack(buff)?;
         let end = start + bytes;
         let result = &buff[start..end];
         Ok((end, result))
     }
-
-    fn pack(buff: &mut Vec<u8>, element: &[u8]) -> Result<usize, PackError> {
-        let len1 = element.len();
-        let len2 = leb128::write::unsigned(buff, element.len() as u64).unwrap();
-        buff.extend(element);
-        Ok(len1 + len2)
-    }
 }
 
 impl Packable for str {
     type Unpacked<'a> = &'a str;
     type Owned = String;
-
-    fn width<'a>(item: &'a str) -> usize {
-        <[u8]>::width(item.as_bytes())
-    }
 
     fn own<'a>(item: &'a str) -> String {
         item.to_owned()
@@ -213,10 +156,6 @@ impl Packable for str {
         let (len, bytes) = <[u8]>::unpack(buff)?;
         let result = std::str::from_utf8(bytes).map_err(|_| PackError::InvalidUtf8)?;
         Ok((len, result))
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &str) -> Result<usize, PackError> {
-        <[u8]>::pack(buff, element.as_bytes())
     }
 }
 
@@ -337,14 +276,6 @@ impl Packable for Action {
         };
         Ok((len, action))
     }
-
-    fn width<'a>(item: Self::Unpacked<'a>) -> usize {
-        u64::width(item as u64)
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
-        u64::pack(buff, &u64::from(*element))
-    }
 }
 
 impl MaybePackable<Action> for Action {
@@ -377,17 +308,9 @@ impl Packable for ActorIdx {
         item
     }
 
-    fn width<'a>(item: Self::Unpacked<'a>) -> usize {
-        u64::width(u64::from(item))
-    }
-
     fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), super::PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, ActorIdx::from(result)))
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &Self) -> Result<usize, super::PackError> {
-        u64::pack(buff, &(u64::from(*element)))
     }
 }
 

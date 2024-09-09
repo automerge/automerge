@@ -193,31 +193,33 @@ impl OpSet {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
 
-    pub(crate) fn seek_to_nth(
-        &self,
-        obj: &ObjId,
-        index: usize,
-        encoding: ListEncoding,
-        clock: Option<Clock>,
-    ) -> Option<usize> {
-        let mut iter = self
-            .iter_obj(obj)
-            .visible(clock)
-            .marks()
-            .top_ops()
-            .index(encoding);
-        if index == 0 {
-            None
-        } else {
-            while let Some(op) = iter.next() {
-                if op.index >= index {
-                    let _ = iter.unwrap();
-                    return None;
+    /*
+        pub(crate) fn seek_to_nth(
+            &self,
+            obj: &ObjId,
+            index: usize,
+            encoding: ListEncoding,
+            clock: Option<Clock>,
+        ) -> Option<usize> {
+            let mut iter = self
+                .iter_obj(obj)
+                .visible(clock)
+                .marks()
+                .top_ops()
+                .index(encoding);
+            if index == 0 {
+                None
+            } else {
+                while let Some(op) = iter.next() {
+                    if op.index >= index {
+                        let _ = iter.unwrap();
+                        return None;
+                    }
                 }
+                None
             }
-            None
         }
-    }
+    */
 
     pub(crate) fn query_insert_at(
         &self,
@@ -1360,47 +1362,49 @@ impl Columns {
         }
     }
 
-    fn get_integer_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Integer(c)) => c,
-            _ => panic!(),
+    /*
+        fn get_integer_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::Integer(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
 
-    fn get_boolean_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<BooleanCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Bool(c)) => c,
-            _ => panic!(),
+        fn get_boolean_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<BooleanCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::Bool(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
 
-    fn get_str_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<StrCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Str(c)) => c,
-            _ => panic!(),
+        fn get_str_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<StrCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::Str(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
 
-    fn get_action_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActionCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Action(c)) => c,
-            _ => panic!(),
+        fn get_action_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActionCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::Action(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
 
-    fn get_value_meta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<MetaCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::ValueMeta(c)) => c,
-            _ => panic!(),
+        fn get_value_meta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<MetaCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::ValueMeta(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
 
-    fn get_value_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<RawCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Value(c)) => c,
-            _ => panic!(),
+        fn get_value_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<RawCursor> {
+            match self.0.get_mut(&spec) {
+                Some(Column::Value(c)) => c,
+                _ => panic!(),
+            }
         }
-    }
+    */
 
     fn get_actor(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActorCursor> {
         match self.0.get(&spec) {
@@ -1693,7 +1697,6 @@ pub(super) use ids::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     use proptest::{
         arbitrary::any,

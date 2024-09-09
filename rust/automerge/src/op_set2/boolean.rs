@@ -337,7 +337,7 @@ pub(crate) mod tests {
         assert_eq!(out, vec![3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
 
         // empty data
-        let mut col5: ColumnData<BooleanCursor> = ColumnData::new();
+        let col5: ColumnData<BooleanCursor> = ColumnData::new();
         assert_eq!(col5.export(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);

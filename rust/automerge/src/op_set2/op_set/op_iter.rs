@@ -66,10 +66,10 @@ pub(crate) enum ReadOpError {
     ReadValue(#[from] op_set2::columns::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
-    #[error("missing object ID")]
-    MissingObjId,
-    #[error("missing mark name")]
-    MissingMarkName,
+    //#[error("missing object ID")]
+    //MissingObjId,
+    //#[error("missing mark name")]
+    //MissingMarkName,
 }
 
 impl<'a> OpIter<'a> {

@@ -138,6 +138,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     }
 }
 
+/*
 impl<const B: usize> RawCursorInternal<B> {
     fn get_slice(slab: &Slab, offset: usize, len: usize) -> Result<&[u8], PackError> {
         let end = offset + len;
@@ -147,6 +148,7 @@ impl<const B: usize> RawCursorInternal<B> {
         Ok(&slab.as_ref()[offset..end])
     }
 }
+*/
 
 #[cfg(test)]
 pub(crate) mod tests {

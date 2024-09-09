@@ -157,20 +157,11 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
-        let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
-
-        let (rle, post) = SubCursor::<B>::encode_inner(&cursor.rle, run, index);
+        let (rle, post, current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
         let state = DeltaState { abs, rle };
-
-        let mut current = cursor.rle.start_copy(slab, last_run_count);
-
-        if cursor.rle.lit_num() > 1 {
-            let num = cursor.rle.lit_num() - 1;
-            current.flush_before(slab, cursor.rle.lit_range(), num, num);
-        }
 
         let SpliceDel {
             deleted,

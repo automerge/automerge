@@ -1,9 +1,7 @@
 use crate::marks::MarkSet;
-use crate::types::{Clock, ListEncoding};
+use crate::types::Clock;
 
-use super::{
-    DiffOpIter, IndexIter, KeyOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter,
-};
+use super::{DiffOpIter, KeyOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -26,10 +24,6 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
 
     fn no_marks(self) -> NoMarkIter<'a, Self> {
         NoMarkIter::new(self)
-    }
-
-    fn index(self, encoding: ListEncoding) -> IndexIter<'a, Self> {
-        IndexIter::new(self, encoding)
     }
 
     fn top_ops(self) -> TopOpIter<'a, Self> {

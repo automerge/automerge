@@ -995,6 +995,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 1);
 
+    doc1.dump();
     let doc5 = AutoCommit::load(&doc1.save())?;
 
     assert_eq!(doc5.length(&list), 1);

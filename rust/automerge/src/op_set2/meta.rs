@@ -107,10 +107,6 @@ impl Packable for ValueMeta {
         item.length()
     }
 
-    fn width<'a>(item: ValueMeta) -> usize {
-        u64::width(item.0)
-    }
-
     fn own<'a>(item: ValueMeta) -> ValueMeta {
         item
     }
@@ -119,11 +115,6 @@ impl Packable for ValueMeta {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), ValueMeta(val)))
-    }
-
-    fn pack(buff: &mut Vec<u8>, element: &ValueMeta) -> Result<usize, PackError> {
-        let len = leb128::write::unsigned(buff, element.0).unwrap();
-        Ok(len)
     }
 }
 

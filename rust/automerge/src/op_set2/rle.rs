@@ -62,10 +62,18 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn active_lit(&self) -> Option<&LitRunCursor> {
+    fn valid_lit(&self) -> Option<&LitRunCursor> {
         match &self.lit {
-            Some(lit) if lit.num_left() > 0 => Some(lit),
+            Some(lit) if lit.index <= lit.len => Some(lit),
             _ => None,
+        }
+    }
+
+    fn next_lit(&self, count: usize) -> Option<LitRunCursor> {
+        if let Some(lit) = self.lit {
+            lit.next(count)
+        } else {
+            None
         }
     }
 
@@ -90,14 +98,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         self.lit.as_ref().map(|l| l.num_left()).unwrap_or(0)
     }
 
-    fn lit_final(&self) -> bool {
-        match &self.lit {
-            Some(lit) if lit.num_left() == 0 => true,
-            _ => false,
-        }
-    }
-
-    pub(super) fn lit_num(&self) -> usize {
+    fn lit_num(&self) -> usize {
         if let Some(lit) = &self.lit {
             lit.index
         } else {
@@ -113,51 +114,70 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    pub(crate) fn start_copy<'a>(&self, slab: &'a Slab, last_run_count: usize) -> SlabWriter<'a> {
-        let (range, size) = if let Some(lit) = self.lit {
-            let end = lit.header_offset();
-            let size = self.index - lit.index;
-            (0..end, size)
+    fn copy_range(&self) -> Range<usize> {
+        if let Some(lit) = self.lit {
+            // copy only before the lit run
+            0..lit.header_offset()
         } else {
-            (0..self.last_offset, self.index - last_run_count)
-        };
-        let mut out = SlabWriter::new(B);
-        out.flush_before(slab, range, 0, size);
-        out
+            // copy only before the last read
+            0..self.last_offset
+        }
+    }
+
+    fn copy_size(&self, last_run: usize) -> usize {
+        if let Some(lit) = self.lit {
+            // copy only before the lit run
+            self.index - lit.index
+        } else {
+            // copy everything
+            self.index - last_run
+        }
     }
 
     pub(crate) fn encode_inner<'a>(
+        slab: &'a Slab,
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
-    ) -> (RleState<'a, P>, Option<Run<'a, P>>) {
+    ) -> (RleState<'a, P>, Option<Run<'a, P>>, SlabWriter<'a>) {
         let mut post = None;
+
+        let last_run = run.as_ref().map(|r| r.count).unwrap_or(0);
+
+        let copy_range = cursor.copy_range();
+        let copy_size = cursor.copy_size(last_run);
+        let copy_lit_range = cursor.lit_range();
+        let copy_lit_size = cursor.lit_num().saturating_sub(last_run);
 
         let state = match run {
             None => RleState::Empty,
             Some(Run {
                 count: 1,
-                value: Some(value),
+                value: Some(current),
             }) if cursor.lit_num() > 1 => RleState::LitRun {
                 run: vec![],
-                current: value,
+                current,
             },
             Some(Run { count: 1, value }) => RleState::LoneValue(value),
             Some(Run { count, value }) if index < cursor.index => {
-                let run_delta = cursor.index - index;
-                post = Some(Run {
-                    count: run_delta,
-                    value: value,
-                });
-                RleState::Run {
-                    count: count - run_delta,
-                    value,
-                }
+                let delta = cursor.index - index;
+                //post = Some(Run { count: delta, value });
+                post = Some(Run::new(delta, value));
+                let count = count - delta;
+                RleState::Run { count, value }
             }
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        (state, post)
+        let mut current = SlabWriter::new(B);
+
+        current.flush_before(slab, copy_range, 0, copy_size);
+
+        if copy_lit_size > 0 {
+            current.flush_before(slab, copy_lit_range, copy_lit_size, copy_lit_size);
+        }
+
+        (state, post, current)
     }
 }
 
@@ -179,7 +199,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         run: Run<'a, Self::Item>,
         size: usize,
     ) -> Self::State<'a> {
-        match (&c0.lit, &c1.lit) {
+        match (c0.valid_lit(), c1.valid_lit()) {
             (Some(a), Some(_b)) if a.len == slab.len() => {
                 let lit = a.len - 2;
                 writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size);
@@ -321,16 +341,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
-        let last_run_count = run.as_ref().map(|r| r.count).unwrap_or(0);
-
-        let (state, post) = RleCursor::encode_inner(&cursor, run, index);
-
-        let mut current = cursor.start_copy(slab, last_run_count);
-
-        if cursor.lit_num() > 1 {
-            let num = cursor.lit_num() - 1;
-            current.flush_before(slab, cursor.lit_range(), num, num);
-        }
+        let (state, post, current) = RleCursor::encode_inner(slab, &cursor, run, index);
 
         let SpliceDel {
             deleted,
@@ -370,7 +381,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     count: 1,
                     value: Some(v),
                 } => {
-                    if next.lit_final() {
+                    if next.num_left() == 0 {
                         let mut run = current.take().unwrap_or_default();
                         run.push(v);
                         result.push(ColExport::litrun(run))
@@ -406,10 +417,11 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         if data.len() == 0 {
             return Ok(None);
         }
-        if let Some(lit) = self.active_lit() {
+        if self.num_left() > 0 {
             let (value_bytes, value) = P::unpack(data)?;
             let group = P::group(value);
-            let cursor = self.progress(1, value_bytes, lit.next(), group);
+            let lit = self.next_lit(1);
+            let cursor = self.progress(1, value_bytes, lit, group);
             let value = Run {
                 count: 1,
                 value: Some(value),
@@ -423,7 +435,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     let count = count as usize;
                     let (value_bytes, value) = P::unpack(data)?;
                     let group = P::group(value) * count;
-                    let cursor = self.progress(count, count_bytes + value_bytes, None, group);
+                    let lit = self.next_lit(count);
+                    let cursor = self.progress(count, count_bytes + value_bytes, lit, group);
                     let value = Run {
                         count,
                         value: Some(value),
@@ -487,17 +500,15 @@ impl LitRunCursor {
     }
 
     fn num_left(&self) -> usize {
-        assert!(self.len >= self.index);
-        self.len - self.index
+        self.len.saturating_sub(self.index)
     }
 
-    fn next(&self) -> Option<Self> {
-        let index = self.index + 1;
-        if index > self.len {
+    fn next(&self, count: usize) -> Option<Self> {
+        if self.index > self.len {
             None
         } else {
             Some(LitRunCursor {
-                index,
+                index: self.index + count,
                 offset: self.offset,
                 group: self.group,
                 len: self.len,
@@ -742,7 +753,7 @@ pub(crate) mod tests {
         );
 
         // empty data
-        let mut col5: ColumnData<RleCursor<5, u64>> = ColumnData::new();
+        let col5: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         assert_eq!(col5.export(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);
@@ -783,5 +794,24 @@ pub(crate) mod tests {
         let mut col3 = col1.clone();
         col3.splice::<u64>(1, 7, vec![]);
         assert_eq!(col3.export(), vec![vec![ColExport::litrun(vec![1, 9]),]]);
+    }
+
+    #[test]
+    fn rle_breaking_runs_near_lit_runs() {
+        let mut col1: ColumnData<RleCursor<1024, u64>> = ColumnData::new();
+        col1.splice(0, 0, vec![1, 2, 4, 4, 4, 5, 6]);
+        assert_eq!(
+            col1.export(),
+            vec![vec![
+                ColExport::litrun(vec![1, 2]),
+                ColExport::run(3, 4),
+                ColExport::litrun(vec![5, 6]),
+            ]]
+        );
+        col1.splice::<u64>(3, 1, vec![9]);
+        assert_eq!(
+            col1.export(),
+            vec![vec![ColExport::litrun(vec![1, 2, 4, 9, 4, 5, 6]),]]
+        );
     }
 }

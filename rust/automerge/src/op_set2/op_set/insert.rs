@@ -112,10 +112,6 @@ impl<'a> InsertQuery<'a> {
             pos = op.pos;
         }
 
-        if let Some(w) = last_width.take() {
-            index += w;
-        }
-
         if let Some(loc) = self.candidates.pop() {
             // process all the marks before the final pos
             for op in post_marks {

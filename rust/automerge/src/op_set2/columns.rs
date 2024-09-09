@@ -147,22 +147,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         &self.slabs
     }
 
-    pub(crate) fn seek(&self, mut pos: usize) -> (Option<Run<'_, C::Item>>, C) {
-        for slab in &self.slabs {
-            if slab.len() <= pos {
-                pos -= slab.len();
-            } else {
-                return C::seek(pos + 1, slab.as_ref());
-            }
-        }
-        panic!()
-    }
-
     pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         let mut state = C::State::default();
         let mut writer = SlabWriter::new(usize::MAX);
-        // TODO if just 1 slab - copy it
+        // TODO - if just 1 slab - copy it
         for s in &self.slabs {
             state = C::write(&mut writer, s, state);
         }
@@ -653,8 +642,15 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
 
         let after = self.to_vec();
-        if self.len != after.len() {
+        let slab_len = self.slabs.iter().map(|s| s.len()).sum::<usize>();
+        if self.len != after.len() || self.len != slab_len {
             log!(":::SPLICE FAIL (index={}):::", index);
+            log!(
+                "before.len={} after.len={} slabs.len={}",
+                before.len(),
+                self.len(),
+                slab_len
+            );
             log!("SLABS={:?}", self.slabs);
             log!(
                 "::: self.len({}) != after.len({}) :::",
@@ -871,7 +867,6 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
             return (None, Self::default());
         } else {
             let mut cursor = Self::default();
-            //return Self::advance_by(index, cursor, data);
             while let Some((val, next_cursor)) = cursor.next(data) {
                 if next_cursor.index() >= index {
                     return (Some(val), next_cursor);

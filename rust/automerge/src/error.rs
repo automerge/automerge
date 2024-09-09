@@ -1,5 +1,4 @@
 use crate::exid::ExId;
-use crate::op_set2::pack::PackError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
