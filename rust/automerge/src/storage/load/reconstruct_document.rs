@@ -15,6 +15,8 @@ pub(crate) enum Error {
     //OpsOutOfOrder,
     #[error("invalid changes: {0}")]
     InvalidChanges(#[from] super::change_collector::Error),
+    #[error("mismatched max_op ops={0}, changes={0}")]
+    MismatchingMaxOp(u64, u64),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
     // FIXME - i need to do this check
@@ -56,10 +58,10 @@ pub(crate) fn reconstruct_opset<'a>(
 ) -> Result<ReconOpSet, Error> {
     let op_set = OpSet::new(doc)?;
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
-    let mut max_op = 0;
     let mut preds = HashMap::new();
     let mut last = None;
     let mut iter = op_set.iter();
+    let mut max_op = 0;
     while let Some(op) = iter.try_next()? {
         let next = Some((op.obj, op.elemid_or_key()));
         if last != next {
@@ -67,8 +69,10 @@ pub(crate) fn reconstruct_opset<'a>(
             last = next;
         }
         for id in op.succ() {
+            max_op = std::cmp::max(max_op, id.counter());
             preds.entry(id).or_default().push(op.id);
         }
+
         max_op = std::cmp::max(max_op, op.id.counter());
 
         let pred = preds.remove(&op.id);
@@ -78,7 +82,11 @@ pub(crate) fn reconstruct_opset<'a>(
 
     add_del_ops(&mut change_collector, &mut last, &mut preds)?;
 
-    let (changes, heads) = flush_changes(change_collector, doc, mode, &op_set)?;
+    let (changes, heads, max_op2) = flush_changes(change_collector, doc, mode, &op_set)?;
+
+    if max_op != max_op2 {
+        return Err(Error::MismatchingMaxOp(max_op, max_op2));
+    }
 
     Ok(ReconOpSet {
         changes,
@@ -110,7 +118,7 @@ fn flush_changes(
     doc: &Document<'_>,
     mode: VerificationMode,
     op_set: &OpSet,
-) -> Result<(Vec<Change>, BTreeSet<ChangeHash>), Error> {
+) -> Result<(Vec<Change>, BTreeSet<ChangeHash>, u64), Error> {
     let super::change_collector::CollectedChanges { history, heads } =
         change_collector.finish(op_set)?;
     if matches!(mode, VerificationMode::Check) {
@@ -124,8 +132,9 @@ fn flush_changes(
             }));
         }
     }
-    let changes = history.into_iter().map(Change::new).collect();
-    Ok((changes, heads))
+    let changes = history.into_iter().map(Change::new).collect::<Vec<_>>();
+    let max_op = changes.iter().map(|c| c.max_op()).max().unwrap_or(0);
+    Ok((changes, heads, max_op))
 }
 
 pub(crate) struct ReconOpSet {
