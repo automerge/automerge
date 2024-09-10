@@ -72,6 +72,12 @@ pub(crate) enum ReadOpError {
     //MissingMarkName,
 }
 
+impl<'a> ExactSizeIterator for OpIter<'a> {
+    fn len(&self) -> usize {
+        self.end_pos() - self.pos()
+    }
+}
+
 impl<'a> OpIter<'a> {
     pub(crate) fn op_set(&self) -> &'a OpSet {
         self.op_set
@@ -99,11 +105,9 @@ impl<'a> OpIter<'a> {
         let successors = self.read_successors()?;
         let pos = self.pos;
         let conflict = false;
-        let index = 0;
         self.pos += 1;
         Ok(Some(Op {
             pos,
-            index,
             conflict,
             id,
             key,
@@ -242,22 +246,4 @@ impl<'a> Iterator for OpIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().unwrap()
     }
-}
-
-/*
-impl<'a> Iterator for OpIter<'a, Unverified> {
-    type Item = Result<Op<'a>, ReadOpError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().transpose()
-    }
-}
-*/
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    //#[test]
-    //fn foo_bar() {}
 }

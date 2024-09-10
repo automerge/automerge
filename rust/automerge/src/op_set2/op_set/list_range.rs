@@ -1,10 +1,9 @@
 use super::{MarkIter, OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
 use crate::Value;
-use crate::{exid::ExId, marks::MarkSet, types::ListEncoding};
+use crate::{exid::ExId, types::ListEncoding};
 
 use std::fmt::Debug;
 use std::ops::RangeBounds;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ListRangeItem<'a> {
@@ -12,7 +11,7 @@ pub struct ListRangeItem<'a> {
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    //pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
 #[derive(Debug)]
@@ -65,13 +64,13 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
             let value = op.value().into();
             let op_set = iter.get_opiter().op_set();
             let id = op.exid(op_set);
-            let marks = iter.get_marks().cloned();
+            //let marks = iter.get_marks().cloned();
             return Some(ListRangeItem {
                 index,
                 value,
                 id,
                 conflict,
-                marks,
+                //marks,
             });
         }
         None

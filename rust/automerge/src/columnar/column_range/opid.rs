@@ -3,13 +3,10 @@ use std::ops::Range;
 use super::{DeltaRange, RleRange};
 use crate::{
     columnar::{
-        encoding::{
-            raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
-        },
+        encoding::{raw, DeltaEncoder, RleEncoder, Sink},
         SpliceError,
     },
     convert,
-    types::OpId,
 };
 
 #[derive(Debug, Clone)]
@@ -31,12 +28,14 @@ impl OpIdRange {
         &self.counter
     }
 
-    pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> OpIdIter<'a> {
-        OpIdIter {
-            actor: self.actor.decoder(data),
-            counter: self.counter.decoder(data),
+    /*
+        pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> OpIdIter<'a> {
+            OpIdIter {
+                actor: self.actor.decoder(data),
+                counter: self.counter.decoder(data),
+            }
         }
-    }
+    */
 
     pub(crate) fn encode<I, O>(opids: I, out: &mut Vec<u8>) -> Self
     where
@@ -79,6 +78,7 @@ impl OpIdRange {
     }
 }
 
+/*
 #[derive(Clone)]
 pub(crate) struct OpIdIter<'a> {
     actor: RleDecoder<'a, u64>,
@@ -127,6 +127,7 @@ impl<'a> Iterator for OpIdIter<'a> {
         self.try_next().transpose()
     }
 }
+*/
 
 pub(crate) struct OpIdEncoder<S> {
     actor: RleEncoder<S, u64>,
@@ -161,50 +162,6 @@ impl OpIdEncoder<Vec<u8>> {
         OpIdRange {
             actor: (start..actor_end).into(),
             counter: (actor_end..counter_end).into(),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        columnar::encoding::properties::{opid, splice_scenario},
-        types::OpId,
-    };
-    use proptest::prelude::*;
-    use std::convert::Infallible;
-
-    fn encode(vals: &[OpId]) -> (Vec<u8>, OpIdRange) {
-        let mut out = Vec::new();
-        let r = OpIdRange::encode(vals.iter().copied(), &mut out);
-        (out, r)
-    }
-
-    fn decode(buf: &[u8], range: OpIdRange) -> Vec<OpId> {
-        range.iter(buf).map(|c| c.unwrap()).collect()
-    }
-
-    proptest! {
-        #[test]
-        fn encode_decode_opid(opids in proptest::collection::vec(opid(), 0..100)) {
-            let (encoded, range) = encode(&opids);
-            assert_eq!(opids, decode(&encoded[..], range));
-        }
-
-        #[test]
-        fn splice_opids(scenario in splice_scenario(opid())) {
-            let (encoded, range) = encode(&scenario.initial_values);
-            let mut out = Vec::new();
-            let replacements: Vec<Result<OpId, Infallible>> = scenario.replacements.iter().cloned().map(Ok).collect();
-            let new_range = range.splice(
-                &encoded,
-                scenario.replace_range.clone(),
-                replacements.into_iter(),
-                &mut out
-            ).unwrap();
-            let result = decode(&out[..], new_range);
-            scenario.check(result);
         }
     }
 }

@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn column_data_meta_group() {
-        let mut data = vec![
+        let data = vec![
             ValueMeta(1),
             ValueMeta(6 + (30 << 4)),
             ValueMeta(6 + (10 << 4)),

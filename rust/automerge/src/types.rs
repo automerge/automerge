@@ -807,47 +807,49 @@ impl From<Prop> for wasm_bindgen::JsValue {
 
 #[cfg(test)]
 pub(crate) mod gen {
-    use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
-    use crate::value::Counter;
+    //use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
+    //use crate::value::Counter;
 
-    use proptest::prelude::*;
+    //use proptest::prelude::*;
 
-    pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
-        proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
-            .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
-    }
+    /*
+        pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
+            proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
+                .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
+        }
 
-    pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
-        prop_oneof![
-            proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
-            "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
-            any::<i64>().prop_map(ScalarValue::Int),
-            any::<u64>().prop_map(ScalarValue::Uint),
-            any::<f64>().prop_map(ScalarValue::F64),
-            any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
-            any::<i64>().prop_map(ScalarValue::Timestamp),
-            any::<bool>().prop_map(ScalarValue::Boolean),
-            Just(ScalarValue::Null),
-        ]
-    }
+        pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
+            prop_oneof![
+                proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
+                "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
+                any::<i64>().prop_map(ScalarValue::Int),
+                any::<u64>().prop_map(ScalarValue::Uint),
+                any::<f64>().prop_map(ScalarValue::F64),
+                any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
+                any::<i64>().prop_map(ScalarValue::Timestamp),
+                any::<bool>().prop_map(ScalarValue::Boolean),
+                Just(ScalarValue::Null),
+            ]
+        }
 
-    pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
-        prop_oneof![
-            Just(ObjType::Map),
-            Just(ObjType::Table),
-            Just(ObjType::List),
-            Just(ObjType::Text),
-        ]
-    }
+        pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
+            prop_oneof![
+                Just(ObjType::Map),
+                Just(ObjType::Table),
+                Just(ObjType::List),
+                Just(ObjType::Text),
+            ]
+        }
 
-    pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
-        prop_oneof![
-            Just(OpType::Delete),
-            any::<i64>().prop_map(OpType::Increment),
-            gen_scalar_value().prop_map(OpType::Put),
-            gen_objtype().prop_map(OpType::Make)
-        ]
-    }
+        pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
+            prop_oneof![
+                Just(OpType::Delete),
+                any::<i64>().prop_map(OpType::Increment),
+                gen_scalar_value().prop_map(OpType::Put),
+                gen_objtype().prop_map(OpType::Make)
+            ]
+        }
+    */
 
     /*
         pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {

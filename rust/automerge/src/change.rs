@@ -353,27 +353,29 @@ impl From<&Change> for crate::ExpandedChange {
 
 #[cfg(test)]
 pub(crate) mod gen {
-    use super::Change;
-    use crate::{
-        storage::change::ChangeBuilder,
-        types::{
-            //gen::{gen_hash, gen_op},
-            ObjId,
-            OpId,
-        },
-        ActorId,
-    };
-    use proptest::prelude::*;
+    /*
+        use super::Change;
+        use crate::{
+            storage::change::ChangeBuilder,
+            types::{
+                //gen::{gen_hash, gen_op},
+                ObjId,
+                OpId,
+            },
+            ActorId,
+        };
+        use proptest::prelude::*;
 
-    fn gen_actor() -> impl Strategy<Value = ActorId> {
-        proptest::array::uniform32(proptest::bits::u8::ANY).prop_map(ActorId::from)
-    }
-
-    prop_compose! {
-        fn gen_actors()(this_actor in gen_actor(), other_actors in proptest::collection::vec(gen_actor(), 0..10)) -> (ActorId, Vec<ActorId>) {
-            (this_actor, other_actors)
+        fn gen_actor() -> impl Strategy<Value = ActorId> {
+            proptest::array::uniform32(proptest::bits::u8::ANY).prop_map(ActorId::from)
         }
-    }
+
+        prop_compose! {
+            fn gen_actors()(this_actor in gen_actor(), other_actors in proptest::collection::vec(gen_actor(), 0..10)) -> (ActorId, Vec<ActorId>) {
+                (this_actor, other_actors)
+            }
+        }
+    */
 
     // FIXME - port these tests over to the new op_set
 

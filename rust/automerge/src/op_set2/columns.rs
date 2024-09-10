@@ -59,12 +59,6 @@ impl<'a> Run<'a, i64> {
     }
 }
 
-impl<'a> Run<'a, u64> {
-    fn sum(&self) -> u64 {
-        self.count as u64 * self.value.unwrap_or(0)
-    }
-}
-
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
     pub(crate) fn new(count: usize, value: Option<T::Unpacked<'a>>) -> Self {
         Run { count, value }
@@ -143,9 +137,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
-    pub(crate) fn slabs(&self) -> &[Slab] {
-        &self.slabs
-    }
+    /*
+        pub(crate) fn slabs(&self) -> &[Slab] {
+            &self.slabs
+        }
+    */
 
     pub(crate) fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
@@ -251,7 +247,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         ColumnDataIter {
             pos: 0,
             group: 0,
-            max: usize::MAX,
+            max: 0,
             slabs: NextSlab::new(&[]),
             iter: None,
         }
@@ -430,56 +426,58 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         })
     }
 
-    pub(crate) fn seek_to_value<'b, V: for<'c> PartialOrd<<C::Item as Packable>::Unpacked<'c>>>(
-        &mut self,
-        value: V,
-    ) -> usize {
-        struct SeekValue<T: ?Sized, V> {
-            target: V,
-            advanced_by: usize,
-            found: bool,
-            _phantom: PhantomData<T>,
-        }
+    /*
+        pub(crate) fn seek_to_value<'b, V: for<'c> PartialOrd<<C::Item as Packable>::Unpacked<'c>>>(
+            &mut self,
+            value: V,
+        ) -> usize {
+            struct SeekValue<T: ?Sized, V> {
+                target: V,
+                advanced_by: usize,
+                found: bool,
+                _phantom: PhantomData<T>,
+            }
 
-        impl<T: ?Sized, V> Seek<T> for SeekValue<T, V>
-        where
-            T: Packable,
-            V: for<'a> PartialOrd<T::Unpacked<'a>>,
-        {
-            type Output = usize;
-            fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
-                if let Some(c) = r.value {
-                    if self.target == c {
-                        return RunStep::Process;
+            impl<T: ?Sized, V> Seek<T> for SeekValue<T, V>
+            where
+                T: Packable,
+                V: for<'a> PartialOrd<T::Unpacked<'a>>,
+            {
+                type Output = usize;
+                fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
+                    if let Some(c) = r.value {
+                        if self.target == c {
+                            return RunStep::Process;
+                        }
                     }
+                    self.advanced_by += r.count;
+                    RunStep::Skip
                 }
-                self.advanced_by += r.count;
-                RunStep::Skip
-            }
-            fn process_element<'b>(&mut self, e: Option<<T as Packable>::Unpacked<'b>>) {
-                if let Some(e) = e {
-                    if self.target == e {
-                        self.found = true;
-                        return;
+                fn process_element<'b>(&mut self, e: Option<<T as Packable>::Unpacked<'b>>) {
+                    if let Some(e) = e {
+                        if self.target == e {
+                            self.found = true;
+                            return;
+                        }
                     }
+                    self.advanced_by += 1;
                 }
-                self.advanced_by += 1;
+                fn done<'b>(&self) -> bool {
+                    self.found
+                }
+                fn finish(self) -> Self::Output {
+                    self.advanced_by
+                }
             }
-            fn done<'b>(&self) -> bool {
-                self.found
-            }
-            fn finish(self) -> Self::Output {
-                self.advanced_by
-            }
-        }
 
-        self.seek_to(SeekValue {
-            target: value,
-            found: false,
-            advanced_by: 0,
-            _phantom: PhantomData,
-        })
-    }
+            self.seek_to(SeekValue {
+                target: value,
+                found: false,
+                advanced_by: 0,
+                _phantom: PhantomData,
+            })
+        }
+    */
 
     pub(crate) fn seek_to<S: Seek<C::Item>>(&mut self, mut seek: S) -> S::Output {
         loop {
@@ -564,7 +562,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnDataIter::<C> {
             pos: 0,
             group: 0,
-            max: usize::MAX,
+            max: self.len,
             slabs: NextSlab::new(&self.slabs),
             iter: None,
         }
@@ -593,15 +591,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn export(&self) -> Vec<Vec<ColExport<C::Item>>> {
         self.slabs.iter().map(|s| C::export(s.as_ref())).collect()
-    }
-
-    pub(crate) fn update<'a>(
-        &mut self,
-        _index: usize,
-        _values: <C::Item as Packable>::Unpacked<'a>,
-    ) {
     }
 
     pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
@@ -621,15 +613,17 @@ impl<C: ColumnCursor> ColumnData<C> {
                 slab_offset += slab.len();
             } else {
                 match C::splice(slab, index - slab_offset, del, values) {
-                    SpliceResult::Done(add, del) => {
-                        self.len = self.len + add - del;
-                    }
-                    SpliceResult::Add(add, del, slabs) => {
-                        self.len = self.len + add - del;
-                        let j = i + 1;
-                        self.slabs.splice(j..j, slabs);
-                        assert!(self.slabs.len() > 0);
-                    }
+                    /*
+                                        SpliceResult::Done(add, del) => {
+                                            self.len = self.len + add - del;
+                                        }
+                                        SpliceResult::Add(add, del, slabs) => {
+                                            self.len = self.len + add - del;
+                                            let j = i + 1;
+                                            self.slabs.splice(j..j, slabs);
+                                            assert!(self.slabs.len() > 0);
+                                        }
+                    */
                     SpliceResult::Replace(add, del, slabs) => {
                         self.len = self.len + add - del;
                         let j = i + 1;
@@ -691,6 +685,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ColExport<P: Packable + ?Sized> {
     LitRun(Vec<P::Owned>),
@@ -699,6 +694,7 @@ pub(crate) enum ColExport<P: Packable + ?Sized> {
     Null(usize),
 }
 
+#[cfg(test)]
 impl<P: Packable + ?Sized> ColExport<P> {
     pub(crate) fn litrun(items: Vec<P::Unpacked<'_>>) -> Self {
         Self::LitRun(items.into_iter().map(|i| P::own(i)).collect())
@@ -811,6 +807,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         data: &'a [u8],
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError>;
 
+    #[cfg(test)]
     fn export(data: &[u8]) -> Vec<ColExport<Self::Item>>;
 
     fn export_item(item: Option<<Self::Item as Packable>::Unpacked<'_>>) -> Self::Export;
@@ -847,20 +844,22 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         0
     }
 
-    fn advance_by<'a>(
-        count: usize,
-        mut cursor: Self,
-        data: &'a [u8],
-    ) -> (Option<Run<'a, Self::Item>>, Self) {
-        let index = cursor.index() + count;
-        while let Some((val, next_cursor)) = cursor.next(data) {
-            if next_cursor.index() >= index {
-                return (Some(val), next_cursor);
+    /*
+        fn advance_by<'a>(
+            count: usize,
+            mut cursor: Self,
+            data: &'a [u8],
+        ) -> (Option<Run<'a, Self::Item>>, Self) {
+            let index = cursor.index() + count;
+            while let Some((val, next_cursor)) = cursor.next(data) {
+                if next_cursor.index() >= index {
+                    return (Some(val), next_cursor);
+                }
+                cursor = next_cursor;
             }
-            cursor = next_cursor;
+            panic!() // we reached the end of the buffer without finding our item - return an error
         }
-        panic!() // we reached the end of the buffer without finding our item - return an error
-    }
+    */
 
     fn seek<'a>(index: usize, data: &'a [u8]) -> (Option<Run<'a, Self::Item>>, Self) {
         if index == 0 {
@@ -1022,6 +1021,7 @@ impl Column {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn dump(&self) {
         match self {
             Self::Actor(col) => col.dump(),
@@ -1133,8 +1133,8 @@ impl Column {
 }
 
 pub(crate) enum SpliceResult {
-    Done(usize, usize),
-    Add(usize, usize, Vec<Slab>),
+    //Done(usize, usize),
+    //Add(usize, usize, Vec<Slab>),
     Replace(usize, usize, Vec<Slab>),
 }
 
@@ -1532,7 +1532,7 @@ pub(crate) mod tests {
         {
             let mut result = vec![];
             let len = rng.gen::<usize>() % 4 + 1;
-            for i in 0..len {
+            for _ in 0..len {
                 if rng.gen::<i64>() % 3 == 0 {
                     result.push(Self::null())
                 } else {
@@ -1562,7 +1562,7 @@ pub(crate) mod tests {
         fn rand(rng: &mut SmallRng) -> bool {
             rng.gen::<bool>()
         }
-        fn plus(&self, index: usize) -> bool {
+        fn plus(&self, _index: usize) -> bool {
             true
         }
     }
@@ -1621,9 +1621,9 @@ pub(crate) mod tests {
         let mut data: Vec<Option<u64>> = vec![];
         let mut col = ColumnData::<RleCursor<{ usize::MAX }, u64>>::new();
         let mut rng = make_rng();
-        for i in 0..1000 {
+        for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
-            test_splice(&mut data, &mut col, 0, values);
+            test_splice(&mut data, &mut col, index, values);
         }
     }
 
@@ -1639,46 +1639,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn column_data_fuzz_test_seek_to_value_int() {
-        let mut rng = make_rng();
-        for _ in 0..1000 {
-            let mut col = ColumnData::<IntCursor>::new();
-            let values = Option::<u64>::rand_vec(&mut rng);
-            col.splice(0, 0, values.clone());
-
-            // choose a random value  from `values` and record the index of the
-            // first occurrence of that value
-            let non_empty_values = values
-                .iter()
-                .filter_map(|value| value.clone())
-                .collect::<Vec<_>>();
-            if non_empty_values.len() == 0 {
-                continue;
-            }
-            let target = non_empty_values.choose(&mut rng).unwrap();
-            let index = values
-                .iter()
-                .position(|v| v.map(|v| v == *target).unwrap_or(false))
-                .unwrap();
-
-            // Now seek to that index
-            let mut iter = col.iter();
-            let skipped = iter.seek_to_value(*target);
-            assert_eq!(skipped, index);
-            let remaining = iter.collect::<Vec<_>>();
-            let expected = values[index..].to_vec();
-            assert_eq!(remaining, expected);
-        }
-    }
-
-    #[test]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<RleCursor<{ usize::MAX }, str>>::new();
         let mut rng = make_rng();
-        for i in 0..100 {
+        for _ in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);
-            test_splice(&mut data, &mut col, 0, values);
+            test_splice(&mut data, &mut col, index, values);
         }
     }
 
@@ -1698,9 +1665,9 @@ pub(crate) mod tests {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursor>::new();
         let mut rng = make_rng();
-        for i in 0..100 {
+        for _ in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);
-            test_splice(&mut data, &mut col, 0, values);
+            test_splice(&mut data, &mut col, index, values);
         }
     }
 
@@ -1717,7 +1684,7 @@ pub(crate) mod tests {
 
     #[test]
     fn column_data_test_boolean() {
-        let mut data: Vec<bool> = vec![true, true, true];
+        let data: Vec<bool> = vec![true, true, true];
         let mut col = ColumnData::<BooleanCursor>::new();
         col.splice(0, 0, data.clone());
         assert_eq!(col.export(), vec![vec![ColExport::Run(3, true)]]);
@@ -1776,9 +1743,9 @@ pub(crate) mod tests {
         let mut data: Vec<bool> = vec![];
         let mut col = ColumnData::<BooleanCursor>::new();
         let mut rng = make_rng();
-        for i in 0..100 {
+        for _ in 0..100 {
             let (index, values) = generate_splice(data.len(), &mut rng);
-            test_splice(&mut data, &mut col, 0, values);
+            test_splice(&mut data, &mut col, index, values);
         }
     }
 
@@ -1795,7 +1762,7 @@ pub(crate) mod tests {
 
     #[test]
     fn column_data_scope_to_value() {
-        let mut data = vec![
+        let data = vec![
             2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 7, 8, 8,
         ];
         let mut col = ColumnData::<RleCursor<4, u64>>::new();

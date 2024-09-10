@@ -335,7 +335,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut osd = OpSet::from_actors(self.actors.clone());
+            let osd = OpSet::from_actors(self.actors.clone());
 
             let start_op = parents
                 .iter()

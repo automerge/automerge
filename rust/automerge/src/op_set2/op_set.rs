@@ -20,8 +20,7 @@ use super::pack::PackError;
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue};
 use super::{
-    BooleanCursor, Column, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, RawCursor, Slab,
-    StrCursor, ValueMeta,
+    BooleanCursor, Column, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, StrCursor, ValueMeta,
 };
 
 use std::borrow::Cow;
@@ -30,7 +29,6 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod found_op;
-mod index_iter;
 mod insert;
 mod keys;
 mod list_range;
@@ -50,9 +48,8 @@ pub use spans::{Span, Spans};
 pub use values::Values;
 
 pub(crate) use found_op::OpsFoundIter;
-pub(crate) use index_iter::IndexIter;
 pub(crate) use insert::InsertQuery;
-pub(crate) use keys::{KeyIter, KeyOpIter};
+pub(crate) use keys::KeyIter;
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
@@ -79,6 +76,7 @@ impl OpSet {
         std::mem::swap(&mut checkpoint.0, self);
     }
 
+    #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         OpSet {
             len: 0,
@@ -192,34 +190,6 @@ impl OpSet {
     ) -> usize {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
-
-    /*
-        pub(crate) fn seek_to_nth(
-            &self,
-            obj: &ObjId,
-            index: usize,
-            encoding: ListEncoding,
-            clock: Option<Clock>,
-        ) -> Option<usize> {
-            let mut iter = self
-                .iter_obj(obj)
-                .visible(clock)
-                .marks()
-                .top_ops()
-                .index(encoding);
-            if index == 0 {
-                None
-            } else {
-                while let Some(op) = iter.next() {
-                    if op.index >= index {
-                        let _ = iter.unwrap();
-                        return None;
-                    }
-                }
-                None
-            }
-        }
-    */
 
     pub(crate) fn query_insert_at(
         &self,
@@ -419,17 +389,6 @@ impl OpSet {
         self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC)
     }
 
-    fn get_succ_num(&self) -> ColumnDataIter<'_, IntCursor> {
-        self.cols.get_group(SUCC_COUNT_COL_SPEC)
-    }
-    fn get_succ_actor(&self) -> ColumnDataIter<'_, ActorCursor> {
-        self.cols.get_actor(SUCC_ACTOR_COL_SPEC)
-    }
-
-    fn get_succ_counter(&self) -> ColumnDataIter<'_, DeltaCursor> {
-        self.cols.get_delta_integer(SUCC_COUNTER_COL_SPEC)
-    }
-
     fn validate(&self) {
         let mut ctr = self.get_obj_ctr();
         let mut last = 0;
@@ -611,6 +570,7 @@ impl OpSet {
         Self::from_parts(doc.op_metadata.raw_columns(), data, actors)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_doc_ops<
         'a,
         I: Iterator<Item = super::op::Op<'a>> + ExactSizeIterator + Clone,
@@ -676,10 +636,6 @@ impl OpSet {
             .get_str(KEY_STR_COL_SPEC)
             .scope_to_value(Some(prop), range);
         self.iter_range(&range)
-    }
-
-    pub(crate) fn query_opid<'a>(&'a self, id: &OpId) -> Option<Op<'a>> {
-        self.iter().find(|op| &op.id == id)
     }
 
     pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a> {
@@ -799,6 +755,11 @@ impl OpSet {
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         self.cols.rewrite_with_new_actor(idx)
+    }
+
+    pub(crate) fn remove_actor(&mut self, idx: usize) {
+        self.actors.remove(idx);
+        self.cols.rewrite_without_actor(idx);
     }
 }
 
@@ -1055,6 +1016,29 @@ impl Columns {
         }
     }
 
+    fn rewrite_without_actor(&mut self, idx: usize) {
+        for (_spec, col) in &mut self.0 {
+            match col {
+                Column::Actor(col_data) => {
+                    let new_ids = col_data
+                        .iter()
+                        .map(|a| match a {
+                            Some(ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
+                            Some(ActorIdx(id)) if id as usize == idx => {
+                                panic!("cant rewrite - actor is present")
+                            }
+                            old => old,
+                        })
+                        .collect::<Vec<_>>();
+                    let mut new_data = ColumnData::<ActorCursor>::new();
+                    new_data.splice(0, 0, new_ids);
+                    std::mem::swap(col_data, &mut new_data);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn dump(&self) {
         let mut id_a = self.get_actor(ID_ACTOR_COL_SPEC);
         let mut id_c = self.get_delta_integer(ID_COUNTER_COL_SPEC);
@@ -1226,6 +1210,7 @@ impl Columns {
         }
     }
 
+    #[cfg(test)]
     fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
         // FIXME this should insert NULL values into columns we dont recognize
 
@@ -1358,7 +1343,7 @@ impl Columns {
         );
         columns.insert(VALUE_META_COL_SPEC, Column::ValueMeta(value_meta));
 
-        let mut value = ColumnData::<RawCursor>::new();
+        let mut value = ColumnData::<super::RawCursor>::new();
         let values = ops
             .clone()
             .filter_map(|op| op.value.to_raw())
@@ -1463,9 +1448,11 @@ impl Columns {
         }
     }
 
-    fn get_coldata(&self, spec: ColumnSpec) -> &[Slab] {
-        self.0.get(&spec).unwrap().slabs()
-    }
+    /*
+        fn get_coldata(&self, spec: ColumnSpec) -> &[Slab] {
+            self.0.get(&spec).unwrap().slabs()
+        }
+    */
 
     fn get_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, IntCursor> {
         match self.0.get(&spec) {
@@ -1737,29 +1724,18 @@ pub(super) use ids::*;
 mod tests {
     use super::*;
 
-    use proptest::{
-        arbitrary::any,
-        prop_compose, prop_oneof,
-        strategy::{Just, Strategy},
-    };
-
     use crate::{
-        indexed_cache::IndexedCache,
         op_set2::{
             columns::ColumnData,
             op::SuccCursors,
             rle::ActorCursor,
-            //slab::WritableSlab,
             types::{Action, ActorIdx, ScalarValue},
-            ColumnCursor,
-            DeltaCursor,
-            KeyRef,
-            Slab,
+            DeltaCursor, KeyRef,
         },
         storage::Document,
         transaction::Transactable,
         types::{ObjId, OpId},
-        ActorId, AutoCommit, ObjType, OpType,
+        ActorId, AutoCommit, ObjType,
     };
 
     use super::OpSet;
@@ -1863,14 +1839,12 @@ mod tests {
         let mut group_iter = group_data.iter();
         let mut actor_iter = succ_actor_data.iter();
         let mut counter_iter = succ_counter_data.iter();
-        let tmp_op_set = OpSet::default();
 
         // first encode the succs
         for test_op in test_ops {
             let group_count = group_iter.next().unwrap().unwrap();
             let op = super::super::op::Op {
-                pos: 0,   // not relevent for this equality test
-                index: 0, // not relevent for this equality test
+                pos: 0, // not relevent for this equality test
                 id: test_op.id,
                 obj: test_op.obj,
                 action: test_op.action,
@@ -2242,9 +2216,7 @@ mod tests {
                 }
             }
         }
-    */
 
-    /*
         impl std::fmt::Debug for Scenario {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let ops_desc = self
@@ -2265,7 +2237,6 @@ mod tests {
                     .finish()
             }
         }
-    */
 
     fn arbitrary_action() -> impl Strategy<Value = OpType> {
         prop_oneof![
@@ -2301,7 +2272,6 @@ mod tests {
         ]
     }
 
-    /*
         fn arbitrary_key(
             actors: &[crate::ActorId],
             keys: &crate::indexed_cache::IndexedCache<String>,
@@ -2315,7 +2285,6 @@ mod tests {
                 .prop_map(crate::types::Key::Seq)
             ]
         }
-    */
 
     fn arbitrary_opid(actors: &[crate::ActorId]) -> impl Strategy<Value = crate::types::OpId> {
         (0..actors.len()).prop_flat_map(move |actor_idx| {
@@ -2327,7 +2296,6 @@ mod tests {
         proptest::collection::vec(any::<u8>(), 32).prop_map(|v| crate::ActorId::from(&v))
     }
 
-    /*
         #[derive(Debug)]
         struct ArbOp {
             op: OpBuilder,
@@ -2367,7 +2335,6 @@ mod tests {
                 }
             }
         }
-    */
 
     fn arbitrary_objid(actors: &[crate::ActorId]) -> impl Strategy<Value = crate::types::ObjId> {
         prop_oneof![
@@ -2380,4 +2347,5 @@ mod tests {
         proptest::collection::vec(proptest::string::string_regex("[a-zA-Z]*").unwrap(), 1..10)
             .prop_map(|v| v.into_iter().collect())
     }
+    */
 }

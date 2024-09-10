@@ -4,21 +4,18 @@ use crate::{
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
-            BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, MaybeBooleanRange,
-            ObjIdEncoder, ObjIdIter, ObjIdRange, OpIdEncoder, OpIdIter, OpIdListEncoder,
-            OpIdListIter, OpIdListRange, OpIdRange, RleRange, ValueEncoder, ValueIter, ValueRange,
+            BooleanRange, DeltaRange, KeyEncoder, KeyRange, MaybeBooleanRange, ObjIdEncoder,
+            ObjIdRange, OpIdEncoder, OpIdListEncoder, OpIdListRange, OpIdRange, RleRange,
+            ValueEncoder, ValueRange,
         },
-        encoding::{
-            BooleanDecoder, BooleanEncoder, MaybeBooleanDecoder, MaybeBooleanEncoder, RleDecoder,
-            RleEncoder,
-        },
+        encoding::{BooleanEncoder, MaybeBooleanEncoder, RleEncoder},
     },
     convert,
     storage::{
         columns::{compression, ColumnId, ColumnSpec, ColumnType},
         Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    types::{ObjId, OpId, ScalarValue},
+    types::ScalarValue,
 };
 
 const OBJ_COL_ID: ColumnId = ColumnId::new(0);

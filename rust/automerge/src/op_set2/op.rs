@@ -2,7 +2,7 @@ use super::columns::ColumnDataIter;
 use super::op_set::{OpLike, OpSet};
 use super::rle::ActorCursor;
 use super::types::{Action, Key, KeyRef, OpType, PropRef, ScalarValue};
-use super::{ActorIdx, DeltaCursor, Value, ValueMeta};
+use super::{DeltaCursor, Value, ValueMeta};
 
 use crate::convert;
 use crate::storage::document::AsDocOp;
@@ -10,7 +10,6 @@ use crate::storage::document::AsDocOp;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate;
-use crate::storage::ColumnSpec;
 use crate::text_value::TextValue;
 use crate::types;
 use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, OpId};
@@ -77,46 +76,6 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn get_int(&self, spec: &ColumnSpec) -> Option<i64> {
-        match *spec {
-            super::op_set::ID_COUNTER_COL_SPEC => Some(0),
-            super::op_set::KEY_COUNTER_COL_SPEC => Some(0),
-            _ => {
-                log!("unknown col spec ({:?}) passed to get_int()", spec);
-                None
-            }
-        }
-    }
-
-    pub(crate) fn get_group_int(&self, spec: &ColumnSpec) -> Vec<Option<i64>> {
-        if *spec == super::op_set::SUCC_COUNTER_COL_SPEC {
-            vec![]
-        } else {
-            log!("unknown col spec ({:?}) passed to get_group_int()", spec);
-            vec![]
-        }
-    }
-
-    pub(crate) fn get_actor(&self, spec: &ColumnSpec) -> Option<ActorIdx> {
-        match *spec {
-            super::op_set::ID_ACTOR_COL_SPEC => Some(ActorIdx(0)),
-            super::op_set::KEY_ACTOR_COL_SPEC => Some(ActorIdx(0)),
-            _ => {
-                log!("unknown col spec ({:?}) passed to get_actor()", spec);
-                None
-            }
-        }
-    }
-
-    pub(crate) fn get_group_actor(&self, spec: &ColumnSpec) -> Vec<Option<ActorIdx>> {
-        if *spec == super::op_set::SUCC_ACTOR_COL_SPEC {
-            vec![]
-        } else {
-            log!("unknown col spec ({:?}) passed to get_group_actor()", spec);
-            vec![]
-        }
-    }
-
     pub(crate) fn prop(&self) -> PropRef<'_> {
         if let Key::Map(s) = &self.key {
             PropRef::Map(s)
@@ -153,14 +112,6 @@ impl OpBuilder2 {
 
     pub(crate) fn is_mark(&self) -> bool {
         self.action.is_mark()
-    }
-
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        if encoding == ListEncoding::List {
-            1
-        } else {
-            TextValue::width(self.as_str()) // FASTER
-        }
     }
 
     pub(crate) fn is_list_op(&self) -> bool {
@@ -272,7 +223,7 @@ impl<'a> OpLike for Op<'a> {
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Op<'a> {
     pub(crate) pos: usize,
-    pub(crate) index: usize,
+    //pub(crate) index: usize,
     pub(crate) conflict: bool,
     pub(crate) id: OpId,
     pub(crate) action: Action,
@@ -412,14 +363,6 @@ impl<'a> Op<'a> {
                 KeyRef::Seq(e) => Ok(e),
                 _ => Err(AutomergeError::InvalidCursorOp),
             }
-        }
-    }
-
-    pub(crate) fn map_key(&self) -> Option<&'a str> {
-        if let KeyRef::Map(s) = self.key {
-            Some(s)
-        } else {
-            None
         }
     }
 

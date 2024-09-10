@@ -35,37 +35,7 @@ pub struct OldMark<'a> {
     pub(crate) data: Cow<'a, OldMarkData>,
 }
 
-impl<'a> OldMark<'a> {
-    pub(crate) fn len(&self) -> usize {
-        self.end - self.start
-    }
-
-    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
-        let mut m = MarkSet::default();
-        let data = self.data.into_owned();
-        //let name = SmolStr::from(self.name);
-        //m.insert(data.name, data.value);
-        m.insert(data.name, data.value);
-        Arc::new(m)
-    }
-
-    pub(crate) fn from_data(start: usize, end: usize, data: &'a OldMarkData) -> OldMark<'a> {
-        OldMark {
-            data: Cow::Borrowed(data),
-            start,
-            end,
-        }
-    }
-}
-
 impl Mark {
-    pub(crate) fn data(&self) -> MarkData<'_> {
-        MarkData {
-            name: self.name.as_str(),
-            value: (&self.value).into(),
-        }
-    }
-
     pub(crate) fn old_data(&self) -> OldMarkData {
         OldMarkData {
             name: SmolStr::from(self.name.as_str()),
@@ -434,11 +404,13 @@ impl<'a> RichTextQueryState<'a> {
         self.map.iter()
     }
 
-    pub(crate) fn insert(&mut self, op: OpId, data: MarkData<'a>) {
-        self.map.insert(op, data);
-    }
+    /*
+        pub(crate) fn insert(&mut self, op: OpId, data: MarkData<'a>) {
+            self.map.insert(op, data);
+        }
 
-    pub(crate) fn remove(&mut self, op: &OpId) {
-        self.map.remove(op);
-    }
+        pub(crate) fn remove(&mut self, op: &OpId) {
+            self.map.remove(op);
+        }
+    */
 }

@@ -1,6 +1,4 @@
-use super::{
-    ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel,
-};
+use super::{ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel};
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub(crate) struct BooleanState {
@@ -168,13 +166,14 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         item.unwrap_or(false)
     }
 
-    fn export(data: &[u8]) -> Vec<ColExport<bool>> {
+    #[cfg(test)]
+    fn export(data: &[u8]) -> Vec<super::ColExport<bool>> {
         let mut result = vec![];
         let mut cursor = Self::default();
         while let Ok(Some((Run { count, value }, next_cursor))) = cursor.try_next(data) {
             cursor = next_cursor;
             if count > 0 {
-                result.push(ColExport::Run(count, value.unwrap()))
+                result.push(super::ColExport::Run(count, value.unwrap()))
             }
         }
         result

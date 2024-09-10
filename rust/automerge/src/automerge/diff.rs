@@ -274,11 +274,12 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         });
 }
 
-// FIXME
+/*
 fn get_prop<'a>(_doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
     op.key.map_key()
     //Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
+*/
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if before.op.is_counter() && after.op.is_counter() {
@@ -293,15 +294,15 @@ fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
 
 #[derive(Debug, Clone)]
 struct RichTextDiff<'a> {
-    doc: &'a Automerge,
+    //doc: &'a Automerge,
     before: MarkStateMachine<'a>,
     after: MarkStateMachine<'a>,
 }
 
 impl<'a> RichTextDiff<'a> {
-    fn new(doc: &'a Automerge) -> Self {
+    fn new(_doc: &'a Automerge) -> Self {
         RichTextDiff {
-            doc,
+            //doc,
             before: MarkStateMachine::default(),
             after: MarkStateMachine::default(),
         }
@@ -548,8 +549,8 @@ mod tests {
 
     use crate::{
         hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
-        transaction::Transactable, types::OldMarkData, AutoCommit, ObjType, Patch, PatchAction,
-        Prop, ScalarValue, Value, ROOT,
+        transaction::Transactable, AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue,
+        Value, ROOT,
     };
     use itertools::Itertools;
 

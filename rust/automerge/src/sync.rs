@@ -746,10 +746,11 @@ mod tests {
     use crate::storage::parse::Input;
     use crate::storage::Chunk;
     use crate::transaction::Transactable;
-    use crate::types::gen::gen_hash;
+    //use crate::types::gen::gen_hash;
     use crate::ActorId;
-    use proptest::prelude::*;
+    //use proptest::prelude::*;
 
+    /*
     prop_compose! {
         fn gen_bloom()(hashes in gen_sorted_hashes(0..10)) -> BloomFilter {
             BloomFilter::from_hashes(hashes.into_iter())
@@ -772,7 +773,6 @@ mod tests {
         })
     }
 
-    /*
         prop_compose! {
             fn gen_sync_message_v1()(
                 heads in gen_sorted_hashes(0..10),

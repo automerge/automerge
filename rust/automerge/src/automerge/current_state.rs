@@ -1,16 +1,18 @@
 use super::{SpanInternal, SpansInternal};
 use crate::{
-    op_set2::{KeyRef, OpIter, OpQuery, Value},
+    op_set2::{OpIter, OpQuery, Value},
     patches::{PatchLog, TextRepresentation},
-    types::{ObjMeta, OpId},
+    types::ObjMeta,
     Automerge, ObjType,
 };
 
+/*
 struct Put<'a> {
     value: Value<'a>,
     key: KeyRef<'a>,
     id: OpId,
 }
+*/
 
 /// Traverse the "current" state of the document, logging patches to `patch_log`.
 ///

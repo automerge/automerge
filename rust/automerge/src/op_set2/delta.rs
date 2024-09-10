@@ -1,7 +1,10 @@
 use super::{
-    ColExport, ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab,
-    SlabWriter, SpliceDel,
+    ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab, SlabWriter,
+    SpliceDel,
 };
+
+#[cfg(test)]
+use super::ColExport;
 
 type SubCursor<const B: usize> = RleCursor<B, i64>;
 
@@ -17,15 +20,6 @@ pub(crate) type DeltaCursor = DeltaCursorInternal<{ usize::MAX }>;
 pub(crate) struct DeltaState<'a> {
     abs: i64,
     rle: RleState<'a, i64>,
-}
-
-impl<'a> DeltaState<'a> {
-    fn new(abs: i64) -> Self {
-        DeltaState {
-            abs,
-            rle: RleState::Empty,
-        }
-    }
 }
 
 impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
@@ -185,6 +179,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         item
     }
 
+    #[cfg(test)]
     fn export(data: &[u8]) -> Vec<ColExport<i64>> {
         SubCursor::<B>::export(data)
     }
@@ -328,7 +323,7 @@ pub(crate) mod tests {
         );
 
         // empty data
-        let mut col5: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
+        let col5: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         assert_eq!(col5.export(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);

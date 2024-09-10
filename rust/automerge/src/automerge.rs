@@ -22,9 +22,8 @@ use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
-use crate::types::{
-    ActorId, ChangeHash, Clock, Export, Exportable, ListEncoding, ObjId, ObjMeta, OpId, Value,
-};
+
+use crate::types::{ActorId, ChangeHash, Clock, ListEncoding, ObjId, ObjMeta, OpId, Value};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -1158,16 +1157,18 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
-        match id.export() {
-            Export::Id(id) => {
-                let mut actor = self.ops.get_actor(id.actor()).to_string();
-                actor.truncate(6);
-                format!("{}@{}", id.counter(), actor)
+    /*
+        pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
+            match id.export() {
+                Export::Id(id) => {
+                    let mut actor = self.ops.get_actor(id.actor()).to_string();
+                    actor.truncate(6);
+                    format!("{}@{}", id.counter(), actor)
+                }
+                Export::Special(s) => s,
             }
-            Export::Special(s) => s,
         }
-    }
+    */
 
     pub fn dump(&self) {
         /*

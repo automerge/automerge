@@ -1,6 +1,4 @@
-use super::{
-    ColExport, ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel,
-};
+use super::{ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel};
 use crate::columnar::encoding::leb128::lebsize;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -365,7 +363,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         item.map(|i| P::own(i))
     }
 
-    fn export(data: &[u8]) -> Vec<ColExport<Self::Item>> {
+    #[cfg(test)]
+    fn export(data: &[u8]) -> Vec<super::ColExport<Self::Item>> {
         let mut cursor = Self::default();
         let mut current = None;
         let mut result = vec![];
@@ -373,9 +372,9 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             match run {
                 Run { count, value: None } => {
                     if let Some(run) = current.take() {
-                        result.push(ColExport::litrun(run))
+                        result.push(super::ColExport::litrun(run))
                     }
-                    result.push(ColExport::Null(count))
+                    result.push(super::ColExport::Null(count))
                 }
                 Run {
                     count: 1,
@@ -384,7 +383,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     if next.num_left() == 0 {
                         let mut run = current.take().unwrap_or_default();
                         run.push(v);
-                        result.push(ColExport::litrun(run))
+                        result.push(super::ColExport::litrun(run))
                     } else if let Some(run) = &mut current {
                         run.push(v);
                     } else {
@@ -396,15 +395,15 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     value: Some(v),
                 } => {
                     if let Some(run) = current.take() {
-                        result.push(ColExport::litrun(run))
+                        result.push(super::ColExport::litrun(run))
                     }
-                    result.push(ColExport::run(count, v))
+                    result.push(super::ColExport::run(count, v))
                 }
             }
             cursor = next;
         }
         if let Some(run) = current.take() {
-            result.push(ColExport::litrun(run))
+            result.push(super::ColExport::litrun(run))
         }
         result
     }
@@ -656,6 +655,7 @@ pub(crate) mod tests {
         let mut sum = 0;
         let mut iter = col1.iter();
         while let Some(val) = iter.next() {
+            assert_eq!(sum, iter.group());
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -678,6 +678,7 @@ pub(crate) mod tests {
         let mut sum = 0;
         let mut iter = col2.iter();
         while let Some(val) = iter.next() {
+            assert_eq!(sum, iter.group());
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -699,7 +700,9 @@ pub(crate) mod tests {
         );
         let mut sum = 0;
         let mut iter = col3.iter();
+
         while let Some(val) = iter.next() {
+            assert_eq!(sum, iter.group());
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -741,6 +744,7 @@ pub(crate) mod tests {
         let mut sum = 0;
         let mut iter = col4.iter();
         while let Some(val) = iter.next() {
+            assert_eq!(sum, iter.group());
             if let Some(v) = val {
                 sum += u64::group(v);
             }

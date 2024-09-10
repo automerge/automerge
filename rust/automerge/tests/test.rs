@@ -1121,7 +1121,6 @@ fn test_local_inc_in_map() {
         "hello" => {"world"},
     }};
     let mut doc4 = AutoCommit::load(&doc1.save()).unwrap();
-    doc1.diff_opset(&doc4);
     assert_eq!(doc4.save(), doc1.save());
 }
 

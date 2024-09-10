@@ -56,6 +56,7 @@ pub(crate) struct DeltaDecoder<'a> {
 }
 
 impl<'a> DeltaDecoder<'a> {
+    #[allow(unused)]
     pub(crate) fn done(&self) -> bool {
         self.rle.done()
     }

@@ -57,22 +57,23 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyIter<'a, I> {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct KeyOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     iter: I,
     next_op: Option<Op<'a>>,
-    count: usize,
 }
 
+#[cfg(test)]
 impl<'a, I: Iterator<Item = Op<'a>> + Clone> KeyOpIter<'a, I> {
     pub(crate) fn new(iter: I) -> Self {
         KeyOpIter {
             iter,
             next_op: None,
-            count: 0,
         }
     }
 }
 
+#[cfg(test)]
 impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
     type Item = KeyIter<'a, I>;
 

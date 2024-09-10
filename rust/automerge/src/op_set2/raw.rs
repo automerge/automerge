@@ -1,5 +1,5 @@
 use super::columns::ScanMeta;
-use super::{ColExport, ColumnCursor, Encoder, PackError, Run, Slab, SlabWriter};
+use super::{ColumnCursor, Encoder, PackError, Run, Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct RawCursorInternal<const B: usize> {
@@ -102,8 +102,9 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         item.unwrap_or(&[]).to_vec()
     }
 
-    fn export(data: &[u8]) -> Vec<ColExport<[u8]>> {
-        vec![ColExport::Raw(data.to_vec())]
+    #[cfg(test)]
+    fn export(data: &[u8]) -> Vec<super::ColExport<[u8]>> {
+        vec![super::ColExport::Raw(data.to_vec())]
     }
 
     fn scan(data: &[u8], _m: &ScanMeta) -> Result<Self, PackError> {

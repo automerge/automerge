@@ -1,7 +1,10 @@
 use crate::marks::MarkSet;
 use crate::types::Clock;
 
-use super::{DiffOpIter, KeyOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter};
+use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter};
+
+#[cfg(test)]
+use super::keys::KeyOpIter;
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -30,6 +33,7 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
         TopOpIter::new(self)
     }
 
+    #[cfg(test)]
     fn key_ops(self) -> KeyOpIter<'a, Self> {
         KeyOpIter::new(self)
     }

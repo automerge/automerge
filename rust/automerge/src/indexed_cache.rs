@@ -29,16 +29,18 @@ where
         }
     }
 
-    pub(crate) fn cache(&mut self, item: T) -> usize {
-        if let Some(n) = self.lookup.get(&item) {
-            *n
-        } else {
-            let n = self.cache.len();
-            self.cache.push(item.clone());
-            self.lookup.insert(item, n);
-            n
+    /*
+        pub(crate) fn cache(&mut self, item: T) -> usize {
+            if let Some(n) = self.lookup.get(&item) {
+                *n
+            } else {
+                let n = self.cache.len();
+                self.cache.push(item.clone());
+                self.lookup.insert(item, n);
+                n
+            }
         }
-    }
+    */
 
     pub(crate) fn lookup(&self, item: &T) -> Option<usize> {
         self.lookup.get(item).cloned()
@@ -49,13 +51,15 @@ where
         self.cache.len()
     }
 
-    pub(crate) fn get(&self, index: usize) -> &T {
-        &self.cache[index]
-    }
+    /*
+        pub(crate) fn get(&self, index: usize) -> &T {
+            &self.cache[index]
+        }
 
-    pub(crate) fn safe_get(&self, index: usize) -> Option<&T> {
-        self.cache.get(index)
-    }
+        pub(crate) fn safe_get(&self, index: usize) -> Option<&T> {
+            self.cache.get(index)
+        }
+    */
 
     #[allow(dead_code)]
     pub(crate) fn sorted(&self) -> IndexedCache<T> {

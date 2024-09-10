@@ -1,6 +1,5 @@
 use super::columns::ScanMeta;
 use super::WriteOp;
-use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 

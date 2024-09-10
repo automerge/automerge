@@ -1,4 +1,5 @@
-use std::{borrow::Cow, collections::HashMap, iter::Iterator};
+use std::borrow::{Borrow, Cow};
+use std::{collections::HashMap, iter::Iterator};
 
 use fxhash::FxBuildHasher;
 use itertools::Itertools;
@@ -17,86 +18,17 @@ use crate::{
 /// * If any of ops in `ops` reference an actor which is not in `actors`
 /// * If any of ops in `ops` reference a property which is not in `props`
 /// * If any of the changes reference a dependency index which is not in `changes`
-/*
-#[tracing::instrument(skip(changes, ops, actors, props, config))]
-pub(crate) fn save_document<'a, I, O>(
-    changes: I,
-    ops: O,
-    actors: &'a IndexedCache<ActorId>,
-    props: &IndexedCache<String>,
-    heads: &[ChangeHash],
-    config: Option<CompressConfig>,
-) -> Vec<u8>
-where
-    I: Iterator<Item = &'a Change> + Clone + 'a,
-    O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
-{
-    let mut actor_lookup = HashMap::with_capacity(actors.len());
-    let mut actor_ids = changes
-        .clone()
-        .map(|c| c.actor_id().clone())
-        .unique()
-        .collect::<Vec<_>>();
-    actor_ids.sort();
-    for (index, actor_id) in actor_ids.iter().enumerate() {
-        actor_lookup.insert(actors.lookup(actor_id).unwrap(), index);
-    }
-
-    let doc_ops = ops
-        .clone()
-        .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
-
-    let hash_graph = HashGraph::new(changes.clone());
-    let changes = changes.map(|c| ChangeWithGraph {
-        actors,
-        actor_lookup: &actor_lookup,
-        change: c,
-        graph: &hash_graph,
-    });
-
-    let doc = Document::new(
-        actor_ids,
-        hash_graph.heads_with_indices(heads.to_vec()),
-        doc_ops,
-        changes,
-        config.unwrap_or(CompressConfig::Threshold(DEFLATE_MIN_SIZE)),
-    );
-    doc.into_bytes()
-}
-*/
-
 pub(crate) fn save_document<'a, I>(
     changes: I,
     op_set: &OpSet,
-    //actors: &'a IndexedCache<ActorId>,
-    //props: &IndexedCache<String>,
     heads: &[ChangeHash],
     config: Option<CompressConfig>,
 ) -> Vec<u8>
 where
     I: Iterator<Item = &'a Change> + Clone + 'a,
-    //    O: Iterator<Item = (&'a ObjId, Op<'a>)> + Clone + ExactSizeIterator,
 {
-    //let actor_ids = changes
-    //    .clone()
-    //    .map(|c| c.actor_id().clone())
-    //    .unique()
-    //    .collect::<Vec<_>>();
+    let mut op_set = Cow::Borrowed(op_set);
 
-    //let actor_lookup = actors.encode_index();
-    //let doc_ops = op_set.iter()
-    //    .map(|op| op_as_docop2(op));
-
-    //let actor_lookup = vec![];
-    /*
-        let actor_lookup = op_set
-            .actors
-            .iter()
-            .enumerate()
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-    */
-    //let actor_lookup : HashMap<usize,usize> = op_set.actors.iter().enumerate().map(|(a,_)| (a,a)).collect();
     let mut actor_lookup = HashMap::with_capacity(op_set.actors.len());
     let mut actor_ids = changes
         .clone()
@@ -104,8 +36,26 @@ where
         .unique()
         .collect::<Vec<_>>();
     actor_ids.sort();
+
+    // I really dont like this current implementation
+    // This is needed b/c sometimes an actor is added but not used
+    // and it should not be present in the final file
+    // save() should not be &mut as well so we cant edit op_set
+    // better solutions:
+    // 1.  supply an optional actor_id mapping to op_set.export()
+    // 2a. only add new actorIds when the transaction is successfull and incorporated
+    // 3b. Use Arc<ActorId> instead of actor_idx in
+    //     HashGraph and history so they cant get out of sync
     for (index, actor_id) in actor_ids.iter().enumerate() {
-        actor_lookup.insert(op_set.lookup_actor(actor_id).unwrap(), index);
+        loop {
+            let actor_idx = op_set.lookup_actor(actor_id).unwrap();
+            if actor_idx != index {
+                op_set.to_mut().remove_actor(actor_idx - 1);
+                continue;
+            }
+            actor_lookup.insert(actor_idx, index);
+            break;
+        }
     }
 
     let actors = op_set.actors.clone().into_iter().collect();
@@ -117,12 +67,12 @@ where
         graph: &hash_graph,
     });
 
-    let doc_ops = op_set.iter().collect::<Vec<_>>();
+    let doc_ops = op_set.iter();
 
     let doc = Document::new(
-        op_set,
+        op_set.borrow(),
         hash_graph.heads_with_indices(heads.to_vec()),
-        doc_ops.into_iter(),
+        doc_ops,
         changes,
         config.unwrap_or(CompressConfig::Threshold(DEFLATE_MIN_SIZE)),
     );
