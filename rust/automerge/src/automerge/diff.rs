@@ -37,32 +37,6 @@ impl<'a> Winner<'a> {
     }
 }
 
-/*
-fn process2<'a, T: Iterator<Item = Op<'a>>>(
-    ops: T,
-    before: &'a Clock,
-    after: &'a Clock,
-    diff: &mut RichTextDiff<'a>,
-) -> Option<Patch<'a>> {
-    let mut before_op = None;
-    let mut after_op = None;
-
-    for op in ops {
-        let predates_before = op.predates(before);
-        let predates_after = op.predates(after);
-
-        if predates_before && !op.was_deleted_before(before) {
-            push_top(&mut before_op, op, predates_after, before);
-        }
-
-        if predates_after && !op.was_deleted_before(after) {
-            push_top(&mut after_op, op, predates_before, after);
-        }
-    }
-    resolve(before_op, after_op, diff)
-}
-*/
-
 fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
     ops: T,
     _before: &'a Clock,

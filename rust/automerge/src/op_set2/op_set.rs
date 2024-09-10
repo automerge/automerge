@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::marks::MarkSet;
+use crate::marks::{MarkSet, MarkStateMachine};
 use crate::patches::TextRepresentation;
 use crate::storage::ColumnType;
 use crate::storage::{
@@ -306,7 +306,7 @@ impl OpSet {
         let mut found = target.is_head();
         let mut index = 0;
         let mut current = 0;
-        let marks = None; // FIXME
+        let mut marks = MarkStateMachine::default();
         if insert {
             while let Some(mut op) = iter.next() {
                 if op.insert {
@@ -324,6 +324,7 @@ impl OpSet {
                 let visible = op.scope_to_clock(clock, iter.get_opiter());
 
                 if visible {
+                    marks.process(op.id(), op.action());
                     current = op.width(encoding);
                 }
             }
@@ -353,6 +354,7 @@ impl OpSet {
                 }
 
                 if visible && !found {
+                    marks.process(op.id(), op.action());
                     current = op.width(encoding);
                 }
             }
@@ -362,7 +364,7 @@ impl OpSet {
             index,
             pos,
             ops,
-            marks,
+            marks: marks.current().cloned(),
         }
     }
 
@@ -389,7 +391,12 @@ impl OpSet {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        self.top_ops(obj, clock).map(|op| op.as_str()).collect()
+        self.iter_obj(obj)
+            .no_marks()
+            .visible(clock)
+            .top_ops()
+            .map(|op| op.as_str())
+            .collect()
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
@@ -835,29 +842,63 @@ impl<'a> FoundOpWithPatchLog<'a> {
         obj: &ObjMeta,
         op: &OpBuilder2,
         pred: &[OpId],
-        _doc: &Automerge,
+        doc: &Automerge,
         patch_log: &mut PatchLog,
     ) {
         if op.insert {
             if op.is_mark() {
                 if let crate::types::OpType::MarkEnd(_) = op.action {
-                    /*
-                    let q = doc.ops().search(
-                        &obj.id,
-                        query::SeekMark::new(
-                            op.id.prev(),
-                            self.pos,
-                            patch_log.text_rep().encoding(obj.typ),
-                        ),
-                    );
-                    for mark in q.finish() {
-                        let index = mark.start;
-                        let len = mark.len();
-                        let marks = mark.into_mark_set();
-                        patch_log.mark(obj.id, index, len, &marks);
+                    let encoding = patch_log.text_rep().encoding(obj.typ);
+                    let mut index = 0;
+                    let mut marks = MarkStateMachine::default();
+                    let mut mark_name = None;
+                    let mut value = ScalarValue::Null;
+                    let mut start = None;
+                    let target = op.id.prev();
+                    let end_id = op.id;
+                    for op in doc.ops().iter_obj(&obj.id).visible(None).top_ops() {
+                        // if we find our first op
+                        if op.id == target {
+                            // grab its name and value
+                            if let Some(mark) = op.mark_name {
+                                mark_name = Some(mark);
+                                value = op.value;
+                                // and if it changes the mark state start recording
+                                if marks.process(op.id, op.action()) {
+                                    start = Some(index);
+                                }
+                            }
+                        } else if let Some(mark) = mark_name {
+                            // whenever the mark state changes
+                            if marks.process(op.id, op.action()) {
+                                match (marks.covered(target, mark), start) {
+                                    (true, Some(s)) => {
+                                        // the mark is either covered up (so we're done)
+                                        let ms = MarkSet::new(mark, value);
+                                        patch_log.mark(obj.id, s, index - s, &ms);
+                                        start = None;
+                                    }
+                                    (false, None) => {
+                                        // or revealed - start recording
+                                        start = Some(index);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } else {
+                            marks.process(op.id, op.action());
+                        }
+                        index += op.width(encoding);
+                        if op.id == end_id {
+                            break;
+                        }
                     }
-                    */
-                    todo!()
+                    if let Some(s) = start {
+                        if let Some(mark) = mark_name {
+                            let ms = MarkSet::new(mark, value);
+                            patch_log.mark(obj.id, s, index - s, &ms);
+                        }
+                    }
                 }
             // TODO - move this into patch_log()
             } else if obj.typ == ObjType::Text && !op.action.is_block() {
@@ -930,7 +971,7 @@ pub(crate) struct FoundOpId<'a> {
     pub(crate) visible: bool,
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct OpsFound<'a> {
     pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
@@ -972,9 +1013,7 @@ pub(super) trait OpLike {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
     fn meta_value(&self) -> ValueMeta;
     fn insert(&self) -> bool;
-    fn expand(&self) -> bool {
-        false
-    }
+    fn expand(&self) -> bool;
     // allocation
     fn succ(&self) -> Vec<OpId> {
         vec![]
@@ -1841,7 +1880,6 @@ mod tests {
                 expand: test_op.expand,
                 mark_name: test_op.mark_name,
                 conflict: false,
-                op_set: &tmp_op_set,
                 succ_cursors: SuccCursors {
                     len: group_count as usize,
                     succ_counter: counter_iter.clone(),

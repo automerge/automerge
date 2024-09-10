@@ -1366,8 +1366,8 @@ impl Automerge {
             .ops()
             .iter_obj(&obj.id)
             .visible(clock)
-            .marks()
-            .top_ops();
+            .top_ops()
+            .marks();
 
         let text_rep = TextRepresentation::String.encoding(obj.typ);
         let mut index = 0;
@@ -1572,7 +1572,7 @@ impl Automerge {
             .ops
             .into_iter()
             .last()
-            .map(|op| op.tagged_value()))
+            .map(|op| op.tagged_value(self.ops())))
     }
 
     pub(crate) fn get_all_for<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1593,7 +1593,7 @@ impl Automerge {
             )
             .ops
             .into_iter()
-            .map(|op| op.tagged_value())
+            .map(|op| op.tagged_value(self.ops()))
             .collect::<Vec<_>>();
         // this is a test to make sure opid and exid are always sorting the same way
         assert_eq!(

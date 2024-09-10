@@ -37,8 +37,8 @@ pub enum AutomergeError {
     InvalidSeq(u64),
     #[error("cursor {0} is invalid")]
     InvalidCursor(Cursor),
-    #[error("op {0} has no valid cursor")]
-    InvalidCursorOp(ExId),
+    #[error("op has no valid cursor")] // this error sucks
+    InvalidCursorOp,
     #[error("cursor format is invalid")]
     InvalidCursorFormat,
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]

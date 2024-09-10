@@ -73,6 +73,10 @@ pub(crate) enum ReadOpError {
 }
 
 impl<'a> OpIter<'a> {
+    pub(crate) fn op_set(&self) -> &'a OpSet {
+        self.op_set
+    }
+
     pub(crate) fn end_pos(&self) -> usize {
         self.id_actor.end_pos()
     }
@@ -93,7 +97,6 @@ impl<'a> OpIter<'a> {
         let expand = self.read_expand()?;
         let mark_name = self.read_mark_name()?;
         let successors = self.read_successors()?;
-        let op_set = self.op_set;
         let pos = self.pos;
         let conflict = false;
         let index = 0;
@@ -111,7 +114,6 @@ impl<'a> OpIter<'a> {
             expand,
             mark_name,
             succ_cursors: successors,
-            op_set,
         }))
     }
 

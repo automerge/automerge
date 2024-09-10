@@ -117,11 +117,6 @@ impl OpBuilder2 {
         }
     }
 
-    //fn op_type(&self) -> OpType<'_> {
-    //OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
-    //OpType::from_action_and_value(self.action, self.value, None, false)
-    //}
-
     pub(crate) fn prop(&self) -> PropRef<'_> {
         if let Key::Map(s) = &self.key {
             PropRef::Map(s)
@@ -212,6 +207,9 @@ impl OpLike for OpBuilder2 {
     fn mark_name(&self) -> Option<&str> {
         self.action.mark_name()
     }
+    fn expand(&self) -> bool {
+        self.action.expand()
+    }
 }
 
 impl PartialEq<OpBuilder2> for OpBuilder2 {
@@ -285,7 +283,6 @@ pub(crate) struct Op<'a> {
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<&'a str>,
     pub(super) succ_cursors: SuccCursors<'a>,
-    pub(super) op_set: &'a OpSet,
 }
 
 #[derive(Clone, Default, Copy)]
@@ -342,13 +339,6 @@ pub(crate) struct SuccInsert {
 }
 
 impl<'a> Op<'a> {
-    /*
-        pub(crate) fn pred(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator {
-            // FIXME
-            vec![].into_iter()
-        }
-    */
-
     pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
@@ -361,10 +351,6 @@ impl<'a> Op<'a> {
             sub_pos = succ.pos();
         }
         SuccInsert { pos, len, sub_pos }
-    }
-
-    pub(crate) fn op_set(&self) -> &'a OpSet {
-        self.op_set
     }
 
     pub(crate) fn as_str(&self) -> &'a str {
@@ -397,14 +383,14 @@ impl<'a> Op<'a> {
         self.succ_cursors.clone()
     }
 
-    pub(crate) fn exid(&self) -> ExId {
+    pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
         let id = self.id;
         if id == types::ROOT {
             ExId::Root
         } else {
             ExId::Id(
                 id.counter(),
-                self.op_set.get_actor(id.actor()).clone(),
+                op_set.get_actor(id.actor()).clone(),
                 id.actor(),
             )
         }
@@ -424,7 +410,7 @@ impl<'a> Op<'a> {
         } else {
             match self.key {
                 KeyRef::Seq(e) => Ok(e),
-                _ => Err(AutomergeError::InvalidCursorOp(self.exid())),
+                _ => Err(AutomergeError::InvalidCursorOp),
             }
         }
     }
@@ -437,8 +423,8 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn tagged_value(&self) -> (types::Value<'static>, ExId) {
-        (self.value().into_owned(), self.exid())
+    pub(crate) fn tagged_value(&self, op_set: &'a OpSet) -> (types::Value<'static>, ExId) {
+        (self.value().into_owned(), self.exid(op_set))
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
@@ -571,28 +557,3 @@ impl<'a> AsDocOp<'a> for Op<'a> {
             .map(|s| Cow::Owned(smol_str::SmolStr::from(s)))
     }
 }
-
-/*
-pub(crate) trait AsDocOp<'a> {
-    /// The type of the Actor ID component of the op IDs for this impl. This is typically either
-    /// `&'a ActorID` or `usize`
-    type ActorId;
-    /// The type of the op IDs this impl produces.
-    type OpId: convert::OpId<Self::ActorId>;
-    /// The type of the successor iterator returned by `Self::pred`. This can often be omitted
-    type SuccIter: Iterator<Item = Self::OpId> + ExactSizeIterator;
-
-    fn obj(&self) -> convert::ObjId<Self::OpId>;
-    fn id(&self) -> Self::OpId;
-    fn key(&self) -> convert::Key<'a, Self::OpId>;
-    fn insert(&self) -> bool;
-    fn action(&self) -> u64;
-    fn val(&self) -> Cow<'a, ScalarValue>;
-    fn succ(&self) -> Self::SuccIter;
-    fn expand(&self) -> bool;
-    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
-}
-*/
-
-// TODO:
-// needs tests around counter value and visability

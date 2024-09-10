@@ -5,6 +5,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
+use crate::op_set2;
 use crate::op_set2::{MarkData, Op, OpType};
 use crate::types::Clock;
 use crate::types::{ObjType, OpId};
@@ -23,7 +24,6 @@ use std::collections::BTreeMap;
 pub struct Mark {
     pub start: usize,
     pub end: usize,
-    //pub(crate) data: MarkData<'a>,
     pub name: SmolStr,
     pub value: ScalarValue,
 }
@@ -142,6 +142,12 @@ pub struct MarkSet {
 }
 
 impl MarkSet {
+    pub(crate) fn new(name: &str, value: op_set2::ScalarValue<'_>) -> Arc<MarkSet> {
+        let mut m = MarkSet::default();
+        m.insert(SmolStr::from(name), value.into_owned());
+        Arc::new(m)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
         self.marks
             .iter()
@@ -234,6 +240,7 @@ impl Mark {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
+    // would this make more sense as a BTree<OpId, MarkData<'a>>?
     state: Vec<(OpId, MarkData<'a>)>,
     current: Arc<MarkSet>,
 }
@@ -312,6 +319,18 @@ impl<'a> MarkStateMachine<'a> {
 
     fn find(&self, target: OpId) -> Result<usize, usize> {
         self.state.binary_search_by(|probe| probe.0.cmp(&target))
+    }
+
+    pub(crate) fn covered(&self, id: OpId, name: &str) -> bool {
+        let index = self
+            .state
+            .binary_search_by(|probe| probe.0.cmp(&id))
+            .ok()
+            .unwrap_or(0);
+        self.state[index..]
+            .iter()
+            .find(|(i, m)| *i > id && m.name == name)
+            .is_some()
     }
 
     fn mark_above(

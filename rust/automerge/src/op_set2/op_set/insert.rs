@@ -11,7 +11,6 @@ use std::fmt::Debug;
 #[derive(Clone, Debug)]
 pub(crate) struct InsertQuery<'a> {
     iter: OpIter<'a>,
-    //marks: MarkStateMachine<'a>,
     marks: RichTextQueryState<'a>,
     encoding: ListEncoding,
     clock: Option<Clock>,

@@ -230,6 +230,10 @@ impl OpType {
         }
     */
 
+    pub(crate) fn expand(&self) -> bool {
+        matches!(self, OpType::MarkBegin(true, _) | OpType::MarkEnd(true))
+    }
+
     pub(crate) fn value<'a>(&'a self) -> Cow<'a, ScalarValue> {
         match self {
             OpType::Put(v) => Cow::Borrowed(v),

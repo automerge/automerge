@@ -63,7 +63,8 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
             }
             let conflict = op.conflict;
             let value = op.value().into();
-            let id = op.exid();
+            let op_set = iter.get_opiter().op_set();
+            let id = op.exid(op_set);
             let marks = iter.get_marks().cloned();
             return Some(ListRangeItem {
                 index,

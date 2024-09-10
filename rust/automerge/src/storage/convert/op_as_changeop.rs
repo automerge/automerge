@@ -15,9 +15,10 @@ pub(crate) fn ob_as_actor_id<'a>(op_set: &'a OpSet, op: &'a OpBuilder2) -> ObWit
     ObWithMetadata { op, op_set }
 }
 
-#[derive(Clone, Debug, Eq, Ord)]
+#[derive(Clone, Debug)]
 pub(crate) struct OpWithMetadata<'a> {
     op: Op<'a>,
+    op_set: &'a OpSet,
     pred: Vec<OpId>,
 }
 
@@ -45,12 +46,8 @@ impl<'a> std::fmt::Debug for ObWithMetadata<'a> {
 }
 
 impl<'a> OpWithMetadata<'a> {
-    //pub(crate) fn new(op: Op<'a>, pred: Vec<OpId>) -> Self {
-    //    Self { op, pred }
-    //}
-
     fn wrap(&self, opid: OpId) -> OpIdWithMetadata<'a> {
-        OpIdWithMetadata::new(opid, self.op.op_set())
+        OpIdWithMetadata::new(opid, self.op_set)
     }
 }
 
@@ -224,7 +221,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
         if let Some(id) = self.op.obj.id() {
-            convert::ObjId::Op(OpIdWithMetadata::new(*id, self.op.op_set()))
+            convert::ObjId::Op(OpIdWithMetadata::new(*id, self.op_set))
         } else {
             convert::ObjId::Root
         }
@@ -232,7 +229,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn pred(&self) -> Self::PredIter {
         PredWithMetadata {
-            op_set: self.op.op_set(),
+            op_set: self.op_set,
             pred: self.pred.clone(), // FIXME clone
             offset: 0,
         }

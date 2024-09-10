@@ -641,9 +641,7 @@ fn test_remote_patches_for_marks_with_expand_after() {
 
     doc_b.update_diff_cursor();
     let heads_before_b = doc_b.get_heads();
-    println!("doing merge");
     doc_b.merge(&mut doc_a).unwrap();
-    println!("done merge");
     let heads_after_b = doc_b.get_heads();
 
     let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);

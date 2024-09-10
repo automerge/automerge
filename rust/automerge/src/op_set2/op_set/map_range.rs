@@ -43,7 +43,8 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
                 continue;
             }
             let value = op.value().into();
-            let id = op.exid();
+            let op_set = iter.get_opiter().op_set();
+            let id = op.exid(op_set);
             let conflict = op.conflict;
             return Some(MapRangeItem {
                 key,
