@@ -266,7 +266,6 @@ impl OpSet {
         target: ElemId,
         id: OpId,
         insert: bool,
-        pred: &[OpId],
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> SeekOpIdResult<'_> {
@@ -319,7 +318,7 @@ impl OpSet {
 
                 let visible = op.scope_to_clock(clock, iter.get_opiter());
 
-                if found && pred.contains(&op.id) {
+                if found {
                     ops.push((op, visible));
                 }
 
@@ -449,10 +448,18 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
         let mut iter = self.iter();
-        while let Some(mut op) = iter.next() {
-            if &op.id == id {
-                let visible = op.scope_to_clock(clock, &iter);
-                return Some((op, visible));
+        while let Some(mut o1) = iter.next() {
+            if &o1.id == id {
+                let mut vis = o1.scope_to_clock(clock, &iter);
+                while let Some(mut o2) = iter.next() {
+                    if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
+                        break;
+                    }
+                    if o2.scope_to_clock(clock, &iter) {
+                        vis = false;
+                    }
+                }
+                return Some((o1, vis));
             }
         }
         None
@@ -469,31 +476,28 @@ impl OpSet {
 
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
-        op: &ChangeOp,
+        new_op: &ChangeOp,
         encoding: ListEncoding,
     ) -> FoundOpWithPatchLog<'a> {
-        match &op.key {
+        match &new_op.key {
             Key::Seq(e) => {
-                let r = self.seek_list_op(&op.obj, *e, op.id, op.insert, &op.pred, encoding, None);
-                assert_eq!(op.pred.len(), r.ops.len());
-                self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
+                let r =
+                    self.seek_list_op(&new_op.obj, *e, new_op.id, new_op.insert, encoding, None);
+                self.found_op_with_patch_log(new_op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let mut iter = self.iter_prop(&op.obj, &s);
+                let mut iter = self.iter_prop(&new_op.obj, &s);
                 let mut pos = iter.end_pos();
                 let mut ops = vec![];
                 while let Some(mut o) = iter.next() {
-                    if op.pred.contains(&o.id) {
-                        let visible = o.scope_to_clock(None, iter.get_opiter());
-                        ops.push((o, visible));
-                    }
-                    if o.id > op.id {
+                    let visible = o.scope_to_clock(None, iter.get_opiter());
+                    ops.push((o, visible));
+                    if o.id > new_op.id {
                         pos = o.pos;
                         break;
                     }
                 }
-                assert_eq!(op.pred.len(), ops.len());
-                self.found_op_with_patch_log(op, &ops, pos, 0, None)
+                self.found_op_with_patch_log(new_op, &ops, pos, 0, None)
             }
         }
     }
