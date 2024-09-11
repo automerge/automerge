@@ -313,7 +313,6 @@ impl OpSet {
                     }
                 } else if found && op.id > id {
                     pos = op.pos;
-                    break;
                 }
 
                 let visible = op.scope_to_clock(clock, iter.get_opiter());
@@ -494,7 +493,6 @@ impl OpSet {
                     ops.push((o, visible));
                     if o.id > new_op.id {
                         pos = o.pos;
-                        break;
                     }
                 }
                 self.found_op_with_patch_log(new_op, &ops, pos, 0, None)
@@ -533,7 +531,9 @@ impl OpSet {
                 if found.is_none() && overwritten.is_none() {
                     before = Some(*op);
                     num_before += 1;
-                } else {
+                } else if !op.is_inc() {
+                    // increments are a special case where they can be visible
+                    // but dont overwrite a value
                     after = Some(*op);
                 }
             }

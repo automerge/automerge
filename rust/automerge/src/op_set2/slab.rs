@@ -24,7 +24,7 @@ pub(crate) struct ReadOnlySlab {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct OwnedSlab {
-    data: Vec<u8>,
+    data: Arc<Vec<u8>>,
     len: usize,
     group: usize,
 }
@@ -324,20 +324,14 @@ impl<'a> SlabWriter<'a> {
             self.actions.push(WriteAction::End(self.items, self.group));
         }
         let mut result = vec![];
-        let mut slab = OwnedSlab {
-            data: vec![],
-            len: 0,
-            group: 0,
-        };
+        let mut buffer = vec![];
         for action in self.actions {
             match action {
                 WriteAction::End(len, group) => {
-                    slab.len = len;
-                    slab.group = group;
-                    let next = std::mem::take(&mut slab);
-                    result.push(Slab::Owned(next));
+                    let data = Arc::new(std::mem::take(&mut buffer));
+                    result.push(Slab::Owned(OwnedSlab { data, len, group }));
                 }
-                action => action.write(&mut slab.data),
+                action => action.write(&mut buffer),
             }
         }
         result
