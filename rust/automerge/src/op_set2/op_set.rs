@@ -55,7 +55,7 @@ pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use spans::{SpanInternal, SpansInternal};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{is_visible, DiffOp, DiffOpIter, VisibleOpIter};
+pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -320,7 +320,7 @@ impl OpSet {
                 let visible = op.scope_to_clock(clock, iter.get_opiter());
 
                 if found && pred.contains(&op.id) {
-                    ops.push(op);
+                    ops.push((op, visible));
                 }
 
                 if visible && !found {
@@ -479,12 +479,13 @@ impl OpSet {
                 self.found_op_with_patch_log(op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let iter = self.iter_prop(&op.obj, &s);
+                let mut iter = self.iter_prop(&op.obj, &s);
                 let mut pos = iter.end_pos();
                 let mut ops = vec![];
-                for o in iter {
+                while let Some(mut o) = iter.next() {
                     if op.pred.contains(&o.id) {
-                        ops.push(o);
+                        let visible = o.scope_to_clock(None, iter.get_opiter());
+                        ops.push((o, visible));
                     }
                     if o.id > op.id {
                         pos = o.pos;
@@ -500,7 +501,7 @@ impl OpSet {
     pub(crate) fn found_op_with_patch_log<'a>(
         &'a self,
         new_op: &ChangeOp,
-        ops: &[Op<'a>],
+        ops: &[(Op<'a>, bool)],
         end_pos: usize,
         index: usize,
         marks: Option<Arc<MarkSet>>,
@@ -512,22 +513,19 @@ impl OpSet {
         let mut after = None;
         let mut succ = vec![];
         for i in 0..ops.len() {
-            let op = &ops[i];
-
-            let visible = is_visible(op, &ops[(i + 1)..], None);
+            let (op, visible) = &ops[i];
 
             if found.is_none() && op.id > new_op.id {
                 found = Some(op.pos);
             }
 
             if new_op.pred.contains(&op.id) {
-                // overwrites
                 succ.push(*op);
 
-                if visible {
+                if *visible {
                     overwritten = Some(*op);
                 }
-            } else if visible {
+            } else if *visible {
                 if found.is_none() && overwritten.is_none() {
                     before = Some(*op);
                     num_before += 1;
@@ -781,7 +779,7 @@ pub(crate) struct QueryNth {
 struct SeekOpIdResult<'a> {
     index: usize,
     pos: usize,
-    ops: Vec<Op<'a>>,
+    ops: Vec<(Op<'a>, bool)>,
     marks: Option<Arc<MarkSet>>,
 }
 

@@ -26,7 +26,6 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
             if op.action == Action::Mark {
                 if let Some(name) = op.mark_name {
                     let value = op.value;
-                    log!("MARK BEGIN name={} value={}", name, value);
                     self.marks.mark_begin(op.id, MarkData { name, value });
                     continue;
                 } else {
