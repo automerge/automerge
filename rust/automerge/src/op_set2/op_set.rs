@@ -164,7 +164,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        let iter = self.iter_obj(obj).visible(clock).marks().top_ops();
+        let iter = self.iter_obj(obj).visible(clock).top_ops().marks();
         ListRange::new(iter, range, encoding)
     }
 
@@ -818,8 +818,11 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     let mut value = ScalarValue::Null;
                     let mut start = None;
                     let target = op.id.prev();
-                    let end_id = op.id;
+                    let end_pos = op.pos;
                     for op in doc.ops().iter_obj(&obj.id).visible(None).top_ops() {
+                        if op.pos == end_pos {
+                            break;
+                        }
                         // if we find our first op
                         if op.id == target {
                             // grab its name and value
@@ -852,9 +855,6 @@ impl<'a> FoundOpWithPatchLog<'a> {
                             marks.process(op.id, op.action());
                         }
                         index += op.width(encoding);
-                        if op.id == end_id {
-                            break;
-                        }
                     }
                     if let Some(s) = start {
                         if let Some(mark) = mark_name {

@@ -35,7 +35,7 @@ impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {
 
 impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
     pub(crate) fn new(
-        iter: TopOpIter<'a, MarkIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
+        iter: MarkIter<'a, TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
         range: R,
         encoding: ListEncoding,
     ) -> Self {

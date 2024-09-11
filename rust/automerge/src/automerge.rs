@@ -276,7 +276,6 @@ impl Automerge {
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
-        let checkpoint = self.ops.save_checkpoint();
         let actor_index;
         let seq;
         let mut deps;
@@ -305,6 +304,7 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
+        let checkpoint = self.ops.save_checkpoint();
         TransactionArgs {
             actor_index,
             seq,
@@ -1611,7 +1611,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self.ops.iter_obj(&obj.id).visible(clock).marks().top_ops();
+        let mut iter = self.ops.iter_obj(&obj.id).visible(clock).top_ops().marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok((**arc).clone()),
