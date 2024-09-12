@@ -1,7 +1,6 @@
 use super::columns::ColumnDataIter;
 use super::op_set::{OpLike, OpSet};
-use super::rle::ActorCursor;
-use super::types::{Action, Key, KeyRef, OpType, PropRef, ScalarValue};
+use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{DeltaCursor, Value, ValueMeta};
 
 use crate::convert;

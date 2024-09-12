@@ -1,5 +1,6 @@
-use super::columns::ScanMeta;
-use super::{ColumnCursor, Encoder, PackError, Run, Slab, SlabWriter};
+use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
+use super::pack::PackError;
+use super::slab::{Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct RawCursorInternal<const B: usize> {
@@ -151,9 +152,71 @@ impl<const B: usize> RawCursorInternal<B> {
 }
 */
 
+#[derive(Debug, Clone)]
+pub(crate) struct RawReader<'a> {
+    pub(crate) slabs: std::slice::Iter<'a, Slab>,
+    pub(crate) current: Option<(&'a Slab, usize)>,
+}
+
+impl<'a> Default for RawReader<'a> {
+    fn default() -> Self {
+        Self {
+            slabs: [].iter(),
+            current: None,
+        }
+    }
+}
+
+impl<'a> RawReader<'a> {
+    pub(crate) fn empty() -> RawReader<'static> {
+        RawReader {
+            slabs: [].iter(),
+            current: None,
+        }
+    }
+
+    /// Read a slice out of a set of slabs
+    ///
+    /// Returns an error if:
+    /// * The read would cross a slab boundary
+    /// * The read would go past the end of the data
+    pub(crate) fn read_next(&mut self, length: usize) -> Result<&'a [u8], ReadRawError> {
+        let (slab, offset) = match self.current.take() {
+            Some(state) => state,
+            None => {
+                if let Some(slab) = self.slabs.next() {
+                    (slab, 0)
+                } else {
+                    return Err(ReadRawError::EndOfData);
+                }
+            }
+        };
+        if offset + length > slab.len() {
+            return Err(ReadRawError::CrossBoundary);
+        }
+        let result = slab[offset..offset + length].as_ref();
+        let new_offset = offset + length;
+        if offset == slab.len() {
+            self.current = None;
+        } else {
+            self.current = Some((slab, new_offset));
+        }
+        Ok(result)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ReadRawError {
+    #[error("attempted to read across slab boundaries")]
+    CrossBoundary,
+    #[error("attempted to read past end of data")]
+    EndOfData,
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::{ColExport, ColumnData};
+    use super::super::columns::ColumnData;
+    use super::super::cursor::ColExport;
     use super::*;
 
     #[test]

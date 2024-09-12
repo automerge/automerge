@@ -1,7 +1,7 @@
-use super::{
-    ColumnCursor, Encoder, PackError, Packable, RleCursor, RleState, Run, Slab, SlabWriter,
-    SpliceDel,
-};
+use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::pack::{PackError, Packable};
+use super::rle::{RleCursor, RleState};
+use super::slab::{Slab, SlabWriter};
 
 #[cfg(test)]
 use super::ColExport;
@@ -204,7 +204,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::{ColExport, ColumnData};
+    use super::super::columns::ColumnData;
+    use super::super::cursor::ColExport;
     use super::*;
 
     #[test]

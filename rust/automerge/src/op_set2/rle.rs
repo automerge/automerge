@@ -1,4 +1,8 @@
-use super::{ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel};
+
+use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::pack::{PackError, Packable};
+use super::slab::{Slab, SlabWriter};
+
 use crate::columnar::encoding::leb128::lebsize;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -509,8 +513,6 @@ impl LitRunCursor {
 
 pub(crate) type StrCursor = RleCursor<{ usize::MAX }, str>;
 pub(crate) type IntCursor = RleCursor<{ usize::MAX }, u64>;
-pub(crate) type ActorCursor = RleCursor<{ usize::MAX }, super::types::ActorIdx>;
-pub(crate) type ActionCursor = RleCursor<{ usize::MAX }, super::types::Action>;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) enum RleState<'a, P: Packable + ?Sized> {
@@ -536,9 +538,23 @@ impl<'a, P: Packable + ?Sized> RleState<'a, P> {
     }
 }
 
+impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
+    fn from(r: Run<'a, T>) -> Self {
+        if r.count == 1 {
+            RleState::LoneValue(r.value)
+        } else {
+            RleState::Run {
+                count: r.count,
+                value: r.value,
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::{ColExport, ColumnData};
+    use super::super::columns::ColumnData;
+    use super::super::cursor::ColExport;
     use super::*;
 
     #[test]

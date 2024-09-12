@@ -5,7 +5,7 @@ members = [
     "automerge-cli",
     "automerge-test",
     "automerge-wasm",
-    "edit-trace",
+    "edit-trace", "rle",
 ]
 resolver = "2"
 

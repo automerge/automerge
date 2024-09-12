@@ -8,7 +8,11 @@ use crate::value;
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
+use super::cursor::ScanMeta;
 use super::meta::ValueType;
+use super::pack::{MaybePackable, PackError, Packable};
+use super::rle::RleCursor;
+use super::slab::WriteOp;
 
 /// An index into an array of actors stored elsewhere
 #[derive(PartialEq, PartialOrd, Debug, Clone, Default, Copy)]
@@ -585,3 +589,97 @@ impl<'a> Value<'a> {
         }
     }
 }
+
+impl Packable for Action {
+    type Unpacked<'a> = Action;
+
+    type Owned = Action;
+
+    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
+        item
+    }
+
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
+        let (len, result) = u64::unpack(buff)?;
+        let action = match result {
+            0 => Action::MakeMap,
+            1 => Action::Set,
+            2 => Action::MakeList,
+            3 => Action::Delete,
+            4 => Action::MakeText,
+            5 => Action::Increment,
+            6 => Action::MakeTable,
+            7 => Action::Mark,
+            other => {
+                return Err(super::PackError::invalid_value(
+                    "valid action (integer between 0 and 7)",
+                    format!("unexpected integer: {}", other),
+                ))
+            }
+        };
+        Ok((len, action))
+    }
+}
+
+impl MaybePackable<Action> for Action {
+    fn maybe_packable(&self) -> Option<Action> {
+        Some(*self)
+    }
+}
+
+impl MaybePackable<Action> for Option<Action> {
+    fn maybe_packable(&self) -> Option<Action> {
+        *self
+    }
+}
+
+impl Packable for ActorIdx {
+    type Unpacked<'a> = ActorIdx;
+
+    type Owned = ActorIdx;
+
+    fn validate(val: &Option<Self::Unpacked<'_>>, m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(ActorIdx(a)) = val {
+            if *a >= m.actors as u64 {
+                return Err(PackError::ActorIndexOutOfRange(*a, m.actors));
+            }
+        }
+        Ok(())
+    }
+
+    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
+        item
+    }
+
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
+        let (len, result) = u64::unpack(buff)?;
+        Ok((len, ActorIdx::from(result)))
+    }
+}
+
+impl MaybePackable<ActorIdx> for ActorIdx {
+    fn maybe_packable(&self) -> Option<ActorIdx> {
+        Some(*self)
+    }
+}
+
+impl MaybePackable<ActorIdx> for Option<ActorIdx> {
+    fn maybe_packable(&self) -> Option<ActorIdx> {
+        *self
+    }
+}
+
+impl<'a> From<ActorIdx> for WriteOp<'a> {
+    fn from(n: ActorIdx) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(n))
+    }
+}
+
+impl<'a> From<Action> for WriteOp<'a> {
+    fn from(a: Action) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(a))
+    }
+}
+
+pub(crate) type ActorCursor = RleCursor<{ usize::MAX }, ActorIdx>;
+pub(crate) type ActionCursor = RleCursor<{ usize::MAX }, Action>;

@@ -14,12 +14,15 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
-use super::columns::{Column, ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
+use super::columns::{Column, ColumnData, ColumnDataIter};
+use super::cursor::{ColumnCursor, Run};
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::pack::PackError;
-use super::rle::{ActionCursor, ActorCursor};
-use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue};
-use super::{BooleanCursor, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, StrCursor, ValueMeta};
+use super::raw::RawReader;
+use super::types::{
+    Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
+};
+use super::{BooleanCursor, DeltaCursor, IntCursor, Key, MetaCursor, StrCursor, ValueMeta};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -1339,7 +1342,7 @@ impl Columns {
         );
         columns.insert(VALUE_META_COL_SPEC, Column::ValueMeta(value_meta));
 
-        let mut value = ColumnData::<super::RawCursor>::new();
+        let mut value = ColumnData::<super::raw::RawCursor>::new();
         let values = ops
             .clone()
             .filter_map(|op| op.value.to_raw())
@@ -1671,8 +1674,7 @@ mod tests {
         op_set2::{
             columns::ColumnData,
             op::SuccCursors,
-            rle::ActorCursor,
-            types::{Action, ActorIdx, ScalarValue},
+            types::{Action, ActorCursor, ActorIdx, ScalarValue},
             DeltaCursor, KeyRef,
         },
         storage::Document,

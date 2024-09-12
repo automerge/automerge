@@ -1,5 +1,6 @@
 pub(crate) mod boolean;
 pub(crate) mod columns;
+pub(crate) mod cursor;
 pub(crate) mod delta;
 pub(crate) mod meta;
 mod op;
@@ -12,15 +13,12 @@ pub(crate) mod raw;
 pub(crate) mod rle;
 pub(crate) mod slab;
 mod types;
-pub(crate) use types::{
-    Action, ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value,
-};
+pub(crate) use types::{ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value};
 
 #[cfg(test)]
-pub(crate) use columns::ColExport;
+pub(crate) use cursor::ColExport;
 
 pub(crate) use boolean::BooleanCursor;
-pub(crate) use columns::{ColumnCursor, Encoder, Run, SpliceDel};
 pub(crate) use delta::DeltaCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
@@ -30,7 +28,5 @@ pub(crate) use op_set::{
 
 pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans, Values};
 
-pub(crate) use pack::{MaybePackable, PackError, Packable};
-pub(crate) use raw::RawCursor;
-pub(crate) use rle::{IntCursor, RleCursor, RleState, StrCursor};
-pub(crate) use slab::{Slab, SlabIter, SlabWriter, WriteOp};
+pub(crate) use pack::PackError;
+pub(crate) use rle::{IntCursor, StrCursor};

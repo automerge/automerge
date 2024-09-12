@@ -1,4 +1,6 @@
-use super::{ColumnCursor, Encoder, PackError, Packable, Run, Slab, SlabWriter, SpliceDel};
+use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::pack::{PackError, Packable};
+use super::slab::{Slab, SlabWriter};
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub(crate) struct BooleanState {
@@ -210,54 +212,10 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 }
 
-/*
-struct SpliceDel<'a, C: ColumnCursor> {
-  deleted: usize,
-  overflow: usize,
-  cursor: C,
-  post: Option<Run<'a, C::Item>>
-}
-
-fn splice_delete<'a, C: ColumnCursor>(_post: Option<Run<'a, C::Item>>, _cursor: C, _del: usize, slab: &'a Slab) -> SpliceDel<'a, C> {
-    let mut cursor = _cursor;
-    let mut post = _post;
-    let mut del = _del;
-    let mut overflow = 0;
-    let mut deleted = 0;
-    while del > 0 {
-      match post {
-        // if del is less than the current run
-        Some(Run { count, value }) if del < count => {
-          deleted += del;
-          post = Some(Run { count: count - del, value });
-          del = 0;
-        },
-        // if del is greather than or equal the current run
-        Some(Run { count, .. }) => {
-          del -= count;
-          deleted += count;
-          post = None;
-        },
-        None => {
-          if let Some((p, c)) = C::next(&cursor, slab.as_ref()) {
-            post = Some(p);
-            cursor = c;
-          } else {
-            post = None;
-            overflow = del;
-            del = 0;
-          }
-        }
-      }
-    }
-    assert!(_del == deleted + overflow );
-    SpliceDel { deleted, overflow, cursor, post }
-}
-*/
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::{ColExport, ColumnData};
+    use super::super::columns::ColumnData;
+    use super::super::cursor::ColExport;
     use super::*;
 
     #[test]

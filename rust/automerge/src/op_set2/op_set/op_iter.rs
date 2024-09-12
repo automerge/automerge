@@ -1,10 +1,14 @@
 use crate::{
     op_set2,
     op_set2::{
-        columns::{ColumnDataIter, RawReader},
+        boolean::BooleanCursor,
+        columns::ColumnDataIter,
+        delta::DeltaCursor,
+        meta::MetaCursor,
         op::SuccCursors,
-        rle::{ActionCursor, ActorCursor},
-        BooleanCursor, DeltaCursor, IntCursor, MetaCursor, StrCursor,
+        raw::RawReader,
+        rle::{IntCursor, StrCursor},
+        types::{ActionCursor, ActorCursor},
     },
     types::{ElemId, ObjId, OpId},
 };
@@ -63,7 +67,7 @@ pub(crate) enum ReadOpError {
     #[error("missing action")]
     MissingAction,
     #[error("error reading value column: {0}")]
-    ReadValue(#[from] op_set2::columns::ReadRawError),
+    ReadValue(#[from] op_set2::raw::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
     //#[error("missing object ID")]

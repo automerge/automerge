@@ -1,7 +1,5 @@
-use super::{
-    columns::{RunStep, ScanMeta, Seek},
-    Action, ActorIdx, ColumnCursor, PackError, Packable, Run,
-};
+use super::cursor::{ColumnCursor, Run, ScanMeta};
+use super::pack::{PackError, Packable};
 use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 
 use std::fmt::Debug;
@@ -52,18 +50,6 @@ impl<'a> From<i64> for WriteOp<'a> {
 impl<'a> From<u64> for WriteOp<'a> {
     fn from(n: u64) -> WriteOp<'static> {
         WriteOp::UInt(n)
-    }
-}
-
-impl<'a> From<ActorIdx> for WriteOp<'a> {
-    fn from(n: ActorIdx) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(n))
-    }
-}
-
-impl<'a> From<Action> for WriteOp<'a> {
-    fn from(a: Action) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(a))
     }
 }
 
@@ -654,4 +640,21 @@ impl Slab {
             Self::Owned(OwnedSlab { group, .. }) => *group,
         }
     }
+}
+
+pub(crate) trait Seek<T: Packable + ?Sized> {
+    type Output;
+    fn process_slab(&mut self, _r: &Slab) -> RunStep {
+        RunStep::Process
+    }
+    fn process_run(&mut self, r: &Run<'_, T>) -> RunStep;
+    fn process_element(&mut self, e: Option<T::Unpacked<'_>>);
+    fn done(&self) -> bool;
+    fn finish(self) -> Self::Output;
+}
+
+pub(crate) enum RunStep {
+    Skip,
+    Process,
+    Done,
 }
