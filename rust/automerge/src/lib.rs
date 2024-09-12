@@ -282,8 +282,6 @@ mod text_value;
 pub mod transaction;
 mod types;
 mod value;
-#[cfg(feature = "optree-visualisation")]
-mod visualisation;
 
 pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
 pub use autocommit::AutoCommit;

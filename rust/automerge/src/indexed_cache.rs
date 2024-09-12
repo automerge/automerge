@@ -87,7 +87,7 @@ impl<'a, T> IntoIterator for &'a IndexedCache<T> {
     type IntoIter = std::slice::Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.cache).into_iter()
+        self.cache.iter()
     }
 }
 

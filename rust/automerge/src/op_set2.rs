@@ -20,7 +20,7 @@ pub(crate) use types::{
 pub(crate) use columns::ColExport;
 
 pub(crate) use boolean::BooleanCursor;
-pub(crate) use columns::{Column, ColumnCursor, Encoder, Run, SpliceDel};
+pub(crate) use columns::{ColumnCursor, Encoder, Run, SpliceDel};
 pub(crate) use delta::DeltaCursor;
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{

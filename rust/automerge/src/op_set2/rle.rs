@@ -13,20 +13,11 @@ pub(crate) struct RleCursor<const B: usize, P: Packable + ?Sized> {
     _phantom: PhantomData<P>,
 }
 
-// FIXME phantom data <str> seems to mess up the clone copy macros
-
 impl<const B: usize, P: Packable + ?Sized> Copy for RleCursor<B, P> {}
 
 impl<const B: usize, P: Packable + ?Sized> Clone for RleCursor<B, P> {
     fn clone(&self) -> Self {
-        Self {
-            offset: self.offset,
-            last_offset: self.last_offset,
-            index: self.index,
-            group: self.group,
-            lit: self.lit,
-            _phantom: PhantomData,
-        }
+        *self
     }
 }
 
@@ -335,7 +326,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         chunk.count
     }
 
-    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
@@ -413,7 +404,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         slab: &'a [u8],
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
         let data = &slab[self.offset..];
-        if data.len() == 0 {
+        if data.is_empty() {
             return Ok(None);
         }
         if self.num_left() > 0 {
@@ -444,7 +435,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 }
                 count if count < 0 => {
                     let (value_bytes, value) = P::unpack(data)?;
-                    assert!(count * -1 < slab.len() as i64);
+                    assert!(-count < slab.len() as i64);
                     let lit = Some(LitRunCursor::new(
                         self.offset + count_bytes,
                         count,
@@ -485,7 +476,7 @@ pub(crate) struct LitRunCursor {
 impl LitRunCursor {
     fn new(offset: usize, count: i64, group: usize) -> Self {
         assert!(count < 0);
-        let len = (count * -1) as usize;
+        let len = (-count) as usize;
         LitRunCursor {
             offset,
             index: 1,
@@ -495,7 +486,7 @@ impl LitRunCursor {
     }
 
     fn header_offset(&self) -> usize {
-        self.offset - lebsize(-1 * (self.len as i64)) as usize
+        self.offset - lebsize(-(self.len as i64)) as usize
     }
 
     fn num_left(&self) -> usize {
@@ -521,8 +512,9 @@ pub(crate) type IntCursor = RleCursor<{ usize::MAX }, u64>;
 pub(crate) type ActorCursor = RleCursor<{ usize::MAX }, super::types::ActorIdx>;
 pub(crate) type ActionCursor = RleCursor<{ usize::MAX }, super::types::Action>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) enum RleState<'a, P: Packable + ?Sized> {
+    #[default]
     Empty,
     LoneValue(Option<P::Unpacked<'a>>),
     Run {
@@ -533,12 +525,6 @@ pub(crate) enum RleState<'a, P: Packable + ?Sized> {
         run: Vec<P::Unpacked<'a>>,
         current: P::Unpacked<'a>,
     },
-}
-
-impl<'a, P: Packable + ?Sized> Default for RleState<'a, P> {
-    fn default() -> Self {
-        RleState::Empty
-    }
 }
 
 impl<'a, P: Packable + ?Sized> RleState<'a, P> {

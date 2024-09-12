@@ -47,24 +47,22 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
                 out.flush_bool_run(post.count);
                 out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
             }
-        } else {
-            if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_ref()) {
-                if val.value == Some(state.value) {
-                    out.flush_bool_run(state.count + val.count);
-                    out.flush_after(
-                        slab,
-                        next_cursor.offset,
-                        0,
-                        slab.len() - next_cursor.index,
-                        0,
-                    );
-                } else {
-                    out.flush_bool_run(state.count);
-                    out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
-                }
+        } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_ref()) {
+            if val.value == Some(state.value) {
+                out.flush_bool_run(state.count + val.count);
+                out.flush_after(
+                    slab,
+                    next_cursor.offset,
+                    0,
+                    slab.len() - next_cursor.index,
+                    0,
+                );
             } else {
                 out.flush_bool_run(state.count);
+                out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
             }
+        } else {
+            out.flush_bool_run(state.count);
         }
     }
 
@@ -77,7 +75,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 
     fn is_empty<'a>(v: Option<bool>) -> bool {
-        !(v == Some(true))
+        v != Some(true)
     }
 
     fn copy_between<'a>(
@@ -117,7 +115,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run.count
     }
 
-    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 
@@ -149,7 +147,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             cursor,
             post,
         } = Self::splice_delete(post, cursor, del, slab);
-        let post = post.map(|r| BooleanState::from(r));
+        let post = post.map(BooleanState::from);
 
         Encoder {
             slab,

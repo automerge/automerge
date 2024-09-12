@@ -27,10 +27,7 @@ pub(crate) struct Run<'a, P: Packable + ?Sized> {
 impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> {}
 impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
     fn clone(&self) -> Self {
-        Self {
-            count: self.count,
-            value: self.value,
-        }
+        *self
     }
 }
 
@@ -88,7 +85,7 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
 
     pub(crate) fn finish(mut self) -> Vec<Slab> {
         C::finish(
-            &self.slab,
+            self.slab,
             &mut self.current,
             self.state,
             self.post,
@@ -109,9 +106,9 @@ pub(crate) trait Seek<T: Packable + ?Sized> {
     fn process_slab(&mut self, _r: &Slab) -> RunStep {
         RunStep::Process
     }
-    fn process_run<'a, 'b>(&mut self, r: &'b Run<'a, T>) -> RunStep;
-    fn process_element<'a>(&mut self, e: Option<T::Unpacked<'a>>);
-    fn done<'a>(&self) -> bool;
+    fn process_run(&mut self, r: &Run<'_, T>) -> RunStep;
+    fn process_element(&mut self, e: Option<T::Unpacked<'_>>);
+    fn done(&self) -> bool;
     fn finish(self) -> Self::Output;
 }
 
@@ -156,7 +153,8 @@ impl<C: ColumnCursor> ColumnData<C> {
         start..end
     }
 
-    pub(crate) fn raw_reader<'a>(&'a self, mut advance: usize) -> RawReader<'a> {
+    #[allow(clippy::while_let_on_iterator)]
+    pub(crate) fn raw_reader(&self, mut advance: usize) -> RawReader<'_> {
         let mut reader = RawReader {
             slabs: self.slabs.iter(),
             current: None,
@@ -175,15 +173,9 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Default, Clone)]
 pub(crate) struct NextSlab<'a> {
     slabs: &'a [Slab],
-}
-
-impl<'a> Default for NextSlab<'a> {
-    fn default() -> Self {
-        Self { slabs: &[] }
-    }
 }
 
 impl<'a> NextSlab<'a> {
@@ -269,7 +261,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     RunStep::Process
                 }
             }
-            fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep {
+            fn process_run(&mut self, r: &Run<'_, T>) -> RunStep {
                 if r.count < self.amount_left {
                     self.amount_left -= r.count;
                     RunStep::Skip
@@ -277,7 +269,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     RunStep::Process
                 }
             }
-            fn process_element<'a>(&mut self, _e: Option<<T as Packable>::Unpacked<'a>>) {
+            fn process_element(&mut self, _e: Option<<T as Packable>::Unpacked<'_>>) {
                 if self.amount_left > 0 {
                     self.amount_left -= 1;
                 }
@@ -285,9 +277,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             fn done<'a>(&self) -> bool {
                 self.amount_left == 0
             }
-            fn finish(self) -> Self::Output {
-                ()
-            }
+            fn finish(self) -> Self::Output {}
         }
 
         self.seek_to(SeekBy {
@@ -328,15 +318,13 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         {
             type Output = Range<usize>;
             fn process_slab(&mut self, r: &Slab) -> RunStep {
-                if self.state == ScopeState::Seek {
-                    if self.pos + r.len() <= self.start {
-                        self.pos += r.len();
-                        return RunStep::Skip;
-                    }
+                if self.state == ScopeState::Seek && self.pos + r.len() <= self.start {
+                    self.pos += r.len();
+                    return RunStep::Skip;
                 }
                 RunStep::Process
             }
-            fn process_run<'b, 'c>(&mut self, r: &'c Run<'b, T>) -> RunStep {
+            fn process_run(&mut self, r: &Run<'_, T>) -> RunStep {
                 match self.state {
                     ScopeState::Seek => {
                         if self.pos + r.count <= self.start {
@@ -399,7 +387,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     }
                 }
             }
-            fn process_element<'b>(&mut self, _e: Option<<T as Packable>::Unpacked<'b>>) {
+            fn process_element(&mut self, _e: Option<<T as Packable>::Unpacked<'_>>) {
                 panic!()
             }
             fn done<'b>(&self) -> bool {
@@ -490,12 +478,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     //self.iter = self.slabs.next().map(|s| s.iter());
                     self.iter = self.slabs.next().map(|s| s.iter());
                 }
+            } else if let Some(slab) = self.slabs.next() {
+                self.iter = Some(slab.iter());
             } else {
-                if let Some(slab) = self.slabs.next() {
-                    self.iter = Some(slab.iter());
-                } else {
-                    return seek.finish();
-                }
+                return seek.finish();
             }
         }
     }
@@ -554,11 +540,11 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
-    pub(crate) fn to_vec<'a>(&'a self) -> Vec<C::Export> {
+    pub(crate) fn to_vec(&self) -> Vec<C::Export> {
         self.iter().map(|i| C::export_item(i)).collect()
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> ColumnDataIter<'a, C> {
+    pub(crate) fn iter(&self) -> ColumnDataIter<'_, C> {
         ColumnDataIter::<C> {
             pos: 0,
             group: 0,
@@ -601,7 +587,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         E: MaybePackable<C::Item> + Debug + Clone,
     {
         assert!(index <= self.len);
-        assert!(self.slabs.len() > 0);
+        assert!(!self.slabs.is_empty());
         if values.is_empty() && del == 0 {
             return;
         }
@@ -628,7 +614,7 @@ impl<C: ColumnCursor> ColumnData<C> {
                         self.len = self.len + add - del;
                         let j = i + 1;
                         self.slabs.splice(i..j, slabs);
-                        assert!(self.slabs.len() > 0);
+                        assert!(!self.slabs.is_empty());
                     }
                 }
                 break;
@@ -738,7 +724,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         }
         Self::flush_state(writer, state);
 
-        Self::copy_between(slab, writer, c0, c1, run1.clone(), size)
+        Self::copy_between(slab, writer, c0, c1, run1, size)
     }
 
     fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
@@ -746,13 +732,13 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         writer.write(out);
     }
 
-    fn is_empty<'a>(v: Option<<Self::Item as Packable>::Unpacked<'a>>) -> bool {
+    fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
         v.is_none()
     }
 
-    // FIXME remove self?
+    #[allow(clippy::type_complexity)]
     fn pop<'a>(
-        &self,
+        &self, // FIXME remove self?
         mut run: Run<'a, Self::Item>,
     ) -> (
         Option<<Self::Item as Packable>::Unpacked<'a>>,
@@ -800,8 +786,9 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>);
 
-    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self>;
+    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self>;
 
+    #[allow(clippy::type_complexity)]
     fn try_next<'a>(
         &self,
         data: &'a [u8],
@@ -861,7 +848,7 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
         }
     */
 
-    fn seek<'a>(index: usize, data: &'a [u8]) -> (Option<Run<'a, Self::Item>>, Self) {
+    fn seek(index: usize, data: &[u8]) -> (Option<Run<'_, Self::Item>>, Self) {
         if index == 0 {
             return (None, Self::default());
         } else {
@@ -1147,7 +1134,7 @@ pub(crate) struct RawReader<'a> {
 impl<'a> Default for RawReader<'a> {
     fn default() -> Self {
         Self {
-            slabs: (&[]).iter(),
+            slabs: [].iter(),
             current: None,
         }
     }
@@ -1230,7 +1217,7 @@ pub(crate) mod tests {
             let advance_by = rng.gen_range(1..(data.len() - advanced_by));
             iter.advance_by(advance_by);
             let expected = data[advance_by + advanced_by..].to_vec();
-            let actual = iter.clone().map(|e| C::export_item(e)).collect::<Vec<_>>();
+            let actual = iter.map(|e| C::export_item(e)).collect::<Vec<_>>();
             assert_eq!(expected, actual);
             advanced_by += advance_by;
         }

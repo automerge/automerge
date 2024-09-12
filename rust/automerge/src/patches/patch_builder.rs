@@ -213,7 +213,7 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         }
     }
 
-    pub(crate) fn mark<'b, 'c, M: Iterator<Item = Mark>>(&mut self, obj: ObjId, mark: M) {
+    pub(crate) fn mark<M: Iterator<Item = Mark>>(&mut self, obj: ObjId, mark: M) {
         if let Some(PatchAction::Mark { marks, .. }) = maybe_append(&mut self.patches, &obj) {
             for m in mark {
                 marks.push(m)

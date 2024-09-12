@@ -292,7 +292,7 @@ pub(crate) struct SuccInsert {
 impl<'a> Op<'a> {
     pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
         let pos = self.pos;
-        let mut succ = self.succ_cursors.clone();
+        let mut succ = self.succ_cursors;
         let len = succ.len() as u64;
         let mut sub_pos = succ.pos();
         while let Some(i) = succ.next() {
@@ -317,12 +317,10 @@ impl<'a> Op<'a> {
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
         if encoding == ListEncoding::List {
             1
+        } else if self.action == Action::Mark {
+            0
         } else {
-            if self.action == Action::Mark {
-                0
-            } else {
-                TextValue::width(self.as_str()) // FASTER
-            }
+            TextValue::width(self.as_str()) // FASTER
         }
     }
 
@@ -330,8 +328,8 @@ impl<'a> Op<'a> {
         OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
     }
 
-    pub(crate) fn succ(&self) -> impl Iterator<Item = OpId> + ExactSizeIterator + 'a {
-        self.succ_cursors.clone()
+    pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = OpId> + 'a {
+        self.succ_cursors
     }
 
     pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
@@ -396,7 +394,7 @@ impl<'a> Op<'a> {
         match &self.action() {
             OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
             OpType::Put(scalar) => hydrate::Value::from(scalar.into_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::from(mark.value.clone()),
+            OpType::MarkBegin(_, mark) => hydrate::Value::from(mark.value),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
@@ -490,7 +488,7 @@ impl<'a> AsDocOp<'a> for Op<'a> {
         Cow::Owned(self.value.into())
     }
     fn succ(&self) -> Self::SuccIter {
-        self.succ_cursors.clone()
+        self.succ_cursors
     }
     fn expand(&self) -> bool {
         self.expand

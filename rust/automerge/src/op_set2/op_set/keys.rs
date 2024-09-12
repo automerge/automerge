@@ -84,9 +84,8 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyOpIter<'a, I> {
         };
         let iter = self.iter.clone();
         let key = head.elemid_or_key();
-        while let Some(next) = self.iter.next() {
+        for next in self.iter.by_ref() {
             if next.elemid_or_key() != key {
-                //log!("next_op = {:?}", next);
                 self.next_op = Some(next);
                 break;
             }

@@ -647,16 +647,6 @@ fn test_remote_patches_for_marks_with_expand_after() {
     let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);
     let patches_b = doc_b.diff(&heads_before_b, &heads_after_b);
 
-    #[cfg(feature = "optree-visualisation")]
-    {
-        println!("--------------------------------");
-        println!("Doc A");
-        println!("{}", doc_a.visualise_optree(None));
-        println!("--------------------------------");
-        println!("Doc B");
-        println!("{}", doc_b.visualise_optree(None));
-    }
-
     assert_eq!(patches_a, patches_b);
 }
 

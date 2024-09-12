@@ -208,7 +208,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = winner.value().into();
+                let value = winner.value();
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -249,7 +249,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .filter_map(|patch| Some((patch.op().key.map_key()?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
-                let value = winner.value().into();
+                let value = winner.value();
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -257,7 +257,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
-                let value = after.value().into();
+                let value = after.value();
                 let id = after.op.id;
                 let expose = after.cross_visible;
                 patch_log.put_map(obj.id, key, value, id, conflict, expose)

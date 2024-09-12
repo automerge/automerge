@@ -39,23 +39,23 @@ pub(crate) trait Packable: PartialEq + Debug {
         + Default;
     type Owned: Clone + PartialEq + Debug;
 
-    fn group<'a>(_item: Self::Unpacked<'a>) -> usize {
+    fn group(_item: Self::Unpacked<'_>) -> usize {
         0
     }
 
-    fn validate<'a>(_val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
+    fn validate(_val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
         Ok(())
     }
 
-    fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned;
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError>;
+    fn own(item: Self::Unpacked<'_>) -> Self::Owned;
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError>;
 }
 
 impl Packable for i64 {
     type Unpacked<'a> = i64;
     type Owned = i64;
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
+    fn validate(val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
                 return Err(PackError::CounterOutOfRange(*a as u64));
@@ -64,10 +64,10 @@ impl Packable for i64 {
         Ok(())
     }
 
-    fn own<'a>(item: i64) -> i64 {
+    fn own(item: i64) -> i64 {
         item
     }
-    fn unpack<'a>(mut buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::signed(&mut buff)?;
         Ok((start_len - buff.len(), val))
@@ -78,7 +78,7 @@ impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, _m: &ScanMeta) -> Result<(), PackError> {
+    fn validate(val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
                 return Err(PackError::CounterOutOfRange(*a));
@@ -87,14 +87,14 @@ impl Packable for u64 {
         Ok(())
     }
 
-    fn group<'a>(item: u64) -> usize {
+    fn group(item: u64) -> usize {
         item as usize
     }
 
-    fn own<'a>(item: u64) -> u64 {
+    fn own(item: u64) -> u64 {
         item
     }
-    fn unpack<'a>(mut buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), val))
@@ -105,10 +105,10 @@ impl Packable for usize {
     type Unpacked<'a> = usize;
     type Owned = usize;
 
-    fn own<'a>(item: usize) -> usize {
+    fn own(item: usize) -> usize {
         item
     }
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let (len, val) = u64::unpack(buff)?;
         Ok((len, val as usize))
     }
@@ -118,11 +118,11 @@ impl Packable for bool {
     type Unpacked<'a> = bool;
     type Owned = bool;
 
-    fn own<'a>(item: bool) -> bool {
+    fn own(item: bool) -> bool {
         item
     }
 
-    fn unpack<'a>(_buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(_buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         panic!()
     }
 }
@@ -131,11 +131,11 @@ impl Packable for [u8] {
     type Unpacked<'a> = &'a [u8];
     type Owned = Vec<u8>;
 
-    fn own<'a>(item: &'a [u8]) -> Vec<u8> {
+    fn own(item: &[u8]) -> Vec<u8> {
         item.to_vec()
     }
 
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let (start, bytes) = usize::unpack(buff)?;
         let end = start + bytes;
         let result = &buff[start..end];
@@ -147,11 +147,11 @@ impl Packable for str {
     type Unpacked<'a> = &'a str;
     type Owned = String;
 
-    fn own<'a>(item: &'a str) -> String {
+    fn own(item: &str) -> String {
         item.to_owned()
     }
 
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let (len, bytes) = <[u8]>::unpack(buff)?;
         let result = std::str::from_utf8(bytes).map_err(|_| PackError::InvalidUtf8)?;
         Ok((len, result))
@@ -251,11 +251,11 @@ impl Packable for Action {
 
     type Owned = Action;
 
-    fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
+    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
         item
     }
 
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), super::PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
         let (len, result) = u64::unpack(buff)?;
         let action = match result {
             0 => Action::MakeMap,
@@ -294,7 +294,7 @@ impl Packable for ActorIdx {
 
     type Owned = ActorIdx;
 
-    fn validate<'a>(val: &Option<Self::Unpacked<'a>>, m: &ScanMeta) -> Result<(), PackError> {
+    fn validate(val: &Option<Self::Unpacked<'_>>, m: &ScanMeta) -> Result<(), PackError> {
         if let Some(ActorIdx(a)) = val {
             if *a >= m.actors as u64 {
                 return Err(PackError::ActorIndexOutOfRange(*a, m.actors));
@@ -303,11 +303,11 @@ impl Packable for ActorIdx {
         Ok(())
     }
 
-    fn own<'a>(item: Self::Unpacked<'a>) -> Self::Owned {
+    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
         item
     }
 
-    fn unpack<'a>(buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), super::PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, ActorIdx::from(result)))
     }

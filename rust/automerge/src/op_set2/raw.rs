@@ -66,7 +66,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         len
     }
 
-    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         let state = ();
         let cursor = Self { offset: index };
 

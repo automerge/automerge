@@ -25,9 +25,9 @@ pub(crate) enum Error {
     #[error(transparent)]
     InvalidOp(#[from] crate::error::InvalidOpType),
     #[error(transparent)]
-    PackError(#[from] PackError),
+    PackErr(#[from] PackError),
     #[error(transparent)]
-    ReadOpError(#[from] ReadOpError),
+    ReadOpErr(#[from] ReadOpError),
 }
 
 pub(crate) struct MismatchedHeads {

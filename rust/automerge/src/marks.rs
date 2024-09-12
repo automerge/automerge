@@ -49,9 +49,9 @@ impl Mark {
     pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
         //let data = self.data.into_owned();
-        let name = SmolStr::from(self.name);
+        //let name = self.name;
         //m.insert(data.name, data.value);
-        m.insert(name, self.value);
+        m.insert(self.name, self.value);
         Arc::new(m)
     }
 }
@@ -299,8 +299,7 @@ impl<'a> MarkStateMachine<'a> {
             .unwrap_or(0);
         self.state[index..]
             .iter()
-            .find(|(i, m)| *i > id && m.name == name)
-            .is_some()
+            .any(|(i, m)| *i > id && m.name == name)
     }
 
     fn mark_above(
@@ -311,7 +310,7 @@ impl<'a> MarkStateMachine<'a> {
         Some(state[index..].iter().find(|(_, m)| m.name == mark.name)?.1)
     }
 
-    fn mark_below<'b>(
+    fn mark_below(
         state: &mut [(OpId, MarkData<'a>)],
         index: usize,
         mark: MarkData<'a>,

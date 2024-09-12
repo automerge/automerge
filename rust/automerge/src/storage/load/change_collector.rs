@@ -257,7 +257,7 @@ impl<'a> PartialChange<'a> {
             .with_timestamp(self.timestamp)
             .with_message(self.message.map(|s| s.to_string()))
             .with_extra_bytes(self.extra_bytes.into_owned())
-            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, &op)))
+            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, op)))
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {

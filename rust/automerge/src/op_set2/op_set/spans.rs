@@ -148,7 +148,7 @@ impl<'a> Iterator for SpansInternal<'a> {
             self.state.index += width;
             return Some(block);
         }
-        while let Some(op) = self.iter.next() {
+        for op in self.iter.by_ref() {
             //if !(op.is_mark() || op.visible_at(self.clock.as_ref())) {
             //    continue;
             //}

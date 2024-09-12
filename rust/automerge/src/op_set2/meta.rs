@@ -49,9 +49,9 @@ impl From<u64> for ValueMeta {
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for ValueMeta {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::GroupUInt(self.0, self.length())
+impl<'a> From<ValueMeta> for WriteOp<'a> {
+    fn from(v: ValueMeta) -> WriteOp<'static> {
+        WriteOp::GroupUInt(v.0, v.length())
     }
 }
 
@@ -107,11 +107,11 @@ impl Packable for ValueMeta {
         item.length()
     }
 
-    fn own<'a>(item: ValueMeta) -> ValueMeta {
+    fn own(item: ValueMeta) -> ValueMeta {
         item
     }
 
-    fn unpack<'a>(mut buff: &'a [u8]) -> Result<(usize, Self::Unpacked<'a>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), ValueMeta(val)))

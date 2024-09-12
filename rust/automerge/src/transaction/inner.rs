@@ -901,7 +901,7 @@ impl TransactionInner {
         self.split_block(doc, patch_log, text, index)
     }
 
-    fn finalize_op<'a>(
+    fn finalize_op(
         &mut self,
         patch_log: &mut PatchLog,
         op: &OpBuilder2,

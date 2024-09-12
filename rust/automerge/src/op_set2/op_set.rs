@@ -14,16 +14,15 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
-use super::columns::{ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
+use super::columns::{Column, ColumnCursor, ColumnData, ColumnDataIter, RawReader, Run};
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::pack::PackError;
 use super::rle::{ActionCursor, ActorCursor};
 use super::types::{Action, ActorIdx, MarkData, OpType, ScalarValue};
-use super::{
-    BooleanCursor, Column, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, StrCursor, ValueMeta,
-};
+use super::{BooleanCursor, DeltaCursor, IntCursor, Key, KeyRef, MetaCursor, StrCursor, ValueMeta};
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -106,7 +105,7 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn insert2<'a>(&'a mut self, op: &OpBuilder2) {
+    pub(crate) fn insert2(&mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
         self.len += 1;
         self.validate()
@@ -269,7 +268,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> SeekOpIdResult<'_> {
-        let mut iter = self.iter_obj(&obj);
+        let mut iter = self.iter_obj(obj);
         let mut pos = iter.end_pos();
         let mut ops = vec![];
         let mut found = target.is_head();
@@ -485,7 +484,7 @@ impl OpSet {
                 self.found_op_with_patch_log(new_op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let mut iter = self.iter_prop(&new_op.obj, &s);
+                let mut iter = self.iter_prop(&new_op.obj, s);
                 let mut pos = iter.end_pos();
                 let mut ops = vec![];
                 while let Some(mut o) = iter.next() {
@@ -514,8 +513,9 @@ impl OpSet {
         let mut overwritten = None;
         let mut after = None;
         let mut succ = vec![];
-        for i in 0..ops.len() {
-            let (op, visible) = &ops[i];
+        for (op, visible) in ops {
+            //for i in 0..ops.len() {
+            //    let (op, visible) = &ops[i];
 
             if found.is_none() && op.id > new_op.id {
                 found = Some(op.pos);
@@ -652,7 +652,7 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_range<'a>(&'a self, range: &Range<usize>) -> OpIter<'_> {
+    pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
             .cols
@@ -688,7 +688,7 @@ impl OpSet {
             value,
             mark_name: self.cols.get_str_range(MARK_NAME_COL_SPEC, range),
             expand: self.cols.get_boolean_range(EXPAND_COL_SPEC, range),
-            op_set: &self,
+            op_set: self,
         }
     }
 
@@ -711,7 +711,7 @@ impl OpSet {
             value: self.cols.get_value(VALUE_COL_SPEC),
             mark_name: self.cols.get_str(MARK_NAME_COL_SPEC),
             expand: self.cols.get_boolean(EXPAND_COL_SPEC),
-            op_set: &self,
+            op_set: self,
         }
     }
 
@@ -960,7 +960,7 @@ impl Default for Columns {
         let mut btree = BTreeMap::new();
         for spec in &ALL_COLUMN_SPECS {
             let col = Column::new(*spec);
-            assert!(col.slabs().len() > 0);
+            assert!(!col.slabs().is_empty());
             btree.insert(*spec, col);
         }
         Self(btree)
@@ -986,7 +986,7 @@ pub(super) trait OpLike {
 
 // TODO? add inc value to the succ column
 
-const NONE: &'static str = ".";
+const NONE: &str = ".";
 
 fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
     match t {
@@ -999,44 +999,38 @@ fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
 impl Columns {
     // FIXME - this could be much much more efficient
     fn rewrite_with_new_actor(&mut self, idx: usize) {
-        for (_spec, col) in &mut self.0 {
-            match col {
-                Column::Actor(col_data) => {
-                    let new_ids = col_data
-                        .iter()
-                        .map(|a| match a {
-                            Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
-                            old => old,
-                        })
-                        .collect::<Vec<_>>();
-                    let mut new_data = ColumnData::<ActorCursor>::new();
-                    new_data.splice(0, 0, new_ids);
-                    std::mem::swap(col_data, &mut new_data);
-                }
-                _ => {}
+        for col in self.0.values_mut() {
+            if let Column::Actor(col_data) = col {
+                let new_ids = col_data
+                    .iter()
+                    .map(|a| match a {
+                        Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
+                        old => old,
+                    })
+                    .collect::<Vec<_>>();
+                let mut new_data = ColumnData::<ActorCursor>::new();
+                new_data.splice(0, 0, new_ids);
+                std::mem::swap(col_data, &mut new_data);
             }
         }
     }
 
     fn rewrite_without_actor(&mut self, idx: usize) {
-        for (_spec, col) in &mut self.0 {
-            match col {
-                Column::Actor(col_data) => {
-                    let new_ids = col_data
-                        .iter()
-                        .map(|a| match a {
-                            Some(ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
-                            Some(ActorIdx(id)) if id as usize == idx => {
-                                panic!("cant rewrite - actor is present")
-                            }
-                            old => old,
-                        })
-                        .collect::<Vec<_>>();
-                    let mut new_data = ColumnData::<ActorCursor>::new();
-                    new_data.splice(0, 0, new_ids);
-                    std::mem::swap(col_data, &mut new_data);
-                }
-                _ => {}
+        for col in self.0.values_mut() {
+            if let Column::Actor(col_data) = col {
+                let new_ids = col_data
+                    .iter()
+                    .map(|a| match a {
+                        Some(ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
+                        Some(ActorIdx(id)) if id as usize == idx => {
+                            panic!("cant rewrite - actor is present")
+                        }
+                        old => old,
+                    })
+                    .collect::<Vec<_>>();
+                let mut new_data = ColumnData::<ActorCursor>::new();
+                new_data.splice(0, 0, new_ids);
+                std::mem::swap(col_data, &mut new_data);
             }
         }
     }
@@ -1354,13 +1348,7 @@ impl Columns {
         columns.insert(VALUE_COL_SPEC, Column::Value(value));
 
         let mut mark_name = ColumnData::<StrCursor>::new();
-        mark_name.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| op.mark_name.clone())
-                .collect::<Vec<_>>(),
-        );
+        mark_name.splice(0, 0, ops.clone().map(|op| op.mark_name).collect::<Vec<_>>());
         columns.insert(MARK_NAME_COL_SPEC, Column::Str(mark_name));
 
         let mut expand = ColumnData::<BooleanCursor>::new();
@@ -1388,50 +1376,6 @@ impl Columns {
         }
     }
 
-    /*
-        fn get_integer_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::Integer(c)) => c,
-                _ => panic!(),
-            }
-        }
-
-        fn get_boolean_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<BooleanCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::Bool(c)) => c,
-                _ => panic!(),
-            }
-        }
-
-        fn get_str_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<StrCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::Str(c)) => c,
-                _ => panic!(),
-            }
-        }
-
-        fn get_action_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActionCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::Action(c)) => c,
-                _ => panic!(),
-            }
-        }
-
-        fn get_value_meta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<MetaCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::ValueMeta(c)) => c,
-                _ => panic!(),
-            }
-        }
-
-        fn get_value_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<RawCursor> {
-            match self.0.get_mut(&spec) {
-                Some(Column::Value(c)) => c,
-                _ => panic!(),
-            }
-        }
-    */
-
     fn get_actor(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActorCursor> {
         match self.0.get(&spec) {
             Some(Column::Actor(c)) => c.iter(),
@@ -1449,12 +1393,6 @@ impl Columns {
             _ => ColumnDataIter::empty(),
         }
     }
-
-    /*
-        fn get_coldata(&self, spec: ColumnSpec) -> &[Slab] {
-            self.0.get(&spec).unwrap().slabs()
-        }
-    */
 
     fn get_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, IntCursor> {
         match self.0.get(&spec) {
@@ -1613,13 +1551,13 @@ impl Columns {
         let mut group = None;
         for spec in &ALL_COLUMN_SPECS {
             if group == Some(spec.id()) {
-                if self.0.get(spec).is_none() {
+                if !self.0.contains_key(spec) {
                     let col = Column::new(*spec);
                     self.0.insert(*spec, col);
                 }
             } else {
                 group = spec.group_id();
-                if self.0.get(spec).is_none() {
+                if !self.0.contains_key(spec) {
                     let col = Column::init_empty(*spec, len);
                     self.0.insert(*spec, col);
                 }
@@ -1643,21 +1581,24 @@ impl<'a> Iterator for IterObjIds<'a> {
         let start = self.pos;
         match (self.next_ctr, self.next_actor) {
             (Some(mut run1), Some(mut run2)) => {
-                if run1.count < run2.count {
-                    run2.count -= run1.count;
-                    self.next_actor = Some(run2);
-                    self.pos += run1.count;
-                    self.next_ctr = self.ctr.next_run();
-                } else if run1.count > run2.count {
-                    run1.count -= run2.count;
-                    self.next_ctr = Some(run1);
-                    self.pos += run2.count;
-                    self.next_actor = self.actor.next_run();
-                } else {
-                    // equal
-                    self.pos += run1.count;
-                    self.next_ctr = self.ctr.next_run();
-                    self.next_actor = self.actor.next_run();
+                match run1.count.cmp(&run2.count) {
+                    Ordering::Less => {
+                        run2.count -= run1.count;
+                        self.next_actor = Some(run2);
+                        self.pos += run1.count;
+                        self.next_ctr = self.ctr.next_run();
+                    }
+                    Ordering::Greater => {
+                        run1.count -= run2.count;
+                        self.next_ctr = Some(run1);
+                        self.pos += run2.count;
+                        self.next_actor = self.actor.next_run();
+                    }
+                    Ordering::Equal => {
+                        self.pos += run1.count;
+                        self.next_ctr = self.ctr.next_run();
+                        self.next_actor = self.actor.next_run();
+                    }
                 }
                 let end = self.pos;
                 let obj = ObjId::load(run1.value, run2.value)?;
@@ -1850,16 +1791,16 @@ mod tests {
                 id: test_op.id,
                 obj: test_op.obj,
                 action: test_op.action,
-                value: test_op.value.clone(),
-                key: test_op.key.clone(),
+                value: test_op.value,
+                key: test_op.key,
                 insert: test_op.insert,
                 expand: test_op.expand,
                 mark_name: test_op.mark_name,
                 conflict: false,
                 succ_cursors: SuccCursors {
                     len: group_count as usize,
-                    succ_counter: counter_iter.clone(),
-                    succ_actor: actor_iter.clone(),
+                    succ_counter: counter_iter,
+                    succ_actor: actor_iter,
                 },
             };
             for _ in 0..group_count {
@@ -1942,7 +1883,7 @@ mod tests {
             let range = opset
                 .cols
                 .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-                .scope_to_value(Some(ActorIdx::from(1 as usize)), range);
+                .scope_to_value(Some(ActorIdx::from(1_usize)), range);
             let mut iter = opset.iter_range(&range);
             let op = iter.next().unwrap();
             assert_eq!(ops[3], op);
@@ -2091,7 +2032,7 @@ mod tests {
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
                 .collect::<Vec<_>>();
-            let key1 = ops.get(0).unwrap().as_slice();
+            let key1 = ops.first().unwrap().as_slice();
             let key2 = ops.get(1).unwrap().as_slice();
             let key3 = ops.get(2).unwrap().as_slice();
             let key4 = ops.get(3);
@@ -2106,7 +2047,7 @@ mod tests {
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
                 .collect::<Vec<_>>();
-            let key1 = ops.get(0).unwrap().as_slice();
+            let key1 = ops.first().unwrap().as_slice();
             let key2 = ops.get(1).unwrap().as_slice();
             let key3 = ops.get(2).unwrap().as_slice();
             let key4 = ops.get(3);

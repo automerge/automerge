@@ -246,7 +246,7 @@ impl Automerge {
         match &self.actor {
             Actor::Unused(actor) => {
                 let index = self.put_actor(actor.clone());
-                self.actor = Actor::Cached(usize::from(index));
+                self.actor = Actor::Cached(index);
                 index
             }
             Actor::Cached(index) => *index,
@@ -751,7 +751,7 @@ impl Automerge {
 
     fn duplicate_seq(&self, change: &Change) -> bool {
         let mut dup = false;
-        if let Some(actor_index) = self.ops.lookup_actor(change.actor_id().into()) {
+        if let Some(actor_index) = self.ops.lookup_actor(change.actor_id()) {
             if let Some(s) = self.states.get(&actor_index) {
                 dup = s.len() >= change.seq() as usize;
             }
@@ -1157,19 +1157,6 @@ impl Automerge {
         }
     }
 
-    /*
-        pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
-            match id.export() {
-                Export::Id(id) => {
-                    let mut actor = self.ops.get_actor(id.actor()).to_string();
-                    actor.truncate(6);
-                    format!("{}@{}", id.counter(), actor)
-                }
-                Export::Special(s) => s,
-            }
-        }
-    */
-
     pub fn dump(&self) {
         /*
                 log!(
@@ -1221,23 +1208,6 @@ impl Automerge {
                     );
                 }
         */
-    }
-
-    /// Return a graphviz representation of the opset.
-    ///
-    /// # Arguments
-    ///
-    /// * objects: An optional list of object IDs to display, if not specified all objects are
-    ///            visualised
-    #[cfg(feature = "optree-visualisation")]
-    pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
-        let objects = objects.map(|os| {
-            os.iter()
-                .filter_map(|o| self.exid_to_obj(o).ok())
-                .map(|o| o.id)
-                .collect()
-        });
-        self.ops.visualise(objects)
     }
 
     pub(crate) fn insert_op(

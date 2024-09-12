@@ -22,7 +22,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(op) = self.iter.next() {
+        for op in self.iter.by_ref() {
             if op.action == Action::Mark {
                 if let Some(name) = op.mark_name {
                     let value = op.value;
@@ -64,7 +64,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for NoMarkIter<'a, I> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(op) = self.iter.next() {
+        for op in self.iter.by_ref() {
             if op.action == Action::Mark {
                 continue;
             }

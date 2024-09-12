@@ -203,7 +203,7 @@ impl<'a> OpIter<'a> {
                 if counter == 0 {
                     Ok(ObjId::root())
                 } else {
-                    Ok(OpId::new(counter as u64, u64::from(actor_idx) as usize).into())
+                    Ok(OpId::new(counter, u64::from(actor_idx) as usize).into())
                 }
             }
             (Some(None), Some(None)) => Ok(ObjId::root()),
@@ -229,8 +229,8 @@ impl<'a> OpIter<'a> {
         let num_succ = self.succ_count.next().flatten().unwrap_or(0);
         let result = SuccCursors {
             len: num_succ as usize,
-            succ_actor: self.succ_actor.clone(),
-            succ_counter: self.succ_counter.clone(),
+            succ_actor: self.succ_actor,
+            succ_counter: self.succ_counter,
         };
         for _ in 0..num_succ {
             self.succ_actor.next();

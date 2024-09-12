@@ -234,7 +234,7 @@ impl OpType {
         matches!(self, OpType::MarkBegin(true, _) | OpType::MarkEnd(true))
     }
 
-    pub(crate) fn value<'a>(&'a self) -> Cow<'a, ScalarValue> {
+    pub(crate) fn value(&self) -> Cow<'_, ScalarValue> {
         match self {
             OpType::Put(v) => Cow::Borrowed(v),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),

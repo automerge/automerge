@@ -147,7 +147,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
     }
 
-    fn encode<'a>(index: usize, del: usize, slab: &'a Slab) -> Encoder<'a, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_ref());
 

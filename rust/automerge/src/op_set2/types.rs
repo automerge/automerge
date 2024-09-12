@@ -249,18 +249,18 @@ impl<'a> From<&'a types::ScalarValue> for ScalarValue<'a> {
 }
 
 impl<'a> ScalarValue<'a> {
-    pub(crate) fn into_owned(&self) -> types::ScalarValue {
+    pub(crate) fn into_owned(self) -> types::ScalarValue {
         match self {
             Self::Bytes(b) => types::ScalarValue::Bytes(b.to_vec()),
             Self::Str(s) => types::ScalarValue::Str(s.to_string().into()),
-            Self::Int(n) => types::ScalarValue::Int(*n),
-            Self::Uint(n) => types::ScalarValue::Uint(*n),
-            Self::F64(n) => types::ScalarValue::F64(*n),
+            Self::Int(n) => types::ScalarValue::Int(n),
+            Self::Uint(n) => types::ScalarValue::Uint(n),
+            Self::F64(n) => types::ScalarValue::F64(n),
             Self::Counter(n) => types::ScalarValue::Counter(n.into()),
-            Self::Timestamp(n) => types::ScalarValue::Timestamp(*n),
-            Self::Boolean(b) => types::ScalarValue::Boolean(*b),
+            Self::Timestamp(n) => types::ScalarValue::Timestamp(n),
+            Self::Boolean(b) => types::ScalarValue::Boolean(b),
             Self::Unknown { type_code, bytes } => types::ScalarValue::Unknown {
-                type_code: *type_code,
+                type_code,
                 bytes: bytes.to_vec(),
             },
             Self::Null => types::ScalarValue::Null,
@@ -278,12 +278,11 @@ impl<'a> ScalarValue<'a> {
             ValueType::Uleb => Ok(ScalarValue::Uint(parse_uleb128(raw)?)),
             ValueType::Leb => Ok(ScalarValue::Int(parse_leb128(raw)?)),
             ValueType::Float => {
-                let float_bytes: [u8; 8] =
-                    raw.try_into().map_err(|_| ReadScalarError::InvalidFloat)?;
+                let float_bytes: [u8; 8] = raw.try_into().map_err(|_| ReadScalarError::Float)?;
                 Ok(ScalarValue::F64(f64::from_le_bytes(float_bytes)))
             }
             ValueType::String => {
-                let s = std::str::from_utf8(raw).map_err(|_| ReadScalarError::InvalidStr)?;
+                let s = std::str::from_utf8(raw).map_err(|_| ReadScalarError::Str)?;
                 Ok(ScalarValue::Str(s))
             }
             ValueType::Bytes => Ok(ScalarValue::Bytes(raw)),
@@ -296,7 +295,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(super) fn to_raw(&self) -> Option<Cow<'a, [u8]>> {
+    pub(super) fn to_raw(self) -> Option<Cow<'a, [u8]>> {
         match self {
             Self::Bytes(b) => Some(Cow::Borrowed(b)),
             Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
@@ -304,12 +303,12 @@ impl<'a> ScalarValue<'a> {
             Self::Boolean(_) => None,
             Self::Uint(i) => {
                 let mut out = Vec::new();
-                leb128::write::unsigned(&mut out, *i).unwrap();
+                leb128::write::unsigned(&mut out, i).unwrap();
                 Some(Cow::Owned(out))
             }
             Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
                 let mut out = Vec::new();
-                leb128::write::signed(&mut out, *i).unwrap();
+                leb128::write::signed(&mut out, i).unwrap();
                 Some(Cow::Owned(out))
             }
             Self::F64(f) => {
@@ -392,38 +391,38 @@ impl crate::types::ScalarValue {
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ReadScalarError {
     #[error("invalid uleb128")]
-    InvalidUleb,
+    Uleb,
     #[error("invalid leb128")]
-    InvalidLeb,
+    Leb,
     #[error("invalid float")]
-    InvalidFloat,
+    Float,
     #[error("invalid string")]
-    InvalidStr,
+    Str,
 }
 
 impl From<crate::storage::parse::leb128::Error> for ReadScalarError {
     fn from(_: crate::storage::parse::leb128::Error) -> Self {
-        ReadScalarError::InvalidUleb
+        ReadScalarError::Uleb
     }
 }
 
 fn parse_uleb128(input: &[u8]) -> Result<u64, ReadScalarError> {
     crate::storage::parse::leb128_u64::<ReadScalarError>(crate::storage::parse::Input::new(input))
         .map(|(_, v)| v)
-        .map_err(|_| ReadScalarError::InvalidLeb)
+        .map_err(|_| ReadScalarError::Leb)
 }
 
 fn parse_leb128(input: &[u8]) -> Result<i64, ReadScalarError> {
     crate::storage::parse::leb128_i64::<ReadScalarError>(crate::storage::parse::Input::new(input))
         .map(|(_, v)| v)
-        .map_err(|_| ReadScalarError::InvalidLeb)
+        .map_err(|_| ReadScalarError::Leb)
 }
 
 impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
     fn eq(&self, other: &types::ScalarValue) -> bool {
         match (self, other) {
             (ScalarValue::Bytes(a), types::ScalarValue::Bytes(b)) => a == &b.as_slice(),
-            (ScalarValue::Str(a), types::ScalarValue::Str(b)) => a == &b,
+            (ScalarValue::Str(a), types::ScalarValue::Str(b)) => a == b,
             (ScalarValue::Int(a), types::ScalarValue::Int(b)) => a == b,
             (ScalarValue::Uint(a), types::ScalarValue::Uint(b)) => a == b,
             (ScalarValue::F64(a), types::ScalarValue::F64(b)) => a == b,
@@ -579,9 +578,9 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub(crate) fn into_owned(&self) -> value::Value<'static> {
+    pub(crate) fn into_owned(self) -> value::Value<'static> {
         match self {
-            Self::Object(o) => value::Value::Object(*o),
+            Self::Object(o) => value::Value::Object(o),
             Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
         }
     }

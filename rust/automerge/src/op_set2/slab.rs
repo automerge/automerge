@@ -43,50 +43,50 @@ impl Index<Range<usize>> for Slab {
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for i64 {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::Int(self)
+impl<'a> From<i64> for WriteOp<'a> {
+    fn from(n: i64) -> WriteOp<'static> {
+        WriteOp::Int(n)
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for u64 {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::UInt(self)
+impl<'a> From<u64> for WriteOp<'a> {
+    fn from(n: u64) -> WriteOp<'static> {
+        WriteOp::UInt(n)
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for ActorIdx {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(self))
+impl<'a> From<ActorIdx> for WriteOp<'a> {
+    fn from(n: ActorIdx) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(n))
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for Action {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(self))
+impl<'a> From<Action> for WriteOp<'a> {
+    fn from(a: Action) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(a))
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for usize {
-    fn into(self) -> WriteOp<'static> {
-        WriteOp::UInt(self as u64)
+impl<'a> From<usize> for WriteOp<'a> {
+    fn from(n: usize) -> WriteOp<'static> {
+        WriteOp::UInt(n as u64)
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for &'a str {
-    fn into(self) -> WriteOp<'a> {
-        WriteOp::Bytes(self.as_bytes())
+impl<'a> From<&'a str> for WriteOp<'a> {
+    fn from(s: &'a str) -> WriteOp<'a> {
+        WriteOp::Bytes(s.as_bytes())
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for &'a [u8] {
-    fn into(self) -> WriteOp<'a> {
-        WriteOp::Bytes(self)
+impl<'a> From<&'a [u8]> for WriteOp<'a> {
+    fn from(bytes: &'a [u8]) -> WriteOp<'a> {
+        WriteOp::Bytes(bytes)
     }
 }
 
-impl<'a> Into<WriteOp<'a>> for bool {
-    fn into(self) -> WriteOp<'a> {
+impl<'a> From<bool> for WriteOp<'a> {
+    fn from(_bool: bool) -> WriteOp<'a> {
         panic!()
     }
 }
@@ -203,7 +203,7 @@ impl<'a> WriteAction<'a> {
                 //log!("write raw {:?}", &buff[start..]);
             }
             Self::Run(n, b) => {
-                leb128::write::signed(buff, -1 * n).unwrap();
+                leb128::write::signed(buff, -n).unwrap();
                 //log!("write lit run of {:?} {:?}", n, &buff[start..]);
                 for item in b {
                     item.write(buff);
@@ -395,7 +395,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     pub(crate) fn flush_bool_run(&mut self, count: usize) {
-        self.push(WriteAction::Op(WriteOp::UInt(count as u64)), count as usize);
+        self.push(WriteAction::Op(WriteOp::UInt(count as u64)), count);
     }
 
     pub(crate) fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
@@ -406,7 +406,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     pub(crate) fn flush_bytes(&mut self, data: &'a [u8], count: usize) {
-        self.push(WriteAction::Raw(data), count as usize);
+        self.push(WriteAction::Raw(data), count);
     }
 
     pub(crate) fn flush_null(&mut self, count: usize) {
@@ -435,18 +435,13 @@ impl<'a, C: ColumnCursor> Copy for SlabIter<'a, C> {}
 
 impl<'a, C: ColumnCursor> std::clone::Clone for SlabIter<'a, C> {
     fn clone(&self) -> Self {
-        Self {
-            slab: self.slab,
-            cursor: self.cursor.clone(),
-            state: self.state.clone(),
-            last_group: self.last_group,
-        }
+        *self
     }
 }
 
 #[derive(Debug)]
 enum IterState<'a, I: Packable + ?Sized> {
-    PoppedRun(Option<I::Unpacked<'a>>, Option<Run<'a, I>>),
+    Popped(Option<I::Unpacked<'a>>, Option<Run<'a, I>>),
     AtStartOfRun(Run<'a, I>),
     InRun(Run<'a, I>),
 }
@@ -454,11 +449,7 @@ enum IterState<'a, I: Packable + ?Sized> {
 impl<'a, I: Packable + ?Sized> Copy for IterState<'a, I> {}
 impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
     fn clone(&self) -> Self {
-        match self {
-            Self::PoppedRun(value, run) => Self::PoppedRun(value.clone(), run.clone()),
-            Self::AtStartOfRun(run) => Self::AtStartOfRun(run.clone()),
-            Self::InRun(run) => Self::InRun(run.clone()),
-        }
+        *self
     }
 }
 
@@ -466,9 +457,9 @@ impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
 impl<'a, I: Packable + ?Sized> IterState<'a, I> {
     fn group(&self) -> usize {
         match self {
-            Self::PoppedRun(None, Some(run)) => run.group(),
-            Self::PoppedRun(Some(val), Some(run)) => I::group(*val) + run.group(),
-            Self::PoppedRun(Some(val), None) => I::group(*val),
+            Self::Popped(None, Some(run)) => run.group(),
+            Self::Popped(Some(val), Some(run)) => I::group(*val) + run.group(),
+            Self::Popped(Some(val), None) => I::group(*val),
             Self::AtStartOfRun(run) => run.group(),
             Self::InRun(run) => run.group(),
             _ => 0,
@@ -477,8 +468,8 @@ impl<'a, I: Packable + ?Sized> IterState<'a, I> {
 
     fn state_length(&self) -> usize {
         match self {
-            Self::PoppedRun(_, Some(run)) => run.count + 1,
-            Self::PoppedRun(_, None) => 1,
+            Self::Popped(_, Some(run)) => run.count + 1,
+            Self::Popped(_, None) => 1,
             Self::AtStartOfRun(run) => run.count,
             Self::InRun(run) => run.count,
         }
@@ -532,7 +523,7 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
                     }
                     RunStep::Process => {
                         let (value, next_state) = self.cursor.pop(run);
-                        self.state = Some(IterState::PoppedRun(value, next_state));
+                        self.state = Some(IterState::Popped(value, next_state));
                     }
                     RunStep::Done => {
                         return true;
@@ -540,17 +531,17 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
                 },
                 Some(IterState::InRun(run)) => {
                     let (value, next_state) = self.cursor.pop(run);
-                    self.state = Some(IterState::PoppedRun(value, next_state));
+                    self.state = Some(IterState::Popped(value, next_state));
                 }
-                Some(IterState::PoppedRun(elem, run)) => {
+                Some(IterState::Popped(elem, run)) => {
                     seek.process_element(elem);
                     if seek.done() {
-                        self.state = Some(IterState::PoppedRun(elem, run));
+                        self.state = Some(IterState::Popped(elem, run));
                         return true;
                     }
                     if let Some(run) = run {
                         let (value, next_state) = self.cursor.pop(run);
-                        self.state = Some(IterState::PoppedRun(value, next_state));
+                        self.state = Some(IterState::Popped(value, next_state));
                     } else {
                         self.state = None
                     }
@@ -569,7 +560,7 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 }
 
-fn item_group<'a, P: Packable + ?Sized>(item: &Option<P::Unpacked<'a>>) -> usize {
+fn item_group<P: Packable + ?Sized>(item: &Option<P::Unpacked<'_>>) -> usize {
     match item {
         Some(i) => P::group(*i),
         None => 0,
@@ -583,7 +574,7 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
         let mut state = None;
         std::mem::swap(&mut state, &mut self.state);
         match state {
-            Some(IterState::PoppedRun(value, next_run)) => {
+            Some(IterState::Popped(value, next_run)) => {
                 self.state = next_run.map(IterState::InRun);
                 self.last_group = item_group::<C::Item>(&value);
                 Some(value)
@@ -613,7 +604,7 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
 }
 
 impl Slab {
-    pub(crate) fn iter<'a, C: ColumnCursor>(&'a self) -> SlabIter<'a, C> {
+    pub(crate) fn iter<C: ColumnCursor>(&self) -> SlabIter<'_, C> {
         SlabIter {
             slab: self,
             cursor: C::default(),
@@ -625,7 +616,7 @@ impl Slab {
     pub(crate) fn as_ref(&self) -> &[u8] {
         match self {
             Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
-            Self::Owned(OwnedSlab { data, .. }) => &data,
+            Self::Owned(OwnedSlab { data, .. }) => data,
         }
     }
 

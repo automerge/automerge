@@ -247,7 +247,7 @@ impl Automerge {
             OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock),
             OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock),
             OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone().into()),
+            OpType::Put(scalar) => Value::Scalar(scalar.into()),
             _ => panic!("invalid op to hydrate"),
         }
     }

@@ -486,17 +486,6 @@ impl AutoCommit {
         self.doc.dump()
     }
 
-    /// Return a graphviz representation of the opset.
-    ///
-    /// # Arguments
-    ///
-    /// * objects: An optional list of object IDs to display, if not specified all objects are
-    ///            visualised
-    #[cfg(feature = "optree-visualisation")]
-    pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
-        self.doc.visualise_optree(objects)
-    }
-
     /// Get the current heads of the document.
     ///
     /// This closes the transaction first, if one is in progress.

@@ -53,10 +53,10 @@ impl<'a> Op<'a> {
     ) -> (bool, Option<ScalarValue<'a>>) {
         let mut succ = self
             .succ()
-            .filter(|i| vis(clock, &i))
+            .filter(|i| vis(clock, i))
             .collect::<HashSet<_>>();
         // shouldnt need to clone Op
-        let key_iter = KeyIter::new(self.clone(), iter.clone());
+        let key_iter = KeyIter::new(*self, iter.clone());
         let mut inc = 0;
         for op in key_iter {
             if op.action == Action::Increment && succ.contains(&op.id) {
@@ -66,7 +66,7 @@ impl<'a> Op<'a> {
                 succ.remove(&op.id);
             }
         }
-        (succ.len() > 0, Some(ScalarValue::Counter(counter + inc)))
+        (!succ.is_empty(), Some(ScalarValue::Counter(counter + inc)))
     }
 
     pub(crate) fn scope_to_clock(&mut self, clock: Option<&Clock>, iter: &OpIter<'a>) -> bool {

@@ -4,15 +4,9 @@ use super::OpQueryTerm;
 
 use std::fmt::Debug;
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct Values<'a> {
     iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
-}
-
-impl<'a> Default for Values<'a> {
-    fn default() -> Self {
-        Self { iter: None }
-    }
 }
 
 impl<'a> Values<'a> {
