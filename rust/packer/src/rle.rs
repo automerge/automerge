@@ -1,14 +1,13 @@
-
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWriter};
 
-use crate::columnar::encoding::leb128::lebsize;
 use std::marker::PhantomData;
 use std::ops::Range;
 
 #[derive(Debug)]
-pub(crate) struct RleCursor<const B: usize, P: Packable + ?Sized> {
+pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
     offset: usize,
     group: usize,
     last_offset: usize,
@@ -511,11 +510,11 @@ impl LitRunCursor {
     }
 }
 
-pub(crate) type StrCursor = RleCursor<{ usize::MAX }, str>;
-pub(crate) type IntCursor = RleCursor<{ usize::MAX }, u64>;
+pub type StrCursor = RleCursor<{ usize::MAX }, str>;
+pub type IntCursor = RleCursor<{ usize::MAX }, u64>;
 
 #[derive(Debug, Clone, Default)]
-pub(crate) enum RleState<'a, P: Packable + ?Sized> {
+pub enum RleState<'a, P: Packable + ?Sized> {
     #[default]
     Empty,
     LoneValue(Option<P::Unpacked<'a>>),
@@ -553,7 +552,7 @@ impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::ColumnData;
+    use super::super::columndata::ColumnData;
     use super::super::cursor::ColExport;
     use super::*;
 

@@ -1,8 +1,4 @@
-use crate::columnar::encoding::leb128::{lebsize, ulebsize};
-
-use super::pack::{MaybePackable, PackError, Packable};
-use super::rle::RleCursor;
-use super::slab::WriteOp;
+use super::packer::{lebsize, ulebsize, MaybePackable, PackError, Packable, RleCursor, WriteOp};
 use super::types::ScalarValue;
 
 #[derive(Debug)]
@@ -137,7 +133,7 @@ pub(crate) type MetaCursor = RleCursor<1024, ValueMeta>;
 
 #[cfg(test)]
 mod tests {
-    use super::super::columns::ColumnData;
+    use super::super::packer::ColumnData;
     use super::*;
 
     #[test]

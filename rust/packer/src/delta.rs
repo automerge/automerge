@@ -9,15 +9,15 @@ use super::ColExport;
 type SubCursor<const B: usize> = RleCursor<B, i64>;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct DeltaCursorInternal<const B: usize> {
+pub struct DeltaCursorInternal<const B: usize> {
     abs: i64,
     rle: SubCursor<B>,
 }
 
-pub(crate) type DeltaCursor = DeltaCursorInternal<{ usize::MAX }>;
+pub type DeltaCursor = DeltaCursorInternal<{ usize::MAX }>;
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct DeltaState<'a> {
+pub struct DeltaState<'a> {
     abs: i64,
     rle: RleState<'a, i64>,
 }
@@ -204,7 +204,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::ColumnData;
+    use super::super::columndata::ColumnData;
     use super::super::cursor::ColExport;
     use super::*;
 

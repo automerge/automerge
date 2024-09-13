@@ -3,7 +3,7 @@ use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWriter};
 
 #[derive(Debug, PartialEq, Default, Clone)]
-pub(crate) struct BooleanState {
+pub struct BooleanState {
     value: bool,
     count: usize,
 }
@@ -18,14 +18,14 @@ impl<'a> From<Run<'a, bool>> for BooleanState {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct BooleanCursorInternal<const B: usize> {
+pub struct BooleanCursorInternal<const B: usize> {
     value: bool,
     index: usize,
     offset: usize,
     last_offset: usize,
 }
 
-pub(crate) type BooleanCursor = BooleanCursorInternal<1024>;
+pub type BooleanCursor = BooleanCursorInternal<1024>;
 
 impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     type Item = bool;
@@ -214,7 +214,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::ColumnData;
+    use super::super::columndata::ColumnData;
     use super::super::cursor::ColExport;
     use super::*;
 

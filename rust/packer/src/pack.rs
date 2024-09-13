@@ -5,7 +5,7 @@ use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum PackError {
+pub enum PackError {
     #[error(transparent)]
     InvalidNumber(#[from] leb128::read::Error),
     #[error("invalid utf8")]
@@ -19,7 +19,7 @@ pub(crate) enum PackError {
 }
 
 impl PackError {
-    pub(crate) fn invalid_value(expected: &'static str, error: impl std::fmt::Display) -> Self {
+    pub fn invalid_value(expected: &'static str, error: impl std::fmt::Display) -> Self {
         PackError::InvalidValue {
             typ: expected,
             error: error.to_string(),
@@ -27,7 +27,7 @@ impl PackError {
     }
 }
 
-pub(crate) trait Packable: PartialEq + Debug {
+pub trait Packable: PartialEq + Debug {
     type Unpacked<'a>: Clone
         + Copy
         + Debug
@@ -157,7 +157,7 @@ impl Packable for str {
     }
 }
 
-pub(crate) trait MaybePackable<T: Packable + ?Sized> {
+pub trait MaybePackable<T: Packable + ?Sized> {
     fn maybe_packable(&self) -> Option<T::Unpacked<'_>>;
 }
 

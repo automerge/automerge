@@ -14,15 +14,16 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
-use super::columns::{Column, ColumnData, ColumnDataIter};
-use super::cursor::{ColumnCursor, Run};
+use super::columns::Column;
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
-use super::pack::PackError;
-use super::raw::RawReader;
+use super::packer::{
+    BooleanCursor, ColumnCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError,
+    RawReader, Run, StrCursor,
+};
 use super::types::{
     Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
 };
-use super::{BooleanCursor, DeltaCursor, IntCursor, Key, MetaCursor, StrCursor, ValueMeta};
+use super::{Key, MetaCursor, ValueMeta};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -1342,7 +1343,7 @@ impl Columns {
         );
         columns.insert(VALUE_META_COL_SPEC, Column::ValueMeta(value_meta));
 
-        let mut value = ColumnData::<super::raw::RawCursor>::new();
+        let mut value = ColumnData::<super::packer::RawCursor>::new();
         let values = ops
             .clone()
             .filter_map(|op| op.value.to_raw())
@@ -1672,10 +1673,10 @@ mod tests {
 
     use crate::{
         op_set2::{
-            columns::ColumnData,
             op::SuccCursors,
+            packer::{ColumnData, DeltaCursor},
             types::{Action, ActorCursor, ActorIdx, ScalarValue},
-            DeltaCursor, KeyRef,
+            KeyRef,
         },
         storage::Document,
         transaction::Transactable,

@@ -1,19 +1,19 @@
 use super::cursor::{ColumnCursor, Run, ScanMeta};
+use super::leb128::{lebsize, ulebsize};
 use super::pack::{PackError, Packable};
-use crate::columnar::encoding::leb128::{lebsize, ulebsize};
 
 use std::fmt::Debug;
 use std::ops::{Index, Range};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) enum Slab {
+pub enum Slab {
     External(ReadOnlySlab),
     Owned(OwnedSlab),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ReadOnlySlab {
+pub struct ReadOnlySlab {
     data: Arc<Vec<u8>>,
     range: Range<usize>,
     len: usize,
@@ -21,7 +21,7 @@ pub(crate) struct ReadOnlySlab {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(crate) struct OwnedSlab {
+pub struct OwnedSlab {
     data: Arc<Vec<u8>>,
     len: usize,
     group: usize,
@@ -78,7 +78,7 @@ impl<'a> From<bool> for WriteOp<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum WriteOp<'a> {
+pub enum WriteOp<'a> {
     UInt(u64),
     GroupUInt(u64, usize),
     Int(i64),
@@ -87,7 +87,7 @@ pub(crate) enum WriteOp<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum WriteAction<'a> {
+pub enum WriteAction<'a> {
     Op(WriteOp<'a>),
     Pair(WriteOp<'a>, WriteOp<'a>),
     Raw(&'a [u8]),
@@ -201,7 +201,7 @@ impl<'a> WriteAction<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SlabWriter<'a> {
+pub struct SlabWriter<'a> {
     actions: Vec<WriteAction<'a>>,
     lit: Vec<WriteOp<'a>>,
     width: usize,
@@ -212,7 +212,7 @@ pub(crate) struct SlabWriter<'a> {
 }
 
 impl<'a> SlabWriter<'a> {
-    pub(crate) fn new(max: usize) -> Self {
+    pub fn new(max: usize) -> Self {
         SlabWriter {
             max,
             width: 0,
@@ -297,14 +297,14 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn write(mut self, out: &mut Vec<u8>) {
+    pub fn write(mut self, out: &mut Vec<u8>) {
         self.close_lit();
         for action in self.actions {
             action.write(out)
         }
     }
 
-    pub(crate) fn finish(mut self) -> Vec<Slab> {
+    pub fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
             self.actions.push(WriteAction::End(self.items, self.group));
@@ -328,7 +328,7 @@ impl<'a> SlabWriter<'a> {
     // skipping this on size zero is needed on write/merge operations
     // but being able to write something with size == 0 is needed for the first element of
     // boolean sets - likely these 2 and flush_after could all get turned into one nice method
-    pub(crate) fn flush_before2(
+    pub fn flush_before2(
         &mut self,
         slab: &'a Slab,
         range: Range<usize>,
@@ -344,7 +344,7 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn flush_before(
+    pub fn flush_before(
         &mut self,
         slab: &'a Slab,
         range: Range<usize>,
@@ -358,7 +358,7 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn flush_after(
+    pub fn flush_after(
         &mut self,
         slab: &'a Slab,
         index: usize,
@@ -374,28 +374,28 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub(crate) fn flush_lit_run<W: Debug + Copy + Into<WriteOp<'a>>>(&mut self, run: &[W]) {
+    pub fn flush_lit_run<W: Debug + Copy + Into<WriteOp<'a>>>(&mut self, run: &[W]) {
         for value in run.iter() {
             self.push_lit((*value).into(), 1, 1);
         }
     }
 
-    pub(crate) fn flush_bool_run(&mut self, count: usize) {
+    pub fn flush_bool_run(&mut self, count: usize) {
         self.push(WriteAction::Op(WriteOp::UInt(count as u64)), count);
     }
 
-    pub(crate) fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
+    pub fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
         self.push(
             WriteAction::Pair(WriteOp::Int(count), value.into()),
             count as usize,
         );
     }
 
-    pub(crate) fn flush_bytes(&mut self, data: &'a [u8], count: usize) {
+    pub fn flush_bytes(&mut self, data: &'a [u8], count: usize) {
         self.push(WriteAction::Raw(data), count);
     }
 
-    pub(crate) fn flush_null(&mut self, count: usize) {
+    pub fn flush_null(&mut self, count: usize) {
         self.push(
             WriteAction::Pair(WriteOp::Int(0), WriteOp::UInt(count as u64)),
             count,
@@ -410,7 +410,7 @@ impl Default for Slab {
 }
 
 #[derive(Debug)]
-pub(crate) struct SlabIter<'a, C: ColumnCursor> {
+pub struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
     pub(crate) cursor: C,
     state: Option<IterState<'a, C::Item>>,
@@ -590,7 +590,7 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
 }
 
 impl Slab {
-    pub(crate) fn iter<C: ColumnCursor>(&self) -> SlabIter<'_, C> {
+    pub fn iter<C: ColumnCursor>(&self) -> SlabIter<'_, C> {
         SlabIter {
             slab: self,
             cursor: C::default(),
@@ -599,14 +599,14 @@ impl Slab {
         }
     }
 
-    pub(crate) fn as_ref(&self) -> &[u8] {
+    pub fn as_ref(&self) -> &[u8] {
         match self {
             Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
             Self::Owned(OwnedSlab { data, .. }) => data,
         }
     }
 
-    pub(crate) fn external<C: ColumnCursor>(
+    pub fn external<C: ColumnCursor>(
         data: Arc<Vec<u8>>,
         range: Range<usize>,
         m: &ScanMeta,
@@ -620,21 +620,21 @@ impl Slab {
         }))
     }
 
-    pub(crate) fn byte_len(&self) -> usize {
+    pub fn byte_len(&self) -> usize {
         match self {
             Self::External(ReadOnlySlab { data, range, .. }) => data[range.clone()].len(),
             Self::Owned(OwnedSlab { data, .. }) => data.len(),
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         match self {
             Self::External(ReadOnlySlab { len, .. }) => *len,
             Self::Owned(OwnedSlab { len, .. }) => *len,
         }
     }
 
-    pub(crate) fn group(&self) -> usize {
+    pub fn group(&self) -> usize {
         match self {
             Self::External(ReadOnlySlab { group, .. }) => *group,
             Self::Owned(OwnedSlab { group, .. }) => *group,
@@ -642,7 +642,7 @@ impl Slab {
     }
 }
 
-pub(crate) trait Seek<T: Packable + ?Sized> {
+pub trait Seek<T: Packable + ?Sized> {
     type Output;
     fn process_slab(&mut self, _r: &Slab) -> RunStep {
         RunStep::Process
@@ -653,7 +653,7 @@ pub(crate) trait Seek<T: Packable + ?Sized> {
     fn finish(self) -> Self::Output;
 }
 
-pub(crate) enum RunStep {
+pub enum RunStep {
     Skip,
     Process,
     Done,

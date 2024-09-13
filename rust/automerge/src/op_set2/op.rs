@@ -1,7 +1,7 @@
-use super::columns::ColumnDataIter;
 use super::op_set::{OpLike, OpSet};
+use super::packer::{ColumnDataIter, DeltaCursor};
 use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
-use super::{DeltaCursor, Value, ValueMeta};
+use super::{Value, ValueMeta};
 
 use crate::convert;
 use crate::storage::document::AsDocOp;

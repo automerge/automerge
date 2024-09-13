@@ -14,6 +14,7 @@ wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
 utf8-indexing = []
 
 [dependencies]
+packer = { path = "../packer" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "^0.10.0"

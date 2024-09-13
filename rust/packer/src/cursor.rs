@@ -4,14 +4,14 @@ use super::slab::{Slab, SlabWriter};
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub(crate) struct ScanMeta {
-    pub(crate) actors: usize,
+pub struct ScanMeta {
+    pub actors: usize,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Run<'a, P: Packable + ?Sized> {
-    pub(crate) count: usize,
-    pub(crate) value: Option<P::Unpacked<'a>>,
+pub struct Run<'a, P: Packable + ?Sized> {
+    pub count: usize,
+    pub value: Option<P::Unpacked<'a>>,
 }
 
 impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> {}
@@ -22,37 +22,37 @@ impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
 }
 
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
-    pub(crate) fn group(&self) -> usize {
+    pub fn group(&self) -> usize {
         self.count * self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
     }
 }
 
 impl<'a> Run<'a, i64> {
-    pub(crate) fn delta(&self) -> i64 {
+    pub fn delta(&self) -> i64 {
         self.count as i64 * self.value.unwrap_or(0)
     }
 }
 
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
-    pub(crate) fn new(count: usize, value: Option<T::Unpacked<'a>>) -> Self {
+    pub fn new(count: usize, value: Option<T::Unpacked<'a>>) -> Self {
         Run { count, value }
     }
 
-    pub(crate) fn plus(mut self, num: usize) -> Self {
+    pub fn plus(mut self, num: usize) -> Self {
         self.count += num;
         self
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct Encoder<'a, C: ColumnCursor> {
-    pub(crate) slab: &'a Slab,
-    pub(crate) state: C::State<'a>,
-    pub(crate) current: SlabWriter<'a>,
-    pub(crate) post: C::PostState<'a>,
-    pub(crate) deleted: usize,
-    pub(crate) overflow: usize,
-    pub(crate) cursor: C,
+pub struct Encoder<'a, C: ColumnCursor> {
+    pub slab: &'a Slab,
+    pub state: C::State<'a>,
+    pub current: SlabWriter<'a>,
+    pub post: C::PostState<'a>,
+    pub deleted: usize,
+    pub overflow: usize,
+    pub cursor: C,
 }
 
 impl<'a, C: ColumnCursor> Encoder<'a, C> {
@@ -97,7 +97,7 @@ impl<'a> Iterator for NextSlab<'a> {
 
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ColExport<P: Packable + ?Sized> {
+pub enum ColExport<P: Packable + ?Sized> {
     LitRun(Vec<P::Owned>),
     Run(usize, P::Owned),
     Raw(Vec<u8>),
@@ -114,7 +114,7 @@ impl<P: Packable + ?Sized> ColExport<P> {
     }
 }
 
-pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
+pub trait ColumnCursor: Debug + Default + Clone + Copy {
     type Item: Packable + ?Sized;
     type State<'a>: Default;
     type PostState<'a>;
@@ -348,14 +348,14 @@ pub(crate) trait ColumnCursor: Debug + Default + Clone + Copy {
     }
 }
 
-pub(crate) struct SpliceDel<'a, C: ColumnCursor> {
+pub struct SpliceDel<'a, C: ColumnCursor> {
     pub(crate) deleted: usize,
     pub(crate) overflow: usize,
     pub(crate) cursor: C,
     pub(crate) post: Option<Run<'a, C::Item>>,
 }
 
-pub(crate) enum SpliceResult {
+pub enum SpliceResult {
     //Done(usize, usize),
     //Add(usize, usize, Vec<Slab>),
     Replace(usize, usize, Vec<Slab>),

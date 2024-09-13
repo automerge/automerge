@@ -6,13 +6,9 @@ use crate::types::{ElemId, ObjType, OldMarkData};
 use crate::value;
 
 use std::fmt;
-use std::ops::{Bound, RangeBounds};
 
-use super::cursor::ScanMeta;
 use super::meta::ValueType;
-use super::pack::{MaybePackable, PackError, Packable};
-use super::rle::RleCursor;
-use super::slab::WriteOp;
+use super::packer::{MaybePackable, PackError, Packable, RleCursor, ScanMeta, WriteOp};
 
 /// An index into an array of actors stored elsewhere
 #[derive(PartialEq, PartialOrd, Debug, Clone, Default, Copy)]
@@ -560,21 +556,6 @@ impl<'a> types::Exportable for KeyRef<'a> {
     }
 }
 
-pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize) {
-    let start = match range.start_bound() {
-        Bound::Unbounded => usize::MIN,
-        Bound::Included(n) => *n,
-        Bound::Excluded(n) => *n - 1,
-    };
-
-    let end = match range.end_bound() {
-        Bound::Unbounded => usize::MAX,
-        Bound::Included(n) => *n + 1,
-        Bound::Excluded(n) => *n,
-    };
-    (start, end)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value<'a> {
     Object(ObjType),
@@ -599,7 +580,7 @@ impl Packable for Action {
         item
     }
 
-    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let (len, result) = u64::unpack(buff)?;
         let action = match result {
             0 => Action::MakeMap,
@@ -611,7 +592,7 @@ impl Packable for Action {
             6 => Action::MakeTable,
             7 => Action::Mark,
             other => {
-                return Err(super::PackError::invalid_value(
+                return Err(PackError::invalid_value(
                     "valid action (integer between 0 and 7)",
                     format!("unexpected integer: {}", other),
                 ))
@@ -651,7 +632,7 @@ impl Packable for ActorIdx {
         item
     }
 
-    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), super::PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, ActorIdx::from(result)))
     }

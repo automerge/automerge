@@ -1,0 +1,8 @@
+
+Cleanup
+* can I move ColExport entirely into a test block?
+* rename ColumnData - as a general purpose compression crate these aren't necessarily columns
+* ScanMeta should be a trait not a struct
+* Packable trait probably needs to be 2 traits - note: bool cursor panics on unpack()
+* Packable and WriteOp can likely be integrated logically
+

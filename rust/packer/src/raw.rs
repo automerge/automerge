@@ -3,11 +3,11 @@ use super::pack::PackError;
 use super::slab::{Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct RawCursorInternal<const B: usize> {
+pub struct RawCursorInternal<const B: usize> {
     offset: usize,
 }
 
-pub(crate) type RawCursor = RawCursorInternal<2048>;
+pub type RawCursor = RawCursorInternal<2048>;
 
 impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type Item = [u8];
@@ -153,7 +153,7 @@ impl<const B: usize> RawCursorInternal<B> {
 */
 
 #[derive(Debug, Clone)]
-pub(crate) struct RawReader<'a> {
+pub struct RawReader<'a> {
     pub(crate) slabs: std::slice::Iter<'a, Slab>,
     pub(crate) current: Option<(&'a Slab, usize)>,
 }
@@ -168,7 +168,7 @@ impl<'a> Default for RawReader<'a> {
 }
 
 impl<'a> RawReader<'a> {
-    pub(crate) fn empty() -> RawReader<'static> {
+    pub fn empty() -> RawReader<'static> {
         RawReader {
             slabs: [].iter(),
             current: None,
@@ -180,7 +180,7 @@ impl<'a> RawReader<'a> {
     /// Returns an error if:
     /// * The read would cross a slab boundary
     /// * The read would go past the end of the data
-    pub(crate) fn read_next(&mut self, length: usize) -> Result<&'a [u8], ReadRawError> {
+    pub fn read_next(&mut self, length: usize) -> Result<&'a [u8], ReadRawError> {
         let (slab, offset) = match self.current.take() {
             Some(state) => state,
             None => {
@@ -206,7 +206,7 @@ impl<'a> RawReader<'a> {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ReadRawError {
+pub enum ReadRawError {
     #[error("attempted to read across slab boundaries")]
     CrossBoundary,
     #[error("attempted to read past end of data")]
@@ -215,7 +215,7 @@ pub(crate) enum ReadRawError {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columns::ColumnData;
+    use super::super::columndata::ColumnData;
     use super::super::cursor::ColExport;
     use super::*;
 
