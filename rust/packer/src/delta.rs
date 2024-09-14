@@ -14,7 +14,8 @@ pub struct DeltaCursorInternal<const B: usize> {
     rle: SubCursor<B>,
 }
 
-pub type DeltaCursor = DeltaCursorInternal<{ usize::MAX }>;
+// FIXME - encode delta breaks across slabs
+pub type DeltaCursor = DeltaCursorInternal<2048>;
 
 #[derive(Debug, Default, Clone)]
 pub struct DeltaState<'a> {
@@ -60,7 +61,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
                 Self::finish(slab, out, state, None, cursor);
             }
             None => {
-                if let Some((run, next_cursor)) = cursor.next(slab.as_ref()) {
+                if let Some((run, next_cursor)) = cursor.next(slab.as_slice()) {
                     match run {
                         Run { count, value: None } => {
                             //let next_state = DeltaState::new(state.abs);
@@ -92,6 +93,14 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
                     SubCursor::<B>::flush_state(out, state.rle);
                 }
             }
+        }
+    }
+
+    fn transform(&self, run: &Run<'_, i64>) -> Option<i64> {
+        if run.value.is_some() {
+            Some(self.abs - run.delta_minus_one())
+        } else {
+            None
         }
     }
 
@@ -149,7 +158,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_ref());
+        let (run, cursor) = Self::seek(index, slab.as_slice());
 
         let (rle, post, current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
 

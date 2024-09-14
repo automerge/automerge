@@ -22,6 +22,20 @@ impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
 }
 
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
+    pub(crate) fn pop_n(&self, n: usize) -> Option<Run<'a, T>> {
+        if self.count <= n {
+            None
+        } else {
+            let count = self.count - n;
+            let value = self.value;
+            Some(Run { count, value })
+        }
+    }
+
+    pub(crate) fn pop(&self) -> Option<Run<'a, T>> {
+        self.pop_n(1)
+    }
+
     pub fn group(&self) -> usize {
         self.count * self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
     }
@@ -30,6 +44,10 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
 impl<'a> Run<'a, i64> {
     pub fn delta(&self) -> i64 {
         self.count as i64 * self.value.unwrap_or(0)
+    }
+
+    pub fn delta_minus_one(&self) -> i64 {
+        (self.count as i64 - 1) * self.value.unwrap_or(0)
     }
 }
 
@@ -127,11 +145,11 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
     ) -> Self::State<'a> {
         let mut size = slab.len();
 
-        if slab.len() == 0 {
+        if slab.is_empty() {
             return state;
         }
 
-        let (run0, c0) = Self::seek(1, slab.as_ref());
+        let (run0, c0) = Self::seek(1, slab.as_slice());
         let run0 = run0.unwrap();
         size -= run0.count;
         Self::append_chunk(&mut state, writer, run0);
@@ -139,7 +157,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
             return state;
         }
 
-        let (run1, c1) = Self::seek(slab.len(), slab.as_ref());
+        let (run1, c1) = Self::seek(slab.len(), slab.as_slice());
         let run1 = run1.unwrap();
         size -= run1.count;
         if size == 0 {
@@ -160,9 +178,16 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
         v.is_none()
     }
 
+    fn transform<'a>(
+        &self,
+        run: &Run<'a, Self::Item>,
+    ) -> Option<<Self::Item as Packable>::Unpacked<'a>> {
+        run.value
+    }
+
     #[allow(clippy::type_complexity)]
     fn pop<'a>(
-        &self, // FIXME remove self?
+        &self,
         mut run: Run<'a, Self::Item>,
     ) -> (
         Option<<Self::Item as Packable>::Unpacked<'a>>,
@@ -321,7 +346,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
                     post = None;
                 }
                 None => {
-                    if let Some((p, c)) = Self::next(&cursor, slab.as_ref()) {
+                    if let Some((p, c)) = Self::next(&cursor, slab.as_slice()) {
                         post = Some(p);
                         cursor = c;
                     } else {

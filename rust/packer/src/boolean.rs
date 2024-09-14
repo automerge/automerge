@@ -25,7 +25,7 @@ pub struct BooleanCursorInternal<const B: usize> {
     last_offset: usize,
 }
 
-pub type BooleanCursor = BooleanCursorInternal<1024>;
+pub type BooleanCursor = BooleanCursorInternal<64>;
 
 impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     type Item = bool;
@@ -49,7 +49,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
                 out.flush_bool_run(post.count);
                 out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
             }
-        } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_ref()) {
+        } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_slice()) {
             if val.value == Some(state.value) {
                 out.flush_bool_run(state.count + val.count);
                 out.flush_after(
@@ -119,7 +119,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_ref());
+        let (run, cursor) = Self::seek(index, slab.as_slice());
 
         let count = run.map(|r| r.count).unwrap_or(0);
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);

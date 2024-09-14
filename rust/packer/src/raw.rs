@@ -73,18 +73,18 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
         // everything before...
         let mut current = SlabWriter::new(B);
-        current.flush_bytes(&slab.as_ref()[0..index], index);
+        current.flush_bytes(&slab.as_slice()[0..index], index);
 
         let post;
         let deleted;
-        if index + del < slab.as_ref().len() {
+        if index + del < slab.as_slice().len() {
             // everything after
-            post = &slab.as_ref()[(index + del)..];
+            post = &slab.as_slice()[(index + del)..];
             deleted = del;
         } else {
             // nothing left
             post = &[];
-            deleted = slab.as_ref().len() - index;
+            deleted = slab.as_slice().len() - index;
         }
         let overflow = del - deleted;
 
@@ -147,7 +147,7 @@ impl<const B: usize> RawCursorInternal<B> {
         if offset > slab.len() || end > slab.len() {
             return Err(PackError::SliceOutOfRange(offset, end));
         }
-        Ok(&slab.as_ref()[offset..end])
+        Ok(&slab.as_slice()[offset..end])
     }
 }
 */

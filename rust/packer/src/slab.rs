@@ -22,7 +22,8 @@ pub struct ReadOnlySlab {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct OwnedSlab {
-    data: Arc<Vec<u8>>,
+    //data: Arc<Vec<u8>>,
+    data: Vec<u8>,
     len: usize,
     group: usize,
 }
@@ -125,24 +126,24 @@ impl<'a> WriteOp<'a> {
         match self {
             Self::UInt(i) => {
                 leb128::write::unsigned(buff, i).unwrap();
-                //log!("write uint {} {:?}",i, &buff[start..]);
+                //println!("write uint {} {:?}",i, &buff[start..]);
             }
             Self::GroupUInt(i, _) => {
                 leb128::write::unsigned(buff, i).unwrap();
-                //log!("write group uint {} {:?}",i, &buff[start..]);
+                //println!("write group uint {} {:?}",i, &buff[start..]);
             }
             Self::Int(i) => {
                 leb128::write::signed(buff, i).unwrap();
-                //log!("write int {} {:?}",i, &buff[start..]);
+                //println!("write int {} {:?}",i, &buff[start..]);
             }
             Self::Bytes(b) => {
                 leb128::write::unsigned(buff, b.len() as u64).unwrap();
                 buff.extend(b);
-                //log!("write bytes {:?}",&buff[start..]);
+                //println!("write bytes {:?}",&buff[start..]);
             }
             Self::Import(s, r) => {
                 buff.extend(&s[r]);
-                //log!("write import {:?}",&buff[start..]);
+                //println!("write import {:?}",&buff[start..]);
             }
         }
     }
@@ -186,11 +187,11 @@ impl<'a> WriteAction<'a> {
             }
             Self::Raw(b) => {
                 buff.extend(b);
-                //log!("write raw {:?}", &buff[start..]);
+                //println!("write raw {:?}", &buff[start..]);
             }
             Self::Run(n, b) => {
                 leb128::write::signed(buff, -n).unwrap();
-                //log!("write lit run of {:?} {:?}", n, &buff[start..]);
+                //println!("write lit run of {:?} {:?}", n, &buff[start..]);
                 for item in b {
                     item.write(buff);
                 }
@@ -223,10 +224,6 @@ impl<'a> SlabWriter<'a> {
             lit: vec![],
         }
     }
-
-    //pub(crate) fn len(&self) -> usize {
-    //    self.items
-    //}
 
     fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize) {
         let mut width = action.width();
@@ -314,7 +311,8 @@ impl<'a> SlabWriter<'a> {
         for action in self.actions {
             match action {
                 WriteAction::End(len, group) => {
-                    let data = Arc::new(std::mem::take(&mut buffer));
+                    //let data = Arc::new(std::mem::take(&mut buffer));
+                    let data = std::mem::take(&mut buffer);
                     result.push(Slab::Owned(OwnedSlab { data, len, group }));
                 }
                 action => action.write(&mut buffer),
@@ -328,13 +326,7 @@ impl<'a> SlabWriter<'a> {
     // skipping this on size zero is needed on write/merge operations
     // but being able to write something with size == 0 is needed for the first element of
     // boolean sets - likely these 2 and flush_after could all get turned into one nice method
-    pub fn flush_before2(
-        &mut self,
-        slab: &'a Slab,
-        range: Range<usize>,
-        lit: usize,
-        size: usize,
-    ) {
+    pub fn flush_before2(&mut self, slab: &'a Slab, range: Range<usize>, lit: usize, size: usize) {
         if size > 0 {
             if lit > 0 {
                 self.push_lit(WriteOp::Import(slab, range), lit, size)
@@ -344,13 +336,7 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub fn flush_before(
-        &mut self,
-        slab: &'a Slab,
-        range: Range<usize>,
-        lit: usize,
-        size: usize,
-    ) {
+    pub fn flush_before(&mut self, slab: &'a Slab, range: Range<usize>, lit: usize, size: usize) {
         if lit > 0 {
             self.push_lit(WriteOp::Import(slab, range), lit, size)
         } else {
@@ -413,7 +399,7 @@ impl Default for Slab {
 pub struct SlabIter<'a, C: ColumnCursor> {
     slab: &'a Slab,
     pub(crate) cursor: C,
-    state: Option<IterState<'a, C::Item>>,
+    state: Option<Run<'a, C::Item>>,
     last_group: usize,
 }
 
@@ -425,48 +411,13 @@ impl<'a, C: ColumnCursor> std::clone::Clone for SlabIter<'a, C> {
     }
 }
 
-#[derive(Debug)]
-enum IterState<'a, I: Packable + ?Sized> {
-    Popped(Option<I::Unpacked<'a>>, Option<Run<'a, I>>),
-    AtStartOfRun(Run<'a, I>),
-    InRun(Run<'a, I>),
-}
-
-impl<'a, I: Packable + ?Sized> Copy for IterState<'a, I> {}
-impl<'a, I: Packable + ?Sized> std::clone::Clone for IterState<'a, I> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-//impl<'a, C: ColumnCursor> SlabIter<'a, C> {
-impl<'a, I: Packable + ?Sized> IterState<'a, I> {
-    fn group(&self) -> usize {
-        match self {
-            Self::Popped(None, Some(run)) => run.group(),
-            Self::Popped(Some(val), Some(run)) => I::group(*val) + run.group(),
-            Self::Popped(Some(val), None) => I::group(*val),
-            Self::AtStartOfRun(run) => run.group(),
-            Self::InRun(run) => run.group(),
-            _ => 0,
-        }
-    }
-
-    fn state_length(&self) -> usize {
-        match self {
-            Self::Popped(_, Some(run)) => run.count + 1,
-            Self::Popped(_, None) => 1,
-            Self::AtStartOfRun(run) => run.count,
-            Self::InRun(run) => run.count,
-        }
-    }
-}
-
 impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
-        if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
+        if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
             self.cursor = cursor;
-            self.last_group = item_group::<C::Item>(&run.value) * run.count;
+            //self.last_group = item_group::<C::Item>(&run.value) * run.count;
+            //self.state = Some(run);
+            //self.state
             Some(run)
         } else {
             None
@@ -474,7 +425,11 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 
     pub(crate) fn pos(&self) -> usize {
-        self.cursor.index() - self.state.as_ref().map(|s| s.state_length()).unwrap_or(0)
+        if let Some(run) = self.state {
+            self.cursor.index() - run.count
+        } else {
+            self.cursor.index()
+        }
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -482,9 +437,11 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 
     pub(crate) fn group(&self) -> usize {
-        // FIXME
-        let state_group = self.state.as_ref().map(|s| s.group()).unwrap_or(0);
-        self.cursor.group() - state_group - self.last_group
+        if let Some(run) = self.state {
+            self.cursor.group() - run.group() - self.last_group
+        } else {
+            self.cursor.group() - self.last_group
+        }
     }
 
     pub(crate) fn max_group(&self) -> usize {
@@ -492,54 +449,21 @@ impl<'a, C: ColumnCursor> SlabIter<'a, C> {
     }
 
     pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
-        match seek.process_slab(self.slab) {
-            RunStep::Skip => {
-                return false;
-            }
-            RunStep::Done => {
-                return true;
-            }
-            _ => (),
-        }
-        loop {
-            match self.state.take() {
-                Some(IterState::AtStartOfRun(run)) => match seek.process_run(&run) {
-                    RunStep::Skip => {
-                        self.state = None;
-                    }
-                    RunStep::Process => {
-                        let (value, next_state) = self.cursor.pop(run);
-                        self.state = Some(IterState::Popped(value, next_state));
-                    }
-                    RunStep::Done => {
+        if seek.skip_slab(self.slab) {
+            false
+        } else {
+            loop {
+                if let Some(run) = &self.state {
+                    if let RunStep::Done(s) = seek.process_run(run) {
+                        self.state = s;
                         return true;
                     }
-                },
-                Some(IterState::InRun(run)) => {
-                    let (value, next_state) = self.cursor.pop(run);
-                    self.state = Some(IterState::Popped(value, next_state));
                 }
-                Some(IterState::Popped(elem, run)) => {
-                    seek.process_element(elem);
-                    if seek.done() {
-                        self.state = Some(IterState::Popped(elem, run));
-                        return true;
-                    }
-                    if let Some(run) = run {
-                        let (value, next_state) = self.cursor.pop(run);
-                        self.state = Some(IterState::Popped(value, next_state));
-                    } else {
-                        self.state = None
-                    }
-                }
-                None => {
-                    if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
-                        //if let Some(run) = self.next_run() {
-                        self.cursor = cursor;
-                        self.state = Some(IterState::AtStartOfRun(run));
-                    } else {
-                        return false;
-                    }
+                if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
+                    self.state = Some(run);
+                    self.cursor = cursor;
+                } else {
+                    return false;
                 }
             }
         }
@@ -557,34 +481,17 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
     type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut state = None;
-        std::mem::swap(&mut state, &mut self.state);
-        match state {
-            Some(IterState::Popped(value, next_run)) => {
-                self.state = next_run.map(IterState::InRun);
-                self.last_group = item_group::<C::Item>(&value);
-                Some(value)
-            }
-            Some(IterState::InRun(run) | IterState::AtStartOfRun(run)) => {
-                let (value, next_state) = self.cursor.pop(run);
-                self.state = next_state.map(IterState::InRun);
-                self.last_group = item_group::<C::Item>(&value);
-                Some(value)
-            }
-            None => {
-                if let Some((run, cursor)) = self.cursor.next(self.slab.as_ref()) {
-                    //if let Some(run) = self.next_run() {
-                    self.cursor = cursor;
-                    let (value, next_state) = self.cursor.pop(run);
-                    self.state = next_state.map(IterState::InRun);
-                    self.last_group = item_group::<C::Item>(&value);
-                    Some(value)
-                } else {
-                    self.state = None;
-                    self.last_group = 0;
-                    None
-                }
-            }
+        if let Some(run) = self.state {
+            self.state = run.pop();
+            self.last_group = item_group::<C::Item>(&run.value);
+            Some(self.cursor.transform(&run))
+        } else if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
+            self.cursor = cursor;
+            self.state = Some(run);
+            self.next()
+        } else {
+            self.last_group = 0;
+            None
         }
     }
 }
@@ -599,7 +506,7 @@ impl Slab {
         }
     }
 
-    pub fn as_ref(&self) -> &[u8] {
+    pub fn as_slice(&self) -> &[u8] {
         match self {
             Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
             Self::Owned(OwnedSlab { data, .. }) => data,
@@ -627,6 +534,10 @@ impl Slab {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::External(ReadOnlySlab { len, .. }) => *len,
@@ -644,17 +555,13 @@ impl Slab {
 
 pub trait Seek<T: Packable + ?Sized> {
     type Output;
-    fn process_slab(&mut self, _r: &Slab) -> RunStep {
-        RunStep::Process
-    }
-    fn process_run(&mut self, r: &Run<'_, T>) -> RunStep;
-    fn process_element(&mut self, e: Option<T::Unpacked<'_>>);
+    fn skip_slab(&mut self, _r: &Slab) -> bool;
+    fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep<'a, T>;
     fn done(&self) -> bool;
     fn finish(self) -> Self::Output;
 }
 
-pub enum RunStep {
+pub enum RunStep<'a, T: Packable + ?Sized> {
     Skip,
-    Process,
-    Done,
+    Done(Option<Run<'a, T>>),
 }

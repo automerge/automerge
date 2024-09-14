@@ -233,7 +233,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         if let Some(run) = post {
             Self::append_chunk(&mut state, out, run);
         }
-        if let Some((run, next_cursor)) = cursor.next(slab.as_ref()) {
+        if let Some((run, next_cursor)) = cursor.next(slab.as_slice()) {
             Self::append_chunk(&mut state, out, run);
             cursor = next_cursor;
         }
@@ -331,7 +331,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_ref());
+        let (run, cursor) = Self::seek(index, slab.as_slice());
 
         let (state, post, current) = RleCursor::encode_inner(slab, &cursor, run, index);
 
@@ -510,8 +510,10 @@ impl LitRunCursor {
     }
 }
 
-pub type StrCursor = RleCursor<{ usize::MAX }, str>;
-pub type IntCursor = RleCursor<{ usize::MAX }, u64>;
+//pub type StrCursor = RleCursor<{ usize::MAX }, str>;
+//pub type IntCursor = RleCursor<{ usize::MAX }, u64>;
+pub type StrCursor = RleCursor<64, str>;
+pub type IntCursor = RleCursor<64, u64>;
 
 #[derive(Debug, Clone, Default)]
 pub enum RleState<'a, P: Packable + ?Sized> {

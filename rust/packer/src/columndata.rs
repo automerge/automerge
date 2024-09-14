@@ -17,6 +17,16 @@ pub struct ColumnData<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub fn byte_len(&self) -> usize {
+        self.slabs.iter().map(|s| s.as_slice().len()).sum()
+    }
+
+    pub fn get(&self, index: usize) -> Option<Option<<C::Item as Packable>::Unpacked<'_>>> {
+        let mut iter = self.iter();
+        iter.advance_by(index);
+        iter.next()
+    }
+
     pub fn is_empty(&self) -> bool {
         let run = self.iter().next_run();
         match run {
@@ -78,6 +88,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.max
     }
 
+    // FIXME - this API is dangerous b/c of Delta
     pub fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
         if self.iter.is_none() {
             if let Some(slab) = self.slabs.next() {
@@ -121,25 +132,21 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
         impl<T: Packable + ?Sized> Seek<T> for SeekBy<T> {
             type Output = ();
-            fn process_slab(&mut self, r: &Slab) -> RunStep {
+            fn skip_slab(&mut self, r: &Slab) -> bool {
                 if r.len() < self.amount_left {
                     self.amount_left -= r.len();
-                    RunStep::Skip
+                    true
                 } else {
-                    RunStep::Process
+                    false
                 }
             }
-            fn process_run(&mut self, r: &Run<'_, T>) -> RunStep {
+            fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep<'a, T> {
                 if r.count < self.amount_left {
                     self.amount_left -= r.count;
                     RunStep::Skip
                 } else {
-                    RunStep::Process
-                }
-            }
-            fn process_element(&mut self, _e: Option<<T as Packable>::Unpacked<'_>>) {
-                if self.amount_left > 0 {
-                    self.amount_left -= 1;
+                    let left = r.pop_n(self.amount_left);
+                    RunStep::Done(left)
                 }
             }
             fn done<'a>(&self) -> bool {
@@ -149,7 +156,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
 
         self.seek_to(SeekBy {
-            amount_left: amount + 1,
+            amount_left: amount,
             _phantom: PhantomData,
         });
     }
@@ -185,14 +192,15 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             V: for<'a> PartialOrd<T::Unpacked<'a>> + Debug, //+ PartialOrd<T::Unpacked<'a>>
         {
             type Output = Range<usize>;
-            fn process_slab(&mut self, r: &Slab) -> RunStep {
+            fn skip_slab(&mut self, r: &Slab) -> bool {
                 if self.state == ScopeState::Seek && self.pos + r.len() <= self.start {
                     self.pos += r.len();
-                    return RunStep::Skip;
+                    true
+                } else {
+                    false
                 }
-                RunStep::Process
             }
-            fn process_run(&mut self, r: &Run<'_, T>) -> RunStep {
+            fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep<'a, T> {
                 match self.state {
                     ScopeState::Seek => {
                         if self.pos + r.count <= self.start {
@@ -201,7 +209,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                             RunStep::Skip
                         } else if self.pos >= self.max {
                             // after max
-                            RunStep::Done
+                            RunStep::Done(None)
                         } else {
                             match (&self.target, &r.value) {
                                 (None, None) => {
@@ -214,7 +222,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                                     self.state = ScopeState::Found;
                                     self.start = std::cmp::max(self.start, self.pos);
                                     self.pos = self.start;
-                                    RunStep::Done
+                                    RunStep::Done(None)
                                 }
                                 (Some(a), Some(b)) if a <= b => {
                                     // found target
@@ -227,7 +235,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                                         RunStep::Skip
                                     } else {
                                         self.pos = self.start;
-                                        RunStep::Done
+                                        RunStep::Done(None)
                                     }
                                 }
                                 _ => {
@@ -241,11 +249,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                     ScopeState::Found => {
                         if self.pos >= self.max {
                             // past max
-                            RunStep::Done
+                            RunStep::Done(None)
                         } else {
                             match (&self.target, &r.value) {
-                                (Some(a), Some(b)) if a != b => RunStep::Done,
-                                (a, b) if a.is_some() != b.is_some() => RunStep::Done,
+                                (Some(a), Some(b)) if a != b => RunStep::Done(None),
+                                (a, b) if a.is_some() != b.is_some() => RunStep::Done(None),
                                 _ => {
                                     self.pos += r.count;
                                     RunStep::Skip
@@ -254,9 +262,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                         }
                     }
                 }
-            }
-            fn process_element(&mut self, _e: Option<<T as Packable>::Unpacked<'_>>) {
-                panic!()
             }
             fn done<'b>(&self) -> bool {
                 panic!()
@@ -394,7 +399,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     #[cfg(test)]
     pub fn export(&self) -> Vec<Vec<super::cursor::ColExport<C::Item>>> {
-        self.slabs.iter().map(|s| C::export(s.as_ref())).collect()
+        self.slabs.iter().map(|s| C::export(s.as_slice())).collect()
     }
 
     pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
@@ -897,8 +902,8 @@ pub(crate) mod tests {
     }
 
     fn make_rng() -> SmallRng {
-        let seed = rand::random::<u64>();
-        //let seed = 7798599467530965361;
+        //let seed = rand::random::<u64>();
+        let seed = 7796233028731974218;
         println!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
