@@ -77,6 +77,7 @@ To build this codebase you will need:
 - `yarn`
 - `cmake`
 - `cmocka`
+- `ninja`
 
 You will also need to install the following with `cargo install`
 

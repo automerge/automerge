@@ -11,7 +11,7 @@ a root directory of your choosing (e.g. "/usr/local") like so:
 
 ```shell
 cmake -E make_directory automerge-c/build
-cmake -S automerge-c -B automerge-c/build
+cmake -S automerge-c -B automerge-c/build -G Ninja
 cmake --build automerge-c/build
 cmake --install automerge-c/build --prefix "/usr/local"
 ```
