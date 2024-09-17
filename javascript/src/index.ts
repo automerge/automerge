@@ -5,7 +5,7 @@
  * Other libraries can be built on top of this one which provide IO and
  * persistence.
  *
- * An automerge document can be though of an immutable POJO (plain old javascript
+ * An automerge document can be thought of an immutable POJO (plain old javascript
  * object) which `automerge` tracks the history of, allowing it to be merged with
  * any other automerge document.
  *
