@@ -64,3 +64,7 @@ harness = false
 [[bench]]
 name = "sync"
 harness = false
+
+[[bench]]
+name = "load_save"
+harness = false
