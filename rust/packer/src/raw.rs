@@ -1,6 +1,6 @@
 use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
 use super::pack::PackError;
-use super::slab::{Slab, SlabWriter};
+use super::slab::{self, Slab, SlabWriter};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RawCursorInternal<const B: usize> {
@@ -154,14 +154,14 @@ impl<const B: usize> RawCursorInternal<B> {
 
 #[derive(Debug, Clone)]
 pub struct RawReader<'a> {
-    pub(crate) slabs: std::slice::Iter<'a, Slab>,
+    pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab>,
     pub(crate) current: Option<(&'a Slab, usize)>,
 }
 
 impl<'a> Default for RawReader<'a> {
     fn default() -> Self {
         Self {
-            slabs: [].iter(),
+            slabs: slab::Iter::default(),
             current: None,
         }
     }
@@ -170,7 +170,7 @@ impl<'a> Default for RawReader<'a> {
 impl<'a> RawReader<'a> {
     pub fn empty() -> RawReader<'static> {
         RawReader {
-            slabs: [].iter(),
+            slabs: slab::Iter::default(),
             current: None,
         }
     }

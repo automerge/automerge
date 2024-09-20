@@ -90,29 +90,6 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
     }
 }
 
-#[derive(Debug, Copy, Default, Clone)]
-pub(crate) struct NextSlab<'a> {
-    slabs: &'a [Slab],
-}
-
-impl<'a> NextSlab<'a> {
-    pub(crate) fn new(slabs: &'a [Slab]) -> Self {
-        Self { slabs }
-    }
-}
-
-impl<'a> Iterator for NextSlab<'a> {
-    type Item = &'a Slab;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.slabs.first();
-        if result.is_some() {
-            self.slabs = &self.slabs[1..];
-        }
-        result
-    }
-}
-
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ColExport<P: Packable + ?Sized> {
@@ -304,7 +281,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
         Ok(cursor)
     }
 
-    fn splice<E>(slab: &mut Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
+    fn splice<E>(slab: &Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
     where
         E: MaybePackable<Self::Item> + Debug,
     {

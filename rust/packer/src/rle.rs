@@ -512,8 +512,10 @@ impl LitRunCursor {
 
 //pub type StrCursor = RleCursor<{ usize::MAX }, str>;
 //pub type IntCursor = RleCursor<{ usize::MAX }, u64>;
-pub type StrCursor = RleCursor<64, str>;
-pub type IntCursor = RleCursor<64, u64>;
+pub type StrCursor = RleCursor<1024, str>;
+pub type IntCursor = RleCursor<1024, u64>;
+//pub type StrCursor = RleCursor<64, str>;
+//pub type IntCursor = RleCursor<64, u64>;
 
 #[derive(Debug, Clone, Default)]
 pub enum RleState<'a, P: Packable + ?Sized> {
@@ -588,6 +590,7 @@ pub(crate) mod tests {
                 vec![ColExport::run(2, "xxx3")],
             ]
         );
+        println!("BEFORE SPLICE {:?}", col2.export());
         col2.splice(3, 0, vec!["xxx3", "xxx3"]);
         assert_eq!(
             col2.export(),

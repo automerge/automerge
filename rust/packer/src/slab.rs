@@ -2,6 +2,14 @@ use super::cursor::{ColumnCursor, Run, ScanMeta};
 use super::leb128::{lebsize, ulebsize};
 use super::pack::{PackError, Packable};
 
+pub(crate) mod tree;
+
+pub(crate) use super::columndata::normalize_range;
+pub(crate) use tree::{HasWidth, SpanTree, SpanTreeIter};
+
+pub(crate) type SlabTree = SpanTree<Slab>;
+pub(crate) type Iter<'a> = SpanTreeIter<'a, Slab>;
+
 use std::fmt::Debug;
 use std::ops::{Index, Range};
 use std::sync::Arc;
@@ -564,4 +572,10 @@ pub trait Seek<T: Packable + ?Sized> {
 pub enum RunStep<'a, T: Packable + ?Sized> {
     Skip,
     Done(Option<Run<'a, T>>),
+}
+
+impl HasWidth for Slab {
+    fn width(&self) -> usize {
+        self.len()
+    }
 }

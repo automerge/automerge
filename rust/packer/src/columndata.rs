@@ -1,7 +1,7 @@
-use super::cursor::{ColumnCursor, NextSlab, Run, ScanMeta, SpliceResult};
+use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceResult};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
-use super::slab::{RunStep, Seek, Slab, SlabIter, SlabWriter};
+use super::slab::{self, RunStep, Seek, Slab, SlabIter, SlabTree, SlabWriter};
 
 use std::cmp::PartialOrd;
 use std::fmt::Debug;
@@ -12,7 +12,8 @@ use std::sync::Arc;
 #[derive(Debug, Default, Clone)]
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
-    pub slabs: Vec<Slab>,
+    //pub slabs: Vec<Slab>,
+    pub slabs: SlabTree,
     _phantom: PhantomData<C>,
 }
 
@@ -79,7 +80,7 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     group: usize,
     max: usize,
-    slabs: NextSlab<'a>,
+    slabs: slab::SpanTreeIter<'a, Slab>,
     iter: Option<SlabIter<'a, C>>,
 }
 
@@ -103,7 +104,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 Some(run)
             } else {
                 assert_eq!(iter.pos(), iter.cursor.index());
-                //assert_eq!(iter.group(), iter.cursor.group());
+                assert_eq!(iter.group(), iter.cursor.group());
                 self.pos += iter.pos();
                 self.group += iter.group();
                 self.iter = None;
@@ -119,7 +120,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             pos: 0,
             group: 0,
             max: 0,
-            slabs: NextSlab::new(&[]),
+            slabs: slab::SpanTreeIter::default(),
             iter: None,
         }
     }
@@ -369,7 +370,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: self.len,
-            slabs: NextSlab::new(&self.slabs),
+            slabs: self.slabs.iter(),
             iter: None,
         }
     }
@@ -379,7 +380,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: range.end,
-            slabs: NextSlab::new(&self.slabs),
+            slabs: self.slabs.iter(),
             iter: None,
         };
         if range.start > 0 {
@@ -392,7 +393,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub fn new() -> Self {
         ColumnData {
             len: 0,
-            slabs: vec![Slab::default()],
+            slabs: SlabTree::new2(Slab::default()),
             _phantom: PhantomData,
         }
     }
@@ -411,38 +412,34 @@ impl<C: ColumnCursor> ColumnData<C> {
         if values.is_empty() && del == 0 {
             return;
         }
+        #[cfg(debug_assertions)]
         let before = self.to_vec();
+        #[cfg(debug_assertions)]
         let tmp_values = values.clone();
-        let mut slab_offset = 0;
-        for (i, slab) in self.slabs.iter_mut().enumerate() {
-            if slab.len() < index - slab_offset {
-                slab_offset += slab.len();
-            } else {
-                match C::splice(slab, index - slab_offset, del, values) {
-                    /*
-                                        SpliceResult::Done(add, del) => {
-                                            self.len = self.len + add - del;
-                                        }
-                                        SpliceResult::Add(add, del, slabs) => {
-                                            self.len = self.len + add - del;
-                                            let j = i + 1;
-                                            self.slabs.splice(j..j, slabs);
-                                            assert!(self.slabs.len() > 0);
-                                        }
-                    */
-                    SpliceResult::Replace(add, del, slabs) => {
-                        self.len = self.len + add - del;
-                        let j = i + 1;
-                        self.slabs.splice(i..j, slabs);
-                        assert!(!self.slabs.is_empty());
-                    }
+        if index == 0 {
+            let slab = self.slabs.get(0).unwrap();
+            match C::splice(slab, 0, del, values) {
+                SpliceResult::Replace(add, del, slabs) => {
+                    self.len = self.len + add - del;
+                    self.slabs.splice(0..1, slabs);
+                    assert!(!self.slabs.is_empty());
                 }
-                break;
             }
-        }
-
+        } else {
+            let (slab_index, sub_index, slab) = self.slabs.get_at_width(index - 1).unwrap();
+            match C::splice(slab, sub_index + 1, del, values) {
+                SpliceResult::Replace(add, del, slabs) => {
+                    self.len = self.len + add - del;
+                    self.slabs.splice(slab_index..(slab_index + 1), slabs);
+                    assert!(!self.slabs.is_empty());
+                }
+            }
+        };
+        #[cfg(debug_assertions)]
         let after = self.to_vec();
+        #[cfg(debug_assertions)]
         let slab_len = self.slabs.iter().map(|s| s.len()).sum::<usize>();
+        #[cfg(debug_assertions)]
         if self.len != after.len() || self.len != slab_len {
             println!(":::SPLICE FAIL (index={}):::", index);
             println!(
@@ -464,7 +461,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
     pub fn init_empty(len: usize) -> Self {
-        let slabs = C::init_empty(len);
+        let new_slabs = C::init_empty(len);
+        let mut slabs = SlabTree::new();
+        slabs.splice(0..0, new_slabs);
         ColumnData {
             len,
             slabs,
@@ -481,7 +480,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         let len = slab.len();
         Ok(ColumnData {
             len,
-            slabs: vec![slab],
+            slabs: SlabTree::new2(slab),
             _phantom: PhantomData,
         })
     }

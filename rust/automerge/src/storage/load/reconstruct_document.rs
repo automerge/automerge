@@ -63,6 +63,9 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut iter = op_set.iter();
     let mut max_op = 0;
     while let Some(op) = iter.try_next()? {
+        // opportunity to have a custom iterator that ignore some columns
+        // read - op.obj(2) op.key(3) op.insert(1), op.id(2) op.succ(3)
+        // not read - op.value(2) op.action(1), op.mark_name(1)
         let next = Some((op.obj, op.elemid_or_key()));
         if last != next {
             add_del_ops(&mut change_collector, &mut last, &mut preds)?;
