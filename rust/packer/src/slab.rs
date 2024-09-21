@@ -7,7 +7,7 @@ pub(crate) mod tree;
 pub(crate) use super::columndata::normalize_range;
 pub(crate) use tree::{HasWidth, SpanTree, SpanTreeIter};
 
-pub(crate) type SlabTree = SpanTree<Slab>;
+pub type SlabTree = SpanTree<Slab>;
 pub(crate) type Iter<'a> = SpanTreeIter<'a, Slab>;
 
 use std::fmt::Debug;

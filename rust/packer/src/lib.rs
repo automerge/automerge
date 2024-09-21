@@ -16,7 +16,7 @@ pub use leb128::{lebsize, ulebsize};
 pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
 pub use rle::{IntCursor, RleCursor, StrCursor};
-pub use slab::{Slab, WriteOp};
+pub use slab::{Slab, SlabTree, WriteOp};
 
 #[cfg(test)]
 pub(crate) use cursor::ColExport;

@@ -3,6 +3,7 @@ use std::{borrow::Cow, ops::Range};
 use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 
 use crate::op_set2::OpSet;
+use crate::storage::columns::compression::Uncompressed;
 use crate::{convert, ActorId, ChangeHash};
 
 mod doc_op_columns;
@@ -27,7 +28,8 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: Vec<ActorId>,
     heads: Vec<ChangeHash>,
-    pub(crate) op_metadata: DocOpColumns,
+    //pub(crate) op_metadata: DocOpColumns,
+    pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
     change_metadata: DocChangeColumns,
     change_bytes: Range<usize>,
@@ -203,7 +205,7 @@ impl<'a> Document<'a> {
                 header,
                 actors,
                 heads,
-                op_metadata: ops_cols,
+                op_metadata: ops_cols.raw_columns(),
                 op_bytes,
                 change_metadata: change_cols,
                 change_bytes,
@@ -215,7 +217,7 @@ impl<'a> Document<'a> {
     pub(crate) fn new<'b, C, IC, I, D, O>(
         op_set: &OpSet,
         heads_with_indices: Vec<(ChangeHash, usize)>,
-        ops: I,
+        _ops: I,
         changes: IC,
         compress: CompressConfig,
     ) -> Document<'static>
@@ -226,33 +228,37 @@ impl<'a> Document<'a> {
         C: AsChangeMeta<'b>,
         IC: Iterator<Item = C> + Clone,
     {
-        let mut ops_out = Vec::new();
-        let ops_meta = DocOpColumns::encode(ops, &mut ops_out);
+        #[cfg(debug_assertions)]
+        let mut ops_out_a = Vec::new();
+        #[cfg(debug_assertions)]
+        let ops_meta_ax = DocOpColumns::encode(op_set.iter(), &mut ops_out_a);
 
-        let (ops_meta2, ops_out2) = op_set.export();
-        let ops_meta1 = ops_meta.raw_columns();
-        if ops_meta1 != ops_meta2 {
-            let specs: std::collections::BTreeSet<_> = ops_meta1
+        let (op_metadata, ops_out_b) = op_set.export();
+        #[cfg(debug_assertions)]
+        let op_meta_a = ops_meta_ax.raw_columns();
+        #[cfg(debug_assertions)]
+        if op_meta_a != op_metadata {
+            let specs: std::collections::BTreeSet<_> = op_meta_a
                 .0
                 .iter()
-                .chain(ops_meta2.0.iter())
+                .chain(op_metadata.0.iter())
                 .map(|c| c.spec())
                 .collect();
             for s in specs {
-                let d1 = ops_meta1
+                let d1 = op_meta_a
                     .0
                     .iter()
                     .find(|c| c.spec() == s)
                     .map(|c| c.data())
                     .unwrap();
-                let d2 = ops_meta2
+                let d2 = op_metadata
                     .0
                     .iter()
                     .find(|c| c.spec() == s)
                     .map(|c| c.data())
                     .unwrap();
-                let d1 = &ops_out[d1];
-                let d2 = &ops_out2[d2];
+                let d1 = &ops_out_a[d1];
+                let d2 = &ops_out_b[d2];
                 if d1 != d2 {
                     log!(" s={:?}|{:?} ", s.id(), s.col_type());
                     log!(" {:?} ", d1);
@@ -264,7 +270,8 @@ impl<'a> Document<'a> {
             }
             panic!()
         }
-        assert_eq!(ops_out, ops_out2);
+        #[cfg(debug_assertions)]
+        assert_eq!(ops_out_a, ops_out_b);
 
         let mut change_out = Vec::new();
         let change_meta = DocChangeColumns::encode(changes, &mut change_out);
@@ -273,7 +280,7 @@ impl<'a> Document<'a> {
         let actors = op_set.actors.clone();
         //actors.sort_unstable();
 
-        let mut data = Vec::with_capacity(ops_out.len() + change_out.len());
+        let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
         for actor in &actors {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
@@ -286,13 +293,13 @@ impl<'a> Document<'a> {
         let prefix_len = data.len();
 
         change_meta.raw_columns().write(&mut data);
-        ops_meta.raw_columns().write(&mut data);
+        op_metadata.write(&mut data);
         let change_start = data.len();
         let change_end = change_start + change_out.len();
         data.extend(change_out);
         let ops_start = data.len();
-        let ops_end = ops_start + ops_out.len();
-        data.extend(ops_out);
+        let ops_end = ops_start + ops_out_b.len();
+        data.extend(ops_out_b);
         let suffix_start = data.len();
 
         let head_indices = heads_with_indices
@@ -317,7 +324,7 @@ impl<'a> Document<'a> {
                 prefix: prefix_len + header.len(),
                 suffix: suffix_start + header.len(),
                 ops: compression::Cols {
-                    raw_columns: ops_meta.raw_columns(),
+                    raw_columns: op_metadata.clone(),
                     data: op_bytes.clone(),
                 },
                 changes: compression::Cols {
@@ -341,7 +348,7 @@ impl<'a> Document<'a> {
             compressed_bytes,
             header,
             heads: heads_with_indices.into_iter().map(|(h, _)| h).collect(),
-            op_metadata: ops_meta,
+            op_metadata,
             op_bytes,
             change_metadata: change_meta,
             change_bytes,
@@ -390,13 +397,13 @@ impl<'a> Document<'a> {
 }
 
 /*
-                if ops_meta.raw_columns() != ops_meta2 {
+                if ops_meta.raw_columns() != ops_meta_b {
                   log!("OLD");
                   for c in ops_meta.raw_columns().iter() {
                     log!(" :: col={:?}:{:?} data={:?}",c.spec().id(), c.spec().col_type(), c.data());
                   }
                   log!("NEW");
-                  for c in ops_meta2.iter() {
+                  for c in ops_meta_b.iter() {
                     log!(" :: col={:?}:{:?} data={:?}",c.spec().id(), c.spec().col_type(), c.data());
                   }
                   panic!();

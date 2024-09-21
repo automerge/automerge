@@ -3,7 +3,7 @@ use crate::types::ActorId;
 
 use super::meta::MetaCursor;
 use super::packer::{
-    BooleanCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor, ScanMeta, Slab,
+    BooleanCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor, ScanMeta, SlabTree,
     StrCursor,
 };
 use super::types::{ActionCursor, ActorCursor};
@@ -58,17 +58,17 @@ impl Column {
         }
     }
 
-    pub(crate) fn slabs(&self) -> &[Slab] {
+    pub(crate) fn slabs(&self) -> &SlabTree {
         match self {
-            Self::Actor(col) => col.slabs.as_slice(),
-            Self::Str(col) => col.slabs.as_slice(),
-            Self::Integer(col) => col.slabs.as_slice(),
-            Self::Delta(col) => col.slabs.as_slice(),
-            Self::Bool(col) => col.slabs.as_slice(),
-            Self::ValueMeta(col) => col.slabs.as_slice(),
-            Self::Value(col) => col.slabs.as_slice(),
-            Self::Group(col) => col.slabs.as_slice(),
-            Self::Action(col) => col.slabs.as_slice(),
+            Self::Actor(col) => &col.slabs,
+            Self::Str(col) => &col.slabs,
+            Self::Integer(col) => &col.slabs,
+            Self::Delta(col) => &col.slabs,
+            Self::Bool(col) => &col.slabs,
+            Self::ValueMeta(col) => &col.slabs,
+            Self::Value(col) => &col.slabs,
+            Self::Group(col) => &col.slabs,
+            Self::Action(col) => &col.slabs,
         }
     }
 

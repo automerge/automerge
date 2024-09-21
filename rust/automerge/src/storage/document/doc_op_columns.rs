@@ -410,7 +410,7 @@ impl TryFrom<Columns> for DocOpColumns {
         let mut succ_ctr: Option<DeltaRange> = None;
         let mut expand: Option<MaybeBooleanRange> = None;
         let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
-        let mut other = Columns::empty();
+        let mut other = Columns::empty(); // not doing anything with these here
 
         for (index, col) in columns.into_iter().enumerate() {
             match (col.id(), col.col_type()) {

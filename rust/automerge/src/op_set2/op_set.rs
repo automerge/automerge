@@ -573,7 +573,7 @@ impl OpSet {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = Arc::new(doc.op_raw_bytes().to_vec());
         let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.raw_columns(), data, actors)
+        Self::from_parts(doc.op_metadata.clone(), data, actors)
     }
 
     #[cfg(test)]

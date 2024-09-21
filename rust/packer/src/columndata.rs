@@ -44,13 +44,24 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
-        let mut state = C::State::default();
-        let mut writer = SlabWriter::new(usize::MAX);
-        // TODO - if just 1 slab - copy it
-        for s in &self.slabs {
-            state = C::write(&mut writer, s, state);
+        if self.slabs.len() == 1 {
+            let slab = self.slabs.get(0).unwrap();
+            if slab.is_empty() {
+                let state = C::State::default();
+                let writer = SlabWriter::new(usize::MAX);
+                C::write_finish(out, writer, state);
+            } else {
+                out.extend(slab.as_slice())
+            }
+        } else {
+            let mut state = C::State::default();
+            let mut writer = SlabWriter::new(usize::MAX);
+            // TODO - if just 1 slab - copy it
+            for s in &self.slabs {
+                state = C::write(&mut writer, s, state);
+            }
+            C::write_finish(out, writer, state);
         }
-        C::write_finish(out, writer, state);
         let end = out.len();
         start..end
     }
