@@ -152,19 +152,10 @@ impl<const B: usize> RawCursorInternal<B> {
 }
 */
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RawReader<'a> {
     pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab>,
     pub(crate) current: Option<(&'a Slab, usize)>,
-}
-
-impl<'a> Default for RawReader<'a> {
-    fn default() -> Self {
-        Self {
-            slabs: slab::Iter::default(),
-            current: None,
-        }
-    }
 }
 
 impl<'a> RawReader<'a> {

@@ -34,6 +34,7 @@ pub struct OwnedSlab {
     data: Vec<u8>,
     len: usize,
     group: usize,
+    abs: i64,
 }
 
 impl Index<Range<usize>> for Slab {
@@ -101,13 +102,20 @@ pub enum WriteAction<'a> {
     Pair(WriteOp<'a>, WriteOp<'a>),
     Raw(&'a [u8]),
     Run(i64, Vec<WriteOp<'a>>),
-    End(usize, usize),
+    End(usize, usize, i64),
 }
 
 impl<'a> WriteOp<'a> {
     fn group(&self) -> usize {
         match self {
             Self::GroupUInt(_, g) => *g,
+            _ => 0,
+        }
+    }
+
+    fn abs(&self) -> i64 {
+        match self {
+            Self::Int(i) => *i,
             _ => 0,
         }
     }
@@ -164,7 +172,15 @@ impl<'a> WriteAction<'a> {
             Self::Pair(op1, op2) => op1.group() + op2.group(),
             Self::Raw(_) => 0,
             Self::Run(_, _) => 0, // already added in
-            Self::End(_, _) => 0,
+            Self::End(_, _, _) => 0,
+        }
+    }
+
+    fn abs(&self) -> i64 {
+        match self {
+            Self::Pair(WriteOp::Int(count), WriteOp::Int(value)) => count * value,
+            Self::Run(_, _) => 0,
+            _ => 0,
         }
     }
 
@@ -174,7 +190,7 @@ impl<'a> WriteAction<'a> {
             Self::Pair(op1, op2) => op1.width() + op2.width(),
             Self::Raw(data) => data.len(),
             Self::Run(_, _) => 0, // already added in
-            Self::End(_, _) => 0,
+            Self::End(_, _, _) => 0,
         }
     }
 
@@ -204,7 +220,7 @@ impl<'a> WriteAction<'a> {
                     item.write(buff);
                 }
             }
-            Self::End(_, _) => {}
+            Self::End(_, _, _) => {}
         }
     }
 }
@@ -216,6 +232,7 @@ pub struct SlabWriter<'a> {
     width: usize,
     items: usize,
     group: usize,
+    abs: i64,
     lit_items: usize,
     max: usize,
 }
@@ -226,11 +243,16 @@ impl<'a> SlabWriter<'a> {
             max,
             width: 0,
             group: 0,
+            abs: 0,
             lit_items: 0,
             items: 0,
             actions: vec![],
             lit: vec![],
         }
+    }
+
+    pub fn set_abs(&mut self, abs: i64) {
+      self.abs = abs;
     }
 
     fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize) {
@@ -247,6 +269,7 @@ impl<'a> SlabWriter<'a> {
             //
             width += 1;
         }
+        self.abs += action.abs();
         self.check_copy_overflow(action.copy_width());
         self.group += action.group();
         self.width += width;
@@ -264,6 +287,7 @@ impl<'a> SlabWriter<'a> {
         if width == 0 {
             return;
         }
+        self.abs += action.abs();
         self.check_copy_overflow(action.copy_width());
         self.group += action.group();
         self.width += width;
@@ -285,7 +309,7 @@ impl<'a> SlabWriter<'a> {
     fn check_max(&mut self) {
         if self.width >= self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items, self.group));
+            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
             self.items = 0;
@@ -295,7 +319,7 @@ impl<'a> SlabWriter<'a> {
     fn check_copy_overflow(&mut self, copy: usize) {
         if self.width + copy > self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items, self.group));
+            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
             self.items = 0;
@@ -312,16 +336,18 @@ impl<'a> SlabWriter<'a> {
     pub fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
-            self.actions.push(WriteAction::End(self.items, self.group));
+            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
         }
         let mut result = vec![];
         let mut buffer = vec![];
+        let mut abs = 0;
         for action in self.actions {
             match action {
-                WriteAction::End(len, group) => {
+                WriteAction::End(len, group, next_abs) => {
                     //let data = Arc::new(std::mem::take(&mut buffer));
                     let data = std::mem::take(&mut buffer);
-                    result.push(Slab::Owned(OwnedSlab { data, len, group }));
+                    result.push(Slab::Owned(OwnedSlab { data, len, group, abs }));
+                    abs = next_abs;
                 }
                 action => action.write(&mut buffer),
             }
@@ -505,10 +531,17 @@ impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
 }
 
 impl Slab {
+    pub fn abs(&self) -> i64 {
+        match self {
+            Self::External(ReadOnlySlab { .. }) => 0,
+            Self::Owned(OwnedSlab { abs, .. }) => *abs,
+        }
+    }
+
     pub fn iter<C: ColumnCursor>(&self) -> SlabIter<'_, C> {
         SlabIter {
             slab: self,
-            cursor: C::default(),
+            cursor: C::new(self),
             state: None,
             last_group: 0,
         }

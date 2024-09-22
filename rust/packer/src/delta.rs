@@ -29,6 +29,10 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     type PostState<'a> = Option<Run<'a, i64>>;
     type Export = Option<i64>;
 
+    fn new(slab: &Slab) -> Self {
+      Self { abs: slab.abs(), rle: Default::default() }
+    }
+
     fn finish<'a>(
         slab: &'a Slab,
         out: &mut SlabWriter<'a>,
@@ -160,11 +164,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab.as_slice());
 
-        let (rle, post, current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
+        let (rle, post, mut current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
         let state = DeltaState { abs, rle };
+        current.set_abs(abs);
 
         let SpliceDel {
             deleted,
@@ -172,6 +177,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             cursor,
             post,
         } = Self::splice_delete(post, cursor, del, slab);
+
 
         Encoder {
             slab,
@@ -246,7 +252,10 @@ pub(crate) mod tests {
     fn column_data_delta_split_merge_semantics() {
         // lit run spanning multiple slabs
         let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        col1.splice(0, 0, vec![1, 10, 2, 11, 4, 27, 19, 3, 21, 14, 2, 8]);
+        let mut col1a: ColumnData<DeltaCursorInternal<{ usize::MAX }>> = ColumnData::new();
+        let col1_data = vec![1, 10, 2, 11, 4, 27, 19, 3, 21, 14, 2, 8];
+        col1.splice(0, 0, col1_data.clone());
+        col1a.splice(0, 0, col1_data.clone());
         assert_eq!(
             col1.export(),
             vec![
@@ -256,11 +265,13 @@ pub(crate) mod tests {
             ]
         );
         let mut out = Vec::new();
+        let mut outa = Vec::new();
         col1.write(&mut out);
-        assert_eq!(
-            out,
-            vec![116, 1, 9, 120, 9, 121, 23, 120, 112, 18, 121, 116, 6]
-        );
+        col1a.write(&mut outa);
+        assert_eq!(out, outa);
+        for i in 0..col1.len() {
+          assert_eq!(col1.get(i), col1a.get(i));
+        }
 
         // lit run capped by runs
         let mut col2: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();

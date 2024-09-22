@@ -115,6 +115,10 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
 
+    fn new(_: &Slab) -> Self {
+      Self::default()
+    }
+
     fn write<'a>(
         writer: &mut SlabWriter<'a>,
         slab: &'a Slab,
@@ -225,6 +229,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
 
     fn export_item(item: Option<<Self::Item as Packable>::Unpacked<'_>>) -> Self::Export;
 
+    // useful for debugging
     fn decode(data: &[u8]) {
         let mut cursor = Self::default();
         loop {

@@ -557,8 +557,8 @@ impl<T: HasWidth> TreeNode<T> {
         pos: usize,
     ) -> Option<(usize, usize, &T)> {
         if self.is_leaf() {
-            let mut iter = self.elements.iter().peekable();
-            while let Some(e) = iter.next() {
+            let iter = self.elements.iter().peekable();
+            for e in iter {
                 if pos - sub_index < e.width() {
                     return Some((index, pos - sub_index, e));
                 }
