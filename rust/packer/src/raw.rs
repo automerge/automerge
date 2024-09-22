@@ -7,7 +7,7 @@ pub struct RawCursorInternal<const B: usize> {
     offset: usize,
 }
 
-pub type RawCursor = RawCursorInternal<2048>;
+pub type RawCursor = RawCursorInternal<1024>;
 
 impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type Item = [u8];
@@ -187,7 +187,7 @@ impl<'a> RawReader<'a> {
         }
         let result = slab[offset..offset + length].as_ref();
         let new_offset = offset + length;
-        if offset == slab.len() {
+        if new_offset == slab.len() {
             self.current = None;
         } else {
             self.current = Some((slab, new_offset));

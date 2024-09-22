@@ -15,7 +15,7 @@ pub struct DeltaCursorInternal<const B: usize> {
 }
 
 // FIXME - encode delta breaks across slabs
-pub type DeltaCursor = DeltaCursorInternal<2048>;
+pub type DeltaCursor = DeltaCursorInternal<1024>;
 
 #[derive(Debug, Default, Clone)]
 pub struct DeltaState<'a> {
