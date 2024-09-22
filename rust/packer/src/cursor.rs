@@ -116,7 +116,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
     type Export: Debug + PartialEq + Clone;
 
     fn new(_: &Slab) -> Self {
-      Self::default()
+        Self::default()
     }
 
     fn write<'a>(

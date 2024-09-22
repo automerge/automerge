@@ -1,10 +1,8 @@
 use std::ops::RangeBounds;
 
+use crate::automerge::{Automerge, Parents, ReadDoc};
 use crate::exid::ExId;
-//use crate::iter::Spans;
-//use crate::iter::{Keys, ListRange, MapRange, Values};
-//use crate::parents::Parents;
-use crate::automerge::{Automerge, Keys, ListRange, MapRange, Parents, ReadDoc, Spans, Values};
+use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::patches::PatchLog;
 use crate::types::{Clock, ScalarValue};

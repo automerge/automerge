@@ -60,8 +60,8 @@ fn update_blocks_change_block_properties() {
         .spans(&text)
         .unwrap()
         .map(|s| match s {
-            automerge::op_set2::Span::Block(b) => BlockOrText::Block(b),
-            automerge::op_set2::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
+            automerge::iter::Span::Block(b) => BlockOrText::Block(b),
+            automerge::iter::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -118,8 +118,8 @@ fn update_blocks_updates_text() {
         .spans(&text)
         .unwrap()
         .map(|s| match s {
-            automerge::op_set2::Span::Block(b) => BlockOrText::Block(b),
-            automerge::op_set2::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
+            automerge::iter::Span::Block(b) => BlockOrText::Block(b),
+            automerge::iter::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -212,12 +212,12 @@ fn update_blocks_updates_text_and_blocks_at_once() {
     assert_eq!(
         spans_after,
         vec![
-            automerge::op_set2::Span::Block(hydrate_map! {
+            automerge::iter::Span::Block(hydrate_map! {
                 "type" => "unordered-list-item",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            automerge::op_set2::Span::Text("goodbye world".into(), None),
+            automerge::iter::Span::Text("goodbye world".into(), None),
         ]
     );
 }
@@ -283,7 +283,7 @@ fn update_spans_delete_attribute() {
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
     assert_eq!(
         spans,
-        vec![automerge::op_set2::Span::Block(hydrate_map! {
+        vec![automerge::iter::Span::Block(hydrate_map! {
             "type" => "ordered-list-item",
             "parents" => hydrate_list![],
         })]

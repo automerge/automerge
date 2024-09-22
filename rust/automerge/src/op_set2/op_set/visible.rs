@@ -1,6 +1,7 @@
 use crate::{marks::MarkSet, types::Clock};
 
-use super::{KeyIter, Op, OpId, OpIter, OpQueryTerm};
+use super::{Op, OpId, OpIter, OpQueryTerm};
+use crate::iter::KeyIter;
 use crate::op_set2::types::{Action, ScalarValue};
 
 use std::collections::HashSet;

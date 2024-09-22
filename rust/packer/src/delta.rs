@@ -30,7 +30,10 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     type Export = Option<i64>;
 
     fn new(slab: &Slab) -> Self {
-      Self { abs: slab.abs(), rle: Default::default() }
+        Self {
+            abs: slab.abs(),
+            rle: Default::default(),
+        }
     }
 
     fn finish<'a>(
@@ -178,7 +181,6 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             post,
         } = Self::splice_delete(post, cursor, del, slab);
 
-
         Encoder {
             slab,
             current,
@@ -270,7 +272,7 @@ pub(crate) mod tests {
         col1a.write(&mut outa);
         assert_eq!(out, outa);
         for i in 0..col1.len() {
-          assert_eq!(col1.get(i), col1a.get(i));
+            assert_eq!(col1.get(i), col1a.get(i));
         }
 
         // lit run capped by runs

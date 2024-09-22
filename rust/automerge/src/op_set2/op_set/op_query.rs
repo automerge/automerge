@@ -4,7 +4,7 @@ use crate::types::Clock;
 use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter};
 
 #[cfg(test)]
-use super::keys::KeyOpIter;
+use crate::iter::KeyOpIter;
 
 use std::fmt::Debug;
 use std::sync::Arc;

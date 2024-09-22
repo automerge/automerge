@@ -1,4 +1,4 @@
-use super::{Op, OpIter, OpQuery, OpQueryTerm, TopOpIter, VisibleOpIter};
+use crate::op_set2::{Op, OpIter, OpQuery, OpQueryTerm, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 

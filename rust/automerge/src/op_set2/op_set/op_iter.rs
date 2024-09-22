@@ -51,7 +51,7 @@ pub(crate) struct OpIter<'a> {
     pub(super) value: RawReader<'a>,
     pub(super) mark_name: ColumnDataIter<'a, StrCursor>,
     pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
-    pub(super) op_set: &'a OpSet,
+    pub(crate) op_set: &'a OpSet,
 }
 
 #[derive(Debug, thiserror::Error)]

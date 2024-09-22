@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::Automerge;
 use crate::{
     clock::Clock,
-    op_set2::{SpanInternal, SpansInternal},
+    iter::{SpanInternal, SpansInternal},
     //op_tree::OpTreeOpIter,
     text_value::TextValue,
     transaction::TransactionInner,

@@ -2,10 +2,9 @@ use itertools::Itertools;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use crate::automerge::{
-    Automerge, Keys, ListRange, MapRange, Parents, ReadDoc, ReadDocInternal, Spans, Values,
-};
+use crate::automerge::{Automerge, Parents, ReadDoc, ReadDocInternal};
 use crate::hydrate;
+use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::Mark;
 use crate::patches::TextRepresentation;
 use crate::types::ObjMeta;

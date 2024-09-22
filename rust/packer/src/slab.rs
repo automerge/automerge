@@ -252,7 +252,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     pub fn set_abs(&mut self, abs: i64) {
-      self.abs = abs;
+        self.abs = abs;
     }
 
     fn push_lit(&mut self, action: WriteOp<'a>, lit: usize, items: usize) {
@@ -309,7 +309,8 @@ impl<'a> SlabWriter<'a> {
     fn check_max(&mut self) {
         if self.width >= self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
+            self.actions
+                .push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
             self.items = 0;
@@ -319,7 +320,8 @@ impl<'a> SlabWriter<'a> {
     fn check_copy_overflow(&mut self, copy: usize) {
         if self.width + copy > self.max {
             self.close_lit();
-            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
+            self.actions
+                .push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
             self.items = 0;
@@ -336,7 +338,8 @@ impl<'a> SlabWriter<'a> {
     pub fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
-            self.actions.push(WriteAction::End(self.items, self.group, self.abs));
+            self.actions
+                .push(WriteAction::End(self.items, self.group, self.abs));
         }
         let mut result = vec![];
         let mut buffer = vec![];
@@ -346,7 +349,12 @@ impl<'a> SlabWriter<'a> {
                 WriteAction::End(len, group, next_abs) => {
                     //let data = Arc::new(std::mem::take(&mut buffer));
                     let data = std::mem::take(&mut buffer);
-                    result.push(Slab::Owned(OwnedSlab { data, len, group, abs }));
+                    result.push(Slab::Owned(OwnedSlab {
+                        data,
+                        len,
+                        group,
+                        abs,
+                    }));
                     abs = next_abs;
                 }
                 action => action.write(&mut buffer),

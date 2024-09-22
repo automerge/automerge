@@ -2,13 +2,14 @@ use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use crate::automerge::{Automerge, ListRangeItem, MapRangeItem};
 use crate::exid::ExId;
+use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{Op, OpBuilder2, OpSet, OpSetCheckpoint, PropRef, SuccInsert};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::storage::Change as StoredChange;
 use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue};
+use crate::Automerge;
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
 

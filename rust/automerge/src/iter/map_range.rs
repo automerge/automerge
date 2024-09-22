@@ -1,7 +1,7 @@
 use crate::exid::ExId;
 use crate::Value;
 
-use super::OpQueryTerm;
+use crate::op_set2::op_set::OpQueryTerm;
 
 use std::fmt::Debug;
 use std::ops::RangeBounds;

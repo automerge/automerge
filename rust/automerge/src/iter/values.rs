@@ -1,6 +1,6 @@
 use crate::{exid::ExId, types, types::Clock};
 
-use super::OpQueryTerm;
+use crate::op_set2::op_set::OpQueryTerm;
 
 use std::fmt::Debug;
 

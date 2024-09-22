@@ -1,5 +1,5 @@
-use super::OpIter;
 use crate::marks::{MarkSet, MarkStateMachine};
+use crate::op_set2::op_set::OpIter;
 use crate::op_set2::{KeyRef, Op, OpQuery, OpType, VisibleOpIter};
 use crate::types::Clock;
 use crate::types::{ListEncoding, ObjType, OpId};

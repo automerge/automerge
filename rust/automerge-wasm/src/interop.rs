@@ -4,7 +4,7 @@ use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
-use automerge::op_set2::{Span, Spans};
+use automerge::iter::{Span, Spans};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};

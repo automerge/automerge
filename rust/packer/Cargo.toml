@@ -2,6 +2,7 @@
 name = "packer"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 leb128 = "^0.2.5"

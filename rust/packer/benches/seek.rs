@@ -1,3 +1,4 @@
+/*
 #![feature(test)]
 
 extern crate test;
@@ -63,3 +64,4 @@ fn seek_n(b: &mut Bencher, n: usize, max: u64) {
         col.get(pos);
     });
 }
+*/

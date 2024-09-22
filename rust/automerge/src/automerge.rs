@@ -7,21 +7,22 @@ use std::ops::RangeBounds;
 use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
-pub(crate) use crate::op_set2::{
-    ChangeOp, KeyRef, Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, OpQuery, OpQueryTerm,
-    OpSet, OpType, Parents, SpanInternal, Spans, SpansInternal, Values,
-};
+pub(crate) use crate::op_set2::{ChangeOp, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents};
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
 use crate::change_graph::ChangeGraph;
 use crate::exid::ExId;
 use crate::hydrate;
+use crate::iter::{Keys, ListRange, MapRange};
+use crate::iter::{Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
+#[allow(unused_imports)]
+use crate::types::ScalarValue;
 
 use crate::types::{ActorId, ChangeHash, Clock, ListEncoding, ObjId, ObjMeta, OpId, Value};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};

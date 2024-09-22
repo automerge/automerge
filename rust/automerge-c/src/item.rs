@@ -35,7 +35,7 @@ pub enum Value {
     ChangeHash(am::ChangeHash),
     Cursor(AMcursor),
     Doc(RefCell<AMdoc>),
-    Mark(AMmark<'static>),
+    Mark(AMmark),
     SyncHave(AMsyncHave),
     SyncMessage(AMsyncMessage),
     SyncState(RefCell<AMsyncState>),
@@ -197,8 +197,8 @@ impl From<am::Value<'static>> for Value {
     }
 }
 
-impl From<Mark<'static>> for Value {
-    fn from(mark: Mark<'static>) -> Self {
+impl From<Mark> for Value {
+    fn from(mark: Mark) -> Self {
         Self::Mark(AMmark::new(mark))
     }
 }
@@ -473,7 +473,7 @@ impl TryFrom<&Value> for AMunknownValue {
     }
 }
 
-impl<'a> TryFrom<&'a Value> for &'a AMmark<'a> {
+impl<'a> TryFrom<&'a Value> for &'a AMmark {
     type Error = am::AutomergeError;
 
     fn try_from(value: &'a Value) -> Result<Self, Self::Error> {
@@ -481,7 +481,7 @@ impl<'a> TryFrom<&'a Value> for &'a AMmark<'a> {
         use am::AutomergeError::InvalidValueType;
 
         match value {
-            Mark(mark) => Ok(mark.to_owned()),
+            Mark(mark) => Ok(mark),
             _ => Err(InvalidValueType {
                 expected: type_name::<Self>().to_string(),
                 unexpected: type_name::<self::Value>().to_string(),
@@ -661,8 +661,8 @@ impl From<am::Value<'static>> for Item {
     }
 }
 
-impl From<Mark<'static>> for Item {
-    fn from(mark: Mark<'static>) -> Self {
+impl From<Mark> for Item {
+    fn from(mark: Mark) -> Self {
         Value::from(mark).into()
     }
 }
@@ -867,7 +867,7 @@ impl<'a> TryFrom<&'a mut Item> for &'a mut AMsyncState {
     }
 }
 
-impl<'a> TryFrom<&'a Item> for &'a AMmark<'a> {
+impl<'a> TryFrom<&'a Item> for &'a AMmark {
     type Error = am::AutomergeError;
 
     fn try_from(item: &'a Item) -> Result<Self, Self::Error> {
@@ -1116,8 +1116,8 @@ impl From<am::Value<'static>> for AMitem {
     }
 }
 
-impl From<Mark<'static>> for AMitem {
-    fn from(mark: Mark<'static>) -> Self {
+impl From<Mark> for AMitem {
+    fn from(mark: Mark) -> Self {
         Value::from(mark).into()
     }
 }
@@ -1204,7 +1204,7 @@ impl<'a> TryFrom<&'a mut AMitem> for &'a mut AMdoc {
     }
 }
 
-impl<'a> TryFrom<&'a AMitem> for &'a AMmark<'a> {
+impl<'a> TryFrom<&'a AMitem> for &'a AMmark {
     type Error = am::AutomergeError;
 
     fn try_from(item: &'a AMitem) -> Result<Self, Self::Error> {
@@ -1954,12 +1954,9 @@ pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bo
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToMark<'a>(
-    item: *const AMitem,
-    value: *mut *const AMmark<'a>,
-) -> bool {
+pub unsafe extern "C" fn AMitemToMark(item: *const AMitem, value: *mut *const AMmark) -> bool {
     if let Some(item) = item.as_ref() {
-        if let Ok(mark) = <&AMmark<'a>>::try_from(item) {
+        if let Ok(mark) = <&AMmark>::try_from(item) {
             if !value.is_null() {
                 *value = mark;
                 return true;

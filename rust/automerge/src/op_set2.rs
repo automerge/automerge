@@ -15,8 +15,8 @@ pub(crate) use types::{ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarV
 
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    DiffOp, OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, ReadOpError, SpanInternal,
-    SpansInternal, VisibleOpIter,
+    DiffOp, OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, ReadOpError, TopOpIter,
+    VisibleOpIter,
 };
 
-pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans, Values};
+//pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans, Values};

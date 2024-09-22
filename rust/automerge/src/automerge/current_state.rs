@@ -1,10 +1,9 @@
-use super::{SpanInternal, SpansInternal};
-use crate::{
-    op_set2::{OpIter, OpQuery, Value},
-    patches::{PatchLog, TextRepresentation},
-    types::ObjMeta,
-    Automerge, ObjType,
-};
+use crate::automerge::Automerge;
+use crate::iter::{SpanInternal, SpansInternal};
+use crate::op_set2::{OpIter, OpQuery, Value};
+use crate::patches::{PatchLog, TextRepresentation};
+use crate::types::ObjMeta;
+use crate::types::ObjType;
 
 /*
 struct Put<'a> {

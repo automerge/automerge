@@ -33,30 +33,19 @@ use std::sync::Arc;
 
 mod found_op;
 mod insert;
-mod keys;
-mod list_range;
-mod map_range;
 mod marks;
 mod op_iter;
 mod op_query;
-mod spans;
 mod top_op;
-mod values;
 mod visible;
 
-pub use keys::Keys;
-pub use list_range::{ListRange, ListRangeItem};
-pub use map_range::{MapRange, MapRangeItem};
-pub use spans::{Span, Spans};
-pub use values::Values;
+pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-pub(crate) use keys::KeyIter;
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
-pub(crate) use spans::{SpanInternal, SpansInternal};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 

@@ -269,6 +269,7 @@ pub mod error;
 mod exid;
 pub mod hydrate;
 mod indexed_cache;
+pub mod iter;
 mod legacy;
 pub mod marks;
 pub mod op_set2;

@@ -1,3 +1,4 @@
+/*
 #![feature(test)]
 
 extern crate test;
@@ -66,3 +67,4 @@ fn insert_n(b: &mut Bencher, n: usize, max: u64) {
         col.splice(pos, 0, vec![val as u64]);
     });
 }
+*/

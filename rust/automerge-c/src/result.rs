@@ -427,8 +427,8 @@ impl From<Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for 
     }
 }
 
-impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
+impl From<Result<Vec<Mark>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<Mark>, am::AutomergeError>) -> Self {
         match maybe {
             Ok(marks) => Self::items(marks.iter().map(|mark| mark.clone().into()).collect()),
             Err(e) => Self::error(&e.to_string()),
