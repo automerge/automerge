@@ -68,3 +68,7 @@ harness = false
 [[bench]]
 name = "load_save"
 harness = false
+
+[[bench]]
+name = "bestiary"
+harness = false
