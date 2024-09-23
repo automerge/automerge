@@ -74,25 +74,26 @@ fn save_load(doc: &Automerge) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let n = 1_000;
-    let doc = big_paste_doc(n);
+    let n = 10_000;
+
     c.bench_function(&format!("load_save_big_paste_doc {}", n), |b| {
+        let doc = big_paste_doc(n);
         b.iter(|| save_load(black_box(&doc)))
     });
 
-    let doc = poorly_simulated_typing_doc(n);
     c.bench_function(
-        &format!("load_save_poorly_simulated_typing_doc {}", n),
-        |b| b.iter(|| save_load(black_box(&doc))),
-    );
+        &format!("load_save_poorly_simulated_typing_doc {}", n), |b| {
+            let doc = poorly_simulated_typing_doc(n);
+            b.iter(|| save_load(black_box(&doc)))
+    });
 
-    let doc = maps_in_maps_doc(n);
     c.bench_function(&format!("load_save_maps_in_maps_doc {}", n), |b| {
+        let doc = maps_in_maps_doc(n);
         b.iter(|| save_load(black_box(&doc)))
     });
 
-    let doc = deep_history_doc(n);
     c.bench_function(&format!("load_save_deep_history_doc {}", n), |b| {
+        let doc = deep_history_doc(n);
         b.iter(|| save_load(black_box(&doc)))
     });
 }
