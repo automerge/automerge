@@ -479,10 +479,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         #[cfg(debug_assertions)]
         if self.debug != self.to_vec() {
             let col = self.to_vec();
-            println!(":::SPLICE FAIL (index={}):::", index);
+            println!(":::SPLICE FAIL (index={} del={}):::", index, del);
             println!(":::values={:?}", tmp_values);
-            println!(":::DBG={:?}", self.debug);
-            println!(":::COL={:?}", col);
+            let range = (index - 3)..(index + 4);
+            println!(":::DBG={:?}", &self.debug[range.clone()]);
+            println!(":::COL={:?}", &col[range.clone()]);
             assert_eq!(self.debug.len(), col.len());
             for (i, dbg) in col.iter().enumerate() {
                 if dbg != &col[i] {

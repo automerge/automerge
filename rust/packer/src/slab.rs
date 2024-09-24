@@ -30,8 +30,8 @@ pub struct ReadOnlySlab {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct OwnedSlab {
-    //data: Arc<Vec<u8>>,
-    data: Vec<u8>,
+    data: Arc<Vec<u8>>,
+    //data: Vec<u8>,
     len: usize,
     group: usize,
     abs: i64,
@@ -173,7 +173,7 @@ impl<'a> WriteOp<'a> {
             }
             Self::Import(s, r) => {
                 buff.extend(&s[r]);
-                //println!("write import {:?}",&buff[start..]);
+                //println!("write import ({:?} bytes)",buff[start..].len());
             }
         }
     }
@@ -368,6 +368,7 @@ impl<'a> SlabWriter<'a> {
             match action {
                 WriteAction::End(len, group, next_abs) => {
                     let data = std::mem::take(&mut buffer);
+                    let data = Arc::new(data);
                     result.push(Slab::Owned(OwnedSlab {
                         data,
                         len,

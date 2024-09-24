@@ -19,6 +19,20 @@ pub struct DeltaCursorInternal<const B: usize> {
 // FIXME - encode delta breaks across slabs
 pub type DeltaCursor = DeltaCursorInternal<1024>;
 
+impl<'a> DeltaState<'a> {
+    fn pending_delta(&self) -> i64 {
+        match &self.rle {
+            RleState::LoneValue(Some(n)) => *n,
+            RleState::Run {
+                count,
+                value: Some(v),
+            } => *count as i64 * *v,
+            RleState::LitRun { current, run } => run.iter().sum::<i64>() + *current,
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct DeltaState<'a> {
     abs: i64,
@@ -157,7 +171,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         let state = DeltaState { abs, rle };
         let init_abs = slab.abs();
         current.set_init_abs(init_abs);
-        current.set_abs(abs);
+        current.set_abs(abs - state.pending_delta());
 
         let SpliceDel {
             deleted,
@@ -414,5 +428,19 @@ pub(crate) mod tests {
             col1.to_vec(),
             vec![Some(1), Some(2), Some(10), Some(2), Some(8)],
         );
+    }
+
+    #[test]
+    fn delta_cross_boundary() {
+        let mut col: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
+        let mut data = vec![Some(1), Some(2), Some(3), Some(4), Some(10), Some(20)];
+        col.splice(0, 0, data.clone());
+
+        let patch = vec![Some(32), Some(16), Some(100), Some(99), Some(204)];
+
+        col.splice(3, 0, patch.clone());
+        data.splice(3..3, patch);
+
+        assert_eq!(data, col.to_vec());
     }
 }
