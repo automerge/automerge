@@ -2,6 +2,8 @@ use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWriter};
 
+use std::ops::Range;
+
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct BooleanState {
     value: bool,
@@ -33,47 +35,42 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     type PostState<'a> = Option<BooleanState>;
     type Export = bool;
 
-    fn finish<'a>(
+    fn empty() -> Self {
+        Self::default()
+    }
+
+    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
+        out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
+    }
+
+    fn finalize_state<'a>(
         slab: &'a Slab,
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
-    ) {
+    ) -> Option<Self> {
         if let Some(post) = post {
             if post.value == state.value {
                 state.count += post.count;
-                Self::finish(slab, out, state, None, cursor);
+                Self::finalize_state(slab, out, state, None, cursor)
             } else {
                 out.flush_bool_run(state.count);
                 out.flush_bool_run(post.count);
-                out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
+                Some(cursor)
             }
         } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_slice()) {
             if val.value == Some(state.value) {
                 out.flush_bool_run(state.count + val.count);
-                out.flush_after(
-                    slab,
-                    next_cursor.offset,
-                    0,
-                    slab.len() - next_cursor.index,
-                    0,
-                );
+                Some(next_cursor)
             } else {
                 out.flush_bool_run(state.count);
-                out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
+                Some(cursor)
             }
         } else {
             out.flush_bool_run(state.count);
+            None
         }
-    }
-
-    fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
-        // write nothing if its all false
-        //if !(state.value == false && writer.len() == 0) {
-        Self::flush_state(&mut writer, state);
-        //}
-        writer.write(out);
     }
 
     fn is_empty<'a>(v: Option<bool>) -> bool {
@@ -119,7 +116,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_slice());
+        let (run, cursor) = Self::seek(index, slab);
 
         let count = run.map(|r| r.count).unwrap_or(0);
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
@@ -162,8 +159,11 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         }
     }
 
-    fn export_item(item: Option<bool>) -> bool {
-        item.unwrap_or(false)
+    fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
+    where
+        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+    {
+        data.splice(range, values.map(|e| e.unwrap_or(false)));
     }
 
     #[cfg(test)]

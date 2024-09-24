@@ -153,7 +153,6 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             Some(Run { count: 1, value }) => RleState::LoneValue(value),
             Some(Run { count, value }) if index < cursor.index => {
                 let delta = cursor.index - index;
-                //post = Some(Run { count: delta, value });
                 post = Some(Run::new(delta, value));
                 let count = count - delta;
                 RleState::Run { count, value }
@@ -178,6 +177,10 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
     type State<'a> = RleState<'a, P>;
     type PostState<'a> = Option<Run<'a, P>>;
     type Export = Option<P::Owned>;
+
+    fn empty() -> Self {
+        Self::default()
+    }
 
     fn group(&self) -> usize {
         self.group
@@ -223,35 +226,28 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         next_state
     }
 
-    fn finish<'a>(
+    fn finalize_state<'a>(
         slab: &'a Slab,
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Option<Run<'a, P>>,
-        mut cursor: Self,
-    ) {
+        cursor: Self,
+    ) -> Option<Self> {
         if let Some(run) = post {
             Self::append_chunk(&mut state, out, run);
         }
         if let Some((run, next_cursor)) = cursor.next(slab.as_slice()) {
             Self::append_chunk(&mut state, out, run);
-            cursor = next_cursor;
+            Self::flush_state(out, state);
+            Some(next_cursor)
+        } else {
+            Self::flush_state(out, state);
+            None
         }
+    }
 
+    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
         let num_left = cursor.num_left();
-
-        match state {
-            RleState::LoneValue(Some(value)) if num_left > 0 => {
-                out.flush_lit_run(&[value]);
-            }
-            RleState::LitRun { mut run, current } if num_left > 0 => {
-                run.push(current);
-                out.flush_lit_run(&run);
-            }
-            state => {
-                Self::flush_state(out, state);
-            }
-        }
         out.flush_after(slab, cursor.offset, num_left, slab.len() - cursor.index, 0);
     }
 
@@ -331,7 +327,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_slice());
+        let (run, cursor) = Self::seek(index, slab);
 
         let (state, post, current) = RleCursor::encode_inner(slab, &cursor, run, index);
 
@@ -353,8 +349,11 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         }
     }
 
-    fn export_item(item: Option<<Self::Item as Packable>::Unpacked<'_>>) -> Option<P::Owned> {
-        item.map(|i| P::own(i))
+    fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
+    where
+        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+    {
+        data.splice(range, values.map(|e| e.map(|i| P::own(i))));
     }
 
     #[cfg(test)]
@@ -590,7 +589,6 @@ pub(crate) mod tests {
                 vec![ColExport::run(2, "xxx3")],
             ]
         );
-        println!("BEFORE SPLICE {:?}", col2.export());
         col2.splice(3, 0, vec!["xxx3", "xxx3"]);
         assert_eq!(
             col2.export(),

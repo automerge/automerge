@@ -6,6 +6,8 @@ use super::slab::{Slab, SlabWriter};
 #[cfg(test)]
 use super::ColExport;
 
+use std::ops::Range;
+
 type SubCursor<const B: usize> = RleCursor<B, i64>;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -29,6 +31,10 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     type PostState<'a> = Option<Run<'a, i64>>;
     type Export = Option<i64>;
 
+    fn empty() -> Self {
+        Self::default()
+    }
+
     fn new(slab: &Slab) -> Self {
         Self {
             abs: slab.abs(),
@@ -36,68 +42,45 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn finish<'a>(
+    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
+        out.set_abs(cursor.abs);
+        SubCursor::<B>::finish(slab, out, cursor.rle)
+    }
+
+    fn finalize_state<'a>(
         slab: &'a Slab,
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
-    ) {
+    ) -> Option<Self> {
         match post {
-            Some(Run {
-                count: 1,
-                value: Some(_),
-            }) => {
-                //let delta = cursor.abs - state.abs;
-                Self::append(&mut state, out, Some(cursor.abs));
-                SubCursor::<B>::finish(slab, out, state.rle, None, cursor.rle);
+            Some(run) if run.value.is_some() => {
+                // we need to flush at least two elements to make sure
+                // we're connected to prior and post lit runs
+                Self::flush_twice(slab, out, state, run, cursor)
             }
-            Some(Run {
-                count,
-                value: Some(v),
-            }) => {
-                Self::append(&mut state, out, Some(cursor.abs - (count as i64 - 1) * v));
-                let next_post = Some(Run::new(count - 1, Some(v)));
-                SubCursor::<B>::finish(slab, out, state.rle, next_post, cursor.rle);
-            }
-            Some(Run { count, value: None }) => {
-                //let next_state = DeltaState::new(state.abs);
-                //SubCursor::<B>::flush_state(out, state.rle);
-                //SubCursor::<B>::flush_run(out, count, None);
-                Self::append_chunk(&mut state, out, Run { count, value: None });
-                Self::finish(slab, out, state, None, cursor);
+            Some(run) => {
+                // Nulls do not affect ABS - so the post does not connect us to the copy afterward
+                // clear the post and try again
+                Self::append_chunk(&mut state, out, run);
+                Self::finalize_state(slab, out, state, None, cursor)
             }
             None => {
-                if let Some((run, next_cursor)) = cursor.next(slab.as_slice()) {
-                    match run {
-                        Run { count, value: None } => {
-                            //let next_state = DeltaState::new(state.abs);
-                            //SubCursor::<B>::flush_state(out, state.rle);
-                            //SubCursor::<B>::flush_run(out, count, None);
-                            Self::append_chunk(&mut state, out, Run { count, value: None });
-                            Self::finish(slab, out, state, None, next_cursor);
-                        }
-                        Run {
-                            count: 1,
-                            value: Some(_),
-                        } => {
-                            Self::append(&mut state, out, Some(next_cursor.abs));
-                            SubCursor::<B>::finish(slab, out, state.rle, None, next_cursor.rle);
-                        }
-                        run => {
-                            let run = Run::new(run.count - 1, run.value);
-                            Self::append(&mut state, out, Some(next_cursor.abs - run.delta()));
-                            SubCursor::<B>::finish(
-                                slab,
-                                out,
-                                state.rle,
-                                Some(run),
-                                next_cursor.rle,
-                            );
-                        }
+                if let Some((run, next)) = cursor.next(slab.as_slice()) {
+                    if run.value.is_some() {
+                        // we need to flush at least two elements to make sure
+                        // we're connected to prior and post lit runs
+                        Self::flush_twice(slab, out, state, run, next)
+                    } else {
+                        // Nulls do not affect ABS - so the post does not connect us to the copy afterward
+                        // clear the post and try again
+                        Self::append_chunk(&mut state, out, run);
+                        Self::finalize_state(slab, out, state, None, next)
                     }
                 } else {
-                    SubCursor::<B>::flush_state(out, state.rle);
+                    Self::flush_state(out, state);
+                    None
                 }
             }
         }
@@ -165,13 +148,15 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
         // FIXME encode
-        let (run, cursor) = Self::seek(index, slab.as_slice());
+        let (run, cursor) = Self::seek(index, slab);
 
         let (rle, post, mut current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
         let state = DeltaState { abs, rle };
+        let init_abs = slab.abs();
+        current.set_init_abs(init_abs);
         current.set_abs(abs);
 
         let SpliceDel {
@@ -192,8 +177,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn export_item(item: Option<i64>) -> Option<i64> {
-        item
+    fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
+    where
+        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+    {
+        //data.splice(range, values.map(|e| e.map(|i| P::own(i))));
+        data.splice(range, values);
     }
 
     #[cfg(test)]
@@ -216,6 +205,33 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn index(&self) -> usize {
         self.rle.index()
+    }
+}
+
+impl<const B: usize> DeltaCursorInternal<B> {
+    fn flush_twice<'a>(
+        slab: &'a Slab,
+        out: &mut SlabWriter<'a>,
+        mut state: DeltaState<'a>,
+        run: Run<'a, i64>,
+        cursor: Self,
+    ) -> Option<Self> {
+        if let Some(run) = run.pop() {
+            Self::append(&mut state, out, Some(cursor.abs - run.delta()));
+            Self::append_chunk(&mut state, out, run);
+            Self::flush_state(out, state);
+            Some(cursor)
+        } else {
+            Self::append(&mut state, out, Some(cursor.abs));
+            if let Some((run, next)) = cursor.next(slab.as_slice()) {
+                Self::append_chunk(&mut state, out, run);
+                Self::flush_state(out, state);
+                Some(next)
+            } else {
+                Self::flush_state(out, state);
+                Some(cursor)
+            }
+        }
     }
 }
 

@@ -87,13 +87,27 @@ impl<'a> From<bool> for WriteOp<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum WriteOp<'a> {
     UInt(u64),
     GroupUInt(u64, usize),
     Int(i64),
     Bytes(&'a [u8]),
     Import(&'a Slab, Range<usize>),
+}
+
+impl<'a> Debug for WriteOp<'a> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let mut s = fmt.debug_struct("WriteOp");
+        match self {
+            Self::UInt(a) => s.field("uint", a),
+            Self::GroupUInt(a, b) => s.field("group_uint", a).field("group", b),
+            Self::Int(a) => s.field("int", a),
+            Self::Bytes(a) => s.field("bytes", &a.len()),
+            Self::Import(_a, b) => s.field("import", b),
+        }
+        .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +247,7 @@ pub struct SlabWriter<'a> {
     items: usize,
     group: usize,
     abs: i64,
+    init_abs: i64,
     lit_items: usize,
     max: usize,
 }
@@ -244,11 +259,16 @@ impl<'a> SlabWriter<'a> {
             width: 0,
             group: 0,
             abs: 0,
+            init_abs: 0,
             lit_items: 0,
             items: 0,
             actions: vec![],
             lit: vec![],
         }
+    }
+
+    pub fn set_init_abs(&mut self, abs: i64) {
+        self.init_abs = abs;
     }
 
     pub fn set_abs(&mut self, abs: i64) {
@@ -269,8 +289,8 @@ impl<'a> SlabWriter<'a> {
             //
             width += 1;
         }
-        self.abs += action.abs();
         self.check_copy_overflow(action.copy_width());
+        self.abs += action.abs();
         self.group += action.group();
         self.width += width;
         self.items += items;
@@ -287,8 +307,8 @@ impl<'a> SlabWriter<'a> {
         if width == 0 {
             return;
         }
-        self.abs += action.abs();
         self.check_copy_overflow(action.copy_width());
+        self.abs += action.abs();
         self.group += action.group();
         self.width += width;
         self.items += items;
@@ -343,11 +363,10 @@ impl<'a> SlabWriter<'a> {
         }
         let mut result = vec![];
         let mut buffer = vec![];
-        let mut abs = 0;
+        let mut abs = self.init_abs;
         for action in self.actions {
             match action {
                 WriteAction::End(len, group, next_abs) => {
-                    //let data = Arc::new(std::mem::take(&mut buffer));
                     let data = std::mem::take(&mut buffer);
                     result.push(Slab::Owned(OwnedSlab {
                         data,

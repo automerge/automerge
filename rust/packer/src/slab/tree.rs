@@ -632,6 +632,16 @@ pub struct SpanTreeIter<'a, T: HasWidth> {
     index: usize,
 }
 
+impl<'a, T: HasWidth> SpanTreeIter<'a, T> {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.as_ref().map(|t| t.len()).unwrap_or(0)
+    }
+}
+
 impl<'a, T: HasWidth> Copy for SpanTreeIter<'a, T> {}
 
 impl<'a, T: HasWidth> Iterator for SpanTreeIter<'a, T> {

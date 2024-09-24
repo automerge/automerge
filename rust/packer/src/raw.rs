@@ -2,6 +2,9 @@ use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
 use super::pack::PackError;
 use super::slab::{self, Slab, SlabWriter};
 
+use std::fmt::Debug;
+use std::ops::Range;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RawCursorInternal<const B: usize> {
     offset: usize,
@@ -13,7 +16,11 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type Item = [u8];
     type State<'a> = ();
     type PostState<'a> = &'a [u8];
-    type Export = Vec<u8>;
+    type Export = u8;
+
+    fn empty() -> Self {
+        Self::default()
+    }
 
     fn write<'a>(
         writer: &mut SlabWriter<'a>,
@@ -24,19 +31,17 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         writer.flush_before(slab, 0..len, 0, len);
     }
 
-    fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
-        Self::flush_state(&mut writer, state);
-        writer.write(out);
-    }
+    fn finish<'a>(_slab: &'a Slab, _out: &mut SlabWriter<'a>, _cursor: Self) {}
 
-    fn finish<'a>(
+    fn finalize_state<'a>(
         _slab: &'a Slab,
         out: &mut SlabWriter<'a>,
         _state: (),
         post: Self::PostState<'a>,
         _cursor: Self,
-    ) {
-        out.flush_bytes(post, post.len())
+    ) -> Option<Self> {
+        out.flush_bytes(post, post.len());
+        None
     }
 
     fn flush_state<'a>(_out: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
@@ -99,8 +104,15 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         }
     }
 
-    fn export_item(item: Option<&[u8]>) -> Vec<u8> {
-        item.unwrap_or(&[]).to_vec()
+    fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
+    where
+        I: Iterator<Item = Option<&'a [u8]>>,
+    {
+        let mut total: Vec<u8> = vec![];
+        for bytes in values.flatten() {
+            total.extend(bytes);
+        }
+        data.splice(range, total);
     }
 
     #[cfg(test)]

@@ -2,13 +2,14 @@ use super::pack::{MaybePackable, PackError, Packable};
 use super::slab::{Slab, SlabWriter};
 
 use std::fmt::Debug;
+use std::ops::Range;
 
 #[derive(Debug)]
 pub struct ScanMeta {
     pub actors: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Run<'a, P: Packable + ?Sized> {
     pub count: usize,
     pub value: Option<P::Unpacked<'a>>,
@@ -79,13 +80,15 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
     }
 
     pub(crate) fn finish(mut self) -> Vec<Slab> {
-        C::finish(
+        if let Some(cursor) = C::finalize_state(
             self.slab,
             &mut self.current,
             self.state,
             self.post,
             self.cursor,
-        );
+        ) {
+            C::finish(self.slab, &mut self.current, cursor)
+        }
         self.current.finish()
     }
 }
@@ -109,14 +112,16 @@ impl<P: Packable + ?Sized> ColExport<P> {
     }
 }
 
-pub trait ColumnCursor: Debug + Default + Clone + Copy {
+pub trait ColumnCursor: Debug + Clone + Copy {
     type Item: Packable + ?Sized;
     type State<'a>: Default;
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
 
+    fn empty() -> Self;
+
     fn new(_: &Slab) -> Self {
-        Self::default()
+        Self::empty()
     }
 
     fn write<'a>(
@@ -130,7 +135,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
             return state;
         }
 
-        let (run0, c0) = Self::seek(1, slab.as_slice());
+        let (run0, c0) = Self::seek(1, slab);
         let run0 = run0.unwrap();
         size -= run0.count;
         Self::append_chunk(&mut state, writer, run0);
@@ -138,7 +143,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
             return state;
         }
 
-        let (run1, c1) = Self::seek(slab.len(), slab.as_slice());
+        let (run1, c1) = Self::seek(slab.len(), slab);
         let run1 = run1.unwrap();
         size -= run1.count;
         if size == 0 {
@@ -148,11 +153,6 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
         Self::flush_state(writer, state);
 
         Self::copy_between(slab, writer, c0, c1, run1, size)
-    }
-
-    fn write_finish<'a>(out: &mut Vec<u8>, mut writer: SlabWriter<'a>, state: Self::State<'a>) {
-        Self::flush_state(&mut writer, state);
-        writer.write(out);
     }
 
     fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
@@ -183,13 +183,15 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
         }
     }
 
-    fn finish<'a>(
+    fn finalize_state<'a>(
         slab: &'a Slab,
         out: &mut SlabWriter<'a>,
         state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
-    );
+    ) -> Option<Self>;
+
+    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self);
 
     fn append<'a>(
         state: &mut Self::State<'a>,
@@ -227,14 +229,26 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
     #[cfg(test)]
     fn export(data: &[u8]) -> Vec<ColExport<Self::Item>>;
 
-    fn export_item(item: Option<<Self::Item as Packable>::Unpacked<'_>>) -> Self::Export;
+    fn to_vec<'a, I>(values: I) -> Vec<Self::Export>
+    where
+        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+    {
+        let mut result = vec![];
+        Self::export_splice(&mut result, 0..0, values);
+        result
+    }
+
+    fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
+    where
+        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>;
 
     // useful for debugging
     fn decode(data: &[u8]) {
-        let mut cursor = Self::default();
+        let mut cursor = Self::empty();
         loop {
             match cursor.try_next(data) {
                 Ok(Some((_run, next_cursor))) => {
+                    //println!("RUN {:?}", _run);
                     cursor = next_cursor;
                 }
                 Ok(None) => break,
@@ -262,12 +276,12 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
         0
     }
 
-    fn seek(index: usize, data: &[u8]) -> (Option<Run<'_, Self::Item>>, Self) {
+    fn seek(index: usize, slab: &Slab) -> (Option<Run<'_, Self::Item>>, Self) {
         if index == 0 {
-            return (None, Self::default());
+            return (None, Self::new(slab));
         } else {
-            let mut cursor = Self::default();
-            while let Some((val, next_cursor)) = cursor.next(data) {
+            let mut cursor = Self::new(slab);
+            while let Some((val, next_cursor)) = cursor.next(slab.as_slice()) {
                 if next_cursor.index() >= index {
                     return (Some(val), next_cursor);
                 }
@@ -278,7 +292,7 @@ pub trait ColumnCursor: Debug + Default + Clone + Copy {
     }
 
     fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
-        let mut cursor = Self::default();
+        let mut cursor = Self::empty();
         while let Some((val, next_cursor)) = cursor.try_next(data)? {
             Self::Item::validate(&val.value, m)?;
             cursor = next_cursor
