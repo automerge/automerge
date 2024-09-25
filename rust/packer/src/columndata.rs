@@ -455,26 +455,14 @@ impl<C: ColumnCursor> ColumnData<C> {
         );
         #[cfg(debug_assertions)]
         let tmp_values = values.clone();
-
-        if index == 0 {
-            let slab = self.slabs.get(0).unwrap();
-            match C::splice(slab, 0, del, values) {
-                SpliceResult::Replace(add, del, slabs) => {
-                    self.len = self.len + add - del;
-                    self.slabs.splice(0..1, slabs);
-                    assert!(!self.slabs.is_empty());
-                }
+        let cursor = self.slabs.get_at_width(index).unwrap();
+        match C::splice(cursor.element, cursor.width_index, del, values) {
+            SpliceResult::Replace(add, del, slabs) => {
+                self.len = self.len + add - del;
+                self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
+                assert!(!self.slabs.is_empty());
             }
-        } else {
-            let (slab_index, sub_index, slab) = self.slabs.get_at_width(index - 1).unwrap();
-            match C::splice(slab, sub_index + 1, del, values) {
-                SpliceResult::Replace(add, del, slabs) => {
-                    self.len = self.len + add - del;
-                    self.slabs.splice(slab_index..(slab_index + 1), slabs);
-                    assert!(!self.slabs.is_empty());
-                }
-            }
-        };
+        }
 
         #[cfg(debug_assertions)]
         if self.debug != self.to_vec() {
@@ -1123,5 +1111,24 @@ pub(crate) mod tests {
         assert_eq!(range, 22..23);
         let range = col.iter().scope_to_value(Some(8), ..);
         assert_eq!(range, 23..25);
+    }
+
+    #[test]
+    fn splice_on_boundary() {
+        let data = vec![1, 2, 3, 4, 5, 6];
+        let mut col = ColumnData::<RleCursor<4, u64>>::new();
+        col.splice(0, 0, data);
+        assert_eq!(
+            col.export(),
+            vec![
+                vec![ColExport::litrun(vec![1, 2, 3])],
+                vec![ColExport::litrun(vec![4, 5, 6])],
+            ]
+        );
+        col.splice(3, 1, vec![99]);
+        assert_eq!(
+            col.to_vec(),
+            vec![Some(1), Some(2), Some(3), Some(99), Some(5), Some(6)]
+        );
     }
 }

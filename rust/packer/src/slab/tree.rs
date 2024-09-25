@@ -24,6 +24,23 @@ struct TreeNode<T: HasWidth> {
     width: usize,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubCursor<'a, T: HasWidth> {
+    pub index: usize,
+    pub width_index: usize,
+    pub element: &'a T,
+}
+
+impl<'a, T: HasWidth> SubCursor<'a, T> {
+    fn new(index: usize, width_index: usize, element: &'a T) -> Self {
+        Self {
+            index,
+            width_index,
+            element,
+        }
+    }
+}
+
 impl<T: HasWidth> SpanTree<T> {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
@@ -150,11 +167,24 @@ impl<T: HasWidth> SpanTree<T> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
+    pub fn last(&self) -> Option<&T> {
+        self.root_node.as_ref().and_then(|n| n.last())
+    }
+
     /// Get the `element` at `index` in the sequence.
-    pub fn get_at_width(&self, pos: usize) -> Option<(usize, usize, &T)> {
-        self.root_node
-            .as_ref()
-            .and_then(|n| n.get_at_width(0, 0, pos))
+    pub fn get_at_width(&self, pos: usize) -> Option<SubCursor<'_, T>> {
+        if self.width() == pos {
+            let element = self.last()?;
+            Some(SubCursor {
+                index: self.len() - 1,
+                width_index: element.width(),
+                element,
+            })
+        } else {
+            self.root_node
+                .as_ref()
+                .and_then(|n| n.get_at_width(0, 0, pos))
+        }
     }
 
     /// Removes the element at `index` from the sequence.
@@ -555,12 +585,13 @@ impl<T: HasWidth> TreeNode<T> {
         mut index: usize,
         mut sub_index: usize,
         pos: usize,
-    ) -> Option<(usize, usize, &T)> {
+        //) -> Option<(usize, usize, &T)> {
+    ) -> Option<SubCursor<'_, T>> {
         if self.is_leaf() {
             let iter = self.elements.iter().peekable();
             for e in iter {
                 if pos - sub_index < e.width() {
-                    return Some((index, pos - sub_index, e));
+                    return Some(SubCursor::new(index, pos - sub_index, e));
                 }
                 index += 1;
                 sub_index += e.width()
@@ -576,7 +607,7 @@ impl<T: HasWidth> TreeNode<T> {
                 }
                 if let Some(e) = self.elements.get(i) {
                     if pos - sub_index < e.width() {
-                        return Some((index, pos - sub_index, e));
+                        return Some(SubCursor::new(index, pos - sub_index, e));
                     }
                     index += 1;
                     sub_index += e.width();
@@ -584,6 +615,14 @@ impl<T: HasWidth> TreeNode<T> {
             }
         }
         None
+    }
+
+    fn last(&self) -> Option<&T> {
+        if self.is_leaf() {
+            return self.elements.last();
+        } else {
+            self.children.last().and_then(|c| c.last())
+        }
     }
 
     fn get(&self, index: usize) -> Option<&T> {
@@ -824,17 +863,17 @@ pub(crate) mod tests {
         assert_eq!(tree.get(2), Some(&30));
         assert_eq!(tree.get(3), Some(&40));
         assert_eq!(tree.get(4), Some(&50));
-        assert_eq!(tree.get_at_width(0), Some((0, 0, &10)));
-        assert_eq!(tree.get_at_width(5), Some((0, 5, &10)));
-        assert_eq!(tree.get_at_width(6), Some((0, 6, &10)));
-        assert_eq!(tree.get_at_width(10), Some((1, 0, &20)));
-        assert_eq!(tree.get_at_width(15), Some((1, 5, &20)));
-        assert_eq!(tree.get_at_width(16), Some((1, 6, &20)));
-        assert_eq!(tree.get_at_width(29), Some((1, 19, &20)));
-        assert_eq!(tree.get_at_width(30), Some((2, 0, &30)));
-        assert_eq!(tree.get_at_width(40), Some((2, 10, &30)));
-        assert_eq!(tree.get_at_width(50), Some((2, 20, &30)));
-        assert_eq!(tree.get_at_width(60), Some((3, 0, &40)));
+        assert_eq!(tree.get_at_width(0), Some(SubCursor::new(0, 0, &10)));
+        assert_eq!(tree.get_at_width(5), Some(SubCursor::new(0, 5, &10)));
+        assert_eq!(tree.get_at_width(6), Some(SubCursor::new(0, 6, &10)));
+        assert_eq!(tree.get_at_width(10), Some(SubCursor::new(1, 0, &20)));
+        assert_eq!(tree.get_at_width(15), Some(SubCursor::new(1, 5, &20)));
+        assert_eq!(tree.get_at_width(16), Some(SubCursor::new(1, 6, &20)));
+        assert_eq!(tree.get_at_width(29), Some(SubCursor::new(1, 19, &20)));
+        assert_eq!(tree.get_at_width(30), Some(SubCursor::new(2, 0, &30)));
+        assert_eq!(tree.get_at_width(40), Some(SubCursor::new(2, 10, &30)));
+        assert_eq!(tree.get_at_width(50), Some(SubCursor::new(2, 20, &30)));
+        assert_eq!(tree.get_at_width(60), Some(SubCursor::new(3, 0, &40)));
         assert_eq!(tree.get_at_width(200), None);
     }
 
@@ -852,7 +891,7 @@ pub(crate) mod tests {
             let n = i % 10;
             assert_eq!(
                 tree.get_at_width(i),
-                Some((index, n, &TestWidth { index, width }))
+                Some(SubCursor::new(index, n, &TestWidth { index, width }))
             );
         }
 
@@ -867,7 +906,7 @@ pub(crate) mod tests {
 
         assert_eq!(
             tree.get_at_width(201),
-            Some((
+            Some(SubCursor::new(
                 11,
                 1,
                 &TestWidth {

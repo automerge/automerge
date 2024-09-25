@@ -594,8 +594,8 @@ pub(crate) mod tests {
             col2.export(),
             vec![
                 vec![ColExport::litrun(vec!["xxx0", "xxx1"])],
-                vec![ColExport::litrun(vec!["xxx2"]), ColExport::run(2, "xxx3")],
-                vec![ColExport::run(2, "xxx3")],
+                vec![ColExport::litrun(vec!["xxx2"])],
+                vec![ColExport::run(4, "xxx3")],
             ]
         );
         assert_eq!(
