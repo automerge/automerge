@@ -74,7 +74,7 @@ fn save_load(doc: &Automerge) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let n = 1_00;
+    let n = 1_000;
     let doc = big_paste_doc(n);
     c.bench_function(&format!("load_save_big_paste_doc {}", n), |b| {
         b.iter(|| save_load(black_box(&doc)))

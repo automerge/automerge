@@ -76,7 +76,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         };
         if advance > 0 {
             while let Some(s) = reader.slabs.next() {
-                if s.len() < advance {
+                if s.len() <= advance {
                     advance -= s.len();
                 } else {
                     reader.current = Some((s, advance));
