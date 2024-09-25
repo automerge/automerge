@@ -10,7 +10,7 @@ use crate::{
     op_set2::{OpBuilder2, OpSet},
     storage::{
         change::{PredOutOfOrder, Verified},
-        convert::ob_as_actor_id,
+        convert::{ob_as_actor_id, OpWithMetadata},
         Change as StoredChange, ChangeMetadata,
     },
     types::ChangeHash,
@@ -100,15 +100,15 @@ impl<'a> ChangeCollector<'a> {
         }
     */
 
-    pub(crate) fn collect(&mut self, op: OpBuilder2) -> Result<(), Error> {
+    pub(crate) fn collect(&mut self, op: OpWithMetadata<'a>) -> Result<(), Error> {
         let actor_changes = self
             .changes_by_actor
-            .get_mut(&op.id.actor())
+            .get_mut(&op.id().actor())
             .ok_or_else(|| {
-                tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
+                tracing::error!(missing_actor = op.id().actor(), "missing actor for op");
                 Error::MissingActor
             })?;
-        let change_index = actor_changes.partition_point(|c| c.max_op < op.id.counter());
+        let change_index = actor_changes.partition_point(|c| c.max_op < op.id().counter());
         let change = actor_changes.get_mut(change_index).ok_or_else(|| {
             tracing::error!(missing_change_index = change_index, "missing change for op");
             Error::MissingChange
@@ -204,8 +204,8 @@ struct PartialChange<'a> {
     timestamp: i64,
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
-    //ops: Vec<OpWithMetadata<'a>>,
-    ops: Vec<OpBuilder2>,
+    ops: Vec<OpWithMetadata<'a>>,
+    //ops: Vec<OpBuilder2>,
 }
 
 impl<'a> PartialChange<'a> {
@@ -257,7 +257,8 @@ impl<'a> PartialChange<'a> {
             .with_timestamp(self.timestamp)
             .with_message(self.message.map(|s| s.to_string()))
             .with_extra_bytes(self.extra_bytes.into_owned())
-            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, op)))
+            //            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, op)))
+            .build(self.ops.into_iter())
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
@@ -265,12 +266,12 @@ impl<'a> PartialChange<'a> {
                 panic!("preds out of order");
             }
         };
-        #[cfg(not(debug_assertions))]
-        tracing::trace!(?change, hash=?change.hash(), "collected change");
-        #[cfg(debug_assertions)]
-        {
-            tracing::trace!(?change, ops=?self.ops, hash=?change.hash(), "collected change");
-        }
+        //#[cfg(not(debug_assertions))]
+        //tracing::trace!(?change, hash=?change.hash(), "collected change");
+        //#[cfg(debug_assertions)]
+        //{
+        //    tracing::trace!(?change, ops=?self.ops, hash=?change.hash(), "collected change");
+        //}
         Ok(change)
     }
 }

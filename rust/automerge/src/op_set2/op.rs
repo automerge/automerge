@@ -2,6 +2,7 @@ use super::op_set::{OpLike, OpSet};
 use super::packer::{ColumnDataIter, DeltaCursor};
 use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{Value, ValueMeta};
+use crate::storage::convert::OpWithMetadata;
 
 use crate::convert;
 use crate::storage::document::AsDocOp;
@@ -289,6 +290,21 @@ pub(crate) struct SuccInsert {
 }
 
 impl<'a> Op<'a> {
+    pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {
+        Op {
+            id,
+            obj,
+            pos: 0,
+            conflict: false,
+            expand: false,
+            mark_name: None,
+            action: Action::Delete,
+            value: ScalarValue::Null,
+            key,
+            insert: false,
+            succ_cursors: Default::default(),
+        }
+    }
     pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors;
@@ -417,6 +433,14 @@ impl<'a> Op<'a> {
 
     pub(crate) fn is_mark(&self) -> bool {
         self.action == Action::Mark
+    }
+
+    pub(crate) fn into_meta(
+        self,
+        op_set: &'a OpSet,
+        pred: Option<Vec<OpId>>,
+    ) -> OpWithMetadata<'a> {
+        OpWithMetadata::new(op_set, self, pred.unwrap_or_default())
     }
 
     pub(crate) fn build(&self, pred: Option<Vec<OpId>>) -> OpBuilder2 {
