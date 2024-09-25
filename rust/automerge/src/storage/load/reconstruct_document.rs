@@ -1,11 +1,12 @@
 use super::change_collector::ChangeCollector;
 use std::collections::{BTreeSet, HashMap};
 
-use crate::change::Change;
-use crate::op_set2::{KeyRef, Op, OpBuilder2, OpSet, PackError, ReadOpError};
-use crate::storage::convert::OpWithMetadata;
-use crate::storage::{change::Verified, Change as StoredChange, Document};
-use crate::types::{ChangeHash, ObjId, OpId};
+use crate::{
+    change::Change,
+    op_set2::{KeyRef, OpBuilder2, OpSet, PackError, ReadOpError},
+    storage::{change::Verified, Change as StoredChange, Document},
+    types::{ChangeHash, ObjId, OpId},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -67,7 +68,7 @@ pub(crate) fn reconstruct_opset<'a>(
         // not read - op.value(2) op.action(1), op.mark_name(1)
         let next = Some((op.obj, op.elemid_or_key()));
         if last != next {
-            add_del_ops(&op_set, &mut change_collector, &mut last, &mut preds)?;
+            add_del_ops(&mut change_collector, &mut last, &mut preds)?;
             last = next;
         }
         for id in op.succ() {
@@ -79,10 +80,10 @@ pub(crate) fn reconstruct_opset<'a>(
 
         let pred = preds.remove(&op.id);
 
-        change_collector.collect(op.into_meta(&op_set, pred))?;
+        change_collector.collect(op.build(pred))?;
     }
 
-    add_del_ops(&op_set, &mut change_collector, &mut last, &mut preds)?;
+    add_del_ops(&mut change_collector, &mut last, &mut preds)?;
 
     let (changes, heads, max_op2) = flush_changes(change_collector, doc, mode, &op_set)?;
 
@@ -98,15 +99,14 @@ pub(crate) fn reconstruct_opset<'a>(
     })
 }
 
-fn add_del_ops<'a>(
-    op_set: &'a OpSet,
-    change_collector: &mut ChangeCollector<'a>,
-    last: &mut Option<(ObjId, KeyRef<'a>)>,
+fn add_del_ops(
+    change_collector: &mut ChangeCollector<'_>,
+    last: &mut Option<(ObjId, KeyRef<'_>)>,
     preds: &mut HashMap<OpId, Vec<OpId>>,
 ) -> Result<(), Error> {
     if let Some((obj, key)) = last.take() {
         for (id, pred) in preds.drain() {
-            let del = OpWithMetadata::new(op_set, Op::del(id, obj, key), pred);
+            let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred);
             change_collector.collect(del)?;
         }
     }

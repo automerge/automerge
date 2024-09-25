@@ -22,29 +22,11 @@ pub(crate) struct OpWithMetadata<'a> {
     pred: Vec<OpId>,
 }
 
-impl<'a> OpWithMetadata<'a> {
-    pub(crate) fn id(&self) -> OpId {
-        self.op.id
-    }
-
-    pub(crate) fn new(op_set: &'a OpSet, op: Op<'a>, pred: Vec<OpId>) -> Self {
-        Self { op, op_set, pred }
-    }
-}
-
-impl<'a> Ord for OpWithMetadata<'a> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.op.cmp(&other.op)
-    }
-}
-
 impl<'a> PartialOrd for OpWithMetadata<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(&other))
+        self.op.partial_cmp(&other.op)
     }
 }
-
-impl<'a> Eq for OpWithMetadata<'a> {}
 
 impl<'a> PartialEq for OpWithMetadata<'a> {
     fn eq(&self, other: &Self) -> bool {
