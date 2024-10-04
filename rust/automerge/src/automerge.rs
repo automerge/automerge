@@ -1083,6 +1083,11 @@ impl Automerge {
 
     fn rewrite_states_with_new_actor(&mut self, index: usize) {
         // we could index states with ActorID to not have to do this
+        if let Actor::Cached(idx) = self.actor {
+          if idx >= index {
+            self.actor = Actor::Cached(idx + 1);
+          }
+        }
         let old_states = std::mem::take(&mut self.states);
         self.states = old_states
             .into_iter()
