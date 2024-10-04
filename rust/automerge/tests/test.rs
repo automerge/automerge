@@ -2280,3 +2280,24 @@ fn stats_smoke_test() {
     assert_eq!(stats.num_changes, 2);
     assert_eq!(stats.num_ops, 2);
 }
+
+#[test]
+fn invalid_index() {
+    let mut doc = AutoCommit::new();
+    let obj = doc
+        .put_object(&automerge::ROOT, "a", ObjType::List)
+        .unwrap();
+    doc.insert(&obj, 0, 1).unwrap();
+    doc.put(&obj, 0, 2).unwrap();
+    assert_eq!(doc.get(&obj, 0).unwrap().unwrap().0, 2.into());
+    assert_eq!(doc.insert(&obj, 2, 1), Err(AutomergeError::InvalidIndex(2)));
+    assert_eq!(doc.put(&obj, 2, 2), Err(AutomergeError::InvalidIndex(2)));
+    assert_eq!(
+        doc.insert(&obj, 100, 1),
+        Err(AutomergeError::InvalidIndex(100))
+    );
+    assert_eq!(
+        doc.put(&obj, 100, 2),
+        Err(AutomergeError::InvalidIndex(100))
+    );
+}

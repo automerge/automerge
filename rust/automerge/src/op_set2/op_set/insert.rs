@@ -111,7 +111,14 @@ impl<'a> InsertQuery<'a> {
             pos = op.pos;
         }
 
-        if let Some(loc) = self.candidates.pop() {
+        if let Some(last) = last_width.take() {
+            index += last;
+            done = index >= self.target;
+        }
+
+        if !done {
+            Err(AutomergeError::InvalidIndex(self.target))
+        } else if let Some(loc) = self.candidates.pop() {
             // process all the marks before the final pos
             for op in post_marks {
                 if op.pos < loc.pos {

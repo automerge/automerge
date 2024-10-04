@@ -40,6 +40,16 @@ pub(crate) enum Actor {
     Cached(usize),
 }
 
+impl Actor {
+    fn rewrite_states_with_new_actor(&mut self, index: usize) {
+        if let Actor::Cached(idx) = self {
+            if *idx >= index {
+                *idx += 1;
+            }
+        }
+    }
+}
+
 /// What to do when loading a document partially succeeds
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnPartialLoad {
@@ -1082,12 +1092,7 @@ impl Automerge {
     }
 
     fn rewrite_states_with_new_actor(&mut self, index: usize) {
-        // we could index states with ActorID to not have to do this
-        if let Actor::Cached(idx) = self.actor {
-          if idx >= index {
-            self.actor = Actor::Cached(idx + 1);
-          }
-        }
+        self.actor.rewrite_states_with_new_actor(index);
         let old_states = std::mem::take(&mut self.states);
         self.states = old_states
             .into_iter()
