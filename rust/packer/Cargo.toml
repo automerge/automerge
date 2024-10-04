@@ -9,8 +9,17 @@ leb128 = "^0.2.5"
 thiserror = "^1.0.16"
 
 [dev-dependencies]
+criterion = "0.5.1"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
 
 [profile.release]
 debug = true
+
+[[bench]]
+name = "seek"
+harness = false
+
+[[bench]]
+name = "insert"
+harness = false
