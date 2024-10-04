@@ -61,6 +61,8 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
+    #[error("patch logs cannot be shared between documents")]
+    PatchLogMismatch,
 }
 
 impl PartialEq for AutomergeError {

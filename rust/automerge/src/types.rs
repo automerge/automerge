@@ -539,6 +539,14 @@ impl Key {
 pub(crate) struct OpId(u32, u32);
 
 impl OpId {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        if self.actor() >= idx {
+            OpId(self.0, self.1 + 1)
+        } else {
+            self
+        }
+    }
+
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
@@ -595,6 +603,14 @@ impl AsRef<OpId> for ObjId {
 pub(crate) struct ObjId(pub(crate) OpId);
 
 impl ObjId {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        if self.is_root() {
+            self
+        } else {
+            ObjId(self.0.with_new_actor(idx))
+        }
+    }
+
     pub(crate) fn load(counter: Option<u64>, actor: Option<ActorIdx>) -> Option<ObjId> {
         match (counter, actor) {
             (Some(c), Some(a)) => Some(ObjId(OpId::new(c, a.into()))),

@@ -1,18 +1,20 @@
 use automerge::ObjType;
 use automerge::ReadDoc;
 use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ROOT};
+use serde_json::Value;
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
     let contents = include_str!("../edits.json");
-    let edits = json::parse(contents).expect("cant parse edits");
+    let edits: Vec<Value> = serde_json::from_str(contents).expect("cant parse edits");
+    //let edits = json::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
-    for i in 0..edits.len() {
-        let pos: usize = edits[i][0].as_usize().unwrap();
-        let del: isize = edits[i][1].as_isize().unwrap();
+    for edit in &edits {
+        let pos: usize = edit.as_array().unwrap()[0].as_u64().unwrap() as usize;
+        let del: isize = edit.as_array().unwrap()[1].as_i64().unwrap() as isize;
         let mut vals = String::new();
-        for j in 2..edits[i].len() {
-            let v = edits[i][j].as_str().unwrap();
+        for j in 2..edit.as_array().unwrap().len() {
+            let v = edit.as_array().unwrap()[j].as_str().unwrap();
             vals.push_str(v);
         }
         commands.push((pos, del, vals));

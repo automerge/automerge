@@ -233,8 +233,14 @@ impl<const B: usize> DeltaCursorInternal<B> {
         if let Some(run) = run.pop() {
             Self::append(&mut state, out, Some(cursor.abs - run.delta()));
             Self::append_chunk(&mut state, out, run);
-            Self::flush_state(out, state);
-            Some(cursor)
+            if let Some((run, next)) = cursor.next(slab.as_slice()) {
+                Self::append_chunk(&mut state, out, run);
+                Self::flush_state(out, state);
+                Some(next)
+            } else {
+                Self::flush_state(out, state);
+                Some(cursor)
+            }
         } else {
             Self::append(&mut state, out, Some(cursor.abs));
             if let Some((run, next)) = cursor.next(slab.as_slice()) {
@@ -442,5 +448,46 @@ pub(crate) mod tests {
         data.splice(3..3, patch);
 
         assert_eq!(data, col.to_vec());
+    }
+
+    #[test]
+    fn delta_flush_twice() {
+        let mut col: ColumnData<DeltaCursor> = ColumnData::new();
+        let mut data = vec![
+            None,
+            Some(0),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(4),
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(7),
+            Some(8),
+            Some(9),
+        ];
+        col.splice(0, 0, data.clone());
+
+        let patch = vec![Some(6)];
+
+        col.splice(7, 0, patch.clone());
+        data.splice(7..7, patch);
+
+        assert_eq!(data, col.to_vec());
+
+        assert_eq!(
+            col.export(),
+            vec![vec![
+                ColExport::Null(1),
+                ColExport::litrun(vec![0, 2]),
+                ColExport::run(2, 1),
+                ColExport::litrun(vec![0]),
+                ColExport::run(2, 1),
+                // if you dont flush twice this lit run gets broken in two
+                ColExport::litrun(vec![0, 1, 0]),
+                ColExport::run(2, 1),
+            ],]
+        );
     }
 }

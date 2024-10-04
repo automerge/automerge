@@ -1,12 +1,13 @@
 use crate::automerge::diff::ReadDocAt;
 use crate::automerge::Automerge;
+use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::read::ReadDocInternal;
-use crate::types::{ObjId, ObjType, OpId, Prop};
+use crate::types::{ActorId, ObjId, ObjType, OpId, Prop};
 use crate::{ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -49,6 +50,7 @@ pub struct PatchLog {
     active: bool,
     text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
+    pub(crate) actors: Vec<ActorId>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -104,6 +106,57 @@ pub(crate) enum Event {
     },
 }
 
+impl Event {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        match self {
+            Self::PutMap {
+                key,
+                value,
+                id,
+                conflict,
+            } => Self::PutMap {
+                key,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::PutSeq {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::PutSeq {
+                index,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::Insert {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::Insert {
+                index,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::IncrementMap { key, n, id } => Self::IncrementMap {
+                key,
+                n,
+                id: id.with_new_actor(idx),
+            },
+            Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
+                index,
+                n,
+                id: id.with_new_actor(idx),
+            },
+            event => event,
+        }
+    }
+}
+
 impl PatchLog {
     /// Create a new [`PatchLog`]
     ///
@@ -124,6 +177,7 @@ impl PatchLog {
             events: vec![],
             heads: None,
             text_rep,
+            actors: vec![],
         }
     }
 
@@ -344,6 +398,7 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
+        //self.migrate_actors(&doc.ops().actors).ok();
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
@@ -453,7 +508,48 @@ impl PatchLog {
             events: Default::default(),
             text_rep: self.text_rep,
             heads: None,
+            actors: self.actors.clone(),
         }
+    }
+
+    pub(crate) fn migrate_actor(&mut self, index: usize) {
+        let dirty = std::mem::take(&mut self.events);
+        self.events = dirty
+            .into_iter()
+            .map(|(o, e)| (o.with_new_actor(index), e.with_new_actor(index)))
+            .collect();
+
+        let dirty = std::mem::take(&mut self.expose);
+        self.expose = dirty
+            .into_iter()
+            .map(|id| id.with_new_actor(index))
+            .collect();
+    }
+
+    // if a new actor is added to an opset, the id's inside the patch log need to be re-ordered
+    // this is an uncommon operation so this seems preferable to storing ExId's in place
+    // for every objid and opid
+    pub(crate) fn migrate_actors(&mut self, others: &Vec<ActorId>) -> Result<(), AutomergeError> {
+        if &self.actors != others {
+            if self.actors.is_empty() {
+                self.actors = others.clone();
+                return Ok(());
+            }
+            for i in 0..others.len() {
+                match (self.actors.get(i), others.get(i)) {
+                    (Some(a), Some(b)) if a == b => {}
+                    (Some(a), Some(b)) if b < a => {
+                        self.actors.insert(i, b.clone());
+                        self.migrate_actor(i);
+                    }
+                    (None, Some(b)) => {
+                        self.actors.insert(i, b.clone());
+                    }
+                    _ => return Err(AutomergeError::PatchLogMismatch),
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn merge(&mut self, other: Self) {

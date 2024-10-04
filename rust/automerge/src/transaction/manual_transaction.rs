@@ -33,7 +33,12 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
+    pub(crate) fn new(
+        doc: &'a mut Automerge,
+        args: TransactionArgs,
+        mut patch_log: PatchLog,
+    ) -> Self {
+        patch_log.migrate_actors(&doc.ops().actors).unwrap(); // we forked and merged so there will be no mismatch
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,

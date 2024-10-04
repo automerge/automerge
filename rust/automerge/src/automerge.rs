@@ -815,6 +815,7 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change)?;
         self.update_history(change, ops.len());
+        patch_log.migrate_actors(&self.ops().actors)?;
         for op in ops {
             self.insert_op(op, patch_log)?;
         }
@@ -1058,7 +1059,7 @@ impl Automerge {
             .unwrap_or(0)
     }
 
-    pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
+    pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) {
         self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
 
         self.update_deps(&change);
@@ -1078,8 +1079,6 @@ impl Automerge {
             .expect("Change's deps should already be in the document");
 
         self.history.push(change);
-
-        history_index
     }
 
     fn rewrite_states_with_new_actor(&mut self, index: usize) {

@@ -256,7 +256,7 @@ describe('Automerge', () => {
       ]);
     })
 
-    it.only('marks should create patches that respect marks that supersede it', () => {
+    it('marks should create patches that respect marks that supersede it', () => {
 
       let doc1 : Automerge = create({ actor: "aabbcc"})
       let list = doc1.putObject("_root", "list", "")
