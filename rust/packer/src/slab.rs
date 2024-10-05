@@ -1,11 +1,12 @@
 use super::cursor::{ColumnCursor, Run, ScanMeta};
 use super::leb128::{lebsize, ulebsize};
 use super::pack::{PackError, Packable};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub(crate) mod tree;
 
 pub(crate) use super::columndata::normalize_range;
-pub(crate) use tree::{HasWidth, SpanTree, SpanTreeIter};
+pub(crate) use tree::{HasWeight, SpanTree, SpanTreeIter};
 
 pub type SlabTree = SpanTree<Slab>;
 pub(crate) type Iter<'a> = SpanTreeIter<'a, Slab>;
@@ -635,8 +636,53 @@ pub enum RunStep<'a, T: Packable + ?Sized> {
     Done(Option<Run<'a, T>>),
 }
 
-impl HasWidth for Slab {
-    fn width(&self) -> usize {
-        self.len()
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+pub struct SlabWeight {
+    pub(crate) pos: usize,
+    pub(crate) group: usize,
+}
+
+impl HasWeight for Slab {
+    type Weight = SlabWeight;
+
+    fn weight(&self) -> SlabWeight {
+        SlabWeight {
+            pos: self.len(),
+            group: self.group(),
+        }
+    }
+}
+
+impl Add for SlabWeight {
+    type Output = SlabWeight;
+
+    fn add(self, b: Self) -> Self {
+        Self {
+            pos: self.pos + b.pos,
+            group: self.group + b.group,
+        }
+    }
+}
+
+impl AddAssign<SlabWeight> for SlabWeight {
+    fn add_assign(&mut self, other: Self) {
+        self.pos += other.pos;
+        self.group += other.group;
+    }
+}
+impl SubAssign<SlabWeight> for SlabWeight {
+    fn sub_assign(&mut self, other: Self) {
+        self.pos -= other.pos;
+        self.group -= other.group;
+    }
+}
+
+impl Sub for SlabWeight {
+    type Output = SlabWeight;
+    fn sub(self, b: Self) -> Self {
+        Self {
+            pos: self.pos - b.pos,
+            group: self.group - b.group,
+        }
     }
 }

@@ -1,7 +1,7 @@
 use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceResult};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
-use super::slab::{self, RunStep, Seek, Slab, SlabIter, SlabTree, SlabWriter};
+use super::slab::{RunStep, Seek, Slab, SlabIter, SlabTree, SlabWriter};
 
 use std::cmp::PartialOrd;
 use std::fmt::Debug;
@@ -68,6 +68,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         start..end
     }
 
+    // FIXME - get_on_width
     #[allow(clippy::while_let_on_iterator)]
     pub fn raw_reader(&self, mut advance: usize) -> RawReader<'_> {
         let mut reader = RawReader {
@@ -93,7 +94,8 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     group: usize,
     max: usize,
-    pub slabs: slab::SpanTreeIter<'a, Slab>,
+    slab_index: usize,
+    slabs: Option<&'a SlabTree>,
     iter: Option<SlabIter<'a, C>>,
 }
 
@@ -102,12 +104,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.max
     }
 
-    // FIXME - this API is dangerous b/c of Delta
     pub fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
         if self.iter.is_none() {
-            if let Some(slab) = self.slabs.next() {
-                self.iter = Some(slab.iter());
-            }
+            self.iter = Some(self.slabs?.get(self.slab_index)?.iter());
+            self.slab_index += 1;
         }
         if self.pos() >= self.max {
             return None;
@@ -133,7 +133,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             pos: 0,
             group: 0,
             max: 0,
-            slabs: slab::SpanTreeIter::default(),
+            slab_index: 0,
+            slabs: None, //slab::SpanTreeIter::default(),
             iter: None,
         }
     }
@@ -301,6 +302,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         })
     }
 
+    // FIXME - dont do this anymore
     pub fn seek_to<S: Seek<C::Item>>(&mut self, mut seek: S) -> S::Output {
         loop {
             if let Some(iter) = &mut self.iter {
@@ -309,10 +311,14 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
                 } else {
                     self.pos += iter.len();
                     self.group += iter.max_group();
-                    self.iter = self.slabs.next().map(|s| s.iter());
+                    self.iter = self
+                        .slabs
+                        .and_then(|s| Some(s.get(self.slab_index)?.iter()));
+                    self.slab_index += 1;
                 }
-            } else if let Some(slab) = self.slabs.next() {
+            } else if let Some(slab) = self.slabs.and_then(|s| s.get(self.slab_index)) {
                 self.iter = Some(slab.iter());
+                self.slab_index += 1;
             } else {
                 return seek.finish();
             }
@@ -321,7 +327,12 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     fn compute_len(&self) -> usize {
         let completed_slabs = self.pos;
-        let future_slabs = self.slabs.map(|s| s.len()).sum::<usize>();
+        let future_slabs = self
+            .slabs
+            .iter()
+            .skip(self.slab_index)
+            .map(|s| s.len())
+            .sum::<usize>();
         let current_slab = self.iter.as_ref().map(|i| i.len()).unwrap_or(0);
         completed_slabs + future_slabs + current_slab
     }
@@ -348,9 +359,8 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.iter.is_none() {
-            if let Some(slab) = self.slabs.next() {
-                self.iter = Some(slab.iter());
-            }
+            self.iter = Some(self.slabs?.get(self.slab_index)?.iter());
+            self.slab_index += 1;
         }
         if self.pos() >= self.max {
             return None;
@@ -382,7 +392,8 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: self.len,
-            slabs: self.slabs.iter(),
+            slab_index: 0,
+            slabs: Some(&self.slabs),
             iter: None,
         }
     }
@@ -392,7 +403,8 @@ impl<C: ColumnCursor> ColumnData<C> {
             pos: 0,
             group: 0,
             max: range.end,
-            slabs: self.slabs.iter(),
+            slab_index: 0,
+            slabs: Some(&self.slabs),
             iter: None,
         };
         if range.start > 0 {
@@ -455,8 +467,12 @@ impl<C: ColumnCursor> ColumnData<C> {
         );
         #[cfg(debug_assertions)]
         let tmp_values = values.clone();
-        let cursor = self.slabs.get_at_width(index).unwrap();
-        match C::splice(cursor.element, cursor.width_index, del, values) {
+
+        let cursor = self
+            .slabs
+            .get_where(|c, next| index - c.pos < next.pos)
+            .unwrap();
+        match C::splice(cursor.element, index - cursor.weight.pos, del, values) {
             SpliceResult::Replace(add, del, slabs) => {
                 self.len = self.len + add - del;
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
