@@ -11,6 +11,7 @@ pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
     offset: usize,
     group: usize,
     last_offset: usize,
+    last_group: usize,
     index: usize,
     lit: Option<LitRunCursor>,
     _phantom: PhantomData<P>,
@@ -29,6 +30,7 @@ impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
         Self {
             offset: 0,
             last_offset: 0,
+            last_group: 0,
             index: 0,
             group: 0,
             lit: None,
@@ -78,6 +80,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
     ) -> Self {
         RleCursor {
             last_offset: self.offset,
+            last_group: self.group,
             offset: self.offset + bytes,
             index: self.index + count,
             group: self.group + group,
@@ -98,11 +101,26 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
+    pub(super) fn lit_group(&self) -> usize {
+        if let Some(lit) = &self.lit {
+            self.last_group - lit.group
+        } else {
+            0
+        }
+    }
     pub(super) fn lit_range(&self) -> Range<usize> {
         if let Some(lit) = &self.lit {
             lit.offset..self.last_offset
         } else {
             0..0
+        }
+    }
+
+    fn copy_group(&self) -> usize {
+        if let Some(lit) = self.lit {
+            lit.group
+        } else {
+            self.last_group
         }
     }
 
@@ -131,14 +149,17 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
-    ) -> (RleState<'a, P>, Option<Run<'a, P>>, SlabWriter<'a>) {
+    ) -> (RleState<'a, P>, Option<Run<'a, P>>, usize, SlabWriter<'a>) {
         let mut post = None;
+        let mut group = cursor.group();
 
         let last_run = run.as_ref().map(|r| r.count).unwrap_or(0);
 
         let copy_range = cursor.copy_range();
+        let copy_group = cursor.copy_group();
         let copy_size = cursor.copy_size(last_run);
         let copy_lit_range = cursor.lit_range();
+        let copy_lit_group = cursor.lit_group();
         let copy_lit_size = cursor.lit_num().saturating_sub(last_run);
 
         let state = match run {
@@ -153,7 +174,9 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             Some(Run { count: 1, value }) => RleState::LoneValue(value),
             Some(Run { count, value }) if index < cursor.index => {
                 let delta = cursor.index - index;
-                post = Some(Run::new(delta, value));
+                let run = Run::new(delta, value);
+                group -= run.group();
+                post = Some(run);
                 let count = count - delta;
                 RleState::Run { count, value }
             }
@@ -162,13 +185,19 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
 
         let mut current = SlabWriter::new(B);
 
-        current.flush_before(slab, copy_range, 0, copy_size);
+        current.flush_before(slab, copy_range, 0, copy_size, copy_group);
 
         if copy_lit_size > 0 {
-            current.flush_before(slab, copy_lit_range, copy_lit_size, copy_lit_size);
+            current.flush_before(
+                slab,
+                copy_lit_range,
+                copy_lit_size,
+                copy_lit_size,
+                copy_lit_group,
+            );
         }
 
-        (state, post, current)
+        (state, post, group, current)
     }
 }
 
@@ -197,27 +226,63 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         match (c0.valid_lit(), c1.valid_lit()) {
             (Some(a), Some(_b)) if a.len == slab.len() => {
                 let lit = a.len - 2;
-                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size);
+                writer.flush_before2(
+                    slab,
+                    c0.offset..c1.last_offset,
+                    lit,
+                    size,
+                    c1.last_group - c0.group,
+                );
             }
             (Some(a), Some(b)) => {
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(slab, c0.offset..b_start, lit1, size - lit2);
-                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
+                writer.flush_before2(
+                    slab,
+                    c0.offset..b_start,
+                    lit1,
+                    size - lit2,
+                    b.group - c0.group,
+                );
+                writer.flush_before2(
+                    slab,
+                    b.offset..c1.last_offset,
+                    lit2,
+                    lit2,
+                    c1.last_group - b.group,
+                );
             }
             (Some(a), None) => {
                 let lit = a.len - 1;
-                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size);
+                writer.flush_before2(
+                    slab,
+                    c0.offset..c1.last_offset,
+                    lit,
+                    size,
+                    c1.last_group - c0.group,
+                );
             }
             (None, Some(b)) => {
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2);
-                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2);
+                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2, b.group - c0.group);
+                writer.flush_before2(
+                    slab,
+                    b.offset..c1.last_offset,
+                    lit2,
+                    lit2,
+                    c1.last_group - b.group,
+                );
             }
             _ => {
-                writer.flush_before2(slab, c0.offset..c1.last_offset, 0, size);
+                writer.flush_before2(
+                    slab,
+                    c0.offset..c1.last_offset,
+                    0,
+                    size,
+                    c1.last_group - c0.group,
+                );
             }
         }
 
@@ -248,7 +313,13 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
     fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
         let num_left = cursor.num_left();
-        out.flush_after(slab, cursor.offset, num_left, slab.len() - cursor.index, 0);
+        out.flush_after(
+            slab,
+            cursor.offset,
+            num_left,
+            slab.len() - cursor.index,
+            slab.group() - cursor.group(),
+        );
     }
 
     fn append<'a>(
@@ -329,7 +400,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
-        let (state, post, current) = RleCursor::encode_inner(slab, &cursor, run, index);
+        let (state, post, group, current) = RleCursor::encode_inner(slab, &cursor, run, index);
 
         let SpliceDel {
             deleted,
@@ -342,6 +413,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             slab,
             current,
             post,
+            group,
             state,
             deleted,
             overflow,
@@ -509,12 +581,10 @@ impl LitRunCursor {
     }
 }
 
-//pub type StrCursor = RleCursor<{ usize::MAX }, str>;
-//pub type IntCursor = RleCursor<{ usize::MAX }, u64>;
-pub type StrCursor = RleCursor<1024, str>;
-pub type IntCursor = RleCursor<1024, u64>;
-//pub type StrCursor = RleCursor<64, str>;
-//pub type IntCursor = RleCursor<64, u64>;
+//pub type StrCursor = RleCursor<1024, str>;
+pub type StrCursor = RleCursor<128, str>;
+//pub type IntCursor = RleCursor<1024, u64>;
+pub type IntCursor = RleCursor<64, u64>;
 
 #[derive(Debug, Clone, Default)]
 pub enum RleState<'a, P: Packable + ?Sized> {
@@ -657,9 +727,8 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        let mut iter = col1.iter();
-        while let Some(val) = iter.next() {
-            assert_eq!(sum, iter.group());
+        for (val, g) in col1.iter().with_group() {
+            assert_eq!(sum, g);
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -680,9 +749,8 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        let mut iter = col2.iter();
-        while let Some(val) = iter.next() {
-            assert_eq!(sum, iter.group());
+        for (val, g) in col2.iter().with_group() {
+            assert_eq!(sum, g);
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -703,10 +771,9 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        let mut iter = col3.iter();
 
-        while let Some(val) = iter.next() {
-            assert_eq!(sum, iter.group());
+        for (val, g) in col3.iter().with_group() {
+            assert_eq!(sum, g);
             if let Some(v) = val {
                 sum += u64::group(v);
             }
@@ -746,9 +813,8 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        let mut iter = col4.iter();
-        while let Some(val) = iter.next() {
-            assert_eq!(sum, iter.group());
+        for (val, g) in col4.iter().with_group() {
+            assert_eq!(sum, g);
             if let Some(v) = val {
                 sum += u64::group(v);
             }

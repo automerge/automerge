@@ -238,6 +238,7 @@ impl<'a> Document<'a> {
         let op_meta_a = ops_meta_ax.raw_columns();
         #[cfg(debug_assertions)]
         if op_meta_a != op_metadata {
+            op_set.dump();
             let specs: std::collections::BTreeSet<_> = op_meta_a
                 .0
                 .iter()
@@ -256,7 +257,7 @@ impl<'a> Document<'a> {
                     .iter()
                     .find(|c| c.spec() == s)
                     .map(|c| c.data())
-                    .unwrap();
+                    .unwrap_or(0..0);
                 let d1 = &ops_out_a[d1];
                 let d2 = &ops_out_b[d2];
                 if d1 != d2 {

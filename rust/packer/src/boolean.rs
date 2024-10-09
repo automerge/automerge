@@ -85,7 +85,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run: Run<'a, bool>,
         size: usize,
     ) -> Self::State<'a> {
-        out.flush_before2(slab, c0.offset..c1.last_offset, 0, size);
+        out.flush_before2(slab, c0.offset..c1.last_offset, 0, size, 0);
         let mut next_state = BooleanState {
             value: run.value.unwrap_or_default(),
             count: 0,
@@ -138,7 +138,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
         let mut current = SlabWriter::new(B);
-        current.flush_before(slab, range, 0, size);
+        current.flush_before(slab, range, 0, size, 0);
 
         let SpliceDel {
             deleted,
@@ -147,11 +147,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             post,
         } = Self::splice_delete(post, cursor, del, slab);
         let post = post.map(BooleanState::from);
+        let group = 0;
 
         Encoder {
             slab,
             current,
             post,
+            group,
             state,
             deleted,
             overflow,
@@ -205,10 +207,10 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         self.index
     }
 
-    fn init_empty(len: usize) -> Vec<Slab> {
+    fn init_empty(len: usize) -> Slab {
         let mut writer = SlabWriter::new(usize::MAX);
         writer.flush_bool_run(len);
-        writer.finish()
+        writer.finish().pop().unwrap_or_default()
     }
 }
 

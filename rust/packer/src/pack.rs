@@ -32,6 +32,7 @@ pub trait Packable: PartialEq + Debug {
         + Copy
         + Debug
         + PartialEq
+        + PartialOrd
         + ToOwned
         + Borrow<Self>
         + Into<WriteOp<'a>>
@@ -93,6 +94,7 @@ impl Packable for u64 {
     fn own(item: u64) -> u64 {
         item
     }
+
     fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
@@ -159,6 +161,9 @@ impl Packable for str {
 
 pub trait MaybePackable<T: Packable + ?Sized> {
     fn maybe_packable(&self) -> Option<T::Unpacked<'_>>;
+    fn group(&self) -> usize {
+        self.maybe_packable().map(|n| T::group(n)).unwrap_or(0)
+    }
 }
 
 impl MaybePackable<i64> for i64 {

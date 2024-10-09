@@ -621,15 +621,15 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter(), ..);
+            .scope_to_value(obj.counter());
         let range = self
             .cols
-            .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-            .scope_to_value(obj.actor(), range);
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
         let range = self
             .cols
-            .get_str(KEY_STR_COL_SPEC)
-            .scope_to_value(Some(prop), range);
+            .get_str_range(KEY_STR_COL_SPEC, &range)
+            .scope_to_value(Some(prop));
         self.iter_range(&range)
     }
 
@@ -637,11 +637,11 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter(), ..);
+            .scope_to_value(obj.counter());
         let range = self
             .cols
-            .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-            .scope_to_value(obj.actor(), range);
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
         self.iter_range(&range)
     }
 
@@ -649,15 +649,17 @@ impl OpSet {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
             .cols
-            .get_value_range(VALUE_COL_SPEC, value_meta.group());
+            .get_value_range(VALUE_COL_SPEC, value_meta.calculate_group());
 
         let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
-        let succ_actor = self
-            .cols
-            .get_actor_range(SUCC_ACTOR_COL_SPEC, &(succ_count.group()..usize::MAX));
-        let succ_counter = self
-            .cols
-            .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, &(succ_count.group()..usize::MAX));
+        let succ_actor = self.cols.get_actor_range(
+            SUCC_ACTOR_COL_SPEC,
+            &(succ_count.calculate_group()..usize::MAX),
+        );
+        let succ_counter = self.cols.get_delta_integer_range(
+            SUCC_COUNTER_COL_SPEC,
+            &(succ_count.calculate_group()..usize::MAX),
+        );
 
         OpIter {
             pos: range.start,
@@ -1041,7 +1043,17 @@ impl Columns {
         let mut value = self.get_value(VALUE_COL_SPEC);
         let mut succ = self.get_group(SUCC_COUNT_COL_SPEC);
         let mut insert = self.get_boolean(INSERT_COL_SPEC);
-        log!(":: id      obj     key      elem     ins act  suc value");
+        /*
+                if let Some(Column::Value(c)) = self.0.get(&VALUE_COL_SPEC)  {
+                  let mut x = vec![];
+                  c.write(&mut x);
+                  unsafe {
+                    println!("VALUE={:?}",std::str::from_utf8_unchecked(&x));
+                    println!("VALUE={:?}",x.iter().map(|c| char::from_u32(*c as u32).unwrap()).collect::<Vec<_>>());
+                  }
+                }
+        */
+        log!(":: id      obj     key        elem     ins act  suc value");
         loop {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
@@ -1065,7 +1077,7 @@ impl Columns {
                 break;
             }
             log!(
-                ":: {:7} {:7} {:8} {:8} {:3} {:3}  {:1}   {}",
+                ":: {:7} {:7} {:10} {:8} {:3} {:3}  {:1}   {}",
                 format!("({},{})", id_c, id_a),
                 format!("({},{})", obj_c, obj_a),
                 key_s,
@@ -1107,7 +1119,7 @@ impl Columns {
                             None
                         };
                         if let Some(v) = value {
-                            c.splice(group_pos, 0, vec![v])
+                            c.splice(group_pos, 0, vec![v]);
                         }
                     }
                     _ => {
@@ -1140,7 +1152,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value])
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Str(c) => {
                         let value = match *spec {
@@ -1148,7 +1160,7 @@ impl Columns {
                             MARK_NAME_COL_SPEC => op.mark_name(),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value])
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Bool(c) => {
                         let value = match *spec {
@@ -1156,7 +1168,7 @@ impl Columns {
                             EXPAND_COL_SPEC => Some(op.expand()),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value])
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Action(c) => {
                         let value = if *spec == ACTION_COL_SPEC {
@@ -1164,7 +1176,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value])
+                        c.splice(pos, 0, vec![value]);
                     }
                     Column::Value(_c) => {
                         panic!("VALUE spliced outside of a group");
@@ -1175,11 +1187,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value]);
-                        // FIXME if value > 0
-                        let mut iter = c.iter();
-                        iter.advance_by(pos);
-                        group_pos = iter.group();
+                        group_pos = c.splice(pos, 0, vec![value]);
                     }
                     Column::Group(c) => {
                         let value = if *spec == SUCC_COUNT_COL_SPEC {
@@ -1187,12 +1195,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value]);
-                        // FIXME if value > 0
-                        // FIXME would be nice if splice did this
-                        let mut iter = c.iter();
-                        iter.advance_by(pos);
-                        group_pos = iter.group();
+                        group_pos = c.splice(pos, 0, vec![value]);
                     }
                 }
             }
@@ -1382,7 +1385,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, ActorCursor> {
         match self.0.get(&spec) {
-            Some(Column::Actor(c)) => c.iter_range(range),
+            Some(Column::Actor(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1400,7 +1403,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, IntCursor> {
         match self.0.get(&spec) {
-            Some(Column::Integer(c)) => c.iter_range(range),
+            Some(Column::Integer(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1418,7 +1421,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, ActionCursor> {
         match self.0.get(&spec) {
-            Some(Column::Action(c)) => c.iter_range(range),
+            Some(Column::Action(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1436,7 +1439,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, DeltaCursor> {
         match self.0.get(&spec) {
-            Some(Column::Delta(c)) => c.iter_range(range),
+            Some(Column::Delta(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1454,7 +1457,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, StrCursor> {
         match self.0.get(&spec) {
-            Some(Column::Str(c)) => c.iter_range(range),
+            Some(Column::Str(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1472,7 +1475,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, BooleanCursor> {
         match self.0.get(&spec) {
-            Some(Column::Bool(c)) => c.iter_range(range),
+            Some(Column::Bool(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1490,7 +1493,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, MetaCursor> {
         match self.0.get(&spec) {
-            Some(Column::ValueMeta(c)) => c.iter_range(range),
+            Some(Column::ValueMeta(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1530,7 +1533,7 @@ impl Columns {
         range: &Range<usize>,
     ) -> ColumnDataIter<'_, IntCursor> {
         match self.0.get(&spec) {
-            Some(Column::Group(c)) => c.iter_range(range),
+            Some(Column::Group(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
         }
     }
@@ -1871,12 +1874,21 @@ mod tests {
             let range = opset
                 .cols
                 .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                .scope_to_value(Some(1), ..);
+                .scope_to_value(Some(1));
             let range = opset
                 .cols
-                .get_actor(OBJ_ID_ACTOR_COL_SPEC)
-                .scope_to_value(Some(ActorIdx::from(1_usize)), range);
+                .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+                .scope_to_value(Some(ActorIdx::from(1_usize)));
             let mut iter = opset.iter_range(&range);
+            println!(
+                "ITER :: range={:?} pos={} max={}",
+                range,
+                iter.pos(),
+                iter.end_pos()
+            );
+            for o in &ops {
+                println!("OP={:?}", o);
+            }
             let op = iter.next().unwrap();
             assert_eq!(ops[3], op);
             let op = iter.next().unwrap();

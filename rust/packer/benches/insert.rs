@@ -7,7 +7,7 @@ const MAX: u64 = u32::MAX as u64;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
-    for n in vec![10, 100, 1_000, 10_000] {
+    for n in [10, 100, 1_000, 10_000, 100_000] {
         c.bench_function(&format!("insert_{}_large", n), |b| {
             let mut col = gen_col(&mut rng, n, MAX);
             b.iter(|| insert(&mut rng, black_box(&mut col), MAX))
@@ -31,7 +31,7 @@ fn insert(rng: &mut ThreadRng, col: &mut ColumnData<IntCursor>, max: u64) {
     let val = val % max;
     let pos: usize = rng.gen();
     let pos = pos % (col.len() + 1);
-    col.splice(pos, 0, vec![val as u64]);
+    col.splice(pos, 0, vec![val]);
 }
 
 criterion_group!(benches, criterion_benchmark);

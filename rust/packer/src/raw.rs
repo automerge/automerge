@@ -28,7 +28,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         _state: Self::State<'a>,
     ) -> Self::State<'a> {
         let len = slab.len();
-        writer.flush_before(slab, 0..len, 0, len);
+        writer.flush_before(slab, 0..len, 0, len, 0);
     }
 
     fn finish<'a>(_slab: &'a Slab, _out: &mut SlabWriter<'a>, _cursor: Self) {}
@@ -92,11 +92,13 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
             deleted = slab.as_slice().len() - index;
         }
         let overflow = del - deleted;
+        let group = 0;
 
         Encoder {
             slab,
             current,
             post,
+            group,
             state,
             deleted,
             overflow,
@@ -151,18 +153,6 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         self.offset
     }
 }
-
-/*
-impl<const B: usize> RawCursorInternal<B> {
-    fn get_slice(slab: &Slab, offset: usize, len: usize) -> Result<&[u8], PackError> {
-        let end = offset + len;
-        if offset > slab.len() || end > slab.len() {
-            return Err(PackError::SliceOutOfRange(offset, end));
-        }
-        Ok(&slab.as_slice()[offset..end])
-    }
-}
-*/
 
 #[derive(Debug, Clone, Default)]
 pub struct RawReader<'a> {
@@ -268,5 +258,26 @@ pub(crate) mod tests {
                 vec![ColExport::Raw(vec![1, 1, 1])],
             ]
         );
+    }
+
+    #[test]
+    fn raw_reader() {
+        let mut col: ColumnData<RawCursorInternal<6>> = ColumnData::new();
+        // stuff it with sets of 3 bytes
+        for n in 0..=255 {
+            col.splice(0, 0, vec![vec![n, n, n]]);
+        }
+        // single reader - read all;
+        let mut reader = col.raw_reader(0);
+        for m in (0..=255).rev() {
+            let val = reader.read_next(3).unwrap();
+            assert_eq!(&[m, m, m], val);
+        }
+        // many readers w offset;
+        for m in (0..=255).rev() {
+            let offset = (255 - m as usize) * 3;
+            let val = col.raw_reader(offset).read_next(3).unwrap();
+            assert_eq!(&[m, m, m], val);
+        }
     }
 }

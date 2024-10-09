@@ -1,5 +1,5 @@
 use super::pack::{MaybePackable, PackError, Packable};
-use super::slab::{Slab, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -22,6 +22,29 @@ impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
     }
 }
 
+impl<'a, P: Packable + ?Sized> Iterator for Run<'a, P> {
+    type Item = Option<P::Unpacked<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count >= 1 {
+            self.count -= 1;
+            Some(self.value)
+        } else {
+            None
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        if self.count > n {
+            self.count -= n + 1;
+            Some(self.value)
+        } else {
+            self.count = 0;
+            None
+        }
+    }
+}
+
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
     pub(crate) fn pop_n(&self, n: usize) -> Option<Run<'a, T>> {
         if self.count <= n {
@@ -39,6 +62,13 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
 
     pub fn group(&self) -> usize {
         self.count * self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
+    }
+
+    pub(crate) fn weight_left(&self) -> SlabWeight {
+        SlabWeight {
+            pos: self.count,
+            group: self.group(),
+        }
     }
 }
 
@@ -69,6 +99,7 @@ pub struct Encoder<'a, C: ColumnCursor> {
     pub state: C::State<'a>,
     pub current: SlabWriter<'a>,
     pub post: C::PostState<'a>,
+    pub group: usize,
     pub deleted: usize,
     pub overflow: usize,
     pub cursor: C,
@@ -248,7 +279,6 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         loop {
             match cursor.try_next(data) {
                 Ok(Some((_run, next_cursor))) => {
-                    //println!("RUN {:?}", _run);
                     cursor = next_cursor;
                 }
                 Ok(None) => break,
@@ -306,11 +336,22 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     {
         let mut encoder = Self::encode(index, del, slab);
         let mut add = 0;
+        let mut value_group = 0;
         for v in &values {
+            value_group += v.group();
             add += encoder.append(v.maybe_packable());
         }
         assert!(encoder.overflow == 0);
-        SpliceResult::Replace(add, encoder.deleted, encoder.finish())
+        let deleted = encoder.deleted;
+        let group = encoder.group;
+        let slabs = encoder.finish();
+        if deleted == 0 {
+            debug_assert_eq!(
+                slabs.iter().map(|s| s.group()).sum::<usize>(),
+                slab.group() + value_group
+            );
+        }
+        SpliceResult::Replace(add, deleted, group, slabs)
     }
 
     fn splice_delete<'a>(
@@ -362,10 +403,10 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         }
     }
 
-    fn init_empty(len: usize) -> Vec<Slab> {
+    fn init_empty(len: usize) -> Slab {
         let mut writer = SlabWriter::new(usize::MAX);
         writer.flush_null(len);
-        writer.finish()
+        writer.finish().pop().unwrap_or_default()
     }
 }
 
@@ -379,5 +420,54 @@ pub struct SpliceDel<'a, C: ColumnCursor> {
 pub enum SpliceResult {
     //Done(usize, usize),
     //Add(usize, usize, Vec<Slab>),
-    Replace(usize, usize, Vec<Slab>),
+    Replace(usize, usize, usize, Vec<Slab>),
+}
+
+#[derive(Debug, Clone, Default, Copy)]
+pub struct RunIter<'a, C: ColumnCursor> {
+    pub(crate) slab: &'a [u8],
+    pub(crate) cursor: C,
+    pub(crate) weight_left: SlabWeight,
+}
+
+impl<'a, C: ColumnCursor> RunIter<'a, C> {
+    pub fn empty() -> Self {
+        RunIter {
+            slab: &[],
+            cursor: C::empty(),
+            weight_left: SlabWeight::default(),
+        }
+    }
+
+    pub(crate) fn weight_left(&self) -> SlabWeight {
+        self.weight_left
+    }
+
+    pub(crate) fn sub_advance(&mut self, mut n: usize) -> Option<Run<'a, C::Item>> {
+        while let Some(mut run) = self.next() {
+            if run.count <= n {
+                n -= run.count;
+            } else {
+                run.count -= n;
+                if run.count == 0 {
+                    let tmp = self.next();
+                    return tmp;
+                } else {
+                    return Some(run);
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
+    type Item = Run<'a, C::Item>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (run, cursor) = self.cursor.next(self.slab)?;
+        self.cursor = cursor;
+        self.weight_left -= run.weight_left();
+        Some(run)
+    }
 }

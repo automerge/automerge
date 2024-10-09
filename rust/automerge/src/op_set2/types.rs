@@ -59,7 +59,7 @@ impl<'a> MarkData<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 pub(crate) enum Action {
     #[default]
     MakeMap,
@@ -225,6 +225,17 @@ impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
 impl<'a> From<Value<'a>> for types::Value<'static> {
     fn from(v: Value<'a>) -> Self {
         v.into_owned()
+    }
+}
+
+impl<'a> From<&'a types::OpType> for ScalarValue<'a> {
+    fn from(o: &'a types::OpType) -> Self {
+        match o {
+            types::OpType::Put(s) => ScalarValue::from(s),
+            types::OpType::Increment(i) => ScalarValue::Int(*i),
+            types::OpType::MarkBegin(_, OldMarkData { value, .. }) => ScalarValue::from(value),
+            _ => ScalarValue::Null,
+        }
     }
 }
 

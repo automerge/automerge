@@ -299,51 +299,50 @@ mod tests {
 
         let p = doc.document().current_state(TextRepresentation::default());
 
-        assert_eq!(
-            Patches::from(p),
-            Patches(vec![
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "key".into(),
-                    value: PatchValue::Untagged("value".into()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "list".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "map".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "text".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: map.clone(),
-                    prop: "nested_key".into(),
-                    value: PatchValue::Untagged("value".into()),
-                    conflict: false,
-                },
-                ObservedPatch::Insert {
-                    obj: list,
-                    index: 0,
-                    value: PatchValue::Untagged("value".into()),
-                },
-                ObservedPatch::SpliceText {
-                    obj: text,
-                    index: 0,
-                    chars: "a".into(),
-                },
-            ])
-        );
+        let doc_patches = Patches::from(p);
+        let test_patches = Patches(vec![
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "key".into(),
+                value: PatchValue::Untagged("value".into()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "list".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "map".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "text".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: map.clone(),
+                prop: "nested_key".into(),
+                value: PatchValue::Untagged("value".into()),
+                conflict: false,
+            },
+            ObservedPatch::Insert {
+                obj: list,
+                index: 0,
+                value: PatchValue::Untagged("value".into()),
+            },
+            ObservedPatch::SpliceText {
+                obj: text,
+                index: 0,
+                chars: "a".into(),
+            },
+        ]);
+        assert_eq!(doc_patches, test_patches);
     }
 
     #[test]

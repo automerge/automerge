@@ -102,7 +102,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn transform(&self, run: &Run<'_, i64>) -> Option<i64> {
         if run.value.is_some() {
-            Some(self.abs - run.delta_minus_one())
+            //Some(self.abs - run.delta_minus_one())
+            Some(self.abs - run.delta())
         } else {
             None
         }
@@ -164,7 +165,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
-        let (rle, post, mut current) = SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
+        let (rle, post, group, mut current) =
+            SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
@@ -184,6 +186,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             slab,
             current,
             post,
+            group,
             state,
             deleted,
             overflow,

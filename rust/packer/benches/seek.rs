@@ -7,7 +7,8 @@ const MAX: u64 = u32::MAX as u64;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
-    for n in vec![10, 100, 1_000, 10_000] {
+    //for n in vec![10, 100, 1_000, 10_000] {
+    for n in [10_000, 100_000] {
         c.bench_function(&format!("seek_{}_large", n), |b| {
             let mut col = gen_col(&mut rng, n, MAX);
             b.iter(|| seek(&mut rng, black_box(&mut col)))

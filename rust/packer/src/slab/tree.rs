@@ -32,7 +32,7 @@ struct TreeNode<T: HasWeight> {
     weight: T::Weight,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Copy, PartialEq)]
 pub struct SubCursor<'a, T: HasWeight> {
     pub index: usize,
     pub weight: T::Weight,
@@ -90,6 +90,18 @@ impl<T: HasWeight> SpanTree<T> {
         }
     }
 
+    pub fn iter_where<F>(&self, f: F) -> SpanTreeIter<'_, T>
+    where
+        F: Fn(T::Weight, T::Weight) -> bool,
+    {
+        let cursor = self.get_where(f).unwrap();
+        SpanTreeIter {
+            inner: Some(self),
+            index: cursor.index,
+            weight: cursor.weight,
+        }
+    }
+
     pub fn splice<R, I>(&mut self, range: R, values: I)
     where
         R: RangeBounds<usize>,
@@ -126,6 +138,7 @@ impl<T: HasWeight> SpanTree<T> {
         let old_len = self.len();
         let old_weight = self.weight();
         let weight = element.weight();
+        debug_assert_eq!(self.check_weight(), self.weight());
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
             root.check();
@@ -137,6 +150,8 @@ impl<T: HasWeight> SpanTree<T> {
                 // move new_root to root position
                 let old_root = mem::replace(root, new_root);
 
+                assert_eq!(root.length, 0);
+                assert_eq!(root.weight, T::Weight::default());
                 root.length += old_root.len();
                 root.weight += old_root.weight();
                 root.children.push(old_root);
@@ -168,6 +183,7 @@ impl<T: HasWeight> SpanTree<T> {
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
         assert_eq!(self.weight(), old_weight + weight);
+        debug_assert_eq!(self.check_weight(), self.weight());
     }
 
     /// Push the `element` onto the back of the sequence.
@@ -242,7 +258,7 @@ impl<T: HasWeight> SpanTree<T> {
 
             #[cfg(debug_assertions)]
             debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()));
-            debug_assert_eq!(self.check_weight(), self.weight());
+            //debug_assert_eq!(self.check_weight(), self.weight());
             old
         } else {
             panic!("remove from empty tree")
@@ -283,6 +299,7 @@ impl<T: HasWeight> TreeNode<T> {
             .map(|c| c.weight())
             .chain(self.children.iter().map(|c| c.weight()))
             .fold(Default::default(), |acc, n| acc + n); // sum()
+        debug_assert_eq!(self.check_weight(), self.weight());
     }
 
     fn is_leaf(&self) -> bool {
@@ -317,8 +334,7 @@ impl<T: HasWeight> TreeNode<T> {
             let (child_index, sub_index) = self.find_child_index(index);
             let child = &mut self.children[child_index];
 
-            self.length += 1;
-            self.weight += element.weight();
+            let element_weight = element.weight();
             if child.is_full() {
                 self.split_child(child_index);
 
@@ -329,6 +345,8 @@ impl<T: HasWeight> TreeNode<T> {
             } else {
                 child.insert_into_non_full_node(sub_index, element);
             }
+            self.length += 1;
+            self.weight += element_weight;
         }
         debug_assert_eq!(self.check_weight(), self.weight());
     }
@@ -336,6 +354,7 @@ impl<T: HasWeight> TreeNode<T> {
     // A utility function to split the child `full_child_index` of this node
     // Note that `full_child_index` must be full when this function is called.
     fn split_child(&mut self, full_child_index: usize) {
+        debug_assert_eq!(self.check_weight(), self.weight());
         let original_len_self = self.len();
         let original_weight_self = self.weight();
 
@@ -357,15 +376,6 @@ impl<T: HasWeight> TreeNode<T> {
         let middle = full_child.elements.pop().unwrap();
 
         full_child.recompute_len();
-
-        /*
-                successor_sibling.length = successor_sibling.elements.len()
-                    + successor_sibling
-                        .children
-                        .iter()
-                        .map(|c| c.len())
-                        .sum::<usize>();
-        */
 
         successor_sibling.recompute_len();
 
@@ -392,6 +402,7 @@ impl<T: HasWeight> TreeNode<T> {
 
         assert_eq!(original_len_self, self.len());
         assert_eq!(original_weight_self, self.weight());
+        debug_assert_eq!(self.check_weight(), self.weight());
     }
 
     fn remove_from_leaf(&mut self, index: usize) -> T {
@@ -591,12 +602,13 @@ impl<T: HasWeight> TreeNode<T> {
 
     fn replace(&mut self, index: usize, element: T) -> T {
         let original_len = self.len();
+        debug_assert_eq!(self.check_weight(), self.weight()); // FIXME
         if self.is_leaf() {
             self.weight += element.weight();
             let v = mem::replace(&mut self.elements[index], element);
             self.weight -= v.weight();
             debug_assert_eq!(self.check(), self.len());
-            debug_assert_eq!(self.check_weight(), self.weight());
+            debug_assert_eq!(self.check_weight(), self.weight()); // FIXME
             v
         } else {
             let mut total_index = 0;
@@ -658,7 +670,7 @@ impl<T: HasWeight> TreeNode<T> {
                     return Some(SubCursor::new(index, acc, e));
                 }
                 index += 1;
-                acc = acc + e.weight()
+                acc += e.weight()
             }
         } else {
             for i in 0..self.children.len() {
@@ -667,14 +679,14 @@ impl<T: HasWeight> TreeNode<T> {
                         return child.get_where(index, acc, f);
                     }
                     index += child.len();
-                    acc = acc + child.weight();
+                    acc += child.weight();
                 }
                 if let Some(e) = self.elements.get(i) {
                     if f(acc, e.weight()) {
                         return Some(SubCursor::new(index, acc, e));
                     }
                     index += 1;
-                    acc = acc + e.weight();
+                    acc += e.weight();
                 }
             }
         }
@@ -738,12 +750,33 @@ pub struct SpanTreeIter<'a, T: HasWeight> {
 }
 
 impl<'a, T: HasWeight> SpanTreeIter<'a, T> {
+    pub(crate) fn new(tree: &'a SpanTree<T>, cursor: SubCursor<'_, T>) -> Self {
+        // make a cursor that's already pop'ed the element
+        Self {
+            inner: Some(tree),
+            index: cursor.index + 1,
+            weight: cursor.weight + cursor.element.weight(),
+        }
+    }
+
+    pub fn weight(&self) -> T::Weight {
+        self.weight
+    }
+
+    pub fn weight_left(&self) -> T::Weight {
+        self.inner.as_ref().map(|t| t.weight()).unwrap_or_default() - self.weight
+    }
+
     pub fn index(&self) -> usize {
         self.index
     }
 
     pub fn len(&self) -> usize {
         self.inner.as_ref().map(|t| t.len()).unwrap_or(0)
+    }
+
+    pub(crate) fn span_tree(&self) -> Option<&'a SpanTree<T>> {
+        self.inner
     }
 }
 
@@ -759,14 +792,18 @@ impl<'a, T: HasWeight> Iterator for SpanTreeIter<'a, T> {
         Some(element)
     }
 
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n == 0 {
-            self.next()
-        } else {
-            self.index += n + 1;
-            self.inner.as_ref().and_then(|i| i.get(self.index - 1))
+    /*
+        // nontrivial to compute weight and i dont think ill ever use this
+        // we will always start the iterator in the middle
+        fn nth(&mut self, n: usize) -> Option<Self::Item> {
+            if n == 0 {
+                self.next()
+            } else {
+                self.index += n + 1;
+                self.inner.as_ref().and_then(|i| i.get(self.index - 1))
+            }
         }
-    }
+    */
 }
 
 #[cfg(test)]

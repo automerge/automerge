@@ -1,6 +1,6 @@
-use super::cursor::{ColumnCursor, Run, ScanMeta};
+use super::cursor::{ColumnCursor, RunIter, ScanMeta};
 use super::leb128::{lebsize, ulebsize};
-use super::pack::{PackError, Packable};
+use super::pack::PackError;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub(crate) mod tree;
@@ -32,7 +32,6 @@ pub struct ReadOnlySlab {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct OwnedSlab {
     data: Arc<Vec<u8>>,
-    //data: Vec<u8>,
     len: usize,
     group: usize,
     abs: i64,
@@ -60,13 +59,13 @@ impl<'a> From<i64> for WriteOp<'a> {
 
 impl<'a> From<u64> for WriteOp<'a> {
     fn from(n: u64) -> WriteOp<'static> {
-        WriteOp::UInt(n)
+        WriteOp::GroupUInt(n, n as usize)
     }
 }
 
 impl<'a> From<usize> for WriteOp<'a> {
     fn from(n: usize) -> WriteOp<'static> {
-        WriteOp::UInt(n as u64)
+        WriteOp::GroupUInt(n as u64, n)
     }
 }
 
@@ -94,7 +93,7 @@ pub enum WriteOp<'a> {
     GroupUInt(u64, usize),
     Int(i64),
     Bytes(&'a [u8]),
-    Import(&'a Slab, Range<usize>),
+    Import(&'a Slab, Range<usize>, usize),
 }
 
 impl<'a> Debug for WriteOp<'a> {
@@ -105,7 +104,7 @@ impl<'a> Debug for WriteOp<'a> {
             Self::GroupUInt(a, b) => s.field("group_uint", a).field("group", b),
             Self::Int(a) => s.field("int", a),
             Self::Bytes(a) => s.field("bytes", &a.len()),
-            Self::Import(_a, b) => s.field("import", b),
+            Self::Import(_a, b, _c) => s.field("import", b),
         }
         .finish()
     }
@@ -123,6 +122,7 @@ pub enum WriteAction<'a> {
 impl<'a> WriteOp<'a> {
     fn group(&self) -> usize {
         match self {
+            Self::Import(_, _, g) => *g,
             Self::GroupUInt(_, g) => *g,
             _ => 0,
         }
@@ -141,13 +141,13 @@ impl<'a> WriteOp<'a> {
             Self::GroupUInt(i, _) => ulebsize(*i) as usize,
             Self::Int(i) => lebsize(*i) as usize,
             Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
-            Self::Import(_, r) => r.end - r.start,
+            Self::Import(_, r, _) => r.end - r.start,
         }
     }
 
     fn copy_width(&self) -> usize {
         match self {
-            Self::Import(_, _) => self.width(),
+            Self::Import(_, _, _) => self.width(),
             _ => 0,
         }
     }
@@ -172,7 +172,7 @@ impl<'a> WriteOp<'a> {
                 buff.extend(b);
                 //println!("write bytes {:?}",&buff[start..]);
             }
-            Self::Import(s, r) => {
+            Self::Import(s, r, _) => {
                 buff.extend(&s[r]);
                 //println!("write import ({:?} bytes)",buff[start..].len());
             }
@@ -184,10 +184,11 @@ impl<'a> WriteAction<'a> {
     fn group(&self) -> usize {
         match self {
             Self::Op(op) => op.group(),
-            Self::Pair(op1, op2) => op1.group() + op2.group(),
-            Self::Raw(_) => 0,
-            Self::Run(_, _) => 0, // already added in
-            Self::End(_, _, _) => 0,
+            Self::Pair(WriteOp::Int(count), op) => *count as usize * op.group(),
+            //Self::Raw(_) => 0,
+            //Self::Run(_, _) => 0, // already added in
+            //Self::End(_, _, _) => 0,
+            _ => 0,
         }
     }
 
@@ -202,7 +203,7 @@ impl<'a> WriteAction<'a> {
     fn width(&self) -> usize {
         match self {
             Self::Op(op) => op.width(),
-            Self::Pair(op1, op2) => op1.width() + op2.width(),
+            Self::Pair(count, op) => count.width() + op.width(),
             Self::Raw(data) => data.len(),
             Self::Run(_, _) => 0, // already added in
             Self::End(_, _, _) => 0,
@@ -389,21 +390,35 @@ impl<'a> SlabWriter<'a> {
     // skipping this on size zero is needed on write/merge operations
     // but being able to write something with size == 0 is needed for the first element of
     // boolean sets - likely these 2 and flush_after could all get turned into one nice method
-    pub fn flush_before2(&mut self, slab: &'a Slab, range: Range<usize>, lit: usize, size: usize) {
+    pub fn flush_before2(
+        &mut self,
+        slab: &'a Slab,
+        range: Range<usize>,
+        lit: usize,
+        size: usize,
+        group: usize,
+    ) {
         if size > 0 {
             if lit > 0 {
-                self.push_lit(WriteOp::Import(slab, range), lit, size)
+                self.push_lit(WriteOp::Import(slab, range, group), lit, size)
             } else {
-                self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
+                self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
             }
         }
     }
 
-    pub fn flush_before(&mut self, slab: &'a Slab, range: Range<usize>, lit: usize, size: usize) {
+    pub fn flush_before(
+        &mut self,
+        slab: &'a Slab,
+        range: Range<usize>,
+        lit: usize,
+        size: usize,
+        group: usize,
+    ) {
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range), lit, size)
+            self.push_lit(WriteOp::Import(slab, range, group), lit, size)
         } else {
-            self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
+            self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
         }
     }
 
@@ -413,13 +428,13 @@ impl<'a> SlabWriter<'a> {
         index: usize,
         lit: usize,
         size: usize,
-        _group: usize, // FIXME!!
+        group: usize,
     ) {
         let range = index..slab.byte_len();
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range), lit, size)
+            self.push_lit(WriteOp::Import(slab, range, group), lit, size)
         } else {
-            self.push(WriteAction::Op(WriteOp::Import(slab, range)), size)
+            self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
         }
     }
 
@@ -430,7 +445,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     pub fn flush_bool_run(&mut self, count: usize) {
-        self.push(WriteAction::Op(WriteOp::UInt(count as u64)), count);
+        self.push(WriteAction::Op(WriteOp::GroupUInt(count as u64, 0)), count);
     }
 
     pub fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
@@ -458,107 +473,6 @@ impl Default for Slab {
     }
 }
 
-#[derive(Debug)]
-pub struct SlabIter<'a, C: ColumnCursor> {
-    slab: &'a Slab,
-    pub(crate) cursor: C,
-    state: Option<Run<'a, C::Item>>,
-    last_group: usize,
-}
-
-impl<'a, C: ColumnCursor> Copy for SlabIter<'a, C> {}
-
-impl<'a, C: ColumnCursor> std::clone::Clone for SlabIter<'a, C> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<'a, C: ColumnCursor> SlabIter<'a, C> {
-    pub(crate) fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
-        if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
-            self.cursor = cursor;
-            //self.last_group = item_group::<C::Item>(&run.value) * run.count;
-            //self.state = Some(run);
-            //self.state
-            Some(run)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn pos(&self) -> usize {
-        if let Some(run) = self.state {
-            self.cursor.index() - run.count
-        } else {
-            self.cursor.index()
-        }
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.slab.len()
-    }
-
-    pub(crate) fn group(&self) -> usize {
-        if let Some(run) = self.state {
-            self.cursor.group() - run.group() - self.last_group
-        } else {
-            self.cursor.group() - self.last_group
-        }
-    }
-
-    pub(crate) fn max_group(&self) -> usize {
-        self.slab.group()
-    }
-
-    pub(crate) fn seek<S: Seek<C::Item>>(&mut self, seek: &mut S) -> bool {
-        if seek.skip_slab(self.slab) {
-            false
-        } else {
-            loop {
-                if let Some(run) = &self.state {
-                    if let RunStep::Done(s) = seek.process_run(run) {
-                        self.state = s;
-                        return true;
-                    }
-                }
-                if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
-                    self.state = Some(run);
-                    self.cursor = cursor;
-                } else {
-                    return false;
-                }
-            }
-        }
-    }
-}
-
-fn item_group<P: Packable + ?Sized>(item: &Option<P::Unpacked<'_>>) -> usize {
-    match item {
-        Some(i) => P::group(*i),
-        None => 0,
-    }
-}
-
-impl<'a, C: ColumnCursor> Iterator for SlabIter<'a, C> {
-    type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(run) = self.state {
-            self.state = run.pop();
-            self.last_group = item_group::<C::Item>(&run.value);
-            Some(self.cursor.transform(&run))
-        } else if let Some((run, cursor)) = self.cursor.next(self.slab.as_slice()) {
-            self.cursor = cursor;
-            self.state = Some(run);
-            self.next()
-        } else {
-            self.last_group = 0;
-            None
-        }
-    }
-}
-
 impl Slab {
     pub fn abs(&self) -> i64 {
         match self {
@@ -567,12 +481,11 @@ impl Slab {
         }
     }
 
-    pub fn iter<C: ColumnCursor>(&self) -> SlabIter<'_, C> {
-        SlabIter {
-            slab: self,
+    pub fn run_iter<C: ColumnCursor>(&self) -> RunIter<'_, C> {
+        RunIter {
+            slab: self.as_slice(),
             cursor: C::new(self),
-            state: None,
-            last_group: 0,
+            weight_left: self.weight(),
         }
     }
 
@@ -623,19 +536,6 @@ impl Slab {
     }
 }
 
-pub trait Seek<T: Packable + ?Sized> {
-    type Output;
-    fn skip_slab(&mut self, _r: &Slab) -> bool;
-    fn process_run<'a>(&mut self, r: &Run<'a, T>) -> RunStep<'a, T>;
-    fn done(&self) -> bool;
-    fn finish(self) -> Self::Output;
-}
-
-pub enum RunStep<'a, T: Packable + ?Sized> {
-    Skip,
-    Done(Option<Run<'a, T>>),
-}
-
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub struct SlabWeight {
     pub(crate) pos: usize,
@@ -673,7 +573,8 @@ impl AddAssign<SlabWeight> for SlabWeight {
 impl SubAssign<SlabWeight> for SlabWeight {
     fn sub_assign(&mut self, other: Self) {
         self.pos -= other.pos;
-        self.group -= other.group;
+        self.group = self.group.saturating_sub(other.group);
+        //self.group = 0; // FIXME
     }
 }
 

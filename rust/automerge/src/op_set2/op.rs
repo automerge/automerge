@@ -145,6 +145,7 @@ impl OpLike for OpBuilder2 {
             _ => None,
         }
     }
+
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.action.to_raw()
     }
@@ -199,6 +200,7 @@ impl<'a> OpLike for Op<'a> {
     fn map_key(&self) -> Option<&str> {
         self.key.map_key()
     }
+
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.value.to_raw()
     }

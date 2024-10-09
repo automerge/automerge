@@ -16,7 +16,7 @@ pub(crate) enum ValueType {
     Unknown(u8),
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub(crate) struct ValueMeta(u64);
 
 impl ValueMeta {
@@ -148,35 +148,35 @@ mod tests {
         let mut col = ColumnData::<MetaCursor>::new();
         col.splice(0, 0, data);
 
-        let mut iter = col.iter();
+        let mut iter = col.iter().with_group();
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(1))));
-        assert_eq!(iter.group(), 0);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(1)));
+        assert_eq!(group, 0);
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(6 + (30 << 4)))));
-        assert_eq!(iter.group(), 0);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(6 + (30 << 4))));
+        assert_eq!(group, 0);
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(6 + (10 << 4)))));
-        assert_eq!(iter.group(), 30);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(6 + (10 << 4))));
+        assert_eq!(group, 30);
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(3))));
-        assert_eq!(iter.group(), 40);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(3)));
+        assert_eq!(group, 40);
 
-        let mut iter = col.iter();
+        let mut iter = col.iter().with_group();
         iter.advance_by(3);
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(3))));
-        assert_eq!(iter.group(), 40);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(3)));
+        assert_eq!(group, 40);
 
-        let mut iter = col.iter_range(&(3..5));
+        let mut iter = col.iter_range(3..5).with_group();
 
-        let value = iter.next();
-        assert_eq!(value, Some(Some(ValueMeta(3))));
-        assert_eq!(iter.group(), 40);
+        let (value, group) = iter.next().unwrap();
+        assert_eq!(value, Some(ValueMeta(3)));
+        assert_eq!(group, 40);
     }
 }
