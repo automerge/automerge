@@ -9,7 +9,7 @@ pub(crate) mod rle;
 pub(crate) mod slab;
 
 pub use boolean::BooleanCursor;
-pub use columndata::{ColumnData, ColumnDataIter};
+pub use columndata::{ColGroupItem, ColumnData, ColumnDataIter};
 pub use cursor::{ColumnCursor, Run, ScanMeta};
 pub use delta::DeltaCursor;
 pub use leb128::{lebsize, ulebsize};

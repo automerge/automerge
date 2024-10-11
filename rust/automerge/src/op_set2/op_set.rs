@@ -53,6 +53,7 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
+    text_index: ColumnData<IntCursor>,
     cols: Columns,
 }
 
@@ -74,6 +75,7 @@ impl OpSet {
             len: 0,
             actors,
             cols: Columns::default(),
+            text_index: ColumnData::new(),
         }
     }
 
@@ -98,8 +100,20 @@ impl OpSet {
         }
     }
 
+    pub(crate) fn set_text_index(&mut self, widths: Vec<u64>) {
+        assert_eq!(widths.len(), self.len());
+        self.text_index = ColumnData::new();
+        self.text_index.splice(0, 0, widths);
+    }
+
     pub(crate) fn insert2(&mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
+        if op.succ().len() == 0 {
+            self.text_index
+                .splice(op.pos, 0, vec![op.width(ListEncoding::Text) as u64]);
+        } else {
+            self.text_index.splice(op.pos, 0, vec![0]);
+        }
         self.len += 1;
         self.validate()
         // do succ later
@@ -115,6 +129,8 @@ impl OpSet {
 
             let succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
             succ_counter.splice(i.sub_pos, 0, vec![id.counter() as i64]);
+
+            self.text_index.splice(i.pos, 1, vec![0]);
         }
     }
 
@@ -183,6 +199,44 @@ impl OpSet {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
 
+    pub(crate) fn query_insert_at_text(
+        &self,
+        obj: &ObjId,
+        index: usize,
+    ) -> Result<QueryNth, AutomergeError> {
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter());
+        let range = self
+            .cols
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
+
+        let mut elemid = ElemId::head();
+        let mut pos = range.start;
+
+        if index > 0 {
+            let mut iter = self.text_index.iter_range(range.clone()).with_group();
+            if let Some(tx) = iter.nth(index - 1) {
+                for op in self.iter_range(&(tx.pos..range.end)) {
+                    if op.insert && !elemid.is_head() {
+                        break;
+                    }
+                    if op.succ().len() == 0 {
+                        elemid = op.elemid_or_key().elemid().unwrap();
+                    }
+                    pos = op.pos + 1;
+                }
+            }
+        }
+        Ok(QueryNth {
+            marks: None,
+            pos,
+            elemid,
+        })
+    }
+
     pub(crate) fn query_insert_at(
         &self,
         obj: &ObjId,
@@ -190,7 +244,17 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
+        if encoding == ListEncoding::Text && clock.is_none() {
+            self.query_insert_at_text(obj, index)
+        /*
+                    let b = InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()?;
+                    assert_eq!(a.pos, b.pos);
+                    assert_eq!(a.elemid, b.elemid);
+                    Ok(b)
+        */
+        } else {
+            InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
+        }
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -231,6 +295,9 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
+        if encoding == ListEncoding::Text && clock.is_none() {
+            return self.iter_obj_text(obj, index);
+        }
         let sub_iter = self.iter_obj(obj);
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
@@ -575,7 +642,12 @@ impl OpSet {
     ) -> Self {
         let len = ops.len();
         let cols = Columns::new(ops);
-        OpSet { actors, cols, len }
+        OpSet {
+            actors,
+            cols,
+            len,
+            text_index: ColumnData::new(),
+        }
     }
 
     fn from_parts(
@@ -598,7 +670,12 @@ impl OpSet {
 
         let len = cols.len();
 
-        let op_set = OpSet { actors, cols, len };
+        let op_set = OpSet {
+            actors,
+            cols,
+            len,
+            text_index: ColumnData::new(),
+        };
 
         Ok(op_set)
     }
@@ -643,6 +720,43 @@ impl OpSet {
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
         self.iter_range(&range)
+    }
+
+    pub(crate) fn iter_obj_text<'a>(&'a self, obj: &ObjId, index: usize) -> OpsFound<'a> {
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter());
+        let range = self
+            .cols
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
+
+        let mut iter = self.text_index.iter_range(range.clone()).with_group();
+
+        let mut ops = vec![];
+        let mut ops_pos = vec![];
+        let mut end_pos = range.end;
+
+        if let Some(tx) = iter.nth(index) {
+            for op in self.iter_range(&(tx.pos..range.end)) {
+                if op.insert && !ops.is_empty() {
+                    break;
+                }
+                if op.succ().len() == 0 {
+                    ops.push(op);
+                    ops_pos.push(op.pos);
+                }
+                end_pos = op.pos + 1;
+            }
+        }
+
+        OpsFound {
+            index,
+            ops,
+            ops_pos,
+            end_pos: range.end,
+        }
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {

@@ -60,8 +60,11 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
         self.pop_n(1)
     }
 
+    pub fn unit_group(&self) -> usize {
+        self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
+    }
     pub fn group(&self) -> usize {
-        self.count * self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
+        self.count * self.unit_group()
     }
 
     pub(crate) fn weight_left(&self) -> SlabWeight {
@@ -441,6 +444,29 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
 
     pub(crate) fn weight_left(&self) -> SlabWeight {
         self.weight_left
+    }
+
+    pub(crate) fn sub_advance_group(&mut self, mut n: usize) -> (usize, Option<Run<'a, C::Item>>) {
+        let mut pos = 0;
+        while let Some(mut run) = self.next() {
+            let unit = run.unit_group();
+            if unit * run.count <= n {
+                n -= unit * run.count;
+                pos += run.count;
+            } else {
+                assert!(unit > 0);
+                let advance = n / unit;
+                run.count -= advance;
+                pos += advance;
+                if run.count == 0 {
+                    let tmp = self.next();
+                    return (pos, tmp);
+                } else {
+                    return (pos, Some(run));
+                }
+            }
+        }
+        (pos, None)
     }
 
     pub(crate) fn sub_advance(&mut self, mut n: usize) -> Option<Run<'a, C::Item>> {

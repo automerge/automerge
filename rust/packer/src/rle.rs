@@ -625,7 +625,7 @@ impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::super::columndata::ColumnData;
+    use super::super::columndata::{ColGroupItem, ColumnData};
     use super::super::cursor::ColExport;
     use super::*;
 
@@ -727,9 +727,9 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        for (val, g) in col1.iter().with_group() {
-            assert_eq!(sum, g);
-            if let Some(v) = val {
+        for ColGroupItem { item, group, .. } in col1.iter().with_group() {
+            assert_eq!(sum, group);
+            if let Some(v) = item {
                 sum += u64::group(v);
             }
         }
@@ -749,9 +749,9 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        for (val, g) in col2.iter().with_group() {
-            assert_eq!(sum, g);
-            if let Some(v) = val {
+        for ColGroupItem { item, group, .. } in col2.iter().with_group() {
+            assert_eq!(sum, group);
+            if let Some(v) = item {
                 sum += u64::group(v);
             }
         }
@@ -772,9 +772,9 @@ pub(crate) mod tests {
         );
         let mut sum = 0;
 
-        for (val, g) in col3.iter().with_group() {
-            assert_eq!(sum, g);
-            if let Some(v) = val {
+        for ColGroupItem { item, group, .. } in col3.iter().with_group() {
+            assert_eq!(sum, group);
+            if let Some(v) = item {
                 sum += u64::group(v);
             }
         }
@@ -813,9 +813,9 @@ pub(crate) mod tests {
             ]
         );
         let mut sum = 0;
-        for (val, g) in col4.iter().with_group() {
-            assert_eq!(sum, g);
-            if let Some(v) = val {
+        for ColGroupItem { item, group, .. } in col4.iter().with_group() {
+            assert_eq!(sum, group);
+            if let Some(v) = item {
                 sum += u64::group(v);
             }
         }

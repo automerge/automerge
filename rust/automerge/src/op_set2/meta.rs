@@ -150,33 +150,33 @@ mod tests {
 
         let mut iter = col.iter().with_group();
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(1)));
-        assert_eq!(group, 0);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(1)));
+        assert_eq!(r.group, 0);
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(6 + (30 << 4))));
-        assert_eq!(group, 0);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(6 + (30 << 4))));
+        assert_eq!(r.group, 0);
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(6 + (10 << 4))));
-        assert_eq!(group, 30);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(6 + (10 << 4))));
+        assert_eq!(r.group, 30);
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(3)));
-        assert_eq!(group, 40);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.group, 40);
 
         let mut iter = col.iter().with_group();
         iter.advance_by(3);
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(3)));
-        assert_eq!(group, 40);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.group, 40);
 
         let mut iter = col.iter_range(3..5).with_group();
 
-        let (value, group) = iter.next().unwrap();
-        assert_eq!(value, Some(ValueMeta(3)));
-        assert_eq!(group, 40);
+        let r = iter.next().unwrap();
+        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.group, 40);
     }
 }

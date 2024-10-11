@@ -5,7 +5,7 @@ use crate::{
     change::Change,
     op_set2::{KeyRef, OpBuilder2, OpSet, PackError, ReadOpError},
     storage::{change::Verified, Change as StoredChange, Document},
-    types::{ChangeHash, ObjId, OpId},
+    types::{ChangeHash, ListEncoding, ObjId, OpId},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -56,13 +56,20 @@ pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
 ) -> Result<ReconOpSet, Error> {
-    let op_set = OpSet::new(doc)?;
+    let mut op_set = OpSet::new(doc)?;
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut preds = HashMap::new();
     let mut last = None;
     let mut iter = op_set.iter();
     let mut max_op = 0;
+    let mut widths = Vec::with_capacity(op_set.len());
     while let Some(op) = iter.try_next()? {
+        if op.succ().len() == 0 {
+            widths.push(op.width(ListEncoding::Text) as u64);
+        } else {
+            widths.push(0);
+        }
+
         // opportunity to have a custom iterator that ignore some columns
         // read - op.obj(2) op.key(3) op.insert(1), op.id(2) op.succ(3)
         // not read - op.value(2) op.action(1), op.mark_name(1)
@@ -90,6 +97,8 @@ pub(crate) fn reconstruct_opset<'a>(
     if max_op != max_op2 {
         return Err(Error::MismatchingMaxOp(max_op, max_op2));
     }
+
+    op_set.set_text_index(widths);
 
     Ok(ReconOpSet {
         changes,

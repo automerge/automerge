@@ -75,6 +75,16 @@ impl OpBuilder2 {
         }
     }
 
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        if encoding == ListEncoding::List {
+            1
+        } else if self.is_mark() {
+            0
+        } else {
+            TextValue::width(self.as_str()) // FASTER
+        }
+    }
+
     pub(crate) fn prop(&self) -> PropRef<'_> {
         if let Key::Map(s) = &self.key {
             PropRef::Map(s)
@@ -306,10 +316,10 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn as_str(&self) -> &'a str {
-        if let ScalarValue::Str(s) = &self.value {
-            s
-        } else if self.action == Action::Mark {
+        if self.action == Action::Mark {
             ""
+        } else if let ScalarValue::Str(s) = &self.value {
+            s
         } else {
             "\u{fffc}"
         }

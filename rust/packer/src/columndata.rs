@@ -9,13 +9,19 @@ use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::Arc;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
     pub slabs: SlabTree,
     #[cfg(debug_assertions)]
     pub debug: Vec<C::Export>,
     _phantom: PhantomData<C>,
+}
+
+impl<C: ColumnCursor> Default for ColumnData<C> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
@@ -106,6 +112,23 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let iter_pos = slabs.weight().pos - slab.weight_left().pos;
         let advance = pos - iter_pos;
         let run = slab.sub_advance(advance);
+        ColumnDataIter {
+            pos,
+            max,
+            slabs,
+            slab,
+            run,
+        }
+    }
+
+    pub(crate) fn new_at_group(slabs: &'a SlabTree, group: usize, max: usize) -> Self {
+        let cursor = slabs
+            .get_where(|acc, next| group - acc.group < next.group)
+            .unwrap();
+        let mut slab = cursor.element.run_iter();
+        let pos = cursor.weight.pos;
+        let slabs = slab::Iter::new(slabs, cursor);
+        let run = slab.sub_advance(0);
         ColumnDataIter {
             pos,
             max,
@@ -225,6 +248,13 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let _ = std::mem::replace(self, Self::new(tree, pos, self.max));
         Some(())
     }
+
+    fn reset_iter_to_group(&mut self, group: usize) -> Option<usize> {
+        let starting_group = self.calculate_group();
+        let tree = self.slabs.span_tree()?;
+        let _ = std::mem::replace(self, Self::new_at_group(tree, group, self.max));
+        Some(self.calculate_group() - starting_group)
+    }
 }
 
 pub struct ColGroupIter<'a, C: ColumnCursor> {
@@ -237,15 +267,51 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct ColGroupItem<'a, P: Packable + ?Sized> {
+    pub group: usize,
+    pub pos: usize,
+    pub item: Option<P::Unpacked<'a>>,
+}
+
 impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
-    type Item = (Option<<C::Item as Packable>::Unpacked<'a>>, usize);
+    //type Item = (Option<<C::Item as Packable>::Unpacked<'a>>, usize);
+    type Item = ColGroupItem<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let group = self.iter.slabs.weight().group
             - self.iter.slab.weight_left().group
             - self.iter.run_group();
+        let pos = self.iter.pos;
         let item = self.iter.next()?;
-        Some((item, group))
+        Some(ColGroupItem { item, pos, group })
+    }
+
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        let target = self.iter.calculate_group() + n + 1;
+        if self.iter.slabs.weight().group < target {
+            let delta = self.iter.reset_iter_to_group(target - 1)?;
+            self.iter.check_pos();
+            n -= delta;
+        }
+        if self.iter.run_group() > n {
+            let unit = self.iter.run.as_ref().unwrap().unit_group();
+            let advance = n / unit;
+            self.iter.pos += advance;
+            if advance > 0 {
+                self.iter.run.as_mut().and_then(|r| r.nth(advance - 1));
+            }
+            self.iter.check_pos();
+            self.next()
+        } else {
+            self.iter.pos += self.iter.run_count();
+            let n = n - self.iter.run_group();
+            let (advance, run) = self.iter.slab.sub_advance_group(n);
+            self.iter.run = run;
+            self.iter.pos += advance;
+            self.iter.check_pos();
+            self.next()
+        }
     }
 }
 
@@ -355,7 +421,6 @@ impl<C: ColumnCursor> ColumnData<C> {
     {
         assert!(index <= self.len);
         assert!(!self.slabs.is_empty());
-        //assert!(!(values.is_empty() && del == 0)); // nothing to do
         if values.is_empty() && del == 0 {
             return 0; // really none
         }
@@ -419,6 +484,10 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn group(&self) -> usize {
+        self.slabs.weight().group
     }
 }
 
@@ -1084,7 +1153,8 @@ pub(crate) mod tests {
         let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
-        for _ in 0..1000 {
+        const MAX: usize = 1000;
+        for _ in 0..MAX {
             let val = rng.gen::<u64>() % 4;
             if val == 0 {
                 data.push(None);
@@ -1097,10 +1167,23 @@ pub(crate) mod tests {
 
         let vals_w_group = col.iter().with_group().collect::<Vec<_>>();
 
-        for n in 0..995 {
+        for n in 0..(MAX - 3) {
             let m = n + 3;
             let sub = col.iter_range(n..m).with_group().collect::<Vec<_>>();
-            assert_eq!(&vals_w_group[n..m], &sub);
+            assert_eq!(&vals_w_group[n..m], sub.as_slice());
+        }
+
+        let mut last_group = 0;
+        let mut last_item: u64 = 0;
+        for n in 0..col.group() {
+            let result = col.iter().with_group().nth(n).unwrap();
+            let item = result.item;
+            let group = result.group;
+            assert!(
+                group <= n && (group == last_group || group == last_group + last_item as usize)
+            );
+            last_group = group;
+            last_item = item.unwrap_or(0);
         }
     }
 }
