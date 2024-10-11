@@ -10,7 +10,7 @@ pub struct RawCursorInternal<const B: usize> {
     offset: usize,
 }
 
-pub type RawCursor = RawCursorInternal<1024>;
+pub type RawCursor = RawCursorInternal<4096>;
 
 impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type Item = [u8];

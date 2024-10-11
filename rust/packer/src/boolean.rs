@@ -27,7 +27,7 @@ pub struct BooleanCursorInternal<const B: usize> {
     last_offset: usize,
 }
 
-pub type BooleanCursor = BooleanCursorInternal<512>;
+pub type BooleanCursor = BooleanCursorInternal<64>;
 
 impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     type Item = bool;

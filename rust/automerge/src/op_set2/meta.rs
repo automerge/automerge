@@ -129,7 +129,7 @@ impl MaybePackable<ValueMeta> for Option<ValueMeta> {
     }
 }
 
-pub(crate) type MetaCursor = RleCursor<1024, ValueMeta>;
+pub(crate) type MetaCursor = RleCursor<64, ValueMeta>;
 
 #[cfg(test)]
 mod tests {

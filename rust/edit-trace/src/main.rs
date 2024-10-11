@@ -34,6 +34,7 @@ fn main() -> Result<(), AutomergeError> {
     println!("Done in {} ms", now.elapsed().as_millis());
     let commit = Instant::now();
     doc.commit();
+
     println!("Commit in {} ms", commit.elapsed().as_millis());
     let observe = Instant::now();
     let _patches = doc.diff_incremental();
@@ -42,6 +43,7 @@ fn main() -> Result<(), AutomergeError> {
     let bytes = doc.save();
     println!("Saved in {} ms", save.elapsed().as_millis());
 
+/*
     let fork = Instant::now();
     let heads = doc.get_heads();
     let _other = doc.fork_at(&heads);
@@ -54,6 +56,7 @@ fn main() -> Result<(), AutomergeError> {
     let get_txt = Instant::now();
     doc.text(&text)?;
     println!("Text in {} ms", get_txt.elapsed().as_millis());
+*/
 
     Ok(())
 }

@@ -16,8 +16,7 @@ pub struct DeltaCursorInternal<const B: usize> {
     rle: SubCursor<B>,
 }
 
-// FIXME - encode delta breaks across slabs
-pub type DeltaCursor = DeltaCursorInternal<1024>;
+pub type DeltaCursor = DeltaCursorInternal<64>;
 
 impl<'a> DeltaState<'a> {
     fn pending_delta(&self) -> i64 {
@@ -109,6 +108,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
+/*
     fn pop<'a>(
         &self,
         mut run: Run<'a, Self::Item>,
@@ -124,6 +124,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             (value, None)
         }
     }
+*/
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
         SubCursor::<B>::flush_state(out, state.rle)

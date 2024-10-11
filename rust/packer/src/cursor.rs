@@ -200,6 +200,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         run.value
     }
 
+/*
     #[allow(clippy::type_complexity)]
     fn pop<'a>(
         &self,
@@ -216,6 +217,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
             (value, None)
         }
     }
+*/
 
     fn finalize_state<'a>(
         slab: &'a Slab,

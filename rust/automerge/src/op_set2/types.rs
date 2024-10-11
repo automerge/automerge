@@ -673,5 +673,5 @@ impl<'a> From<Action> for WriteOp<'a> {
     }
 }
 
-pub(crate) type ActorCursor = RleCursor<{ usize::MAX }, ActorIdx>;
-pub(crate) type ActionCursor = RleCursor<{ usize::MAX }, Action>;
+pub(crate) type ActorCursor = RleCursor<64, ActorIdx>;
+pub(crate) type ActionCursor = RleCursor<64, Action>;
