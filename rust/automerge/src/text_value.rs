@@ -1,6 +1,6 @@
-use core::fmt::Debug;
 use crate::sequence_tree::SequenceTree;
 use cfg_if::cfg_if;
+use core::fmt::Debug;
 
 cfg_if! {
     if #[cfg(feature = "utf8-indexing")] {
@@ -15,28 +15,28 @@ cfg_if! {
                 }
                 Self(v)
             }
-        
+
             pub(crate) fn splice(&mut self, index: usize, value: &str) {
                 for (n, ch) in value.bytes().enumerate() {
                     self.0.insert(index + n, ch)
                 }
             }
-        
+
             pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
                 for (n, ch) in value.chars().enumerate() {
                     self.0.insert(index + n, ch)
                 }
             }
-        
+
             pub fn make_string(&self) -> String {
                 let bytes: Vec<_> = self.0.iter().cloned().collect();
                 String::from_utf8_lossy(bytes.as_slice()).to_string()
             }
-        
+
             pub(crate) fn width(s: &str) -> usize {
                 s.len()
             }
-        
+
             pub(crate) fn chars(&self) -> impl Iterator<Item = u8> + '_ {
                 self.0.iter().cloned()
             }
@@ -53,28 +53,28 @@ cfg_if! {
                 }
                 Self(v)
             }
-        
+
             pub(crate) fn splice(&mut self, index: usize, value: &str) {
                 for (n, ch) in value.encode_utf16().enumerate() {
                     self.0.insert(index + n, ch)
                 }
             }
-        
+
             pub(crate) fn splice_text_value(&mut self, index: usize, value: &TextValue) {
                 for (n, ch) in value.chars().enumerate() {
                     self.0.insert(index + n, ch)
                 }
             }
-        
+
             pub fn make_string(&self) -> String {
                 let bytes: Vec<_> = self.0.iter().cloned().collect();
                 String::from_utf16_lossy(bytes.as_slice())
             }
-        
+
             pub(crate) fn width(s: &str) -> usize {
                 s.encode_utf16().count()
             }
-        
+
             pub(crate) fn chars(&self) -> impl Iterator<Item = u16> + '_ {
                 self.0.iter().cloned()
             }
