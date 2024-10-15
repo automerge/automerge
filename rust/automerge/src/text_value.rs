@@ -2,11 +2,11 @@ use core::fmt::Debug;
 
 use crate::sequence_tree::SequenceTree;
 
-#[cfg(not(any(target_family = "wasm", feature = "utf8-indexing")))]
+#[cfg(not(any(feature = "utf8-indexing", feature = "utf16-indexing")))]
 #[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<char>);
 
-#[cfg(target_family = "wasm")]
+#[cfg(feature = "utf16-indexing")]
 #[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<u16>);
 
@@ -14,7 +14,7 @@ pub struct TextValue(SequenceTree<u16>);
 #[derive(Clone, PartialEq, Default)]
 pub struct TextValue(SequenceTree<u8>);
 
-#[cfg(not(any(target_family = "wasm", feature = "utf8-indexing")))]
+#[cfg(not(any(feature = "utf8-indexing", feature = "utf16-indexing")))]
 impl TextValue {
     pub(crate) fn new(s: &str) -> Self {
         let mut v = SequenceTree::new();
@@ -49,7 +49,7 @@ impl TextValue {
     }
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(feature = "utf16-indexing")]
 impl TextValue {
     pub(crate) fn new(s: &str) -> Self {
         let mut v = SequenceTree::new();
