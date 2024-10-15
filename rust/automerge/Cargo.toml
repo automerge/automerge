@@ -19,7 +19,7 @@ hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "^0.10.0"
 thiserror = "^1.0.16"
-itertools = "0.12.0"
+itertools = "0.13.0"
 flate2 = "^1.0.22"
 uuid = { version = "^1.2.1", features = ["v4", "serde"] }
 smol_str = { version = "0.2", features = ["serde"] }
@@ -46,9 +46,9 @@ pretty_assertions = "1.0.0"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features = true }
 maplit = { version = "^1.0" }
-criterion = "0.4.0"
+criterion = "0.5"
 test-log = { version = "0.2.10", features = ["trace"], default-features = false}
-tracing-subscriber = { version = "0.3.9", features = ["fmt", "env-filter"] }
+tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
 

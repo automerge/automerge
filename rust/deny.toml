@@ -9,6 +9,7 @@
 # The values provided in this template are the default values that will be used
 # when any section or field is not specified in your own configuration
 
+[graph]
 # If 1 or more target triples (and optionally, target_features) are specified,
 # only the specified targets will be checked when running `cargo deny check`.
 # This means, if a particular package is only ever used as a target specific
@@ -36,12 +37,7 @@ db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # The lint level for security vulnerabilities
-vulnerability = "deny"
-# The lint level for unmaintained crates
-unmaintained = "warn"
-# The lint level for crates that have been yanked from their source registry
 yanked = "warn"
-notice = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
@@ -61,8 +57,6 @@ ignore = [
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-# The lint level for crates which do not have a detectable license
-unlicensed = "deny"
 # List of explictly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
@@ -70,27 +64,8 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    "MPL-2.0",
 ]
-# List of explictly disallowed licenses
-# See https://spdx.org/licenses/ for list of possible licenses
-# [possible values: any SPDX 3.11 short identifier (+ optional exception)].
-deny = [
-    #"Nokia",
-]
-# Lint level for licenses considered copyleft
-copyleft = "warn"
-# Blanket approval or denial for OSI-approved or FSF Free/Libre licenses
-# * both - The license will be approved if it is both OSI-approved *AND* FSF
-# * either - The license will be approved if it is either OSI-approved *OR* FSF
-# * osi-only - The license will be approved if is OSI-approved *AND NOT* FSF
-# * fsf-only - The license will be approved if is FSF *AND NOT* OSI-approved
-# * neither - This predicate is ignored and the default lint level is used
-allow-osi-fsf-free = "neither"
-# Lint level used when no other predicates are matched
-# 1. License isn't in the allow or deny lists
-# 2. License isn't copyleft
-# 3. License isn't OSI/FSF, or allow-osi-fsf-free = "neither"
-default = "deny"
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
 # canonical license text of a valid SPDX license file.
@@ -109,10 +84,6 @@ exceptions = [
     # these are needed by cbindgen and its dependancies
     # should be revied more fully before release
     { allow = ["MPL-2.0"], name = "cbindgen" },
-    { allow = ["BSD-3-Clause"], name = "instant" },
-
-    # we only use prettytable in tests
-    { allow = ["BSD-3-Clause"], name = "prettytable" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -175,25 +146,17 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # redox_syscall has a dupliucate version included by prettytable
-    # which is only used in tests
-    { name = "redox_syscall", version = "0.2.16" },
-
-    # linux-raw-sys and rustix are duplicated due to transitive dependencies of
-    # cbindgen, which we only use at build time in automerge-c
-    { name = "linux-raw-sys", version = "0.3.8" },
-    { name = "rustix", version = "0.37.21" },
     { name = "heck", version = "0.5.0" },
+    { crate = "windows-sys@0.52", reason = "this is brought in by the clap dependency in automerge-cli, which is fine as we're not distributing that as a library" },
+    { crate = "regex-syntax@0.6.29", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # // We only ever use criterion in benchmarks
-    { name = "criterion", version = "0.4.0", depth=10},
-
-    { name = "windows-sys", version = "0.48.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

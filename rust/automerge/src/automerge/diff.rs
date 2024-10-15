@@ -120,7 +120,7 @@ impl<'a> Patch<'a> {
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
         let mut diff = RichTextDiff::new(doc);
-        let ops_by_key = ops.group_by(|o| o.as_op(doc.osd()).elemid_or_key());
+        let ops_by_key = ops.chunk_by(|o| o.as_op(doc.osd()).elemid_or_key());
         let diffs = ops_by_key.into_iter().filter_map(|(_key, key_ops)| {
             process(
                 key_ops.map(|i| i.as_op(doc.osd())),
@@ -520,6 +520,10 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         heads: Option<&[ChangeHash]>,
     ) -> Result<crate::hydrate::Value, crate::AutomergeError> {
         self.doc.hydrate_obj(obj.as_ref(), heads)
+    }
+
+    fn stats(&self) -> crate::read::Stats {
+        self.doc.stats()
     }
 }
 

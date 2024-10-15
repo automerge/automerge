@@ -58,10 +58,6 @@ macro_rules! log {
     };
 }
 
-#[cfg(feature = "wee_alloc")]
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 /// How text is represented in materialized objects on the JS side
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 #[wasm_bindgen]
@@ -897,6 +893,22 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(js_name = getDecodedChangeByHash)]
+    pub fn get_decoded_change_by_hash(
+        &mut self,
+        hash: JsValue,
+    ) -> Result<JsValue, error::GetDecodedChangeByHash> {
+        let hash = JS(hash).try_into()?;
+        let change = self.doc.get_change_by_hash(&hash);
+        if let Some(c) = change {
+            let change: am::ExpandedChange = c.decode();
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            Ok(change.serialize(&serializer)?)
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
     #[wasm_bindgen(js_name = getChangesAdded)]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
         let changes = self.doc.get_changes_added(&mut other.doc);
@@ -1150,6 +1162,36 @@ impl Automerge {
         } else {
             Ok(self.doc.text(obj)?)
         }
+    }
+
+    #[wasm_bindgen(js_name = hasOurChanges)]
+    pub fn has_our_changes(&mut self, state: &mut SyncState) -> JsValue {
+        self.doc.has_our_changes(&state.0).into()
+    }
+
+    #[wasm_bindgen(js_name = topoHistoryTraversal)]
+    pub fn topo_history_traversal(&mut self) -> JsValue {
+        let hashes = self
+            .doc
+            .get_changes(&[])
+            .into_iter()
+            .map(|c| c.hash())
+            .collect::<Vec<_>>();
+        AR::from(hashes).into()
+    }
+
+    #[wasm_bindgen(js_name = stats)]
+    pub fn stats(&mut self) -> JsValue {
+        let stats = self.doc.stats();
+        let result = Object::new();
+        js_set(
+            &result,
+            "numChanges",
+            JsValue::from(stats.num_changes as usize),
+        )
+        .unwrap();
+        js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
+        result.into()
     }
 }
 
@@ -1790,6 +1832,20 @@ pub mod error {
 
     impl From<GetSpans> for JsValue {
         fn from(e: GetSpans) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum GetDecodedChangeByHash {
+        #[error(transparent)]
+        BadChangeHash(#[from] super::interop::error::BadChangeHash),
+        #[error(transparent)]
+        SerdeWasm(#[from] serde_wasm_bindgen::Error),
+    }
+
+    impl From<GetDecodedChangeByHash> for JsValue {
+        fn from(e: GetDecodedChangeByHash) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

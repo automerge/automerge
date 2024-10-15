@@ -2,3 +2,4 @@ e2e/verdacciodb
 dist
 docs
 deno_dist
+packaging_tests

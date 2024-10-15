@@ -70,7 +70,7 @@ fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
     obj: &ObjMeta,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| o.elemid_or_key());
+    let ops_by_key = ops.chunk_by(|o| o.elemid_or_key());
     let mut len = 0;
     ops_by_key
         .into_iter()
@@ -130,7 +130,7 @@ fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
     obj: &ObjMeta,
     ops: I,
 ) {
-    let ops_by_key = ops.group_by(|o| *o.key());
+    let ops_by_key = ops.chunk_by(|o| *o.key());
     ops_by_key
         .into_iter()
         .filter_map(log_map_key_patches)

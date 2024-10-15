@@ -1,4 +1,4 @@
-import { Automerge, type ObjID, type Prop } from "@automerge/automerge-wasm"
+import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 import { COUNTER } from "./constants.js"
 /**
  * The most basic CRDT: an integer value that can be changed only by

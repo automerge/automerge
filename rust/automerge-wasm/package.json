@@ -39,7 +39,7 @@
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target && cross-env TARGET=deno yarn target && TARGET=web yarn target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node ./fixup-node-cjs.mjs",
     "target": "rimraf ./$TARGET && yarn compile && yarn bindgen && yarn opt",
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
-    "bindgen": "wasm-bindgen --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
+    "bindgen": "wasm-bindgen --omit-default-module-path --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "mocha --loader=ts-node/esm test/**/*.mts"
   },

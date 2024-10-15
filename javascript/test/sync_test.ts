@@ -7,7 +7,7 @@ import {
   decodeSyncState,
   encodeSyncState,
   initSyncState,
-} from "../src"
+} from "../src/index.js"
 
 function getHeads(doc) {
   return Automerge.getHeads(doc)
@@ -1090,5 +1090,47 @@ describe("Data sync protocol", () => {
       assert.ok(decodeSyncMessage(msg).changes.length > 0)
       assert.deepStrictEqual(s1.sharedHeads, [c2, c8].sort())
     })
+  })
+
+  it("should report whether the other end has our changes", () => {
+    let left = Automerge.from({ foo: "bar" })
+    let right = Automerge.from({ baz: "qux" })
+
+    let leftToRight = Automerge.initSyncState()
+    let rightToLeft = Automerge.initSyncState()
+
+    while (
+      !Automerge.hasOurChanges(left, leftToRight) &&
+      !Automerge.hasOurChanges(right, rightToLeft)
+    ) {
+      let quiet = true
+      let msg: Automerge.SyncMessage | null
+      ;[leftToRight, msg] = Automerge.generateSyncMessage(left, leftToRight)
+      if (msg) {
+        quiet = false
+        ;[right, rightToLeft] = Automerge.receiveSyncMessage(
+          right,
+          rightToLeft,
+          msg,
+        )
+      }
+      ;[rightToLeft, msg] = Automerge.generateSyncMessage(right, rightToLeft)
+      if (msg) {
+        quiet = false
+        ;[left, leftToRight] = Automerge.receiveSyncMessage(
+          left,
+          leftToRight,
+          msg,
+        )
+      }
+      if (quiet) {
+        throw new Error(
+          "no sync message generated but the sync states say we are not done",
+        )
+      }
+    }
+
+    assert.ok(Automerge.hasOurChanges(left, leftToRight))
+    assert.ok(Automerge.hasOurChanges(right, rightToLeft))
   })
 })
