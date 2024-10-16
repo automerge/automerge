@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
-cd rust
-cargo build --workspace --features=optree-visualisation,wasm
-
-RUST_LOG=error cargo test --workspace --features=optree-visualisation,wasm
+pushd rust
+RUST_LOG=error cargo test -p automerge
+RUST_LOG=error cargo test -p automerge-test
+RUST_LOG=error cargo test -p automerge-c
+RUST_LOG=error cargo test -p automerge-cli
+RUST_LOG=error cargo test -p automerge-wasm
+popd
