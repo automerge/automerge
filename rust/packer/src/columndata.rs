@@ -265,6 +265,10 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     pub fn advance_by(&mut self, amount: usize) {
         self.iter.advance_by(amount)
     }
+
+    pub fn group(&self) -> usize {
+        self.iter.slabs.weight().group - self.iter.slab.weight_left().group - self.iter.run_group()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]

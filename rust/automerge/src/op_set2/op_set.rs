@@ -108,7 +108,7 @@ impl OpSet {
 
     pub(crate) fn insert2(&mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
-        if op.succ().len() == 0 {
+        if op.succ().is_empty() {
             self.text_index
                 .splice(op.pos, 0, vec![op.width(ListEncoding::Text) as u64]);
         } else {
@@ -206,9 +206,8 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<QueryNth> {
-
         if encoding != ListEncoding::Text || clock.is_some() {
-          return None
+            return None;
         }
 
         let range = self
@@ -222,7 +221,7 @@ impl OpSet {
             .scope_to_value(obj.actor());
 
         if self.has_marks_in_range(&range) {
-          return None
+            return None;
         }
 
         let mut elemid = ElemId::head();
@@ -257,7 +256,12 @@ impl OpSet {
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
-            debug_assert_eq!(Ok(&query), InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve().as_ref());
+            debug_assert_eq!(
+                Ok(&query),
+                InsertQuery::new(self.iter_obj(obj), index, encoding, clock)
+                    .resolve()
+                    .as_ref()
+            );
             Ok(query)
         } else {
             InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
@@ -303,14 +307,23 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         if let Some(found) = self.seek_ops_by_index_fast(obj, index, encoding, clock) {
-          debug_assert_eq!(found, self.seek_ops_by_index_slow(obj,index, encoding,clock));
-          found
+            debug_assert_eq!(
+                found,
+                self.seek_ops_by_index_slow(obj, index, encoding, clock)
+            );
+            found
         } else {
-          self.seek_ops_by_index_slow(obj,index, encoding,clock)
+            self.seek_ops_by_index_slow(obj, index, encoding, clock)
         }
     }
 
-    pub(crate) fn seek_ops_by_index_slow<'a>(&'a self, obj: &ObjId, index: usize, encoding: ListEncoding, clock: Option<&Clock>) -> OpsFound<'a> {
+    pub(crate) fn seek_ops_by_index_slow<'a>(
+        &'a self,
+        obj: &ObjId,
+        index: usize,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> OpsFound<'a> {
         let sub_iter = self.iter_obj(obj);
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
@@ -333,16 +346,26 @@ impl OpSet {
     }
 
     fn has_marks_in_range(&self, range: &Range<usize>) -> bool {
-        if let Some(marks) = self.cols.get_str_range(MARK_NAME_COL_SPEC, range).next_run() {
-          marks.value.is_some() || marks.count < range.end - range.start
+        if let Some(marks) = self
+            .cols
+            .get_str_range(MARK_NAME_COL_SPEC, range)
+            .next_run()
+        {
+            marks.value.is_some() || marks.count < range.end - range.start
         } else {
-          false
+            false
         }
     }
 
-    pub(crate) fn seek_ops_by_index_fast<'a>(&'a self, obj: &ObjId, index: usize, encoding: ListEncoding, clock: Option<&Clock>) -> Option<OpsFound<'a>> {
+    pub(crate) fn seek_ops_by_index_fast<'a>(
+        &'a self,
+        obj: &ObjId,
+        mut index: usize,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<OpsFound<'a>> {
         if encoding != ListEncoding::Text || clock.is_some() {
-          return None
+            return None;
         }
 
         let range = self
@@ -356,7 +379,7 @@ impl OpSet {
             .scope_to_value(obj.actor());
 
         if self.has_marks_in_range(&range) {
-          return None
+            return None;
         }
 
         let mut iter = self.text_index.iter_range(range.clone()).with_group();
@@ -365,7 +388,9 @@ impl OpSet {
         let mut ops_pos = vec![];
         let mut end_pos = range.end;
 
+        let obj_start = iter.group();
         if let Some(tx) = iter.nth(index) {
+            index = tx.group - obj_start;
             for op in self.iter_range(&(tx.pos..range.end)) {
                 if op.insert && !ops.is_empty() {
                     break;
@@ -386,7 +411,6 @@ impl OpSet {
             end_pos,
         })
     }
-
 
     fn seek_list_op(
         &self,
