@@ -31,6 +31,8 @@ use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
+const ENABLE_TEXT_INDEX: bool = true;
+
 mod found_op;
 mod insert;
 mod marks;
@@ -244,7 +246,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        if encoding == ListEncoding::Text && clock.is_none() {
+        if encoding == ListEncoding::Text && clock.is_none() && ENABLE_TEXT_INDEX {
             self.query_insert_at_text(obj, index)
         /*
                     let b = InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()?;
@@ -295,9 +297,11 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        if encoding == ListEncoding::Text && clock.is_none() {
+
+        if encoding == ListEncoding::Text && clock.is_none() && ENABLE_TEXT_INDEX {
             return self.iter_obj_text(obj, index);
         }
+
         let sub_iter = self.iter_obj(obj);
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());

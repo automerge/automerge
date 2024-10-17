@@ -10,6 +10,16 @@ pub struct BooleanState {
     count: usize,
 }
 
+impl BooleanState {
+    fn group(&self) -> usize {
+        if self.value {
+            self.count
+        } else {
+            0
+        }
+    }
+}
+
 impl<'a> From<Run<'a, bool>> for BooleanState {
     fn from(run: Run<'a, bool>) -> Self {
         Self {
@@ -24,6 +34,7 @@ pub struct BooleanCursorInternal<const B: usize> {
     value: bool,
     index: usize,
     offset: usize,
+    group: usize,
     last_offset: usize,
 }
 
@@ -40,7 +51,14 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 
     fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
-        out.flush_after(slab, cursor.offset, 0, slab.len() - cursor.index, 0);
+        out.flush_after(
+            slab,
+            cursor.offset,
+            0,
+            slab.len() - cursor.index,
+            slab.group() - cursor.group,
+            Some(cursor.value),
+        );
     }
 
     fn finalize_state<'a>(
@@ -55,20 +73,20 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
                 state.count += post.count;
                 Self::finalize_state(slab, out, state, None, cursor)
             } else {
-                out.flush_bool_run(state.count);
-                out.flush_bool_run(post.count);
+                out.flush_bool_run(state.count, state.value);
+                out.flush_bool_run(post.count, post.value);
                 Some(cursor)
             }
         } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_slice()) {
             if val.value == Some(state.value) {
-                out.flush_bool_run(state.count + val.count);
+                out.flush_bool_run(state.count + val.count, state.value);
                 Some(next_cursor)
             } else {
-                out.flush_bool_run(state.count);
+                out.flush_bool_run(state.count, state.value);
                 Some(cursor)
             }
         } else {
-            out.flush_bool_run(state.count);
+            out.flush_bool_run(state.count, state.value);
             None
         }
     }
@@ -85,7 +103,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run: Run<'a, bool>,
         size: usize,
     ) -> Self::State<'a> {
-        out.flush_before2(slab, c0.offset..c1.last_offset, 0, size, 0);
+        out.flush_before2(
+            slab,
+            c0.offset..c1.last_offset,
+            0,
+            size,
+            c1.group - c0.group,
+        );
         let mut next_state = BooleanState {
             value: run.value.unwrap_or_default(),
             count: 0,
@@ -95,7 +119,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        out.flush_bool_run(state.count);
+        out.flush_bool_run(state.count, state.value);
     }
 
     fn append_chunk<'a>(
@@ -107,7 +131,9 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         if state.value == item {
             state.count += run.count;
         } else {
-            out.flush_bool_run(state.count);
+            if state.count > 0 {
+                out.flush_bool_run(state.count, state.value);
+            }
             state.value = item;
             state.count = run.count;
         }
@@ -122,6 +148,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
 
         let mut state = BooleanState { count, value };
+        let group = cursor.group - state.group();
         let state2 = BooleanState::from(run.unwrap_or_default());
         assert_eq!(state, state2);
         let mut post = None;
@@ -138,7 +165,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
         let mut current = SlabWriter::new(B);
-        current.flush_before(slab, range, 0, size, 0);
+        current.flush_before(slab, range, 0, size, group);
 
         let SpliceDel {
             deleted,
@@ -168,19 +195,6 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         data.splice(range, values.map(|e| e.unwrap_or(false)));
     }
 
-    #[cfg(test)]
-    fn export(data: &[u8]) -> Vec<super::ColExport<bool>> {
-        let mut result = vec![];
-        let mut cursor = Self::default();
-        while let Ok(Some((Run { count, value }, next_cursor))) = cursor.try_next(data) {
-            cursor = next_cursor;
-            if count > 0 {
-                result.push(super::ColExport::Run(count, value.unwrap()))
-            }
-        }
-        result
-    }
-
     fn try_next<'a>(
         &self,
         slab: &'a [u8],
@@ -196,6 +210,9 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         cursor.index += count;
         cursor.last_offset = self.offset;
         cursor.offset += bytes;
+        if self.value {
+            cursor.group += count;
+        }
         let run = Run {
             count,
             value: Some(self.value),
@@ -209,15 +226,19 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn init_empty(len: usize) -> Slab {
         let mut writer = SlabWriter::new(usize::MAX);
-        writer.flush_bool_run(len);
+        writer.flush_bool_run(len, false);
         writer.finish().pop().unwrap_or_default()
+    }
+
+    fn group(&self) -> usize {
+        self.group
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columndata::ColumnData;
-    use super::super::cursor::ColExport;
+    use super::super::test::ColExport;
     use super::*;
 
     #[test]
@@ -232,7 +253,7 @@ pub(crate) mod tests {
             ],
         );
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![
                     ColExport::run(1, true),
@@ -267,7 +288,7 @@ pub(crate) mod tests {
             ],
         );
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![
                     ColExport::run(3, false),
@@ -295,7 +316,7 @@ pub(crate) mod tests {
 
         // empty data
         let col5: ColumnData<BooleanCursor> = ColumnData::new();
-        assert_eq!(col5.export(), vec![vec![]]);
+        assert_eq!(col5.test_dump(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);
         assert_eq!(out, vec![0]);
@@ -312,7 +333,7 @@ pub(crate) mod tests {
             ],
         );
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![
                 ColExport::run(4, true),
                 ColExport::run(4, false),
@@ -324,7 +345,7 @@ pub(crate) mod tests {
         col2.splice::<bool>(2, 2, vec![]);
 
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![vec![
                 ColExport::run(2, true),
                 ColExport::run(4, false),
@@ -336,7 +357,7 @@ pub(crate) mod tests {
         col3.splice::<bool>(2, 2, vec![false, false]);
 
         assert_eq!(
-            col3.export(),
+            col3.test_dump(),
             vec![vec![
                 ColExport::run(2, true),
                 ColExport::run(6, false),
@@ -348,7 +369,7 @@ pub(crate) mod tests {
         col4.splice::<bool>(2, 4, vec![]);
 
         assert_eq!(
-            col4.export(),
+            col4.test_dump(),
             vec![vec![
                 ColExport::run(2, true),
                 ColExport::run(2, false),
@@ -359,24 +380,24 @@ pub(crate) mod tests {
         let mut col5 = col1.clone();
         col5.splice::<bool>(2, 7, vec![]);
 
-        assert_eq!(col5.export(), vec![vec![ColExport::run(3, true),]]);
+        assert_eq!(col5.test_dump(), vec![vec![ColExport::run(3, true),]]);
 
         let mut col6 = col1.clone();
         col6.splice::<bool>(0, 4, vec![]);
 
         assert_eq!(
-            col6.export(),
+            col6.test_dump(),
             vec![vec![ColExport::run(4, false), ColExport::run(2, true),]]
         );
 
         let mut col7 = col1.clone();
         col7.splice::<bool>(0, 10, vec![false]);
 
-        assert_eq!(col7.export(), vec![vec![ColExport::run(1, false),]]);
+        assert_eq!(col7.test_dump(), vec![vec![ColExport::run(1, false),]]);
 
         let mut col8 = col1.clone();
         col8.splice::<bool>(4, 4, vec![]);
 
-        assert_eq!(col8.export(), vec![vec![ColExport::run(6, true),]]);
+        assert_eq!(col8.test_dump(), vec![vec![ColExport::run(6, true),]]);
     }
 }

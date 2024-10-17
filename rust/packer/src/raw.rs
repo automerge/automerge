@@ -117,11 +117,6 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         data.splice(range, total);
     }
 
-    #[cfg(test)]
-    fn export(data: &[u8]) -> Vec<super::ColExport<[u8]>> {
-        vec![super::ColExport::Raw(data.to_vec())]
-    }
-
     fn scan(data: &[u8], _m: &ScanMeta) -> Result<Self, PackError> {
         Ok(Self { offset: data.len() })
     }
@@ -209,22 +204,22 @@ pub enum ReadRawError {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columndata::ColumnData;
-    use super::super::cursor::ColExport;
+    use super::super::test::ColExport;
     use super::*;
 
     #[test]
     fn column_data_raw_splice() {
         let mut col1: ColumnData<RawCursorInternal<6>> = ColumnData::new();
         col1.splice(0, 0, vec![vec![1, 1, 1]]);
-        assert_eq!(col1.export(), vec![vec![ColExport::Raw(vec![1, 1, 1])]]);
+        assert_eq!(col1.test_dump(), vec![vec![ColExport::Raw(vec![1, 1, 1])]]);
         col1.splice(0, 0, vec![vec![2, 2, 2]]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![ColExport::Raw(vec![2, 2, 2, 1, 1, 1])]]
         );
         col1.splice(3, 0, vec![vec![3, 3, 3]]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::Raw(vec![2, 2, 2, 3, 3, 3])],
                 vec![ColExport::Raw(vec![1, 1, 1])],
@@ -232,7 +227,7 @@ pub(crate) mod tests {
         );
         col1.splice(3, 0, vec![vec![4, 4, 4]]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::Raw(vec![2, 2, 2, 4, 4, 4])],
                 vec![ColExport::Raw(vec![3, 3, 3])],
@@ -241,7 +236,7 @@ pub(crate) mod tests {
         );
         col1.splice::<Vec<u8>>(3, 1, vec![]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::Raw(vec![2, 2, 2, 4, 4])],
                 vec![ColExport::Raw(vec![3, 3, 3])],
@@ -250,7 +245,7 @@ pub(crate) mod tests {
         );
         col1.splice(3, 2, vec![vec![5, 5, 5, 5, 5, 5], vec![6, 6, 6]]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::Raw(vec![2, 2, 2, 5, 5, 5, 5, 5, 5])],
                 vec![ColExport::Raw(vec![6, 6, 6])],

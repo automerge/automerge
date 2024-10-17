@@ -3,12 +3,9 @@ use super::pack::{PackError, Packable};
 use super::rle::{RleCursor, RleState};
 use super::slab::{Slab, SlabWriter};
 
-#[cfg(test)]
-use super::ColExport;
-
 use std::ops::Range;
 
-type SubCursor<const B: usize> = RleCursor<B, i64>;
+pub(crate) type SubCursor<const B: usize> = RleCursor<B, i64>;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DeltaCursorInternal<const B: usize> {
@@ -108,24 +105,6 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-/*
-    fn pop<'a>(
-        &self,
-        mut run: Run<'a, Self::Item>,
-    ) -> (
-        Option<<Self::Item as Packable>::Unpacked<'a>>,
-        Option<Run<'a, Self::Item>>,
-    ) {
-        run.count -= 1;
-        let value = run.value.map(|_| self.abs - run.delta());
-        if run.count > 0 {
-            (value, Some(run))
-        } else {
-            (value, None)
-        }
-    }
-*/
-
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
         SubCursor::<B>::flush_state(out, state.rle)
     }
@@ -138,9 +117,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         run: Run<'a, i64>,
         size: usize,
     ) -> Self::State<'a> {
-        SubCursor::<B>::copy_between(slab, out, c0.rle, c1.rle, run, size);
-        let mut rle = RleState::Empty;
-        SubCursor::<B>::append_chunk(&mut rle, out, run);
+        let rle = SubCursor::<B>::copy_between(slab, out, c0.rle, c1.rle, run, size);
         DeltaState { abs: c1.abs, rle }
     }
 
@@ -151,6 +128,32 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     ) -> usize {
         let value = item.map(|i| i - state.abs);
         Self::append_chunk(state, slab, Run { count: 1, value })
+    }
+
+    fn append_first_chunk<'a>(
+        state: &mut DeltaState<'a>,
+        writer: &mut SlabWriter<'a>,
+        run: Run<'a, i64>,
+        slab: &Slab,
+    ) -> bool {
+        if let Some(v) = run.value {
+            let delta = state.abs - slab.abs();
+            Self::append_chunk(
+                state,
+                writer,
+                Run {
+                    count: 1,
+                    value: Some(v - delta),
+                },
+            );
+            if let Some(r) = run.pop() {
+                Self::append_chunk(state, writer, r);
+            }
+            true
+        } else {
+            Self::append_chunk(state, writer, run);
+            false
+        }
     }
 
     fn append_chunk<'a>(
@@ -199,13 +202,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     where
         I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
     {
-        //data.splice(range, values.map(|e| e.map(|i| P::own(i))));
         data.splice(range, values);
-    }
-
-    #[cfg(test)]
-    fn export(data: &[u8]) -> Vec<ColExport<i64>> {
-        SubCursor::<B>::export(data)
     }
 
     fn try_next<'a>(
@@ -262,24 +259,24 @@ impl<const B: usize> DeltaCursorInternal<B> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columndata::ColumnData;
-    use super::super::cursor::ColExport;
+    use super::super::test::ColExport;
     use super::*;
 
     #[test]
     fn column_data_delta_simple() {
         let mut col1: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         col1.splice(0, 0, vec![1]);
-        assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1])],);
+        assert_eq!(col1.test_dump()[0], vec![ColExport::litrun(vec![1])],);
         col1.splice(0, 0, vec![1]);
-        assert_eq!(col1.export()[0], vec![ColExport::litrun(vec![1, 0])],);
+        assert_eq!(col1.test_dump()[0], vec![ColExport::litrun(vec![1, 0])],);
         col1.splice(1, 0, vec![1]);
         assert_eq!(
-            col1.export()[0],
+            col1.test_dump()[0],
             vec![ColExport::litrun(vec![1]), ColExport::run(2, 0)],
         );
         col1.splice(2, 0, vec![1]);
         assert_eq!(
-            col1.export()[0],
+            col1.test_dump()[0],
             vec![ColExport::litrun(vec![1]), ColExport::run(3, 0)],
         );
 
@@ -299,7 +296,7 @@ pub(crate) mod tests {
         col1.splice(0, 0, col1_data.clone());
         col1a.splice(0, 0, col1_data.clone());
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 9, -8, 9])],
                 vec![ColExport::litrun(vec![-7, 23, -8, -16])],
@@ -319,7 +316,7 @@ pub(crate) mod tests {
         let mut col2: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         col2.splice(0, 0, vec![1, 2, 10, 11, 4, 27, 19, 3, 21, 14, 15, 16]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![ColExport::run(2, 1), ColExport::litrun(vec![8, 1])],
                 vec![ColExport::litrun(vec![-7, 23, -8, -16])],
@@ -335,7 +332,7 @@ pub(crate) mod tests {
         let mut col3: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         col3.splice(0, 0, vec![1, 10, 5, 6, 7, 9, 11, 20, 25, 19, 10, 9, 19, 29]);
         assert_eq!(
-            col3.export(),
+            col3.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 9, -5]), ColExport::run(2, 1),],
                 vec![ColExport::run(2, 2), ColExport::litrun(vec![9, 5]),],
@@ -359,7 +356,7 @@ pub(crate) mod tests {
             ],
         );
         assert_eq!(
-            col4.export(),
+            col4.test_dump(),
             vec![
                 vec![
                     ColExport::run(2, 1),
@@ -387,7 +384,7 @@ pub(crate) mod tests {
 
         // empty data
         let col5: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
-        assert_eq!(col5.export(), vec![vec![]]);
+        assert_eq!(col5.test_dump(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);
         assert_eq!(out, Vec::<u8>::new());
@@ -481,7 +478,7 @@ pub(crate) mod tests {
         assert_eq!(data, col.to_vec());
 
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(1),
                 ColExport::litrun(vec![0, 2]),
@@ -493,5 +490,90 @@ pub(crate) mod tests {
                 ColExport::run(2, 1),
             ],]
         );
+    }
+
+    #[test]
+    fn delta_export_join_complex() {
+        // here we create a slab that starts with a null
+        // and has a different abs than the cursor from the previous slab
+        let mut col: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
+        let mut data = vec![
+            None,
+            Some(0),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(4),
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(7),
+            Some(8),
+            Some(9),
+        ];
+        col.splice(0, 0, data.clone());
+        assert_eq!(col.to_vec(), data);
+
+        col.splice(1, 2, vec![Some(10), None]);
+        data.splice(1..3, vec![Some(10), None]);
+        assert_eq!(col.to_vec(), data);
+
+        col.splice(3, 1, vec![None]);
+        data.splice(3..4, vec![None]);
+        assert_eq!(col.to_vec(), data);
+
+        assert_eq!(
+            col.test_dump(),
+            vec![
+                vec![
+                    ColExport::Null(1),
+                    ColExport::litrun(vec![10]),
+                    ColExport::Null(1),
+                ],
+                vec![ColExport::Null(1), ColExport::litrun(vec![2, 0]),],
+                vec![ColExport::run(3, 1),],
+                vec![ColExport::litrun(vec![0]), ColExport::run(2, 1),],
+            ]
+        );
+        let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
+    }
+
+    #[test]
+    fn delta_export_join_simple() {
+        // here we create a slab that starts with a null
+        // and has a different abs than the cursor from the previous slab
+        let mut col: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
+        let data = vec![
+            None,
+            Some(0),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(4),
+            Some(5),
+            Some(6),
+            Some(7),
+            Some(7),
+            Some(8),
+            Some(9),
+        ];
+        col.splice(0, 0, data.clone());
+        assert_eq!(col.to_vec(), data);
+
+        assert_eq!(
+            col.test_dump(),
+            vec![
+                vec![ColExport::Null(1), ColExport::litrun(vec![0, 2]),],
+                vec![
+                    ColExport::Run(2, 1),
+                    ColExport::litrun(vec![0]),
+                    ColExport::run(3, 1)
+                ],
+                vec![ColExport::litrun(vec![0]), ColExport::run(2, 1),],
+            ]
+        );
+        let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
     }
 }

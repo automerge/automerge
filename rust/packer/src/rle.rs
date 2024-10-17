@@ -89,7 +89,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn num_left(&self) -> usize {
+    pub(crate) fn num_left(&self) -> usize {
         self.lit.as_ref().map(|l| l.num_left()).unwrap_or(0)
     }
 
@@ -224,7 +224,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         size: usize,
     ) -> Self::State<'a> {
         match (c0.valid_lit(), c1.valid_lit()) {
-            (Some(a), Some(_b)) if a.len == slab.len() => {
+            // its one big lit-run
+            (Some(a), Some(b)) if a.offset == b.offset => {
                 let lit = a.len - 2;
                 writer.flush_before2(
                     slab,
@@ -235,6 +236,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 );
             }
             (Some(a), Some(b)) => {
+                // its two different lit-runs
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
@@ -319,6 +321,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             num_left,
             slab.len() - cursor.index,
             slab.group() - cursor.group(),
+            None,
         );
     }
 
@@ -426,51 +429,6 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
     {
         data.splice(range, values.map(|e| e.map(|i| P::own(i))));
-    }
-
-    #[cfg(test)]
-    fn export(data: &[u8]) -> Vec<super::ColExport<Self::Item>> {
-        let mut cursor = Self::default();
-        let mut current = None;
-        let mut result = vec![];
-        while let Some((run, next)) = cursor.next(data) {
-            match run {
-                Run { count, value: None } => {
-                    if let Some(run) = current.take() {
-                        result.push(super::ColExport::litrun(run))
-                    }
-                    result.push(super::ColExport::Null(count))
-                }
-                Run {
-                    count: 1,
-                    value: Some(v),
-                } => {
-                    if next.num_left() == 0 {
-                        let mut run = current.take().unwrap_or_default();
-                        run.push(v);
-                        result.push(super::ColExport::litrun(run))
-                    } else if let Some(run) = &mut current {
-                        run.push(v);
-                    } else {
-                        current = Some(vec![v]);
-                    }
-                }
-                Run {
-                    count,
-                    value: Some(v),
-                } => {
-                    if let Some(run) = current.take() {
-                        result.push(super::ColExport::litrun(run))
-                    }
-                    result.push(super::ColExport::run(count, v))
-                }
-            }
-            cursor = next;
-        }
-        if let Some(run) = current.take() {
-            result.push(super::ColExport::litrun(run))
-        }
-        result
     }
 
     fn try_next<'a>(
@@ -626,7 +584,7 @@ impl<'a, T: Packable + ?Sized> From<Run<'a, T>> for RleState<'a, T> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columndata::{ColGroupItem, ColumnData};
-    use super::super::cursor::ColExport;
+    use super::super::test::ColExport;
     use super::*;
 
     #[test]
@@ -634,7 +592,7 @@ pub(crate) mod tests {
         let mut col1: ColumnData<RleCursor<4, u64>> = ColumnData::new();
         col1.splice(0, 0, vec![1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 2, 3])],
                 vec![ColExport::litrun(vec![4, 5, 6])],
@@ -644,7 +602,7 @@ pub(crate) mod tests {
         let mut col2: ColumnData<RleCursor<10, str>> = ColumnData::new();
         col2.splice(0, 0, vec!["xxx1", "xxx2", "xxx3", "xxx3"]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![ColExport::litrun(vec!["xxx1", "xxx2"])],
                 vec![ColExport::run(2, "xxx3")],
@@ -652,7 +610,7 @@ pub(crate) mod tests {
         );
         col2.splice(0, 0, vec!["xxx0"]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![ColExport::litrun(vec!["xxx0", "xxx1"])],
                 vec![ColExport::litrun(vec!["xxx2"])],
@@ -661,7 +619,7 @@ pub(crate) mod tests {
         );
         col2.splice(3, 0, vec!["xxx3", "xxx3"]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![ColExport::litrun(vec!["xxx0", "xxx1"])],
                 vec![ColExport::litrun(vec!["xxx2"])],
@@ -687,7 +645,7 @@ pub(crate) mod tests {
         let mut col1: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         col1.splice(0, 0, vec![1, 2, 3, 4, 5, 6]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 2, 3, 4])],
                 vec![ColExport::litrun(vec![5, 6])],
@@ -695,7 +653,7 @@ pub(crate) mod tests {
         );
         col1.splice(0, 0, vec![9, 9]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::run(2, 9), ColExport::litrun(vec![1])],
                 vec![ColExport::litrun(vec![2, 3, 4])],
@@ -704,7 +662,7 @@ pub(crate) mod tests {
         );
         col1.splice(5, 0, vec![4]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::run(2, 9), ColExport::litrun(vec![1])],
                 vec![ColExport::litrun(vec![2, 3]), ColExport::run(2, 4)],
@@ -719,7 +677,7 @@ pub(crate) mod tests {
         let mut col1: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         col1.splice(0, 0, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 2, 3, 4])],
                 vec![ColExport::litrun(vec![5, 6, 7, 8])],
@@ -741,7 +699,7 @@ pub(crate) mod tests {
         let mut col2: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         col2.splice(0, 0, vec![1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![
                 vec![ColExport::run(2, 1), ColExport::litrun(vec![2, 3])],
                 vec![ColExport::litrun(vec![4, 5, 6, 7])],
@@ -763,7 +721,7 @@ pub(crate) mod tests {
         let mut col3: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         col3.splice(0, 0, vec![1, 2, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 11, 11]);
         assert_eq!(
-            col3.export(),
+            col3.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 2, 3]), ColExport::run(2, 4),],
                 vec![ColExport::run(2, 5), ColExport::litrun(vec![6, 7]),],
@@ -793,7 +751,7 @@ pub(crate) mod tests {
             vec![1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9],
         );
         assert_eq!(
-            col4.export(),
+            col4.test_dump(),
             vec![
                 vec![
                     ColExport::run(2, 1),
@@ -828,7 +786,7 @@ pub(crate) mod tests {
 
         // empty data
         let col5: ColumnData<RleCursor<5, u64>> = ColumnData::new();
-        assert_eq!(col5.export(), vec![vec![]]);
+        assert_eq!(col5.test_dump(), vec![vec![]]);
         let mut out = Vec::new();
         col5.write(&mut out);
         assert_eq!(out, Vec::<u8>::new());
@@ -839,7 +797,7 @@ pub(crate) mod tests {
         let mut col1: ColumnData<RleCursor<1024, u64>> = ColumnData::new();
         col1.splice(0, 0, vec![1, 1, 1, 2, 3, 4, 5, 6, 9, 9]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![
                 ColExport::run(3, 1),
                 ColExport::litrun(vec![2, 3, 4, 5, 6]),
@@ -848,7 +806,7 @@ pub(crate) mod tests {
         );
         col1.splice::<u64>(1, 1, vec![]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![
                 ColExport::run(2, 1),
                 ColExport::litrun(vec![2, 3, 4, 5, 6]),
@@ -858,7 +816,7 @@ pub(crate) mod tests {
         let mut col2 = col1.clone();
         col2.splice::<u64>(0, 1, vec![]);
         assert_eq!(
-            col2.export(),
+            col2.test_dump(),
             vec![vec![
                 ColExport::litrun(vec![1, 2, 3, 4, 5, 6]),
                 ColExport::run(2, 9),
@@ -867,7 +825,7 @@ pub(crate) mod tests {
 
         let mut col3 = col1.clone();
         col3.splice::<u64>(1, 7, vec![]);
-        assert_eq!(col3.export(), vec![vec![ColExport::litrun(vec![1, 9]),]]);
+        assert_eq!(col3.test_dump(), vec![vec![ColExport::litrun(vec![1, 9]),]]);
     }
 
     #[test]
@@ -875,7 +833,7 @@ pub(crate) mod tests {
         let mut col1: ColumnData<RleCursor<1024, u64>> = ColumnData::new();
         col1.splice(0, 0, vec![1, 2, 4, 4, 4, 5, 6]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![
                 ColExport::litrun(vec![1, 2]),
                 ColExport::run(3, 4),
@@ -884,7 +842,7 @@ pub(crate) mod tests {
         );
         col1.splice::<u64>(3, 1, vec![9]);
         assert_eq!(
-            col1.export(),
+            col1.test_dump(),
             vec![vec![ColExport::litrun(vec![1, 2, 4, 9, 4, 5, 6]),]]
         );
     }

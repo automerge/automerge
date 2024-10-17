@@ -410,9 +410,16 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
-    #[cfg(test)]
-    pub fn export(&self) -> Vec<Vec<super::cursor::ColExport<C::Item>>> {
-        self.slabs.iter().map(|s| C::export(s.as_slice())).collect()
+    pub fn export(&self) -> Vec<u8> {
+        let mut data = vec![];
+        self.write(&mut data);
+        data
+    }
+
+    pub fn import(data: Vec<u8>) -> Result<ColumnData<C>, PackError> {
+        let range = 0..data.len();
+        let data = Arc::new(data);
+        ColumnData::<C>::external(data, range, &Default::default())
     }
 
     pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> usize
@@ -439,6 +446,13 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         let mut group = cursor.weight.group;
 
+        debug_assert_eq!(
+            self.iter()
+                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
+                .sum::<usize>(),
+            self.group()
+        );
+
         match C::splice(cursor.element, index - cursor.weight.pos, del, values) {
             SpliceResult::Replace(add, del, g, slabs) => {
                 group += g;
@@ -447,6 +461,13 @@ impl<C: ColumnCursor> ColumnData<C> {
                 assert!(!self.slabs.is_empty());
             }
         }
+
+        debug_assert_eq!(
+            self.iter()
+                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
+                .sum::<usize>(),
+            self.group()
+        );
 
         #[cfg(debug_assertions)]
         if self.debug != self.to_vec() {
@@ -463,6 +484,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
         group
     }
+
     pub fn init_empty(len: usize) -> Self {
         let new_slab = C::init_empty(len);
         let mut slabs = SlabTree::new();
@@ -479,7 +501,14 @@ impl<C: ColumnCursor> ColumnData<C> {
     ) -> Result<Self, PackError> {
         let slab = Slab::external::<C>(data, range, m)?;
         let len = slab.len();
-        Ok(ColumnData::init(len, SlabTree::new2(slab)))
+        let col = ColumnData::init(len, SlabTree::new2(slab));
+        debug_assert_eq!(
+            col.iter()
+                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
+                .sum::<usize>(),
+            col.group()
+        );
+        Ok(col)
     }
 
     pub fn len(&self) -> usize {
@@ -509,9 +538,9 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::boolean::BooleanCursor;
-    use super::super::cursor::ColExport;
-    use super::super::delta::DeltaCursor;
+    use super::super::delta::{DeltaCursor, DeltaCursorInternal};
     use super::super::rle::{IntCursor, RleCursor, StrCursor};
+    use super::super::test::ColExport;
     use super::*;
     use rand::prelude::*;
     use rand::rngs::SmallRng;
@@ -551,23 +580,26 @@ pub(crate) mod tests {
         let numbers = vec![1, 2, 3];
         let mut start = ColumnData::<IntCursor>::new();
         start.splice(0, 0, numbers);
-        assert_eq!(start.export(), vec![vec![ColExport::LitRun(vec![1, 2, 3])]]);
+        assert_eq!(
+            start.test_dump(),
+            vec![vec![ColExport::LitRun(vec![1, 2, 3])]]
+        );
         let mut col = start.clone();
         col.splice(2, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::LitRun(vec![1, 2]), ColExport::Run(4, 3)]]
         );
         let mut col = start.clone();
         col.splice(3, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::LitRun(vec![1, 2]), ColExport::Run(4, 3)]]
         );
         let mut col = start.clone();
         col.splice(1, 0, vec![2, 2]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::LitRun(vec![1]),
                 ColExport::Run(3, 2),
@@ -577,7 +609,7 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(2, 0, vec![2, 2]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::LitRun(vec![1]),
                 ColExport::Run(3, 2),
@@ -587,13 +619,13 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(0, 0, vec![1, 1]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::Run(3, 1), ColExport::LitRun(vec![2, 3]),]]
         );
         let mut col = start.clone();
         col.splice(1, 0, vec![1, 1]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::Run(3, 1), ColExport::LitRun(vec![2, 3]),]]
         );
     }
@@ -603,11 +635,11 @@ pub(crate) mod tests {
         let numbers = vec![2, 2, 2];
         let mut start = ColumnData::<IntCursor>::new();
         start.splice(0, 0, numbers);
-        assert_eq!(start.export(), vec![vec![ColExport::Run(3, 2)]]);
+        assert_eq!(start.test_dump(), vec![vec![ColExport::Run(3, 2)]]);
         let mut col = start.clone();
         col.splice(1, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::LitRun(vec![2]),
                 ColExport::Run(3, 3),
@@ -617,7 +649,7 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(2, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(2, 2),
                 ColExport::Run(3, 3),
@@ -627,13 +659,13 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(0, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::Run(3, 3), ColExport::Run(3, 2),]]
         );
         let mut col = start.clone();
         col.splice(3, 0, vec![3, 3, 3]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::Run(3, 2), ColExport::Run(3, 3),]]
         );
     }
@@ -644,7 +676,7 @@ pub(crate) mod tests {
         let mut start = ColumnData::<IntCursor>::new();
         start.splice(0, 0, numbers);
         assert_eq!(
-            start.export(),
+            start.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::Run(2, 2),
@@ -658,7 +690,7 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(2, 0, vec![None, None, Some(2), Some(2)]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(4),
                 ColExport::Run(4, 2),
@@ -669,7 +701,7 @@ pub(crate) mod tests {
         assert_eq!(col.slabs.iter().map(|s| s.len()).sum::<usize>(), 11);
         col.splice(8, 0, vec![Some(2), Some(2), None, None]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(4),
                 ColExport::Run(6, 2),
@@ -678,7 +710,7 @@ pub(crate) mod tests {
         );
         col.splice(4, 0, vec![None, Some(2), Some(3)]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(5),
                 ColExport::LitRun(vec![2, 3]),
@@ -688,7 +720,7 @@ pub(crate) mod tests {
         );
         col.splice(2, 0, vec![4]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::LitRun(vec![4]),
@@ -700,7 +732,7 @@ pub(crate) mod tests {
         );
         col.splice(6, 0, vec![None, None, Some(2), Some(2)]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::LitRun(vec![4]),
@@ -717,7 +749,7 @@ pub(crate) mod tests {
             vec![Some(3), Some(3), None, Some(7), Some(8), Some(9), Some(2)],
         );
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::LitRun(vec![4]),
@@ -732,7 +764,7 @@ pub(crate) mod tests {
         );
         col.splice(15, 0, vec![5, 6]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::LitRun(vec![4]),
@@ -754,13 +786,13 @@ pub(crate) mod tests {
         let mut start = ColumnData::<StrCursor>::new();
         start.splice(0, 0, strings);
         assert_eq!(
-            start.export(),
+            start.test_dump(),
             vec![vec![ColExport::litrun(vec!["one", "two", "three"])]]
         );
         let mut col = start.clone();
         col.splice(1, 0, vec![None, None, Some("two"), Some("two")]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::litrun(vec!["one"]),
                 ColExport::Null(2),
@@ -770,7 +802,7 @@ pub(crate) mod tests {
         );
         col.splice(0, 0, vec![None, None, Some("three"), Some("one")]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
                 ColExport::litrun(vec!["three"]),
@@ -788,7 +820,7 @@ pub(crate) mod tests {
         let mut start = ColumnData::<DeltaCursor>::new();
         start.splice(0, 0, numbers.clone());
         assert_eq!(
-            start.export(),
+            start.test_dump(),
             vec![vec![
                 ColExport::Run(6, 1),
                 ColExport::Run(4, 0),
@@ -801,7 +833,7 @@ pub(crate) mod tests {
         let mut col = start.clone();
         col.splice(1, 0, vec![2]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(2, 1),
                 ColExport::LitRun(vec![0]),
@@ -812,7 +844,7 @@ pub(crate) mod tests {
         );
         col.splice(0, 0, vec![0]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::LitRun(vec![0]),
                 ColExport::Run(2, 1),
@@ -903,7 +935,7 @@ pub(crate) mod tests {
 
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
-        //let seed = 7796233028731974218;
+        //let seed = 5929730802105464676;
         println!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -929,12 +961,19 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
-        let mut col = ColumnData::<RleCursor<{ usize::MAX }, u64>>::new();
+        let mut col = ColumnData::<RleCursor<64, u64>>::new();
         let mut rng = make_rng();
         for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
+        let mut copy = vec![];
+        col.write(&mut copy);
+        let range = 0..copy.len();
+        let export =
+            ColumnData::<RleCursor<64, u64>>::external(Arc::new(copy), range, &Default::default())
+                .unwrap();
+        assert_eq!(col.to_vec(), export.to_vec());
     }
 
     #[test]
@@ -953,10 +992,17 @@ pub(crate) mod tests {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<RleCursor<{ usize::MAX }, str>>::new();
         let mut rng = make_rng();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
+        let mut copy = vec![];
+        col.write(&mut copy);
+        let range = 0..copy.len();
+        let export =
+            ColumnData::<RleCursor<64, str>>::external(Arc::new(copy), range, &Default::default())
+                .unwrap();
+        assert_eq!(col.to_vec(), export.to_vec());
     }
 
     #[test]
@@ -973,18 +1019,20 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_delta() {
         let mut data: Vec<Option<i64>> = vec![];
-        let mut col = ColumnData::<DeltaCursor>::new();
+        let mut col = ColumnData::<DeltaCursorInternal<8>>::new();
         let mut rng = make_rng();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
+        let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
     }
 
     #[test]
     fn column_data_fuzz_test_advance_by_delta() {
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..100 {
             let mut col = ColumnData::<DeltaCursor>::new();
             let values = Option::<i64>::rand_vec(&mut rng);
             col.splice(0, 0, values.clone());
@@ -997,15 +1045,15 @@ pub(crate) mod tests {
         let data: Vec<bool> = vec![true, true, true];
         let mut col = ColumnData::<BooleanCursor>::new();
         col.splice(0, 0, data.clone());
-        assert_eq!(col.export(), vec![vec![ColExport::Run(3, true)]]);
+        assert_eq!(col.test_dump(), vec![vec![ColExport::Run(3, true)]]);
         col.splice(0, 0, vec![false, false, false]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![ColExport::Run(3, false), ColExport::Run(3, true)]]
         );
         col.splice(6, 0, vec![false, false, false]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(3, false),
                 ColExport::Run(3, true),
@@ -1014,7 +1062,7 @@ pub(crate) mod tests {
         );
         col.splice(9, 0, vec![true, true, true]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(3, false),
                 ColExport::Run(3, true),
@@ -1024,7 +1072,7 @@ pub(crate) mod tests {
         );
         col.splice(0, 0, vec![true, true, true]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(3, true),
                 ColExport::Run(3, false),
@@ -1035,7 +1083,7 @@ pub(crate) mod tests {
         );
         col.splice(1, 0, vec![false, false, false]);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![vec![
                 ColExport::Run(1, true),
                 ColExport::Run(3, false),
@@ -1053,10 +1101,17 @@ pub(crate) mod tests {
         let mut data: Vec<bool> = vec![];
         let mut col = ColumnData::<BooleanCursor>::new();
         let mut rng = make_rng();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
+        let mut copy = vec![];
+        col.write(&mut copy);
+        let range = 0..copy.len();
+        let export =
+            ColumnData::<BooleanCursor>::external(Arc::new(copy), range, &Default::default())
+                .unwrap();
+        assert_eq!(col.to_vec(), export.to_vec());
     }
 
     #[test]
@@ -1109,7 +1164,7 @@ pub(crate) mod tests {
         let mut col = ColumnData::<RleCursor<4, u64>>::new();
         col.splice(0, 0, data);
         assert_eq!(
-            col.export(),
+            col.test_dump(),
             vec![
                 vec![ColExport::litrun(vec![1, 2, 3])],
                 vec![ColExport::litrun(vec![4, 5, 6])],

@@ -4,7 +4,7 @@ use super::slab::{Slab, SlabWeight, SlabWriter};
 use std::fmt::Debug;
 use std::ops::Range;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScanMeta {
     pub actors: usize,
 }
@@ -127,28 +127,9 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
     }
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum ColExport<P: Packable + ?Sized> {
-    LitRun(Vec<P::Owned>),
-    Run(usize, P::Owned),
-    Raw(Vec<u8>),
-    Null(usize),
-}
-
-#[cfg(test)]
-impl<P: Packable + ?Sized> ColExport<P> {
-    pub(crate) fn litrun(items: Vec<P::Unpacked<'_>>) -> Self {
-        Self::LitRun(items.into_iter().map(|i| P::own(i)).collect())
-    }
-    pub(crate) fn run(count: usize, item: P::Unpacked<'_>) -> Self {
-        Self::Run(count, P::own(item))
-    }
-}
-
 pub trait ColumnCursor: Debug + Clone + Copy {
     type Item: Packable + ?Sized;
-    type State<'a>: Default;
+    type State<'a>: Default + Debug;
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
 
@@ -165,29 +146,70 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     ) -> Self::State<'a> {
         let mut size = slab.len();
 
-        if slab.is_empty() {
+        let mut c0 = None;
+        let mut last = None;
+        for (run, c) in slab.run_iter::<Self>().with_cursor() {
+            if c0.is_none() {
+                size -= run.count;
+                if Self::append_first_chunk(&mut state, writer, run, slab) {
+                    c0 = Some(c);
+                }
+            } else {
+                last = Some((run, c));
+            }
+        }
+
+        if c0.is_none() || last.is_none() {
             return state;
         }
 
-        let (run0, c0) = Self::seek(1, slab);
-        let run0 = run0.unwrap();
-        size -= run0.count;
-        Self::append_chunk(&mut state, writer, run0);
-        if size == 0 {
-            return state;
-        }
+        let c0 = c0.unwrap();
+        let (run1, c1) = last.unwrap();
 
-        let (run1, c1) = Self::seek(slab.len(), slab);
-        let run1 = run1.unwrap();
         size -= run1.count;
+
         if size == 0 {
             Self::append_chunk(&mut state, writer, run1);
             return state;
         }
+
         Self::flush_state(writer, state);
 
         Self::copy_between(slab, writer, c0, c1, run1, size)
     }
+
+    /*
+        fn write<'a>(
+            writer: &mut SlabWriter<'a>,
+            slab: &'a Slab,
+            mut state: Self::State<'a>,
+        ) -> Self::State<'a> {
+            let mut size = slab.len();
+
+            if slab.is_empty() {
+                return state;
+            }
+
+            let (run0, c0) = Self::seek(1, slab);
+            let run0 = run0.unwrap();
+            size -= run0.count;
+            Self::append_chunk(&mut state, writer, run0);
+            if size == 0 {
+                return state;
+            }
+
+            let (run1, c1) = Self::seek(slab.len(), slab);
+            let run1 = run1.unwrap();
+            size -= run1.count;
+            if size == 0 {
+                Self::append_chunk(&mut state, writer, run1);
+                return state;
+            }
+            Self::flush_state(writer, state);
+
+            Self::copy_between(slab, writer, c0, c1, run1, size)
+        }
+    */
 
     fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
         v.is_none()
@@ -200,24 +222,24 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         run.value
     }
 
-/*
-    #[allow(clippy::type_complexity)]
-    fn pop<'a>(
-        &self,
-        mut run: Run<'a, Self::Item>,
-    ) -> (
-        Option<<Self::Item as Packable>::Unpacked<'a>>,
-        Option<Run<'a, Self::Item>>,
-    ) {
-        let value = run.value;
-        run.count -= 1;
-        if run.count > 0 {
-            (value, Some(run))
-        } else {
-            (value, None)
+    /*
+        #[allow(clippy::type_complexity)]
+        fn pop<'a>(
+            &self,
+            mut run: Run<'a, Self::Item>,
+        ) -> (
+            Option<<Self::Item as Packable>::Unpacked<'a>>,
+            Option<Run<'a, Self::Item>>,
+        ) {
+            let value = run.value;
+            run.count -= 1;
+            if run.count > 0 {
+                (value, Some(run))
+            } else {
+                (value, None)
+            }
         }
-    }
-*/
+    */
 
     fn finalize_state<'a>(
         slab: &'a Slab,
@@ -235,6 +257,16 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         value: Option<<Self::Item as Packable>::Unpacked<'a>>,
     ) -> usize {
         Self::append_chunk(state, out, Run { count: 1, value })
+    }
+
+    fn append_first_chunk<'a>(
+        state: &mut Self::State<'a>,
+        out: &mut SlabWriter<'a>,
+        chunk: Run<'a, Self::Item>,
+        _slab: &Slab,
+    ) -> bool {
+        Self::append_chunk(state, out, chunk);
+        true
     }
 
     fn append_chunk<'a>(
@@ -261,9 +293,6 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         &self,
         data: &'a [u8],
     ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError>;
-
-    #[cfg(test)]
-    fn export(data: &[u8]) -> Vec<ColExport<Self::Item>>;
 
     fn to_vec<'a, I>(values: I) -> Vec<Self::Export>
     where
@@ -487,6 +516,10 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
         }
         None
     }
+
+    pub(crate) fn with_cursor(self) -> RunIterWithCursor<'a, C> {
+        RunIterWithCursor(self)
+    }
 }
 
 impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
@@ -497,5 +530,16 @@ impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
         self.cursor = cursor;
         self.weight_left -= run.weight_left();
         Some(run)
+    }
+}
+
+pub(crate) struct RunIterWithCursor<'a, C: ColumnCursor>(RunIter<'a, C>);
+
+impl<'a, C: ColumnCursor> Iterator for RunIterWithCursor<'a, C> {
+    type Item = (Run<'a, C::Item>, C);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let run = self.0.next()?;
+        Some((run, self.0.cursor))
     }
 }

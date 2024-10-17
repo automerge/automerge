@@ -8,6 +8,9 @@ pub(crate) mod raw;
 pub(crate) mod rle;
 pub(crate) mod slab;
 
+#[cfg(test)]
+pub(crate) mod test;
+
 pub use boolean::BooleanCursor;
 pub use columndata::{ColGroupItem, ColumnData, ColumnDataIter};
 pub use cursor::{ColumnCursor, Run, ScanMeta};
@@ -17,6 +20,3 @@ pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
 pub use rle::{IntCursor, RleCursor, StrCursor};
 pub use slab::{Slab, SlabTree, WriteOp};
-
-#[cfg(test)]
-pub(crate) use cursor::ColExport;

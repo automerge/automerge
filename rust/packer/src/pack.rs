@@ -124,6 +124,14 @@ impl Packable for bool {
         item
     }
 
+    fn group(item: bool) -> usize {
+        if item {
+            1
+        } else {
+            0
+        }
+    }
+
     fn unpack(_buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
         panic!()
     }

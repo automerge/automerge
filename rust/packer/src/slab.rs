@@ -91,9 +91,10 @@ impl<'a> From<bool> for WriteOp<'a> {
 pub enum WriteOp<'a> {
     UInt(u64),
     GroupUInt(u64, usize),
+    BoolRun(u64, bool),
     Int(i64),
     Bytes(&'a [u8]),
-    Import(&'a Slab, Range<usize>, usize),
+    Import(&'a Slab, Range<usize>, usize, Option<bool>),
 }
 
 impl<'a> Debug for WriteOp<'a> {
@@ -102,9 +103,10 @@ impl<'a> Debug for WriteOp<'a> {
         match self {
             Self::UInt(a) => s.field("uint", a),
             Self::GroupUInt(a, b) => s.field("group_uint", a).field("group", b),
+            Self::BoolRun(a, b) => s.field("bool_run", a).field("bool", b),
             Self::Int(a) => s.field("int", a),
             Self::Bytes(a) => s.field("bytes", &a.len()),
-            Self::Import(_a, b, _c) => s.field("import", b),
+            Self::Import(_a, b, _c, _) => s.field("import", b),
         }
         .finish()
     }
@@ -122,8 +124,9 @@ pub enum WriteAction<'a> {
 impl<'a> WriteOp<'a> {
     fn group(&self) -> usize {
         match self {
-            Self::Import(_, _, g) => *g,
+            Self::Import(_, _, g, _) => *g,
             Self::GroupUInt(_, g) => *g,
+            Self::BoolRun(c, b) if *b => *c as usize,
             _ => 0,
         }
     }
@@ -139,15 +142,24 @@ impl<'a> WriteOp<'a> {
         match self {
             Self::UInt(i) => ulebsize(*i) as usize,
             Self::GroupUInt(i, _) => ulebsize(*i) as usize,
+            Self::BoolRun(i, _) => ulebsize(*i) as usize,
             Self::Int(i) => lebsize(*i) as usize,
             Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
-            Self::Import(_, r, _) => r.end - r.start,
+            Self::Import(_, r, _, _) => r.end - r.start,
+        }
+    }
+
+    fn bool_value(&self) -> Option<bool> {
+        match self {
+            Self::BoolRun(_, v) => Some(*v),
+            Self::Import(_, _, _, v) => *v,
+            _ => None,
         }
     }
 
     fn copy_width(&self) -> usize {
         match self {
-            Self::Import(_, _, _) => self.width(),
+            Self::Import(_, _, _, _) => self.width(),
             _ => 0,
         }
     }
@@ -163,6 +175,10 @@ impl<'a> WriteOp<'a> {
                 leb128::write::unsigned(buff, i).unwrap();
                 //println!("write group uint {} {:?}",i, &buff[start..]);
             }
+            Self::BoolRun(i, _) => {
+                leb128::write::unsigned(buff, i).unwrap();
+                //println!("write group uint {} {:?}",i, &buff[start..]);
+            }
             Self::Int(i) => {
                 leb128::write::signed(buff, i).unwrap();
                 //println!("write int {} {:?}",i, &buff[start..]);
@@ -172,7 +188,7 @@ impl<'a> WriteOp<'a> {
                 buff.extend(b);
                 //println!("write bytes {:?}",&buff[start..]);
             }
-            Self::Import(s, r, _) => {
+            Self::Import(s, r, _, _) => {
                 buff.extend(&s[r]);
                 //println!("write import ({:?} bytes)",buff[start..].len());
             }
@@ -217,6 +233,13 @@ impl<'a> WriteAction<'a> {
         }
     }
 
+    fn bool_value(&self) -> Option<bool> {
+        match self {
+            Self::Op(op) => op.bool_value(),
+            _ => None,
+        }
+    }
+
     fn write(self, buff: &mut Vec<u8>) {
         //let start = buff.len();
         match self {
@@ -248,6 +271,7 @@ pub struct SlabWriter<'a> {
     width: usize,
     items: usize,
     group: usize,
+    bools: u64,
     abs: i64,
     init_abs: i64,
     lit_items: usize,
@@ -262,6 +286,7 @@ impl<'a> SlabWriter<'a> {
             group: 0,
             abs: 0,
             init_abs: 0,
+            bools: 0,
             lit_items: 0,
             items: 0,
             actions: vec![],
@@ -310,6 +335,7 @@ impl<'a> SlabWriter<'a> {
             return;
         }
         self.check_copy_overflow(action.copy_width());
+        self.check_bool_state(action.bool_value());
         self.abs += action.abs();
         self.group += action.group();
         self.width += width;
@@ -317,6 +343,14 @@ impl<'a> SlabWriter<'a> {
         self.close_lit();
         self.actions.push(action);
         self.check_max();
+    }
+
+    fn check_bool_state(&mut self, val: Option<bool>) {
+        // we cant count items b/c we might
+        // have copied over a zero run of false's
+        if self.width == 0 && val == Some(true) {
+            self.push(WriteAction::Op(WriteOp::BoolRun(0, false)), 0);
+        }
     }
 
     fn close_lit(&mut self) {
@@ -335,6 +369,7 @@ impl<'a> SlabWriter<'a> {
                 .push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
+            self.bools = 0;
             self.items = 0;
         }
     }
@@ -346,6 +381,7 @@ impl<'a> SlabWriter<'a> {
                 .push(WriteAction::End(self.items, self.group, self.abs));
             self.width = 0;
             self.group = 0;
+            self.bools = 0;
             self.items = 0;
         }
     }
@@ -400,9 +436,12 @@ impl<'a> SlabWriter<'a> {
     ) {
         if size > 0 {
             if lit > 0 {
-                self.push_lit(WriteOp::Import(slab, range, group), lit, size)
+                self.push_lit(WriteOp::Import(slab, range, group, None), lit, size)
             } else {
-                self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
+                self.push(
+                    WriteAction::Op(WriteOp::Import(slab, range, group, None)),
+                    size,
+                )
             }
         }
     }
@@ -416,9 +455,12 @@ impl<'a> SlabWriter<'a> {
         group: usize,
     ) {
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range, group), lit, size)
+            self.push_lit(WriteOp::Import(slab, range, group, None), lit, size)
         } else {
-            self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
+            self.push(
+                WriteAction::Op(WriteOp::Import(slab, range, group, None)),
+                size,
+            )
         }
     }
 
@@ -429,12 +471,16 @@ impl<'a> SlabWriter<'a> {
         lit: usize,
         size: usize,
         group: usize,
+        bool_state: Option<bool>,
     ) {
         let range = index..slab.byte_len();
         if lit > 0 {
-            self.push_lit(WriteOp::Import(slab, range, group), lit, size)
+            self.push_lit(WriteOp::Import(slab, range, group, bool_state), lit, size)
         } else {
-            self.push(WriteAction::Op(WriteOp::Import(slab, range, group)), size)
+            self.push(
+                WriteAction::Op(WriteOp::Import(slab, range, group, bool_state)),
+                size,
+            )
         }
     }
 
@@ -444,8 +490,11 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub fn flush_bool_run(&mut self, count: usize) {
-        self.push(WriteAction::Op(WriteOp::GroupUInt(count as u64, 0)), count);
+    pub fn flush_bool_run(&mut self, count: usize, value: bool) {
+        self.push(
+            WriteAction::Op(WriteOp::BoolRun(count as u64, value)),
+            count,
+        );
     }
 
     pub fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
