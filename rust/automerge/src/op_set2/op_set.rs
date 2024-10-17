@@ -31,8 +31,6 @@ use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
-const ENABLE_TEXT_INDEX: bool = true;
-
 mod found_op;
 mod insert;
 mod marks;
@@ -205,15 +203,27 @@ impl OpSet {
         &self,
         obj: &ObjId,
         index: usize,
-    ) -> Result<QueryNth, AutomergeError> {
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<QueryNth> {
+
+        if encoding != ListEncoding::Text || clock.is_some() {
+          return None
+        }
+
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
             .scope_to_value(obj.counter());
+
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
+
+        if self.has_marks_in_range(&range) {
+          return None
+        }
 
         let mut elemid = ElemId::head();
         let mut pos = range.start;
@@ -232,7 +242,7 @@ impl OpSet {
                 }
             }
         }
-        Ok(QueryNth {
+        Some(QueryNth {
             marks: None,
             pos,
             elemid,
@@ -246,14 +256,9 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        if encoding == ListEncoding::Text && clock.is_none() && ENABLE_TEXT_INDEX {
-            self.query_insert_at_text(obj, index)
-        /*
-                    let b = InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()?;
-                    assert_eq!(a.pos, b.pos);
-                    assert_eq!(a.elemid, b.elemid);
-                    Ok(b)
-        */
+        if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
+            debug_assert_eq!(Ok(&query), InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve().as_ref());
+            Ok(query)
         } else {
             InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
         }
@@ -297,11 +302,15 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-
-        if encoding == ListEncoding::Text && clock.is_none() && ENABLE_TEXT_INDEX {
-            return self.iter_obj_text(obj, index);
+        if let Some(found) = self.seek_ops_by_index_fast(obj, index, encoding, clock) {
+          debug_assert_eq!(found, self.seek_ops_by_index_slow(obj,index, encoding,clock));
+          found
+        } else {
+          self.seek_ops_by_index_slow(obj,index, encoding,clock)
         }
+    }
 
+    pub(crate) fn seek_ops_by_index_slow<'a>(&'a self, obj: &ObjId, index: usize, encoding: ListEncoding, clock: Option<&Clock>) -> OpsFound<'a> {
         let sub_iter = self.iter_obj(obj);
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
@@ -322,6 +331,62 @@ impl OpSet {
             end_pos,
         }
     }
+
+    fn has_marks_in_range(&self, range: &Range<usize>) -> bool {
+        if let Some(marks) = self.cols.get_str_range(MARK_NAME_COL_SPEC, range).next_run() {
+          marks.value.is_some() || marks.count < range.end - range.start
+        } else {
+          false
+        }
+    }
+
+    pub(crate) fn seek_ops_by_index_fast<'a>(&'a self, obj: &ObjId, index: usize, encoding: ListEncoding, clock: Option<&Clock>) -> Option<OpsFound<'a>> {
+        if encoding != ListEncoding::Text || clock.is_some() {
+          return None
+        }
+
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter());
+
+        let range = self
+            .cols
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
+
+        if self.has_marks_in_range(&range) {
+          return None
+        }
+
+        let mut iter = self.text_index.iter_range(range.clone()).with_group();
+
+        let mut ops = vec![];
+        let mut ops_pos = vec![];
+        let mut end_pos = range.end;
+
+        if let Some(tx) = iter.nth(index) {
+            for op in self.iter_range(&(tx.pos..range.end)) {
+                if op.insert && !ops.is_empty() {
+                    break;
+                }
+                if op.succ().len() == 0 {
+                    ops.push(op);
+                    ops_pos.push(op.pos);
+                }
+                end_pos = op.pos + 1;
+            }
+        }
+
+        Some(OpsFound {
+            index,
+            ops,
+            ops_pos,
+            //end_pos: range.end,
+            end_pos,
+        })
+    }
+
 
     fn seek_list_op(
         &self,
@@ -726,43 +791,6 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_obj_text<'a>(&'a self, obj: &ObjId, index: usize) -> OpsFound<'a> {
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
-        let range = self
-            .cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
-
-        let mut iter = self.text_index.iter_range(range.clone()).with_group();
-
-        let mut ops = vec![];
-        let mut ops_pos = vec![];
-        let mut end_pos = range.end;
-
-        if let Some(tx) = iter.nth(index) {
-            for op in self.iter_range(&(tx.pos..range.end)) {
-                if op.insert && !ops.is_empty() {
-                    break;
-                }
-                if op.succ().len() == 0 {
-                    ops.push(op);
-                    ops_pos.push(op.pos);
-                }
-                end_pos = op.pos + 1;
-            }
-        }
-
-        OpsFound {
-            index,
-            ops,
-            ops_pos,
-            end_pos: range.end,
-        }
-    }
-
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
@@ -1047,7 +1075,7 @@ pub(crate) struct FoundOpId<'a> {
     pub(crate) visible: bool,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub(crate) struct OpsFound<'a> {
     pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
