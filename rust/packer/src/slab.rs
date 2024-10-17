@@ -375,7 +375,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     fn check_copy_overflow(&mut self, copy: usize) {
-        if self.width + copy > self.max {
+        if self.width + copy > self.max && self.width > 0 {
             self.close_lit();
             self.actions
                 .push(WriteAction::End(self.items, self.group, self.abs));

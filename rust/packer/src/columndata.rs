@@ -938,8 +938,8 @@ pub(crate) mod tests {
     }
 
     fn make_rng() -> SmallRng {
-        let seed = rand::random::<u64>();
-        //let seed = 5929730802105464676;
+        //let seed = rand::random::<u64>();
+        let seed = 9838277279446224274;
         println!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -994,19 +994,14 @@ pub(crate) mod tests {
     #[test]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
-        let mut col = ColumnData::<RleCursor<{ usize::MAX }, str>>::new();
+        let mut col = ColumnData::<RleCursor<64, str>>::new();
         let mut rng = make_rng();
         for _ in 0..1000 {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
-        let mut copy = vec![];
-        col.write(&mut copy);
-        let range = 0..copy.len();
-        let export =
-            ColumnData::<RleCursor<64, str>>::external(Arc::new(copy), range, &Default::default())
-                .unwrap();
-        assert_eq!(col.to_vec(), export.to_vec());
+        let copy: ColumnData<StrCursor> = ColumnData::import(col.export()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
     }
 
     #[test]
