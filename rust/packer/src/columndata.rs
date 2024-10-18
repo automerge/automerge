@@ -55,7 +55,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             let slab = self.slabs.get(0).unwrap();
             if slab.is_empty() {
                 let state = C::State::default();
-                let mut writer = SlabWriter::new(usize::MAX);
+                let mut writer = SlabWriter::new(usize::MAX, 2);
                 C::flush_state(&mut writer, state);
                 writer.write(out);
             } else {
@@ -63,7 +63,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             }
         } else {
             let mut state = C::State::default();
-            let mut writer = SlabWriter::new(usize::MAX);
+            let mut writer = SlabWriter::new(usize::MAX, self.slabs.len() * 7);
             for s in &self.slabs {
                 state = C::write(&mut writer, s, state);
             }
@@ -149,7 +149,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 
     pub fn pos(&self) -> usize {
-        assert_eq!(
+        debug_assert_eq!(
             self.slabs.weight().pos - self.slab.weight_left().pos - self.run_count(),
             self.pos
         );
@@ -157,7 +157,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 
     fn check_pos(&self) {
-        assert_eq!(
+        debug_assert_eq!(
             self.slabs.weight().pos - self.slab.weight_left().pos - self.run_count(),
             self.pos
         );
@@ -492,7 +492,6 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub fn init_empty(len: usize) -> Self {
         let new_slab = C::init_empty(len);
         let mut slabs = SlabTree::new();
-        //slabs.splice(0..0, new_slabs);
         slabs.push(new_slab);
         assert!(!slabs.is_empty());
         ColumnData::init(len, slabs)
@@ -537,6 +536,15 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
         Bound::Excluded(n) => *n,
     };
     (start, end)
+}
+
+impl<C: ColumnCursor, M: MaybePackable<C::Item> + Debug + Clone> FromIterator<M> for ColumnData<C> {
+    fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
+        let mut col = ColumnData::new();
+        let data = iter.into_iter().collect::<Vec<_>>();
+        col.splice(0, 0, data);
+        col
+    }
 }
 
 #[cfg(test)]
@@ -939,7 +947,7 @@ pub(crate) mod tests {
 
     fn make_rng() -> SmallRng {
         //let seed = rand::random::<u64>();
-        let seed = 9838277279446224274;
+        let seed = 11016946475517489012;
         println!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }

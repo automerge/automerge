@@ -165,12 +165,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
         let (rle, post, group, mut current) =
-            SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index);
+            SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index, cap * 2 + 9);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;

@@ -178,39 +178,6 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         Self::copy_between(slab, writer, c0, c1, run1, size)
     }
 
-    /*
-        fn write<'a>(
-            writer: &mut SlabWriter<'a>,
-            slab: &'a Slab,
-            mut state: Self::State<'a>,
-        ) -> Self::State<'a> {
-            let mut size = slab.len();
-
-            if slab.is_empty() {
-                return state;
-            }
-
-            let (run0, c0) = Self::seek(1, slab);
-            let run0 = run0.unwrap();
-            size -= run0.count;
-            Self::append_chunk(&mut state, writer, run0);
-            if size == 0 {
-                return state;
-            }
-
-            let (run1, c1) = Self::seek(slab.len(), slab);
-            let run1 = run1.unwrap();
-            size -= run1.count;
-            if size == 0 {
-                Self::append_chunk(&mut state, writer, run1);
-                return state;
-            }
-            Self::flush_state(writer, state);
-
-            Self::copy_between(slab, writer, c0, c1, run1, size)
-        }
-    */
-
     fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
         v.is_none()
     }
@@ -221,25 +188,6 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     ) -> Option<<Self::Item as Packable>::Unpacked<'a>> {
         run.value
     }
-
-    /*
-        #[allow(clippy::type_complexity)]
-        fn pop<'a>(
-            &self,
-            mut run: Run<'a, Self::Item>,
-        ) -> (
-            Option<<Self::Item as Packable>::Unpacked<'a>>,
-            Option<Run<'a, Self::Item>>,
-        ) {
-            let value = run.value;
-            run.count -= 1;
-            if run.count > 0 {
-                (value, Some(run))
-            } else {
-                (value, None)
-            }
-        }
-    */
 
     fn finalize_state<'a>(
         slab: &'a Slab,
@@ -286,7 +234,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
 
     fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>);
 
-    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self>;
+    fn encode(index: usize, del: usize, slab: &Slab, capacity: usize) -> Encoder<'_, Self>;
 
     #[allow(clippy::type_complexity)]
     fn try_next<'a>(
@@ -368,7 +316,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     where
         E: MaybePackable<Self::Item> + Debug,
     {
-        let mut encoder = Self::encode(index, del, slab);
+        let mut encoder = Self::encode(index, del, slab, values.len());
         let mut add = 0;
         let mut value_group = 0;
         for v in &values {
@@ -438,9 +386,13 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     }
 
     fn init_empty(len: usize) -> Slab {
-        let mut writer = SlabWriter::new(usize::MAX);
-        writer.flush_null(len);
-        writer.finish().pop().unwrap_or_default()
+        if len > 0 {
+            let mut writer = SlabWriter::new(usize::MAX, 2);
+            writer.flush_null(len);
+            writer.finish().pop().unwrap_or_default()
+        } else {
+            Slab::default()
+        }
     }
 }
 

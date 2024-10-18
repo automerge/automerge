@@ -1,5 +1,4 @@
 use automerge::ObjType;
-use automerge::ReadDoc;
 use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ROOT};
 use serde_json::Value;
 use std::time::Instant;
@@ -40,23 +39,23 @@ fn main() -> Result<(), AutomergeError> {
     let _patches = doc.diff_incremental();
     println!("Patches in {} ms", observe.elapsed().as_millis());
     let save = Instant::now();
-    let bytes = doc.save();
+    let _bytes = doc.save();
     println!("Saved in {} ms", save.elapsed().as_millis());
 
-/*
-    let fork = Instant::now();
-    let heads = doc.get_heads();
-    let _other = doc.fork_at(&heads);
-    println!("ForkAt in {} ms", fork.elapsed().as_millis());
+    /*
+        let fork = Instant::now();
+        let heads = doc.get_heads();
+        let _other = doc.fork_at(&heads);
+        println!("ForkAt in {} ms", fork.elapsed().as_millis());
 
-    let load = Instant::now();
-    let _ = AutoCommit::load(&bytes).unwrap();
-    println!("Loaded in {} ms", load.elapsed().as_millis());
+        let load = Instant::now();
+        let _ = AutoCommit::load(&bytes).unwrap();
+        println!("Loaded in {} ms", load.elapsed().as_millis());
 
-    let get_txt = Instant::now();
-    doc.text(&text)?;
-    println!("Text in {} ms", get_txt.elapsed().as_millis());
-*/
+        let get_txt = Instant::now();
+        doc.text(&text)?;
+        println!("Text in {} ms", get_txt.elapsed().as_millis());
+    */
 
     Ok(())
 }

@@ -16,6 +16,8 @@ pub enum PackError {
     CounterOutOfRange(u64),
     #[error("invalid value for {typ}: {error}")]
     InvalidValue { typ: &'static str, error: String },
+    #[error("malformed leb encoding")]
+    BadFormat,
 }
 
 impl PackError {
@@ -68,10 +70,39 @@ impl Packable for i64 {
         item
     }
 
-    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, i64), PackError> {
         let start_len = buff.len();
         let val = leb128::read::signed(&mut buff)?;
         Ok((start_len - buff.len(), val))
+    }
+}
+
+impl Packable for u32 {
+    type Unpacked<'a> = u32;
+    type Owned = u32;
+
+    fn validate(val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(a) = val {
+            if *a >= u32::MAX as Self {
+                return Err(PackError::CounterOutOfRange(*a as u64));
+            }
+        }
+        Ok(())
+    }
+
+    fn group(item: u32) -> usize {
+        item as usize
+    }
+
+    fn own(item: u32) -> u32 {
+        item
+    }
+
+    fn unpack(mut buff: &[u8]) -> Result<(usize, u32), PackError> {
+        let start_len = buff.len();
+        let val64 = leb128::read::unsigned(&mut buff)?;
+        let val32 = u32::try_from(val64).map_err(|_| PackError::CounterOutOfRange(val64))?;
+        Ok((start_len - buff.len(), val32))
     }
 }
 
@@ -96,7 +127,7 @@ impl Packable for u64 {
         item
     }
 
-    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, u64), PackError> {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), val))
@@ -193,6 +224,12 @@ impl MaybePackable<u64> for u64 {
     }
 }
 
+impl MaybePackable<u32> for u32 {
+    fn maybe_packable(&self) -> Option<u32> {
+        Some(*self)
+    }
+}
+
 impl MaybePackable<usize> for Option<usize> {
     fn maybe_packable(&self) -> Option<usize> {
         *self
@@ -232,6 +269,12 @@ impl<'a> MaybePackable<[u8]> for Option<Cow<'a, [u8]>> {
 impl MaybePackable<str> for &str {
     fn maybe_packable(&self) -> Option<&str> {
         Some(self)
+    }
+}
+
+impl MaybePackable<str> for String {
+    fn maybe_packable(&self) -> Option<&str> {
+        Some(self.as_str())
     }
 }
 

@@ -149,6 +149,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
+        cap: usize,
     ) -> (RleState<'a, P>, Option<Run<'a, P>>, usize, SlabWriter<'a>) {
         let mut post = None;
         let mut group = cursor.group();
@@ -183,7 +184,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B);
+        let mut current = SlabWriter::new(B, cap);
 
         current.flush_before(slab, copy_range, 0, copy_size, copy_group);
 
@@ -399,11 +400,11 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         chunk.count
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
-        // FIXME encode
+    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
         let (run, cursor) = Self::seek(index, slab);
 
-        let (state, post, group, current) = RleCursor::encode_inner(slab, &cursor, run, index);
+        let cap = cap * 2 + 9;
+        let (state, post, group, current) = RleCursor::encode_inner(slab, &cursor, run, index, cap);
 
         let SpliceDel {
             deleted,

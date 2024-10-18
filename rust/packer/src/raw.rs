@@ -72,12 +72,12 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         len
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
         let state = ();
         let cursor = Self { offset: index };
 
         // everything before...
-        let mut current = SlabWriter::new(B);
+        let mut current = SlabWriter::new(B, cap + 4);
         current.flush_bytes(&slab.as_slice()[0..index], index);
 
         let post;

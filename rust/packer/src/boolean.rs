@@ -140,7 +140,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run.count
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab) -> Encoder<'_, Self> {
+    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
@@ -164,7 +164,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B);
+        let mut current = SlabWriter::new(B, cap + 8);
         current.flush_before(slab, range, 0, size, group);
 
         let SpliceDel {
@@ -225,9 +225,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 
     fn init_empty(len: usize) -> Slab {
-        let mut writer = SlabWriter::new(usize::MAX);
-        writer.flush_bool_run(len, false);
-        writer.finish().pop().unwrap_or_default()
+        if len > 0 {
+            let mut writer = SlabWriter::new(usize::MAX, 2);
+            writer.flush_bool_run(len, false);
+            writer.finish().pop().unwrap_or_default()
+        } else {
+            Slab::default()
+        }
     }
 
     fn group(&self) -> usize {
