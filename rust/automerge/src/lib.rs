@@ -83,7 +83,8 @@
 //!
 //! ### Text Encoding
 //!
-//! Text is encoded in UTF-8 by default but uses UTF-16 when using the wasm target.
+//! Text is encoded in UTF-8 by default but uses UTF-16 when using the wasm target,
+//! you can configure it with the feature `utf16-indexing`.
 //!
 //! ## Sync Protocol
 //!
