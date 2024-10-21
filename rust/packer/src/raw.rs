@@ -1,3 +1,4 @@
+use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
 use super::pack::PackError;
 use super::slab::{self, Slab, SlabWriter};
@@ -28,7 +29,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         _state: Self::State<'a>,
     ) -> Self::State<'a> {
         let len = slab.len();
-        writer.flush_before(slab, 0..len, 0, len, 0);
+        writer.flush_before(slab, 0..len, 0, len, Acc::new());
     }
 
     fn finish<'a>(_slab: &'a Slab, _out: &mut SlabWriter<'a>, _cursor: Self) {}
@@ -92,13 +93,13 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
             deleted = slab.as_slice().len() - index;
         }
         let overflow = del - deleted;
-        let group = 0;
+        let acc = Acc::new();
 
         Encoder {
             slab,
             current,
             post,
-            group,
+            acc,
             state,
             deleted,
             overflow,

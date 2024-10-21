@@ -1,3 +1,4 @@
+use super::aggregate::Agg;
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::pack::{PackError, Packable};
 use super::rle::{RleCursor, RleState};
@@ -10,6 +11,8 @@ pub(crate) type SubCursor<const B: usize> = RleCursor<B, i64>;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DeltaCursorInternal<const B: usize> {
     abs: i64,
+    min: Agg,
+    max: Agg,
     rle: SubCursor<B>,
 }
 
@@ -46,8 +49,11 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     }
 
     fn new(slab: &Slab) -> Self {
+        let abs = slab.abs();
         Self {
-            abs: slab.abs(),
+            abs,
+            min: Agg::default(),
+            max: Agg::default(),
             rle: Default::default(),
         }
     }
@@ -169,7 +175,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
-        let (rle, post, group, mut current) =
+        let (rle, post, acc, mut current) =
             SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index, cap * 2 + 9);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
@@ -190,7 +196,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             slab,
             current,
             post,
-            group,
+            acc,
             state,
             deleted,
             overflow,
@@ -212,10 +218,27 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         if let Some((run, rle)) = self.rle.try_next(slab)? {
             let delta = run.delta();
             let abs = self.abs.saturating_add(delta);
-            Ok(Some((run, Self { abs, rle })))
+            let abs_agg = Agg::from(abs);
+            let min = self.min.minimize(abs_agg);
+            let max = self.max.maximize(abs_agg);
+            Ok(Some((run, Self { abs, rle, min, max })))
         } else {
             Ok(None)
         }
+    }
+
+    fn compute_min_max(slabs: &mut [Slab]) {
+        for s in slabs {
+            let (_run, c) = Self::seek(s.len(), s);
+            s.set_min_max(c.min(), c.max());
+        }
+    }
+
+    fn min(&self) -> Agg {
+        self.min
+    }
+    fn max(&self) -> Agg {
+        self.max
     }
 
     fn index(&self) -> usize {

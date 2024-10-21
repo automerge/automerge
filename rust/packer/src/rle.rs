@@ -1,3 +1,4 @@
+use super::aggregate::{Acc, Agg};
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
@@ -8,11 +9,12 @@ use std::ops::Range;
 
 #[derive(Debug)]
 pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
-    offset: usize,
-    group: usize,
-    last_offset: usize,
-    last_group: usize,
     index: usize,
+    offset: usize,
+    acc: Acc,
+    min: Agg,
+    max: Agg,
+    last_offset: usize,
     lit: Option<LitRunCursor>,
     _phantom: PhantomData<P>,
 }
@@ -30,9 +32,10 @@ impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
         Self {
             offset: 0,
             last_offset: 0,
-            last_group: 0,
             index: 0,
-            group: 0,
+            acc: Acc::new(),
+            min: Agg::default(),
+            max: Agg::default(),
             lit: None,
             _phantom: PhantomData,
         }
@@ -71,19 +74,14 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn progress(
-        &self,
-        count: usize,
-        bytes: usize,
-        lit: Option<LitRunCursor>,
-        group: usize,
-    ) -> Self {
+    fn progress(&self, count: usize, bytes: usize, lit: Option<LitRunCursor>, agg: Agg) -> Self {
         RleCursor {
             last_offset: self.offset,
-            last_group: self.group,
             offset: self.offset + bytes,
             index: self.index + count,
-            group: self.group + group,
+            acc: self.acc + agg * count,
+            min: self.min,
+            max: self.max,
             lit,
             _phantom: PhantomData,
         }
@@ -101,11 +99,11 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    pub(super) fn lit_group(&self) -> usize {
+    pub(super) fn lit_acc(&self, last_acc: Acc) -> Acc {
         if let Some(lit) = &self.lit {
-            self.last_group - lit.group
+            self.acc - last_acc - lit.acc
         } else {
-            0
+            Acc::new()
         }
     }
     pub(super) fn lit_range(&self) -> Range<usize> {
@@ -116,11 +114,11 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn copy_group(&self) -> usize {
+    fn copy_acc(&self, last_acc: Acc) -> Acc {
         if let Some(lit) = self.lit {
-            lit.group
+            lit.acc
         } else {
-            self.last_group
+            self.acc - last_acc
         }
     }
 
@@ -150,17 +148,18 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         run: Option<Run<'a, P>>,
         index: usize,
         cap: usize,
-    ) -> (RleState<'a, P>, Option<Run<'a, P>>, usize, SlabWriter<'a>) {
+    ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a>) {
         let mut post = None;
-        let mut group = cursor.group();
+        let mut acc = cursor.acc();
 
         let last_run = run.as_ref().map(|r| r.count).unwrap_or(0);
+        let last_run_acc = run.as_ref().map(|r| r.acc()).unwrap_or_default();
 
         let copy_range = cursor.copy_range();
-        let copy_group = cursor.copy_group();
+        let copy_acc = cursor.copy_acc(last_run_acc);
         let copy_size = cursor.copy_size(last_run);
         let copy_lit_range = cursor.lit_range();
-        let copy_lit_group = cursor.lit_group();
+        let copy_lit_acc = cursor.lit_acc(last_run_acc);
         let copy_lit_size = cursor.lit_num().saturating_sub(last_run);
 
         let state = match run {
@@ -176,7 +175,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             Some(Run { count, value }) if index < cursor.index => {
                 let delta = cursor.index - index;
                 let run = Run::new(delta, value);
-                group -= run.group();
+                acc -= run.acc();
                 post = Some(run);
                 let count = count - delta;
                 RleState::Run { count, value }
@@ -186,7 +185,7 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
 
         let mut current = SlabWriter::new(B, cap);
 
-        current.flush_before(slab, copy_range, 0, copy_size, copy_group);
+        current.flush_before(slab, copy_range, 0, copy_size, copy_acc);
 
         if copy_lit_size > 0 {
             current.flush_before(
@@ -194,11 +193,11 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
                 copy_lit_range,
                 copy_lit_size,
                 copy_lit_size,
-                copy_lit_group,
+                copy_lit_acc,
             );
         }
 
-        (state, post, group, current)
+        (state, post, acc, current)
     }
 }
 
@@ -212,8 +211,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         Self::default()
     }
 
-    fn group(&self) -> usize {
-        self.group
+    fn acc(&self) -> Acc {
+        self.acc
     }
 
     fn copy_between<'a>(
@@ -228,64 +227,28 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             // its one big lit-run
             (Some(a), Some(b)) if a.offset == b.offset => {
                 let lit = a.len - 2;
-                writer.flush_before2(
-                    slab,
-                    c0.offset..c1.last_offset,
-                    lit,
-                    size,
-                    c1.last_group - c0.group,
-                );
+                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size, Acc::new());
             }
+            // its two different lit-runs
             (Some(a), Some(b)) => {
-                // its two different lit-runs
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(
-                    slab,
-                    c0.offset..b_start,
-                    lit1,
-                    size - lit2,
-                    b.group - c0.group,
-                );
-                writer.flush_before2(
-                    slab,
-                    b.offset..c1.last_offset,
-                    lit2,
-                    lit2,
-                    c1.last_group - b.group,
-                );
+                writer.flush_before2(slab, c0.offset..b_start, lit1, size - lit2, Acc::new());
+                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new());
             }
             (Some(a), None) => {
                 let lit = a.len - 1;
-                writer.flush_before2(
-                    slab,
-                    c0.offset..c1.last_offset,
-                    lit,
-                    size,
-                    c1.last_group - c0.group,
-                );
+                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size, Acc::new());
             }
             (None, Some(b)) => {
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2, b.group - c0.group);
-                writer.flush_before2(
-                    slab,
-                    b.offset..c1.last_offset,
-                    lit2,
-                    lit2,
-                    c1.last_group - b.group,
-                );
+                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2, Acc::new());
+                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new());
             }
             _ => {
-                writer.flush_before2(
-                    slab,
-                    c0.offset..c1.last_offset,
-                    0,
-                    size,
-                    c1.last_group - c0.group,
-                );
+                writer.flush_before2(slab, c0.offset..c1.last_offset, 0, size, Acc::new());
             }
         }
 
@@ -321,7 +284,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             cursor.offset,
             num_left,
             slab.len() - cursor.index,
-            slab.group() - cursor.group(),
+            slab.acc() - cursor.acc(),
             None,
         );
     }
@@ -404,7 +367,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         let (run, cursor) = Self::seek(index, slab);
 
         let cap = cap * 2 + 9;
-        let (state, post, group, current) = RleCursor::encode_inner(slab, &cursor, run, index, cap);
+        let (state, post, acc, current) = RleCursor::encode_inner(slab, &cursor, run, index, cap);
 
         let SpliceDel {
             deleted,
@@ -417,7 +380,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             slab,
             current,
             post,
-            group,
+            acc,
             state,
             deleted,
             overflow,
@@ -432,6 +395,21 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         data.splice(range, values.map(|e| e.map(|i| P::own(i))));
     }
 
+    fn compute_min_max(slabs: &mut [Slab]) {
+        for s in slabs {
+            let (_run, c) = Self::seek(s.len(), s);
+            assert_eq!(s.acc(), c.acc());
+            s.set_min_max(c.min(), c.max());
+        }
+    }
+
+    fn min(&self) -> Agg {
+        self.min
+    }
+    fn max(&self) -> Agg {
+        self.max
+    }
+
     fn try_next<'a>(
         &self,
         slab: &'a [u8],
@@ -442,9 +420,9 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         }
         if self.num_left() > 0 {
             let (value_bytes, value) = P::unpack(data)?;
-            let group = P::group(value);
+            let agg = P::agg(value);
             let lit = self.next_lit(1);
-            let cursor = self.progress(1, value_bytes, lit, group);
+            let cursor = self.progress(1, value_bytes, lit, agg);
             let value = Run {
                 count: 1,
                 value: Some(value),
@@ -457,9 +435,9 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 count if count > 0 => {
                     let count = count as usize;
                     let (value_bytes, value) = P::unpack(data)?;
-                    let group = P::group(value) * count;
+                    let agg = P::agg(value);
                     let lit = self.next_lit(count);
-                    let cursor = self.progress(count, count_bytes + value_bytes, lit, group);
+                    let cursor = self.progress(count, count_bytes + value_bytes, lit, agg);
                     let value = Run {
                         count,
                         value: Some(value),
@@ -472,10 +450,10 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     let lit = Some(LitRunCursor::new(
                         self.offset + count_bytes,
                         count,
-                        self.group,
+                        self.acc,
                     ));
-                    let group = P::group(value);
-                    let cursor = self.progress(1, count_bytes + value_bytes, lit, group);
+                    let agg = P::agg(value);
+                    let cursor = self.progress(1, count_bytes + value_bytes, lit, agg);
                     let value = Run {
                         count: 1,
                         value: Some(value),
@@ -485,7 +463,8 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 _ => {
                     let (null_bytes, count) = u64::unpack(data)?;
                     let count = count as usize;
-                    let cursor = self.progress(count, count_bytes + null_bytes, None, 0);
+                    let cursor =
+                        self.progress(count, count_bytes + null_bytes, None, Agg::default());
                     let value = Run { count, value: None };
                     Ok(Some((value, cursor)))
                 }
@@ -503,17 +482,17 @@ pub(crate) struct LitRunCursor {
     index: usize,
     offset: usize,
     len: usize,
-    group: usize,
+    acc: Acc,
 }
 
 impl LitRunCursor {
-    fn new(offset: usize, count: i64, group: usize) -> Self {
+    fn new(offset: usize, count: i64, acc: Acc) -> Self {
         assert!(count < 0);
         let len = (-count) as usize;
         LitRunCursor {
             offset,
             index: 1,
-            group,
+            acc,
             len,
         }
     }
@@ -533,7 +512,7 @@ impl LitRunCursor {
             Some(LitRunCursor {
                 index: self.index + count,
                 offset: self.offset,
-                group: self.group,
+                acc: self.acc,
                 len: self.len,
             })
         }
@@ -685,11 +664,11 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![9, 10, 11, 12])],
             ]
         );
-        let mut sum = 0;
-        for ColGroupItem { item, group, .. } in col1.iter().with_group() {
-            assert_eq!(sum, group);
+        let mut sum = Acc::new();
+        for ColGroupItem { item, acc, .. } in col1.iter().with_acc() {
+            assert_eq!(sum, acc);
             if let Some(v) = item {
-                sum += u64::group(v);
+                sum += u64::agg(v);
             }
         }
         let mut out = Vec::new();
@@ -707,11 +686,11 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![8, 9]), ColExport::run(2, 10)],
             ]
         );
-        let mut sum = 0;
-        for ColGroupItem { item, group, .. } in col2.iter().with_group() {
-            assert_eq!(sum, group);
+        let mut sum = Acc::new();
+        for ColGroupItem { item, acc, .. } in col2.iter().with_acc() {
+            assert_eq!(sum, acc);
             if let Some(v) = item {
-                sum += u64::group(v);
+                sum += u64::agg(v);
             }
         }
         let mut out = Vec::new();
@@ -729,12 +708,12 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![8, 9, 10]), ColExport::run(2, 11)],
             ]
         );
-        let mut sum = 0;
 
-        for ColGroupItem { item, group, .. } in col3.iter().with_group() {
-            assert_eq!(sum, group);
+        let mut sum = Acc::new();
+        for ColGroupItem { item, acc, .. } in col3.iter().with_acc() {
+            assert_eq!(sum, acc);
             if let Some(v) = item {
-                sum += u64::group(v);
+                sum += u64::agg(v);
             }
         }
         let mut out = Vec::new();
@@ -771,11 +750,11 @@ pub(crate) mod tests {
                 ],
             ]
         );
-        let mut sum = 0;
-        for ColGroupItem { item, group, .. } in col4.iter().with_group() {
-            assert_eq!(sum, group);
+        let mut sum = Acc::new();
+        for ColGroupItem { item, acc, .. } in col4.iter().with_acc() {
+            assert_eq!(sum, acc);
             if let Some(v) = item {
-                sum += u64::group(v);
+                sum += u64::agg(v);
             }
         }
         let mut out = Vec::new();

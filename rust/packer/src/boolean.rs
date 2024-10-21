@@ -1,6 +1,8 @@
+use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWriter};
+use super::ulebsize;
 
 use std::ops::Range;
 
@@ -11,11 +13,11 @@ pub struct BooleanState {
 }
 
 impl BooleanState {
-    fn group(&self) -> usize {
+    fn acc(&self) -> Acc {
         if self.value {
-            self.count
+            Acc::from(self.count)
         } else {
-            0
+            Acc::new()
         }
     }
 }
@@ -34,7 +36,7 @@ pub struct BooleanCursorInternal<const B: usize> {
     value: bool,
     index: usize,
     offset: usize,
-    group: usize,
+    acc: Acc,
     last_offset: usize,
 }
 
@@ -56,7 +58,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             cursor.offset,
             0,
             slab.len() - cursor.index,
-            slab.group() - cursor.group,
+            slab.acc() - cursor.acc,
             Some(cursor.value),
         );
     }
@@ -103,13 +105,9 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run: Run<'a, bool>,
         size: usize,
     ) -> Self::State<'a> {
-        out.flush_before2(
-            slab,
-            c0.offset..c1.last_offset,
-            0,
-            size,
-            c1.group - c0.group,
-        );
+        let c1_last_offset = c1.offset - ulebsize(run.count as u64) as usize;
+        assert_eq!(c1_last_offset, c1.last_offset);
+        out.flush_before2(slab, c0.offset..c1_last_offset, 0, size, Acc::new());
         let mut next_state = BooleanState {
             value: run.value.unwrap_or_default(),
             count: 0,
@@ -148,7 +146,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
 
         let mut state = BooleanState { count, value };
-        let group = cursor.group - state.group();
+        let acc = cursor.acc - state.acc();
         let state2 = BooleanState::from(run.unwrap_or_default());
         assert_eq!(state, state2);
         let mut post = None;
@@ -165,7 +163,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
         let mut current = SlabWriter::new(B, cap + 8);
-        current.flush_before(slab, range, 0, size, group);
+        current.flush_before(slab, range, 0, size, acc);
 
         let SpliceDel {
             deleted,
@@ -174,13 +172,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             post,
         } = Self::splice_delete(post, cursor, del, slab);
         let post = post.map(BooleanState::from);
-        let group = 0;
+        let acc = Acc::new();
 
         Encoder {
             slab,
             current,
             post,
-            group,
+            acc,
             state,
             deleted,
             overflow,
@@ -211,7 +209,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         cursor.last_offset = self.offset;
         cursor.offset += bytes;
         if self.value {
-            cursor.group += count;
+            cursor.acc += Acc::from(count); // agg(1) * count
         }
         let run = Run {
             count,
@@ -234,8 +232,8 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         }
     }
 
-    fn group(&self) -> usize {
-        self.group
+    fn acc(&self) -> Acc {
+        self.acc
     }
 }
 

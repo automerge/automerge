@@ -1,4 +1,5 @@
 use super::Slab;
+use crate::aggregate::{Acc, Agg};
 use crate::leb128::{lebsize, ulebsize};
 
 use std::fmt::Debug;
@@ -7,11 +8,11 @@ use std::ops::Range;
 #[derive(Clone, PartialEq)]
 pub enum WriteOp<'a> {
     UInt(u64),
-    GroupUInt(u64, usize),
+    UIntAcc(u64, Agg),
     BoolRun(u64, bool),
     Int(i64),
     Bytes(&'a [u8]),
-    Import(&'a Slab, Range<usize>, usize, Option<bool>),
+    Import(&'a Slab, Range<usize>, Acc, Option<bool>),
 }
 
 impl<'a> From<i64> for WriteOp<'a> {
@@ -22,19 +23,19 @@ impl<'a> From<i64> for WriteOp<'a> {
 
 impl<'a> From<u64> for WriteOp<'a> {
     fn from(n: u64) -> WriteOp<'static> {
-        WriteOp::GroupUInt(n, n as usize)
+        WriteOp::UIntAcc(n, Agg::from(n))
     }
 }
 
 impl<'a> From<u32> for WriteOp<'a> {
     fn from(n: u32) -> WriteOp<'static> {
-        WriteOp::GroupUInt(n as u64, n as usize)
+        WriteOp::UIntAcc(n as u64, Agg::from(n))
     }
 }
 
 impl<'a> From<usize> for WriteOp<'a> {
     fn from(n: usize) -> WriteOp<'static> {
-        WriteOp::GroupUInt(n as u64, n)
+        WriteOp::UIntAcc(n as u64, Agg::from(n))
     }
 }
 
@@ -61,7 +62,7 @@ impl<'a> Debug for WriteOp<'a> {
         let mut s = fmt.debug_struct("WriteOp");
         match self {
             Self::UInt(a) => s.field("uint", a),
-            Self::GroupUInt(a, b) => s.field("group_uint", a).field("group", b),
+            Self::UIntAcc(a, b) => s.field("acc_uint", a).field("acc", b),
             Self::BoolRun(a, b) => s.field("bool_run", a).field("bool", b),
             Self::Int(a) => s.field("int", a),
             Self::Bytes(a) => s.field("bytes", &a.len()),
@@ -78,17 +79,26 @@ pub enum WriteAction<'a> {
     Lit(WriteOp<'a>),
     Pair(WriteOp<'a>, WriteOp<'a>),
     Raw(&'a [u8]),
-    Slab(usize, usize, i64, usize),
+    Slab(usize, Acc, i64, usize),
     SlabHead,
 }
 
 impl<'a> WriteOp<'a> {
-    fn group(&self) -> usize {
+    fn acc(&self) -> Acc {
         match self {
-            Self::Import(_, _, g, _) => *g,
-            Self::GroupUInt(_, g) => *g,
-            Self::BoolRun(c, b) if *b => *c as usize,
-            _ => 0,
+            Self::Import(_, _, acc, _) => *acc,
+            Self::UIntAcc(_, agg) => *agg * 1,
+            Self::BoolRun(c, b) if *b => Acc::from(*c),
+            _ => Acc::new(),
+        }
+    }
+
+    fn agg(&self) -> Agg {
+        match self {
+            //Self::Import(_, _, acc, _) => *acc,
+            Self::UIntAcc(_, agg) => *agg,
+            //Self::BoolRun(c, b) if *b => Acc::from(c) ,
+            _ => Agg::default(),
         }
     }
 
@@ -102,7 +112,7 @@ impl<'a> WriteOp<'a> {
     fn width(&self) -> usize {
         match self {
             Self::UInt(i) => ulebsize(*i) as usize,
-            Self::GroupUInt(i, _) => ulebsize(*i) as usize,
+            Self::UIntAcc(i, _) => ulebsize(*i) as usize,
             Self::BoolRun(i, _) => ulebsize(*i) as usize,
             Self::Int(i) => lebsize(*i) as usize,
             Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
@@ -132,13 +142,13 @@ impl<'a> WriteOp<'a> {
                 leb128::write::unsigned(buff, i).unwrap();
                 //println!("write uint {} {:?}",i, &buff[start..]);
             }
-            Self::GroupUInt(i, _) => {
+            Self::UIntAcc(i, _) => {
                 leb128::write::unsigned(buff, i).unwrap();
-                //println!("write group uint {} {:?}",i, &buff[start..]);
+                //println!("write acc uint {} {:?}",i, &buff[start..]);
             }
             Self::BoolRun(i, _) => {
                 leb128::write::unsigned(buff, i).unwrap();
-                //println!("write group uint {} {:?}",i, &buff[start..]);
+                //println!("write acc uint {} {:?}",i, &buff[start..]);
             }
             Self::Int(i) => {
                 leb128::write::signed(buff, i).unwrap();
@@ -158,12 +168,12 @@ impl<'a> WriteOp<'a> {
 }
 
 impl<'a> WriteAction<'a> {
-    fn group(&self) -> usize {
+    fn acc(&self) -> Acc {
         match self {
-            Self::Op(op) => op.group(),
-            Self::Pair(WriteOp::Int(count), op) => *count as usize * op.group(),
+            Self::Op(op) => op.acc(),
+            Self::Pair(WriteOp::Int(count), op) => op.agg() * *count as usize,
             //Self::Raw(_) => 0,
-            _ => 0,
+            _ => Acc::new(),
         }
     }
 
@@ -226,7 +236,7 @@ pub struct SlabWriter<'a> {
     actions: Vec<WriteAction<'a>>,
     width: usize,
     items: usize,
-    group: usize,
+    acc: Acc,
     bools: u64,
     abs: i64,
     init_abs: i64,
@@ -244,7 +254,7 @@ impl<'a> SlabWriter<'a> {
         SlabWriter {
             max,
             width: 0,
-            group: 0,
+            acc: Acc::new(),
             abs: 0,
             init_abs: 0,
             bools: 0,
@@ -281,7 +291,7 @@ impl<'a> SlabWriter<'a> {
         }
         self.check_copy_overflow(op.copy_width());
         self.abs += op.abs();
-        self.group += op.group();
+        self.acc += op.acc();
         self.width += width;
         self.items += items;
         if self.lit_items == 0 && lit > 0 {
@@ -305,7 +315,7 @@ impl<'a> SlabWriter<'a> {
         self.check_copy_overflow(action.copy_width());
         self.check_bool_state(action.bool_value());
         self.abs += action.abs();
-        self.group += action.group();
+        self.acc += action.acc();
         self.width += width;
         self.items += items;
         self.close_lit();
@@ -341,7 +351,7 @@ impl<'a> SlabWriter<'a> {
             self.close_lit();
             self.close_slab();
             self.width = 0;
-            self.group = 0;
+            self.acc = Acc::new();
             self.bools = 0;
             self.items = 0;
         }
@@ -353,7 +363,7 @@ impl<'a> SlabWriter<'a> {
             Some(&WriteAction::SlabHead)
         );
         self.actions[self.slab_head] =
-            WriteAction::Slab(self.items, self.group, self.abs, self.width);
+            WriteAction::Slab(self.items, self.acc, self.abs, self.width);
         self.num_slabs += 1;
         self.slab_head = self.actions.len();
         self.actions.push(WriteAction::SlabHead);
@@ -364,7 +374,7 @@ impl<'a> SlabWriter<'a> {
             self.close_lit();
             self.close_slab();
             self.width = 0;
-            self.group = 0;
+            self.acc = Acc::new();
             self.bools = 0;
             self.items = 0;
         }
@@ -386,21 +396,21 @@ impl<'a> SlabWriter<'a> {
         let mut result = Vec::with_capacity(self.num_slabs);
         let mut buffer = vec![];
         let mut len = 0;
-        let mut group = 0;
+        let mut acc = Acc::new();
         let mut abs = self.init_abs;
         let mut next_abs = 0;
         let mut width = 0;
         for action in self.actions {
             match action {
-                WriteAction::Slab(next_len, next_group, next_next_abs, next_width) => {
+                WriteAction::Slab(next_len, next_acc, next_next_abs, next_width) => {
                     if !buffer.is_empty() {
                         assert_eq!(width, buffer.len());
                         let data = std::mem::take(&mut buffer);
-                        result.push(Slab::new(data, len, group, abs));
+                        result.push(Slab::new(data, len, acc, abs));
                         abs = next_abs;
                     }
                     buffer = Vec::with_capacity(next_width);
-                    group = next_group;
+                    acc = next_acc;
                     len = next_len;
                     width = next_width;
                     next_abs = next_next_abs;
@@ -408,7 +418,7 @@ impl<'a> SlabWriter<'a> {
                 action => action.write(&mut buffer),
             }
         }
-        result.push(Slab::new(buffer, len, group, abs));
+        result.push(Slab::new(buffer, len, acc, abs));
         assert_eq!(self.num_slabs, result.len());
         result
     }
@@ -424,10 +434,10 @@ impl<'a> SlabWriter<'a> {
         range: Range<usize>,
         lit: usize,
         size: usize,
-        group: usize,
+        acc: Acc,
     ) {
         if size > 0 {
-            let op = WriteOp::Import(slab, range, group, None);
+            let op = WriteOp::Import(slab, range, acc, None);
             if lit > 0 {
                 self.push_lit(op, lit, size)
             } else {
@@ -443,9 +453,9 @@ impl<'a> SlabWriter<'a> {
         range: Range<usize>,
         lit: usize,
         size: usize,
-        group: usize,
+        acc: Acc,
     ) {
-        let op = WriteOp::Import(slab, range, group, None);
+        let op = WriteOp::Import(slab, range, acc, None);
         if lit > 0 {
             self.push_lit(op, lit, size)
         } else {
@@ -460,11 +470,11 @@ impl<'a> SlabWriter<'a> {
         index: usize,
         lit: usize,
         size: usize,
-        group: usize,
+        acc: Acc,
         bool_state: Option<bool>,
     ) {
         let range = index..slab.byte_len();
-        let op = WriteOp::Import(slab, range, group, bool_state);
+        let op = WriteOp::Import(slab, range, acc, bool_state);
         if lit > 0 {
             self.push_lit(op, lit, size)
         } else {

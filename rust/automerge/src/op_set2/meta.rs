@@ -1,4 +1,6 @@
-use super::packer::{lebsize, ulebsize, MaybePackable, PackError, Packable, RleCursor, WriteOp};
+use super::packer::{
+    lebsize, ulebsize, Agg, MaybePackable, PackError, Packable, RleCursor, WriteOp,
+};
 use super::types::ScalarValue;
 
 #[derive(Debug)]
@@ -50,7 +52,7 @@ impl From<u64> for ValueMeta {
 
 impl<'a> From<ValueMeta> for WriteOp<'a> {
     fn from(v: ValueMeta) -> WriteOp<'static> {
-        WriteOp::GroupUInt(v.0, v.length())
+        WriteOp::UIntAcc(v.0, Agg::from(v.length()))
     }
 }
 
@@ -102,8 +104,8 @@ impl Packable for ValueMeta {
     type Unpacked<'a> = ValueMeta;
     type Owned = ValueMeta;
 
-    fn group(item: ValueMeta) -> usize {
-        item.length()
+    fn agg(item: ValueMeta) -> Agg {
+        Agg::from(item.length())
     }
 
     fn own(item: ValueMeta) -> ValueMeta {
@@ -148,35 +150,35 @@ mod tests {
         let mut col = ColumnData::<MetaCursor>::new();
         col.splice(0, 0, data);
 
-        let mut iter = col.iter().with_group();
+        let mut iter = col.iter().with_acc();
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(1)));
-        assert_eq!(r.group, 0);
+        assert_eq!(r.acc, 0);
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(6 + (30 << 4))));
-        assert_eq!(r.group, 0);
+        assert_eq!(r.acc, 0);
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(6 + (10 << 4))));
-        assert_eq!(r.group, 30);
+        assert_eq!(r.acc, 30);
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(3)));
-        assert_eq!(r.group, 40);
+        assert_eq!(r.acc, 40);
 
-        let mut iter = col.iter().with_group();
+        let mut iter = col.iter().with_acc();
         iter.advance_by(3);
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(3)));
-        assert_eq!(r.group, 40);
+        assert_eq!(r.acc, 40);
 
-        let mut iter = col.iter_range(3..5).with_group();
+        let mut iter = col.iter_range(3..5).with_acc();
 
         let r = iter.next().unwrap();
         assert_eq!(r.item, Some(ValueMeta(3)));
-        assert_eq!(r.group, 40);
+        assert_eq!(r.acc, 40);
     }
 }

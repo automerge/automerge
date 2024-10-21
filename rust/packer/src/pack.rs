@@ -1,3 +1,4 @@
+use super::aggregate::Agg;
 use super::cursor::ScanMeta;
 use super::slab::WriteOp;
 
@@ -41,8 +42,8 @@ pub trait Packable: PartialEq + Debug {
         + Default;
     type Owned: Clone + PartialEq + Debug;
 
-    fn group(_item: Self::Unpacked<'_>) -> usize {
-        0
+    fn agg(_item: Self::Unpacked<'_>) -> Agg {
+        Agg::default()
     }
 
     fn validate(_val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
@@ -90,8 +91,8 @@ impl Packable for u32 {
         Ok(())
     }
 
-    fn group(item: u32) -> usize {
-        item as usize
+    fn agg(item: u32) -> Agg {
+        Agg::from(item)
     }
 
     fn own(item: u32) -> u32 {
@@ -119,8 +120,8 @@ impl Packable for u64 {
         Ok(())
     }
 
-    fn group(item: u64) -> usize {
-        item as usize
+    fn agg(item: u64) -> Agg {
+        Agg::from(item)
     }
 
     fn own(item: u64) -> u64 {
@@ -155,11 +156,11 @@ impl Packable for bool {
         item
     }
 
-    fn group(item: bool) -> usize {
+    fn agg(item: bool) -> Agg {
         if item {
-            1
+            Agg::from(1_u32)
         } else {
-            0
+            Agg::from(0_u32)
         }
     }
 
@@ -201,8 +202,8 @@ impl Packable for str {
 
 pub trait MaybePackable<T: Packable + ?Sized> {
     fn maybe_packable(&self) -> Option<T::Unpacked<'_>>;
-    fn group(&self) -> usize {
-        self.maybe_packable().map(|n| T::group(n)).unwrap_or(0)
+    fn agg(&self) -> Agg {
+        self.maybe_packable().map(|n| T::agg(n)).unwrap_or_default()
     }
 }
 

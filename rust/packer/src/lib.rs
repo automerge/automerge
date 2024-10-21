@@ -1,3 +1,4 @@
+pub(crate) mod aggregate;
 pub(crate) mod boolean;
 pub(crate) mod columndata;
 pub(crate) mod cursor;
@@ -11,6 +12,7 @@ pub(crate) mod slab;
 #[cfg(test)]
 pub(crate) mod test;
 
+pub use aggregate::{Acc, Agg};
 pub use boolean::BooleanCursor;
 pub use columndata::{ColGroupItem, ColumnData, ColumnDataIter};
 pub use cursor::{ColumnCursor, Run, ScanMeta};

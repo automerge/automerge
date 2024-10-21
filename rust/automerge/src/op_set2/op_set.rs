@@ -228,7 +228,7 @@ impl OpSet {
         let mut pos = range.start;
 
         if index > 0 {
-            let mut iter = self.text_index.iter_range(range.clone()).with_group();
+            let mut iter = self.text_index.iter_range(range.clone()).with_acc();
             if let Some(tx) = iter.nth(index - 1) {
                 for op in self.iter_range(&(tx.pos..range.end)) {
                     if op.insert && !elemid.is_head() {
@@ -382,15 +382,15 @@ impl OpSet {
             return None;
         }
 
-        let mut iter = self.text_index.iter_range(range.clone()).with_group();
+        let mut iter = self.text_index.iter_range(range.clone()).with_acc();
 
         let mut ops = vec![];
         let mut ops_pos = vec![];
         let mut end_pos = range.end;
 
-        let obj_start = iter.group();
+        let obj_start = iter.acc();
         if let Some(tx) = iter.nth(index) {
-            index = tx.group - obj_start;
+            index = (tx.acc - obj_start).as_usize();
             for op in self.iter_range(&(tx.pos..range.end)) {
                 if op.insert && !ops.is_empty() {
                     break;
@@ -819,16 +819,16 @@ impl OpSet {
         let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
         let value = self
             .cols
-            .get_value_range(VALUE_COL_SPEC, value_meta.calculate_group());
+            .get_value_range(VALUE_COL_SPEC, value_meta.calculate_acc().as_usize());
 
         let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
         let succ_actor = self.cols.get_actor_range(
             SUCC_ACTOR_COL_SPEC,
-            &(succ_count.calculate_group()..usize::MAX),
+            &(succ_count.calculate_acc().as_usize()..usize::MAX),
         );
         let succ_counter = self.cols.get_delta_integer_range(
             SUCC_COUNTER_COL_SPEC,
-            &(succ_count.calculate_group()..usize::MAX),
+            &(succ_count.calculate_acc().as_usize()..usize::MAX),
         );
 
         OpIter {
@@ -1262,7 +1262,7 @@ impl Columns {
 
     fn insert<O: OpLike + std::fmt::Debug>(&mut self, pos: usize, op: &O) {
         let mut group = None;
-        let mut group_pos = 0;
+        let mut acc_pos = 0;
         for (spec, col) in self.0.iter_mut() {
             if group == Some(spec.id()) {
                 match col {
@@ -1272,7 +1272,7 @@ impl Columns {
                         } else {
                             vec![]
                         };
-                        c.splice(group_pos, 0, values);
+                        c.splice(acc_pos, 0, values);
                     }
                     Column::Delta(c) => {
                         let values = if *spec == SUCC_COUNTER_COL_SPEC {
@@ -1280,7 +1280,7 @@ impl Columns {
                         } else {
                             vec![]
                         };
-                        c.splice(group_pos, 0, values);
+                        c.splice(acc_pos, 0, values);
                     }
                     Column::Value(c) => {
                         let value = if *spec == VALUE_COL_SPEC {
@@ -1289,7 +1289,7 @@ impl Columns {
                             None
                         };
                         if let Some(v) = value {
-                            c.splice(group_pos, 0, vec![v]);
+                            c.splice(acc_pos, 0, vec![v]);
                         }
                     }
                     _ => {
@@ -1357,7 +1357,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        group_pos = c.splice(pos, 0, vec![value]);
+                        acc_pos = c.splice(pos, 0, vec![value]).as_usize();
                     }
                     Column::Group(c) => {
                         let value = if *spec == SUCC_COUNT_COL_SPEC {
@@ -1365,7 +1365,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        group_pos = c.splice(pos, 0, vec![value]);
+                        acc_pos = c.splice(pos, 0, vec![value]).as_usize();
                     }
                 }
             }

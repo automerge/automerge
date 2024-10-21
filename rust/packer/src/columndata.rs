@@ -1,3 +1,4 @@
+use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Run, RunIter, ScanMeta, SpliceResult};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
@@ -75,10 +76,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub fn raw_reader(&self, advance: usize) -> RawReader<'_> {
-        let cursor = self
-            .slabs
-            .get_where(|acc, next| advance - acc.pos < next.pos)
-            .unwrap();
+        let cursor = self.slabs.get_where(|next| advance < next.pos).unwrap();
         let current = Some((cursor.element, advance - cursor.weight.pos));
         let slabs = slab::Iter::new(&self.slabs, cursor);
         RawReader { slabs, current }
@@ -104,9 +102,7 @@ impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     pub(crate) fn new(slabs: &'a SlabTree, pos: usize, max: usize) -> Self {
-        let cursor = slabs
-            .get_where(|acc, next| pos - acc.pos < next.pos)
-            .unwrap();
+        let cursor = slabs.get_where(|next| pos < next.pos).unwrap();
         let mut slab = cursor.element.run_iter();
         let slabs = slab::Iter::new(slabs, cursor);
         let iter_pos = slabs.weight().pos - slab.weight_left().pos;
@@ -121,10 +117,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub(crate) fn new_at_group(slabs: &'a SlabTree, group: usize, max: usize) -> Self {
-        let cursor = slabs
-            .get_where(|acc, next| group - acc.group < next.group)
-            .unwrap();
+    pub(crate) fn new_at_acc(slabs: &'a SlabTree, acc: Acc, max: usize) -> Self {
+        let cursor = slabs.get_where(|next| acc < next.acc).unwrap();
         let mut slab = cursor.element.run_iter();
         let pos = cursor.weight.pos;
         let slabs = slab::Iter::new(slabs, cursor);
@@ -167,8 +161,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.run.as_ref().map(|e| e.count).unwrap_or_default()
     }
 
-    fn run_group(&self) -> usize {
-        self.run.as_ref().map(|e| e.group()).unwrap_or_default()
+    fn run_acc(&self) -> Acc {
+        self.run.as_ref().map(|e| e.acc()).unwrap_or_default()
     }
 
     fn pop_element(&mut self) -> Option<Option<<C::Item as Packable>::Unpacked<'a>>> {
@@ -235,12 +229,12 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         C::to_vec(self)
     }
 
-    pub fn with_group(self) -> ColGroupIter<'a, C> {
+    pub fn with_acc(self) -> ColGroupIter<'a, C> {
         ColGroupIter { iter: self }
     }
 
-    pub fn calculate_group(&self) -> usize {
-        self.slabs.weight().group - self.slab.weight_left().group - self.run_group()
+    pub fn calculate_acc(&self) -> Acc {
+        self.slabs.weight().acc - self.slab.weight_left().acc - self.run_acc()
     }
 
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
@@ -249,11 +243,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(())
     }
 
-    fn reset_iter_to_group(&mut self, group: usize) -> Option<usize> {
-        let starting_group = self.calculate_group();
+    fn reset_iter_to_acc(&mut self, acc: Acc) -> Option<Acc> {
+        let starting_acc = self.calculate_acc();
         let tree = self.slabs.span_tree()?;
-        let _ = std::mem::replace(self, Self::new_at_group(tree, group, self.max));
-        Some(self.calculate_group() - starting_group)
+        let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
+        Some(self.calculate_acc() - starting_acc)
     }
 }
 
@@ -266,14 +260,14 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
         self.iter.advance_by(amount)
     }
 
-    pub fn group(&self) -> usize {
-        self.iter.slabs.weight().group - self.iter.slab.weight_left().group - self.iter.run_group()
+    pub fn acc(&self) -> Acc {
+        self.iter.slabs.weight().acc - self.iter.slab.weight_left().acc - self.iter.run_acc()
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct ColGroupItem<'a, P: Packable + ?Sized> {
-    pub group: usize,
+    pub acc: Acc,
     pub pos: usize,
     pub item: Option<P::Unpacked<'a>>,
 }
@@ -283,24 +277,24 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     type Item = ColGroupItem<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let group = self.iter.slabs.weight().group
-            - self.iter.slab.weight_left().group
-            - self.iter.run_group();
+        let acc =
+            self.iter.slabs.weight().acc - self.iter.slab.weight_left().acc - self.iter.run_acc();
         let pos = self.iter.pos;
         let item = self.iter.next()?;
-        Some(ColGroupItem { item, pos, group })
+        Some(ColGroupItem { item, pos, acc })
     }
 
-    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
-        let target = self.iter.calculate_group() + n + 1;
-        if self.iter.slabs.weight().group < target {
-            let delta = self.iter.reset_iter_to_group(target - 1)?;
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let mut n = Acc::from(n);
+        let target: Acc = self.iter.calculate_acc() + n + 1;
+        if self.iter.slabs.weight().acc < target {
+            let delta = self.iter.reset_iter_to_acc(target - 1)?;
             self.iter.check_pos();
             n -= delta;
         }
-        if self.iter.run_group() > n {
-            let unit = self.iter.run.as_ref().unwrap().unit_group();
-            let advance = n / unit;
+        if self.iter.run_acc() > n {
+            let agg = self.iter.run.as_ref().unwrap().agg();
+            let advance = n / agg;
             self.iter.pos += advance;
             if advance > 0 {
                 self.iter.run.as_mut().and_then(|r| r.nth(advance - 1));
@@ -309,8 +303,8 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
             self.next()
         } else {
             self.iter.pos += self.iter.run_count();
-            let n = n - self.iter.run_group();
-            let (advance, run) = self.iter.slab.sub_advance_group(n);
+            let n = n - self.iter.run_acc();
+            let (advance, run) = self.iter.slab.sub_advance_acc(n);
             self.iter.run = run;
             self.iter.pos += advance;
             self.iter.check_pos();
@@ -426,14 +420,14 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::<C>::external(data, range, &Default::default())
     }
 
-    pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> usize
+    pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
     where
         E: MaybePackable<C::Item> + Debug + Clone,
     {
         assert!(index <= self.len);
         assert!(!self.slabs.is_empty());
         if values.is_empty() && del == 0 {
-            return 0; // really none
+            return Acc::new(); // really none
         }
 
         #[cfg(debug_assertions)]
@@ -443,24 +437,26 @@ impl<C: ColumnCursor> ColumnData<C> {
             values.iter().map(|e| e.maybe_packable()),
         );
 
-        let cursor = self
-            .slabs
-            .get_where(|c, next| index - c.pos < next.pos)
-            .unwrap();
+        let cursor = self.slabs.get_where(|next| index < next.pos).unwrap();
 
-        let mut group = cursor.weight.group;
+        let mut acc = cursor.weight.acc;
 
         debug_assert_eq!(
             self.iter()
-                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
-                .sum::<usize>(),
-            self.group()
+                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            self.acc()
         );
 
         match C::splice(cursor.element, index - cursor.weight.pos, del, values) {
-            SpliceResult::Replace(add, del, g, slabs) => {
-                group += g;
+            SpliceResult::Replace(add, del, g, mut slabs) => {
+                acc += g;
+                C::compute_min_max(&mut slabs);
                 self.len = self.len + add - del;
+                for s in &slabs {
+                    let (_run, c) = C::seek(s.len(), s);
+                    assert_eq!(s.acc(), c.acc());
+                }
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
                 assert!(!self.slabs.is_empty());
             }
@@ -468,9 +464,9 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         debug_assert_eq!(
             self.iter()
-                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
-                .sum::<usize>(),
-            self.group()
+                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            self.acc()
         );
 
         #[cfg(debug_assertions)]
@@ -486,7 +482,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             }
             panic!()
         }
-        group
+        acc
     }
 
     pub fn init_empty(len: usize) -> Self {
@@ -507,9 +503,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         let col = ColumnData::init(len, SlabTree::new2(slab));
         debug_assert_eq!(
             col.iter()
-                .map(|i| i.map(<C::Item>::group).unwrap_or(0))
-                .sum::<usize>(),
-            col.group()
+                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            col.acc()
         );
         Ok(col)
     }
@@ -518,8 +514,8 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.len
     }
 
-    pub fn group(&self) -> usize {
-        self.slabs.weight().group
+    pub fn acc(&self) -> Acc {
+        self.slabs.weight().acc
     }
 }
 
@@ -557,6 +553,8 @@ pub(crate) mod tests {
     use rand::prelude::*;
     use rand::rngs::SmallRng;
 
+    const FUZZ_SIZE: usize = 100;
+
     fn test_splice<'a, C: ColumnCursor, E>(
         vec: &'a mut Vec<E>,
         col: &'a mut ColumnData<C>,
@@ -567,6 +565,11 @@ pub(crate) mod tests {
     {
         vec.splice(index..index, values.clone());
         col.splice(index, 0, values);
+        for slab in &col.slabs {
+            let (_, c) = C::seek(slab.len(), slab);
+            assert_eq!(c.min(), slab.min());
+            assert_eq!(c.max(), slab.max());
+        }
         assert_eq!(vec, &col.to_vec());
     }
 
@@ -901,9 +904,11 @@ pub(crate) mod tests {
         fn null() -> Option<i64> {
             None
         }
+
         fn rand(rng: &mut SmallRng) -> Option<i64> {
-            Some(rng.gen::<i64>() % 10)
+            Some((rng.gen::<u64>() % 10) as i64)
         }
+
         fn plus(&self, index: usize) -> Option<i64> {
             self.map(|i| i + index as i64)
         }
@@ -975,7 +980,7 @@ pub(crate) mod tests {
         let mut data: Vec<Option<u64>> = vec![];
         let mut col = ColumnData::<RleCursor<64, u64>>::new();
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
@@ -991,7 +996,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_advance_by_int() {
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let mut col = ColumnData::<IntCursor>::new();
             let values = Option::<u64>::rand_vec(&mut rng);
             col.splice(0, 0, values.clone());
@@ -1004,7 +1009,7 @@ pub(crate) mod tests {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<RleCursor<64, str>>::new();
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
@@ -1015,7 +1020,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_advance_by_str() {
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let mut col = ColumnData::<StrCursor>::new();
             let values = Option::<String>::rand_vec(&mut rng);
             col.splice(0, 0, values.clone());
@@ -1028,7 +1033,7 @@ pub(crate) mod tests {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursorInternal<8>>::new();
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
@@ -1108,7 +1113,7 @@ pub(crate) mod tests {
         let mut data: Vec<bool> = vec![];
         let mut col = ColumnData::<BooleanCursor>::new();
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
@@ -1124,7 +1129,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_fuzz_test_advance_by_boolean() {
         let mut rng = make_rng();
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let mut col = ColumnData::<BooleanCursor>::new();
             let values = bool::rand_vec(&mut rng);
             col.splice(0, 0, values.clone());
@@ -1189,7 +1194,7 @@ pub(crate) mod tests {
         let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
-        for _ in 0..1000 {
+        for _ in 0..FUZZ_SIZE {
             let val = rng.gen::<u64>() % 4;
             if val == 0 {
                 data.push(None);
@@ -1200,9 +1205,9 @@ pub(crate) mod tests {
         let mut col = ColumnData::<RleCursor<8, u64>>::new();
         col.splice(0, 0, data.clone());
 
-        for _ in 0..1000 {
-            let a = rng.gen::<usize>() % 1000;
-            let b = rng.gen::<usize>() % 1000;
+        for _ in 0..FUZZ_SIZE {
+            let a = rng.gen::<usize>() % FUZZ_SIZE;
+            let b = rng.gen::<usize>() % FUZZ_SIZE;
             let min = std::cmp::min(a, b);
             let max = std::cmp::max(a, b);
 
@@ -1211,11 +1216,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_range_with_group() {
+    fn iter_range_with_acc() {
         let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
-        const MAX: usize = 1000;
+        const MAX: usize = FUZZ_SIZE;
         for _ in 0..MAX {
             let val = rng.gen::<u64>() % 4;
             if val == 0 {
@@ -1227,25 +1232,23 @@ pub(crate) mod tests {
         let mut col = ColumnData::<RleCursor<8, u64>>::new();
         col.splice(0, 0, data.clone());
 
-        let vals_w_group = col.iter().with_group().collect::<Vec<_>>();
+        let vals_w_acc = col.iter().with_acc().collect::<Vec<_>>();
 
         for n in 0..(MAX - 3) {
             let m = n + 3;
-            let sub = col.iter_range(n..m).with_group().collect::<Vec<_>>();
-            assert_eq!(&vals_w_group[n..m], sub.as_slice());
+            let sub = col.iter_range(n..m).with_acc().collect::<Vec<_>>();
+            assert_eq!(&vals_w_acc[n..m], sub.as_slice());
         }
 
-        let mut last_group = 0;
-        let mut last_item: u64 = 0;
-        for n in 0..col.group() {
-            let result = col.iter().with_group().nth(n).unwrap();
+        let mut last_acc = Acc::new();
+        let mut last_item_agg = Default::default();
+        for n in 0..(col.acc().as_usize()) {
+            let result = col.iter().with_acc().nth(n).unwrap();
             let item = result.item;
-            let group = result.group;
-            assert!(
-                group <= n && (group == last_group || group == last_group + last_item as usize)
-            );
-            last_group = group;
-            last_item = item.unwrap_or(0);
+            let acc = result.acc;
+            assert!(acc <= Acc::from(n) && (acc == last_acc || acc == last_acc + last_item_agg));
+            last_acc = acc;
+            last_item_agg = item.agg();
         }
     }
 }

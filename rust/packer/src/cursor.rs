@@ -1,3 +1,4 @@
+use super::aggregate::{Acc, Agg};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter};
 
@@ -60,18 +61,11 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
         self.pop_n(1)
     }
 
-    pub fn unit_group(&self) -> usize {
-        self.value.as_ref().map(|i| T::group(*i)).unwrap_or(0)
+    pub fn agg(&self) -> Agg {
+        self.value.as_ref().map(|i| T::agg(*i)).unwrap_or_default()
     }
-    pub fn group(&self) -> usize {
-        self.count * self.unit_group()
-    }
-
-    pub(crate) fn weight_left(&self) -> SlabWeight {
-        SlabWeight {
-            pos: self.count,
-            group: self.group(),
-        }
+    pub fn acc(&self) -> Acc {
+        self.agg() * self.count
     }
 }
 
@@ -102,7 +96,7 @@ pub struct Encoder<'a, C: ColumnCursor> {
     pub state: C::State<'a>,
     pub current: SlabWriter<'a>,
     pub post: C::PostState<'a>,
-    pub group: usize,
+    pub acc: Acc,
     pub deleted: usize,
     pub overflow: usize,
     pub cursor: C,
@@ -177,6 +171,8 @@ pub trait ColumnCursor: Debug + Clone + Copy {
 
         Self::copy_between(slab, writer, c0, c1, run1, size)
     }
+
+    fn compute_min_max(_slabs: &mut [Slab]) {}
 
     fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
         v.is_none()
@@ -284,8 +280,15 @@ pub trait ColumnCursor: Debug + Clone + Copy {
 
     fn index(&self) -> usize;
 
-    fn group(&self) -> usize {
-        0
+    fn acc(&self) -> Acc {
+        Acc::new()
+    }
+
+    fn min(&self) -> Agg {
+        Agg::default()
+    }
+    fn max(&self) -> Agg {
+        Agg::default()
     }
 
     fn seek(index: usize, slab: &Slab) -> (Option<Run<'_, Self::Item>>, Self) {
@@ -318,22 +321,22 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     {
         let mut encoder = Self::encode(index, del, slab, values.len());
         let mut add = 0;
-        let mut value_group = 0;
+        let mut value_acc = Acc::new();
         for v in &values {
-            value_group += v.group();
+            value_acc += v.agg();
             add += encoder.append(v.maybe_packable());
         }
         assert!(encoder.overflow == 0);
         let deleted = encoder.deleted;
-        let group = encoder.group;
+        let acc = encoder.acc;
         let slabs = encoder.finish();
         if deleted == 0 {
             debug_assert_eq!(
-                slabs.iter().map(|s| s.group()).sum::<usize>(),
-                slab.group() + value_group
+                slabs.iter().map(|s| s.acc()).sum::<Acc>(),
+                slab.acc() + value_acc
             );
         }
-        SpliceResult::Replace(add, deleted, group, slabs)
+        SpliceResult::Replace(add, deleted, acc, slabs)
     }
 
     fn splice_delete<'a>(
@@ -406,7 +409,7 @@ pub struct SpliceDel<'a, C: ColumnCursor> {
 pub enum SpliceResult {
     //Done(usize, usize),
     //Add(usize, usize, Vec<Slab>),
-    Replace(usize, usize, usize, Vec<Slab>),
+    Replace(usize, usize, Acc, Vec<Slab>),
 }
 
 #[derive(Debug, Clone, Default, Copy)]
@@ -429,16 +432,16 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
         self.weight_left
     }
 
-    pub(crate) fn sub_advance_group(&mut self, mut n: usize) -> (usize, Option<Run<'a, C::Item>>) {
+    pub(crate) fn sub_advance_acc(&mut self, mut n: Acc) -> (usize, Option<Run<'a, C::Item>>) {
         let mut pos = 0;
         while let Some(mut run) = self.next() {
-            let unit = run.unit_group();
-            if unit * run.count <= n {
-                n -= unit * run.count;
+            let agg = run.agg();
+            if agg * run.count <= n {
+                n -= agg * run.count;
                 pos += run.count;
             } else {
-                assert!(unit > 0);
-                let advance = n / unit;
+                assert!(agg.as_usize() > 0);
+                let advance = n / agg;
                 run.count -= advance;
                 pos += advance;
                 if run.count == 0 {
@@ -480,7 +483,8 @@ impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
     fn next(&mut self) -> Option<Self::Item> {
         let (run, cursor) = self.cursor.next(self.slab)?;
         self.cursor = cursor;
-        self.weight_left -= run.weight_left();
+        self.weight_left.pos -= run.count;
+        self.weight_left.acc -= run.acc();
         Some(run)
     }
 }
