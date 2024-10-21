@@ -19,7 +19,7 @@
         overlays = [rust-overlay.overlays.default];
         inherit system;
       };
-      rust = pkgs.rust-bin.stable.latest.default;
+      rust = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
     in {
       formatter = pkgs.alejandra;
 
@@ -48,7 +48,7 @@
           cargo-deny
           crate2nix
           wasm-pack
-          pkgconfig
+          pkg-config
           openssl
           gnuplot
 
@@ -60,8 +60,8 @@
           cmake
           cmocka
           doxygen
+          ninja
 
-          rnix-lsp
           nixpkgs-fmt
         ];
       };
