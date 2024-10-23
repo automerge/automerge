@@ -102,12 +102,22 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn transform(&self, run: &Run<'_, i64>) -> Option<i64> {
-        if run.value.is_some() {
-            //Some(self.abs - run.delta_minus_one())
-            Some(self.abs - run.delta())
+    fn contains(&self, run: &Run<'_, i64>, agg: Agg) -> bool {
+        let value = run.value.unwrap_or(0);
+        let a = Agg::from(self.abs);
+        let b = Agg::from(self.abs - value * (run.count as i64 - 1));
+        if a > b {
+            agg <= a && agg >= b
         } else {
-            None
+            agg >= a && agg <= b
+        }
+    }
+
+    fn pop(&self, run: &mut Run<'_, i64>) -> Option<Option<i64>> {
+        if run.next()?.is_some() {
+            Some(Some(self.abs - run.delta()))
+        } else {
+            Some(None)
         }
     }
 
@@ -218,9 +228,11 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         if let Some((run, rle)) = self.rle.try_next(slab)? {
             let delta = run.delta();
             let abs = self.abs.saturating_add(delta);
-            let abs_agg = Agg::from(abs);
-            let min = self.min.minimize(abs_agg);
-            let max = self.max.maximize(abs_agg);
+            let first_step = self.abs.saturating_add(run.value.unwrap_or(0));
+            let min = std::cmp::min(abs, first_step);
+            let max = std::cmp::max(abs, first_step);
+            let min = self.min.minimize(Agg::from(min));
+            let max = self.max.maximize(Agg::from(max));
             Ok(Some((run, Self { abs, rle, min, max })))
         } else {
             Ok(None)

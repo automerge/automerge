@@ -10,7 +10,7 @@ readme = "./README.md"
 
 [features]
 optree-visualisation = ["dot"]
-wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
+wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js", "packer/wasm"]
 utf8-indexing = []
 
 [dependencies]

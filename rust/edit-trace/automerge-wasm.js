@@ -25,7 +25,6 @@ t_time = new Date()
 Automerge.load(saved)
 console.log(`doc.load in ${new Date() - t_time} ms`)
 
-/*
 t_time = new Date()
 doc.fork(undefined, doc.getHeads())
 console.log(`doc.forkAt in ${new Date() - t_time} ms`)
@@ -38,7 +37,6 @@ t_time = new Date()
 t = doc.text(text);
 mat = doc.applyPatches(mat)
 console.log(`doc.applyPatches() in ${new Date() - t_time} ms`)
-*/
 
 if (doc.text(text) !== finalText) {
   throw new RangeError('ERROR: final text did not match expectation')

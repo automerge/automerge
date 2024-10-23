@@ -46,6 +46,10 @@ pub trait Packable: PartialEq + Debug {
         Agg::default()
     }
 
+    fn maybe_agg(_item: Option<Self::Unpacked<'_>>) -> Agg {
+        Agg::default()
+    }
+
     fn validate(_val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
         Ok(())
     }
@@ -69,6 +73,10 @@ impl Packable for i64 {
 
     fn own(item: i64) -> i64 {
         item
+    }
+
+    fn maybe_agg(item: Option<i64>) -> Agg {
+        Agg::from(item.unwrap_or(0))
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, i64), PackError> {
@@ -110,6 +118,10 @@ impl Packable for u32 {
 impl Packable for u64 {
     type Unpacked<'a> = u64;
     type Owned = u64;
+
+    fn maybe_agg(item: Option<u64>) -> Agg {
+        Agg::from(item.unwrap_or(0))
+    }
 
     fn validate(val: &Option<Self::Unpacked<'_>>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {

@@ -1,6 +1,9 @@
+use std::cmp::Ordering;
 use std::iter::Sum;
 use std::num::NonZeroU32;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
+
+use std::fmt;
 
 // Aggregate Accumulator
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
@@ -60,6 +63,12 @@ impl AddAssign for Acc {
 impl AddAssign<Agg> for Acc {
     fn add_assign(&mut self, other: Agg) {
         self.0 += other.as_u64()
+    }
+}
+
+impl fmt::Display for Acc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        self.0.fmt(f)
     }
 }
 
@@ -156,17 +165,32 @@ impl PartialEq<usize> for Acc {
 }
 
 // Aggregate
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Agg(Option<NonZeroU32>);
+
+impl PartialOrd for Agg {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (&self.0, &other.0) {
+            (None, None) => Some(Ordering::Equal),
+            (Some(a), Some(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
 
 impl Agg {
     pub fn new(v: u32) -> Self {
         Self(NonZeroU32::new(v))
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = Agg> {
+        self.0.into_iter().map(|v| Agg(Some(v)))
+    }
+
     pub fn is_some(&self) -> bool {
         self.0.is_some()
     }
+
     pub fn is_none(&self) -> bool {
         self.0.is_none()
     }
@@ -205,5 +229,24 @@ impl Agg {
 
     pub fn as_u64(&self) -> u64 {
         self.0.map(|v| v.get() as u64).unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn agg_partial_cmp() {
+        let agg0 = Agg::from(0);
+        let agg1 = Agg::from(1);
+        let agg2 = Agg::from(2);
+        assert!(agg0 == agg0);
+        assert!(agg2 == agg2);
+        assert!(agg1 < agg2);
+        assert!(!(agg0 < agg1));
+        assert!(!(agg0 > agg1));
+        assert!(!(agg0 == agg1));
+        assert!(!(agg1 >= agg2));
     }
 }

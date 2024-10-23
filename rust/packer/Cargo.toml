@@ -7,6 +7,10 @@ license = "MIT"
 [lib]
 bench = false
 
+
+[features]
+wasm = ["web-sys"]
+
 [dependencies]
 leb128 = "^0.2.5"
 thiserror = "^1.0.16"
@@ -27,3 +31,8 @@ harness = false
 [[bench]]
 name = "insert"
 harness = false
+
+[dependencies.web-sys]
+version = "^0.3.55"
+features = ["console"]
+optional = true

@@ -80,8 +80,8 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             offset: self.offset + bytes,
             index: self.index + count,
             acc: self.acc + agg * count,
-            min: self.min,
-            max: self.max,
+            min: self.min.minimize(agg),
+            max: self.max.maximize(agg),
             lit,
             _phantom: PhantomData,
         }

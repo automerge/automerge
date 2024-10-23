@@ -74,9 +74,11 @@ impl<'a> Run<'a, i64> {
         self.count as i64 * self.value.unwrap_or(0)
     }
 
-    pub fn delta_minus_one(&self) -> i64 {
-        (self.count as i64 - 1) * self.value.unwrap_or(0)
-    }
+    /*
+        pub fn delta_minus_one(&self) -> i64 {
+            (self.count as i64 - 1) * self.value.unwrap_or(0)
+        }
+    */
 }
 
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
@@ -178,11 +180,15 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         v.is_none()
     }
 
-    fn transform<'a>(
+    fn contains(&self, run: &Run<'_, Self::Item>, agg: Agg) -> bool {
+        agg == <Self::Item>::maybe_agg(run.value)
+    }
+
+    fn pop<'a>(
         &self,
-        run: &Run<'a, Self::Item>,
-    ) -> Option<<Self::Item as Packable>::Unpacked<'a>> {
-        run.value
+        run: &mut Run<'a, Self::Item>,
+    ) -> Option<Option<<Self::Item as Packable>::Unpacked<'a>>> {
+        run.next()
     }
 
     fn finalize_state<'a>(
@@ -307,6 +313,15 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     }
 
     fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
+        let mut cursor = Self::empty();
+        while let Some((val, next_cursor)) = cursor.try_next(data)? {
+            Self::Item::validate(&val.value, m)?;
+            cursor = next_cursor
+        }
+        Ok(cursor)
+    }
+
+    fn debug_scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::empty();
         while let Some((val, next_cursor)) = cursor.try_next(data)? {
             Self::Item::validate(&val.value, m)?;

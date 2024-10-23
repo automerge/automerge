@@ -114,18 +114,6 @@ impl<T: HasWeight> SpanTree<T> {
         }
     }
 
-    pub fn iter_where<F>(&self, f: F) -> SpanTreeIter<'_, T>
-    where
-        F: Fn(T::Weight) -> bool,
-    {
-        let cursor = self.get_where(f).unwrap();
-        SpanTreeIter {
-            inner: Some(self),
-            index: cursor.index,
-            weight: cursor.weight,
-        }
-    }
-
     pub fn splice<R, I>(&mut self, range: R, values: I)
     where
         R: RangeBounds<usize>,
@@ -225,23 +213,50 @@ impl<T: HasWeight> SpanTree<T> {
         self.root_node.as_ref().and_then(|n| n.last())
     }
 
+    pub fn get_each<F>(&self, f: F) -> impl Iterator<Item = SubCursor<'_, T>>
+    where
+        F: Fn(&T::Weight, &T::Weight) -> bool,
+    {
+        let acc = Default::default();
+        let mut results = vec![];
+        if let Some(node) = self.root_node.as_ref() {
+            node.get_each(0, acc, &f, &mut results);
+        }
+        results.into_iter()
+    }
+
     pub fn get_where<F>(&self, f: F) -> Option<SubCursor<'_, T>>
     where
-        F: Fn(T::Weight) -> bool,
+        F: Fn(&T::Weight, &T::Weight) -> bool,
     {
-        // TODO: by default we return the last node if nothing matches
-        // this is very non-intuitive - consider alternatives
         let acc = Default::default();
-        if !f(self.weight()) {
-            let element = self.last()?;
-            Some(SubCursor {
-                index: self.len() - 1,
-                weight: self.last_weight(),
-                element,
-            })
-        } else {
-            self.root_node.as_ref().and_then(|n| n.get_where(0, acc, f))
+        self.root_node.as_ref().and_then(|n| n.get_where(0, acc, f))
+    }
+
+    pub fn get_last_cursor(&self) -> SubCursor<'_, T> {
+        assert!(!self.is_empty());
+        let element = self.last().unwrap();
+        SubCursor {
+            index: self.len() - 1,
+            weight: self.last_weight(),
+            element,
         }
+    }
+
+    pub fn get_where_or_last<F>(&self, f: F) -> SubCursor<'_, T>
+    where
+        F: Fn(&T::Weight, &T::Weight) -> bool,
+    {
+        assert!(!self.is_empty());
+        let acc = Default::default();
+        if f(&acc, &self.weight()) {
+            if let Some(root) = self.root_node.as_ref() {
+                if let Some(result) = root.get_where(0, acc, f) {
+                    return result;
+                }
+            }
+        }
+        self.get_last_cursor()
     }
 
     /// Removes the element at `index` from the sequence.
@@ -720,37 +735,78 @@ impl<T: HasWeight> TreeNode<T> {
         assert!(self.is_full());
     }
 
-    fn get_where<F>(&self, mut index: usize, mut acc: T::Weight, f: F) -> Option<SubCursor<'_, T>>
-    where
-        F: Fn(T::Weight) -> bool,
+    fn get_each<'a, F>(
+        &'a self,
+        mut index: usize,
+        mut acc: T::Weight,
+        f: &F,
+        results: &mut Vec<SubCursor<'a, T>>,
+    ) where
+        F: Fn(&T::Weight, &T::Weight) -> bool,
     {
         if self.is_leaf() {
-            let iter = self.elements.iter(); //.peekable();
+            let iter = self.elements.iter();
             for e in iter {
-                let next_acc = acc + e.weight();
-                if f(next_acc) {
-                    return Some(SubCursor::new(index, acc, e));
+                let next = e.weight();
+                if f(&acc, &next) {
+                    results.push(SubCursor::new(index, acc, e));
                 }
                 index += 1;
-                acc = next_acc;
+                acc += next;
             }
         } else {
             for i in 0..self.children.len() {
                 if let Some(child) = self.children.get(i) {
-                    let next_acc = acc + child.weight();
-                    if f(next_acc) {
+                    let next = child.weight();
+                    if f(&acc, &next) {
+                        child.get_each(index, acc, f, results);
+                    }
+                    index += child.len();
+                    acc += next;
+                }
+                if let Some(e) = self.elements.get(i) {
+                    let next = e.weight();
+                    if f(&acc, &next) {
+                        results.push(SubCursor::new(index, acc, e));
+                    }
+                    index += 1;
+                    acc += next;
+                }
+            }
+        }
+    }
+
+    fn get_where<F>(&self, mut index: usize, mut acc: T::Weight, f: F) -> Option<SubCursor<'_, T>>
+    where
+        F: Fn(&T::Weight, &T::Weight) -> bool,
+    {
+        if self.is_leaf() {
+            let iter = self.elements.iter();
+            for e in iter {
+                let next = e.weight();
+                if f(&acc, &next) {
+                    return Some(SubCursor::new(index, acc, e));
+                }
+                index += 1;
+                acc += next;
+            }
+        } else {
+            for i in 0..self.children.len() {
+                if let Some(child) = self.children.get(i) {
+                    let next = child.weight();
+                    if f(&acc, &next) {
                         return child.get_where(index, acc, f);
                     }
                     index += child.len();
-                    acc = next_acc;
+                    acc += next;
                 }
                 if let Some(e) = self.elements.get(i) {
-                    let next_acc = acc + e.weight();
-                    if f(next_acc) {
+                    let next = e.weight();
+                    if f(&acc, &next) {
                         return Some(SubCursor::new(index, acc, e));
                     }
                     index += 1;
-                    acc = next_acc;
+                    acc += next;
                 }
             }
         }
@@ -825,6 +881,10 @@ impl<'a, T: HasWeight> SpanTreeIter<'a, T> {
 
     pub fn weight(&self) -> T::Weight {
         self.weight
+    }
+
+    pub fn total_weight(&self) -> T::Weight {
+        self.inner.as_ref().map(|t| t.weight()).unwrap_or_default()
     }
 
     pub fn index(&self) -> usize {
@@ -1039,47 +1099,47 @@ pub(crate) mod tests {
         assert_eq!(tree.get(3), Some(&40));
         assert_eq!(tree.get(4), Some(&50));
         assert_eq!(
-            tree.get_where(|next| 0 < next),
+            tree.get_where(|acc, next| 0 < *acc + *next),
             Some(SubCursor::new(0, 0, &10))
         );
         assert_eq!(
-            tree.get_where(|next| 5 < next),
+            tree.get_where(|acc, next| 5 < *acc + *next),
             Some(SubCursor::new(0, 0, &10))
         );
         assert_eq!(
-            tree.get_where(|next| 6 < next),
+            tree.get_where(|acc, next| 6 < *acc + *next),
             Some(SubCursor::new(0, 0, &10))
         );
         assert_eq!(
-            tree.get_where(|next| 10 < next),
+            tree.get_where(|acc, next| 10 < *acc + *next),
             Some(SubCursor::new(1, 10, &20))
         );
         assert_eq!(
-            tree.get_where(|next| 15 < next),
+            tree.get_where(|acc, next| 15 < *acc + *next),
             Some(SubCursor::new(1, 10, &20))
         );
         assert_eq!(
-            tree.get_where(|next| 16 < next),
+            tree.get_where(|acc, next| 16 < *acc + *next),
             Some(SubCursor::new(1, 10, &20))
         );
         assert_eq!(
-            tree.get_where(|next| 29 < next),
+            tree.get_where(|acc, next| 29 < *acc + *next),
             Some(SubCursor::new(1, 10, &20))
         );
         assert_eq!(
-            tree.get_where(|next| 30 < next),
+            tree.get_where(|acc, next| 30 < *acc + *next),
             Some(SubCursor::new(2, 30, &30))
         );
         assert_eq!(
-            tree.get_where(|next| 40 < next),
+            tree.get_where(|acc, next| 40 < *acc + *next),
             Some(SubCursor::new(2, 30, &30))
         );
         assert_eq!(
-            tree.get_where(|next| 50 < next),
+            tree.get_where(|acc, next| 50 < *acc + *next),
             Some(SubCursor::new(2, 30, &30))
         );
         assert_eq!(
-            tree.get_where(|next| 60 < next),
+            tree.get_where(|acc, next| 60 < *acc + *next),
             Some(SubCursor::new(3, 60, &40))
         );
     }
@@ -1096,7 +1156,7 @@ pub(crate) mod tests {
             let index = i / 10;
             let weight = 10;
             assert_eq!(
-                tree.get_where(|next| i < next),
+                tree.get_where(|acc, next| i < *acc + *next),
                 Some(SubCursor::new(
                     index,
                     index * weight,
@@ -1115,7 +1175,7 @@ pub(crate) mod tests {
         assert_eq!(tree.weight(), MAX * 10 + 90);
 
         assert_eq!(
-            tree.get_where(|next| 201 < next),
+            tree.get_where(|acc, next| 201 < *acc + *next),
             Some(SubCursor::new(
                 11,
                 200,

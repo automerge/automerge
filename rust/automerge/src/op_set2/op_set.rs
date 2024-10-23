@@ -390,6 +390,7 @@ impl OpSet {
 
         let obj_start = iter.acc();
         if let Some(tx) = iter.nth(index) {
+            assert!(tx.acc >= obj_start);
             index = (tx.acc - obj_start).as_usize();
             for op in self.iter_range(&(tx.pos..range.end)) {
                 if op.insert && !ops.is_empty() {
@@ -412,7 +413,134 @@ impl OpSet {
         })
     }
 
+    fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
+        let counters = self.cols.get_delta_col(ID_COUNTER_COL_SPEC);
+        let actors = self.cols.get_actor_col(ID_ACTOR_COL_SPEC);
+        counters.find_by_value(id.counter()).into_iter().find(|&pos| actors.get(pos) == Some(Some(ActorIdx::from(id.actor()))))
+    }
+
+    fn seek_list_op_fast(
+        &self,
+        obj: &ObjId,
+        target: ElemId,
+        id: OpId,
+        insert: bool,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<SeekOpIdResult<'_>> {
+        if encoding != ListEncoding::Text || clock.is_some() || target.is_head() {
+            return None;
+        }
+
+        let range = self
+            .cols
+            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+            .scope_to_value(obj.counter());
+
+        let range = self
+            .cols
+            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .scope_to_value(obj.actor());
+
+        if self.has_marks_in_range(&range) {
+            return None;
+        }
+
+        let op_pos = self.get_op_id_pos(target.0).unwrap();
+
+        let obj_acc = self.text_index.get_acc(range.start).as_usize();
+        let op_acc = self.text_index.get_acc(op_pos).as_usize();
+
+        let marks = MarkStateMachine::default();
+        let mut iter = self.iter_range(&(op_pos..range.end));
+        let mut pos = range.end;
+        let mut current = 0;
+        let mut index = op_acc - obj_acc;
+        let mut ops = vec![];
+        let mut found = false;
+        if insert {
+            while let Some(mut op) = iter.next() {
+                if op.insert {
+                    index += current;
+                    current = 0;
+                    if found && op.id < id {
+                        pos = op.pos;
+                        break;
+                    }
+                    if !found && ElemId(op.id) == target {
+                        found = true;
+                    }
+                }
+
+                let visible = op.scope_to_clock(clock, iter.get_opiter());
+
+                if visible {
+                    //marks.process(op.id(), op.action());
+                    current = op.width(encoding);
+                }
+            }
+            index += current;
+        } else {
+            while let Some(mut op) = iter.next() {
+                if op.insert {
+                    if found {
+                        pos = op.pos;
+                        break;
+                    } else {
+                        index += current;
+                        current = 0;
+                        if ElemId(op.id) == target {
+                            found = true;
+                        }
+                    }
+                } else if found && op.id > id {
+                    pos = op.pos;
+                }
+
+                let visible = op.scope_to_clock(clock, iter.get_opiter());
+
+                if found {
+                    ops.push((op, visible));
+                }
+
+                /*
+                                if visible && !found {
+                                    marks.process(op.id(), op.action());
+                                    current = op.width(encoding);
+                                }
+                */
+            }
+        }
+
+        Some(SeekOpIdResult {
+            index,
+            pos,
+            ops,
+            marks: marks.current().cloned(),
+        })
+    }
+
     fn seek_list_op(
+        &self,
+        obj: &ObjId,
+        target: ElemId,
+        id: OpId,
+        insert: bool,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> SeekOpIdResult<'_> {
+        if let Some(result) = self.seek_list_op_fast(obj, target, id, insert, encoding, clock) {
+            debug_assert_eq!(
+                result,
+                self.seek_list_op_slow(obj, target, id, insert, encoding, clock)
+            );
+            result
+        } else {
+            self.seek_list_op_slow(obj, target, id, insert, encoding, clock)
+        }
+    }
+
+    fn seek_list_op_slow(
         &self,
         obj: &ObjId,
         target: ElemId,
@@ -945,6 +1073,7 @@ pub(crate) struct QueryNth {
     pub(crate) elemid: ElemId,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct SeekOpIdResult<'a> {
     index: usize,
     pos: usize,
@@ -1542,10 +1671,24 @@ impl Columns {
         }
     }
 
+    fn get_delta_col(&self, spec: ColumnSpec) -> &ColumnData<DeltaCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Delta(c)) => c,
+            _ => panic!(),
+        }
+    }
+
     fn get_actor(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActorCursor> {
         match self.0.get(&spec) {
             Some(Column::Actor(c)) => c.iter(),
             _ => ColumnDataIter::empty(),
+        }
+    }
+
+    fn get_actor_col(&self, spec: ColumnSpec) -> &ColumnData<ActorCursor> {
+        match self.0.get(&spec) {
+            Some(Column::Actor(c)) => c,
+            _ => panic!(),
         }
     }
 
