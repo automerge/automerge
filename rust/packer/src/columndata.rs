@@ -494,6 +494,7 @@ impl<C: ColumnCursor> ColumnData<C> {
                 acc += g;
                 C::compute_min_max(&mut slabs);
                 self.len = self.len + add - del;
+                #[cfg(debug_assertions)]
                 for s in &slabs {
                     let (_run, c) = C::seek(s.len(), s);
                     assert_eq!(s.acc(), c.acc());

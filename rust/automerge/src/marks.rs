@@ -46,6 +46,7 @@ impl Mark {
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
+
     pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
         //let data = self.data.into_owned();

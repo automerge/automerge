@@ -109,6 +109,7 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
         C::append(&mut self.state, &mut self.current, v)
     }
 
+    #[inline(never)]
     pub(crate) fn finish(mut self) -> Vec<Slab> {
         if let Some(cursor) = C::finalize_state(
             self.slab,
@@ -330,6 +331,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
         Ok(cursor)
     }
 
+    #[inline(never)]
     fn splice<E>(slab: &Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
     where
         E: MaybePackable<Self::Item> + Debug,

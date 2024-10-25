@@ -120,8 +120,8 @@ impl Slab {
 
     pub fn as_slice(&self) -> &[u8] {
         match self {
-            Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
             Self::Owned(OwnedSlab { data, .. }) => data,
+            Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
         }
     }
 

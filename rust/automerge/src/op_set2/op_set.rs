@@ -416,7 +416,10 @@ impl OpSet {
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         let counters = self.cols.get_delta_col(ID_COUNTER_COL_SPEC);
         let actors = self.cols.get_actor_col(ID_ACTOR_COL_SPEC);
-        counters.find_by_value(id.counter()).into_iter().find(|&pos| actors.get(pos) == Some(Some(ActorIdx::from(id.actor()))))
+        counters
+            .find_by_value(id.counter())
+            .into_iter()
+            .find(|&pos| actors.get(pos) == Some(Some(ActorIdx::from(id.actor()))))
     }
 
     fn seek_list_op_fast(
@@ -716,17 +719,14 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn find_op_by_id(&self, id: &OpId) -> Option<Op<'_>> {
-        // FIXME - index goes here
-        self.iter().find(|op| &op.id == id)
-    }
-
     pub(crate) fn find_op_by_id_and_vis(
         &self,
         id: &OpId,
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
-        let mut iter = self.iter();
+        // FIXME - INDEX
+        let start = self.get_op_id_pos(*id)?;
+        let mut iter = self.iter_range(&(start..self.len()));
         while let Some(mut o1) = iter.next() {
             if &o1.id == id {
                 let mut vis = o1.scope_to_clock(clock, &iter);
@@ -748,8 +748,12 @@ impl OpSet {
         if obj.is_root() {
             Some(ObjType::Map)
         } else {
-            self.find_op_by_id(&obj.0)
-                .and_then(|op| op.action.try_into().ok())
+            let pos = self.get_op_id_pos(obj.0)?;
+            let action = self
+                .cols
+                .get_action_range(ACTION_COL_SPEC, &(pos..(pos + 1)))
+                .next()??;
+            action.try_into().ok()
         }
     }
 
