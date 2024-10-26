@@ -8,7 +8,7 @@ use std::ops::Range;
 
 pub(crate) type SubCursor<const B: usize> = RleCursor<B, i64>;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct DeltaCursorInternal<const B: usize> {
     abs: i64,
     min: Agg,
@@ -68,7 +68,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
-        cursor: Self,
+        mut cursor: Self,
     ) -> Option<Self> {
         match post {
             Some(run) if run.value.is_some() => {
@@ -83,16 +83,16 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
                 Self::finalize_state(slab, out, state, None, cursor)
             }
             None => {
-                if let Some((run, next)) = cursor.next(slab.as_slice()) {
+                if let Some(run) = cursor.next(slab.as_slice()) {
                     if run.value.is_some() {
                         // we need to flush at least two elements to make sure
                         // we're connected to prior and post lit runs
-                        Self::flush_twice(slab, out, state, run, next)
+                        Self::flush_twice(slab, out, state, run, cursor)
                     } else {
                         // Nulls do not affect ABS - so the post does not connect us to the copy afterward
                         // clear the post and try again
                         Self::append_chunk(&mut state, out, run);
-                        Self::finalize_state(slab, out, state, None, next)
+                        Self::finalize_state(slab, out, state, None, cursor)
                     }
                 } else {
                     Self::flush_state(out, state);
@@ -221,11 +221,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         data.splice(range, values);
     }
 
-    fn try_next<'a>(
-        &self,
-        slab: &'a [u8],
-    ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
-        if let Some((run, rle)) = self.rle.try_next(slab)? {
+    fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
+        if let Some(run) = self.rle.try_next(slab)? {
             let delta = run.delta();
             let abs = self.abs.saturating_add(delta);
             let first_step = self.abs.saturating_add(run.value.unwrap_or(0));
@@ -233,7 +230,10 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             let max = std::cmp::max(abs, first_step);
             let min = self.min.minimize(Agg::from(min));
             let max = self.max.maximize(Agg::from(max));
-            Ok(Some((run, Self { abs, rle, min, max })))
+            self.abs = abs;
+            self.min = min;
+            self.max = max;
+            Ok(Some(run))
         } else {
             Ok(None)
         }
@@ -264,25 +264,25 @@ impl<const B: usize> DeltaCursorInternal<B> {
         out: &mut SlabWriter<'a>,
         mut state: DeltaState<'a>,
         run: Run<'a, i64>,
-        cursor: Self,
+        mut cursor: Self,
     ) -> Option<Self> {
         if let Some(run) = run.pop() {
             Self::append(&mut state, out, Some(cursor.abs - run.delta()));
             Self::append_chunk(&mut state, out, run);
-            if let Some((run, next)) = cursor.next(slab.as_slice()) {
+            if let Some(run) = cursor.next(slab.as_slice()) {
                 Self::append_chunk(&mut state, out, run);
                 Self::flush_state(out, state);
-                Some(next)
+                Some(cursor)
             } else {
                 Self::flush_state(out, state);
                 Some(cursor)
             }
         } else {
             Self::append(&mut state, out, Some(cursor.abs));
-            if let Some((run, next)) = cursor.next(slab.as_slice()) {
+            if let Some(run) = cursor.next(slab.as_slice()) {
                 Self::append_chunk(&mut state, out, run);
                 Self::flush_state(out, state);
-                Some(next)
+                Some(cursor)
             } else {
                 Self::flush_state(out, state);
                 Some(cursor)

@@ -124,7 +124,7 @@ impl<'a, C: ColumnCursor> Encoder<'a, C> {
     }
 }
 
-pub trait ColumnCursor: Debug + Clone + Copy {
+pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     type Item: Packable + ?Sized;
     type State<'a>: Default + Debug;
     type PostState<'a>;
@@ -239,11 +239,7 @@ pub trait ColumnCursor: Debug + Clone + Copy {
 
     fn encode(index: usize, del: usize, slab: &Slab, capacity: usize) -> Encoder<'_, Self>;
 
-    #[allow(clippy::type_complexity)]
-    fn try_next<'a>(
-        &self,
-        data: &'a [u8],
-    ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError>;
+    fn try_next<'a>(&mut self, data: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError>;
 
     fn to_vec<'a, I>(values: I) -> Vec<Self::Export>
     where
@@ -258,30 +254,10 @@ pub trait ColumnCursor: Debug + Clone + Copy {
     where
         I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>;
 
-    // useful for debugging
-    fn decode(data: &[u8]) {
-        let mut cursor = Self::empty();
-        loop {
-            match cursor.try_next(data) {
-                Ok(Some((_run, next_cursor))) => {
-                    cursor = next_cursor;
-                }
-                Ok(None) => break,
-                Err(_) => {
-                    break;
-                }
-            }
-        }
-    }
-
-    fn next<'a>(&self, data: &'a [u8]) -> Option<(Run<'a, Self::Item>, Self)> {
+    fn next<'a>(&mut self, data: &'a [u8]) -> Option<Run<'a, Self::Item>> {
         match self.try_next(data).unwrap() {
-            // need one interface that throws away zero length runs (used by bool columns)
-            // and one interface that does not
-            // this throws out the zero length runs to not complicate the iterator
-            Some((run, cursor)) if run.count == 0 => cursor.next(data),
+            Some(run) if run.count == 0 => self.next(data),
             result => result,
-            //_ => None,
         }
     }
 
@@ -303,11 +279,10 @@ pub trait ColumnCursor: Debug + Clone + Copy {
             return (None, Self::new(slab));
         } else {
             let mut cursor = Self::new(slab);
-            while let Some((val, next_cursor)) = cursor.next(slab.as_slice()) {
-                if next_cursor.index() >= index {
-                    return (Some(val), next_cursor);
+            while let Some(val) = cursor.next(slab.as_slice()) {
+                if cursor.index() >= index {
+                    return (Some(val), cursor);
                 }
-                cursor = next_cursor;
             }
         }
         panic!()
@@ -315,18 +290,16 @@ pub trait ColumnCursor: Debug + Clone + Copy {
 
     fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::empty();
-        while let Some((val, next_cursor)) = cursor.try_next(data)? {
+        while let Some(val) = cursor.try_next(data)? {
             Self::Item::validate(&val.value, m)?;
-            cursor = next_cursor
         }
         Ok(cursor)
     }
 
     fn debug_scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::empty();
-        while let Some((val, next_cursor)) = cursor.try_next(data)? {
+        while let Some(val) = cursor.try_next(data)? {
             Self::Item::validate(&val.value, m)?;
-            cursor = next_cursor
         }
         Ok(cursor)
     }
@@ -385,9 +358,8 @@ pub trait ColumnCursor: Debug + Clone + Copy {
                     post = None;
                 }
                 None => {
-                    if let Some((p, c)) = Self::next(&cursor, slab.as_slice()) {
+                    if let Some(p) = Self::next(&mut cursor, slab.as_slice()) {
                         post = Some(p);
-                        cursor = c;
                     } else {
                         post = None;
                         overflow = del;
@@ -498,8 +470,7 @@ impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
     type Item = Run<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (run, cursor) = self.cursor.next(self.slab)?;
-        self.cursor = cursor;
+        let run = self.cursor.next(self.slab)?;
         self.weight_left.pos -= run.count;
         self.weight_left.acc -= run.acc();
         Some(run)

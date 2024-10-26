@@ -31,7 +31,7 @@ impl<'a> From<Run<'a, bool>> for BooleanState {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct BooleanCursorInternal<const B: usize> {
     value: bool,
     index: usize,
@@ -68,7 +68,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
-        cursor: Self,
+        mut cursor: Self,
     ) -> Option<Self> {
         if let Some(post) = post {
             if post.value == state.value {
@@ -79,17 +79,20 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
                 out.flush_bool_run(post.count, post.value);
                 Some(cursor)
             }
-        } else if let Ok(Some((val, next_cursor))) = cursor.try_next(slab.as_slice()) {
-            if val.value == Some(state.value) {
-                out.flush_bool_run(state.count + val.count, state.value);
-                Some(next_cursor)
+        } else {
+            let old_cursor = cursor;
+            if let Ok(Some(val)) = cursor.try_next(slab.as_slice()) {
+                if val.value == Some(state.value) {
+                    out.flush_bool_run(state.count + val.count, state.value);
+                    Some(cursor)
+                } else {
+                    out.flush_bool_run(state.count, state.value);
+                    Some(old_cursor)
+                }
             } else {
                 out.flush_bool_run(state.count, state.value);
-                Some(cursor)
+                None
             }
-        } else {
-            out.flush_bool_run(state.count, state.value);
-            None
         }
     }
 
@@ -193,29 +196,26 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         data.splice(range, values.map(|e| e.unwrap_or(false)));
     }
 
-    fn try_next<'a>(
-        &self,
-        slab: &'a [u8],
-    ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
+    fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         if self.offset >= slab.len() {
             return Ok(None);
         }
         let data = &slab[self.offset..];
         let (bytes, count) = u64::unpack(data)?;
         let count = count as usize;
-        let mut cursor = *self;
-        cursor.value = !self.value;
-        cursor.index += count;
-        cursor.last_offset = self.offset;
-        cursor.offset += bytes;
-        if self.value {
-            cursor.acc += Acc::from(count); // agg(1) * count
+        let value = self.value;
+        self.value = !value;
+        self.index += count;
+        self.last_offset = self.offset;
+        self.offset += bytes;
+        if value {
+            self.acc += Acc::from(count); // agg(1) * count
         }
         let run = Run {
             count,
-            value: Some(self.value),
+            value: Some(value),
         };
-        Ok(Some((run, cursor)))
+        Ok(Some(run))
     }
 
     fn index(&self) -> usize {

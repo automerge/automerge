@@ -7,7 +7,7 @@ use super::slab::{Slab, SlabWriter};
 use std::marker::PhantomData;
 use std::ops::Range;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
     index: usize,
     offset: usize,
@@ -66,25 +66,23 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
         }
     }
 
-    fn next_lit(&self, count: usize) -> Option<LitRunCursor> {
-        if let Some(lit) = self.lit {
-            lit.next(count)
-        } else {
-            None
+    fn next_lit(&mut self, count: usize) {
+        if let Some(lit) = &mut self.lit {
+            if lit.index > lit.len {
+                self.lit = None;
+            } else {
+                lit.index += count;
+            }
         }
     }
 
-    fn progress(&self, count: usize, bytes: usize, lit: Option<LitRunCursor>, agg: Agg) -> Self {
-        RleCursor {
-            last_offset: self.offset,
-            offset: self.offset + bytes,
-            index: self.index + count,
-            acc: self.acc + agg * count,
-            min: self.min.minimize(agg),
-            max: self.max.maximize(agg),
-            lit,
-            _phantom: PhantomData,
-        }
+    fn progress(&mut self, count: usize, bytes: usize, agg: Agg) {
+        self.last_offset = self.offset;
+        self.offset += bytes;
+        self.index += count;
+        self.acc += agg * count;
+        self.min = self.min.minimize(agg);
+        self.max = self.max.maximize(agg);
     }
 
     pub(crate) fn num_left(&self) -> usize {
@@ -262,15 +260,15 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         out: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Option<Run<'a, P>>,
-        cursor: Self,
+        mut cursor: Self,
     ) -> Option<Self> {
         if let Some(run) = post {
             Self::append_chunk(&mut state, out, run);
         }
-        if let Some((run, next_cursor)) = cursor.next(slab.as_slice()) {
+        if let Some(run) = cursor.next(slab.as_slice()) {
             Self::append_chunk(&mut state, out, run);
             Self::flush_state(out, state);
-            Some(next_cursor)
+            Some(cursor)
         } else {
             Self::flush_state(out, state);
             None
@@ -410,10 +408,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         self.max
     }
 
-    fn try_next<'a>(
-        &self,
-        slab: &'a [u8],
-    ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
+    fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         let data = &slab[self.offset..];
         if data.is_empty() {
             return Ok(None);
@@ -421,13 +416,13 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
         if self.num_left() > 0 {
             let (value_bytes, value) = P::unpack(data)?;
             let agg = P::agg(value);
-            let lit = self.next_lit(1);
-            let cursor = self.progress(1, value_bytes, lit, agg);
+            self.next_lit(1);
+            self.progress(1, value_bytes, agg);
             let value = Run {
                 count: 1,
                 value: Some(value),
             };
-            Ok(Some((value, cursor)))
+            Ok(Some(value))
         } else {
             let (count_bytes, count) = i64::unpack(data)?;
             let data = &data[count_bytes..];
@@ -436,37 +431,37 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     let count = count as usize;
                     let (value_bytes, value) = P::unpack(data)?;
                     let agg = P::agg(value);
-                    let lit = self.next_lit(count);
-                    let cursor = self.progress(count, count_bytes + value_bytes, lit, agg);
+                    self.next_lit(count);
+                    self.progress(count, count_bytes + value_bytes, agg);
                     let value = Run {
                         count,
                         value: Some(value),
                     };
-                    Ok(Some((value, cursor)))
+                    Ok(Some(value))
                 }
                 count if count < 0 => {
                     let (value_bytes, value) = P::unpack(data)?;
                     assert!(-count < slab.len() as i64);
-                    let lit = Some(LitRunCursor::new(
+                    self.lit = Some(LitRunCursor::new(
                         self.offset + count_bytes,
                         count,
                         self.acc,
                     ));
                     let agg = P::agg(value);
-                    let cursor = self.progress(1, count_bytes + value_bytes, lit, agg);
+                    self.progress(1, count_bytes + value_bytes, agg);
                     let value = Run {
                         count: 1,
                         value: Some(value),
                     };
-                    Ok(Some((value, cursor)))
+                    Ok(Some(value))
                 }
                 _ => {
                     let (null_bytes, count) = u64::unpack(data)?;
                     let count = count as usize;
-                    let cursor =
-                        self.progress(count, count_bytes + null_bytes, None, Agg::default());
+                    self.lit = None;
+                    self.progress(count, count_bytes + null_bytes, Agg::default());
                     let value = Run { count, value: None };
-                    Ok(Some((value, cursor)))
+                    Ok(Some(value))
                 }
             }
         }
@@ -477,7 +472,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, PartialEq, Default, Clone, Copy)]
 pub(crate) struct LitRunCursor {
     index: usize,
     offset: usize,
@@ -503,19 +498,6 @@ impl LitRunCursor {
 
     fn num_left(&self) -> usize {
         self.len.saturating_sub(self.index)
-    }
-
-    fn next(&self, count: usize) -> Option<Self> {
-        if self.index > self.len {
-            None
-        } else {
-            Some(LitRunCursor {
-                index: self.index + count,
-                offset: self.offset,
-                acc: self.acc,
-                len: self.len,
-            })
-        }
     }
 }
 

@@ -15,7 +15,7 @@ impl<const B: usize, P: Packable + ?Sized> TestDumpable<P> for RleCursor<B, P> {
         let mut cursor = Self::default();
         let mut current = None;
         let mut result = vec![];
-        while let Some((run, next)) = cursor.next(data) {
+        while let Some(run) = cursor.next(data) {
             match run {
                 Run { count, value: None } => {
                     if let Some(run) = current.take() {
@@ -27,7 +27,7 @@ impl<const B: usize, P: Packable + ?Sized> TestDumpable<P> for RleCursor<B, P> {
                     count: 1,
                     value: Some(v),
                 } => {
-                    if next.num_left() == 0 {
+                    if cursor.num_left() == 0 {
                         let mut run = current.take().unwrap_or_default();
                         run.push(v);
                         result.push(ColExport::litrun(run))
@@ -47,7 +47,6 @@ impl<const B: usize, P: Packable + ?Sized> TestDumpable<P> for RleCursor<B, P> {
                     result.push(ColExport::run(count, v))
                 }
             }
-            cursor = next;
         }
         if let Some(run) = current.take() {
             result.push(ColExport::litrun(run))
@@ -60,8 +59,7 @@ impl<const B: usize> TestDumpable<bool> for BooleanCursorInternal<B> {
     fn test_dump(data: &[u8]) -> Vec<ColExport<bool>> {
         let mut result = vec![];
         let mut cursor = Self::default();
-        while let Ok(Some((Run { count, value }, next_cursor))) = cursor.try_next(data) {
-            cursor = next_cursor;
+        while let Ok(Some(Run { count, value })) = cursor.try_next(data) {
             if count > 0 {
                 result.push(ColExport::Run(count, value.unwrap()))
             }

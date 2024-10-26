@@ -6,7 +6,7 @@ use super::slab::{self, Slab, SlabWriter};
 use std::fmt::Debug;
 use std::ops::Range;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct RawCursorInternal<const B: usize> {
     offset: usize,
 }
@@ -122,27 +122,17 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         Ok(Self { offset: data.len() })
     }
 
-    // dont think this has any real use
-    // this column will always use get_slice
-    fn try_next<'a>(
-        &self,
-        slab: &'a [u8],
-    ) -> Result<Option<(Run<'a, Self::Item>, Self)>, PackError> {
+    fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         let next_offset = self.offset + 1;
         if next_offset > slab.len() {
-            //return Err(PackError::IndexOutOfRange(self.offset));
             return Ok(None);
         }
         let data = &slab[self.offset..next_offset];
-        Ok(Some((
-            Run {
-                count: 1,
-                value: Some(data),
-            },
-            Self {
-                offset: next_offset,
-            },
-        )))
+        self.offset = next_offset;
+        Ok(Some(Run {
+            count: 1,
+            value: Some(data),
+        }))
     }
 
     fn index(&self) -> usize {

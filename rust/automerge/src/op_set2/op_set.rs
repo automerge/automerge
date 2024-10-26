@@ -3,7 +3,6 @@ use crate::cursor::Cursor;
 use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::patches::TextRepresentation;
-use crate::storage::ColumnType;
 use crate::storage::{
     columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
 };
@@ -17,8 +16,8 @@ use crate::{Automerge, PatchLog};
 use super::columns::Column;
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::packer::{
-    BooleanCursor, ColumnCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError,
-    RawReader, Run, StrCursor,
+    BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawReader, Run,
+    StrCursor,
 };
 use super::types::{
     Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
@@ -1039,17 +1038,19 @@ impl OpSet {
     // * maybe do something with types to make scan required to get
     //    validated bytes
 
-    pub(crate) fn decode(spec: ColumnSpec, data: &[u8]) {
-        match spec.col_type() {
-            ColumnType::Actor => ActorCursor::decode(data),
-            ColumnType::String => StrCursor::decode(data),
-            ColumnType::Integer => IntCursor::decode(data),
-            ColumnType::DeltaInteger => DeltaCursor::decode(data),
-            ColumnType::Boolean => BooleanCursor::decode(data),
-            ColumnType::Group => IntCursor::decode(data),
-            ColumnType::ValueMetadata => MetaCursor::decode(data),
-            ColumnType::Value => log!("raw :: {:?}", data),
-        }
+    pub(crate) fn decode(_spec: ColumnSpec, _data: &[u8]) {
+        /*
+                match spec.col_type() {
+                    ColumnType::Actor => ActorCursor::decode(data),
+                    ColumnType::String => StrCursor::decode(data),
+                    ColumnType::Integer => IntCursor::decode(data),
+                    ColumnType::DeltaInteger => DeltaCursor::decode(data),
+                    ColumnType::Boolean => BooleanCursor::decode(data),
+                    ColumnType::Group => IntCursor::decode(data),
+                    ColumnType::ValueMetadata => MetaCursor::decode(data),
+                    ColumnType::Value => log!("raw :: {:?}", data),
+                }
+        */
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
