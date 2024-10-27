@@ -125,21 +125,54 @@ describe("cursors", () => {
     })
   })
 
-  it("should work with Automerge.view", () => {
-    let doc = Automerge.from({ text: "abc" })
-    const cursor = Automerge.getCursor(doc, ["text"], 1)
+  describe("when working with Automerge.view", () => {
+    it("getCursorPosition should work", () => {
+      let doc = Automerge.from({ text: "abc" })
+      const cursor = Automerge.getCursor(doc, ["text"], 1)
 
-    doc = Automerge.change(doc, d => {
-      Automerge.splice(d, ["text"], 1, 0, "x")
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 1, 0, "x")
+      })
+      const heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 1, 0, "y")
+      })
+      const view = Automerge.view(doc, heads)
+
+      const position = Automerge.getCursorPosition(view, ["text"], cursor)
+      assert.equal(position, 2)
     })
-    const heads = Automerge.getHeads(doc)
 
-    doc = Automerge.change(doc, d => {
-      Automerge.splice(d, ["text"], 1, 0, "y")
+    it("getCursor should respect heads", () => {
+      let doc = Automerge.from({ text: "abc" })
+      let heads = Automerge.getHeads(doc)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 1, 0, "x")
+      })
+      const cursor = Automerge.getCursor(doc, ["text"], 3)
+      assert.notEqual(cursor, undefined)
+
+      // First check that trying to get a cursor from a view where the sequence is shorter then the
+      // attempted index throws an error
+      assert.throws(() => {
+        const oldCursor = Automerge.getCursor(
+          Automerge.view(doc, heads),
+          ["text"],
+          3,
+        )
+      }, /index 3 is out of bounds/)
+
+      // Now check that if we delete characters, the getCursor call will still work when viewing
+      // the document with heads that have the deleted characters
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], 0, 4, "")
+      })
+      const view = Automerge.view(doc, heads)
+      const cursor2 = Automerge.getCursor(view, ["text"], 2)
+      assert.equal(cursor, cursor2)
     })
-    const view = Automerge.view(doc, heads)
-
-    const position = Automerge.getCursorPosition(view, ["text"], cursor)
-    assert.equal(position, 2)
   })
+
 })

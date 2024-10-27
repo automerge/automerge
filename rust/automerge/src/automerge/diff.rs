@@ -135,11 +135,10 @@ impl<'a> Patch<'a> {
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
         let mut diff = RichTextDiff::new(doc);
-        let ops_by_key = ops.diff(before, after).group_by(|d| d.op.elemid_or_key());
+        let ops_by_key = ops.diff(before, after).chunk_by(|d| d.op.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
-
         if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
             log_text_diff(patch_log, &obj, diffs)
         } else if obj.typ.is_sequence() {

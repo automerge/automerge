@@ -1,3 +1,18 @@
+# 0.5.12
+
+* Allow empty keys in maps
+* Add `SyncState::has_our_changes` to indicate whether we think the other end
+  has everything we have.
+* Add `ReadDoc::stats` to obtain basic statistics about a document (number of 
+  operations and changes)
+* Allow configuring the character widths used for the wasm32 target by
+  introducing the utf-16 indexing feature flag
+
+# 0.5.11
+
+* Fixed a bug where actor IDs were written incorrectly to the save document
+  format rendering it impossible to load the document
+
 # 0.5.10
 
 The primary feature of this release is a set of methods for managing block 

@@ -9,6 +9,25 @@
 # The values provided in this template are the default values that will be used
 # when any section or field is not specified in your own configuration
 
+[graph]
+# If 1 or more target triples (and optionally, target_features) are specified,
+# only the specified targets will be checked when running `cargo deny check`.
+# This means, if a particular package is only ever used as a target specific
+# dependency, such as, for example, the `nix` crate only being used via the
+# `target_family = "unix"` configuration, that only having windows targets in
+# this list would mean the nix crate, as well as any of its exclusive
+# dependencies not shared by any other crates, would be ignored, as the target
+# list here is effectively saying which targets you are building for.
+targets = [
+    # The triple can be any string, but only the target triples built in to
+    # rustc (as of 1.40) can be checked against actual config expressions
+    #{ triple = "x86_64-unknown-linux-musl" },
+    # You can also specify which target_features you promise are enabled for a
+    # particular target. target_features are currently not validated against
+    # the actual valid features supported by the target architecture.
+    #{ triple = "wasm32-unknown-unknown", features = ["atomics"] },
+]
+
 # This section is considered when running `cargo deny check advisories`
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
@@ -17,7 +36,7 @@
 db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# The lint level for crates that have been yanked from their source registry
+# The lint level for security vulnerabilities
 yanked = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
@@ -43,12 +62,13 @@ ignore = [
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
 allow = [
     "MIT",
-    "BSD-2-Clause",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    # this is needed by cbindgen and im, should be reviewd more fully
     "MPL-2.0",
 ]
+# The confidence threshold for detecting a license from license text.
+# The higher the value, the more closely the license text must be to the
+# canonical license text of a valid SPDX license file.
 # [possible values: any between 0.0 and 1.0].
 confidence-threshold = 0.8
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
@@ -60,6 +80,10 @@ exceptions = [
     # this is not a problem for us. See https://github.com/dtolnay/unicode-ident/pull/9/files
     # for more details.
     { allow = ["MIT", "Apache-2.0", "Unicode-DFS-2016"], name = "unicode-ident" },
+
+    # these are needed by cbindgen and its dependancies
+    # should be revied more fully before release
+    { allow = ["MPL-2.0"], name = "cbindgen" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -122,19 +146,17 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # { name = "itertools", version = "0.10.5" },
-    # { name = "linux-raw-sys", version = "0.3.8" },
-    # { name = "rustix", version = "0.37.21" },
-    # { name = "heck", version = "0.5.0" },
+    { name = "heck", version = "0.5.0" },
+    { crate = "windows-sys@0.52", reason = "this is brought in by the clap dependency in automerge-cli, which is fine as we're not distributing that as a library" },
+    { crate = "regex-syntax@0.6.29", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
+    { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # // We only ever use criterion in benchmarks
-    { name = "criterion", version = "0.5.1", depth=10},
-    # { name = "windows-sys", version = "0.52.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

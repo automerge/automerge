@@ -69,7 +69,7 @@ function buildWasm(outputDir) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
   console.log("building automerge-wasm")
   execSync(
-    "cargo build --release --target wasm32-unknown-unknown",
+    "cargo build --target wasm32-unknown-unknown --release",
     {
       cwd: automergeWasmPath,
     },

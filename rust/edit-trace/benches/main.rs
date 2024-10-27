@@ -42,8 +42,7 @@ fn load_trace_autotx(bytes: &[u8]) {
 
 fn bench(c: &mut Criterion) {
     let contents = fs::read_to_string("edits.json").expect("cannot read edits file");
-    //let edits = json::parse(&contents).expect("cant parse edits");
-    let edits: Vec<Value> = serde_json::from_str(&contents).expect("cant parse edits");
+    let edits = jzon::parse(&contents).expect("cant parse edits");
     let mut commands = vec![];
     for edit in &edits {
         let pos: usize = edit.as_array().unwrap()[0].as_u64().unwrap() as usize;
