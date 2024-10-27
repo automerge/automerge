@@ -194,48 +194,48 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         state: Self::State<'a>,
         post: Self::PostState<'a>,
         cursor: Self,
     ) -> Option<Self>;
 
-    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self);
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self);
 
     fn append<'a>(
         state: &mut Self::State<'a>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         value: Option<<Self::Item as Packable>::Unpacked<'a>>,
     ) -> usize {
-        Self::append_chunk(state, out, Run { count: 1, value })
+        Self::append_chunk(state, writer, Run { count: 1, value })
     }
 
     fn append_first_chunk<'a>(
         state: &mut Self::State<'a>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         chunk: Run<'a, Self::Item>,
         _slab: &Slab,
     ) -> bool {
-        Self::append_chunk(state, out, chunk);
+        Self::append_chunk(state, writer, chunk);
         true
     }
 
     fn append_chunk<'a>(
         state: &mut Self::State<'a>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         chunk: Run<'a, Self::Item>,
     ) -> usize;
 
     fn copy_between<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
         run: Run<'a, Self::Item>,
         size: usize,
     ) -> Self::State<'a>;
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>);
+    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>);
 
     fn encode(index: usize, del: usize, slab: &Slab, capacity: usize) -> Encoder<'_, Self>;
 
@@ -379,7 +379,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2);
+            let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
             writer.flush_null(len);
             writer.finish().pop().unwrap_or_default()
         } else {

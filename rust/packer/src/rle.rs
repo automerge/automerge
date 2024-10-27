@@ -44,18 +44,18 @@ impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
 
 impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
     pub(crate) fn flush_run<'a>(
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         num: usize,
         value: Option<P::Unpacked<'a>>,
     ) {
         if let Some(v) = value {
             if num == 1 {
-                out.flush_lit_run(&[v]);
+                writer.flush_lit_run(&[v]);
             } else {
-                out.flush_run(num as i64, v);
+                writer.flush_run(num as i64, v);
             }
         } else {
-            out.flush_null(num);
+            writer.flush_null(num);
         }
     }
 
@@ -181,17 +181,18 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B, cap);
+        let mut current = SlabWriter::new(B, cap, slab.as_slice());
 
-        current.flush_before(slab, copy_range, 0, copy_size, copy_acc);
+        current.copy(slab, copy_range, 0, copy_size, copy_acc, None);
 
         if copy_lit_size > 0 {
-            current.flush_before(
+            current.copy(
                 slab,
                 copy_lit_range,
                 copy_lit_size,
                 copy_lit_size,
                 copy_lit_acc,
+                None,
             );
         }
 
@@ -225,28 +226,35 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
             // its one big lit-run
             (Some(a), Some(b)) if a.offset == b.offset => {
                 let lit = a.len - 2;
-                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size, Acc::new());
+                writer.copy(slab, c0.offset..c1.last_offset, lit, size, Acc::new(), None);
             }
             // its two different lit-runs
             (Some(a), Some(b)) => {
                 let lit1 = a.len - 1;
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(slab, c0.offset..b_start, lit1, size - lit2, Acc::new());
-                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new());
+                writer.copy(
+                    slab,
+                    c0.offset..b_start,
+                    lit1,
+                    size - lit2,
+                    Acc::new(),
+                    None,
+                );
+                writer.copy(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new(), None);
             }
             (Some(a), None) => {
                 let lit = a.len - 1;
-                writer.flush_before2(slab, c0.offset..c1.last_offset, lit, size, Acc::new());
+                writer.copy(slab, c0.offset..c1.last_offset, lit, size, Acc::new(), None);
             }
             (None, Some(b)) => {
                 let lit2 = b.len - 1;
                 let b_start = b.header_offset();
-                writer.flush_before2(slab, c0.offset..b_start, 0, size - lit2, Acc::new());
-                writer.flush_before2(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new());
+                writer.copy(slab, c0.offset..b_start, 0, size - lit2, Acc::new(), None);
+                writer.copy(slab, b.offset..c1.last_offset, lit2, lit2, Acc::new(), None);
             }
             _ => {
-                writer.flush_before2(slab, c0.offset..c1.last_offset, 0, size, Acc::new());
+                writer.copy(slab, c0.offset..c1.last_offset, 0, size, Acc::new(), None);
             }
         }
 
@@ -257,29 +265,30 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Option<Run<'a, P>>,
         mut cursor: Self,
     ) -> Option<Self> {
         if let Some(run) = post {
-            Self::append_chunk(&mut state, out, run);
+            Self::append_chunk(&mut state, writer, run);
         }
         if let Some(run) = cursor.next(slab.as_slice()) {
-            Self::append_chunk(&mut state, out, run);
-            Self::flush_state(out, state);
+            Self::append_chunk(&mut state, writer, run);
+            Self::flush_state(writer, state);
             Some(cursor)
         } else {
-            Self::flush_state(out, state);
+            Self::flush_state(writer, state);
             None
         }
     }
 
-    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
         let num_left = cursor.num_left();
-        out.flush_after(
+        let range = cursor.offset..slab.as_slice().len();
+        writer.copy(
             slab,
-            cursor.offset,
+            range,
             num_left,
             slab.len() - cursor.index,
             slab.acc() - cursor.acc(),
@@ -289,32 +298,32 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
 
     fn append<'a>(
         old_state: &mut Self::State<'a>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         value: Option<<Self::Item as Packable>::Unpacked<'a>>,
     ) -> usize {
-        Self::append_chunk(old_state, out, Run { count: 1, value })
+        Self::append_chunk(old_state, writer, Run { count: 1, value })
     }
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: RleState<'a, Self::Item>) {
+    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: RleState<'a, Self::Item>) {
         match state {
             RleState::Empty => (),
-            RleState::LoneValue(Some(value)) => out.flush_lit_run(&[value]),
-            RleState::LoneValue(None) => out.flush_null(1),
+            RleState::LoneValue(Some(value)) => writer.flush_lit_run(&[value]),
+            RleState::LoneValue(None) => writer.flush_null(1),
             RleState::Run {
                 count,
                 value: Some(v),
-            } => out.flush_run(count as i64, v),
-            RleState::Run { count, value: None } => out.flush_null(count),
+            } => writer.flush_run(count as i64, v),
+            RleState::Run { count, value: None } => writer.flush_null(count),
             RleState::LitRun { mut run, current } => {
                 run.push(current);
-                out.flush_lit_run(&run);
+                writer.flush_lit_run(&run);
             }
         }
     }
 
     fn append_chunk<'a>(
         old_state: &mut RleState<'a, P>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         chunk: Run<'a, P>,
     ) -> usize {
         let mut state = RleState::Empty;
@@ -325,7 +334,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 (a, b) if a == b => RleState::from(chunk.plus(1)),
                 (Some(a), Some(b)) if chunk.count == 1 => RleState::lit_run(a, b),
                 (a, _b) => {
-                    Self::flush_run(out, 1, a);
+                    Self::flush_run(writer, 1, a);
                     RleState::from(chunk)
                 }
             },
@@ -333,14 +342,14 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                 RleState::from(chunk.plus(count))
             }
             RleState::Run { count, value } => {
-                Self::flush_run(out, count, value);
+                Self::flush_run(writer, count, value);
                 RleState::from(chunk)
             }
             RleState::LitRun { mut run, current } => {
                 match (current, chunk.value) {
                     (a, Some(b)) if a == b => {
                         // the end of the lit run merges with the next
-                        out.flush_lit_run(&run);
+                        writer.flush_lit_run(&run);
                         RleState::from(chunk.plus(1))
                     }
                     (a, Some(b)) if chunk.count == 1 => {
@@ -351,7 +360,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
                     _ => {
                         // flush this lit run (current and all) - next run replaces it
                         run.push(current);
-                        out.flush_lit_run(&run);
+                        writer.flush_lit_run(&run);
                         RleState::from(chunk)
                     }
                 }
@@ -653,9 +662,9 @@ pub(crate) mod tests {
                 sum += u64::agg(v);
             }
         }
-        let mut out = Vec::new();
-        col1.write(&mut out);
-        assert_eq!(out, vec![116, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let mut writer = Vec::new();
+        col1.write(&mut writer);
+        assert_eq!(writer, vec![116, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 
         // lit run capped by runs
         let mut col2: ColumnData<RleCursor<5, u64>> = ColumnData::new();
@@ -675,9 +684,9 @@ pub(crate) mod tests {
                 sum += u64::agg(v);
             }
         }
-        let mut out = Vec::new();
-        col2.write(&mut out);
-        assert_eq!(out, vec![2, 1, 120, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10]);
+        let mut writer = Vec::new();
+        col2.write(&mut writer);
+        assert_eq!(writer, vec![2, 1, 120, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10]);
 
         // lit run capped by runs
         let mut col3: ColumnData<RleCursor<5, u64>> = ColumnData::new();
@@ -698,10 +707,10 @@ pub(crate) mod tests {
                 sum += u64::agg(v);
             }
         }
-        let mut out = Vec::new();
-        col3.write(&mut out);
+        let mut writer = Vec::new();
+        col3.write(&mut writer);
         assert_eq!(
-            out,
+            writer,
             vec![125, 1, 2, 3, 2, 4, 2, 5, 123, 6, 7, 8, 9, 10, 2, 11]
         );
 
@@ -739,19 +748,19 @@ pub(crate) mod tests {
                 sum += u64::agg(v);
             }
         }
-        let mut out = Vec::new();
-        col4.write(&mut out);
+        let mut writer = Vec::new();
+        col4.write(&mut writer);
         assert_eq!(
-            out,
+            writer,
             vec![2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 2, 6, 2, 7, 2, 8, 2, 9]
         );
 
         // empty data
         let col5: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        let mut out = Vec::new();
-        col5.write(&mut out);
-        assert_eq!(out, Vec::<u8>::new());
+        let mut writer = Vec::new();
+        col5.write(&mut writer);
+        assert_eq!(writer, Vec::<u8>::new());
     }
 
     #[test]

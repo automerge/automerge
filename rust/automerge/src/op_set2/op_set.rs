@@ -105,17 +105,16 @@ impl OpSet {
         self.text_index.splice(0, 0, widths);
     }
 
-    pub(crate) fn insert2(&mut self, op: &OpBuilder2) {
+    pub(crate) fn insert(&mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
         if op.succ().is_empty() {
-            self.text_index
-                .splice(op.pos, 0, vec![op.width(ListEncoding::Text) as u64]);
+            let width = op.width(ListEncoding::Text) as u64;
+            self.text_index.splice(op.pos, 0, vec![width]);
         } else {
             self.text_index.splice(op.pos, 0, vec![0]);
         }
         self.len += 1;
         self.validate()
-        // do succ later
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {

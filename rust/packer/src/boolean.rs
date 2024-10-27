@@ -52,10 +52,10 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Self::default()
     }
 
-    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
-        out.flush_after(
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
+        writer.copy(
             slab,
-            cursor.offset,
+            cursor.offset..slab.as_slice().len(),
             0,
             slab.len() - cursor.index,
             slab.acc() - cursor.acc,
@@ -65,7 +65,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
         mut cursor: Self,
@@ -73,24 +73,24 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         if let Some(post) = post {
             if post.value == state.value {
                 state.count += post.count;
-                Self::finalize_state(slab, out, state, None, cursor)
+                Self::finalize_state(slab, writer, state, None, cursor)
             } else {
-                out.flush_bool_run(state.count, state.value);
-                out.flush_bool_run(post.count, post.value);
+                writer.flush_bool_run(state.count, state.value);
+                writer.flush_bool_run(post.count, post.value);
                 Some(cursor)
             }
         } else {
             let old_cursor = cursor;
             if let Ok(Some(val)) = cursor.try_next(slab.as_slice()) {
                 if val.value == Some(state.value) {
-                    out.flush_bool_run(state.count + val.count, state.value);
+                    writer.flush_bool_run(state.count + val.count, state.value);
                     Some(cursor)
                 } else {
-                    out.flush_bool_run(state.count, state.value);
+                    writer.flush_bool_run(state.count, state.value);
                     Some(old_cursor)
                 }
             } else {
-                out.flush_bool_run(state.count, state.value);
+                writer.flush_bool_run(state.count, state.value);
                 None
             }
         }
@@ -102,7 +102,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn copy_between<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
         run: Run<'a, bool>,
@@ -110,22 +110,22 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     ) -> Self::State<'a> {
         let c1_last_offset = c1.offset - ulebsize(run.count as u64) as usize;
         assert_eq!(c1_last_offset, c1.last_offset);
-        out.flush_before2(slab, c0.offset..c1_last_offset, 0, size, Acc::new());
+        writer.copy(slab, c0.offset..c1_last_offset, 0, size, Acc::new(), None);
         let mut next_state = BooleanState {
             value: run.value.unwrap_or_default(),
             count: 0,
         };
-        Self::append_chunk(&mut next_state, out, run);
+        Self::append_chunk(&mut next_state, writer, run);
         next_state
     }
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        out.flush_bool_run(state.count, state.value);
+    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>) {
+        writer.flush_bool_run(state.count, state.value);
     }
 
     fn append_chunk<'a>(
         state: &mut Self::State<'a>,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         run: Run<'_, bool>,
     ) -> usize {
         let item = run.value.unwrap_or_default();
@@ -133,7 +133,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             state.count += run.count;
         } else {
             if state.count > 0 {
-                out.flush_bool_run(state.count, state.value);
+                writer.flush_bool_run(state.count, state.value);
             }
             state.value = item;
             state.count = run.count;
@@ -165,8 +165,8 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B, cap + 8);
-        current.flush_before(slab, range, 0, size, acc);
+        let mut current = SlabWriter::new(B, cap + 8, slab.as_slice());
+        current.copy(slab, range, 0, size, acc, None);
 
         let SpliceDel {
             deleted,
@@ -224,7 +224,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2);
+            let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
             writer.flush_bool_run(len, false);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -275,9 +275,9 @@ pub(crate) mod tests {
                 ]
             ]
         );
-        let mut out = Vec::new();
-        col1.write(&mut out);
-        assert_eq!(out, vec![0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+        let mut writer = Vec::new();
+        col1.write(&mut writer);
+        assert_eq!(writer, vec![0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
 
         let mut col2: ColumnData<BooleanCursorInternal<4>> = ColumnData::new();
         col2.splice(
@@ -312,16 +312,16 @@ pub(crate) mod tests {
                 ],
             ]
         );
-        let mut out = Vec::new();
-        col2.write(&mut out);
-        assert_eq!(out, vec![3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+        let mut writer = Vec::new();
+        col2.write(&mut writer);
+        assert_eq!(writer, vec![3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
 
         // empty data
         let col5: ColumnData<BooleanCursor> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        let mut out = Vec::new();
-        col5.write(&mut out);
-        assert_eq!(out, vec![0]);
+        let mut writer = Vec::new();
+        col5.write(&mut writer);
+        assert_eq!(writer, vec![0]);
     }
 
     #[test]

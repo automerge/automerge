@@ -275,7 +275,6 @@ impl TransactionInner {
         */
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn insert_local_op(
         &mut self,
         doc: &mut Automerge,
@@ -284,7 +283,7 @@ impl TransactionInner {
         succ: &[SuccInsert],
     ) {
         if !op.is_delete() {
-            doc.ops_mut().insert2(&op);
+            doc.ops_mut().insert(&op);
         }
 
         doc.ops_mut().add_succ(succ, op.id);
@@ -359,7 +358,7 @@ impl TransactionInner {
             pred: vec![],
         };
 
-        doc.ops_mut().insert2(&op);
+        doc.ops_mut().insert(&op);
         self.finalize_op(patch_log, &op, marks);
         self.pending.push(op);
 
@@ -671,7 +670,7 @@ impl TransactionInner {
 
                 elemid = ElemId(op.id);
 
-                doc.ops_mut().insert2(&op);
+                doc.ops_mut().insert(&op);
 
                 self.pending.push(op);
                 pos += 1;
@@ -785,7 +784,7 @@ impl TransactionInner {
             pred: vec![],
         };
 
-        doc.ops_mut().insert2(&op);
+        doc.ops_mut().insert(&op);
 
         patch_log.insert(
             obj.id,

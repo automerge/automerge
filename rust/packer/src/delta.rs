@@ -58,14 +58,14 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn finish<'a>(slab: &'a Slab, out: &mut SlabWriter<'a>, cursor: Self) {
-        out.set_abs(cursor.abs);
-        SubCursor::<B>::finish(slab, out, cursor.rle)
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
+        writer.set_abs(cursor.abs);
+        SubCursor::<B>::finish(slab, writer, cursor.rle)
     }
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         mut state: Self::State<'a>,
         post: Self::PostState<'a>,
         mut cursor: Self,
@@ -74,28 +74,28 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             Some(run) if run.value.is_some() => {
                 // we need to flush at least two elements to make sure
                 // we're connected to prior and post lit runs
-                Self::flush_twice(slab, out, state, run, cursor)
+                Self::flush_twice(slab, writer, state, run, cursor)
             }
             Some(run) => {
                 // Nulls do not affect ABS - so the post does not connect us to the copy afterward
                 // clear the post and try again
-                Self::append_chunk(&mut state, out, run);
-                Self::finalize_state(slab, out, state, None, cursor)
+                Self::append_chunk(&mut state, writer, run);
+                Self::finalize_state(slab, writer, state, None, cursor)
             }
             None => {
                 if let Some(run) = cursor.next(slab.as_slice()) {
                     if run.value.is_some() {
                         // we need to flush at least two elements to make sure
                         // we're connected to prior and post lit runs
-                        Self::flush_twice(slab, out, state, run, cursor)
+                        Self::flush_twice(slab, writer, state, run, cursor)
                     } else {
                         // Nulls do not affect ABS - so the post does not connect us to the copy afterward
                         // clear the post and try again
-                        Self::append_chunk(&mut state, out, run);
-                        Self::finalize_state(slab, out, state, None, cursor)
+                        Self::append_chunk(&mut state, writer, run);
+                        Self::finalize_state(slab, writer, state, None, cursor)
                     }
                 } else {
-                    Self::flush_state(out, state);
+                    Self::flush_state(writer, state);
                     None
                 }
             }
@@ -121,19 +121,19 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn flush_state<'a>(out: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        SubCursor::<B>::flush_state(out, state.rle)
+    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>) {
+        SubCursor::<B>::flush_state(writer, state.rle)
     }
 
     fn copy_between<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
         run: Run<'a, i64>,
         size: usize,
     ) -> Self::State<'a> {
-        let rle = SubCursor::<B>::copy_between(slab, out, c0.rle, c1.rle, run, size);
+        let rle = SubCursor::<B>::copy_between(slab, writer, c0.rle, c1.rle, run, size);
         DeltaState { abs: c1.abs, rle }
     }
 
@@ -261,30 +261,30 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 impl<const B: usize> DeltaCursorInternal<B> {
     fn flush_twice<'a>(
         slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         mut state: DeltaState<'a>,
         run: Run<'a, i64>,
         mut cursor: Self,
     ) -> Option<Self> {
         if let Some(run) = run.pop() {
-            Self::append(&mut state, out, Some(cursor.abs - run.delta()));
-            Self::append_chunk(&mut state, out, run);
+            Self::append(&mut state, writer, Some(cursor.abs - run.delta()));
+            Self::append_chunk(&mut state, writer, run);
             if let Some(run) = cursor.next(slab.as_slice()) {
-                Self::append_chunk(&mut state, out, run);
-                Self::flush_state(out, state);
+                Self::append_chunk(&mut state, writer, run);
+                Self::flush_state(writer, state);
                 Some(cursor)
             } else {
-                Self::flush_state(out, state);
+                Self::flush_state(writer, state);
                 Some(cursor)
             }
         } else {
-            Self::append(&mut state, out, Some(cursor.abs));
+            Self::append(&mut state, writer, Some(cursor.abs));
             if let Some(run) = cursor.next(slab.as_slice()) {
-                Self::append_chunk(&mut state, out, run);
-                Self::flush_state(out, state);
+                Self::append_chunk(&mut state, writer, run);
+                Self::flush_state(writer, state);
                 Some(cursor)
             } else {
-                Self::flush_state(out, state);
+                Self::flush_state(writer, state);
                 Some(cursor)
             }
         }
@@ -338,11 +338,11 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![18, -7, -12, 6])],
             ]
         );
-        let mut out = Vec::new();
-        let mut outa = Vec::new();
-        col1.write(&mut out);
-        col1a.write(&mut outa);
-        assert_eq!(out, outa);
+        let mut writer = Vec::new();
+        let mut writer_a = Vec::new();
+        col1.write(&mut writer);
+        col1a.write(&mut writer_a);
+        assert_eq!(writer, writer_a);
         for i in 0..col1.len() {
             assert_eq!(col1.get(i), col1a.get(i));
         }
@@ -358,10 +358,13 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![18, -7]), ColExport::run(2, 1)],
             ]
         );
-        let mut out = Vec::new();
-        col2.write(&mut out);
+        let mut writer = Vec::new();
+        col2.write(&mut writer);
 
-        assert_eq!(out, vec![2, 1, 120, 8, 1, 121, 23, 120, 112, 18, 121, 2, 1]);
+        assert_eq!(
+            writer,
+            vec![2, 1, 120, 8, 1, 121, 23, 120, 112, 18, 121, 2, 1]
+        );
 
         // lit run capped by runs
         let mut col3: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
@@ -374,10 +377,10 @@ pub(crate) mod tests {
                 vec![ColExport::litrun(vec![-6, -9, -1]), ColExport::run(2, 10)],
             ]
         );
-        let mut out = Vec::new();
-        col3.write(&mut out);
+        let mut writer = Vec::new();
+        col3.write(&mut writer);
         assert_eq!(
-            out,
+            writer,
             vec![125, 1, 9, 123, 2, 1, 2, 2, 123, 9, 5, 122, 119, 127, 2, 10]
         );
 
@@ -410,19 +413,19 @@ pub(crate) mod tests {
                 ],
             ]
         );
-        let mut out = Vec::new();
-        col4.write(&mut out);
+        let mut writer = Vec::new();
+        col4.write(&mut writer);
         assert_eq!(
-            out,
+            writer,
             vec![2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 2, 6, 2, 7, 2, 8, 2, 9]
         );
 
         // empty data
         let col5: ColumnData<DeltaCursorInternal<5>> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        let mut out = Vec::new();
-        col5.write(&mut out);
-        assert_eq!(out, Vec::<u8>::new());
+        let mut writer = Vec::new();
+        col5.write(&mut writer);
+        assert_eq!(writer, Vec::<u8>::new());
     }
 
     #[test]

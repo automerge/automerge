@@ -63,7 +63,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             let slab = self.slabs.get(0).unwrap();
             if slab.is_empty() {
                 let state = C::State::default();
-                let mut writer = SlabWriter::new(usize::MAX, 2);
+                let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
                 C::flush_state(&mut writer, state);
                 writer.write(out);
             } else {
@@ -71,7 +71,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             }
         } else {
             let mut state = C::State::default();
-            let mut writer = SlabWriter::new(usize::MAX, self.slabs.len() * 7);
+            let mut writer = SlabWriter::new(usize::MAX, self.slabs.len() * 7, &[]);
             for s in &self.slabs {
                 state = C::write(&mut writer, s, state);
             }

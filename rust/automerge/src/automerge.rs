@@ -1241,7 +1241,7 @@ impl Automerge {
         let succ: Vec<_> = found.succ.iter().map(|op| op.add_succ(op.id)).collect();
 
         if !op.is_delete() {
-            self.ops.insert2(&op);
+            self.ops.insert(&op);
         }
 
         self.ops.add_succ(&succ, op.id);

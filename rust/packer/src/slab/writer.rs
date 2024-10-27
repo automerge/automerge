@@ -7,12 +7,14 @@ use std::ops::Range;
 
 #[derive(Clone, PartialEq)]
 pub enum WriteOp<'a> {
+    LitHead(i64),
     UInt(u64),
     UIntAcc(u64, Agg),
     BoolRun(u64, bool),
     Int(i64),
     Bytes(&'a [u8]),
-    Import(&'a Slab, Range<usize>, Acc, Option<bool>),
+    Raw(&'a [u8]),
+    Cpy(&'a Slab, Range<usize>, Acc, Option<bool>),
 }
 
 impl<'a> From<i64> for WriteOp<'a> {
@@ -65,8 +67,10 @@ impl<'a> Debug for WriteOp<'a> {
             Self::UIntAcc(a, b) => s.field("acc_uint", a).field("acc", b),
             Self::BoolRun(a, b) => s.field("bool_run", a).field("bool", b),
             Self::Int(a) => s.field("int", a),
+            Self::LitHead(a) => s.field("lit_head", a),
             Self::Bytes(a) => s.field("bytes", &a.len()),
-            Self::Import(_a, b, _c, _) => s.field("import", b),
+            Self::Raw(a) => s.field("raw", &a.len()),
+            Self::Cpy(_a, b, _c, _) => s.field("import", b),
         }
         .finish()
     }
@@ -75,10 +79,7 @@ impl<'a> Debug for WriteOp<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum WriteAction<'a> {
     Op(WriteOp<'a>),
-    LitHead(i64),
-    Lit(WriteOp<'a>),
-    Pair(WriteOp<'a>, WriteOp<'a>),
-    Raw(&'a [u8]),
+    Pair(i64, WriteOp<'a>),
     Slab(usize, Acc, i64, usize),
     SlabHead,
 }
@@ -86,7 +87,7 @@ pub enum WriteAction<'a> {
 impl<'a> WriteOp<'a> {
     fn acc(&self) -> Acc {
         match self {
-            Self::Import(_, _, acc, _) => *acc,
+            Self::Cpy(_, _, acc, _) => *acc,
             Self::UIntAcc(_, agg) => *agg * 1,
             Self::BoolRun(c, b) if *b => Acc::from(*c),
             _ => Acc::new(),
@@ -95,9 +96,7 @@ impl<'a> WriteOp<'a> {
 
     fn agg(&self) -> Agg {
         match self {
-            //Self::Import(_, _, acc, _) => *acc,
             Self::UIntAcc(_, agg) => *agg,
-            //Self::BoolRun(c, b) if *b => Acc::from(c) ,
             _ => Agg::default(),
         }
     }
@@ -115,22 +114,24 @@ impl<'a> WriteOp<'a> {
             Self::UIntAcc(i, _) => ulebsize(*i) as usize,
             Self::BoolRun(i, _) => ulebsize(*i) as usize,
             Self::Int(i) => lebsize(*i) as usize,
+            Self::LitHead(i) => lebsize(*i) as usize,
             Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
-            Self::Import(_, r, _, _) => r.end - r.start,
+            Self::Raw(b) => b.len(),
+            Self::Cpy(_, r, _, _) => r.end - r.start,
         }
     }
 
     fn bool_value(&self) -> Option<bool> {
         match self {
             Self::BoolRun(_, v) => Some(*v),
-            Self::Import(_, _, _, v) => *v,
+            Self::Cpy(_, _, _, v) => *v,
             _ => None,
         }
     }
 
     fn copy_width(&self) -> usize {
         match self {
-            Self::Import(_, _, _, _) => self.width(),
+            Self::Cpy(_, _, _, _) => self.width(),
             _ => 0,
         }
     }
@@ -159,7 +160,14 @@ impl<'a> WriteOp<'a> {
                 buff.extend(b);
                 //println!("write bytes {:?}",&buff[start..]);
             }
-            Self::Import(s, r, _, _) => {
+            Self::Raw(b) => {
+                buff.extend(b);
+                //println!("write raw {:?}", &buff[start..]);
+            }
+            Self::LitHead(n) => {
+                leb128::write::signed(buff, -n).unwrap();
+            }
+            Self::Cpy(s, r, _, _) => {
                 buff.extend(&s[r]);
                 //println!("write import ({:?} bytes)",buff[start..].len());
             }
@@ -168,32 +176,34 @@ impl<'a> WriteOp<'a> {
 }
 
 impl<'a> WriteAction<'a> {
+    fn lithead(i: i64) -> Self {
+        WriteAction::Op(WriteOp::LitHead(i))
+    }
+
     fn acc(&self) -> Acc {
         match self {
             Self::Op(op) => op.acc(),
-            Self::Pair(WriteOp::Int(count), op) => op.agg() * *count as usize,
-            //Self::Raw(_) => 0,
+            Self::Pair(count, op) => op.agg() * *count as usize,
             _ => Acc::new(),
         }
     }
 
     fn abs(&self) -> i64 {
         match self {
-            Self::Pair(WriteOp::Int(count), WriteOp::Int(value)) => count * value,
-            //Self::Lit(_) => 0,
+            Self::Pair(count, WriteOp::Int(value)) => count * value,
             _ => 0,
         }
     }
 
-    // FIXME dont need this
-    fn width(&self) -> usize {
-        match self {
-            Self::Op(op) => op.width(),
-            Self::Pair(count, op) => count.width() + op.width(),
-            Self::Raw(data) => data.len(),
-            _ => 0,
+    /*
+        fn width(&self) -> usize {
+            match self {
+                Self::Op(op) => op.width(),
+                Self::Pair(op1, op2) => op1.width() + op2.width(),
+                _ => 0,
+            }
         }
-    }
+    */
 
     fn copy_width(&self) -> usize {
         match self {
@@ -210,21 +220,12 @@ impl<'a> WriteAction<'a> {
     }
 
     fn write(self, buff: &mut Vec<u8>) {
-        //let start = buff.len();
         match self {
             Self::Op(op) => op.write(buff),
-            Self::Pair(op1, op2) => {
-                op1.write(buff);
+            Self::Pair(count, op2) => {
+                leb128::write::signed(buff, count).unwrap();
                 op2.write(buff)
             }
-            Self::Raw(b) => {
-                buff.extend(b);
-                //println!("write raw {:?}", &buff[start..]);
-            }
-            Self::LitHead(n) => {
-                leb128::write::signed(buff, -n).unwrap();
-            }
-            Self::Lit(op) => op.write(buff),
             Self::Slab(_, _, _, _) => {}
             Self::SlabHead => {}
         }
@@ -248,7 +249,7 @@ pub struct SlabWriter<'a> {
 }
 
 impl<'a> SlabWriter<'a> {
-    pub fn new(max: usize, cap: usize) -> Self {
+    pub fn new(max: usize, cap: usize, _origin: &'a [u8]) -> Self {
         let mut actions = Vec::with_capacity(cap);
         actions.push(WriteAction::SlabHead);
         SlabWriter {
@@ -296,10 +297,10 @@ impl<'a> SlabWriter<'a> {
         self.items += items;
         if self.lit_items == 0 && lit > 0 {
             self.lit_head = self.actions.len();
-            self.actions.push(WriteAction::LitHead(0));
+            self.actions.push(WriteAction::lithead(0));
         }
         self.lit_items += lit;
-        self.actions.push(WriteAction::Lit(op));
+        self.actions.push(WriteAction::Op(op));
         if items > lit {
             // copy contains non lit run elements at the end
             self.close_lit()
@@ -308,7 +309,7 @@ impl<'a> SlabWriter<'a> {
     }
 
     fn push(&mut self, action: WriteAction<'a>, items: usize, width: usize) {
-        assert_eq!(width, action.width());
+        //assert_eq!(width, action.width());
         if width == 0 {
             return;
         }
@@ -338,9 +339,9 @@ impl<'a> SlabWriter<'a> {
             assert!(self.lit_items > 0);
             assert_eq!(
                 self.actions.get(self.lit_head),
-                Some(&WriteAction::LitHead(0))
+                Some(&WriteAction::lithead(0))
             );
-            self.actions[self.lit_head] = WriteAction::LitHead(self.lit_items as i64);
+            self.actions[self.lit_head] = WriteAction::lithead(self.lit_items as i64);
 
             self.lit_items = 0;
         }
@@ -423,63 +424,23 @@ impl<'a> SlabWriter<'a> {
         result
     }
 
-    // TODO:
-    // only difference with this vs flush_before is doing nothing when size == 0
-    // skipping this on size zero is needed on write/merge operations
-    // but being able to write something with size == 0 is needed for the first element of
-    // boolean sets - likely these 2 and flush_after could all get turned into one nice method
-    pub fn flush_before2(
+    pub fn copy(
         &mut self,
         slab: &'a Slab,
         range: Range<usize>,
         lit: usize,
         size: usize,
         acc: Acc,
+        bool_state: Option<bool>,
     ) {
-        if size > 0 {
-            let op = WriteOp::Import(slab, range, acc, None);
+        if !range.is_empty() {
+            let op = WriteOp::Cpy(slab, range, acc, bool_state);
             if lit > 0 {
                 self.push_lit(op, lit, size)
             } else {
                 let width = op.width();
                 self.push(WriteAction::Op(op), size, width)
             }
-        }
-    }
-
-    pub fn flush_before(
-        &mut self,
-        slab: &'a Slab,
-        range: Range<usize>,
-        lit: usize,
-        size: usize,
-        acc: Acc,
-    ) {
-        let op = WriteOp::Import(slab, range, acc, None);
-        if lit > 0 {
-            self.push_lit(op, lit, size)
-        } else {
-            let width = op.width();
-            self.push(WriteAction::Op(op), size, width)
-        }
-    }
-
-    pub fn flush_after(
-        &mut self,
-        slab: &'a Slab,
-        index: usize,
-        lit: usize,
-        size: usize,
-        acc: Acc,
-        bool_state: Option<bool>,
-    ) {
-        let range = index..slab.byte_len();
-        let op = WriteOp::Import(slab, range, acc, bool_state);
-        if lit > 0 {
-            self.push_lit(op, lit, size)
-        } else {
-            let width = op.width();
-            self.push(WriteAction::Op(op), size, width)
         }
     }
 
@@ -497,19 +458,19 @@ impl<'a> SlabWriter<'a> {
 
     pub fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
         let value_op = value.into();
-        let count_op = WriteOp::Int(count);
-        let width = count_op.width() + value_op.width();
-        self.push(WriteAction::Pair(count_op, value_op), count as usize, width);
+        let width = lebsize(count) as usize + value_op.width();
+        self.push(WriteAction::Pair(count, value_op), count as usize, width);
     }
 
     pub fn flush_bytes(&mut self, data: &'a [u8], count: usize) {
-        self.push(WriteAction::Raw(data), count, data.len());
+        //self.push(WriteAction::Raw(data), count, data.len());
+        self.push(WriteAction::Op(WriteOp::Raw(data)), count, data.len());
     }
 
     pub fn flush_null(&mut self, count: usize) {
-        let null_op = WriteOp::Int(0);
+        //let null_op = WriteOp::Int(0);
         let count_op = WriteOp::UInt(count as u64);
-        let width = null_op.width() + count_op.width();
-        self.push(WriteAction::Pair(null_op, count_op), count, width);
+        let width = 1 + count_op.width();
+        self.push(WriteAction::Pair(0, count_op), count, width);
     }
 }

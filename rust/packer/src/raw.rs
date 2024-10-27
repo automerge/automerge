@@ -16,7 +16,7 @@ pub type RawCursor = RawCursorInternal<4096>;
 impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type Item = [u8];
     type State<'a> = ();
-    type PostState<'a> = &'a [u8];
+    type PostState<'a> = Range<usize>; //&'a [u8];
     type Export = u8;
 
     fn empty() -> Self {
@@ -29,27 +29,29 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         _state: Self::State<'a>,
     ) -> Self::State<'a> {
         let len = slab.len();
-        writer.flush_before(slab, 0..len, 0, len, Acc::new());
+        writer.copy(slab, 0..len, 0, len, Acc::new(), None);
     }
 
-    fn finish<'a>(_slab: &'a Slab, _out: &mut SlabWriter<'a>, _cursor: Self) {}
+    fn finish<'a>(_slab: &'a Slab, _writer: &mut SlabWriter<'a>, _cursor: Self) {}
 
     fn finalize_state<'a>(
-        _slab: &'a Slab,
-        out: &mut SlabWriter<'a>,
+        slab: &'a Slab,
+        writer: &mut SlabWriter<'a>,
         _state: (),
         post: Self::PostState<'a>,
         _cursor: Self,
     ) -> Option<Self> {
-        out.flush_bytes(post, post.len());
+        //writer.flush_bytes(post, post.len());
+        let len = post.end - post.start;
+        writer.copy(slab, post, 0, len, Acc::new(), None);
         None
     }
 
-    fn flush_state<'a>(_out: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
+    fn flush_state<'a>(_writer: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
 
     fn copy_between<'a>(
         _slab: &'a Slab,
-        _out: &mut SlabWriter<'a>,
+        _writer: &mut SlabWriter<'a>,
         _c0: Self,
         _c1: Self,
         _run: Run<'a, [u8]>,
@@ -60,14 +62,15 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
     fn append_chunk<'a>(
         _state: &mut Self::State<'a>,
-        slab: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a>,
         run: Run<'a, [u8]>,
     ) -> usize {
         let mut len = 0;
         for _ in 0..run.count {
             if let Some(i) = run.value {
                 len += i.len();
-                slab.flush_bytes(i, i.len());
+                writer.flush_bytes(i, i.len());
+                //writer.copy(slab, 0..len, 0, len, Acc::new(), None);
             }
         }
         len
@@ -78,18 +81,18 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         let cursor = Self { offset: index };
 
         // everything before...
-        let mut current = SlabWriter::new(B, cap + 4);
-        current.flush_bytes(&slab.as_slice()[0..index], index);
+        let mut current = SlabWriter::new(B, cap + 4, slab.as_slice());
+        current.copy(slab, 0..index, 0, index, Acc::new(), None);
 
         let post;
         let deleted;
         if index + del < slab.as_slice().len() {
             // everything after
-            post = &slab.as_slice()[(index + del)..];
+            post = (index + del)..(slab.as_slice().len());
             deleted = del;
         } else {
             // nothing left
-            post = &[];
+            post = 0..0;
             deleted = slab.as_slice().len() - index;
         }
         let overflow = del - deleted;
