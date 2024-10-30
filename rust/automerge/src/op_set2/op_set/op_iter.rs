@@ -1,5 +1,5 @@
 use crate::op_set2::packer::{
-    BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, StrCursor,
+    BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, SlabWeight, StrCursor,
 };
 use crate::{
     op_set2,
@@ -48,7 +48,7 @@ pub(crate) struct OpIter<'a> {
     pub(super) insert: ColumnDataIter<'a, BooleanCursor>,
     pub(super) action: ColumnDataIter<'a, ActionCursor>,
     pub(super) value_meta: ColumnDataIter<'a, MetaCursor>,
-    pub(super) value: RawReader<'a>,
+    pub(super) value: RawReader<'a, SlabWeight>,
     pub(super) mark_name: ColumnDataIter<'a, StrCursor>,
     pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
     pub(crate) op_set: &'a OpSet,

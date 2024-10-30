@@ -2,7 +2,7 @@ use super::aggregate::{Acc, Agg};
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter};
 
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -205,6 +205,7 @@ impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
     type State<'a> = RleState<'a, P>;
     type PostState<'a> = Option<Run<'a, P>>;
     type Export = Option<P::Owned>;
+    type SlabIndex = SlabWeight;
 
     fn empty() -> Self {
         Self::default()

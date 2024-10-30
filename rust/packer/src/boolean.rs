@@ -1,7 +1,7 @@
 use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter};
 use super::ulebsize;
 
 use std::ops::Range;
@@ -47,6 +47,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     type State<'a> = BooleanState;
     type PostState<'a> = Option<BooleanState>;
     type Export = bool;
+    type SlabIndex = SlabWeight;
 
     fn empty() -> Self {
         Self::default()

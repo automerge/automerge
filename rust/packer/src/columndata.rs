@@ -1,10 +1,12 @@
 use super::aggregate::Acc;
 use super::aggregate::Agg;
-use super::cursor::{ColumnCursor, Run, RunIter, ScanMeta, SpliceResult};
+use super::cursor::{
+    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, ScanMeta, SpliceResult,
+};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
 use super::slab;
-use super::slab::{Slab, SlabTree, SlabWriter};
+use super::slab::{Slab, SlabTree, SlabWriter, SpanTree};
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -14,7 +16,8 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
-    pub slabs: SlabTree,
+    pub slabs: SpanTree<Slab, C::SlabIndex>,
+    //pub slabs: SpanTree<Slab, SlabWeight>,
     #[cfg(debug_assertions)]
     pub debug: Vec<C::Export>,
     _phantom: PhantomData<C>,
@@ -82,12 +85,12 @@ impl<C: ColumnCursor> ColumnData<C> {
         start..end
     }
 
-    pub fn raw_reader(&self, advance: usize) -> RawReader<'_> {
+    pub fn raw_reader(&self, advance: usize) -> RawReader<'_, C::SlabIndex> {
         let cursor = self
             .slabs
-            .get_where_or_last(|acc, next| advance < acc.pos + next.pos);
-        let current = Some((cursor.element, advance - cursor.weight.pos));
-        let slabs = slab::Iter::new(&self.slabs, cursor);
+            .get_where_or_last(|acc, next| advance < acc.pos() + next.pos());
+        let current = Some((cursor.element, advance - cursor.weight.pos()));
+        let slabs = slab::SpanTreeIter::new(&self.slabs, cursor);
         RawReader { slabs, current }
     }
 }
@@ -96,25 +99,37 @@ impl<C: ColumnCursor> ColumnData<C> {
 pub struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     max: usize,
-    slabs: slab::Iter<'a>,
+    slabs: slab::SpanTreeIter<'a, Slab, C::SlabIndex>,
     slab: RunIter<'a, C>,
     run: Option<Run<'a, C::Item>>,
 }
 
-impl<'a, C: ColumnCursor> Copy for ColumnDataIter<'a, C> {}
+impl<'a, C> Copy for ColumnDataIter<'a, C>
+where
+    C: ColumnCursor,
+    C::SlabIndex: Copy,
+{
+}
 
 impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            pos: self.pos,
+            max: self.max,
+            slabs: self.slabs.clone(),
+            slab: self.slab,
+            run: self.run,
+        }
     }
 }
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
-    pub(crate) fn new(slabs: &'a SlabTree, pos: usize, max: usize) -> Self {
-        let cursor = slabs.get_where_or_last(|acc, next| pos < acc.pos + next.pos);
-        let mut slab = cursor.element.run_iter();
-        let slabs = slab::Iter::new(slabs, cursor);
-        let iter_pos = slabs.weight().pos - slab.weight_left().pos;
+    pub(crate) fn new(slabs: &'a SlabTree<C::SlabIndex>, pos: usize, max: usize) -> Self {
+        let cursor = slabs.get_where_or_last(|acc, next| pos < acc.pos() + next.pos());
+        //let mut slab : RunIter<C> = cursor.element.run_iter::<C>();
+        let mut slab = cursor.element.run_iter::<C>();
+        let slabs = slab::SpanTreeIter::new(slabs, cursor);
+        let iter_pos = slabs.weight().pos() - slab.pos_left();
         let advance = pos - iter_pos;
         let run = slab.sub_advance(advance);
         ColumnDataIter {
@@ -126,11 +141,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub(crate) fn new_at_acc(slabs: &'a SlabTree, acc: Acc, max: usize) -> Self {
-        let cursor = slabs.get_where_or_last(|a, next| acc < a.acc + next.acc);
+    pub(crate) fn new_at_acc(slabs: &'a SlabTree<C::SlabIndex>, acc: Acc, max: usize) -> Self {
+        let cursor = slabs.get_where_or_last(|a, next| acc < a.acc() + next.acc());
         let mut slab = cursor.element.run_iter();
-        let pos = cursor.weight.pos;
-        let slabs = slab::Iter::new(slabs, cursor);
+        let pos = cursor.weight.pos();
+        let slabs = slab::SpanTreeIter::new(slabs, cursor);
         let run = slab.sub_advance(0);
         ColumnDataIter {
             pos,
@@ -153,7 +168,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     pub fn pos(&self) -> usize {
         debug_assert_eq!(
-            self.slabs.weight().pos - self.slab.weight_left().pos - self.run_count(),
+            self.slabs.weight().pos() - self.slab.pos_left() - self.run_count(),
             self.pos
         );
         self.pos
@@ -161,7 +176,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     fn check_pos(&self) {
         debug_assert_eq!(
-            self.slabs.weight().pos - self.slab.weight_left().pos - self.run_count(),
+            self.slabs.weight().pos() - self.slab.pos_left() - self.run_count(),
             self.pos
         );
     }
@@ -243,7 +258,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 
     pub fn calculate_acc(&self) -> Acc {
-        self.slabs.weight().acc - self.slab.weight_left().acc - self.run_acc()
+        self.slabs.weight().acc() - self.slab.acc_left() - self.run_acc()
     }
 
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
@@ -273,7 +288,7 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     }
 
     pub fn acc(&self) -> Acc {
-        self.iter.slabs.weight().acc - self.iter.slab.weight_left().acc - self.iter.run_acc()
+        self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc()
     }
 }
 
@@ -289,8 +304,7 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     type Item = ColGroupItem<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let acc =
-            self.iter.slabs.weight().acc - self.iter.slab.weight_left().acc - self.iter.run_acc();
+        let acc = self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc();
         let pos = self.iter.pos;
         let item = self.iter.next()?;
         Some(ColGroupItem { item, pos, acc })
@@ -299,10 +313,17 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let mut n = Acc::from(n);
         let target: Acc = self.iter.calculate_acc() + n;
-        if target >= self.iter.slabs.total_weight().acc {
+        if target
+            >= self
+                .iter
+                .slabs
+                .total_weight()
+                .map(|w| w.acc())
+                .unwrap_or_default()
+        {
             return None;
         }
-        if self.iter.slabs.weight().acc <= target {
+        if self.iter.slabs.weight().acc() <= target {
             let delta = self.iter.reset_iter_to_acc(target)?;
             self.iter.check_pos();
             n -= delta;
@@ -346,7 +367,7 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let target = self.pos() + n + 1;
-        if self.slabs.weight().pos < target {
+        if self.slabs.weight().pos() < target {
             self.reset_iter_to_pos(target - 1)?;
             self.next()
         } else if self.run_count() > n {
@@ -397,7 +418,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         self
     }
 
-    fn init(len: usize, slabs: SlabTree) -> Self {
+    fn init(len: usize, slabs: SlabTree<C::SlabIndex>) -> Self {
         let col = ColumnData {
             len,
             slabs,
@@ -432,33 +453,6 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::<C>::external(data, range, &Default::default())
     }
 
-    pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> Vec<usize> {
-        let agg = agg.into();
-        let mut results = vec![];
-        if agg.is_none() {
-            return results;
-        }
-        self.slabs
-            .get_each(|_, slab| agg >= slab.min && agg <= slab.max)
-            .for_each(|cursor| {
-                let mut pos = cursor.weight.pos;
-                let mut iter = cursor.element.run_iter::<C>();
-                while let Some(mut run) = iter.next() {
-                    if iter.cursor.contains(&run, agg) {
-                        while let Some(value) = iter.cursor.pop(&mut run) {
-                            if <C::Item>::maybe_agg(value) == agg {
-                                results.push(pos)
-                            }
-                            pos += 1;
-                        }
-                    } else {
-                        pos += run.count;
-                    }
-                }
-            });
-        results
-    }
-
     pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
     where
         E: MaybePackable<C::Item> + Debug + Clone,
@@ -478,9 +472,9 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         let cursor = self
             .slabs
-            .get_where_or_last(|acc, next| index < acc.pos + next.pos);
+            .get_where_or_last(|acc, next| index < acc.pos() + next.pos());
 
-        let mut acc = cursor.weight.acc;
+        let mut acc = cursor.weight.acc();
 
         debug_assert_eq!(
             self.iter()
@@ -489,10 +483,10 @@ impl<C: ColumnCursor> ColumnData<C> {
             self.acc()
         );
 
-        match C::splice(cursor.element, index - cursor.weight.pos, del, values) {
+        match C::splice(cursor.element, index - cursor.weight.pos(), del, values) {
             SpliceResult::Replace(add, del, g, mut slabs) => {
                 acc += g;
-                C::compute_min_max(&mut slabs);
+                C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
                 #[cfg(debug_assertions)]
                 for s in &slabs {
@@ -529,7 +523,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn init_empty(len: usize) -> Self {
         let new_slab = C::init_empty(len);
-        let mut slabs = SlabTree::new();
+        let mut slabs = SlabTree::default();
         slabs.push(new_slab);
         assert!(!slabs.is_empty());
         ColumnData::init(len, slabs)
@@ -557,7 +551,39 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub fn acc(&self) -> Acc {
-        self.slabs.weight().acc
+        self.slabs.weight().map(|w| w.acc()).unwrap_or_default()
+    }
+}
+
+impl<C: ColumnCursor> ColumnData<C>
+where
+    C::SlabIndex: HasMinMax,
+{
+    pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> Vec<usize> {
+        let agg = agg.into();
+        let mut results = vec![];
+        if agg.is_none() {
+            return results;
+        }
+        self.slabs
+            .get_each(|_, slab| agg >= slab.min() && agg <= slab.max())
+            .for_each(|cursor| {
+                let mut pos = cursor.weight.pos();
+                let mut iter = cursor.element.run_iter::<C>();
+                while let Some(mut run) = iter.next() {
+                    if iter.cursor.contains(&run, agg) {
+                        while let Some(value) = iter.cursor.pop(&mut run) {
+                            if <C::Item>::maybe_agg(value) == agg {
+                                results.push(pos)
+                            }
+                            pos += 1;
+                        }
+                    } else {
+                        pos += run.count;
+                    }
+                }
+            });
+        results
     }
 }
 
@@ -626,7 +652,7 @@ pub(crate) mod tests {
             let advance_by = rng.gen_range(1..(data.len() - advanced_by));
             iter.advance_by(advance_by);
             let expected = data[advance_by + advanced_by..].to_vec();
-            let actual = C::to_vec(iter);
+            let actual = C::to_vec(iter.clone());
             assert_eq!(expected, actual);
             advanced_by += advance_by;
         }

@@ -7,7 +7,9 @@ fn main() -> Result<(), AutomergeError> {
     let contents = include_str!("../edits.json");
     let edits = jzon::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
-    for edit in &edits {
+    //for edit in &edits {
+    for i in 0..edits.len() {
+        let edit = &edits[i];
         let pos: usize = edit.as_array().unwrap()[0].as_u64().unwrap() as usize;
         let del: isize = edit.as_array().unwrap()[1].as_i64().unwrap() as isize;
         let mut vals = String::new();

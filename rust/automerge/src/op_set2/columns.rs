@@ -4,7 +4,7 @@ use crate::types::ActorId;
 use super::meta::MetaCursor;
 use super::packer::{
     BooleanCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor, ScanMeta, SlabTree,
-    StrCursor,
+    SlabWeight, StrCursor,
 };
 use super::types::{ActionCursor, ActorCursor};
 
@@ -58,7 +58,7 @@ impl Column {
         }
     }
 
-    pub(crate) fn slabs(&self) -> &SlabTree {
+    pub(crate) fn slabs(&self) -> &SlabTree<SlabWeight> {
         match self {
             Self::Actor(col) => &col.slabs,
             Self::Str(col) => &col.slabs,

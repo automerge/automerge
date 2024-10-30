@@ -17,7 +17,7 @@ use super::columns::Column;
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::packer::{
     BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawReader, Run,
-    StrCursor,
+    SlabWeight, StrCursor,
 };
 use super::types::{
     Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 mod found_op;
 mod insert;
+//mod mark_index;
 mod marks;
 mod op_iter;
 mod op_query;
@@ -42,6 +43,7 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
+//pub(crate) use mark_index::MarkIndex;
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
@@ -53,6 +55,7 @@ pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
     text_index: ColumnData<IntCursor>,
+    //mark_index: MarkIndex,
     cols: Columns,
 }
 
@@ -75,6 +78,7 @@ impl OpSet {
             actors,
             cols: Columns::default(),
             text_index: ColumnData::new(),
+            //mark_index: MarkIndex::new(),
         }
     }
 
@@ -870,6 +874,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
+            //mark_index: MarkIndex::new(),
         }
     }
 
@@ -898,6 +903,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
+            //mark_index: MarkIndex::new(),
         };
 
         Ok(op_set)
@@ -1815,14 +1821,14 @@ impl Columns {
         }
     }
 
-    fn get_value(&self, spec: ColumnSpec) -> RawReader<'_> {
+    fn get_value(&self, spec: ColumnSpec) -> RawReader<'_, SlabWeight> {
         match self.0.get(&spec) {
             Some(Column::Value(c)) => c.raw_reader(0),
             _ => RawReader::empty(),
         }
     }
 
-    fn get_value_range(&self, spec: ColumnSpec, advance: usize) -> RawReader<'_> {
+    fn get_value_range(&self, spec: ColumnSpec, advance: usize) -> RawReader<'_, SlabWeight> {
         // FIXME - range??
         match self.0.get(&spec) {
             Some(Column::Value(c)) => c.raw_reader(advance),

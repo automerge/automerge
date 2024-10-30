@@ -1,17 +1,15 @@
 use super::aggregate::{Acc, Agg};
-use super::cursor::{ColumnCursor, RunIter, ScanMeta};
+use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter, ScanMeta};
 use super::pack::PackError;
-use std::ops::{Add, AddAssign};
 
 pub(crate) mod tree;
 pub(crate) mod writer;
 
 pub(crate) use super::columndata::normalize_range;
-pub(crate) use tree::{HasWeight, MaybeSub, SpanTree, SpanTreeIter};
+pub use tree::{SpanTree, SpanTreeIter, SpanWeight};
 pub use writer::{SlabWriter, WriteOp};
 
-pub type SlabTree = SpanTree<Slab>;
-pub(crate) type Iter<'a> = SpanTreeIter<'a, Slab>;
+pub type SlabTree<W> = SpanTree<Slab, W>;
 
 use std::fmt::Debug;
 use std::ops::{Index, Range};
@@ -111,10 +109,12 @@ impl Slab {
     }
 
     pub fn run_iter<C: ColumnCursor>(&self) -> RunIter<'_, C> {
+        let weight = <C::SlabIndex>::alloc(self);
         RunIter {
             slab: self.as_slice(),
             cursor: C::new(self),
-            weight_left: self.weight(),
+            pos_left: weight.pos(),
+            acc_left: weight.acc(),
         }
     }
 
@@ -175,23 +175,17 @@ pub struct SlabWeight {
     pub(crate) max: Agg,
 }
 
-impl HasWeight for Slab {
-    type Weight = SlabWeight;
-
-    fn weight(&self) -> SlabWeight {
+impl SpanWeight<Slab> for SlabWeight {
+    fn alloc(span: &Slab) -> Self {
         SlabWeight {
-            pos: self.len(),
-            acc: self.acc(),
-            min: self.min(),
-            max: self.max(),
+            pos: span.len(),
+            acc: span.acc(),
+            min: span.min(),
+            max: span.max(),
         }
     }
-}
 
-impl Add for SlabWeight {
-    type Output = SlabWeight;
-
-    fn add(self, b: Self) -> Self {
+    fn and(self, b: &Self) -> Self {
         Self {
             pos: self.pos + b.pos,
             acc: self.acc + b.acc,
@@ -199,19 +193,15 @@ impl Add for SlabWeight {
             min: self.min.minimize(b.min),
         }
     }
-}
 
-impl AddAssign<SlabWeight> for SlabWeight {
-    fn add_assign(&mut self, other: Self) {
+    fn union(&mut self, other: &Self) {
         self.pos += other.pos;
         self.acc += other.acc;
         self.max = self.max.maximize(other.max);
         self.min = self.min.minimize(other.min);
     }
-}
 
-impl MaybeSub<SlabWeight> for SlabWeight {
-    fn maybe_sub(&mut self, other: SlabWeight) -> bool {
+    fn maybe_sub(&mut self, other: &Self) -> bool {
         let max_ok = other.max.is_none() || self.max > other.max;
         let min_ok = other.min.is_none() || self.min.is_some() && self.min < other.min;
         if max_ok && min_ok {
@@ -261,10 +251,10 @@ pub(crate) mod tests {
             min: Agg::from(3),
             max: Agg::from(0),
         };
-        assert_eq!(baseline.clone().maybe_sub(max_eq), false);
-        assert_eq!(baseline.clone().maybe_sub(max_gr), false);
-        assert_eq!(baseline.clone().maybe_sub(max_lt), true);
-        assert_eq!(baseline.clone().maybe_sub(max_none), true);
+        assert_eq!(baseline.clone().maybe_sub(&max_eq), false);
+        assert_eq!(baseline.clone().maybe_sub(&max_gr), false);
+        assert_eq!(baseline.clone().maybe_sub(&max_lt), true);
+        assert_eq!(baseline.clone().maybe_sub(&max_none), true);
 
         let min_eq = SlabWeight {
             pos: 50,
@@ -290,9 +280,9 @@ pub(crate) mod tests {
             min: Agg::from(0),
             max: Agg::from(19),
         };
-        assert_eq!(baseline.clone().maybe_sub(min_eq), false);
-        assert_eq!(baseline.clone().maybe_sub(min_gr), true);
-        assert_eq!(baseline.clone().maybe_sub(min_lt), false);
-        assert_eq!(baseline.clone().maybe_sub(min_none), true);
+        assert_eq!(baseline.clone().maybe_sub(&min_eq), false);
+        assert_eq!(baseline.clone().maybe_sub(&min_gr), true);
+        assert_eq!(baseline.clone().maybe_sub(&min_lt), false);
+        assert_eq!(baseline.clone().maybe_sub(&min_none), true);
     }
 }

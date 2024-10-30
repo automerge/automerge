@@ -50,4 +50,4 @@ pub use leb128::{lebsize, ulebsize};
 pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
 pub use rle::{IntCursor, RleCursor, StrCursor};
-pub use slab::{Slab, SlabTree, WriteOp};
+pub use slab::{Slab, SlabTree, SlabWeight, SpanTree, SpanWeight, WriteOp};

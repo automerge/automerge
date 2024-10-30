@@ -2,7 +2,7 @@ use super::aggregate::Agg;
 use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
 use super::pack::{PackError, Packable};
 use super::rle::{RleCursor, RleState};
-use super::slab::{Slab, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter};
 
 use std::ops::Range;
 
@@ -43,6 +43,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     type State<'a> = DeltaState<'a>;
     type PostState<'a> = Option<Run<'a, i64>>;
     type Export = Option<i64>;
+    type SlabIndex = SlabWeight;
 
     fn empty() -> Self {
         Self::default()

@@ -1,6 +1,6 @@
 use super::aggregate::{Acc, Agg};
 use super::pack::{MaybePackable, PackError, Packable};
-use super::slab::{Slab, SlabWeight, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -8,6 +8,40 @@ use std::ops::Range;
 #[derive(Debug, Default)]
 pub struct ScanMeta {
     pub actors: usize,
+}
+
+pub trait HasMinMax {
+    fn min(&self) -> Agg;
+    fn max(&self) -> Agg;
+}
+
+pub trait HasPos {
+    fn pos(&self) -> usize;
+}
+
+pub trait HasAcc {
+    fn acc(&self) -> Acc;
+}
+
+impl HasPos for SlabWeight {
+    fn pos(&self) -> usize {
+        self.pos
+    }
+}
+
+impl HasMinMax for SlabWeight {
+    fn min(&self) -> Agg {
+        self.min
+    }
+    fn max(&self) -> Agg {
+        self.max
+    }
+}
+
+impl HasAcc for SlabWeight {
+    fn acc(&self) -> Acc {
+        self.acc
+    }
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -129,6 +163,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     type State<'a>: Default + Debug;
     type PostState<'a>;
     type Export: Debug + PartialEq + Clone;
+    type SlabIndex: Debug + Clone + HasPos + HasAcc + SpanWeight<Slab>;
 
     fn empty() -> Self;
 
@@ -405,7 +440,9 @@ pub enum SpliceResult {
 pub struct RunIter<'a, C: ColumnCursor> {
     pub(crate) slab: &'a [u8],
     pub(crate) cursor: C,
-    pub(crate) weight_left: SlabWeight,
+    //pub(crate) weight_left: C::SlabIndex,
+    pub(crate) pos_left: usize,
+    pub(crate) acc_left: Acc,
 }
 
 impl<'a, C: ColumnCursor> RunIter<'a, C> {
@@ -413,12 +450,17 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
         RunIter {
             slab: &[],
             cursor: C::empty(),
-            weight_left: SlabWeight::default(),
+            //weight_left: <C::SlabIndex>::default(),
+            pos_left: 0,
+            acc_left: Acc::new(),
         }
     }
 
-    pub(crate) fn weight_left(&self) -> SlabWeight {
-        self.weight_left
+    pub(crate) fn pos_left(&self) -> usize {
+        self.pos_left
+    }
+    pub(crate) fn acc_left(&self) -> Acc {
+        self.acc_left
     }
 
     pub(crate) fn sub_advance_acc(&mut self, mut n: Acc) -> (usize, Option<Run<'a, C::Item>>) {
@@ -471,8 +513,8 @@ impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let run = self.cursor.next(self.slab)?;
-        self.weight_left.pos -= run.count;
-        self.weight_left.acc -= run.acc();
+        self.pos_left -= run.count;
+        self.acc_left -= run.acc();
         Some(run)
     }
 }

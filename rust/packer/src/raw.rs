@@ -1,7 +1,7 @@
 use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
 use super::pack::PackError;
-use super::slab::{self, Slab, SlabWriter};
+use super::slab::{self, Slab, SlabWeight, SlabWriter, SpanWeight};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -18,6 +18,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     type State<'a> = ();
     type PostState<'a> = Range<usize>; //&'a [u8];
     type Export = u8;
+    type SlabIndex = SlabWeight;
 
     fn empty() -> Self {
         Self::default()
@@ -144,15 +145,15 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RawReader<'a> {
-    pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab>,
+pub struct RawReader<'a, T: SpanWeight<Slab>> {
+    pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab, T>,
     pub(crate) current: Option<(&'a Slab, usize)>,
 }
 
-impl<'a> RawReader<'a> {
-    pub fn empty() -> RawReader<'static> {
+impl<'a, T: SpanWeight<Slab>> RawReader<'a, T> {
+    pub fn empty() -> RawReader<'static, T> {
         RawReader {
-            slabs: slab::Iter::default(),
+            slabs: slab::SpanTreeIter::default(),
             current: None,
         }
     }
