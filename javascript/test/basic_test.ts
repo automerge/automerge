@@ -824,4 +824,21 @@ describe("Automerge", () => {
       assert.strictEqual(Automerge.isRawString(d.bar), false)
     })
   })
+
+  describe("the saveBundle function", () => {
+    it("should save only the dependencies of the end hash", () => {
+      let doc = Automerge.from({ a: "1" })
+      let fork = Automerge.clone(doc)
+      doc = Automerge.change(doc, d => (d.a = "2"))
+      const endHash = Automerge.getHeads(doc)[0]
+      fork = Automerge.change(fork, d => (d.a = "3"))
+      fork = Automerge.change(fork, d => (d.a = "4"))
+      doc = Automerge.merge(doc, fork)
+
+      const bundle = Automerge.saveBundle(doc, null, endHash)
+      const loaded = Automerge.load<{ a: string }>(bundle)
+      assert.deepStrictEqual(loaded.a, "2")
+      assert.deepStrictEqual(Automerge.getHeads(loaded), [endHash])
+    })
+  })
 })

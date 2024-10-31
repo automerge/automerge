@@ -32,6 +32,7 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
+use automerge::ChangeHash;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -856,6 +857,25 @@ impl Automerge {
     pub fn save_and_verify(&mut self) -> Result<Uint8Array, error::Load> {
         let bytes = self.doc.save_and_verify()?;
         Ok(Uint8Array::from(bytes.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name=saveBundle)]
+    pub fn save_bundle(
+        &mut self,
+        start: JsValue,
+        end: JsValue,
+    ) -> Result<Uint8Array, error::SaveBundle> {
+        let start = if start.is_undefined() || start.is_null() {
+            None
+        } else {
+            Some(ChangeHash::try_from(JS(start)).map_err(error::SaveBundle::InvalidStartHash)?)
+        };
+        let end = ChangeHash::try_from(JS(end)).map_err(error::SaveBundle::InvalidEndHash)?;
+        let result = self
+            .doc
+            .save_bundle(start, end)
+            .map_err(error::SaveBundle::Failed)?;
+        Ok(Uint8Array::from(result.as_slice()))
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
@@ -1885,6 +1905,22 @@ pub mod error {
 
     impl From<GetDecodedChangeByHash> for JsValue {
         fn from(e: GetDecodedChangeByHash) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum SaveBundle {
+        #[error("invalid start hash: {0}")]
+        InvalidStartHash(super::interop::error::BadChangeHash),
+        #[error("invalid end hash: {0}")]
+        InvalidEndHash(super::interop::error::BadChangeHash),
+        #[error(transparent)]
+        Failed(automerge::error::Save),
+    }
+
+    impl From<SaveBundle> for JsValue {
+        fn from(e: SaveBundle) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

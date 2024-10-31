@@ -273,6 +273,7 @@ export class Automerge {
   saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
   saveSince(heads: Heads): Uint8Array;
+  saveBundle(start: Hash | null, end: Hash): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 
   // sync over network
