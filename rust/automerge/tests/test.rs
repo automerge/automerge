@@ -2,6 +2,7 @@ use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::{CommitOptions, Transactable};
+use automerge::LoadOptions;
 use automerge::TextEncoding;
 use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
@@ -2280,4 +2281,29 @@ fn stats_smoke_test() {
     let stats = doc.stats();
     assert_eq!(stats.num_changes, 2);
     assert_eq!(stats.num_ops, 2);
+}
+
+#[test]
+fn save_bundle() {
+    let mut doc = AutoCommit::new();
+    doc.put(&automerge::ROOT, "a", 1).unwrap();
+
+    let mut fork = doc.fork();
+
+    doc.put(&automerge::ROOT, "a", 2).unwrap();
+    let head1 = doc.get_heads()[0];
+
+    fork.put(&automerge::ROOT, "a", 3).unwrap();
+    fork.put(&automerge::ROOT, "a", 4).unwrap();
+
+    doc.merge(&mut fork).unwrap();
+
+    let bundle = doc.save_bundle(None, head1).unwrap();
+
+    let mut loaded = AutoCommit::load(&bundle).unwrap();
+    loaded.dump();
+    assert_eq!(loaded.get_heads(), &[head1]);
+
+    let (a, _) = loaded.get(&automerge::ROOT, "a").unwrap().unwrap();
+    assert_eq!(a, 2.into());
 }

@@ -936,6 +936,7 @@ impl Automerge {
             &self.ops.osd.props,
             &heads,
             compress,
+            None,
         );
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
@@ -948,6 +949,46 @@ impl Automerge {
     /// Save the entirety of this document in a compact form.
     pub fn save(&self) -> Vec<u8> {
         self.save_with_options(SaveOptions::default())
+    }
+
+    pub fn save_bundle(
+        &self,
+        start: Option<ChangeHash>,
+        end: ChangeHash,
+    ) -> Result<Vec<u8>, crate::error::Save> {
+        if let Some(start) = start {
+            if !self.history_index.contains_key(&start) {
+                return Err(crate::error::Save::StartNotInHistory);
+            }
+        }
+        if !self.history_index.contains_key(&end) {
+            return Err(crate::error::Save::EndNotInHistory);
+        }
+
+        let end_clock = self.clock_at(&[end]);
+        // filter out all the changes which are not ancestors of `end`
+        let changes = self.get_changes_before(&end_clock);
+        let ops = self
+            .ops
+            .iter()
+            .filter_map(|(obj, _obj_type, op)| {
+                if end_clock.covers(op.id()) {
+                    Some((obj, op))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Ok(crate::storage::save::save_document(
+            changes.into_iter(),
+            ops.into_iter(),
+            &self.ops.osd.actors,
+            &self.ops.osd.props,
+            &[end],
+            Some(CompressConfig::None),
+            Some(&end_clock),
+        ))
     }
 
     /// Save the document and attempt to load it before returning - slow!
@@ -1019,6 +1060,23 @@ impl Automerge {
         }
 
         // ensure the changes are still in sorted order
+        change_indexes.sort_unstable();
+
+        change_indexes
+            .into_iter()
+            .map(|i| &self.history[i])
+            .collect()
+    }
+
+    fn get_changes_before(&self, clock: &Clock) -> Vec<&Change> {
+        let mut change_indexes = Vec::<usize>::new();
+
+        for (actor_index, actor_changes) in &self.states {
+            if let Some(clock_data) = clock.get_for_actor(actor_index) {
+                change_indexes.extend(&actor_changes[..clock_data.seq as usize]);
+            }
+        }
+
         change_indexes.sort_unstable();
 
         change_indexes
