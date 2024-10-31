@@ -68,12 +68,9 @@ function isStep(stepStr) {
 function buildWasm(outputDir) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
   console.log("building automerge-wasm")
-  execSync(
-    "cargo build --target wasm32-unknown-unknown --release",
-    {
-      cwd: automergeWasmPath,
-    },
-  )
+  execSync("cargo build --target wasm32-unknown-unknown --release", {
+    cwd: automergeWasmPath,
+  })
 
   const wasmBlobPath = path.join(
     rustProjectDir,

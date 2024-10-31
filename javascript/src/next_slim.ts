@@ -132,6 +132,7 @@ export {
   insertAt,
   deleteAt,
   saveSince,
+  saveBundle,
   initializeWasm,
   initializeBase64Wasm,
   wasmInitialized,

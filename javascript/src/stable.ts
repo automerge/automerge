@@ -42,6 +42,7 @@ import type {
   JsSyncState,
   SyncMessage,
   DecodedSyncMessage,
+  Hash,
 } from "./wasm_types.js"
 export type {
   PutPatch,
@@ -50,6 +51,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
+  Hash,
 } from "./wasm_types.js"
 
 /** @hidden **/
@@ -1299,4 +1301,13 @@ export function stats(doc: Doc<unknown>): {
 } {
   const state = _state(doc)
   return state.handle.stats()
+}
+
+export function saveBundle(
+  doc: Doc<unknown>,
+  start: Hash | null,
+  end: Hash,
+): Uint8Array {
+  const state = _state(doc)
+  return state.handle.saveBundle(start, end)
 }
