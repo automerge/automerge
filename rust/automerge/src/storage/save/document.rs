@@ -4,6 +4,7 @@ use fxhash::FxBuildHasher;
 use itertools::Itertools;
 
 use crate::{
+    clock::Clock,
     indexed_cache::IndexedCache,
     storage::{
         change::DEFLATE_MIN_SIZE, convert::op_as_docop, AsChangeMeta, CompressConfig, Document,
@@ -26,6 +27,7 @@ pub(crate) fn save_document<'a, I, O>(
     props: &IndexedCache<String>,
     heads: &[ChangeHash],
     config: Option<CompressConfig>,
+    up_to_clock: Option<&'a Clock>,
 ) -> Vec<u8>
 where
     I: Iterator<Item = &'a Change> + Clone + 'a,
@@ -44,7 +46,7 @@ where
 
     let doc_ops = ops
         .clone()
-        .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op));
+        .map(|(_obj, op)| op_as_docop(&actor_lookup, props, op, up_to_clock));
 
     let hash_graph = HashGraph::new(changes.clone());
     let changes = changes.map(|c| ChangeWithGraph {

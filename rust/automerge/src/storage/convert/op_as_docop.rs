@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use crate::{
+    clock::Clock,
     convert,
     indexed_cache::IndexedCache,
     storage::AsDocOp,
@@ -25,11 +26,13 @@ pub(crate) fn op_as_docop<'a>(
     actors: &'a HashMap<usize, usize>,
     props: &'a IndexedCache<String>,
     op: Op<'a>,
+    clock: Option<&'a Clock>,
 ) -> OpAsDocOp<'a> {
     OpAsDocOp {
         op,
         actor_lookup: actors,
         props,
+        clock,
     }
 }
 
@@ -37,6 +40,7 @@ pub(crate) struct OpAsDocOp<'a> {
     op: Op<'a>,
     actor_lookup: &'a HashMap<usize, usize>,
     props: &'a IndexedCache<String>,
+    clock: Option<&'a Clock>,
 }
 
 #[derive(Debug)]
@@ -98,6 +102,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
             op: self.op,
             offset: 0,
             actor_index: self.actor_lookup,
+            clock: self.clock,
         }
     }
 
@@ -126,10 +131,12 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct OpAsDocOpSuccIter<'a> {
     op: Op<'a>,
     offset: usize,
     actor_index: &'a HashMap<usize, usize>,
+    clock: Option<&'a Clock>,
 }
 
 impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
@@ -137,18 +144,29 @@ impl<'a> Iterator for OpAsDocOpSuccIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // FIXME - nth() is no longer fast - rewrite to replace offset with a Op iterator
-        if let Some(s) = self.op.succ().nth(self.offset).map(|op| op.id()) {
-            self.offset += 1;
-            Some(translate(self.actor_index, s))
-        } else {
-            None
+        loop {
+            if let Some(op) = self.op.succ().nth(self.offset) {
+                self.offset += 1;
+                let id = op.id();
+                if let Some(clock) = self.clock {
+                    if !clock.covers(id) {
+                        continue;
+                    }
+                }
+                return Some(translate(self.actor_index, op.id()));
+            } else {
+                return None;
+            }
         }
     }
 }
 
 impl<'a> ExactSizeIterator for OpAsDocOpSuccIter<'a> {
     fn len(&self) -> usize {
-        self.op.succ().len()
+        let mut iter = self.clone();
+        iter.offset = 0;
+        iter.count()
+        // self.op.succ().len()
     }
 }
 

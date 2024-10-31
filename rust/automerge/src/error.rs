@@ -138,3 +138,11 @@ pub enum UpdateObjectError {
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
 }
+
+#[derive(Error, Debug)]
+pub enum Save {
+    #[error("start hash is not in the history")]
+    StartNotInHistory,
+    #[error("end hash is not in the history")]
+    EndNotInHistory,
+}

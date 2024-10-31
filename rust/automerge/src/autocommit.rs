@@ -393,6 +393,15 @@ impl AutoCommit {
         self.save_with_options(SaveOptions::default())
     }
 
+    pub fn save_bundle(
+        &mut self,
+        start: Option<ChangeHash>,
+        end: ChangeHash,
+    ) -> Result<Vec<u8>, crate::error::Save> {
+        self.ensure_transaction_closed();
+        self.doc.save_bundle(start, end)
+    }
+
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
         let bytes = self.doc.save_with_options(options);
