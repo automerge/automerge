@@ -24,8 +24,10 @@ import {
   INT,
   UINT,
   F64,
+  LINK,
 } from "./constants.js"
 import { RawString } from "./raw_string.js"
+import { Link } from "./link.js"
 
 type TargetCommon = {
   context: Automerge
@@ -119,6 +121,9 @@ function valueAt<T extends Target>(
       )
       return counter as ValueType<T>
     }
+    case "link": {
+      return new Link(val as string) as ValueType<T>
+    }
     default:
       throw RangeError(`datatype ${datatype} unimplemented`)
   }
@@ -137,6 +142,7 @@ type ImportedValue =
   | [Array<any>, "list"]
   | [Record<string, any>, "map"]
   | [boolean, "boolean"]
+  | [string, "link"]
 
 function import_value(
   value: any,
@@ -157,6 +163,8 @@ function import_value(
         return [value.value, "f64"]
       } else if (value[COUNTER]) {
         return [value.value, "counter"]
+      } else if (value[LINK]) {
+        return [value.target, "link"]
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
       } else if (value instanceof RawString) {

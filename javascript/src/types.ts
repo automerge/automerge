@@ -5,6 +5,7 @@ export { Int, Uint, Float64 } from "./numbers.js"
 
 import { Counter } from "./counter.js"
 import type { Patch } from "./wasm_types.js"
+import { Link } from "./link.js"
 export type {
   Cursor,
   MapObjType,
@@ -29,6 +30,7 @@ export type ScalarValue =
   | boolean
   | Date
   | Counter
+  | Link
   | Uint8Array
 
 export type MarkValue = string | number | null | boolean | Date | Uint8Array

@@ -28,6 +28,8 @@ export {
 
 import { Text } from "./text.js"
 export { Text } from "./text.js"
+import { Link } from "./link.js"
+export { Link } from "./link.js"
 
 import type {
   Automerge,
@@ -1241,6 +1243,15 @@ function registerDatatypes(handle: Automerge, textV2: boolean) {
     n => {
       if (n instanceof Counter) {
         return n.value
+      }
+    },
+  )
+  handle.registerDatatype(
+    "link",
+    (value: string) => new Link(value),
+    (value: any) => {
+      if (value instanceof Link) {
+        return value.target
       }
     },
   )

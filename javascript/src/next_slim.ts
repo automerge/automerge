@@ -61,6 +61,8 @@ import type {
   MarkValue,
 } from "./next_types.js"
 
+export { Link } from "./link.js"
+
 import { type PatchCallback } from "./stable.js"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts.js"

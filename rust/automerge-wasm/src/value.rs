@@ -132,6 +132,7 @@ impl TryFrom<JsValue> for Datatype {
             "counter" => Ok(Datatype::Counter),
             "timestamp" => Ok(Datatype::Timestamp),
             "boolean" => Ok(Datatype::Boolean),
+            "link" => Ok(Datatype::Link),
             "null" => Ok(Datatype::Null),
             d => {
                 if d.starts_with("unknown") {

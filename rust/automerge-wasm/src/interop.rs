@@ -1309,6 +1309,7 @@ impl Automerge {
                 }
             }
             Some(Datatype::Null) => Some(am::ScalarValue::Null),
+            Some(Datatype::Link) => value.as_string().map(|v| am::ScalarValue::Link(v.into())),
             Some(_) => None,
             None => {
                 if value.is_null() {

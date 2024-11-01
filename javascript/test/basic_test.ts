@@ -785,4 +785,76 @@ describe("Automerge", () => {
       assert.deepStrictEqual(Automerge.getHeads(loaded), [endHash])
     })
   })
+
+  describe("the link data type", () => {
+    it("should be possible to add links", () => {
+      console.log("starting test")
+      let doc = Automerge.from({ link: new Automerge.Link("sometarget") })
+      assert.deepStrictEqual(doc.link, new Automerge.Link("sometarget"))
+    })
+
+    it("should use the link class in change handler functions", () => {
+      let doc = Automerge.from({ link: new Automerge.Link("sometarget") })
+      doc = Automerge.change(doc, d => {
+        assert.deepStrictEqual(d.link, new Automerge.Link("sometarget"))
+        d.link = new Automerge.Link("someothertarget")
+        assert.deepStrictEqual(d.link, new Automerge.Link("someothertarget"))
+      })
+    })
+
+    it("should be possible to insert links in lists", () => {
+      let doc = Automerge.from<{ links: Automerge.Link[] }>({ links: [] })
+      doc = Automerge.change(doc, d => {
+        d.links.push(new Automerge.Link("sometarget"))
+        assert.deepStrictEqual(d.links[0], new Automerge.Link("sometarget"))
+      })
+      assert.deepStrictEqual(doc.links[0], new Automerge.Link("sometarget"))
+    })
+
+    it("should emit links in map patches", () => {
+      let doc = Automerge.from<{ foo: Automerge.Link | null }>({ foo: null })
+      const patches: Automerge.Patch[] = []
+      doc = Automerge.change(
+        doc,
+        {
+          patchCallback: (patch: any) => {
+            patches.push(...patch)
+          },
+        },
+        d => {
+          d.foo = new Automerge.Link("sometarget")
+        },
+      )
+      assert.deepStrictEqual(patches, [
+        {
+          action: "put",
+          path: ["foo"],
+          value: new Automerge.Link("sometarget"),
+        },
+      ])
+    })
+
+    it("should emit links in list patches", () => {
+      let doc = Automerge.from<{ links: Automerge.Link[] }>({ links: [] })
+      const patches: Automerge.Patch[] = []
+      doc = Automerge.change(
+        doc,
+        {
+          patchCallback: (patch: any) => {
+            patches.push(...patch)
+          },
+        },
+        d => {
+          d.links.push(new Automerge.Link("sometarget"))
+        },
+      )
+      assert.deepStrictEqual(patches, [
+        {
+          action: "insert",
+          path: ["links", 0],
+          values: [new Automerge.Link("sometarget")],
+        },
+      ])
+    })
+  })
 })

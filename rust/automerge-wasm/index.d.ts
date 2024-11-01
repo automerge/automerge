@@ -27,6 +27,7 @@ export type FullValue =
   | ["timestamp", Date]
   | ["counter", number]
   | ["bytes", Uint8Array]
+  | ["link", string]
   | ["null", null]
   | ["map", ObjID]
   | ["list", ObjID]
@@ -44,6 +45,7 @@ export type FullValueWithId =
   | ["timestamp", Date, ObjID]
   | ["counter", number, ObjID]
   | ["bytes", Uint8Array, ObjID]
+  | ["link", string, ObjID]
   | ["null", null, ObjID]
   | ["map", ObjID]
   | ["list", ObjID]
@@ -67,6 +69,7 @@ export type Datatype =
   | "timestamp"
   | "counter"
   | "bytes"
+  | "link"
   | "map"
   | "text"
   | "list";
