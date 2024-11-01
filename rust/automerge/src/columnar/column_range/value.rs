@@ -264,6 +264,12 @@ impl<'a> Iterator for ValueIter<'a> {
                         ))),
                         Ok(bytes) => Some(Ok(ScalarValue::Bytes(bytes.to_vec()))),
                     },
+                    ValueType::Link => self.parse_raw(val_meta, |bytes| {
+                        let val = std::str::from_utf8(bytes)
+                            .map_err(|e| DecodeColumnError::invalid_value("value", e.to_string()))?
+                            .into();
+                        Ok(ScalarValue::Link(val))
+                    }),
                 }
             }
             Some(None) => Some(Err(DecodeColumnError::unexpected_null("meta"))),
@@ -364,6 +370,7 @@ fn encode_val<S: Sink>(out: &mut RawEncoder<S>, val: &ScalarValue) -> usize {
         ScalarValue::Counter(i) => out.append(i.start),
         ScalarValue::Str(s) => out.append(RawBytes::from(s.as_bytes())),
         ScalarValue::Bytes(b) => out.append(RawBytes::from(&b[..])),
+        ScalarValue::Link(val) => out.append(RawBytes::from(val.as_bytes())),
         ScalarValue::Unknown { bytes, .. } => out.append(RawBytes::from(&bytes[..])),
     }
 }
@@ -380,6 +387,7 @@ enum ValueType {
     Bytes,
     Counter,
     Timestamp,
+    Link,
     Unknown(u8),
 }
 
@@ -400,6 +408,7 @@ impl ValueMeta {
             7 => ValueType::Bytes,
             8 => ValueType::Counter,
             9 => ValueType::Timestamp,
+            10 => ValueType::Link,
             other => ValueType::Unknown(other),
         }
     }
@@ -424,6 +433,7 @@ impl From<&ScalarValue> for ValueMeta {
             ScalarValue::Counter(i) => Self((lebsize(i.start) << 4) | 8),
             ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
             ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
+            ScalarValue::Link(s) => Self((s.as_bytes().len() as u64) << 4 | 10),
             ScalarValue::Unknown { type_code, bytes } => {
                 Self(((bytes.len() as u64) << 4) | (*type_code as u64))
             }
@@ -458,6 +468,7 @@ impl From<&ScalarValue> for ValueType {
             ScalarValue::Counter(_) => ValueType::Counter,
             ScalarValue::Str(_) => ValueType::String,
             ScalarValue::Bytes(_) => ValueType::Bytes,
+            ScalarValue::Link(_) => ValueType::Link,
             ScalarValue::Unknown { type_code, .. } => ValueType::Unknown(*type_code),
         }
     }
@@ -476,6 +487,7 @@ impl From<ValueType> for u64 {
             ValueType::Bytes => 7,
             ValueType::Counter => 8,
             ValueType::Timestamp => 9,
+            ValueType::Link => 10,
             ValueType::Unknown(other) => other as u64,
         }
     }

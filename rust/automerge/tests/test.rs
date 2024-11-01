@@ -2,11 +2,11 @@ use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::{CommitOptions, Transactable};
-use automerge::LoadOptions;
 use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
     ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
+use std::borrow::Cow;
 use std::fs;
 
 // set up logging for all the tests
@@ -2301,4 +2301,68 @@ fn save_bundle() {
 
     let (a, _) = loaded.get(&automerge::ROOT, "a").unwrap().unwrap();
     assert_eq!(a, 2.into());
+}
+
+#[test]
+fn crud_link() {
+    let mut doc = AutoCommit::new();
+    doc.put(
+        &automerge::ROOT,
+        "link",
+        ScalarValue::Link("somelink".into()),
+    )
+    .unwrap();
+    let link = doc.get(&automerge::ROOT, "link").unwrap().unwrap().0;
+    let Value::Scalar(val) = link else {
+        panic!("expected scalar value");
+    };
+    assert_eq!(val.as_ref(), &ScalarValue::Link("somelink".into()));
+}
+
+#[test]
+fn link_patches() {
+    let mut doc = AutoCommit::new();
+    doc.put(
+        &automerge::ROOT,
+        "link",
+        ScalarValue::Link("somelink".into()),
+    )
+    .unwrap();
+    let mut patches = doc.diff_incremental();
+    assert_eq!(patches.len(), 1);
+    let patch = patches.pop().unwrap();
+    let PatchAction::PutMap {
+        key,
+        value,
+        conflict,
+    } = patch.action
+    else {
+        panic!("expected PutMap action")
+    };
+    assert_eq!(key, "link".to_string());
+    assert_eq!(conflict, false);
+    let (Value::Scalar(val), _) = value else {
+        panic!("expected scalar value");
+    };
+    assert_eq!(val.as_ref(), &ScalarValue::Link("somelink".into()));
+}
+
+#[test]
+fn save_load_links() {
+    let mut doc = AutoCommit::new();
+    doc.put(
+        &automerge::ROOT,
+        "link",
+        ScalarValue::Link("somelink".into()),
+    )
+    .unwrap();
+
+    let saved = doc.save();
+    let loaded = AutoCommit::load(&saved).unwrap();
+
+    let link = loaded.get(&automerge::ROOT, "link").unwrap().unwrap().0;
+    let Value::Scalar(val) = link else {
+        panic!("expected scalar value");
+    };
+    assert_eq!(val.as_ref(), &ScalarValue::Link("somelink".into()));
 }

@@ -229,6 +229,9 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }
+                        Some(ScalarValue::Link(_)) => {
+                            Err(Error::invalid_value(Unexpected::Other("link"), &"a number"))
+                        }
                         None => Err(Error::missing_field("value")),
                     }?,
                     RawOpType::MarkBegin => {

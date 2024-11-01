@@ -231,6 +231,7 @@ impl From<&Value> for wasm_bindgen::JsValue {
                 ScalarValue::Timestamp(v) => Date::new(&(*v as f64).into()).into(),
                 ScalarValue::Boolean(v) => (*v).into(),
                 ScalarValue::Null => JsValue::null(),
+                ScalarValue::Link(l) => l.to_string().into(),
                 ScalarValue::Unknown {
                     bytes,
                     type_code: _,

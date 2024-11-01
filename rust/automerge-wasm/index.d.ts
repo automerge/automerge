@@ -113,7 +113,7 @@ export type PatchValue =
   | null
   | Date
   | Uint8Array
-  | {}
+  | object
   | [];
 export type Patch =
   | PutPatch

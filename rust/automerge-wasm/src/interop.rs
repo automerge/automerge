@@ -1388,6 +1388,7 @@ pub(crate) fn alloc_scalar(value: &am::ScalarValue) -> (Datatype, JsValue) {
         ),
         am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
         am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
+        am::ScalarValue::Link(l) => (Datatype::Link, l.to_string().into()),
         am::ScalarValue::Unknown { bytes, type_code } => (
             Datatype::Unknown(*type_code),
             Uint8Array::from(bytes.as_slice()).into(),

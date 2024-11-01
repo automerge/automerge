@@ -16,6 +16,7 @@ pub(crate) enum Datatype {
     Timestamp,
     Boolean,
     Null,
+    Link,
     Unknown(u8),
 }
 
@@ -64,6 +65,7 @@ impl From<&ScalarValue> for Datatype {
             ScalarValue::Timestamp(_) => Self::Timestamp,
             ScalarValue::Boolean(_) => Self::Boolean,
             ScalarValue::Null => Self::Null,
+            ScalarValue::Link(_) => Self::Link,
             ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
         }
     }
@@ -106,6 +108,7 @@ impl From<Datatype> for String {
             Datatype::Timestamp => "timestamp".into(),
             Datatype::Boolean => "boolean".into(),
             Datatype::Null => "null".into(),
+            Datatype::Link => "link".into(),
             Datatype::Unknown(type_code) => format!("unknown{}", type_code),
         }
     }

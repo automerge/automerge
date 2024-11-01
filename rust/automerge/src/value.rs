@@ -446,6 +446,7 @@ pub enum ScalarValue {
     Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
+    Link(SmolStr),
     /// A value from a future version of automerge
     Unknown {
         type_code: u8,
@@ -742,6 +743,7 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
             ScalarValue::Null => write!(f, "null"),
+            ScalarValue::Link(l) => write!(f, "Link: {}", l),
             ScalarValue::Unknown { type_code, .. } => write!(f, "unknown type {}", type_code),
         }
     }

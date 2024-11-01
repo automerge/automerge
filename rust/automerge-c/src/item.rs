@@ -1329,6 +1329,8 @@ pub enum AMvalType {
     Uint = 1 << 19,
     /// An unknown type of value.
     Unknown = 1 << 20,
+    /// A link to another thing
+    Link = 1 << 21,
     /// A void.
     Void = 1 << 0,
 }
@@ -1356,6 +1358,7 @@ impl From<&am::Value<'static>> for AMvalType {
                 Str(_) => Self::Str,
                 Timestamp(_) => Self::Timestamp,
                 Uint(_) => Self::Uint,
+                Link(_) => Self::Link,
                 Unknown { .. } => Self::Unknown,
             },
         }

@@ -230,6 +230,7 @@ pub enum OrdScalarValue {
     Timestamp(i64),
     Boolean(bool),
     Null,
+    Link(smol_str::SmolStr),
     Unknown { type_code: u8, bytes: Vec<u8> },
 }
 
@@ -245,6 +246,7 @@ impl From<automerge::ScalarValue> for OrdScalarValue {
             automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
             automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
             automerge::ScalarValue::Null => OrdScalarValue::Null,
+            automerge::ScalarValue::Link(l) => OrdScalarValue::Link(l),
             automerge::ScalarValue::Unknown { type_code, bytes } => {
                 OrdScalarValue::Unknown { type_code, bytes }
             }
@@ -264,6 +266,7 @@ impl From<&OrdScalarValue> for automerge::ScalarValue {
             OrdScalarValue::Timestamp(v) => automerge::ScalarValue::Timestamp(*v),
             OrdScalarValue::Boolean(v) => automerge::ScalarValue::Boolean(*v),
             OrdScalarValue::Null => automerge::ScalarValue::Null,
+            OrdScalarValue::Link(l) => automerge::ScalarValue::Link(l.clone()),
             OrdScalarValue::Unknown { type_code, bytes } => automerge::ScalarValue::Unknown {
                 type_code: *type_code,
                 bytes: bytes.to_vec(),
@@ -291,6 +294,7 @@ impl serde::Serialize for OrdScalarValue {
             }
             OrdScalarValue::Boolean(v) => serializer.serialize_bool(*v),
             OrdScalarValue::Null => serializer.serialize_none(),
+            OrdScalarValue::Link(l) => serializer.serialize_str(format!("Link({})", l).as_str()),
             OrdScalarValue::Unknown { type_code, .. } => serializer
                 .serialize_str(format!("An unknown type with code {}", type_code).as_str()),
         }
