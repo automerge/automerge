@@ -40,9 +40,12 @@ use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod console_tracing;
 mod export_cache;
 mod interop;
 mod sync;
@@ -53,6 +56,8 @@ use sync::SyncState;
 use value::Datatype;
 
 use crate::interop::SubValIter;
+
+pub use beelay_wasm::Beelay;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -1428,6 +1433,42 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 }
 
 struct UpdateSpansArgs(Vec<am::BlockOrText<'static>>);
+
+#[allow(unreachable_pub)]
+#[wasm_bindgen(js_name = initLogging)]
+pub fn init_logging(level: JsValue) {
+    console_error_panic_hook::set_once();
+    let level = level
+        .as_string()
+        .unwrap_or("trace".to_string())
+        .parse()
+        .unwrap_or(tracing::Level::TRACE);
+    let module_filter = tracing_subscriber::filter::FilterFn::new(|metadata| {
+        metadata
+            .module_path()
+            .map(|p| p.starts_with("beelay"))
+            .unwrap_or(false)
+    });
+    let has_ansi = {
+        let is_firefox = web_sys::window()
+            .and_then(|w| w.navigator().user_agent().ok())
+            .map(|ua| ua.contains("Firefox"))
+            .unwrap_or(false);
+        !is_firefox
+    };
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_writer(console_tracing::MakeConsoleWriter)
+        .with_max_level(level)
+        .with_ansi(has_ansi)
+        .without_time()
+        .finish();
+    let subscriber = subscriber.with(module_filter);
+    if let Err(e) = subscriber.try_init() {
+        web_sys::console::warn_1(&JsValue::from(
+            format!("unable to set global logger: {:?}", e).as_str(),
+        ));
+    }
+}
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};

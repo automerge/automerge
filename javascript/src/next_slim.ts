@@ -144,6 +144,7 @@ export {
   inspectChange,
   stats,
   frontier,
+  initLogging,
 } from "./stable.js"
 export { isRawString } from "./proxies.js"
 
@@ -526,20 +527,20 @@ export function updateSpans<T>(
  * The string representation is shareable, and so you can use this both
  * to edit the document yourself (using {@link splice}) or to share multiple
  * collaborator's current cursor positions over the network.
- * 
+ *
  * The cursor's `position` can be an index in the string, `'start'` or `'end'`.
  * - `'start'` ensures this cursor always resolves to `0`
  * - `'end'` ensures this cursor always resolves to `string.length`
- * 
+ *
  * Start cursors can be created by passing any negative number in `position`.
- * 
+ *
  * End cursors can be created by passing a number `>= string.length` in `position`.
- * 
+ *
  * `move` determines the position the cursor resolves to if the character at
  * `index` is removed:
  * - `'after'` causes the cursor to resolve towards `string.length`
  * - `'before'` causes the cursor to resolve towards `0`
- * 
+ *
  * `move` is `'after'` by default.
  *
  * @typeParam T - The type of the value contained in the document
@@ -552,7 +553,7 @@ export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
   position: CursorPosition,
-  move?: MoveCursor
+  move?: MoveCursor,
 ): Cursor {
   const objPath = absoluteObjPath(doc, path, "getCursor")
   const state = _state(doc, false)

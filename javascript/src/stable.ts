@@ -1317,3 +1317,11 @@ export function saveBundle(
   const state = _state(doc)
   return state.handle.saveBundle(start, end)
 }
+
+export function initLogging(
+  level: "trace" | "debug" | "info" | "warn" | "error" = "info",
+) {
+  ApiHandler["initLogging"](level)
+}
+
+export * as beelay from "./beelay.js"

@@ -94,7 +94,7 @@ function buildWasm(outputDir) {
     const outputPath = path.join(outputDir, target)
     fs.mkdirSync(outputPath, { recursive: true })
     execSync(
-      `wasm-bindgen ${wasmBlobPath} --out-dir ${outputPath} --target ${target} --no-typescript --weak-refs`,
+      `wasm-bindgen ${wasmBlobPath} --out-dir ${outputPath} --target ${target} --weak-refs`,
       {
         cwd: __dirname,
       },
@@ -220,6 +220,12 @@ function copyAndFixupWasm(wasmBuildTarball) {
     path.join(automergeWasmPath, "index.d.ts"),
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
   )
+
+  console.log("copying 'automerge-wasm/index.d.ts' to 'src/wasm_types.d.ts'")
+  fs.copyFileSync(
+    path.join(automergeWasmPath, "index.d.ts"),
+    path.join(jsProjectDir, "src", "wasm_types.d.ts"),
+  )
 }
 
 function compileTypescript() {
@@ -255,6 +261,10 @@ function compileTypescript() {
   fs.copyFileSync(
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
     path.join(jsProjectDir, "dist", "wasm_types.d.ts"),
+  )
+  fs.copyFileSync(
+    path.join(jsProjectDir, "src", "beelay_types.d.ts"),
+    path.join(jsProjectDir, "dist", "beelay_types.d.ts"),
   )
 }
 

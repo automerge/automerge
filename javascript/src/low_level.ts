@@ -16,7 +16,7 @@ import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js
 import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
 
 let _initialized = false
-let _initializeListeners: (() => void)[] = []
+const _initializeListeners: (() => void)[] = []
 
 export function UseApi(api: API) {
   for (const k in api) {
@@ -27,6 +27,8 @@ export function UseApi(api: API) {
   for (const listener of _initializeListeners) {
     listener()
   }
+
+  // api.init_logging("trace", supportsAnsi())
 }
 
 /* eslint-disable */
@@ -80,8 +82,8 @@ export const ApiHandler: API = {
 export function initializeWasm(
   wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string,
 ): Promise<void> {
-  return initWasm({ module_or_path: wasmBlob }).then(_ => {
-    UseApi(WasmApi)
+  return initWasm({ module_or_path: wasmBlob }).then(output => {
+    UseApi(WasmApi as unknown as API)
   })
 }
 
@@ -112,4 +114,42 @@ export function wasmInitialized(): Promise<void> {
  */
 export function isWasmInitialized(): boolean {
   return _initialized
+}
+
+/**
+ * Utility function to detect if we can use ANSI control codes in our logs
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function supportsAnsi(): boolean {
+  if (
+    typeof process === "undefined" ||
+    !process.stdout ||
+    !process.stdout.isTTY
+  ) {
+    return false // Not a Node.js environment or not a TTY
+  }
+
+  const { env } = process
+
+  if (
+    env.CI || // Continuous Integration environment (often doesn't support colors)
+    env.TEAMCITY_VERSION || // TeamCity CI
+    env.COLORTERM === "nocolor" || // Explicitly disabled colors
+    env.NO_COLOR || // Explicitly disabled colors
+    env.TERM === "dumb" // Dumb terminal (no colors)
+  ) {
+    return false
+  }
+
+  // Check for common terminal emulators that might not report isTTY correctly
+  if (env.TERM && /xterm-256color/.test(env.TERM)) {
+    return true // Force true for xterm-256color (common case)
+  }
+
+  if (env.COLORTERM) {
+    return true // COLORTERM is set, assume support
+  }
+
+  // Fallback: Assume support in most cases
+  return true
 }

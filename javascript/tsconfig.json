@@ -12,7 +12,8 @@
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "lib": ["ESNext", "DOM"],
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["./dist/**/*", "./node_modules", "./src/**/*.deno.ts"],
