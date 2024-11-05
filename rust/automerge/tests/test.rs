@@ -6,7 +6,6 @@ use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
     ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
-use std::borrow::Cow;
 use std::fs;
 
 // set up logging for all the tests

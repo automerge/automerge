@@ -52,6 +52,8 @@ use value::Datatype;
 
 use crate::interop::SubValIter;
 
+mod beelay;
+
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {

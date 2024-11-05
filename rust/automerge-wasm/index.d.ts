@@ -387,3 +387,7 @@ export type InitOptions = {
   actor?: Actor;
   text_v1?: boolean;
 };
+
+import * as Beelay from "./beelay";
+export { Beelay as beelay };
+export { Beelay } from "./beelay";

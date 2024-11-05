@@ -61,6 +61,9 @@ import type {
   MarkValue,
 } from "./next_types.js"
 
+import * as beelay from "./beelay.js"
+export { beelay }
+
 export { Link } from "./link.js"
 
 import { type PatchCallback } from "./stable.js"

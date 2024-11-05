@@ -14,9 +14,10 @@ import type {
 export type { ChangeToEncode } from "./wasm_types.js"
 import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js"
 import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
+import * as beelay from "./beelay.js"
 
 let _initialized = false
-let _initializeListeners: (() => void)[] = []
+const _initializeListeners: (() => void)[] = []
 
 export function UseApi(api: API) {
   for (const k in api) {
@@ -27,6 +28,13 @@ export function UseApi(api: API) {
   for (const listener of _initializeListeners) {
     listener()
   }
+
+  beelay.init({
+    // @ts-expect-error
+    inspectMessage: api.Beelay.inspect_message,
+    // @ts-expect-error
+    construct: api.Beelay.create,
+  })
 }
 
 /* eslint-disable */
