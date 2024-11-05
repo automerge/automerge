@@ -31,6 +31,23 @@ Any time you change the rust code in `../rust/*` you'll need to re-run the
 
 Read on to understand what the `build` step is doing.
 
+## Publishing
+
+CI will publish whatever is on `main` whenever the version in
+`javascript/package.json` changes. If the version has a `-` in it then it will
+be released as a pre-release on NPM, otherwise it will be released as a stable
+version. This means that if you want to release a new version you bump the
+version in `package.json` and then merge to `main` and let CI do the rest.
+
+If you want to publish a package without pushing it to main then you'll need to
+do so manually. To do that, first update the package version in `package.json`
+and then run
+
+```bash
+yarn run build
+yarn publish --access public
+```
+
 ## Packaging the WebAssembly
 
 The `automerge-wasm` rust code uses `wasm-bindgen` to produce a WebAssembly
