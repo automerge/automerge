@@ -9,16 +9,15 @@ type LowLevelImplementation = {
   addCommits(docId: DocumentId, commits: Commit[]): any
   addBundle(
     docId: DocumentId,
-    start: CommitHash,
+    start: CommitHash | null,
     end: CommitHash,
     checkpoints: CommitHash[],
     data: Uint8Array,
   ): any
   addLink(from: DocumentId, to: DocumentId): any
   loadDocument(docId: DocumentId): any
-  syncCollection(docId: DocumentId): any
-  peerConnected(peerId: PeerId): any
-  peerDisconnected(peerId: PeerId): any
+  syncDoc(docId: DocumentId, peerId: PeerId): any
+  listen(peerId: PeerId, snapshot: SnapshotId): any
   peerId(): PeerId
 
   loadRangeComplete(
@@ -28,6 +27,7 @@ type LowLevelImplementation = {
   loadComplete(taskId: string, result: Uint8Array | undefined): any
   putComplete(taskId: string): any
   deleteComplete(taskId: string): any
+  askComplete(taskId: string, peers: PeerId[]): any
 }
 
 type IoTask =
@@ -35,9 +35,11 @@ type IoTask =
   | { action: "load_range"; id: string; prefix: string[] }
   | { action: "put"; key: string[]; id: string; data: Uint8Array }
   | { action: "delete"; id: string; key: string[] }
+  | { action: "ask"; id: string; docId: DocumentId }
 
 export type DocumentId = string
 export type CommitHash = string
+export type SnapshotId = string
 
 export type Commit = {
   parents: CommitHash[]
@@ -76,23 +78,34 @@ export type Message = {
 export type BeelayEvents = {
   message: { message: Message }
   bundleRequired: {
-    start: CommitHash
+    docId: DocumentId
+    start: CommitHash | null
     end: CommitHash
     checkpoints: CommitHash[]
   }
   docEvent: {
     docId: DocumentId
+    peer: PeerId
     data: CommitOrBundle
+  }
+  docRequested: {
+    docId: DocumentId
+    fromPeer: PeerId
   }
 }
 
 type OnMessage = (args: { message: Message }) => void
 type OnBundleRequired = (args: {
+  docId: DocumentId
   start: CommitHash
   end: CommitHash
   checkpoints: CommitHash[]
 }) => void
-type OnDocEvent = (args: { docId: DocumentId; data: CommitOrBundle }) => void
+type OnDocEvent = (args: {
+  docId: DocumentId
+  peer: PeerId
+  data: CommitOrBundle
+}) => void
 
 let lowLevel: LowLevel | undefined
 
@@ -103,6 +116,7 @@ export function init(impl: LowLevel) {
 type TurnEvents = {
   new_messages: Message[]
   new_tasks: IoTask[]
+  requested_docs: { peerId: PeerId; docId: DocumentId }[]
   completed_stories:
     | {
         [key: string]:
@@ -115,12 +129,13 @@ type TurnEvents = {
                 checkpoints: CommitHash[]
               }[]
             }
-          | { story_type: "sync_collection"; documents: DocumentId[] }
+          | { story_type: "sync_doc"; found: boolean; snapshotId: SnapshotId }
       }
     | { story_type: "load_document"; commits: Commit[] }
     | { story_type: "add_link" }
   notifications: {
     docId: DocumentId
+    peer: PeerId
     data: CommitOrBundle
   }[]
 }
@@ -128,6 +143,8 @@ type TurnEvents = {
 export function inspectMessage(message: Uint8Array): any {
   return lowLevel!.inspectMessage(message)
 }
+
+export type RequestPolicy = (args: { docId: DocumentId }) => Promise<PeerId[]>
 
 export class Beelay {
   #lowLevel: LowLevelImplementation
@@ -138,10 +155,15 @@ export class Beelay {
   #awaitingDocCreation: { [key: string]: (docId: DocumentId) => void } = {}
   #awaitingAddcommits: { [key: string]: () => void } = {}
   #awaitingAddBundle: { [key: string]: () => void } = {}
-  #awaitingLoadDoc: { [key: string]: (commits: (Commit | Bundle)[]) => void } =
-    {}
-  #awaitingSyncCollection: { [key: string]: (docs: DocumentId[]) => void } = {}
+  #awaitingLoadDoc: {
+    [key: string]: (commits: (Commit | Bundle)[] | null) => void
+  } = {}
+  #awaitingSyncDoc: {
+    [key: string]: (result: { snapshot: SnapshotId; found: boolean }) => void
+  } = {}
   #awaitingAddLink: { [key: string]: () => void } = {}
+  #awaitingListen: { [key: string]: () => void } = {}
+  #requestPolicy: RequestPolicy
 
   get peerId() {
     return this.#lowLevel.peerId()
@@ -150,12 +172,19 @@ export class Beelay {
   constructor({
     peerId,
     storage,
+    requestPolicy,
   }: {
     peerId: PeerId
     storage: StorageAdapter
+    requestPolicy?: RequestPolicy
   }) {
     this.#storage = storage
     this.#lowLevel = lowLevel!.construct({ peerId })
+    if (requestPolicy != null) {
+      this.#requestPolicy = requestPolicy
+    } else {
+      this.#requestPolicy = () => Promise.resolve([])
+    }
   }
 
   receiveMessage({ message }: { message: Message }) {
@@ -177,7 +206,7 @@ export class Beelay {
       string,
       TurnEvents,
     ]
-    const result = new Promise<void>((resolve, reject) => {
+    const result = new Promise<void>((resolve, _reject) => {
       this.#awaitingAddcommits[storyId] = resolve
     })
     this.processEvents(events)
@@ -192,7 +221,7 @@ export class Beelay {
     data,
   }: {
     docId: DocumentId
-    start: CommitHash
+    start: CommitHash | null
     end: CommitHash
     checkpoints: CommitHash[]
     data: Uint8Array
@@ -204,7 +233,7 @@ export class Beelay {
       checkpoints,
       data,
     ) as [string, TurnEvents]
-    const result = new Promise<void>((resolve, reject) => {
+    const result = new Promise<void>((resolve, _reject) => {
       this.#awaitingAddBundle[storyId] = resolve
     })
     this.processEvents(events)
@@ -216,48 +245,57 @@ export class Beelay {
       string,
       TurnEvents,
     ]
-    const result = new Promise<DocumentId>((resolve, reject) => {
+    const result = new Promise<DocumentId>((resolve, _reject) => {
       this.#awaitingDocCreation[storyId] = resolve
     })
     this.processEvents(events)
     return result
   }
 
-  loadDocument(docId: DocumentId): Promise<(Commit | Bundle)[]> {
+  loadDocument(docId: DocumentId): Promise<(Commit | Bundle)[] | null> {
     const [storyId, events] = this.#lowLevel.loadDocument(docId) as [
       string,
       TurnEvents,
     ]
-    const result = new Promise<(Commit | Bundle)[]>((resolve, reject) => {
+    const result = new Promise<(Commit | Bundle)[] | null>((resolve, _) => {
       this.#awaitingLoadDoc[storyId] = resolve
     })
     this.processEvents(events)
     return result
   }
 
-  syncCollection(docId: DocumentId): Promise<DocumentId[]> {
-    const [storyId, events] = this.#lowLevel.syncCollection(docId) as [
+  syncDoc(
+    docId: DocumentId,
+    peerId: PeerId,
+  ): Promise<{ snapshot: SnapshotId; found: boolean }> {
+    const [storyId, events] = this.#lowLevel.syncDoc(docId, peerId) as [
       string,
       TurnEvents,
     ]
-    const result = new Promise<DocumentId[]>((resolve, reject) => {
-      this.#awaitingSyncCollection[storyId] = resolve
+    const result = new Promise<{ snapshot: SnapshotId; found: boolean }>(
+      (resolve, _reject) => {
+        this.#awaitingSyncDoc[storyId] = resolve
+      },
+    )
+    this.processEvents(events)
+    return result
+  }
+
+  listen(peerId: PeerId, snapshotId: SnapshotId): Promise<void> {
+    const listenResult = this.#lowLevel.listen(peerId, snapshotId) as [
+      // const [storyId, events] = this.#lowLevel.listen(peerId, snapshotId) as [
+      string,
+      TurnEvents,
+    ]
+    const [storyId, events] = listenResult
+    const result = new Promise<void>((resolve, _reject) => {
+      this.#awaitingListen[storyId] = resolve
     })
     this.processEvents(events)
     return result
   }
 
-  syncDoc(_docId: DocumentId): Promise<{
-    present_locally: boolean
-    present_remotely: boolean
-    snapshot_id: string | null
-  }> {
-    return new Promise(() => {
-      return
-    })
-  }
-
-  *listen(_docId: DocumentId, _snapshotId: string): Generator<CommitOrBundle> {
+  cancelListens(_peerId: PeerId) {
     // TODO
   }
 
@@ -266,27 +304,11 @@ export class Beelay {
       string,
       TurnEvents,
     ]
-    const result = new Promise<void>((resolve, reject) => {
+    const result = new Promise<void>((resolve, _) => {
       this.#awaitingAddLink[storyId] = resolve
     })
     this.processEvents(events)
     return result
-  }
-
-  peerConnected(peerId: PeerId) {
-    const [_, events] = this.#lowLevel.peerConnected(peerId) as [
-      null,
-      TurnEvents,
-    ]
-    this.processEvents(events)
-  }
-
-  peerDisconnected(peerId: PeerId) {
-    const [_, events] = this.#lowLevel.peerDisconnected(peerId) as [
-      null,
-      TurnEvents,
-    ]
-    this.processEvents(events)
   }
 
   on<E extends keyof BeelayEvents>(
@@ -324,7 +346,7 @@ export class Beelay {
   }
 
   processEvents(events: TurnEvents) {
-    console.log(JSON.stringify(events, null, 2))
+    // console.log(JSON.stringify(events, null, 2))
     for (const message of events.new_messages) {
       this.#messageListeners.forEach(l => l({ message }))
     }
@@ -366,6 +388,14 @@ export class Beelay {
           ]
           this.processEvents(events)
         })
+      } else if (task.action == "ask") {
+        this.#requestPolicy({ docId: task.docId }).then(result => {
+          const [_, events] = this.#lowLevel.askComplete(task.id, result) as [
+            null,
+            TurnEvents,
+          ]
+          this.processEvents(events)
+        })
       } else {
         throw new Error("Unknown task type")
       }
@@ -384,15 +414,21 @@ export class Beelay {
       } else if (event.story_type === "load_document") {
         this.#awaitingLoadDoc[storyId](event.commits)
         delete this.#awaitingLoadDoc[storyId]
-      } else if (event.story_type === "sync_collection") {
-        this.#awaitingSyncCollection[storyId](event.documents)
-        delete this.#awaitingSyncCollection[storyId]
+      } else if (event.story_type === "sync_doc") {
+        this.#awaitingSyncDoc[storyId]({
+          snapshot: event.snapshotId,
+          found: event.found,
+        })
+        delete this.#awaitingSyncDoc[storyId]
       } else if (event.story_type === "add_link") {
         this.#awaitingAddLink[storyId]()
         delete this.#awaitingAddLink[storyId]
       } else if (event.story_type === "add_bundle") {
         this.#awaitingAddBundle[storyId]()
         delete this.#awaitingAddBundle[storyId]
+      } else if (event.story_type === "listen") {
+        this.#awaitingListen[storyId]()
+        delete this.#awaitingListen[storyId]
       } else {
         throw new Error("Unknown story type")
       }

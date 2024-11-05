@@ -37,16 +37,16 @@ impl io::Write for ConsoleWriter {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        let message = String::from_utf8_lossy(&self.1);
-        let message_jsval = JsValue::from_str(&message);
-        match self.0 {
-            tracing::Level::ERROR => console::error_1(&message_jsval),
-            tracing::Level::WARN => console::warn_1(&message_jsval),
-            tracing::Level::INFO => console::info_1(&message_jsval),
-            tracing::Level::DEBUG => console::debug_1(&message_jsval),
-            tracing::Level::TRACE => console::debug_1(&message_jsval),
-        }
-        self.1.clear();
+        // let message = String::from_utf8_lossy(&self.1);
+        // let message_jsval = JsValue::from_str(&message);
+        // match self.0 {
+        //     tracing::Level::ERROR => console::error_1(&message_jsval),
+        //     tracing::Level::WARN => console::warn_1(&message_jsval),
+        //     tracing::Level::INFO => console::info_1(&message_jsval),
+        //     tracing::Level::DEBUG => console::debug_1(&message_jsval),
+        //     tracing::Level::TRACE => console::debug_1(&message_jsval),
+        // }
+        // self.1.clear();
         Ok(())
     }
 }

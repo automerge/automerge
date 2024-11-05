@@ -83,6 +83,14 @@ fn serialize_task(task: beelay_core::io::IoTask) -> JsValue {
             set_field(&result, "action", JsValue::from_str("delete"));
             set_field(&result, "key", key);
         }
+        beelay_core::io::IoAction::Ask { about } => {
+            set_field(&result, "action", JsValue::from_str("ask"));
+            set_field(
+                &result,
+                "docId",
+                JsValue::from_str(about.to_string().as_str()),
+            );
+        }
     }
 
     result.into()
@@ -101,11 +109,12 @@ fn serialize_story_result(
             let bundles = Array::new();
             for bundle in new_bundles_required {
                 let bundle_obj = Object::new();
-                set_field(
-                    &bundle_obj,
-                    "start",
-                    JsValue::from_str(&bundle.start.to_string()),
-                );
+                let start_js_val = if let Some(start) = &bundle.start {
+                    JsValue::from_str(&start.to_string())
+                } else {
+                    JsValue::NULL
+                };
+                set_field(&bundle_obj, "start", start_js_val);
                 set_field(
                     &bundle_obj,
                     "end",
@@ -116,17 +125,23 @@ fn serialize_story_result(
                     checkpoints.push(&JsValue::from_str(&checkpoint.to_string()));
                 }
                 set_field(&bundle_obj, "checkpoints", checkpoints.into());
+                set_field(
+                    &bundle_obj,
+                    "docId",
+                    JsValue::from_str(&bundle.doc.to_string()),
+                );
                 bundles.push(&bundle_obj);
             }
             set_field(&result, "new_bundles_required", bundles.into());
         }
-        beelay_core::StoryResult::SyncCollection(docs) => {
-            set_field(&result, "story_type", JsValue::from_str("sync_collection"));
-            let js_docs = Array::new();
-            for doc in docs {
-                js_docs.push(&JsValue::from_str(&doc.to_string()));
-            }
-            set_field(&result, "documents", js_docs.into());
+        beelay_core::StoryResult::SyncDoc(sync_result) => {
+            set_field(&result, "story_type", JsValue::from_str("sync_doc"));
+            set_field(
+                &result,
+                "snapshotId",
+                sync_result.remote_snapshot.to_string().as_str().into(),
+            );
+            set_field(&result, "found", sync_result.found.into())
         }
         beelay_core::StoryResult::CreateDoc(doc_id) => {
             set_field(&result, "story_type", JsValue::from_str("create_document"));
@@ -136,6 +151,8 @@ fn serialize_story_result(
             set_field(&result, "story_type", JsValue::from_str("load_document"));
             if let Some(commits) = commits {
                 set_field(&result, "commits", serialize_commits(commits));
+            } else {
+                set_field(&result, "commits", JsValue::null());
             }
         }
         beelay_core::StoryResult::AddLink => {
@@ -143,6 +160,9 @@ fn serialize_story_result(
         }
         beelay_core::StoryResult::AddBundle => {
             set_field(&result, "story_type", JsValue::from_str("add_bundle"));
+        }
+        beelay_core::StoryResult::Listen => {
+            set_field(&result, "story_type", JsValue::from_str("listen"));
         }
     }
 
@@ -173,6 +193,8 @@ fn serialize_docevent(evt: DocEvent) -> JsValue {
     let obj = serialize_commit_or_bundle(evt.data);
     set_field(&event, "data", obj);
 
+    set_field(&event, "peer", evt.peer.to_string().into());
+
     event.into()
 }
 
@@ -198,11 +220,12 @@ fn serialize_commit_or_bundle(c_or_b: CommitOrBundle) -> JsValue {
         }
         CommitOrBundle::Bundle(bundle) => {
             set_field(&commit_obj, "type", JsValue::from_str("bundle"));
-            set_field(
-                &commit_obj,
-                "start",
-                JsValue::from_str(bundle.start().to_string().as_str()),
-            );
+            let start_js_val = if let Some(start) = bundle.start() {
+                JsValue::from_str(start.to_string().as_str())
+            } else {
+                JsValue::NULL
+            };
+            set_field(&commit_obj, "start", start_js_val);
             set_field(
                 &commit_obj,
                 "end",

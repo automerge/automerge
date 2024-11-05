@@ -18,11 +18,13 @@ describe("the beelay", () => {
       }
     })
     await beelay.addCommits({ docId, commits })
-    const content = (await beelay.loadDocument(docId)).map(
-      (i: A.beelay.Commit | A.beelay.Bundle) => {
-        return i.contents
-      },
-    )
+    const bundles = await beelay.loadDocument(docId)
+    if (bundles == null) {
+      throw new Error("Document not found")
+    }
+    const content = bundles.map((i: A.beelay.Commit | A.beelay.Bundle) => {
+      return i.contents
+    })
 
     let loaded = A.init<{ foo: string }>()
     for (const change of content) {

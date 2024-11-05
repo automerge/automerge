@@ -29,9 +29,11 @@ export function UseApi(api: API) {
     listener()
   }
 
+  // @ts-expect-error
+  api.init_logging("info")
   beelay.init({
     // @ts-expect-error
-    inspectMessage: api.Beelay.inspect_message,
+    inspectMessage: api.Beelay.inspectMessage,
     // @ts-expect-error
     construct: api.Beelay.create,
   })

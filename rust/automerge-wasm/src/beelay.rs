@@ -1,9 +1,11 @@
-use std::str::FromStr;
+use std::{collections::HashSet, str::FromStr};
 
 use beelay_core::CommitBundle;
 use js_sys::{Array, Uint8Array};
 use serde::{parse_commit_hash, parse_commit_hashes};
+use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt};
 use wasm_bindgen::prelude::*;
+use web_sys::console;
 
 mod console_tracing;
 mod serde;
@@ -67,8 +69,14 @@ impl Beelay {
     ) -> Result<JsValue, JsValue> {
         let doc_id = beelay_core::DocumentId::from_str(&doc_id)
             .map_err(|e| JsValue::from_str(&format!("invalid document id: {}", e)))?;
-        let start = parse_commit_hash(start)
-            .map_err(|e| JsValue::from_str(&format!("invalid start hash: {:?}", e)))?;
+        let start = if start.is_null() {
+            None
+        } else {
+            Some(
+                parse_commit_hash(start)
+                    .map_err(|e| JsValue::from_str(&format!("invalid start hash: {:?}", e)))?,
+            )
+        };
         let end = parse_commit_hash(end)
             .map_err(|e| JsValue::from_str(&format!("invalid end hash: {:?}", e)))?;
         let checkpoints = parse_commit_hashes(checkpoints)
@@ -86,11 +94,13 @@ impl Beelay {
         self.handle_event(event, story_id.serialize().into())
     }
 
-    #[wasm_bindgen(js_name = "syncCollection")]
-    pub fn sync_collection(&mut self, doc_id: String) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = "syncDoc")]
+    pub fn sync_doc(&mut self, doc_id: String, peer: String) -> Result<JsValue, JsValue> {
         let doc_id = beelay_core::DocumentId::from_str(&doc_id)
             .map_err(|e| JsValue::from_str(&format!("invalid document id: {}", e)))?;
-        let (story_id, event) = beelay_core::Event::begin_collection_sync(doc_id);
+        let peer_id = beelay_core::PeerId::from_str(&peer)
+            .map_err(|e| JsValue::from_str(&format!("invalid peer id: {}", e)))?;
+        let (story_id, event) = beelay_core::Event::sync_doc(doc_id, peer_id);
         self.handle_event(event, story_id.serialize().into())
     }
 
@@ -107,20 +117,19 @@ impl Beelay {
         self.handle_event(event, story_id.serialize().into())
     }
 
-    #[wasm_bindgen(js_name = "peerConnected")]
-    pub fn peer_connected(&mut self, peer_id: String) -> Result<JsValue, JsValue> {
-        let peer_id = beelay_core::PeerId::from_str(&peer_id)
-            .map_err(|e| JsValue::from_str(&format!("invalid peer id: {}", e)))?;
-        let event = beelay_core::Event::peer_connected(peer_id);
-        self.handle_event(event, JsValue::NULL)
-    }
-
-    #[wasm_bindgen(js_name = "peerDisconnected")]
-    pub fn peer_disconnected(&mut self, peer_id: String) -> Result<JsValue, JsValue> {
-        let peer_id = beelay_core::PeerId::from_str(&peer_id)
-            .map_err(|e| JsValue::from_str(&format!("invalid peer id: {}", e)))?;
-        let event = beelay_core::Event::peer_disconnected(peer_id);
-        self.handle_event(event, JsValue::NULL)
+    pub fn listen(&mut self, to_peer: JsValue, starting_from: JsValue) -> Result<JsValue, JsValue> {
+        let to_peer = to_peer
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("to_peer must be a string"))?;
+        let to_peer = beelay_core::PeerId::from_str(&to_peer)
+            .map_err(|e| JsValue::from_str(&format!("bad peer id: {:?}", e)))?;
+        let starting_from = starting_from
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("starting_from must be a string"))?;
+        let starting_from = beelay_core::SnapshotId::from_str(&starting_from)
+            .map_err(|e| JsValue::from_str(&format!("invalid snapshot id: {:?}", e)))?;
+        let (story_id, event) = beelay_core::Event::listen(to_peer, starting_from);
+        self.handle_event(event, story_id.serialize().into()).into()
     }
 
     #[wasm_bindgen(js_name = "receiveMessage")]
@@ -186,6 +195,29 @@ impl Beelay {
         self.handle_event(event, JsValue::NULL)
     }
 
+    #[wasm_bindgen(js_name = "askComplete")]
+    pub fn ask_complete(&mut self, task_id: String, peers: JsValue) -> Result<JsValue, JsValue> {
+        let task_id = task_id
+            .parse()
+            .map_err(|_| JsValue::from_str("invalid task id"))?;
+        let peers = peers
+            .dyn_into::<js_sys::Array>()
+            .map_err(|_| JsValue::from_str("peers is not an array"))?;
+        let peers = peers
+            .iter()
+            .map(|peer| {
+                peer.as_string()
+                    .ok_or_else(|| JsValue::from_str("peer is not a string"))
+                    .and_then(|peer| {
+                        beelay_core::PeerId::from_str(&peer)
+                            .map_err(|e| JsValue::from_str(&format!("bad peer id: {:?}", e)))
+                    })
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+        let event = beelay_core::Event::io_complete(beelay_core::io::IoResult::ask(task_id, peers));
+        self.handle_event(event, JsValue::NULL)
+    }
+
     #[wasm_bindgen(js_name = "inspectMessage")]
     pub fn inspect_message(payload: JsValue) -> Result<JsValue, JsValue> {
         let payload = payload
@@ -214,18 +246,30 @@ impl Beelay {
     }
 }
 
+#[allow(unreachable_pub)]
 #[wasm_bindgen]
-pub fn init_logging() {
-    wasm_tracing::set_as_global_default_with_config(
-        wasm_tracing::WASMLayerConfigBuilder::new()
-            .set_console_config(wasm_tracing::ConsoleConfig::ReportWithoutConsoleColor)
-            .set_max_level(tracing::Level::TRACE)
-            .build(),
-    );
+pub fn init_logging(level: JsValue) {
     console_error_panic_hook::set_once();
-    //tracing_subscriber::fmt()
-    //.with_writer(console_tracing::MakeConsoleWriter)
-    //.with_max_level(tracing::Level::TRACE)
-    //.without_time()
-    //.init();
+    let level = level
+        .as_string()
+        .unwrap_or("trace".to_string())
+        .parse()
+        .unwrap_or(tracing::Level::TRACE);
+    let module_filter = FilterFn::new(|metadata| {
+        metadata
+            .module_path()
+            .map(|p| p.starts_with("beelay"))
+            .unwrap_or(false)
+    });
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_writer(console_tracing::MakeConsoleWriter)
+        .with_max_level(level)
+        .without_time()
+        .finish();
+    let subscriber = subscriber.with(module_filter);
+    if let Err(e) = subscriber.try_init() {
+        console::warn_1(&JsValue::from(
+            format!("unable to set global logger: {:?}", e).as_str(),
+        ));
+    }
 }
