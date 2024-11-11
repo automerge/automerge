@@ -138,6 +138,37 @@ export LIBRARY_PATH=/opt/homebrew/lib
 ./scripts/ci/run
 ```
 
+## Nix Flake
+
+If you have [Nix](https://nixos.org/) installed, there is a flake available with all 
+of the dependencies configured and some helper scripts.
+
+``` console
+$ nix develop
+
+  ____                                          _
+ / ___|___  _ __ ___  _ __ ___   __ _ _ __   __| |___
+| |   / _ \| '_ ` _ \| '_ ` _ \ / _` | '_ \ / _` / __|
+| |__| (_) | | | | | | | | | | | (_| | | | | (_| \__ \
+ \____\___/|_| |_| |_|_| |_| |_|\__,_|_| |_|\__,_|___/
+
+
+build:deno          | Build Deno-wrapped Wasm library
+build:host          | Build for aarch64-darwin
+build:node          | Build JS-wrapped Wasm library
+build:wasi          | Build for Wasm32-WASI
+build:wasm:nodejs   | Build for wasm32-unknown-unknown with Node.js bindgings
+build:wasm:web      | Build for wasm32-unknown-unknown with web bindings
+docs:build:host     | Refresh the docs
+docs:build:wasm     | Refresh the docs with the wasm32-unknown-unknown target
+docs:open:host      | Open refreshed docs
+docs:open:wasm      | Open refreshed docs
+# ✂️  SNIP ✂️
+
+$ rustc --version
+rustc 1.82.0 (f6e511eec 2024-10-15) # latest at time of writing
+```
+
 ## Contributing
 
 Please try and split your changes up into relatively independent commits which
