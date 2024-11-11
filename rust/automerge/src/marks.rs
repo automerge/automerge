@@ -137,7 +137,7 @@ impl MarkSet {
         self.marks.len()
     }
 
-    fn insert(&mut self, name: SmolStr, value: ScalarValue) {
+    pub(crate) fn insert(&mut self, name: SmolStr, value: ScalarValue) {
         self.marks.insert(name, value);
     }
 
@@ -375,8 +375,8 @@ impl ExpandMark {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct RichTextQueryState<'a> {
-    map: HashMap<OpId, MarkData<'a>, FxBuildHasher>,
-    block: Option<OpId>,
+    pub(crate) map: HashMap<OpId, MarkData<'a>, FxBuildHasher>,
+    pub(crate) block: Option<OpId>,
 }
 
 impl<'a> RichTextQueryState<'a> {

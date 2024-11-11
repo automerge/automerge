@@ -25,8 +25,9 @@ impl<'a> InsertQuery<'a> {
         target: usize,
         encoding: ListEncoding,
         clock: Option<Clock>,
+        marks: RichTextQueryState<'a>,
     ) -> Self {
-        let marks = RichTextQueryState::default();
+        //let marks = RichTextQueryState::default();
         let mut candidates = vec![];
         let last_visible_cursor = None;
         if target == 0 {
@@ -73,9 +74,9 @@ impl<'a> InsertQuery<'a> {
     // this query is particularly tricky b/c
     // we care about marks, visible ops, and non-visible ops all at once
 
-    pub(crate) fn resolve(&mut self) -> Result<QueryNth, AutomergeError> {
+    pub(crate) fn resolve(&mut self, mut index: usize) -> Result<QueryNth, AutomergeError> {
         let mut last_width = None;
-        let mut index = 0;
+        //let mut index = 0;
         let mut done = index >= self.target;
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];

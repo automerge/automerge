@@ -1,123 +1,233 @@
-use crate::types::OpId;
-use super::super::op::Op;
-use packer::{SpanWeight, SpanTree};
-use std::collections::HashSet;
+use crate::types::{Clock, OpId};
+use packer::{
+    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
+    Slab, SpanWeight, WriteOp,
+};
 
+use std::collections::{BTreeSet, HashSet};
+use std::fmt::Debug;
 
-#[derive(Clone, Debug)]
-pub(crate) struct MarkIndex(SpanTree<MarkSpan, ActiveMarks>);
-
-impl MarkIndex {
-  fn splice<'a, I: IntoIterator<Item=Op<'a>>>(&mut self, index: usize, mut del: usize, values: I) {
-/*
-    let cursor = self.0.get_where_or_last(|acc, next| index < acc.pos + next.pos);
-    let mut spans = vec![];
-    let mut i = cursor.index;
-    let mut pos = cursor.weight.pos;
-    let mut post = None;
-    let mut element = cursor.element;
-    if pos < index {
-      assert!(index - post <= element.pos);
-      if index - post == element.pos { }
-    }
-    loop {
-      if pos < index {
-        match element {
-          MarkSpan::Span(w) => {}
-          MarkSpan::Start(_) | MarkSpan::End(_) => {
-            panic!("something is wrong with get_where");
-          }
-        }
-      }
-      if del > 0 {
-        match element {
-          MarkSpan::Span(w) => {}
-          MarkSpan::Start(_) | MarkSpan::End(_) => {
-            del -= 1;
-            i += 1;
-            if let Some(e) = self.0.get(i) {
-              element = e;
-            } else {
-              break
-            }
-          }
-        }
-      }
-    }
-*/
-  }
-}
-
-impl MarkIndex {
-    pub(crate) fn new() -> Self {
-        Self(SpanTree::default())
-    }
-}
-
-impl Default for MarkIndex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum MarkSpan {
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub(crate) enum MarkIndexValue {
     Start(OpId),
     End(OpId),
-    Span(u32),
 }
 
-#[derive(Clone, Default, Debug, PartialEq)]
-struct ActiveMarks {
-  start: HashSet<OpId>,
-  end: HashSet<OpId>,
-  pos: u32,
+impl MarkIndexValue {
+  fn with_new_actor(self, idx: usize) -> Self {
+     match self {
+      Self::Start(id) => Self::Start(id.with_new_actor(idx)),
+      Self::End(id) => Self::End(id.with_new_actor(idx)),
+     }
+  }
 }
 
-impl SpanWeight<MarkSpan> for ActiveMarks {
-  fn alloc(span: &MarkSpan) -> ActiveMarks {
-    match span {
-      MarkSpan::Start(id) => { 
-        ActiveMarks {
-          start: HashSet::from([*id]),
-          end: HashSet::default(),
-          pos: 1,
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub(crate) struct MarkIndexSpanner {
+    pub(crate) pos: usize,
+    pub(crate) start: HashSet<OpId>,
+    pub(crate) end: HashSet<OpId>,
+}
+
+impl SpanWeight<Slab> for MarkIndexSpanner {
+    fn alloc(slab: &Slab) -> Self {
+        // FIXME - need to keep a summary on the slab
+        let pos = slab.len();
+        let mut start = HashSet::default();
+        let mut end = HashSet::default();
+        let mut cursor = MarkIndex::default();
+        let bytes = slab.as_slice();
+        while let Some(run) = cursor.next(bytes) {
+            match run.value {
+                Some(MarkIndexValue::Start(id)) => {
+                    start.insert(id);
+                }
+                Some(MarkIndexValue::End(id)) => {
+                    if !start.remove(&id) {
+                        end.insert(id);
+                    }
+                }
+                None => {}
+            }
         }
-      }
-      MarkSpan::End(id) => { 
-        ActiveMarks {
-          start: HashSet::default(),
-          end: HashSet::from([*id]),
-          pos: 1,
+        Self { pos, end, start }
+    }
+    fn and(mut self, other: &Self) -> Self {
+        self.union(other);
+        self
+    }
+    fn union(&mut self, other: &Self) {
+        self.pos += other.pos;
+        //let x = self.clone();
+        for id in &other.start {
+            if !self.end.remove(id) {
+                self.start.insert(*id);
+            }
         }
-      }
-      MarkSpan::Span(n) => { 
-        ActiveMarks {
-          start: HashSet::default(),
-          end: HashSet::default(),
-          pos: *n,
+        for id in &other.end {
+            if !self.start.remove(id) {
+                self.end.insert(*id);
+            }
         }
-      }
+        //let mut y = self.clone();
+        //y.maybe_sub(other);
+        //assert_eq!(x,y);
     }
-  }
-  fn and(mut self, other: &Self) -> Self {
-    self.union(other);
-    self
-  }
-  fn union(&mut self, other: &Self) {
-    for id in &other.end {
-      if self.start.contains(id) {
-        self.start.remove(id);
-      } else {
-        self.end.insert(*id);
-      }
+    fn maybe_sub(&mut self, other: &Self) -> bool {
+        assert!(self.pos > other.pos);
+        self.pos -= other.pos;
+        for id in &other.start {
+            if !self.start.remove(id) {
+                self.end.insert(*id);
+            }
+        }
+        for id in &other.end {
+            if !self.end.remove(id) {
+                self.start.insert(*id);
+            }
+        }
+        true
     }
-    for id in &other.start {
-      self.start.insert(*id);
+}
+
+impl HasAcc for MarkIndexSpanner {
+    fn acc(&self) -> Acc {
+        Acc::new()
     }
-    self.pos += other.pos;
-  }
-  fn maybe_sub(&mut self, _other: &Self) -> bool {
-    false
-  }
+}
+
+impl HasPos for MarkIndexSpanner {
+    fn pos(&self) -> usize {
+        self.pos
+    }
+}
+
+pub(crate) type MarkIndexInternal<const B: usize> = RleCursor<B, MarkIndexValue, MarkIndexSpanner>;
+pub(crate) type MarkIndex = MarkIndexInternal<64>;
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MarkIndexColumn(ColumnData<MarkIndex>);
+
+impl MarkIndexColumn {
+    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
+      // FIXME - would be much better to do this by run instead of by value
+      let new_col = self.0.iter().map(|m| m.map(|n| n.with_new_actor(idx))).collect();
+      self.0 = new_col
+    }
+
+    pub(crate) fn new() -> Self {
+        Self(ColumnData::new())
+    }
+    pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
+    where
+        E: MaybePackable<MarkIndexValue> + Debug + Clone,
+    {
+        self.0.splice(index, del, values);
+    }
+
+    pub(crate) fn marks_at<'a>(
+        &self,
+        target: usize,
+        clock: Option<&'a Clock>,
+    ) -> impl Iterator<Item = OpId> + 'a {
+        let sub = self
+            .0
+            .slabs
+            .get_where_or_last(|acc, next| target < acc.pos() + next.pos());
+        let mut start = sub.weight.start.into_iter().collect::<BTreeSet<_>>();
+        let mut end = sub.weight.end;
+        let mut pos = sub.weight.pos;
+        let mut cursor = MarkIndex::default();
+        let bytes = sub.element.as_slice();
+        while let Some(run) = cursor.next(bytes) {
+            pos += run.count;
+            match run.value {
+                Some(MarkIndexValue::Start(id)) => {
+                    start.insert(id);
+                }
+                Some(MarkIndexValue::End(id)) => {
+                    if !start.remove(&id) {
+                        end.insert(id);
+                    }
+                }
+                None => {}
+            }
+            if pos > target {
+                break;
+            }
+        }
+        start
+            .into_iter()
+            .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
+    }
+}
+
+impl<'a> From<MarkIndexValue> for WriteOp<'a> {
+    fn from(v: MarkIndexValue) -> WriteOp<'static> {
+        WriteOp::Int(i64::from(v))
+    }
+}
+
+impl From<i64> for MarkIndexValue {
+    fn from(v: i64) -> Self {
+        if v < 0 {
+            let v = (-1 * v) as u64;
+            let actor = (v >> 32) as usize;
+            let ctr = v & 0xffffffff;
+            Self::End(OpId::new(ctr, actor))
+        } else {
+            let v = v as u64;
+            let actor = (v >> 32) as usize;
+            let ctr = v & 0xffffffff;
+            Self::Start(OpId::new(ctr, actor))
+        }
+    }
+}
+
+impl From<MarkIndexValue> for i64 {
+    fn from(v: MarkIndexValue) -> Self {
+        match v {
+            MarkIndexValue::Start(id) => {
+                let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
+                assert_eq!(v, MarkIndexValue::from(tmp));
+                tmp
+            }
+            MarkIndexValue::End(id) => {
+                let tmp = -1 * (((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
+                assert_eq!(v, MarkIndexValue::from(tmp));
+                tmp
+            }
+        }
+    }
+}
+
+impl Packable for MarkIndexValue {
+    type Unpacked<'a> = MarkIndexValue;
+    type Owned = MarkIndexValue;
+
+    fn own(item: MarkIndexValue) -> MarkIndexValue {
+        item
+    }
+
+    fn unpack(mut buff: &[u8]) -> Result<(usize, MarkIndexValue), PackError> {
+        let start_len = buff.len();
+        let val = leb128::read::signed(&mut buff)?;
+        assert_eq!(i64::from(MarkIndexValue::from(val)), val);
+        Ok((start_len - buff.len(), MarkIndexValue::from(val)))
+    }
+}
+
+impl MaybePackable<MarkIndexValue> for Option<MarkIndexValue> {
+    fn maybe_packable(&self) -> Option<MarkIndexValue> {
+        *self
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    //use super::*;
+
+    #[test]
+    fn column_data_delta_simple() {}
 }

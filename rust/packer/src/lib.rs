@@ -39,15 +39,15 @@ pub(crate) mod rle;
 pub(crate) mod slab;
 
 #[cfg(test)]
-pub(crate) mod test;
+pub mod test;
 
 pub use aggregate::{Acc, Agg};
 pub use boolean::BooleanCursor;
 pub use columndata::{ColGroupItem, ColumnData, ColumnDataIter};
-pub use cursor::{ColumnCursor, Run, ScanMeta};
+pub use cursor::{ColumnCursor, Encoder, HasAcc, HasPos, Run, ScanMeta, SpliceDel};
 pub use delta::DeltaCursor;
 pub use leb128::{lebsize, ulebsize};
 pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
 pub use rle::{IntCursor, RleCursor, StrCursor};
-pub use slab::{Slab, SlabTree, SlabWeight, SpanTree, SpanWeight, WriteOp};
+pub use slab::{tree, Slab, SlabTree, SlabWeight, SlabWriter, SpanTree, SpanWeight, WriteOp};

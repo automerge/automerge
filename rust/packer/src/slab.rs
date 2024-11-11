@@ -2,7 +2,7 @@ use super::aggregate::{Acc, Agg};
 use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter, ScanMeta};
 use super::pack::PackError;
 
-pub(crate) mod tree;
+pub mod tree;
 pub(crate) mod writer;
 
 pub(crate) use super::columndata::normalize_range;

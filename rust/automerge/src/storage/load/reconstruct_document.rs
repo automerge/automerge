@@ -63,7 +63,9 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut iter = op_set.iter();
     let mut max_op = 0;
     let mut widths = Vec::with_capacity(op_set.len());
+    let mut marks = Vec::with_capacity(op_set.len());
     while let Some(op) = iter.try_next()? {
+        marks.push(op.mark_index());
         if op.succ().len() == 0 {
             widths.push(op.width(ListEncoding::Text) as u64);
         } else {
@@ -99,6 +101,7 @@ pub(crate) fn reconstruct_opset<'a>(
     }
 
     op_set.set_text_index(widths);
+    op_set.set_mark_index(marks);
 
     Ok(ReconOpSet {
         changes,

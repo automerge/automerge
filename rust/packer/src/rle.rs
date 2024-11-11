@@ -1,14 +1,14 @@
 use super::aggregate::{Acc, Agg};
-use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::cursor::{ColumnCursor, Encoder, HasAcc, HasPos, Run, SpliceDel};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabWeight, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
 
 use std::marker::PhantomData;
 use std::ops::Range;
 
 #[derive(Debug, PartialEq)]
-pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
+pub struct RleCursor<const B: usize, P: Packable + ?Sized, X = SlabWeight> {
     index: usize,
     offset: usize,
     acc: Acc,
@@ -17,17 +17,18 @@ pub struct RleCursor<const B: usize, P: Packable + ?Sized> {
     last_offset: usize,
     lit: Option<LitRunCursor>,
     _phantom: PhantomData<P>,
+    _phantom2: PhantomData<X>,
 }
 
-impl<const B: usize, P: Packable + ?Sized> Copy for RleCursor<B, P> {}
+impl<const B: usize, P: Packable + ?Sized, X> Copy for RleCursor<B, P, X> {}
 
-impl<const B: usize, P: Packable + ?Sized> Clone for RleCursor<B, P> {
+impl<const B: usize, P: Packable + ?Sized, X> Clone for RleCursor<B, P, X> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
+impl<const B: usize, P: Packable + ?Sized, X> Default for RleCursor<B, P, X> {
     fn default() -> Self {
         Self {
             offset: 0,
@@ -38,11 +39,14 @@ impl<const B: usize, P: Packable + ?Sized> Default for RleCursor<B, P> {
             max: Agg::default(),
             lit: None,
             _phantom: PhantomData,
+            _phantom2: PhantomData,
         }
     }
 }
 
-impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
+impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>>
+    RleCursor<B, P, X>
+{
     pub(crate) fn flush_run<'a>(
         writer: &mut SlabWriter<'a>,
         num: usize,
@@ -200,12 +204,15 @@ impl<const B: usize, P: Packable + ?Sized> RleCursor<B, P> {
     }
 }
 
-impl<const B: usize, P: Packable + ?Sized> ColumnCursor for RleCursor<B, P> {
+impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>> ColumnCursor
+    for RleCursor<B, P, X>
+{
     type Item = P;
     type State<'a> = RleState<'a, P>;
     type PostState<'a> = Option<Run<'a, P>>;
     type Export = Option<P::Owned>;
-    type SlabIndex = SlabWeight;
+    //type SlabIndex = SlabWeight;
+    type SlabIndex = X;
 
     fn empty() -> Self {
         Self::default()

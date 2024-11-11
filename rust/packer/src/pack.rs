@@ -38,8 +38,7 @@ pub trait Packable: PartialEq + Debug {
         + PartialOrd
         + ToOwned
         + Borrow<Self>
-        + Into<WriteOp<'a>>
-        + Default;
+        + Into<WriteOp<'a>>;
     type Owned: Clone + PartialEq + Debug;
 
     fn agg(_item: Self::Unpacked<'_>) -> Agg {

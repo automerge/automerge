@@ -1,4 +1,4 @@
-use super::op_set::{OpLike, OpSet};
+use super::op_set::{MarkIndexValue, OpLike, OpSet};
 use super::packer::{ColumnDataIter, DeltaCursor};
 use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{Value, ValueMeta};
@@ -62,6 +62,14 @@ pub(crate) struct OpBuilder2 {
 }
 
 impl OpBuilder2 {
+    pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
+        match &self.action {
+            types::OpType::MarkBegin(_, _) => Some(MarkIndexValue::Start(self.id())),
+            types::OpType::MarkEnd(_) => Some(MarkIndexValue::End(self.id().prev())),
+            _ => None,
+        }
+    }
+
     pub(crate) fn del(id: OpId, obj: ObjMeta, key: Key, pred: Vec<OpId>) -> Self {
         OpBuilder2 {
             id,
@@ -301,6 +309,13 @@ pub(crate) struct SuccInsert {
 }
 
 impl<'a> Op<'a> {
+    pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
+        match (&self.action, &self.mark_name) {
+            (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
+            (Action::Mark, None) => Some(MarkIndexValue::End(self.id.prev())),
+            _ => None,
+        }
+    }
     pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors;

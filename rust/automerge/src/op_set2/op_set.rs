@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::marks::{MarkSet, MarkStateMachine};
+use crate::marks::{RichTextQueryState, MarkSet, MarkStateMachine};
 use crate::patches::TextRepresentation;
 use crate::storage::{
     columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
@@ -16,8 +16,8 @@ use crate::{Automerge, PatchLog};
 use super::columns::Column;
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::packer::{
-    BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawReader, Run,
-    SlabWeight, StrCursor,
+    BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawCursor,
+    RawReader, Run, SlabWeight, StrCursor,
 };
 use super::types::{
     Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 mod found_op;
 mod insert;
-//mod mark_index;
+mod mark_index;
 mod marks;
 mod op_iter;
 mod op_query;
@@ -43,7 +43,7 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-//pub(crate) use mark_index::MarkIndex;
+pub(crate) use mark_index::{MarkIndexColumn, MarkIndexValue};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{OpIter, ReadOpError};
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
@@ -55,7 +55,7 @@ pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
     text_index: ColumnData<IntCursor>,
-    //mark_index: MarkIndex,
+    mark_index: MarkIndexColumn,
     cols: Columns,
 }
 
@@ -78,7 +78,7 @@ impl OpSet {
             actors,
             cols: Columns::default(),
             text_index: ColumnData::new(),
-            //mark_index: MarkIndex::new(),
+            mark_index: MarkIndexColumn::new(),
         }
     }
 
@@ -109,8 +109,15 @@ impl OpSet {
         self.text_index.splice(0, 0, widths);
     }
 
+    pub(crate) fn set_mark_index(&mut self, marks: Vec<Option<MarkIndexValue>>) {
+        assert_eq!(marks.len(), self.len());
+        self.mark_index = MarkIndexColumn::new();
+        self.mark_index.splice(0, 0, marks);
+    }
+
     pub(crate) fn insert(&mut self, op: &OpBuilder2) {
         self.cols.insert(op.pos, op);
+        self.mark_index.splice(op.pos, 0, vec![op.mark_index()]);
         if op.succ().is_empty() {
             let width = op.width(ListEncoding::Text) as u64;
             self.text_index.splice(op.pos, 0, vec![width]);
@@ -222,32 +229,16 @@ impl OpSet {
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
 
-        if self.has_marks_in_range(&range) {
-            return None;
-        }
 
-        let mut elemid = ElemId::head();
-        let mut pos = range.start;
-
-        if index > 0 {
-            let mut iter = self.text_index.iter_range(range.clone()).with_acc();
-            if let Some(tx) = iter.nth(index - 1) {
-                for op in self.iter_range(&(tx.pos..range.end)) {
-                    if op.insert && !elemid.is_head() {
-                        break;
-                    }
-                    if op.succ().len() == 0 {
-                        elemid = op.elemid_or_key().elemid().unwrap();
-                    }
-                    pos = op.pos + 1;
-                }
+            if index == 0 {
+              return None
             }
-        }
-        Some(QueryNth {
-            marks: None,
-            pos,
-            elemid,
-        })
+            let mut iter = self.text_index.iter_range(range.clone()).with_acc();
+            let tx = iter.nth(index - 1)?;
+            let iter = self.iter_range(&(tx.pos..range.end));
+            let marks = self.get_rich_text_at(tx.pos, clock);
+            let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
+            query.resolve(index - 1).ok()
     }
 
     pub(crate) fn query_insert_at(
@@ -260,13 +251,13 @@ impl OpSet {
         if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
             debug_assert_eq!(
                 Ok(&query),
-                InsertQuery::new(self.iter_obj(obj), index, encoding, clock)
-                    .resolve()
+                InsertQuery::new(self.iter_obj(obj), index, encoding, clock, Default::default())
+                    .resolve(0)
                     .as_ref()
             );
             Ok(query)
         } else {
-            InsertQuery::new(self.iter_obj(obj), index, encoding, clock).resolve()
+            InsertQuery::new(self.iter_obj(obj), index, encoding, clock, Default::default()).resolve(0)
         }
     }
 
@@ -347,16 +338,65 @@ impl OpSet {
         }
     }
 
-    fn has_marks_in_range(&self, range: &Range<usize>) -> bool {
-        if let Some(marks) = self
-            .cols
-            .get_str_range(MARK_NAME_COL_SPEC, range)
-            .next_run()
-        {
-            marks.value.is_some() || marks.count < range.end - range.start
-        } else {
-            false
+    fn value_meta_col(&self) -> &ColumnData<MetaCursor> {
+        match self.cols.0.get(&VALUE_META_COL_SPEC) {
+            Some(Column::ValueMeta(c)) => &c,
+            _ => panic!(),
         }
+    }
+
+    fn value_col(&self) -> &ColumnData<RawCursor> {
+        match self.cols.0.get(&VALUE_COL_SPEC) {
+            Some(Column::Value(c)) => &c,
+            _ => panic!(),
+        }
+    }
+
+    fn mark_name_col(&self) -> &ColumnData<StrCursor> {
+        match self.cols.0.get(&MARK_NAME_COL_SPEC) {
+            Some(Column::Str(c)) => &c,
+            _ => panic!(),
+        }
+    }
+
+    fn get_value(&self, pos: usize) -> Option<ScalarValue<'_>> {
+        let meta = self.value_meta_col().get_with_acc(pos)?;
+        let length = meta.item?.length();
+        let raw = if length > 0 {
+            self.value_col()
+                .raw_reader(meta.acc.as_usize())
+                .read_next(length)
+                .ok()?
+        } else {
+            &[]
+        };
+        ScalarValue::from_raw(meta.item?, raw).ok()
+    }
+
+    fn get_mark_name(&self, pos: usize) -> Option<&str> {
+        self.mark_name_col().get(pos).flatten()
+    }
+
+    fn get_rich_text_at(&self, pos: usize, clock: Option<&Clock>) -> RichTextQueryState<'_> {
+        let mut marks = RichTextQueryState::default();
+        for id in self.mark_index.marks_at(pos, clock) {
+            let pos = self.get_op_id_pos(id).unwrap();
+            let name = self.get_mark_name(pos).unwrap();
+            let value = self.get_value(pos).unwrap();
+            marks.map.insert(id, MarkData { name, value });
+        }
+        marks
+    }
+
+    fn get_marks_at(&self, pos: usize, clock: Option<&Clock>) -> MarkStateMachine<'_> {
+        let mut marks = MarkStateMachine::default();
+        for id in self.mark_index.marks_at(pos, clock) {
+            let pos = self.get_op_id_pos(id).unwrap();
+            let name = self.get_mark_name(pos).unwrap();
+            let value = self.get_value(pos).unwrap();
+            marks.mark_begin(id, MarkData { name, value });
+        }
+        marks
     }
 
     pub(crate) fn seek_ops_by_index_fast<'a>(
@@ -379,10 +419,6 @@ impl OpSet {
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
-
-        if self.has_marks_in_range(&range) {
-            return None;
-        }
 
         let mut iter = self.text_index.iter_range(range.clone()).with_acc();
 
@@ -410,7 +446,6 @@ impl OpSet {
             index,
             ops,
             ops_pos,
-            //end_pos: range.end,
             end_pos,
         })
     }
@@ -447,16 +482,12 @@ impl OpSet {
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
 
-        if self.has_marks_in_range(&range) {
-            return None;
-        }
-
         let op_pos = self.get_op_id_pos(target.0).unwrap();
 
         let obj_acc = self.text_index.get_acc(range.start).as_usize();
         let op_acc = self.text_index.get_acc(op_pos).as_usize();
 
-        let marks = MarkStateMachine::default();
+        let mut marks = self.get_marks_at(op_pos, clock);
         let mut iter = self.iter_range(&(op_pos..range.end));
         let mut pos = range.end;
         let mut current = 0;
@@ -480,7 +511,7 @@ impl OpSet {
                 let visible = op.scope_to_clock(clock, iter.get_opiter());
 
                 if visible {
-                    //marks.process(op.id(), op.action());
+                    marks.process(op.id(), op.action());
                     current = op.width(encoding);
                 }
             }
@@ -507,12 +538,11 @@ impl OpSet {
                 if found {
                     ops.push((op, visible));
                 }
-
                 /*
-                                if visible && !found {
-                                    marks.process(op.id(), op.action());
-                                    current = op.width(encoding);
-                                }
+                if visible && !found {
+                  marks.process(op, clock);
+                  current = op.width(encoding);
+                }
                 */
             }
         }
@@ -874,7 +904,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
-            //mark_index: MarkIndex::new(),
+            mark_index: MarkIndexColumn::new(),
         }
     }
 
@@ -903,7 +933,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
-            //mark_index: MarkIndex::new(),
+            mark_index: MarkIndexColumn::new(),
         };
 
         Ok(op_set)
@@ -1059,7 +1089,8 @@ impl OpSet {
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.cols.rewrite_with_new_actor(idx)
+        self.cols.rewrite_with_new_actor(idx);
+        self.mark_index.rewrite_with_new_actor(idx)
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
