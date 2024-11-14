@@ -599,6 +599,10 @@ export function rootProxy<T>(context: Automerge, textV2: boolean): T {
 function listMethods<T extends Target>(target: T) {
   const { context, objectId, path, textV2 } = target
   const methods = {
+    at(index: number) {
+      return valueAt(target, index)
+    },
+
     deleteAt(index: number, numDelete: number) {
       if (typeof numDelete === "number") {
         context.splice(objectId, index, numDelete)
