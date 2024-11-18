@@ -40,7 +40,10 @@ impl<C: ColumnCursor> ColumnData<C> {
         iter.next()
     }
 
-    pub fn get_with_acc(&self, index: usize) -> Option<ColGroupItem<'_, <C as ColumnCursor>::Item>> {
+    pub fn get_with_acc(
+        &self,
+        index: usize,
+    ) -> Option<ColGroupItem<'_, <C as ColumnCursor>::Item>> {
         let range = index..(index + 1);
         let mut iter = self.iter_range(range).with_acc();
         iter.next()

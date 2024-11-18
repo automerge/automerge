@@ -1,5 +1,5 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, Encoder, Run, ScanMeta};
+use super::cursor::{ColumnCursor, Encoder, Run};
 use super::pack::PackError;
 use super::slab::{self, Slab, SlabWeight, SlabWriter, SpanWeight};
 
@@ -30,7 +30,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         _state: Self::State<'a>,
     ) -> Self::State<'a> {
         let len = slab.len();
-        writer.copy(slab, 0..len, 0, len, Acc::new(), None);
+        writer.copy(slab.as_slice(), 0..len, 0, len, Acc::new(), None);
     }
 
     fn finish<'a>(_slab: &'a Slab, _writer: &mut SlabWriter<'a>, _cursor: Self) {}
@@ -44,14 +44,14 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     ) -> Option<Self> {
         //writer.flush_bytes(post, post.len());
         let len = post.end - post.start;
-        writer.copy(slab, post, 0, len, Acc::new(), None);
+        writer.copy(slab.as_slice(), post, 0, len, Acc::new(), None);
         None
     }
 
     fn flush_state<'a>(_writer: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
 
     fn copy_between<'a>(
-        _slab: &'a Slab,
+        _slab: &'a [u8],
         _writer: &mut SlabWriter<'a>,
         _c0: Self,
         _c1: Self,
@@ -77,24 +77,30 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         len
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
+    fn encode(
+        index: usize,
+        del: usize,
+        slab: &Slab,
+        cap: usize,
+    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
         let state = ();
         let cursor = Self { offset: index };
+        let bytes = slab.as_slice();
 
         // everything before...
-        let mut current = SlabWriter::new(B, cap + 4, slab.as_slice());
-        current.copy(slab, 0..index, 0, index, Acc::new(), None);
+        let mut current = SlabWriter::new(B, cap + 4, bytes);
+        current.copy(bytes, 0..index, 0, index, Acc::new(), None);
 
         let post;
         let deleted;
-        if index + del < slab.as_slice().len() {
+        if index + del < bytes.len() {
             // everything after
-            post = (index + del)..(slab.as_slice().len());
+            post = (index + del)..(bytes.len());
             deleted = del;
         } else {
             // nothing left
             post = 0..0;
-            deleted = slab.as_slice().len() - index;
+            deleted = bytes.len() - index;
         }
         let overflow = del - deleted;
         let acc = Acc::new();
@@ -120,10 +126,6 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
             total.extend(bytes);
         }
         data.splice(range, total);
-    }
-
-    fn scan(data: &[u8], _m: &ScanMeta) -> Result<Self, PackError> {
-        Ok(Self { offset: data.len() })
     }
 
     fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {

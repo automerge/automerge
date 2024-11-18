@@ -901,10 +901,6 @@ impl<'a, T: Clone + Debug, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
         self.index
     }
 
-    pub fn len(&self) -> usize {
-        self.inner.as_ref().map(|t| t.len()).unwrap_or(0)
-    }
-
     pub(crate) fn span_tree(&self) -> Option<&'a SpanTree<T, W>> {
         self.inner
     }

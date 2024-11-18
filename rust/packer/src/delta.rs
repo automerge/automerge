@@ -127,7 +127,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     }
 
     fn copy_between<'a>(
-        slab: &'a Slab,
+        slab: &'a [u8],
         writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
@@ -182,12 +182,17 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
+    fn encode(
+        index: usize,
+        del: usize,
+        slab: &Slab,
+        cap: usize,
+    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
         let (rle, post, acc, mut current) =
-            SubCursor::<B>::encode_inner(slab, &cursor.rle, run, index, cap * 2 + 9);
+            SubCursor::<B>::encode_inner(slab.as_slice(), &cursor.rle, run, index, cap * 2 + 9);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;

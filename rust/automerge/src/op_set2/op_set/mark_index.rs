@@ -14,14 +14,13 @@ pub(crate) enum MarkIndexValue {
 }
 
 impl MarkIndexValue {
-  fn with_new_actor(self, idx: usize) -> Self {
-     match self {
-      Self::Start(id) => Self::Start(id.with_new_actor(idx)),
-      Self::End(id) => Self::End(id.with_new_actor(idx)),
-     }
-  }
+    fn with_new_actor(self, idx: usize) -> Self {
+        match self {
+            Self::Start(id) => Self::Start(id.with_new_actor(idx)),
+            Self::End(id) => Self::End(id.with_new_actor(idx)),
+        }
+    }
 }
-
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct MarkIndexSpanner {
@@ -111,9 +110,13 @@ pub(crate) struct MarkIndexColumn(ColumnData<MarkIndex>);
 
 impl MarkIndexColumn {
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-      // FIXME - would be much better to do this by run instead of by value
-      let new_col = self.0.iter().map(|m| m.map(|n| n.with_new_actor(idx))).collect();
-      self.0 = new_col
+        // FIXME - would be much better to do this by run instead of by value
+        let new_col = self
+            .0
+            .iter()
+            .map(|m| m.map(|n| n.with_new_actor(idx)))
+            .collect();
+        self.0 = new_col
     }
 
     pub(crate) fn new() -> Self {
@@ -172,7 +175,7 @@ impl<'a> From<MarkIndexValue> for WriteOp<'a> {
 impl From<i64> for MarkIndexValue {
     fn from(v: i64) -> Self {
         if v < 0 {
-            let v = (-1 * v) as u64;
+            let v = -v as u64;
             let actor = (v >> 32) as usize;
             let ctr = v & 0xffffffff;
             Self::End(OpId::new(ctr, actor))
@@ -194,7 +197,7 @@ impl From<MarkIndexValue> for i64 {
                 tmp
             }
             MarkIndexValue::End(id) => {
-                let tmp = -1 * (((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
+                let tmp = -(((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
                 assert_eq!(v, MarkIndexValue::from(tmp));
                 tmp
             }

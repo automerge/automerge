@@ -14,7 +14,7 @@ pub enum WriteOp<'a> {
     Int(i64),
     Bytes(&'a [u8]),
     Raw(&'a [u8]),
-    Cpy(&'a Slab, Range<usize>, Acc, Option<bool>),
+    Cpy(&'a [u8], Range<usize>, Acc, Option<bool>),
 }
 
 impl<'a> From<i64> for WriteOp<'a> {
@@ -426,7 +426,7 @@ impl<'a> SlabWriter<'a> {
 
     pub fn copy(
         &mut self,
-        slab: &'a Slab,
+        slab: &'a [u8],
         range: Range<usize>,
         lit: usize,
         size: usize,

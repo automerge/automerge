@@ -55,7 +55,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
         writer.copy(
-            slab,
+            slab.as_slice(),
             cursor.offset..slab.as_slice().len(),
             0,
             slab.len() - cursor.index,
@@ -102,7 +102,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     }
 
     fn copy_between<'a>(
-        slab: &'a Slab,
+        slab: &'a [u8],
         writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
@@ -142,7 +142,12 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run.count
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
+    fn encode(
+        index: usize,
+        del: usize,
+        slab: &Slab,
+        cap: usize,
+    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
@@ -167,7 +172,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
         let mut current = SlabWriter::new(B, cap + 8, slab.as_slice());
-        current.copy(slab, range, 0, size, acc, None);
+        current.copy(slab.as_slice(), range, 0, size, acc, None);
 
         let SpliceDel {
             deleted,

@@ -1,7 +1,7 @@
 use super::parents::Parents;
 use crate::cursor::Cursor;
 use crate::exid::ExId;
-use crate::marks::{RichTextQueryState, MarkSet, MarkStateMachine};
+use crate::marks::{MarkSet, MarkStateMachine, RichTextQueryState};
 use crate::patches::TextRepresentation;
 use crate::storage::{
     columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
@@ -229,16 +229,15 @@ impl OpSet {
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
             .scope_to_value(obj.actor());
 
-
-            if index == 0 {
-              return None
-            }
-            let mut iter = self.text_index.iter_range(range.clone()).with_acc();
-            let tx = iter.nth(index - 1)?;
-            let iter = self.iter_range(&(tx.pos..range.end));
-            let marks = self.get_rich_text_at(tx.pos, clock);
-            let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
-            query.resolve(index - 1).ok()
+        if index == 0 {
+            return None;
+        }
+        let mut iter = self.text_index.iter_range(range.clone()).with_acc();
+        let tx = iter.nth(index - 1)?;
+        let iter = self.iter_range(&(tx.pos..range.end));
+        let marks = self.get_rich_text_at(tx.pos, clock);
+        let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
+        query.resolve(index - 1).ok()
     }
 
     pub(crate) fn query_insert_at(
@@ -251,13 +250,26 @@ impl OpSet {
         if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
             debug_assert_eq!(
                 Ok(&query),
-                InsertQuery::new(self.iter_obj(obj), index, encoding, clock, Default::default())
-                    .resolve(0)
-                    .as_ref()
+                InsertQuery::new(
+                    self.iter_obj(obj),
+                    index,
+                    encoding,
+                    clock,
+                    Default::default()
+                )
+                .resolve(0)
+                .as_ref()
             );
             Ok(query)
         } else {
-            InsertQuery::new(self.iter_obj(obj), index, encoding, clock, Default::default()).resolve(0)
+            InsertQuery::new(
+                self.iter_obj(obj),
+                index,
+                encoding,
+                clock,
+                Default::default(),
+            )
+            .resolve(0)
         }
     }
 
@@ -340,21 +352,21 @@ impl OpSet {
 
     fn value_meta_col(&self) -> &ColumnData<MetaCursor> {
         match self.cols.0.get(&VALUE_META_COL_SPEC) {
-            Some(Column::ValueMeta(c)) => &c,
+            Some(Column::ValueMeta(c)) => c,
             _ => panic!(),
         }
     }
 
     fn value_col(&self) -> &ColumnData<RawCursor> {
         match self.cols.0.get(&VALUE_COL_SPEC) {
-            Some(Column::Value(c)) => &c,
+            Some(Column::Value(c)) => c,
             _ => panic!(),
         }
     }
 
     fn mark_name_col(&self) -> &ColumnData<StrCursor> {
         match self.cols.0.get(&MARK_NAME_COL_SPEC) {
-            Some(Column::Str(c)) => &c,
+            Some(Column::Str(c)) => c,
             _ => panic!(),
         }
     }

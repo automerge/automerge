@@ -1,6 +1,6 @@
 use super::aggregate::{Acc, Agg};
 use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter, ScanMeta};
-use super::pack::PackError;
+use super::pack::{PackError, Packable};
 
 pub mod tree;
 pub(crate) mod writer;
@@ -130,14 +130,18 @@ impl Slab {
         range: Range<usize>,
         m: &ScanMeta,
     ) -> Result<Self, PackError> {
-        let index = C::scan(&data.as_ref()[range.clone()], m)?;
+        let mut cursor = C::empty();
+        let bytes = &data.as_ref()[range.clone()];
+        while let Some(val) = cursor.try_next(bytes)? {
+            C::Item::validate(&val.value, m)?;
+        }
         Ok(Slab::External(ReadOnlySlab {
             data,
             range,
-            len: index.index(),
-            acc: index.acc(),
-            min: index.min(),
-            max: index.max(),
+            len: cursor.index(),
+            acc: cursor.acc(),
+            min: cursor.min(),
+            max: cursor.max(),
         }))
     }
 

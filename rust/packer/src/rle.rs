@@ -145,7 +145,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
     }
 
     pub(crate) fn encode_inner<'a>(
-        slab: &'a Slab,
+        slab: &'a [u8],
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
@@ -185,7 +185,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B, cap, slab.as_slice());
+        let mut current = SlabWriter::new(B, cap, slab);
 
         current.copy(slab, copy_range, 0, copy_size, copy_acc, None);
 
@@ -223,7 +223,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
     }
 
     fn copy_between<'a>(
-        slab: &'a Slab,
+        slab: &'a [u8],
         writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
@@ -295,7 +295,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         let num_left = cursor.num_left();
         let range = cursor.offset..slab.as_slice().len();
         writer.copy(
-            slab,
+            slab.as_slice(),
             range,
             num_left,
             slab.len() - cursor.index,
@@ -378,11 +378,17 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         chunk.count
     }
 
-    fn encode(index: usize, del: usize, slab: &Slab, cap: usize) -> Encoder<'_, Self> {
+    fn encode(
+        index: usize,
+        del: usize,
+        slab: &Slab,
+        cap: usize,
+    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
         let (run, cursor) = Self::seek(index, slab);
 
         let cap = cap * 2 + 9;
-        let (state, post, acc, current) = RleCursor::encode_inner(slab, &cursor, run, index, cap);
+        let (state, post, acc, current) =
+            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, cap);
 
         let SpliceDel {
             deleted,

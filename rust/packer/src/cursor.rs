@@ -127,21 +127,21 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
 }
 
 #[derive(Debug)]
-pub struct Encoder<'a, C: ColumnCursor> {
+pub struct Encoder<'a, C: ColumnCursor, S, P> {
     pub slab: &'a Slab,
-    pub state: C::State<'a>,
+    pub state: S, // S, : C::State<'a>,
     pub current: SlabWriter<'a>,
-    pub post: C::PostState<'a>,
+    pub post: P, //C::PostState<'a>,
     pub acc: Acc,
     pub deleted: usize,
     pub overflow: usize,
     pub cursor: C,
 }
 
-impl<'a, C: ColumnCursor> Encoder<'a, C> {
-    pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) -> usize {
-        C::append(&mut self.state, &mut self.current, v)
-    }
+impl<'a, C: ColumnCursor<State<'a> = S, PostState<'a> = P>, S, P> Encoder<'a, C, S, P> {
+    //pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) -> usize {
+    //    C::append(&mut self.state, &mut self.current, v)
+    //}
 
     #[inline(never)]
     pub(crate) fn finish(mut self) -> Vec<Slab> {
@@ -207,7 +207,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
         Self::flush_state(writer, state);
 
-        Self::copy_between(slab, writer, c0, c1, run1, size)
+        Self::copy_between(slab.as_slice(), writer, c0, c1, run1, size)
     }
 
     fn compute_min_max(_slabs: &mut [Slab]) {}
@@ -262,7 +262,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     ) -> usize;
 
     fn copy_between<'a>(
-        slab: &'a Slab,
+        slab: &'a [u8],
         writer: &mut SlabWriter<'a>,
         c0: Self,
         c1: Self,
@@ -272,7 +272,12 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>);
 
-    fn encode(index: usize, del: usize, slab: &Slab, capacity: usize) -> Encoder<'_, Self>;
+    fn encode(
+        index: usize,
+        del: usize,
+        slab: &Slab,
+        capacity: usize,
+    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>>;
 
     fn try_next<'a>(&mut self, data: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError>;
 
@@ -323,13 +328,15 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         panic!()
     }
 
-    fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
-        let mut cursor = Self::empty();
-        while let Some(val) = cursor.try_next(data)? {
-            Self::Item::validate(&val.value, m)?;
+    /*
+        fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
+            let mut cursor = Self::empty();
+            while let Some(val) = cursor.try_next(data)? {
+                Self::Item::validate(&val.value, m)?;
+            }
+            Ok(cursor)
         }
-        Ok(cursor)
-    }
+    */
 
     fn debug_scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::empty();
@@ -349,7 +356,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         let mut value_acc = Acc::new();
         for v in &values {
             value_acc += v.agg();
-            add += encoder.append(v.maybe_packable());
+            add += Self::append(&mut encoder.state, &mut encoder.current, v.maybe_packable());
         }
         assert!(encoder.overflow == 0);
         let deleted = encoder.deleted;
