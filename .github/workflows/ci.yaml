@@ -76,6 +76,7 @@ jobs:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: '0.2.95'
       - name: Install wasm32 target
+        working-directory: rust
         run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/wasm_tests
@@ -95,6 +96,7 @@ jobs:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
           version: '0.2.95'
       - name: Install wasm32 target
+        working-directory: rust
         run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/js_tests
