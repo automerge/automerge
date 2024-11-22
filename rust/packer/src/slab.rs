@@ -108,6 +108,12 @@ impl Slab {
         }
     }
 
+    pub fn first_value<C: ColumnCursor>(&self) -> Option<<C::Item as Packable>::Unpacked<'_>> {
+        let mut cursor = C::new(self);
+        let run = cursor.next(self.as_slice())?;
+        run.value
+    }
+
     pub fn run_iter<C: ColumnCursor>(&self) -> RunIter<'_, C> {
         let weight = <C::SlabIndex>::alloc(self);
         RunIter {

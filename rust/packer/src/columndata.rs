@@ -135,12 +135,30 @@ impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     pub(crate) fn new(slabs: &'a SlabTree<C::SlabIndex>, pos: usize, max: usize) -> Self {
         let cursor = slabs.get_where_or_last(|acc, next| pos < acc.pos() + next.pos());
-        //let mut slab : RunIter<C> = cursor.element.run_iter::<C>();
         let mut slab = cursor.element.run_iter::<C>();
         let slabs = slab::SpanTreeIter::new(slabs, cursor);
         let iter_pos = slabs.weight().pos() - slab.pos_left();
         let advance = pos - iter_pos;
         let run = slab.sub_advance(advance);
+        ColumnDataIter {
+            pos,
+            max,
+            slabs,
+            slab,
+            run,
+        }
+    }
+
+    pub(crate) fn new_at_index(
+        slabs: &'a SlabTree<C::SlabIndex>,
+        index: usize,
+        max: usize,
+    ) -> Self {
+        let cursor = slabs.get_cursor(index).unwrap();
+        let mut slab = cursor.element.run_iter::<C>();
+        let slabs = slab::SpanTreeIter::new(slabs, cursor);
+        let pos = slabs.weight().pos() - slab.pos_left();
+        let run = slab.sub_advance(0);
         ColumnDataIter {
             pos,
             max,
@@ -230,10 +248,52 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.check_pos();
     }
 
+    fn slab_index(&self) -> usize {
+        self.slabs.index() - 1
+    }
+
+    // binary search through the span tree nodes
+    // this will only work if the data is ordered over the range
+    // we only read the first element of each node and never
+    // from the first node as we arent always including its first element
+
+    fn binary_search_for(
+        &self,
+        target: Option<<C::Item as Packable>::Unpacked<'a>>,
+    ) -> Option<usize> {
+        let slabs = self.slabs.span_tree()?;
+        let original_start = self.slab_index();
+        let mut start = original_start;
+        let mut end = slabs
+            .get_where_or_last(|a, next| self.max < a.pos() + next.pos())
+            .index;
+        while start < end {
+            let mid = (start + end + 1) / 2;
+            let slab = slabs.get(mid)?;
+            let value = slab.first_value::<C>();
+            assert!(start != mid); // dont infinite loop
+            assert!(end != mid - 1); // dont infinite loop
+            match (value, target) {
+                (None, Some(_)) => start = mid,
+                (Some(a), Some(b)) if a < b => start = mid,
+                _ => end = mid - 1,
+            }
+        }
+        if start != original_start {
+            Some(start)
+        } else {
+            None
+        }
+    }
+
     pub fn scope_to_value(
         &mut self,
         value: Option<<C::Item as Packable>::Unpacked<'a>>,
     ) -> Range<usize> {
+        if let Some(index) = self.binary_search_for(value) {
+            self.reset_iter_to_slab_index(index);
+        }
+
         let pos = self.pos();
         let mut start = pos;
         let mut end = pos;
@@ -273,6 +333,12 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let _ = std::mem::replace(self, Self::new(tree, pos, self.max));
+        Some(())
+    }
+
+    fn reset_iter_to_slab_index(&mut self, index: usize) -> Option<()> {
+        let tree = self.slabs.span_tree()?;
+        let _ = std::mem::replace(self, Self::new_at_index(tree, index, self.max));
         Some(())
     }
 

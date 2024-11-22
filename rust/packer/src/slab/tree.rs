@@ -209,6 +209,13 @@ impl<T: Clone + Debug, W: SpanWeight<T>> SpanTree<T, W> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
+    pub fn get_cursor(&self, index: usize) -> Option<SubCursor<'_, T, W>> {
+        let acc = Default::default();
+        self.root_node
+            .as_ref()
+            .and_then(|n| n.get_cursor(0, index, acc))
+    }
+
     pub fn last(&self) -> Option<&T> {
         self.root_node.as_ref().and_then(|n| n.last())
     }
@@ -842,6 +849,42 @@ impl<T: Clone + Debug, W: SpanWeight<T>> TreeNode<T, W> {
                     Ordering::Greater => {
                         return child.get(index - cumulative_len);
                     }
+                }
+            }
+        }
+        None
+    }
+
+    fn get_cursor(
+        &self,
+        mut current: usize,
+        index: usize,
+        mut acc: W,
+    ) -> Option<SubCursor<'_, T, W>> {
+        if self.is_leaf() {
+            let iter = self.elements.iter();
+            for e in iter {
+                if current == index {
+                    return Some(SubCursor::new(index, acc, e));
+                }
+                current += 1;
+                acc.union(&W::alloc(e));
+            }
+        } else {
+            for i in 0..self.children.len() {
+                if let Some(child) = self.children.get(i) {
+                    if current + child.len() > index {
+                        return child.get_cursor(current, index, acc);
+                    }
+                    current += child.len();
+                    acc.union(child.weight());
+                }
+                if let Some(e) = self.elements.get(i) {
+                    if current == index {
+                        return Some(SubCursor::new(index, acc, e));
+                    }
+                    current += 1;
+                    acc.union(&W::alloc(e));
                 }
             }
         }
