@@ -31,6 +31,7 @@ use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
 mod found_op;
+mod index;
 mod insert;
 mod mark_index;
 mod marks;
@@ -38,6 +39,8 @@ mod op_iter;
 mod op_query;
 mod top_op;
 mod visible;
+
+pub(crate) use index::IndexBuilder;
 
 pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
@@ -105,22 +108,20 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn set_text_index(&mut self, widths: Vec<u64>) {
-        assert_eq!(widths.len(), self.len());
-        self.text_index = ColumnData::new();
-        self.text_index.splice(0, 0, widths);
+    pub(crate) fn index_builder(&self) -> IndexBuilder {
+        IndexBuilder::new(self)
     }
 
-    pub(crate) fn set_inc_index(&mut self, incs: Vec<Option<i64>>) {
-        assert_eq!(incs.len(), self.cols.sub_len());
-        self.inc_index = ColumnData::new();
-        self.inc_index.splice(0, 0, incs);
-    }
+    pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
+        let indexes = builder.finish();
 
-    pub(crate) fn set_mark_index(&mut self, marks: Vec<Option<MarkIndexValue>>) {
-        assert_eq!(marks.len(), self.len());
-        self.mark_index = MarkIndexColumn::new();
-        self.mark_index.splice(0, 0, marks);
+        assert_eq!(indexes.text.len(), self.len());
+        assert_eq!(indexes.mark.len(), self.len());
+        assert_eq!(indexes.inc.len(), self.cols.sub_len());
+
+        self.text_index = indexes.text;
+        self.inc_index = indexes.inc;
+        self.mark_index = indexes.mark;
     }
 
     pub(crate) fn insert(&mut self, op: &OpBuilder2) {

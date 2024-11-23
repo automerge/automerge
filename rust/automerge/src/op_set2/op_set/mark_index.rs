@@ -109,6 +109,10 @@ pub(crate) type MarkIndex = MarkIndexInternal<64>;
 pub(crate) struct MarkIndexColumn(ColumnData<MarkIndex>);
 
 impl MarkIndexColumn {
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         // FIXME - would be much better to do this by run instead of by value
         let new_col = self

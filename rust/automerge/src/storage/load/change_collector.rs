@@ -7,13 +7,13 @@ use std::{
 use tracing::instrument;
 
 use crate::{
-    op_set2::{OpBuilder2, OpSet},
+    op_set2::{KeyRef, Op, OpBuilder2, OpSet},
     storage::{
         change::{PredOutOfOrder, Verified},
         convert::ob_as_actor_id,
         Change as StoredChange, ChangeMetadata,
     },
-    types::ChangeHash,
+    types::{ChangeHash, ObjId, OpId},
 };
 
 use fxhash::FxBuildHasher;
@@ -34,13 +34,20 @@ pub(crate) enum Error {
     MissingOps,
 }
 
+type ChangesByActor<'a> = HashMap<usize, Vec<PartialChange<'a>>, FxBuildHasher>;
+
+#[derive(Default)]
 pub(crate) struct ChangeCollector<'a> {
-    changes_by_actor: HashMap<usize, Vec<PartialChange<'a>>, FxBuildHasher>,
+    changes_by_actor: ChangesByActor<'a>,
+    last: Option<(ObjId, KeyRef<'a>)>,
+    preds: HashMap<OpId, Vec<OpId>>,
+    max_op: u64,
 }
 
 pub(crate) struct CollectedChanges<'a> {
     pub(crate) history: Vec<StoredChange<'a, Verified>>,
     pub(crate) heads: BTreeSet<ChangeHash>,
+    pub(crate) max_op: u64,
 }
 
 impl<'a> ChangeCollector<'a> {
@@ -50,8 +57,7 @@ impl<'a> ChangeCollector<'a> {
     where
         I: IntoIterator<Item = Result<ChangeMetadata<'a>, E>>,
     {
-        let mut changes_by_actor: HashMap<usize, Vec<PartialChange<'_>>, FxBuildHasher> =
-            HashMap::default();
+        let mut changes_by_actor = ChangesByActor::default();
         for (index, change) in changes.into_iter().enumerate() {
             tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
@@ -77,37 +83,50 @@ impl<'a> ChangeCollector<'a> {
         }
         let num_changes: usize = changes_by_actor.values().map(|v| v.len()).sum();
         tracing::trace!(num_changes, "change collection context created");
-        Ok(ChangeCollector { changes_by_actor })
+        Ok(ChangeCollector {
+            changes_by_actor,
+            ..Default::default()
+        })
     }
 
-    /*
-        #[instrument(skip(self))]
-        pub(crate) fn collect(&mut self, opid: OpId, op: Op<'a>, pred: Vec<OpId>) -> Result<(), Error> {
-            let actor_changes = self
-                .changes_by_actor
-                .get_mut(&opid.actor())
-                .ok_or_else(|| {
-                    tracing::error!(missing_actor = opid.actor(), "missing actor for op");
-                    Error::MissingActor
-                })?;
-            let change_index = actor_changes.partition_point(|c| c.max_op < opid.counter());
-            let change = actor_changes.get_mut(change_index).ok_or_else(|| {
-                tracing::error!(missing_change_index = change_index, "missing change for op");
-                Error::MissingChange
-            })?;
-            change.ops.push(OpWithMetadata::new(op,pred));
-            Ok(())
-        }
-    */
+    pub(crate) fn process_succ(&mut self, op: &Op<'a>, id: OpId) {
+        self.max_op = std::cmp::max(self.max_op, id.counter());
+        self.preds.entry(id).or_default().push(op.id);
+    }
 
-    pub(crate) fn collect(&mut self, op: OpBuilder2) -> Result<(), Error> {
-        let actor_changes = self
-            .changes_by_actor
-            .get_mut(&op.id.actor())
-            .ok_or_else(|| {
-                tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
-                Error::MissingActor
-            })?;
+    pub(crate) fn process_op(&mut self, op: &Op<'a>) -> Result<(), Error> {
+        self.max_op = std::cmp::max(self.max_op, op.id.counter());
+        let next = Some((op.obj, op.elemid_or_key()));
+
+        if self.last != next {
+            self.flush_deletes()?;
+            self.last = next;
+        }
+
+        let pred = self.preds.remove(&op.id);
+
+        let change_op = op.build(pred.iter().flatten().cloned());
+
+        Self::collect(&mut self.changes_by_actor, change_op)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn flush_deletes(&mut self) -> Result<(), Error> {
+        if let Some((obj, key)) = self.last.take() {
+            for (id, pred) in self.preds.drain() {
+                let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred.iter().cloned());
+                Self::collect(&mut self.changes_by_actor, del)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn collect(changes_by_actor: &mut ChangesByActor<'_>, op: OpBuilder2) -> Result<(), Error> {
+        let actor_changes = changes_by_actor.get_mut(&op.id.actor()).ok_or_else(|| {
+            tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
+            Error::MissingActor
+        })?;
         let change_index = actor_changes.partition_point(|c| c.max_op < op.id.counter());
         let change = actor_changes.get_mut(change_index).ok_or_else(|| {
             tracing::error!(missing_change_index = change_index, "missing change for op");
@@ -117,47 +136,10 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    /*
-        #[instrument(skip(self, op_set))]
-        pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
-            let mut changes_in_order =
-                Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
-            for (_, changes) in self.changes_by_actor {
-                let mut seq = None;
-                for change in changes {
-                    if let Some(seq) = seq {
-                        if seq != change.seq - 1 {
-                            return Err(Error::ChangesOutOfOrder);
-                        }
-                    } else if change.seq != 1 {
-                        return Err(Error::ChangesOutOfOrder);
-                    }
-                    seq = Some(change.seq);
-                    changes_in_order.push(change);
-                }
-            }
-            changes_in_order.sort_by_key(|c| c.index);
-
-            let mut hashes_by_index = HashMap::default();
-            let mut history = Vec::new();
-            let mut heads = BTreeSet::new();
-            for (index, change) in changes_in_order.into_iter().enumerate() {
-                let finished = change.finish(&hashes_by_index, op_set)?;
-                let hash = finished.hash();
-                hashes_by_index.insert(index, hash);
-                for dep in finished.dependencies() {
-                    heads.remove(dep);
-                }
-                heads.insert(hash);
-                history.push(finished.into_owned());
-            }
-
-            Ok(CollectedChanges { history, heads })
-        }
-    */
-
     #[instrument(skip(self, op_set))]
-    pub(crate) fn finish(self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
+    pub(crate) fn finish(mut self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
+        self.flush_deletes()?;
+
         let mut changes_in_order =
             Vec::with_capacity(self.changes_by_actor.values().map(|c| c.len()).sum());
         for (_actor, changes) in self.changes_by_actor {
@@ -190,7 +172,13 @@ impl<'a> ChangeCollector<'a> {
             history.push(finished.into_owned());
         }
 
-        Ok(CollectedChanges { history, heads })
+        let max_op = self.max_op;
+
+        Ok(CollectedChanges {
+            history,
+            heads,
+            max_op,
+        })
     }
 }
 

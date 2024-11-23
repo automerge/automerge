@@ -69,6 +69,9 @@ impl ChangeGraph {
             clock.rewrite_with_new_actor(idx)
         }
     }
+    pub(crate) fn has_change(&self, hash: &ChangeHash) -> bool {
+        self.nodes_by_hash.contains_key(hash)
+    }
 
     pub(crate) fn add_change(
         &mut self,

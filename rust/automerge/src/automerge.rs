@@ -461,8 +461,7 @@ impl Automerge {
         let mut heads = heads.to_vec();
         let mut changes = vec![];
         while let Some(hash) = heads.pop() {
-            if let Some(idx) = self.history_index.get(&hash) {
-                let change = &self.history[*idx];
+            if let Some(change) = self.get_change_by_hash(&hash) {
                 for dep in change.deps() {
                     if !seen.contains(dep) {
                         heads.push(*dep);
@@ -796,7 +795,7 @@ impl Automerge {
         // empty document right now, once we have logic to produce the diffs between arbitrary
         // states of the OpSet we can make this cleaner.
         for c in changes {
-            if !self.history_index.contains_key(&c.hash()) {
+            if !self.has_change(&c.hash()) {
                 if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
                         c.seq(),
@@ -811,7 +810,7 @@ impl Automerge {
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
-            if !self.history_index.contains_key(&c.hash()) {
+            if !self.has_change(&c.hash()) {
                 self.apply_change(c, patch_log)?;
             }
         }
@@ -833,10 +832,7 @@ impl Automerge {
     }
 
     fn is_causally_ready(&self, change: &Change) -> bool {
-        change
-            .deps()
-            .iter()
-            .all(|d| self.history_index.contains_key(d))
+        change.deps().iter().all(|d| self.has_change(d))
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -968,7 +964,7 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         let heads = heads
             .iter()
-            .filter(|hash| self.history_index.contains_key(hash))
+            .filter(|hash| self.has_change(hash))
             .copied()
             .collect::<Vec<_>>();
 
@@ -1291,7 +1287,7 @@ impl Automerge {
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
-            if !seen_hashes.contains(&hash) && self.get_change_by_hash(&hash).is_none() {
+            if !seen_hashes.contains(&hash) && !self.has_change(&hash) {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
                 if let Some(change) = other.get_change_by_hash(&hash) {
@@ -1713,6 +1709,10 @@ impl Automerge {
     pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
         other.shared_heads == self.get_heads()
     }
+
+    fn has_change(&self, head: &ChangeHash) -> bool {
+        self.change_graph.has_change(head)
+    }
 }
 
 impl ReadDoc for Automerge {
@@ -1924,13 +1924,13 @@ impl ReadDoc for Automerge {
         let mut missing = HashSet::new();
 
         for head in self.queue.iter().flat_map(|change| change.deps()) {
-            if !self.history_index.contains_key(head) {
+            if !self.has_change(head) {
                 missing.insert(head);
             }
         }
 
         for head in heads {
-            if !self.history_index.contains_key(head) {
+            if !self.has_change(head) {
                 missing.insert(head);
             }
         }
