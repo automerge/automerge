@@ -1,10 +1,8 @@
 use crate::{marks::MarkSet, types::Clock};
 
 use super::{Op, OpId, OpIter, OpQueryTerm};
-use crate::iter::KeyIter;
 use crate::op_set2::types::{Action, ScalarValue};
 
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -33,11 +31,11 @@ impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for VisibleOpIter<'a, I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let clock = self.clock.as_ref();
-        while let Some(mut op) = self.iter.next() {
+        for mut op in self.iter.by_ref() {
             if op.action == Action::Increment {
                 continue;
             }
-            if op.scope_to_clock(clock, self.get_opiter()) {
+            if op.scope_to_clock(clock) {
                 return Some(op);
             }
         }
@@ -50,28 +48,23 @@ impl<'a> Op<'a> {
         &self,
         counter: i64,
         clock: Option<&Clock>,
-        iter: &OpIter<'a>,
     ) -> (bool, Option<ScalarValue<'a>>) {
-        let mut succ = self
-            .succ()
-            .filter(|i| vis(clock, i))
-            .collect::<HashSet<_>>();
-        // shouldnt need to clone Op
-        let key_iter = KeyIter::new(*self, iter.clone());
         let mut inc = 0;
-        for op in key_iter {
-            if op.action == Action::Increment && succ.contains(&op.id) {
-                if vis(clock, &op.id) {
-                    inc += op.get_increment_value().unwrap_or(0);
+        let mut deleted = false;
+        for (i, val) in self.succ_inc() {
+            if vis(clock, &i) {
+                if let Some(v) = val {
+                    inc += v;
+                } else {
+                    deleted = true;
                 }
-                succ.remove(&op.id);
             }
         }
-        (!succ.is_empty(), Some(ScalarValue::Counter(counter + inc)))
+        (deleted, Some(ScalarValue::Counter(counter + inc)))
     }
 
-    pub(crate) fn scope_to_clock(&mut self, clock: Option<&Clock>, iter: &OpIter<'a>) -> bool {
-        let visibility = self.maybe_scope_to_clock(clock, iter);
+    pub(crate) fn scope_to_clock(&mut self, clock: Option<&Clock>) -> bool {
+        let visibility = self.maybe_scope_to_clock(clock);
         let result = visibility.visible();
         if let Some(v) = visibility.value {
             self.value = v;
@@ -79,10 +72,10 @@ impl<'a> Op<'a> {
         result
     }
 
-    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>, iter: &OpIter<'a>) -> Visibility<'a> {
+    fn maybe_scope_to_clock(&mut self, clock: Option<&Clock>) -> Visibility<'a> {
         let predates = vis(clock, &self.id);
         if let ScalarValue::Counter(n) = self.value {
-            let (deleted, value) = self.maybe_scope_counter_to_clock(n, clock, iter);
+            let (deleted, value) = self.maybe_scope_counter_to_clock(n, clock);
             Visibility {
                 predates,
                 deleted,
@@ -154,13 +147,12 @@ impl<'a, 'b, I: OpQueryTerm<'a> + Clone> Iterator for DiffOpIter<'a, 'b, I> {
     type Item = DiffOp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(mut op) = self.iter.next() {
-            let iter = self.iter.get_opiter();
+        for mut op in self.iter.by_ref() {
             if op.action == Action::Increment {
                 continue;
             }
-            let before = op.maybe_scope_to_clock(Some(self.before), iter);
-            let after = op.maybe_scope_to_clock(Some(self.after), iter);
+            let before = op.maybe_scope_to_clock(Some(self.before));
+            let after = op.maybe_scope_to_clock(Some(self.after));
             if before.visible() || after.visible() {
                 let value_before = before.value;
                 let value_after = after.value;

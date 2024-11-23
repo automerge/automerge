@@ -1,4 +1,6 @@
-use crate::op_set2::{Op, OpIter, OpQuery, OpQueryTerm, TopOpIter, VisibleOpIter};
+#[cfg(test)]
+use crate::op_set2::Op;
+use crate::op_set2::{OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 
@@ -28,21 +30,14 @@ impl<'a> Keys<'a> {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(crate) struct KeyIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
     head: Option<Op<'a>>,
     iter: I,
 }
 
-impl<'a, I: OpQuery<'a>> KeyIter<'a, I> {
-    pub(crate) fn new(op: Op<'a>, iter: I) -> Self {
-        KeyIter {
-            head: Some(op),
-            iter,
-        }
-    }
-}
-
+#[cfg(test)]
 impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for KeyIter<'a, I> {
     type Item = Op<'a>;
 

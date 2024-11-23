@@ -527,7 +527,8 @@ impl LitRunCursor {
 //pub type StrCursor = RleCursor<1024, str>;
 pub type StrCursor = RleCursor<128, str>;
 //pub type IntCursor = RleCursor<1024, u64>;
-pub type IntCursor = RleCursor<64, u64>;
+pub type UIntCursor = RleCursor<64, u64>;
+pub type IntCursor = RleCursor<64, i64>;
 
 #[derive(Debug, Clone, Default)]
 pub enum RleState<'a, P: Packable + ?Sized> {

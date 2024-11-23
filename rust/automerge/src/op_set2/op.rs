@@ -1,5 +1,5 @@
 use super::op_set::{MarkIndexValue, OpLike, OpSet};
-use super::packer::{ColumnDataIter, DeltaCursor};
+use super::packer::{ColumnDataIter, DeltaCursor, IntCursor};
 use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
 use super::{Value, ValueMeta};
 
@@ -70,7 +70,7 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn del(id: OpId, obj: ObjMeta, key: Key, pred: Vec<OpId>) -> Self {
+    pub(crate) fn del<I: Iterator<Item = OpId>>(id: OpId, obj: ObjMeta, key: Key, pred: I) -> Self {
         OpBuilder2 {
             id,
             obj,
@@ -79,7 +79,7 @@ impl OpBuilder2 {
             action: types::OpType::Delete,
             key,
             insert: false,
-            pred,
+            pred: pred.collect(),
         }
     }
 
@@ -260,6 +260,7 @@ pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
+    pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
 }
 
 impl<'a> SuccCursors<'a> {
@@ -276,6 +277,8 @@ impl<'a> std::fmt::Debug for SuccCursors<'a> {
     }
 }
 
+struct SuccIncCursors<'a>(SuccCursors<'a>);
+
 impl<'a> Iterator for SuccCursors<'a> {
     type Item = OpId;
 
@@ -283,12 +286,8 @@ impl<'a> Iterator for SuccCursors<'a> {
         if self.len == 0 {
             None
         } else {
-            let Some(Some(counter)) = self.succ_counter.next() else {
-                return None;
-            };
-            let Some(Some(actor)) = self.succ_actor.next() else {
-                return None;
-            };
+            let counter = self.succ_counter.next()??;
+            let actor = self.succ_actor.next()??;
             self.len -= 1;
             Some(OpId::new(counter as u64, u64::from(actor) as usize))
         }
@@ -301,9 +300,33 @@ impl<'a> ExactSizeIterator for SuccCursors<'a> {
     }
 }
 
+impl<'a> Iterator for SuccIncCursors<'a> {
+    type Item = (OpId, Option<i64>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.len == 0 {
+            None
+        } else {
+            let counter = self.0.succ_counter.next()??;
+            let actor = self.0.succ_actor.next()??;
+            self.0.len -= 1;
+            let inc = self.0.inc_values.next()?;
+            let id = OpId::new(counter as u64, u64::from(actor) as usize);
+            Some((id, inc))
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for SuccIncCursors<'a> {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct SuccInsert {
     pub(crate) pos: usize,
+    pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
     pub(crate) sub_pos: usize,
 }
@@ -316,7 +339,7 @@ impl<'a> Op<'a> {
             _ => None,
         }
     }
-    pub(crate) fn add_succ(&self, id: OpId) -> SuccInsert {
+    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors;
         let len = succ.len() as u64;
@@ -327,7 +350,12 @@ impl<'a> Op<'a> {
             }
             sub_pos = succ.pos();
         }
-        SuccInsert { pos, len, sub_pos }
+        SuccInsert {
+            pos,
+            inc,
+            len,
+            sub_pos,
+        }
     }
 
     pub(crate) fn as_str(&self) -> &'a str {
@@ -356,6 +384,10 @@ impl<'a> Op<'a> {
 
     pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = OpId> + 'a {
         self.succ_cursors
+    }
+
+    pub(crate) fn succ_inc(&self) -> impl ExactSizeIterator<Item = (OpId, Option<i64>)> + 'a {
+        SuccIncCursors(self.succ_cursors)
     }
 
     pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
@@ -446,7 +478,7 @@ impl<'a> Op<'a> {
         self.action == Action::Mark
     }
 
-    pub(crate) fn build(&self, pred: Option<Vec<OpId>>) -> OpBuilder2 {
+    pub(crate) fn build<I: Iterator<Item = OpId>>(&self, pred: I) -> OpBuilder2 {
         OpBuilder2 {
             id: self.id,
             obj: self.obj.into(),
@@ -455,7 +487,7 @@ impl<'a> Op<'a> {
             action: self.op_type().into_owned(),
             key: self.key.into_owned(),
             insert: self.insert,
-            pred: pred.unwrap_or_default(),
+            pred: pred.collect(),
         }
     }
 }

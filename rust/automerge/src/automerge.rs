@@ -1238,7 +1238,12 @@ impl Automerge {
             found.log_patches(&obj, &op, &op.pred, self, patch_log);
         }
 
-        let succ: Vec<_> = found.succ.iter().map(|op| op.add_succ(op.id)).collect();
+        let inc_amount = op.get_increment_value();
+        let succ: Vec<_> = found
+            .succ
+            .iter()
+            .map(|o| o.add_succ(op.id, inc_amount))
+            .collect();
 
         if !op.is_delete() {
             self.ops.insert(&op);

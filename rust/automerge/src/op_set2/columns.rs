@@ -3,8 +3,8 @@ use crate::types::ActorId;
 
 use super::meta::MetaCursor;
 use super::packer::{
-    BooleanCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor, ScanMeta, SlabTree,
-    SlabWeight, StrCursor,
+    BooleanCursor, ColumnData, DeltaCursor, PackError, RawCursor, ScanMeta, SlabTree, SlabWeight,
+    StrCursor, UIntCursor,
 };
 use super::types::{ActionCursor, ActorCursor};
 
@@ -16,13 +16,13 @@ use std::sync::Arc;
 pub(crate) enum Column {
     Actor(ColumnData<ActorCursor>),
     Str(ColumnData<StrCursor>),
-    Integer(ColumnData<IntCursor>),
+    Integer(ColumnData<UIntCursor>),
     Action(ColumnData<ActionCursor>),
     Delta(ColumnData<DeltaCursor>),
     Bool(ColumnData<BooleanCursor>),
     ValueMeta(ColumnData<MetaCursor>),
     Value(ColumnData<RawCursor>),
-    Group(ColumnData<IntCursor>),
+    Group(ColumnData<UIntCursor>),
 }
 
 impl Column {

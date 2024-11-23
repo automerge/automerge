@@ -260,7 +260,7 @@ impl TransactionInner {
             self.next_id(),
             obj,
             elemid.into(),
-            ops.iter().map(|op| op.id).collect(),
+            ops.iter().map(|op| op.id),
         )
         /*
                     id: self.next_id(),
@@ -416,8 +416,13 @@ impl TransactionInner {
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
+        let inc_value = op.get_increment_value();
 
-        let succ: Vec<_> = query.ops.iter().map(|op| op.add_succ(id)).collect();
+        let succ: Vec<_> = query
+            .ops
+            .iter()
+            .map(|op| op.add_succ(id, inc_value))
+            .collect();
 
         self.insert_local_op(doc, patch_log, op, &succ);
 
@@ -463,10 +468,11 @@ impl TransactionInner {
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
+        let inc_value = op.get_increment_value();
         let succ = query
             .ops
             .iter()
-            .map(|op| op.add_succ(id))
+            .map(|op| op.add_succ(id, inc_value))
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, patch_log, op, &succ);
@@ -635,7 +641,7 @@ impl TransactionInner {
             let ops_pos = query
                 .ops
                 .iter()
-                .map(|o| o.add_succ(op.id))
+                .map(|o| o.add_succ(op.id, None))
                 .collect::<Vec<_>>();
 
             doc.ops_mut().add_succ(&ops_pos, op.id);
@@ -855,7 +861,7 @@ impl TransactionInner {
         */
         let index = found.index;
         //let pos = found.op.pos;
-        let succ_pos = vec![found.op.add_succ(op.id)];
+        let succ_pos = vec![found.op.add_succ(op.id, None)];
         /*
                 {
                     let mut iter = doc.ops().iter(&text_obj.id);

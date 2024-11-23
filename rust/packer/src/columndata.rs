@@ -332,6 +332,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
+        let pos = std::cmp::min(pos, self.max);
         let _ = std::mem::replace(self, Self::new(tree, pos, self.max));
         Some(())
     }
@@ -375,7 +376,6 @@ pub struct ColGroupItem<'a, P: Packable + ?Sized> {
 }
 
 impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
-    //type Item = (Option<<C::Item as Packable>::Unpacked<'a>>, usize);
     type Item = ColGroupItem<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -482,7 +482,9 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub fn iter_range(&self, range: Range<usize>) -> ColumnDataIter<'_, C> {
-        ColumnDataIter::new(&self.slabs, range.start, range.end)
+        let start = std::cmp::min(self.len, range.start);
+        let end = std::cmp::min(self.len, range.end);
+        ColumnDataIter::new(&self.slabs, start, end)
     }
 
     #[cfg(debug_assertions)]
@@ -690,7 +692,7 @@ impl<C: ColumnCursor, M: MaybePackable<C::Item> + Debug + Clone> FromIterator<M>
 pub(crate) mod tests {
     use super::super::boolean::BooleanCursor;
     use super::super::delta::{DeltaCursor, DeltaCursorInternal};
-    use super::super::rle::{IntCursor, RleCursor, StrCursor};
+    use super::super::rle::{RleCursor, StrCursor, UIntCursor};
     use super::super::test::ColExport;
     use super::*;
     use rand::prelude::*;
@@ -736,7 +738,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_breaking_literal_runs_in_int_column() {
         let numbers = vec![1, 2, 3];
-        let mut start = ColumnData::<IntCursor>::new();
+        let mut start = ColumnData::<UIntCursor>::new();
         start.splice(0, 0, numbers);
         assert_eq!(
             start.test_dump(),
@@ -791,7 +793,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_breaking_runs_in_int_column() {
         let numbers = vec![2, 2, 2];
-        let mut start = ColumnData::<IntCursor>::new();
+        let mut start = ColumnData::<UIntCursor>::new();
         start.splice(0, 0, numbers);
         assert_eq!(start.test_dump(), vec![vec![ColExport::Run(3, 2)]]);
         let mut col = start.clone();
@@ -831,7 +833,7 @@ pub(crate) mod tests {
     #[test]
     fn column_data_breaking_null_runs_in_int_column() {
         let numbers = vec![None, None, Some(2), Some(2), None, None, None];
-        let mut start = ColumnData::<IntCursor>::new();
+        let mut start = ColumnData::<UIntCursor>::new();
         start.splice(0, 0, numbers);
         assert_eq!(
             start.test_dump(),
@@ -1140,7 +1142,7 @@ pub(crate) mod tests {
     fn column_data_fuzz_test_advance_by_int() {
         let mut rng = make_rng();
         for _ in 0..FUZZ_SIZE {
-            let mut col = ColumnData::<IntCursor>::new();
+            let mut col = ColumnData::<UIntCursor>::new();
             let values = Option::<u64>::rand_vec(&mut rng);
             col.splice(0, 0, values.clone());
             test_advance_by(&mut rng, &values, &mut col);

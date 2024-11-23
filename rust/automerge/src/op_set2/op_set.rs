@@ -17,7 +17,7 @@ use super::columns::Column;
 use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 use super::packer::{
     BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawCursor,
-    RawReader, Run, SlabWeight, StrCursor,
+    RawReader, Run, SlabWeight, StrCursor, UIntCursor,
 };
 use super::types::{
     Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
@@ -54,7 +54,8 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 pub(crate) struct OpSet {
     len: usize,
     pub(crate) actors: Vec<ActorId>,
-    text_index: ColumnData<IntCursor>,
+    text_index: ColumnData<UIntCursor>,
+    inc_index: ColumnData<IntCursor>,
     mark_index: MarkIndexColumn,
     cols: Columns,
 }
@@ -78,6 +79,7 @@ impl OpSet {
             actors,
             cols: Columns::default(),
             text_index: ColumnData::new(),
+            inc_index: ColumnData::new(),
             mark_index: MarkIndexColumn::new(),
         }
     }
@@ -109,6 +111,12 @@ impl OpSet {
         self.text_index.splice(0, 0, widths);
     }
 
+    pub(crate) fn set_inc_index(&mut self, incs: Vec<Option<i64>>) {
+        assert_eq!(incs.len(), self.cols.sub_len());
+        self.inc_index = ColumnData::new();
+        self.inc_index.splice(0, 0, incs);
+    }
+
     pub(crate) fn set_mark_index(&mut self, marks: Vec<Option<MarkIndexValue>>) {
         assert_eq!(marks.len(), self.len());
         self.mark_index = MarkIndexColumn::new();
@@ -138,6 +146,8 @@ impl OpSet {
 
             let succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
             succ_counter.splice(i.sub_pos, 0, vec![id.counter() as i64]);
+
+            self.inc_index.splice(i.sub_pos, 0, vec![i.inc]);
 
             self.text_index.splice(i.pos, 1, vec![0]);
         }
@@ -197,6 +207,10 @@ impl OpSet {
 
     pub(crate) fn len(&self) -> usize {
         self.len
+    }
+
+    pub(crate) fn sub_len(&self) -> usize {
+        self.cols.sub_len()
     }
 
     pub(crate) fn seq_length(
@@ -295,11 +309,9 @@ impl OpSet {
         let iter = self.iter_prop(obj, key);
         let end_pos = iter.end_pos();
         let ops = iter.visible(clock.cloned()).collect::<Vec<_>>();
-        let ops_pos = ops.iter().map(|op| op.pos).collect::<Vec<_>>();
         OpsFound {
             index: 0,
             ops,
-            ops_pos,
             end_pos,
         }
     }
@@ -345,7 +357,6 @@ impl OpSet {
         OpsFound {
             index,
             ops: vec![],
-            ops_pos: vec![],
             end_pos,
         }
     }
@@ -435,7 +446,6 @@ impl OpSet {
         let mut iter = self.text_index.iter_range(range.clone()).with_acc();
 
         let mut ops = vec![];
-        let mut ops_pos = vec![];
         let mut end_pos = range.end;
 
         let obj_start = iter.acc();
@@ -448,7 +458,6 @@ impl OpSet {
                 }
                 if op.succ().len() == 0 {
                     ops.push(op);
-                    ops_pos.push(op.pos);
                 }
                 end_pos = op.pos + 1;
             }
@@ -457,7 +466,6 @@ impl OpSet {
         Some(OpsFound {
             index,
             ops,
-            ops_pos,
             end_pos,
         })
     }
@@ -499,15 +507,15 @@ impl OpSet {
         let obj_acc = self.text_index.get_acc(range.start).as_usize();
         let op_acc = self.text_index.get_acc(op_pos).as_usize();
 
+        let iter = self.iter_range(&(op_pos..range.end));
         let mut marks = self.get_marks_at(op_pos, clock);
-        let mut iter = self.iter_range(&(op_pos..range.end));
         let mut pos = range.end;
         let mut current = 0;
         let mut index = op_acc - obj_acc;
         let mut ops = vec![];
         let mut found = false;
         if insert {
-            while let Some(mut op) = iter.next() {
+            for mut op in iter {
                 if op.insert {
                     index += current;
                     current = 0;
@@ -520,7 +528,7 @@ impl OpSet {
                     }
                 }
 
-                let visible = op.scope_to_clock(clock, iter.get_opiter());
+                let visible = op.scope_to_clock(clock);
 
                 if visible {
                     marks.process(op.id(), op.action());
@@ -529,7 +537,7 @@ impl OpSet {
             }
             index += current;
         } else {
-            while let Some(mut op) = iter.next() {
+            for mut op in iter {
                 if op.insert {
                     if found {
                         pos = op.pos;
@@ -545,7 +553,7 @@ impl OpSet {
                     pos = op.pos;
                 }
 
-                let visible = op.scope_to_clock(clock, iter.get_opiter());
+                let visible = op.scope_to_clock(clock);
 
                 if found {
                     ops.push((op, visible));
@@ -596,7 +604,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> SeekOpIdResult<'_> {
-        let mut iter = self.iter_obj(obj);
+        let iter = self.iter_obj(obj);
         let mut pos = iter.end_pos();
         let mut ops = vec![];
         let mut found = target.is_head();
@@ -604,7 +612,7 @@ impl OpSet {
         let mut current = 0;
         let mut marks = MarkStateMachine::default();
         if insert {
-            while let Some(mut op) = iter.next() {
+            for mut op in iter {
                 if op.insert {
                     index += current;
                     current = 0;
@@ -617,7 +625,7 @@ impl OpSet {
                     }
                 }
 
-                let visible = op.scope_to_clock(clock, iter.get_opiter());
+                let visible = op.scope_to_clock(clock);
 
                 if visible {
                     marks.process(op.id(), op.action());
@@ -626,7 +634,7 @@ impl OpSet {
             }
             index += current;
         } else {
-            while let Some(mut op) = iter.next() {
+            for mut op in iter {
                 if op.insert {
                     if found {
                         pos = op.pos;
@@ -642,7 +650,7 @@ impl OpSet {
                     pos = op.pos;
                 }
 
-                let visible = op.scope_to_clock(clock, iter.get_opiter());
+                let visible = op.scope_to_clock(clock);
 
                 if found {
                     ops.push((op, visible));
@@ -706,7 +714,7 @@ impl OpSet {
         Cursor::new(id, self)
     }
 
-    fn get_obj_ctr(&self) -> ColumnDataIter<'_, IntCursor> {
+    fn get_obj_ctr(&self) -> ColumnDataIter<'_, UIntCursor> {
         self.cols.get_integer(OBJ_ID_COUNTER_COL_SPEC)
     }
 
@@ -768,17 +776,16 @@ impl OpSet {
         id: &OpId,
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
-        // FIXME - INDEX
         let start = self.get_op_id_pos(*id)?;
         let mut iter = self.iter_range(&(start..self.len()));
         while let Some(mut o1) = iter.next() {
             if &o1.id == id {
-                let mut vis = o1.scope_to_clock(clock, &iter);
-                while let Some(mut o2) = iter.next() {
+                let mut vis = o1.scope_to_clock(clock);
+                for mut o2 in iter {
                     if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
                         break;
                     }
-                    if o2.scope_to_clock(clock, &iter) {
+                    if o2.scope_to_clock(clock) {
                         vis = false;
                     }
                 }
@@ -813,11 +820,11 @@ impl OpSet {
                 self.found_op_with_patch_log(new_op, &r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
-                let mut iter = self.iter_prop(&new_op.obj, s);
+                let iter = self.iter_prop(&new_op.obj, s);
                 let mut pos = iter.end_pos();
                 let mut ops = vec![];
-                while let Some(mut o) = iter.next() {
-                    let visible = o.scope_to_clock(None, iter.get_opiter());
+                for mut o in iter {
+                    let visible = o.scope_to_clock(None);
                     ops.push((o, visible));
                     if o.id > new_op.id {
                         pos = o.pos;
@@ -916,6 +923,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
+            inc_index: ColumnData::new(),
             mark_index: MarkIndexColumn::new(),
         }
     }
@@ -945,6 +953,7 @@ impl OpSet {
             cols,
             len,
             text_index: ColumnData::new(),
+            inc_index: ColumnData::new(),
             mark_index: MarkIndexColumn::new(),
         };
 
@@ -1000,14 +1009,12 @@ impl OpSet {
             .get_value_range(VALUE_COL_SPEC, value_meta.calculate_acc().as_usize());
 
         let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
-        let succ_actor = self.cols.get_actor_range(
-            SUCC_ACTOR_COL_SPEC,
-            &(succ_count.calculate_acc().as_usize()..usize::MAX),
-        );
-        let succ_counter = self.cols.get_delta_integer_range(
-            SUCC_COUNTER_COL_SPEC,
-            &(succ_count.calculate_acc().as_usize()..usize::MAX),
-        );
+        let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
+        let succ_actor = self.cols.get_actor_range(SUCC_ACTOR_COL_SPEC, &succ_range);
+        let succ_counter = self
+            .cols
+            .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, &succ_range);
+        let inc_values = self.inc_index.iter_range(succ_range);
 
         OpIter {
             pos: range.start,
@@ -1025,6 +1032,7 @@ impl OpSet {
             succ_count,
             succ_actor,
             succ_counter,
+            inc_values,
             insert: self.cols.get_boolean_range(INSERT_COL_SPEC, range),
             action: self.cols.get_action_range(ACTION_COL_SPEC, range),
             value_meta,
@@ -1048,6 +1056,7 @@ impl OpSet {
             succ_count: self.cols.get_group(SUCC_COUNT_COL_SPEC),
             succ_actor: self.cols.get_actor(SUCC_ACTOR_COL_SPEC),
             succ_counter: self.cols.get_delta_integer(SUCC_COUNTER_COL_SPEC),
+            inc_values: self.inc_index.iter(),
             insert: self.cols.get_boolean(INSERT_COL_SPEC),
             action: self.cols.get_action(ACTION_COL_SPEC),
             value_meta: self.cols.get_value_meta(VALUE_META_COL_SPEC),
@@ -1090,10 +1099,10 @@ impl OpSet {
                 match spec.col_type() {
                     ColumnType::Actor => ActorCursor::decode(data),
                     ColumnType::String => StrCursor::decode(data),
-                    ColumnType::Integer => IntCursor::decode(data),
+                    ColumnType::Integer => UIntCursor::decode(data),
                     ColumnType::DeltaInteger => DeltaCursor::decode(data),
                     ColumnType::Boolean => BooleanCursor::decode(data),
-                    ColumnType::Group => IntCursor::decode(data),
+                    ColumnType::Group => UIntCursor::decode(data),
                     ColumnType::ValueMetadata => MetaCursor::decode(data),
                     ColumnType::Value => log!("raw :: {:?}", data),
                 }
@@ -1285,7 +1294,6 @@ pub(crate) struct FoundOpId<'a> {
 pub(crate) struct OpsFound<'a> {
     pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
-    pub(crate) ops_pos: Vec<usize>,
     pub(crate) end_pos: usize,
 }
 
@@ -1586,7 +1594,7 @@ impl Columns {
         );
         columns.insert(OBJ_ID_ACTOR_COL_SPEC, Column::Actor(obj_actor_col));
 
-        let mut obj_counter_col = ColumnData::<IntCursor>::new();
+        let mut obj_counter_col = ColumnData::<UIntCursor>::new();
         obj_counter_col.splice(
             0,
             0,
@@ -1639,7 +1647,7 @@ impl Columns {
         );
         columns.insert(KEY_STR_COL_SPEC, Column::Str(key_str));
 
-        let mut succ_count = ColumnData::<IntCursor>::new();
+        let mut succ_count = ColumnData::<UIntCursor>::new();
         succ_count.splice(
             0,
             0,
@@ -1710,6 +1718,13 @@ impl Columns {
         self.0.get(&ID_ACTOR_COL_SPEC).map(|c| c.len()).unwrap_or(0)
     }
 
+    pub(crate) fn sub_len(&self) -> usize {
+        self.0
+            .get(&SUCC_ACTOR_COL_SPEC)
+            .map(|c| c.len())
+            .unwrap_or(0)
+    }
+
     fn get_actor_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActorCursor> {
         match self.0.get_mut(&spec) {
             Some(Column::Actor(c)) => c,
@@ -1756,7 +1771,7 @@ impl Columns {
         }
     }
 
-    fn get_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, IntCursor> {
+    fn get_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, UIntCursor> {
         match self.0.get(&spec) {
             Some(Column::Integer(c)) => c.iter(),
             _ => ColumnDataIter::empty(),
@@ -1767,7 +1782,7 @@ impl Columns {
         &self,
         spec: ColumnSpec,
         range: &Range<usize>,
-    ) -> ColumnDataIter<'_, IntCursor> {
+    ) -> ColumnDataIter<'_, UIntCursor> {
         match self.0.get(&spec) {
             Some(Column::Integer(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
@@ -1879,14 +1894,14 @@ impl Columns {
         }
     }
 
-    fn get_group_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<IntCursor> {
+    fn get_group_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<UIntCursor> {
         match self.0.get_mut(&spec) {
             Some(Column::Group(c)) => c,
             _ => panic!(),
         }
     }
 
-    fn get_group(&self, spec: ColumnSpec) -> ColumnDataIter<'_, IntCursor> {
+    fn get_group(&self, spec: ColumnSpec) -> ColumnDataIter<'_, UIntCursor> {
         match self.0.get(&spec) {
             Some(Column::Group(c)) => c.iter(),
             _ => ColumnDataIter::empty(),
@@ -1897,7 +1912,7 @@ impl Columns {
         &self,
         spec: ColumnSpec,
         range: &Range<usize>,
-    ) -> ColumnDataIter<'_, IntCursor> {
+    ) -> ColumnDataIter<'_, UIntCursor> {
         match self.0.get(&spec) {
             Some(Column::Group(c)) => c.iter_range(range.clone()),
             _ => ColumnDataIter::empty(),
@@ -1929,7 +1944,7 @@ impl Columns {
 }
 
 struct IterObjIds<'a> {
-    ctr: ColumnDataIter<'a, IntCursor>,
+    ctr: ColumnDataIter<'a, UIntCursor>,
     actor: ColumnDataIter<'a, ActorCursor>,
     next_ctr: Option<Run<'a, u64>>,
     next_actor: Option<Run<'a, ActorIdx>>,
@@ -2112,7 +2127,7 @@ mod tests {
     {
         let mut ops = Vec::new();
 
-        let mut group_data = ColumnData::<IntCursor>::new();
+        let mut group_data = ColumnData::<UIntCursor>::new();
         let mut succ_actor_data = ColumnData::<ActorCursor>::new();
         let mut succ_counter_data = ColumnData::<DeltaCursor>::new();
         group_data.splice(
@@ -2131,6 +2146,7 @@ mod tests {
                 .flat_map(|o| o.succs.iter().map(|s| s.actoridx()))
                 .collect::<Vec<_>>(),
         );
+        let inc_index = ColumnData::<IntCursor>::init_empty(succ_actor_data.len());
         succ_counter_data.splice(
             0,
             0,
@@ -2143,6 +2159,7 @@ mod tests {
         let mut group_iter = group_data.iter();
         let mut actor_iter = succ_actor_data.iter();
         let mut counter_iter = succ_counter_data.iter();
+        let mut inc_values = inc_index.iter();
 
         // first encode the succs
         for test_op in test_ops {
@@ -2162,11 +2179,13 @@ mod tests {
                     len: group_count as usize,
                     succ_counter: counter_iter,
                     succ_actor: actor_iter,
+                    inc_values,
                 },
             };
             for _ in 0..group_count {
                 counter_iter.next();
                 actor_iter.next();
+                inc_values.next();
             }
             ops.push(op);
         }

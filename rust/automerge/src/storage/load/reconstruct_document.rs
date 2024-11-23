@@ -59,10 +59,12 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut op_set = OpSet::new(doc)?;
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut preds = HashMap::new();
+    let mut counters = HashMap::new();
     let mut last = None;
     let mut iter = op_set.iter();
     let mut max_op = 0;
     let mut widths = Vec::with_capacity(op_set.len());
+    let mut incs = Vec::with_capacity(op_set.sub_len());
     let mut marks = Vec::with_capacity(op_set.len());
     while let Some(op) = iter.try_next()? {
         marks.push(op.mark_index());
@@ -83,13 +85,24 @@ pub(crate) fn reconstruct_opset<'a>(
         for id in op.succ() {
             max_op = std::cmp::max(max_op, id.counter());
             preds.entry(id).or_default().push(op.id);
+            if op.is_counter() {
+                counters.entry(id).or_insert_with(Vec::new).push(incs.len());
+            }
+            incs.push(None); // will update later
         }
 
         max_op = std::cmp::max(max_op, op.id.counter());
 
         let pred = preds.remove(&op.id);
+        let count = counters.remove(&op.id);
 
-        change_collector.collect(op.build(pred))?;
+        if let Some(i) = op.get_increment_value() {
+            for idx in count.iter().flatten() {
+                incs[*idx] = Some(i);
+            }
+        }
+
+        change_collector.collect(op.build(pred.iter().flatten().cloned()))?;
     }
 
     add_del_ops(&mut change_collector, &mut last, &mut preds)?;
@@ -101,6 +114,7 @@ pub(crate) fn reconstruct_opset<'a>(
     }
 
     op_set.set_text_index(widths);
+    op_set.set_inc_index(incs);
     op_set.set_mark_index(marks);
 
     Ok(ReconOpSet {
@@ -118,7 +132,7 @@ fn add_del_ops(
 ) -> Result<(), Error> {
     if let Some((obj, key)) = last.take() {
         for (id, pred) in preds.drain() {
-            let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred);
+            let del = OpBuilder2::del(id, obj.into(), key.into_owned(), pred.iter().cloned());
             change_collector.collect(del)?;
         }
     }

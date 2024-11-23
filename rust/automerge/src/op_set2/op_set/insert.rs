@@ -84,7 +84,7 @@ impl<'a> InsertQuery<'a> {
             if op.is_inc() {
                 continue;
             }
-            let visible = op.scope_to_clock(self.clock.as_ref(), &self.iter);
+            let visible = op.scope_to_clock(self.clock.as_ref());
             if op.insert {
                 // this is the one place where we need non-visible ops
                 if let Some(last) = last_width.take() {

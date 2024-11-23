@@ -1,5 +1,6 @@
 use crate::op_set2::packer::{
     BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, SlabWeight, StrCursor,
+    UIntCursor,
 };
 use crate::{
     op_set2,
@@ -38,13 +39,14 @@ pub(crate) struct OpIter<'a> {
     pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) id_counter: ColumnDataIter<'a, DeltaCursor>,
     pub(super) obj_id_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) obj_id_counter: ColumnDataIter<'a, IntCursor>,
+    pub(super) obj_id_counter: ColumnDataIter<'a, UIntCursor>,
     pub(super) key_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) key_counter: ColumnDataIter<'a, DeltaCursor>,
     pub(super) key_str: ColumnDataIter<'a, StrCursor>,
-    pub(super) succ_count: ColumnDataIter<'a, IntCursor>,
+    pub(super) succ_count: ColumnDataIter<'a, UIntCursor>,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
     pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
+    pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
     pub(super) insert: ColumnDataIter<'a, BooleanCursor>,
     pub(super) action: ColumnDataIter<'a, ActionCursor>,
     pub(super) value_meta: ColumnDataIter<'a, MetaCursor>,
@@ -104,7 +106,7 @@ impl<'a> OpIter<'a> {
         let value = self.read_value()?;
         let expand = self.read_expand()?;
         let mark_name = self.read_mark_name()?;
-        let successors = self.read_successors()?;
+        let succ_cursors = self.read_successors()?;
         let pos = self.pos;
         let conflict = false;
         self.pos += 1;
@@ -119,7 +121,7 @@ impl<'a> OpIter<'a> {
             value,
             expand,
             mark_name,
-            succ_cursors: successors,
+            succ_cursors,
         }))
     }
 
@@ -233,11 +235,13 @@ impl<'a> OpIter<'a> {
             len: num_succ as usize,
             succ_actor: self.succ_actor,
             succ_counter: self.succ_counter,
+            inc_values: self.inc_values,
         };
-        for _ in 0..num_succ {
-            self.succ_actor.next();
-            self.succ_counter.next();
-        }
+
+        self.succ_actor.advance_by(num_succ as usize);
+        self.succ_counter.advance_by(num_succ as usize);
+        self.inc_values.advance_by(num_succ as usize);
+
         Ok(result)
     }
 }

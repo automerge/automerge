@@ -10,7 +10,6 @@ pub use map_range::{MapRange, MapRangeItem};
 pub use spans::{Span, Spans};
 pub use values::Values;
 
-pub(crate) use keys::KeyIter;
 pub(crate) use spans::{SpanInternal, SpansInternal};
 
 #[cfg(test)]
