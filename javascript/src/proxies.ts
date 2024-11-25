@@ -24,6 +24,8 @@ import {
   INT,
   UINT,
   F64,
+  RAW_STRING,
+  TEXT,
 } from "./constants.js"
 import { RawString } from "./raw_string.js"
 
@@ -159,9 +161,9 @@ function import_value(
         return [value.value, "counter"]
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
-      } else if (value instanceof RawString) {
+      } else if (isRawString(value)) {
         return [value.toString(), "str"]
-      } else if (value instanceof Text) {
+      } else if (isText(value)) {
         return [value, "text"]
       } else if (value instanceof Uint8Array) {
         return [value, "bytes"]
@@ -986,7 +988,7 @@ function textMethods(target: Target) {
 }
 
 function assertText(value: Text | string): asserts value is Text {
-  if (!(value instanceof Text)) {
+  if (!isText(value)) {
     throw new Error("value was not a Text instance")
   }
 }
@@ -1013,4 +1015,28 @@ function printPath(path: Prop[]): string {
   } else {
     return "/" + jsonPointerComponents.join("/")
   }
+}
+
+function isRawString(obj: any): obj is RawString {
+  // We used to determine whether something was a RawString by doing an instanceof check, but
+  // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
+  // of a symbol to determine if something is a RawString
+
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    Object.prototype.hasOwnProperty.call(obj, RAW_STRING)
+  )
+}
+
+function isText(obj: any): obj is Text {
+  // We used to determine whether something was a Text by doing an instanceof check, but
+  // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
+  // of a symbol to determine if something is a TEXT
+
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    Object.prototype.hasOwnProperty.call(obj, TEXT)
+  )
 }
