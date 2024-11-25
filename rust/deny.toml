@@ -74,12 +74,11 @@ confidence-threshold = 0.8
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # The Unicode-DFS--2016 license is necessary for unicode-ident because they
+    # The Unicode-3.0 license is necessary for unicode-ident because they
     # use data from the unicode tables to generate the tables which are
     # included in the application. We do not distribute those data files so
-    # this is not a problem for us. See https://github.com/dtolnay/unicode-ident/pull/9/files
-    # for more details.
-    { allow = ["MIT", "Apache-2.0", "Unicode-DFS-2016"], name = "unicode-ident" },
+    # this is not a problem for us.
+    { allow = ["MIT", "Apache-2.0", "Unicode-3.0"], name = "unicode-ident" },
 
     # these are needed by cbindgen and its dependancies
     # should be revied more fully before release
