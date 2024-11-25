@@ -1,4 +1,5 @@
 import * as assert from "assert"
+import { TEXT } from "../src/constants.js"
 import * as Automerge from "../src/index.js"
 import { assertEqualsOneOf } from "./helpers.js"
 
@@ -330,5 +331,22 @@ describe("Automerge.Text", () => {
 
   it("should support slice", () => {
     assert.strictEqual(s1.text.slice(0).toString(), s1.text.toString())
+  })
+
+  it("should work with anythying that has the TEXT symbol", () => {
+    class FakeText {
+      val: string;
+      [TEXT] = true
+
+      constructor(val: string) {
+        this.val = val
+      }
+
+      [Symbol.iterator]() {
+        return this.val[Symbol.iterator]()
+      }
+    }
+    const doc = Automerge.from({ value: new FakeText("something") })
+    assert.deepStrictEqual(doc.value, new Automerge.Text("something"))
   })
 })

@@ -174,5 +174,4 @@ describe("cursors", () => {
       assert.equal(cursor, cursor2)
     })
   })
-
 })
