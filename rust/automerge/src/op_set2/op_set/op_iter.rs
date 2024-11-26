@@ -14,6 +14,7 @@ use crate::{
 
 use super::{Op, OpSet};
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 
 /*
@@ -130,12 +131,12 @@ impl<'a> OpIter<'a> {
         let id_counter = self.id_counter.next();
         match (id_actor, id_counter) {
             (Some(Some(actor_idx)), Some(Some(counter))) => {
-                if counter < 0 {
+                if *counter < 0 {
                     Err(ReadOpError::InvalidOpId("negative counter".to_string()))
                 } else {
                     Ok(Some(OpId::new(
-                        counter as u64,
-                        u64::from(actor_idx) as usize,
+                        *counter as u64,
+                        u64::from(*actor_idx) as usize,
                     )))
                 }
             }
@@ -154,14 +155,14 @@ impl<'a> OpIter<'a> {
             (Some(key_str), None | Some(None), None | Some(None)) => {
                 Ok(op_set2::types::KeyRef::Map(key_str))
             }
-            (None, Some(Some(0)) | None, Some(None) | None) => {
+            (None, Some(Some(Cow::Owned(0))) | None, Some(None) | None) => {
                 // ElemId::Head is represented as a counter of 0 and a null actor
                 Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(0, 0))))
             }
-            (None, Some(Some(counter)), Some(Some(actor))) if counter > 0 => {
+            (None, Some(Some(counter)), Some(Some(actor))) if *counter > 0 => {
                 Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(
-                    counter as u64,
-                    u64::from(actor) as usize,
+                    *counter as u64,
+                    u64::from(*actor) as usize,
                 ))))
             }
             (None, Some(None), None | Some(None)) => Err(ReadOpError::MissingKey),
@@ -174,7 +175,7 @@ impl<'a> OpIter<'a> {
 
     fn read_insert(&mut self) -> Result<bool, ReadOpError> {
         match self.insert.next() {
-            Some(Some(b)) => Ok(b),
+            Some(Some(b)) => Ok(*b),
             Some(None) => Ok(false),
             None => Ok(false),
         }
@@ -182,7 +183,7 @@ impl<'a> OpIter<'a> {
 
     fn read_action(&mut self) -> Result<op_set2::types::Action, ReadOpError> {
         match self.action.next() {
-            Some(Some(a)) => Ok(a),
+            Some(Some(a)) => Ok(*a),
             _ => Err(ReadOpError::MissingAction),
         }
     }
@@ -196,7 +197,7 @@ impl<'a> OpIter<'a> {
         } else {
             self.value.read_next(meta.length())?
         };
-        Ok(op_set2::types::ScalarValue::from_raw(meta, raw_data)?)
+        Ok(op_set2::types::ScalarValue::from_raw(*meta, raw_data)?)
     }
 
     fn read_obj(&mut self) -> Result<ObjId, ReadOpError> {
@@ -204,10 +205,10 @@ impl<'a> OpIter<'a> {
         let obj_id_counter = self.obj_id_counter.next();
         match (obj_id_actor, obj_id_counter) {
             (Some(Some(actor_idx)), Some(Some(counter))) => {
-                if counter == 0 {
+                if *counter == 0 {
                     Ok(ObjId::root())
                 } else {
-                    Ok(OpId::new(counter, u64::from(actor_idx) as usize).into())
+                    Ok(OpId::new(*counter, u64::from(*actor_idx) as usize).into())
                 }
             }
             (Some(None), Some(None)) => Ok(ObjId::root()),
@@ -222,20 +223,26 @@ impl<'a> OpIter<'a> {
     }
 
     fn read_expand(&mut self) -> Result<bool, ReadOpError> {
-        Ok(self.expand.next().flatten().unwrap_or(false))
+        Ok(self
+            .expand
+            .next()
+            .flatten()
+            .as_deref()
+            .copied()
+            .unwrap_or(false))
     }
 
-    fn read_mark_name(&mut self) -> Result<Option<&'a str>, ReadOpError> {
+    fn read_mark_name(&mut self) -> Result<Option<Cow<'a, str>>, ReadOpError> {
         Ok(self.mark_name.next().flatten())
     }
 
     fn read_successors(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let num_succ = self.succ_count.next().flatten().unwrap_or(0);
+        let num_succ = *self.succ_count.next().flatten().unwrap_or_default();
         let result = SuccCursors {
             len: num_succ as usize,
-            succ_actor: self.succ_actor,
-            succ_counter: self.succ_counter,
-            inc_values: self.inc_values,
+            succ_actor: self.succ_actor.clone(),
+            succ_counter: self.succ_counter.clone(),
+            inc_values: self.inc_values.clone(),
         };
 
         self.succ_actor.advance_by(num_succ as usize);

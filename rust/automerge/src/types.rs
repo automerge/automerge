@@ -417,6 +417,12 @@ impl From<&String> for Prop {
     }
 }
 
+impl<'a> From<Cow<'a, str>> for Prop {
+    fn from(p: Cow<'a, str>) -> Self {
+        Prop::Map(p.into_owned())
+    }
+}
+
 impl From<&str> for Prop {
     fn from(p: &str) -> Self {
         Prop::Map(p.to_owned())
@@ -557,12 +563,14 @@ impl OpId {
         Ok(Self(self.0, actor as u32))
     }
 
-    #[inline]
     pub(crate) fn counter(&self) -> u64 {
         self.0.into()
     }
 
-    #[inline]
+    pub(crate) fn icounter(&self) -> i64 {
+        self.0.into()
+    }
+
     pub(crate) fn actor(&self) -> usize {
         self.1 as usize
     }
@@ -715,6 +723,10 @@ impl ElemId {
 
     pub(crate) fn counter(&self) -> u64 {
         self.0.counter()
+    }
+
+    pub(crate) fn icounter(&self) -> i64 {
+        self.0.icounter()
     }
 
     pub(crate) fn actor(&self) -> Option<ActorIdx> {

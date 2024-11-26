@@ -383,7 +383,7 @@ mod tests {
                     .with_actor(actor.clone())
                     .with_seq(*seq)
                     .with_timestamp(timestamp)
-                    .build(ops.iter().map(|o| ob_as_actor_id(&osd, o)))
+                    .build(ops.iter().map(|o| ob_as_actor_id(&osd, o)), None)
                     .unwrap(),
             );
             *seq = seq.checked_add(1).unwrap();

@@ -33,7 +33,7 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
                 continue;
             }
             let key = op.elemid_or_key();
-            if Some(key) != self.last_key {
+            if Some(&key) != self.last_key.as_ref() {
                 result = self.found.take();
                 self.last_key = Some(key);
                 self.found = Some(OpsFound::default());

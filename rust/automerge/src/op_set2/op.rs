@@ -216,7 +216,10 @@ impl<'a> OpLike for Op<'a> {
         self.key.elemid()
     }
     fn map_key(&self) -> Option<&str> {
-        self.key.map_key()
+        match &self.key {
+            KeyRef::Map(s) => Some(s.as_ref()),
+            KeyRef::Seq(_) => None,
+        }
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
@@ -235,14 +238,13 @@ impl<'a> OpLike for Op<'a> {
         self.expand
     }
     fn mark_name(&self) -> Option<&str> {
-        self.mark_name
+        self.mark_name.as_deref()
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct Op<'a> {
     pub(crate) pos: usize,
-    //pub(crate) index: usize,
     pub(crate) conflict: bool,
     pub(crate) id: OpId,
     pub(crate) action: Action,
@@ -251,11 +253,11 @@ pub(crate) struct Op<'a> {
     pub(crate) insert: bool,
     pub(crate) value: ScalarValue<'a>,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<&'a str>,
+    pub(crate) mark_name: Option<Cow<'a, str>>,
     pub(super) succ_cursors: SuccCursors<'a>,
 }
 
-#[derive(Clone, Default, Copy)]
+#[derive(Clone, Default)]
 pub(crate) struct SuccCursors<'a> {
     pub(super) len: usize,
     pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
@@ -289,7 +291,7 @@ impl<'a> Iterator for SuccCursors<'a> {
             let counter = self.succ_counter.next()??;
             let actor = self.succ_actor.next()??;
             self.len -= 1;
-            Some(OpId::new(counter as u64, u64::from(actor) as usize))
+            Some(OpId::new(*counter as u64, u64::from(*actor) as usize))
         }
     }
 }
@@ -310,8 +312,8 @@ impl<'a> Iterator for SuccIncCursors<'a> {
             let counter = self.0.succ_counter.next()??;
             let actor = self.0.succ_actor.next()??;
             self.0.len -= 1;
-            let inc = self.0.inc_values.next()?;
-            let id = OpId::new(counter as u64, u64::from(actor) as usize);
+            let inc = self.0.inc_values.next()?.as_deref().copied();
+            let id = OpId::new(*counter as u64, u64::from(*actor) as usize);
             Some((id, inc))
         }
     }
@@ -341,7 +343,7 @@ impl<'a> Op<'a> {
     }
     pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
         let pos = self.pos;
-        let mut succ = self.succ_cursors;
+        let mut succ = self.succ_cursors.clone();
         let len = succ.len() as u64;
         let mut sub_pos = succ.pos();
         while let Some(i) = succ.next() {
@@ -379,15 +381,15 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn op_type(&self) -> OpType<'a> {
-        OpType::from_action_and_value(self.action, self.value, self.mark_name, self.expand)
+        OpType::from_action_and_value(self.action, self.value, self.mark_name.clone(), self.expand)
     }
 
     pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = OpId> + 'a {
-        self.succ_cursors
+        self.succ_cursors.clone()
     }
 
     pub(crate) fn succ_inc(&self) -> impl ExactSizeIterator<Item = (OpId, Option<i64>)> + 'a {
-        SuccIncCursors(self.succ_cursors)
+        SuccIncCursors(self.succ_cursors.clone())
     }
 
     pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
@@ -407,7 +409,7 @@ impl<'a> Op<'a> {
         if self.insert {
             KeyRef::Seq(ElemId(self.id))
         } else {
-            self.key
+            self.key.clone()
         }
     }
 
@@ -485,9 +487,25 @@ impl<'a> Op<'a> {
             pos: 0,
             index: 0,
             action: self.op_type().into_owned(),
-            key: self.key.into_owned(),
+            key: self.key.clone().into_owned(),
             insert: self.insert,
             pred: pred.collect(),
+        }
+    }
+
+    pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {
+        Op {
+            pos: 0,
+            conflict: false,
+            id,
+            action: Action::Delete,
+            obj,
+            key,
+            insert: false,
+            value: ScalarValue::Null,
+            expand: false,
+            mark_name: None,
+            succ_cursors: SuccCursors::default(),
         }
     }
 }
@@ -530,10 +548,10 @@ impl<'a> AsDocOp<'a> for Op<'a> {
         self.id
     }
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match self.key {
-            KeyRef::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s))),
+        match &self.key {
+            KeyRef::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s.as_ref()))),
             KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            KeyRef::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(op)),
+            KeyRef::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(*op)),
         }
     }
     fn insert(&self) -> bool {
@@ -546,13 +564,14 @@ impl<'a> AsDocOp<'a> for Op<'a> {
         Cow::Owned(self.value.into())
     }
     fn succ(&self) -> Self::SuccIter {
-        self.succ_cursors
+        self.succ_cursors.clone()
     }
     fn expand(&self) -> bool {
         self.expand
     }
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         self.mark_name
-            .map(|s| Cow::Owned(smol_str::SmolStr::from(s)))
+            .as_ref()
+            .map(|s| Cow::Owned(smol_str::SmolStr::from(s.as_ref())))
     }
 }

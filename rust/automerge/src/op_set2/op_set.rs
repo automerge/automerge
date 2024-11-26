@@ -129,9 +129,9 @@ impl OpSet {
         self.mark_index.splice(op.pos, 0, vec![op.mark_index()]);
         if op.succ().is_empty() {
             let width = op.width(ListEncoding::Text) as u64;
-            self.text_index.splice(op.pos, 0, vec![width]);
+            self.text_index.splice(op.pos, 0, [width]);
         } else {
-            self.text_index.splice(op.pos, 0, vec![0]);
+            self.text_index.splice(op.pos, 0, [0]);
         }
         self.len += 1;
         self.validate()
@@ -140,17 +140,17 @@ impl OpSet {
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {
         for i in op_pos.iter().rev() {
             let succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
-            succ_num.splice(i.pos, 1, vec![i.len + 1]);
+            succ_num.splice(i.pos, 1, [i.len + 1]);
 
             let succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
-            succ_actor.splice(i.sub_pos, 0, vec![id.actoridx()]);
+            succ_actor.splice(i.sub_pos, 0, [id.actoridx()]);
 
             let succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
-            succ_counter.splice(i.sub_pos, 0, vec![id.counter() as i64]);
+            succ_counter.splice(i.sub_pos, 0, [id.counter() as i64]);
 
-            self.inc_index.splice(i.sub_pos, 0, vec![i.inc]);
+            self.inc_index.splice(i.sub_pos, 0, [i.inc]);
 
-            self.text_index.splice(i.pos, 1, vec![0]);
+            self.text_index.splice(i.pos, 1, [0]);
         }
     }
 
@@ -237,12 +237,12 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
+            .scope_to_value(&obj.counter());
 
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
+            .scope_to_value(&obj.actor());
 
         if index == 0 {
             return None;
@@ -385,7 +385,7 @@ impl OpSet {
 
     fn get_value(&self, pos: usize) -> Option<ScalarValue<'_>> {
         let meta = self.value_meta_col().get_with_acc(pos)?;
-        let length = meta.item?.length();
+        let length = meta.item.as_ref()?.length();
         let raw = if length > 0 {
             self.value_col()
                 .raw_reader(meta.acc.as_usize())
@@ -394,10 +394,10 @@ impl OpSet {
         } else {
             &[]
         };
-        ScalarValue::from_raw(meta.item?, raw).ok()
+        ScalarValue::from_raw(*meta.item?, raw).ok()
     }
 
-    fn get_mark_name(&self, pos: usize) -> Option<&str> {
+    fn get_mark_name(&self, pos: usize) -> Option<Cow<'_, str>> {
         self.mark_name_col().get(pos).flatten()
     }
 
@@ -437,12 +437,12 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
+            .scope_to_value(&obj.counter());
 
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
+            .scope_to_value(&obj.actor());
 
         let mut iter = self.text_index.iter_range(range.clone()).with_acc();
 
@@ -457,10 +457,10 @@ impl OpSet {
                 if op.insert && !ops.is_empty() {
                     break;
                 }
+                end_pos = op.pos + 1;
                 if op.succ().len() == 0 {
                     ops.push(op);
                 }
-                end_pos = op.pos + 1;
             }
         }
 
@@ -477,7 +477,7 @@ impl OpSet {
         counters
             .find_by_value(id.counter())
             .into_iter()
-            .find(|&pos| actors.get(pos) == Some(Some(ActorIdx::from(id.actor()))))
+            .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(ActorIdx::from(id.actor())))))
     }
 
     fn seek_list_op_fast(
@@ -496,12 +496,12 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
+            .scope_to_value(&obj.counter());
 
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
+            .scope_to_value(&obj.actor());
 
         let op_pos = self.get_op_id_pos(target.0).unwrap();
 
@@ -653,13 +653,13 @@ impl OpSet {
 
                 let visible = op.scope_to_clock(clock);
 
-                if found {
-                    ops.push((op, visible));
-                }
-
                 if visible && !found {
                     marks.process(op.id(), op.action());
                     current = op.width(encoding);
+                }
+
+                if found {
+                    ops.push((op, visible));
                 }
             }
         }
@@ -727,7 +727,7 @@ impl OpSet {
         let mut ctr = self.get_obj_ctr();
         let mut last = 0;
         while let Some(Run { value, .. }) = ctr.next_run() {
-            let value = value.unwrap_or(0);
+            let value = value.as_deref().copied().unwrap_or(0);
             assert!(last <= value);
             last = value;
         }
@@ -801,7 +801,7 @@ impl OpSet {
             Some(ObjType::Map)
         } else {
             let pos = self.get_op_id_pos(obj.0)?;
-            let action = self
+            let action = *self
                 .cols
                 .get_action_range(ACTION_COL_SPEC, &(pos..(pos + 1)))
                 .next()??;
@@ -818,7 +818,7 @@ impl OpSet {
             Key::Seq(e) => {
                 let r =
                     self.seek_list_op(&new_op.obj, *e, new_op.id, new_op.insert, encoding, None);
-                self.found_op_with_patch_log(new_op, &r.ops, r.pos, r.index, r.marks)
+                self.found_op_with_patch_log(new_op, r.ops, r.pos, r.index, r.marks)
             }
             Key::Map(s) => {
                 let iter = self.iter_prop(&new_op.obj, s);
@@ -826,12 +826,12 @@ impl OpSet {
                 let mut ops = vec![];
                 for mut o in iter {
                     let visible = o.scope_to_clock(None);
-                    ops.push((o, visible));
                     if o.id > new_op.id {
                         pos = o.pos;
                     }
+                    ops.push((o, visible));
                 }
-                self.found_op_with_patch_log(new_op, &ops, pos, 0, None)
+                self.found_op_with_patch_log(new_op, ops, pos, 0, None)
             }
         }
     }
@@ -839,7 +839,7 @@ impl OpSet {
     pub(crate) fn found_op_with_patch_log<'a>(
         &'a self,
         new_op: &ChangeOp,
-        ops: &[(Op<'a>, bool)],
+        ops: Vec<(Op<'a>, bool)>,
         end_pos: usize,
         index: usize,
         marks: Option<Arc<MarkSet>>,
@@ -859,19 +859,19 @@ impl OpSet {
             }
 
             if new_op.pred.contains(&op.id) {
-                succ.push(*op);
+                succ.push(op.clone());
 
-                if *visible {
-                    overwritten = Some(*op);
+                if visible {
+                    overwritten = Some(op);
                 }
-            } else if *visible {
+            } else if visible {
                 if found.is_none() && overwritten.is_none() {
-                    before = Some(*op);
+                    before = Some(op);
                     num_before += 1;
                 } else if !op.is_inc() {
                     // increments are a special case where they can be visible
                     // but dont overwrite a value
-                    after = Some(*op);
+                    after = Some(op);
                 }
             }
         }
@@ -979,15 +979,15 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
+            .scope_to_value(&obj.counter());
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
+            .scope_to_value(&obj.actor());
         let range = self
             .cols
             .get_str_range(KEY_STR_COL_SPEC, &range)
-            .scope_to_value(Some(prop));
+            .scope_to_value(&Some(prop));
         self.iter_range(&range)
     }
 
@@ -995,11 +995,11 @@ impl OpSet {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(obj.counter());
+            .scope_to_value(&obj.counter());
         let range = self
             .cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(obj.actor());
+            .scope_to_value(&obj.actor());
         self.iter_range(&range)
     }
 
@@ -1183,21 +1183,21 @@ impl<'a> FoundOpWithPatchLog<'a> {
                         // if we find our first op
                         if op.id == target {
                             // grab its name and value
-                            if let Some(mark) = op.mark_name {
-                                mark_name = Some(mark);
+                            if let Some(ref mark) = op.mark_name {
+                                mark_name = Some(mark.clone());
                                 value = op.value;
                                 // and if it changes the mark state start recording
                                 if marks.process(op.id, op.action()) {
                                     start = Some(index);
                                 }
                             }
-                        } else if let Some(mark) = mark_name {
+                        } else if let Some(ref mark) = mark_name {
                             // whenever the mark state changes
                             if marks.process(op.id, op.action()) {
                                 match (marks.covered(target, mark), start) {
                                     (true, Some(s)) => {
                                         // the mark is either covered up (so we're done)
-                                        let ms = MarkSet::new(mark, value);
+                                        let ms = MarkSet::new(mark.as_ref(), value);
                                         patch_log.mark(obj.id, s, index - s, &ms);
                                         start = None;
                                     }
@@ -1215,7 +1215,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     }
                     if let Some(s) = start {
                         if let Some(mark) = mark_name {
-                            let ms = MarkSet::new(mark, value);
+                            let ms = MarkSet::new(&mark, value);
                             patch_log.mark(obj.id, s, index - s, &ms);
                         }
                     }
@@ -1235,7 +1235,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
         };
 
         if op.is_delete() {
-            match (self.before, self.overwritten, self.after) {
+            match (&self.before, &self.overwritten, &self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => patch_log.delete_map(obj.id, &k),
                     Prop::Seq(index) => patch_log.delete_seq(
@@ -1259,7 +1259,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
             }
         } else if let Some(value) = op.get_increment_value() {
             if self.after.is_none() {
-                if let Some(counter) = self.overwritten {
+                if let Some(counter) = &self.overwritten {
                     if pred.contains(&counter.id()) {
                         patch_log.increment(obj.id, &key, value, op.id);
                     }
@@ -1344,11 +1344,11 @@ pub(super) trait OpLike {
 
 const NONE: &str = ".";
 
-fn fmt<T: std::fmt::Display>(t: Option<Option<T>>) -> String {
+fn fmt<T: std::fmt::Display + packer::Packable + ?Sized>(t: Option<Option<Cow<'_, T>>>) -> String {
     match t {
         None => NONE.to_owned(),
         Some(None) => "-".to_owned(),
-        Some(Some(t)) => format!("{}", t).to_owned(),
+        Some(Some(t)) => format!("{}", t.as_ref()).to_owned(),
     }
 }
 
@@ -1357,11 +1357,15 @@ impl Columns {
     fn rewrite_with_new_actor(&mut self, idx: usize) {
         for col in self.0.values_mut() {
             if let Column::Actor(col_data) = col {
+                // col_data.remap(|a| match a {
+                //   Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
+                //   old => old,
+                // })
                 let new_ids = col_data
                     .iter()
-                    .map(|a| match a {
-                        Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
-                        old => old,
+                    .map(|a| match a.as_deref() {
+                        Some(&ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
+                        old => old.copied(),
                     })
                     .collect::<Vec<_>>();
                 let mut new_data = ColumnData::<ActorCursor>::new();
@@ -1376,12 +1380,12 @@ impl Columns {
             if let Column::Actor(col_data) = col {
                 let new_ids = col_data
                     .iter()
-                    .map(|a| match a {
-                        Some(ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
-                        Some(ActorIdx(id)) if id as usize == idx => {
+                    .map(|a| match a.as_deref() {
+                        Some(&ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
+                        Some(&ActorIdx(id)) if id as usize == idx => {
                             panic!("cant rewrite - actor is present")
                         }
-                        old => old,
+                        old => old.copied(),
                     })
                     .collect::<Vec<_>>();
                 let mut new_data = ColumnData::<ActorCursor>::new();
@@ -1422,7 +1426,11 @@ impl Columns {
             let obj_c = fmt(obj_c.next());
             let act = fmt(act.next());
             let insert = insert.next();
-            let insert = if insert == Some(Some(true)) { "t" } else { "-" };
+            let insert = if insert.flatten().as_deref() == Some(&true) {
+                "t"
+            } else {
+                "-"
+            };
             let key_s = fmt(key_str.next());
             let key_a = fmt(key_a.next());
             let key_c = fmt(key_c.next());
@@ -1430,7 +1438,7 @@ impl Columns {
             let m = meta.next();
             let v = if let Some(Some(m)) = m {
                 let raw_data = value.read_next(m.length()).unwrap_or(&[]);
-                ScalarValue::from_raw(m, raw_data).unwrap()
+                ScalarValue::from_raw(*m, raw_data).unwrap()
             } else {
                 ScalarValue::Null
             };
@@ -1458,20 +1466,14 @@ impl Columns {
             if group == Some(spec.id()) {
                 match col {
                     Column::Actor(c) => {
-                        let values = if *spec == SUCC_ACTOR_COL_SPEC {
-                            op.succ().iter().map(|s| s.actoridx()).collect()
-                        } else {
-                            vec![]
+                        if *spec == SUCC_ACTOR_COL_SPEC {
+                            c.splice(acc_pos, 0, op.succ().iter().map(|s| s.actoridx()));
                         };
-                        c.splice(acc_pos, 0, values);
                     }
                     Column::Delta(c) => {
-                        let values = if *spec == SUCC_COUNTER_COL_SPEC {
-                            op.succ().iter().map(|s| s.counter() as i64).collect()
-                        } else {
-                            vec![]
+                        if *spec == SUCC_COUNTER_COL_SPEC {
+                            c.splice(acc_pos, 0, op.succ().iter().map(|s| s.counter() as i64));
                         };
-                        c.splice(acc_pos, 0, values);
                     }
                     Column::Value(c) => {
                         let value = if *spec == VALUE_COL_SPEC {
@@ -1480,7 +1482,7 @@ impl Columns {
                             None
                         };
                         if let Some(v) = value {
-                            c.splice(acc_pos, 0, vec![v]);
+                            c.splice(acc_pos, 0, [v]);
                         }
                     }
                     _ => {
@@ -1497,7 +1499,7 @@ impl Columns {
                             KEY_ACTOR_COL_SPEC => op.elemid().and_then(|e| e.actor()),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Delta(c) => {
                         let value = match *spec {
@@ -1505,7 +1507,7 @@ impl Columns {
                             KEY_COUNTER_COL_SPEC => op.elemid().map(|e| e.counter() as i64),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Integer(c) => {
                         let value = if *spec == OBJ_ID_COUNTER_COL_SPEC {
@@ -1513,7 +1515,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Str(c) => {
                         let value = match *spec {
@@ -1521,7 +1523,7 @@ impl Columns {
                             MARK_NAME_COL_SPEC => op.mark_name(),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Bool(c) => {
                         let value = match *spec {
@@ -1529,7 +1531,7 @@ impl Columns {
                             EXPAND_COL_SPEC => Some(op.expand()),
                             _ => None,
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Action(c) => {
                         let value = if *spec == ACTION_COL_SPEC {
@@ -1537,7 +1539,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        c.splice(pos, 0, vec![value]);
+                        c.splice(pos, 0, [value]);
                     }
                     Column::Value(_c) => {
                         panic!("VALUE spliced outside of a group");
@@ -1548,7 +1550,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        acc_pos = c.splice(pos, 0, vec![value]).as_usize();
+                        acc_pos = c.splice(pos, 0, [value]).as_usize();
                     }
                     Column::Group(c) => {
                         let value = if *spec == SUCC_COUNT_COL_SPEC {
@@ -1556,7 +1558,7 @@ impl Columns {
                         } else {
                             None
                         };
-                        acc_pos = c.splice(pos, 0, vec![value]).as_usize();
+                        acc_pos = c.splice(pos, 0, [value]).as_usize();
                     }
                 }
             }
@@ -1957,18 +1959,18 @@ impl<'a> Iterator for IterObjIds<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.pos;
-        match (self.next_ctr, self.next_actor) {
+        match (self.next_ctr.clone(), self.next_actor.clone()) {
             (Some(mut run1), Some(mut run2)) => {
                 match run1.count.cmp(&run2.count) {
                     Ordering::Less => {
                         run2.count -= run1.count;
-                        self.next_actor = Some(run2);
+                        self.next_actor = Some(run2.clone());
                         self.pos += run1.count;
                         self.next_ctr = self.ctr.next_run();
                     }
                     Ordering::Greater => {
                         run1.count -= run2.count;
-                        self.next_ctr = Some(run1);
+                        self.next_ctr = Some(run1.clone());
                         self.pos += run2.count;
                         self.next_actor = self.actor.next_run();
                     }
@@ -1979,7 +1981,10 @@ impl<'a> Iterator for IterObjIds<'a> {
                     }
                 }
                 let end = self.pos;
-                let obj = ObjId::load(run1.value, run2.value)?;
+                let obj = ObjId::load(
+                    run1.value.as_deref().copied(),
+                    run2.value.as_deref().copied(),
+                )?;
                 Some((obj, start..end))
             }
             (None, None) => None,
@@ -2104,7 +2109,7 @@ mod tests {
         insert: bool,
         succs: Vec<OpId>,
         expand: bool,
-        mark_name: Option<&'static str>,
+        mark_name: Option<Cow<'static, str>>,
     }
 
     impl<'a> PartialEq<super::super::op::Op<'a>> for TestOp {
@@ -2171,19 +2176,19 @@ mod tests {
                 obj: test_op.obj,
                 action: test_op.action,
                 value: test_op.value,
-                key: test_op.key,
+                key: test_op.key.clone(),
                 insert: test_op.insert,
                 expand: test_op.expand,
-                mark_name: test_op.mark_name,
+                mark_name: test_op.mark_name.clone(),
                 conflict: false,
                 succ_cursors: SuccCursors {
-                    len: group_count as usize,
-                    succ_counter: counter_iter,
-                    succ_actor: actor_iter,
-                    inc_values,
+                    len: *group_count as usize,
+                    succ_counter: counter_iter.clone(),
+                    succ_actor: actor_iter.clone(),
+                    inc_values: inc_values.clone(),
                 },
             };
-            for _ in 0..group_count {
+            for _ in 0..*group_count {
                 counter_iter.next();
                 actor_iter.next();
                 inc_values.next();
@@ -2204,7 +2209,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: KeyRef::Map("key"),
+                key: KeyRef::Map("key".into()),
                 insert: false,
                 succs: vec![OpId::new(5, 1), OpId::new(6, 1), OpId::new(10, 1)],
                 expand: false,
@@ -2215,7 +2220,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::Set,
                 value: ScalarValue::Str("value1"),
-                key: KeyRef::Map("key1"),
+                key: KeyRef::Map("key1".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2226,7 +2231,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::Set,
                 value: ScalarValue::Str("value2"),
-                key: KeyRef::Map("key2"),
+                key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![OpId::new(6, 1)],
                 expand: false,
@@ -2237,7 +2242,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("inner_value1"),
-                key: KeyRef::Map("inner_key1"),
+                key: KeyRef::Map("inner_key1".into()),
                 insert: false,
                 succs: vec![OpId::new(7, 1), OpId::new(8, 2), OpId::new(9, 1)],
                 expand: false,
@@ -2248,7 +2253,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("inner_value2"),
-                key: KeyRef::Map("inner_key2"),
+                key: KeyRef::Map("inner_key2".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2260,11 +2265,11 @@ mod tests {
             let range = opset
                 .cols
                 .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                .scope_to_value(Some(1));
+                .scope_to_value(&Some(1));
             let range = opset
                 .cols
                 .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-                .scope_to_value(Some(ActorIdx::from(1_usize)));
+                .scope_to_value(&Some(ActorIdx::from(1_usize)));
             let mut iter = opset.iter_range(&range);
             println!(
                 "ITER :: range={:?} pos={} max={}",
@@ -2294,7 +2299,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: KeyRef::Map("map"),
+                key: KeyRef::Map("map".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2305,7 +2310,7 @@ mod tests {
                 obj: ObjId::root(),
                 action: Action::MakeMap,
                 value: ScalarValue::Null,
-                key: KeyRef::Map("list"),
+                key: KeyRef::Map("list".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2316,7 +2321,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value1"),
-                key: KeyRef::Map("key1"),
+                key: KeyRef::Map("key1".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2327,7 +2332,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2a"),
-                key: KeyRef::Map("key2"),
+                key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2338,7 +2343,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2b"),
-                key: KeyRef::Map("key2"),
+                key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![OpId::new(5, 2)],
                 expand: false,
@@ -2349,7 +2354,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value2c"),
-                key: KeyRef::Map("key2"),
+                key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,
@@ -2360,7 +2365,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value3a"),
-                key: KeyRef::Map("key3"),
+                key: KeyRef::Map("key3".into()),
                 insert: false,
                 succs: vec![OpId::new(7, 2)],
                 expand: false,
@@ -2371,7 +2376,7 @@ mod tests {
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
                 value: ScalarValue::Str("value3b"),
-                key: KeyRef::Map("key3"),
+                key: KeyRef::Map("key3".into()),
                 insert: false,
                 succs: vec![],
                 expand: false,

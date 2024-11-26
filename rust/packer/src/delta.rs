@@ -1,8 +1,10 @@
 use super::aggregate::Agg;
-use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
-use super::pack::{PackError, Packable};
+use super::cursor::{ColumnCursor, Run, SpliceDel};
+use super::encoder::{Encoder, SpliceEncoder};
+use super::pack::PackError;
 use super::rle::{RleCursor, RleState};
 use super::slab::{Slab, SlabWeight, SlabWriter};
+use super::Cow;
 
 use std::ops::Range;
 
@@ -21,12 +23,12 @@ pub type DeltaCursor = DeltaCursorInternal<64>;
 impl<'a> DeltaState<'a> {
     fn pending_delta(&self) -> i64 {
         match &self.rle {
-            RleState::LoneValue(Some(n)) => *n,
+            RleState::LoneValue(Some(n)) => **n,
             RleState::Run {
                 count,
                 value: Some(v),
-            } => *count as i64 * *v,
-            RleState::LitRun { current, run } => run.iter().sum::<i64>() + *current,
+            } => *count as i64 * **v,
+            RleState::LitRun { current, run } => run.iter().map(|a| **a).sum::<i64>() + **current,
             _ => 0,
         }
     }
@@ -34,8 +36,8 @@ impl<'a> DeltaState<'a> {
 
 #[derive(Debug, Default, Clone)]
 pub struct DeltaState<'a> {
-    abs: i64,
-    rle: RleState<'a, i64>,
+    pub(crate) abs: i64,
+    pub(crate) rle: RleState<'a, i64>,
 }
 
 impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
@@ -66,8 +68,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        writer: &mut SlabWriter<'a>,
-        mut state: Self::State<'a>,
+        encoder: &mut Encoder<'a, Self>,
         post: Self::PostState<'a>,
         mut cursor: Self,
     ) -> Option<Self> {
@@ -75,28 +76,28 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             Some(run) if run.value.is_some() => {
                 // we need to flush at least two elements to make sure
                 // we're connected to prior and post lit runs
-                Self::flush_twice(slab, writer, state, run, cursor)
+                Self::flush_twice(slab, encoder, run, cursor)
             }
             Some(run) => {
                 // Nulls do not affect ABS - so the post does not connect us to the copy afterward
                 // clear the post and try again
-                Self::append_chunk(&mut state, writer, run);
-                Self::finalize_state(slab, writer, state, None, cursor)
+                encoder.append_chunk(run);
+                Self::finalize_state(slab, encoder, None, cursor)
             }
             None => {
                 if let Some(run) = cursor.next(slab.as_slice()) {
                     if run.value.is_some() {
                         // we need to flush at least two elements to make sure
                         // we're connected to prior and post lit runs
-                        Self::flush_twice(slab, writer, state, run, cursor)
+                        Self::flush_twice(slab, encoder, run, cursor)
                     } else {
                         // Nulls do not affect ABS - so the post does not connect us to the copy afterward
                         // clear the post and try again
-                        Self::append_chunk(&mut state, writer, run);
-                        Self::finalize_state(slab, writer, state, None, cursor)
+                        encoder.append_chunk(run);
+                        Self::finalize_state(slab, encoder, None, cursor)
                     }
                 } else {
-                    Self::flush_state(writer, state);
+                    encoder.flush();
                     None
                 }
             }
@@ -104,7 +105,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
     }
 
     fn contains(&self, run: &Run<'_, i64>, agg: Agg) -> bool {
-        let value = run.value.unwrap_or(0);
+        let value = run.value.as_deref().cloned().unwrap_or(0);
         let a = Agg::from(self.abs);
         let b = Agg::from(self.abs - value * (run.count as i64 - 1));
         if a > b {
@@ -114,16 +115,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn pop(&self, run: &mut Run<'_, i64>) -> Option<Option<i64>> {
+    fn pop(&self, run: &mut Run<'_, i64>) -> Option<Option<Cow<'static, i64>>> {
         if run.next()?.is_some() {
-            Some(Some(self.abs - run.delta()))
+            Some(Some(Cow::Owned(self.abs - run.delta())))
         } else {
             Some(None)
         }
-    }
-
-    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        SubCursor::<B>::flush_state(writer, state.rle)
     }
 
     fn copy_between<'a>(
@@ -138,56 +135,16 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         DeltaState { abs: c1.abs, rle }
     }
 
-    fn append<'a>(
-        state: &mut Self::State<'a>,
-        slab: &mut SlabWriter<'a>,
-        item: Option<i64>,
-    ) -> usize {
-        let value = item.map(|i| i - state.abs);
-        Self::append_chunk(state, slab, Run { count: 1, value })
+    fn slab_size() -> usize {
+        B
     }
 
-    fn append_first_chunk<'a>(
-        state: &mut DeltaState<'a>,
-        writer: &mut SlabWriter<'a>,
-        run: Run<'a, i64>,
-        slab: &Slab,
-    ) -> bool {
-        if let Some(v) = run.value {
-            let delta = state.abs - slab.abs();
-            Self::append_chunk(
-                state,
-                writer,
-                Run {
-                    count: 1,
-                    value: Some(v - delta),
-                },
-            );
-            if let Some(r) = run.pop() {
-                Self::append_chunk(state, writer, r);
-            }
-            true
-        } else {
-            Self::append_chunk(state, writer, run);
-            false
-        }
-    }
-
-    fn append_chunk<'a>(
-        state: &mut Self::State<'a>,
-        slab: &mut SlabWriter<'a>,
-        run: Run<'a, i64>,
-    ) -> usize {
-        state.abs += run.delta();
-        SubCursor::<B>::append_chunk(&mut state.rle, slab, run)
-    }
-
-    fn encode(
+    fn splice_encoder(
         index: usize,
         del: usize,
         slab: &Slab,
         cap: usize,
-    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
+    ) -> SpliceEncoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
@@ -208,12 +165,11 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
             post,
         } = Self::splice_delete(post, cursor, del, slab);
 
-        Encoder {
+        SpliceEncoder {
+            encoder: Encoder::init(current, state),
             slab,
-            current,
             post,
             acc,
-            state,
             deleted,
             overflow,
             cursor,
@@ -222,16 +178,18 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
     where
-        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+        I: Iterator<Item = Option<Cow<'a, Self::Item>>>,
     {
-        data.splice(range, values);
+        data.splice(range, values.map(|i| i.as_deref().cloned()));
     }
 
     fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         if let Some(run) = self.rle.try_next(slab)? {
             let delta = run.delta();
             let abs = self.abs.saturating_add(delta);
-            let first_step = self.abs.saturating_add(run.value.unwrap_or(0));
+            let first_step = self
+                .abs
+                .saturating_add(run.value.as_deref().cloned().unwrap_or(0));
             let min = std::cmp::min(abs, first_step);
             let max = std::cmp::max(abs, first_step);
             let min = self.min.minimize(Agg::from(min));
@@ -267,30 +225,29 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 impl<const B: usize> DeltaCursorInternal<B> {
     fn flush_twice<'a>(
         slab: &'a Slab,
-        writer: &mut SlabWriter<'a>,
-        mut state: DeltaState<'a>,
+        encoder: &mut Encoder<'a, Self>,
         run: Run<'a, i64>,
         mut cursor: Self,
     ) -> Option<Self> {
         if let Some(run) = run.pop() {
-            Self::append(&mut state, writer, Some(cursor.abs - run.delta()));
-            Self::append_chunk(&mut state, writer, run);
+            encoder.append_item(Some(Cow::Owned(cursor.abs - run.delta())));
+            encoder.append_chunk(run);
             if let Some(run) = cursor.next(slab.as_slice()) {
-                Self::append_chunk(&mut state, writer, run);
-                Self::flush_state(writer, state);
+                encoder.append_chunk(run);
+                encoder.flush();
                 Some(cursor)
             } else {
-                Self::flush_state(writer, state);
+                encoder.flush();
                 Some(cursor)
             }
         } else {
-            Self::append(&mut state, writer, Some(cursor.abs));
+            encoder.append_item(Some(Cow::Owned(cursor.abs)));
             if let Some(run) = cursor.next(slab.as_slice()) {
-                Self::append_chunk(&mut state, writer, run);
-                Self::flush_state(writer, state);
+                encoder.append_chunk(run);
+                encoder.flush();
                 Some(cursor)
             } else {
-                Self::flush_state(writer, state);
+                encoder.flush();
                 Some(cursor)
             }
         }
@@ -453,7 +410,7 @@ pub(crate) mod tests {
                 Some(8)
             ],
         );
-        col1.splice::<i64>(2, 1, vec![]);
+        col1.splice::<i64, _>(2, 1, vec![]);
         assert_eq!(
             col1.to_vec(),
             vec![
@@ -468,7 +425,7 @@ pub(crate) mod tests {
             ],
         );
 
-        col1.splice::<i64>(4, 3, vec![]);
+        col1.splice::<i64, _>(4, 3, vec![]);
 
         assert_eq!(
             col1.to_vec(),
@@ -562,7 +519,7 @@ pub(crate) mod tests {
         data.splice(1..3, vec![Some(10), None]);
         assert_eq!(col.to_vec(), data);
 
-        col.splice(3, 1, vec![None]);
+        col.splice::<Option<i64>, _>(3, 1, vec![None]);
         data.splice(3..4, vec![None]);
         assert_eq!(col.to_vec(), data);
 

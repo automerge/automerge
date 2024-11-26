@@ -24,6 +24,7 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<OpBuilder2>,
+    //pending2: ChangeBuilder<'static>,
 }
 
 /// Arguments required to create a new transaction
@@ -140,7 +141,7 @@ impl TransactionInner {
             .with_message(self.message.clone())
             .with_dependencies(deps)
             .with_timestamp(self.time)
-            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)))
+            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)), None)
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {

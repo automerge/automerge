@@ -44,7 +44,7 @@ impl<'a> InsertQuery<'a> {
         }
     }
 
-    fn identify_valid_insertion_spot(&mut self, op: Op<'a>, cursor: ElemId) {
+    fn identify_valid_insertion_spot(&mut self, op: &Op<'a>, cursor: ElemId) {
         // first insert we see after list_state.done()
         if op.insert && self.candidates.is_empty() {
             if let Some(cursor) = self.last_visible_cursor {
@@ -56,7 +56,7 @@ impl<'a> InsertQuery<'a> {
         if !self.candidates.is_empty() {
             // if we find a begin/end pair - ignore them
             if let OpType::MarkEnd(_) = op.action() {
-                if let Some(pos) = self.candidates.iter().position(|loc| loc.matches(&op)) {
+                if let Some(pos) = self.candidates.iter().position(|loc| loc.matches(op)) {
                     // mark points between begin and end are invalid
                     self.candidates.truncate(pos);
                     return;
@@ -81,6 +81,7 @@ impl<'a> InsertQuery<'a> {
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];
         while let Some(mut op) = self.iter.next() {
+            let op_pos = op.pos;
             if op.is_inc() {
                 continue;
             }
@@ -94,7 +95,7 @@ impl<'a> InsertQuery<'a> {
             }
             let cursor = op.cursor().unwrap();
             if done {
-                self.identify_valid_insertion_spot(op, cursor);
+                self.identify_valid_insertion_spot(&op, cursor);
                 if visible {
                     if op.action == Action::Mark {
                         post_marks.push(op);
@@ -103,13 +104,13 @@ impl<'a> InsertQuery<'a> {
                     }
                 }
             } else if visible {
-                self.marks.process(op, None);
                 if !op.is_mark() {
                     self.last_visible_cursor = Some(cursor);
                     last_width = Some(op.width(self.encoding));
                 }
+                self.marks.process(op, None);
             }
-            pos = op.pos;
+            pos = op_pos;
         }
 
         if let Some(last) = last_width.take() {

@@ -173,7 +173,7 @@ impl MarkSet {
     pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Arc<Self>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in q.iter() {
-            marks.mark_begin(*id, *mark_data);
+            marks.mark_begin(*id, mark_data.clone());
         }
         marks.current().cloned()
     }
@@ -241,17 +241,17 @@ impl<'a> MarkStateMachine<'a> {
             None => return false,
         };
 
-        if Self::mark_above(&self.state, index, mark).is_none() {
-            if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
+        if Self::mark_above(&self.state, index, mark.clone()).is_none() {
+            if let Some(below) = Self::mark_below(&mut self.state, index, mark.clone()) {
                 if below.value != mark.value {
                     Arc::make_mut(&mut self.current)
-                        .insert(SmolStr::from(mark.name), mark.value.into());
+                        .insert(SmolStr::from(mark.name.as_ref()), mark.value.into());
                     result = true
                 }
             } else {
                 // nothing above or below
                 Arc::make_mut(&mut self.current)
-                    .insert(SmolStr::from(mark.name), mark.value.into());
+                    .insert(SmolStr::from(mark.name.as_ref()), mark.value.into());
                 result = true
             }
         }
@@ -270,8 +270,8 @@ impl<'a> MarkStateMachine<'a> {
 
         let mark = self.state.remove(index).1;
 
-        if Self::mark_above(&self.state, index, mark).is_none() {
-            match Self::mark_below(&mut self.state, index, mark) {
+        if Self::mark_above(&self.state, index, mark.clone()).is_none() {
+            match Self::mark_below(&mut self.state, index, mark.clone()) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
                     Arc::make_mut(&mut self.current)
@@ -279,7 +279,7 @@ impl<'a> MarkStateMachine<'a> {
                     result = true;
                 }
                 None => {
-                    Arc::make_mut(&mut self.current).remove(&SmolStr::from(mark.name));
+                    Arc::make_mut(&mut self.current).remove(&SmolStr::from(mark.name.as_ref()));
                     result = true;
                 }
             }
@@ -308,7 +308,13 @@ impl<'a> MarkStateMachine<'a> {
         index: usize,
         mark: MarkData<'a>,
     ) -> Option<MarkData<'a>> {
-        Some(state[index..].iter().find(|(_, m)| m.name == mark.name)?.1)
+        Some(
+            state[index..]
+                .iter()
+                .find(|(_, m)| m.name == mark.name)?
+                .1
+                .clone(),
+        )
     }
 
     fn mark_below(
@@ -321,7 +327,8 @@ impl<'a> MarkStateMachine<'a> {
                 .iter_mut()
                 .filter(|(_, m)| m.name == mark.name)
                 .last()?
-                .1,
+                .1
+                .clone(),
         )
     }
 }

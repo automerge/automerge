@@ -11,7 +11,7 @@ use super::meta::ValueType;
 use super::packer::{MaybePackable, PackError, Packable, RleCursor, ScanMeta, WriteOp};
 
 /// An index into an array of actors stored elsewhere
-#[derive(PartialEq, PartialOrd, Debug, Clone, Default, Copy)]
+#[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
 pub(crate) struct ActorIdx(pub(crate) u64); // FIXME - shouldnt this be usize? (wasm is 32bit)
 
 impl fmt::Display for ActorIdx {
@@ -44,9 +44,9 @@ impl From<ActorIdx> for usize {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone)]
 pub(crate) struct MarkData<'a> {
-    pub(crate) name: &'a str,
+    pub(crate) name: Cow<'a, str>,
     pub(crate) value: ScalarValue<'a>,
 }
 
@@ -130,7 +130,7 @@ impl TryFrom<Action> for ObjType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum OpType<'a> {
     Make(ObjType),
     Delete,
@@ -155,7 +155,7 @@ impl<'a> OpType<'a> {
     pub(crate) fn from_action_and_value(
         action: Action,
         value: ScalarValue<'a>,
-        mark_name: Option<&'a str>,
+        mark_name: Option<Cow<'a, str>>,
         expand: bool,
     ) -> OpType<'a> {
         match action {
@@ -319,6 +319,7 @@ impl<'a> ScalarValue<'a> {
             }
             Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
                 let mut out = Vec::new();
+                //let mut out = [8; u8];//Vec::new();
                 leb128::write::signed(&mut out, i).unwrap();
                 Some(Cow::Owned(out))
             }
@@ -458,7 +459,7 @@ impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
 
 impl<'a> PartialEq<types::OldMarkData> for MarkData<'a> {
     fn eq(&self, other: &types::OldMarkData) -> bool {
-        self.name == other.name && self.value == other.value
+        *self.name == *other.name && self.value == other.value
     }
 }
 
@@ -500,9 +501,9 @@ pub(crate) enum PropRef<'a> {
     Seq(usize),
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum KeyRef<'a> {
-    Map(&'a str),
+    Map(Cow<'a, str>),
     Seq(ElemId),
 }
 
@@ -536,16 +537,29 @@ impl From<String> for Key {
 }
 
 impl<'a> KeyRef<'a> {
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        match self {
+            KeyRef::Map(_) => None,
+            KeyRef::Seq(e) => e.actor(),
+        }
+    }
+
+    pub(crate) fn icounter(&self) -> Option<i64> {
+        match self {
+            KeyRef::Map(_) => None,
+            KeyRef::Seq(e) => Some(e.icounter()),
+        }
+    }
     pub(crate) fn into_owned(self) -> Key {
         match self {
-            KeyRef::Map(s) => Key::Map(String::from(s)),
+            KeyRef::Map(s) => Key::Map(s.to_string()),
             KeyRef::Seq(e) => Key::Seq(e),
         }
     }
 
-    pub(crate) fn map_key(&self) -> Option<&'a str> {
+    pub(crate) fn key_str(&self) -> Option<Cow<'a, str>> {
         match self {
-            KeyRef::Map(s) => Some(s),
+            KeyRef::Map(s) => Some(s.clone()),
             KeyRef::Seq(_) => None,
         }
     }
@@ -561,7 +575,7 @@ impl<'a> KeyRef<'a> {
 impl<'a> types::Exportable for KeyRef<'a> {
     fn export(&self) -> types::Export {
         match self {
-            KeyRef::Map(p) => types::Export::Special(String::from(*p)),
+            KeyRef::Map(p) => types::Export::Special(p.to_string()),
             KeyRef::Seq(e) => e.export(),
         }
     }
@@ -583,17 +597,15 @@ impl<'a> Value<'a> {
 }
 
 impl Packable for Action {
-    type Unpacked<'a> = Action;
+    //type Unpacked<'a> = Action;
 
-    type Owned = Action;
-
-    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
-        item
+    fn pack(item: Cow<'_, Action>) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(*item))
     }
 
-    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
-        let action = match result {
+        let action = match *result {
             0 => Action::MakeMap,
             1 => Action::Set,
             2 => Action::MakeList,
@@ -609,55 +621,53 @@ impl Packable for Action {
                 ))
             }
         };
-        Ok((len, action))
+        Ok((len, Cow::Owned(action)))
     }
 }
 
 impl MaybePackable<Action> for Action {
-    fn maybe_packable(&self) -> Option<Action> {
-        Some(*self)
+    fn maybe_packable(&self) -> Option<Cow<'static, Action>> {
+        Some(Cow::Owned(*self))
     }
 }
 
 impl MaybePackable<Action> for Option<Action> {
-    fn maybe_packable(&self) -> Option<Action> {
-        *self
+    fn maybe_packable(&self) -> Option<Cow<'static, Action>> {
+        self.map(Cow::Owned)
     }
 }
 
 impl Packable for ActorIdx {
-    type Unpacked<'a> = ActorIdx;
+    //type Unpacked<'a> = ActorIdx;
 
-    type Owned = ActorIdx;
+    fn pack(item: Cow<'_, ActorIdx>) -> WriteOp<'static> {
+        WriteOp::UInt(u64::from(*item))
+    }
 
-    fn validate(val: &Option<Self::Unpacked<'_>>, m: &ScanMeta) -> Result<(), PackError> {
-        if let Some(ActorIdx(a)) = val {
-            if *a >= m.actors as u64 {
-                return Err(PackError::ActorIndexOutOfRange(*a, m.actors));
+    fn validate(val: Option<&Self>, m: &ScanMeta) -> Result<(), PackError> {
+        if let Some(&ActorIdx(a)) = val {
+            if a >= m.actors as u64 {
+                return Err(PackError::ActorIndexOutOfRange(a, m.actors));
             }
         }
         Ok(())
     }
 
-    fn own(item: Self::Unpacked<'_>) -> Self::Owned {
-        item
-    }
-
-    fn unpack(buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
+    fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
-        Ok((len, ActorIdx::from(result)))
+        Ok((len, Cow::Owned(ActorIdx::from(*result))))
     }
 }
 
 impl MaybePackable<ActorIdx> for ActorIdx {
-    fn maybe_packable(&self) -> Option<ActorIdx> {
-        Some(*self)
+    fn maybe_packable(&self) -> Option<Cow<'static, ActorIdx>> {
+        Some(Cow::Owned(*self))
     }
 }
 
 impl MaybePackable<ActorIdx> for Option<ActorIdx> {
-    fn maybe_packable(&self) -> Option<ActorIdx> {
-        *self
+    fn maybe_packable(&self) -> Option<Cow<'_, ActorIdx>> {
+        self.as_ref().map(Cow::Borrowed)
     }
 }
 

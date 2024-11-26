@@ -5,6 +5,7 @@ use super::pack::Packable;
 use super::raw::RawCursorInternal;
 use super::rle::RleCursor;
 use crate::ColumnData;
+use std::borrow::Borrow;
 
 pub(crate) trait TestDumpable<T: Packable + ?Sized> {
     fn test_dump(data: &[u8]) -> Vec<ColExport<T>>;
@@ -61,7 +62,7 @@ impl<const B: usize> TestDumpable<bool> for BooleanCursorInternal<B> {
         let mut cursor = Self::default();
         while let Ok(Some(Run { count, value })) = cursor.try_next(data) {
             if count > 0 {
-                result.push(ColExport::Run(count, value.unwrap()))
+                result.push(ColExport::Run(count, *value.unwrap()))
             }
         }
         result
@@ -98,10 +99,10 @@ pub(crate) enum ColExport<P: Packable + ?Sized> {
 }
 
 impl<P: Packable + ?Sized> ColExport<P> {
-    pub(crate) fn litrun(items: Vec<P::Unpacked<'_>>) -> Self {
-        Self::LitRun(items.into_iter().map(|i| P::own(i)).collect())
+    pub(crate) fn litrun<X: Borrow<P>>(items: Vec<X>) -> Self {
+        Self::LitRun(items.into_iter().map(|i| i.borrow().to_owned()).collect())
     }
-    pub(crate) fn run(count: usize, item: P::Unpacked<'_>) -> Self {
-        Self::Run(count, P::own(item))
+    pub(crate) fn run<X: Borrow<P>>(count: usize, item: X) -> Self {
+        Self::Run(count, item.borrow().to_owned())
     }
 }

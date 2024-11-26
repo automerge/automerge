@@ -236,8 +236,8 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     }
 
     fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match self.op.key {
-            KeyRef::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k))),
+        match &self.op.key {
+            KeyRef::Map(k) => convert::Key::Prop(Cow::Owned(SmolStr::from(k.as_ref()))),
             KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
             KeyRef::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(e.0))),
         }

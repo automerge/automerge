@@ -1,6 +1,7 @@
 use super::aggregate::{Acc, Agg};
 use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter, ScanMeta};
 use super::pack::{PackError, Packable};
+use super::Cow;
 
 pub mod tree;
 pub(crate) mod writer;
@@ -108,7 +109,7 @@ impl Slab {
         }
     }
 
-    pub fn first_value<C: ColumnCursor>(&self) -> Option<<C::Item as Packable>::Unpacked<'_>> {
+    pub fn first_value<C: ColumnCursor>(&self) -> Option<Cow<'_, C::Item>> {
         let mut cursor = C::new(self);
         let run = cursor.next(self.as_slice())?;
         run.value
@@ -139,7 +140,7 @@ impl Slab {
         let mut cursor = C::empty();
         let bytes = &data.as_ref()[range.clone()];
         while let Some(val) = cursor.try_next(bytes)? {
-            C::Item::validate(&val.value, m)?;
+            C::Item::validate(val.value.as_deref(), m)?;
         }
         Ok(Slab::External(ReadOnlySlab {
             data,

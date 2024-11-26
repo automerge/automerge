@@ -1,15 +1,16 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, Encoder, Run, SpliceDel};
+use super::cursor::{ColumnCursor, Run, SpliceDel};
+use super::encoder::{Encoder, EncoderState, SpliceEncoder};
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter};
-use super::ulebsize;
+use super::Cow;
 
 use std::ops::Range;
 
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct BooleanState {
-    value: bool,
-    count: usize,
+    pub(crate) value: bool,
+    pub(crate) count: usize,
 }
 
 impl BooleanState {
@@ -26,7 +27,7 @@ impl<'a> From<Run<'a, bool>> for BooleanState {
     fn from(run: Run<'a, bool>) -> Self {
         Self {
             count: run.count,
-            value: run.value.unwrap_or(false),
+            value: *run.value.unwrap_or(Cow::Owned(false)),
         }
     }
 }
@@ -66,39 +67,46 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        writer: &mut SlabWriter<'a>,
-        mut state: Self::State<'a>,
+        encoder: &mut Encoder<'a, Self>,
         post: Self::PostState<'a>,
         mut cursor: Self,
     ) -> Option<Self> {
         if let Some(post) = post {
-            if post.value == state.value {
-                state.count += post.count;
-                Self::finalize_state(slab, writer, state, None, cursor)
+            if post.value == encoder.state.value {
+                encoder.state.count += post.count;
+                Self::finalize_state(slab, encoder, None, cursor)
             } else {
-                writer.flush_bool_run(state.count, state.value);
-                writer.flush_bool_run(post.count, post.value);
+                encoder
+                    .writer
+                    .flush_bool_run(encoder.state.count, encoder.state.value);
+                encoder.writer.flush_bool_run(post.count, post.value);
                 Some(cursor)
             }
         } else {
             let old_cursor = cursor;
             if let Ok(Some(val)) = cursor.try_next(slab.as_slice()) {
-                if val.value == Some(state.value) {
-                    writer.flush_bool_run(state.count + val.count, state.value);
+                if val.value == Some(Cow::Owned(encoder.state.value)) {
+                    encoder
+                        .writer
+                        .flush_bool_run(encoder.state.count + val.count, encoder.state.value);
                     Some(cursor)
                 } else {
-                    writer.flush_bool_run(state.count, state.value);
+                    encoder
+                        .writer
+                        .flush_bool_run(encoder.state.count, encoder.state.value);
                     Some(old_cursor)
                 }
             } else {
-                writer.flush_bool_run(state.count, state.value);
+                encoder
+                    .writer
+                    .flush_bool_run(encoder.state.count, encoder.state.value);
                 None
             }
         }
     }
 
-    fn is_empty<'a>(v: Option<bool>) -> bool {
-        v != Some(true)
+    fn is_empty(v: Option<Cow<'_, bool>>) -> bool {
+        v.as_deref() != Some(&true)
     }
 
     fn copy_between<'a>(
@@ -109,50 +117,33 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         run: Run<'a, bool>,
         size: usize,
     ) -> Self::State<'a> {
-        let c1_last_offset = c1.offset - ulebsize(run.count as u64) as usize;
-        assert_eq!(c1_last_offset, c1.last_offset);
-        writer.copy(slab, c0.offset..c1_last_offset, 0, size, Acc::new(), None);
+        writer.copy(slab, c0.offset..c1.last_offset, 0, size, Acc::new(), None);
         let mut next_state = BooleanState {
-            value: run.value.unwrap_or_default(),
+            value: run.value.as_deref().copied().unwrap_or_default(),
             count: 0,
         };
-        Self::append_chunk(&mut next_state, writer, run);
+        next_state.append_chunk(writer, run);
         next_state
     }
 
-    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>) {
-        writer.flush_bool_run(state.count, state.value);
+    fn slab_size() -> usize {
+        B
     }
 
-    fn append_chunk<'a>(
-        state: &mut Self::State<'a>,
-        writer: &mut SlabWriter<'a>,
-        run: Run<'_, bool>,
-    ) -> usize {
-        let item = run.value.unwrap_or_default();
-        if state.value == item {
-            state.count += run.count;
-        } else {
-            if state.count > 0 {
-                writer.flush_bool_run(state.count, state.value);
-            }
-            state.value = item;
-            state.count = run.count;
-        }
-        run.count
-    }
-
-    fn encode(
+    fn splice_encoder(
         index: usize,
         del: usize,
         slab: &Slab,
         cap: usize,
-    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
+    ) -> SpliceEncoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
-        let count = run.map(|r| r.count).unwrap_or(0);
-        let value = run.map(|r| r.value.unwrap_or(false)).unwrap_or(false);
+        let count = run.as_ref().map(|r| r.count).unwrap_or(0);
+        let value = run
+            .as_ref()
+            .and_then(|r| r.value.as_deref().cloned())
+            .unwrap_or_default();
 
         let mut state = BooleanState { count, value };
         let acc = cursor.acc - state.acc();
@@ -165,13 +156,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             state.count -= delta;
             post = Some(Run {
                 count: delta,
-                value: Some(value),
+                value: Some(Cow::Owned(value)),
             });
         }
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B, cap + 8, slab.as_slice());
+        let mut current = SlabWriter::new(B, cap + 8);
         current.copy(slab.as_slice(), range, 0, size, acc, None);
 
         let SpliceDel {
@@ -183,12 +174,11 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let post = post.map(BooleanState::from);
         let acc = Acc::new();
 
-        Encoder {
+        SpliceEncoder {
+            encoder: Encoder::init(current, state),
             slab,
-            current,
             post,
             acc,
-            state,
             deleted,
             overflow,
             cursor,
@@ -197,9 +187,9 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
     where
-        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
+        I: Iterator<Item = Option<Cow<'a, bool>>>,
     {
-        data.splice(range, values.map(|e| e.unwrap_or(false)));
+        data.splice(range, values.map(|e| *e.unwrap_or_default()));
     }
 
     fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
@@ -208,7 +198,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         }
         let data = &slab[self.offset..];
         let (bytes, count) = u64::unpack(data)?;
-        let count = count as usize;
+        let count = *count as usize;
         let value = self.value;
         self.value = !value;
         self.index += count;
@@ -219,7 +209,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         }
         let run = Run {
             count,
-            value: Some(value),
+            value: Some(Cow::Owned(value)),
         };
         Ok(Some(run))
     }
@@ -230,7 +220,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
+            let mut writer = SlabWriter::new(usize::MAX, 2);
             writer.flush_bool_run(len, false);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -350,7 +340,7 @@ pub(crate) mod tests {
         );
 
         let mut col2 = col1.clone();
-        col2.splice::<bool>(2, 2, vec![]);
+        col2.splice::<bool, _>(2, 2, vec![]);
 
         assert_eq!(
             col2.test_dump(),
@@ -362,7 +352,7 @@ pub(crate) mod tests {
         );
 
         let mut col3 = col1.clone();
-        col3.splice::<bool>(2, 2, vec![false, false]);
+        col3.splice(2, 2, vec![false, false]);
 
         assert_eq!(
             col3.test_dump(),
@@ -374,7 +364,7 @@ pub(crate) mod tests {
         );
 
         let mut col4 = col1.clone();
-        col4.splice::<bool>(2, 4, vec![]);
+        col4.splice::<bool, _>(2, 4, vec![]);
 
         assert_eq!(
             col4.test_dump(),
@@ -386,12 +376,12 @@ pub(crate) mod tests {
         );
 
         let mut col5 = col1.clone();
-        col5.splice::<bool>(2, 7, vec![]);
+        col5.splice::<bool, _>(2, 7, vec![]);
 
         assert_eq!(col5.test_dump(), vec![vec![ColExport::run(3, true),]]);
 
         let mut col6 = col1.clone();
-        col6.splice::<bool>(0, 4, vec![]);
+        col6.splice::<bool, _>(0, 4, vec![]);
 
         assert_eq!(
             col6.test_dump(),
@@ -399,12 +389,12 @@ pub(crate) mod tests {
         );
 
         let mut col7 = col1.clone();
-        col7.splice::<bool>(0, 10, vec![false]);
+        col7.splice(0, 10, vec![false]);
 
         assert_eq!(col7.test_dump(), vec![vec![ColExport::run(1, false),]]);
 
         let mut col8 = col1.clone();
-        col8.splice::<bool>(4, 4, vec![]);
+        col8.splice::<bool, _>(4, 4, vec![]);
 
         assert_eq!(col8.test_dump(), vec![vec![ColExport::run(6, true),]]);
     }

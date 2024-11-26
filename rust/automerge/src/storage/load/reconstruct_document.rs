@@ -62,12 +62,15 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut index_builder = op_set.index_builder();
 
     while let Some(op) = iter.try_next()? {
+        let op_id = op.id;
+        let op_is_counter = op.is_counter();
+        let op_succ = op.succ();
         index_builder.process_op(&op);
-        change_collector.process_op(&op)?;
+        change_collector.process_op(op)?;
 
-        for id in op.succ() {
-            change_collector.process_succ(&op, id);
-            index_builder.process_succ(&op, id);
+        for id in op_succ {
+            change_collector.process_succ(op_id, id);
+            index_builder.process_succ(op_is_counter, id);
         }
     }
 

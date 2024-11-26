@@ -48,8 +48,8 @@ impl IndexBuilder {
         }
     }
 
-    pub(crate) fn process_succ(&mut self, op: &Op<'_>, id: OpId) {
-        if op.is_counter() {
+    pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
+        if op_is_counter {
             self.counters.entry(id).or_default().push(self.incs.len());
         }
         self.incs.push(None); // will update later

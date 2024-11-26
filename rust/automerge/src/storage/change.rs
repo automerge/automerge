@@ -1,5 +1,6 @@
 use std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
+use crate::op_set2::change::ChangeBuilder as ChangeBuilder2;
 use crate::{convert, ActorId, ChangeHash, ScalarValue};
 
 use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
@@ -452,9 +453,10 @@ pub(crate) trait AsChangeOp<'a> {
 }
 
 impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
-    pub(crate) fn build<'a, A, I, O>(
+    pub(crate) fn build<'a, 'b, A, I, O>(
         self,
         ops: I,
+        _ops2: Option<ChangeBuilder2<'b>>,
     ) -> Result<Change<'static, Verified>, PredOutOfOrder>
     where
         A: AsChangeOp<'a, OpId = O> + 'a + std::fmt::Debug,

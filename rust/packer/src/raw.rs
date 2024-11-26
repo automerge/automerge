@@ -1,7 +1,9 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, Encoder, Run};
+use super::cursor::{ColumnCursor, Run};
+use super::encoder::{Encoder, SpliceEncoder};
 use super::pack::PackError;
 use super::slab::{self, Slab, SlabWeight, SlabWriter, SpanWeight};
+use super::Cow;
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -24,31 +26,20 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         Self::default()
     }
 
-    fn write<'a>(
-        writer: &mut SlabWriter<'a>,
-        slab: &'a Slab,
-        _state: Self::State<'a>,
-    ) -> Self::State<'a> {
-        let len = slab.len();
-        writer.copy(slab.as_slice(), 0..len, 0, len, Acc::new(), None);
-    }
-
     fn finish<'a>(_slab: &'a Slab, _writer: &mut SlabWriter<'a>, _cursor: Self) {}
 
     fn finalize_state<'a>(
         slab: &'a Slab,
-        writer: &mut SlabWriter<'a>,
-        _state: (),
+        encoder: &mut Encoder<'a, Self>,
         post: Self::PostState<'a>,
         _cursor: Self,
     ) -> Option<Self> {
-        //writer.flush_bytes(post, post.len());
         let len = post.end - post.start;
-        writer.copy(slab.as_slice(), post, 0, len, Acc::new(), None);
+        encoder
+            .writer
+            .copy(slab.as_slice(), post, 0, len, Acc::new(), None);
         None
     }
-
-    fn flush_state<'a>(_writer: &mut SlabWriter<'a>, _state: Self::State<'a>) {}
 
     fn copy_between<'a>(
         _slab: &'a [u8],
@@ -61,34 +52,22 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         // only called from write and we override that
     }
 
-    fn append_chunk<'a>(
-        _state: &mut Self::State<'a>,
-        writer: &mut SlabWriter<'a>,
-        run: Run<'a, [u8]>,
-    ) -> usize {
-        let mut len = 0;
-        for _ in 0..run.count {
-            if let Some(i) = run.value {
-                len += i.len();
-                writer.flush_bytes(i, i.len());
-                //writer.copy(slab, 0..len, 0, len, Acc::new(), None);
-            }
-        }
-        len
+    fn slab_size() -> usize {
+        B
     }
 
-    fn encode(
+    fn splice_encoder(
         index: usize,
         del: usize,
         slab: &Slab,
         cap: usize,
-    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>> {
+    ) -> SpliceEncoder<'_, Self> {
         let state = ();
         let cursor = Self { offset: index };
         let bytes = slab.as_slice();
 
         // everything before...
-        let mut current = SlabWriter::new(B, cap + 4, bytes);
+        let mut current = SlabWriter::new(B, cap + 4);
         current.copy(bytes, 0..index, 0, index, Acc::new(), None);
 
         let post;
@@ -105,12 +84,11 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         let overflow = del - deleted;
         let acc = Acc::new();
 
-        Encoder {
+        SpliceEncoder {
+            encoder: Encoder::init(current, state),
             slab,
-            current,
             post,
             acc,
-            state,
             deleted,
             overflow,
             cursor,
@@ -119,11 +97,11 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
     fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
     where
-        I: Iterator<Item = Option<&'a [u8]>>,
+        I: Iterator<Item = Option<Cow<'a, [u8]>>>,
     {
         let mut total: Vec<u8> = vec![];
         for bytes in values.flatten() {
-            total.extend(bytes);
+            total.extend_from_slice(&bytes);
         }
         data.splice(range, total);
     }
@@ -137,7 +115,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         self.offset = next_offset;
         Ok(Some(Run {
             count: 1,
-            value: Some(data),
+            value: Some(Cow::Borrowed(data)),
         }))
     }
 
@@ -231,7 +209,7 @@ pub(crate) mod tests {
                 vec![ColExport::Raw(vec![1, 1, 1])],
             ]
         );
-        col1.splice::<Vec<u8>>(3, 1, vec![]);
+        col1.splice::<Vec<u8>, _>(3, 1, vec![]);
         assert_eq!(
             col1.test_dump(),
             vec![

@@ -50,11 +50,11 @@ fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
         let predates_after = dop.predates_after;
 
         if predates_before && !dop.was_deleted_before {
-            push_top(&mut before_op, dop.op, predates_after, dop.value_before);
+            push_top(&mut before_op, &dop.op, predates_after, dop.value_before);
         }
 
         if predates_after && !dop.was_deleted_after {
-            push_top(&mut after_op, dop.op, predates_before, dop.value_after);
+            push_top(&mut after_op, &dop.op, predates_before, dop.value_after);
         }
     }
     resolve(before_op, after_op, diff)
@@ -62,7 +62,7 @@ fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
 
 fn push_top<'a>(
     top: &mut Option<Winner<'a>>,
-    op: Op<'a>,
+    op: &Op<'a>,
     cross_visible: bool,
     value_at: Option<ScalarValue<'a>>,
 ) {
@@ -70,7 +70,7 @@ fn push_top<'a>(
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
             top.replace(Winner {
-                op,
+                op: op.clone(),
                 //clock,
                 value_at,
                 cross_visible,
@@ -122,12 +122,12 @@ enum Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-    fn op(&self) -> Op<'a> {
+    fn op(&self) -> &Op<'a> {
         match self {
-            Patch::New(winner, _) => winner.op,
-            Patch::Update { after, .. } => after.op,
-            Patch::Old { after, .. } => after.op,
-            Patch::Delete(winner) => winner.op,
+            Patch::New(winner, _) => &winner.op,
+            Patch::Update { after, .. } => &after.op,
+            Patch::Old { after, .. } => &after.op,
+            Patch::Delete(winner) => &winner.op,
         }
     }
 }
@@ -244,31 +244,31 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
     diffs: I,
 ) {
     diffs
-        .filter_map(|patch| Some((patch.op().key.map_key()?, patch)))
+        .filter_map(|patch| Some((patch.op().key.key_str()?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
                 let value = winner.value();
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
-                patch_log.put_map(obj.id, key, value, id, conflict, expose)
+                patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
                 let value = after.value();
                 let id = after.op.id;
                 let expose = after.cross_visible;
-                patch_log.put_map(obj.id, key, value, id, conflict, expose)
+                patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
             Patch::Old { before, after, .. } => {
                 if !before.conflict && after.conflict {
-                    patch_log.flag_conflict_map(obj.id, key);
+                    patch_log.flag_conflict_map(obj.id, &key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    patch_log.increment_map(obj.id, key, n, after.op.id);
+                    patch_log.increment_map(obj.id, &key, n, after.op.id);
                 }
             }
-            Patch::Delete(_) => patch_log.delete_map(obj.id, key),
+            Patch::Delete(_) => patch_log.delete_map(obj.id, &key),
         });
 }
 

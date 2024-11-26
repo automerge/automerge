@@ -79,8 +79,8 @@ fn log_map_patches<'a, I: OpQuery<'a>>(
     ops: I,
 ) {
     for op in ops.visible(None).top_ops() {
-        if let Some(key) = op.key.map_key() {
-            patch_log.put_map(obj.id, key, op.value().into(), op.id, op.conflict, false);
+        if let Some(key) = op.key.key_str() {
+            patch_log.put_map(obj.id, &key, op.value().into(), op.id, op.conflict, false);
         }
     }
 }

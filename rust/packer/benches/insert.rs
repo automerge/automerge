@@ -29,7 +29,7 @@ where
     (0..n).map(move |_| rng.gen::<N>() % max)
 }
 
-fn int_insert(rng: &mut ThreadRng, col: &mut ColumnData<IntCursor>, max: u64) {
+fn int_insert(rng: &mut ThreadRng, col: &mut ColumnData<UIntCursor>, max: u64) {
     let val = rng.gen::<u64>() % max;
     let pos: usize = rng.gen();
     let pos = pos % (col.len() + 1);

@@ -3,12 +3,13 @@ use crate::Value;
 
 use crate::op_set2::op_set::OpQueryTerm;
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
 
 #[derive(Debug, PartialEq)]
 pub struct MapRangeItem<'a> {
-    pub key: &'a str,
+    pub key: Cow<'a, str>,
     pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
@@ -36,7 +37,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
         let range = self.range.as_ref()?;
         let iter = self.iter.as_mut()?;
         while let Some(op) = iter.next() {
-            let key = op.key.map_key()?;
+            let key = op.key.key_str()?;
             let s_key = key.to_string(); // FIXME
             if !range.contains(&s_key) {
                 // return None if > end

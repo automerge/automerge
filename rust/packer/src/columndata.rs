@@ -3,11 +3,14 @@ use super::aggregate::Agg;
 use super::cursor::{
     ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, ScanMeta, SpliceResult,
 };
-use super::pack::{MaybePackable, PackError, Packable};
+use super::encoder::Encoder;
+use super::pack::{MaybePackable, MaybePackable2, PackError, Packable};
 use super::raw::RawReader;
 use super::slab;
-use super::slab::{Slab, SlabTree, SlabWriter, SpanTree};
+use super::slab::{Slab, SlabTree, SpanTree};
+use super::Cow;
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
@@ -34,7 +37,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.slabs.iter().map(|s| s.as_slice().len()).sum()
     }
 
-    pub fn get(&self, index: usize) -> Option<Option<<C::Item as Packable>::Unpacked<'_>>> {
+    pub fn get(&self, index: usize) -> Option<Option<Cow<'_, C::Item>>> {
         let range = index..(index + 1);
         let mut iter = self.iter_range(range);
         iter.next()
@@ -69,26 +72,36 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
+    pub fn remap<'a, F, M: MaybePackable<C::Item> + Debug + Clone + 'a>(&'a mut self, _f: F)
+    where
+        F: Fn(Option<Cow<'a, C::Item>>) -> Option<Cow<'a, C::Item>>,
+    {
+        /*
+                let mut new_data = ColumnData::new();
+                std::mem::swap(self, &mut new_data);
+                let new_ids = new_data.iter().map(f).collect::<Vec<_>>();
+                self.splice(0, 0, new_ids);
+        */
+    }
+
     pub fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         if self.slabs.len() == 1 {
             let slab = self.slabs.get(0).unwrap();
             if slab.is_empty() {
-                let state = C::State::default();
-                let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
-                C::flush_state(&mut writer, state);
-                writer.write(out);
+                let mut encoder: Encoder<C> = Encoder::with_capacity(2);
+                encoder.flush();
+                encoder.writer.write(out);
             } else {
                 out.extend(slab.as_slice())
             }
         } else {
-            let mut state = C::State::default();
-            let mut writer = SlabWriter::new(usize::MAX, self.slabs.len() * 7, &[]);
+            let mut encoder: Encoder<C> = Encoder::with_capacity(self.slabs.len() * 7);
             for s in &self.slabs {
-                state = C::write(&mut writer, s, state);
+                encoder.write(s);
             }
-            C::flush_state(&mut writer, state);
-            writer.write(out);
+            encoder.flush();
+            encoder.writer.write(out);
         }
         let end = out.len();
         start..end
@@ -113,12 +126,15 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
     run: Option<Run<'a, C::Item>>,
 }
 
+/*
 impl<'a, C> Copy for ColumnDataIter<'a, C>
 where
     C: ColumnCursor,
     C::SlabIndex: Copy,
+    C::Item: ToOwned<Owned: Copy>,
 {
 }
+*/
 
 impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
     fn clone(&self) -> Self {
@@ -127,7 +143,7 @@ impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
             max: self.max,
             slabs: self.slabs.clone(),
             slab: self.slab,
-            run: self.run,
+            run: self.run.clone(),
         }
     }
 }
@@ -216,7 +232,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.run.as_ref().map(|e| e.acc()).unwrap_or_default()
     }
 
-    fn pop_element(&mut self) -> Option<Option<<C::Item as Packable>::Unpacked<'a>>> {
+    fn pop_element(&mut self) -> Option<Option<Cow<'a, C::Item>>> {
         self.slab.cursor.pop(self.run.as_mut()?)
     }
 
@@ -257,9 +273,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     // we only read the first element of each node and never
     // from the first node as we arent always including its first element
 
-    fn binary_search_for(
+    fn binary_search_for<B: Borrow<C::Item>>(
         &self,
-        target: Option<<C::Item as Packable>::Unpacked<'a>>,
+        //target: &Option<Cow<'a,C::Item>>,
+        target: &Option<B>,
     ) -> Option<usize> {
         let slabs = self.slabs.span_tree()?;
         let original_start = self.slab_index();
@@ -275,7 +292,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             assert!(end != mid - 1); // dont infinite loop
             match (value, target) {
                 (None, Some(_)) => start = mid,
-                (Some(a), Some(b)) if a < b => start = mid,
+                (Some(a), Some(b)) if a.as_ref() < b.borrow() => start = mid,
                 _ => end = mid - 1,
             }
         }
@@ -286,9 +303,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub fn scope_to_value(
+    pub fn scope_to_value<B: Borrow<C::Item>>(
         &mut self,
-        value: Option<<C::Item as Packable>::Unpacked<'a>>,
+        //value: &Option<Cow<'a,C::Item>>,
+        value: &Option<B>,
     ) -> Range<usize> {
         if let Some(index) = self.binary_search_for(value) {
             self.reset_iter_to_slab_index(index);
@@ -299,11 +317,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let mut end = pos;
         let mut found = false;
         while let Some(run) = self.next_run() {
-            match (value, run.value) {
+            match (value, &run.value) {
                 (None, None) => found = true,
                 (None, Some(_)) => break,
-                (Some(a), Some(b)) if a < b => break,
-                (Some(a), Some(b)) if a == b => found = true,
+                (Some(a), Some(b)) if a.borrow() < b.borrow() => break,
+                (Some(a), Some(b)) if a.borrow() == b.borrow() => found = true,
                 _ => {}
             }
             if !found {
@@ -319,7 +337,9 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 
     pub fn to_vec(self) -> Vec<C::Export> {
-        C::to_vec(self)
+        let mut result = vec![];
+        C::export_splice(&mut result, 0..0, self);
+        result
     }
 
     pub fn with_acc(self) -> ColGroupIter<'a, C> {
@@ -368,12 +388,14 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ColGroupItem<'a, P: Packable + ?Sized> {
     pub acc: Acc,
     pub pos: usize,
-    pub item: Option<P::Unpacked<'a>>,
+    pub item: Option<Cow<'a, P>>,
 }
+
+//impl<'a, P: Packable + ?Sized + ToOwned<Owned: Copy>> Copy for ColGroupItem<'a, P> { }
 
 impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     type Item = ColGroupItem<'a, C::Item>;
@@ -426,7 +448,7 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
 }
 
 impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
-    type Item = Option<<C::Item as Packable>::Unpacked<'a>>;
+    type Item = Option<Cow<'a, C::Item>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.max {
@@ -464,16 +486,19 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 
 impl<C: ColumnCursor> ColumnData<C> {
     pub fn to_vec(&self) -> Vec<C::Export> {
-        C::to_vec(self.iter())
+        let mut result = vec![];
+        C::export_splice(&mut result, 0..0, self.iter());
+        result
     }
 
     pub fn iter(&self) -> ColumnDataIter<'_, C> {
         ColumnDataIter::new(&self.slabs, 0, self.len)
     }
 
-    pub fn scope_to_value<'a, R: RangeBounds<usize>>(
-        &'a mut self,
-        value: Option<<C::Item as Packable>::Unpacked<'a>>,
+    pub fn scope_to_value<B: Borrow<C::Item>, R: RangeBounds<usize>>(
+        &mut self,
+        //value: &Option<Cow<'a, C::Item>>,
+        value: &Option<B>,
         range: R,
     ) -> Range<usize> {
         let (start, end) = normalize_range(range);
@@ -530,7 +555,16 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::<C>::external(data, range, &Default::default())
     }
 
-    pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
+    /*
+        pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
+        where
+            E: MaybePackable<C::Item> + Debug + Clone,
+        {
+            self.splice_v1(index, del, values)
+        }
+    */
+
+    pub fn splice_v1<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
     where
         E: MaybePackable<C::Item> + Debug + Clone,
     {
@@ -555,7 +589,78 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         debug_assert_eq!(
             self.iter()
-                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            self.acc()
+        );
+
+        match C::splice_v1(cursor.element, index - cursor.weight.pos(), del, values) {
+            SpliceResult::Replace(add, del, g, mut slabs) => {
+                acc += g;
+                C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
+                self.len = self.len + add - del;
+                #[cfg(debug_assertions)]
+                for s in &slabs {
+                    let (_run, c) = C::seek(s.len(), s);
+                    assert_eq!(s.acc(), c.acc());
+                }
+                self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
+                assert!(!self.slabs.is_empty());
+            }
+        }
+
+        debug_assert_eq!(
+            self.iter()
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            self.acc()
+        );
+
+        #[cfg(debug_assertions)]
+        if self.debug != self.to_vec() {
+            log!(":: debug={:?}", self.debug);
+            log!(":: col={:?}", self.to_vec());
+            let col = self.to_vec();
+            assert_eq!(self.debug.len(), col.len());
+            for (i, dbg) in col.iter().enumerate() {
+                if dbg != &col[i] {
+                    panic!("index={} {:?} vs {:?}", i, dbg, col[i]);
+                }
+            }
+            panic!()
+        }
+        acc
+    }
+
+    pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
+    where
+        M: MaybePackable2<'b, C::Item>,
+        I: IntoIterator<Item = M, IntoIter: ExactSizeIterator + Clone>,
+        C::Item: 'b,
+    {
+        assert!(index <= self.len);
+        assert!(!self.slabs.is_empty());
+        let values = values.into_iter();
+        if values.len() == 0 && del == 0 {
+            return Acc::new(); // really none
+        }
+
+        #[cfg(debug_assertions)]
+        C::export_splice(
+            &mut self.debug,
+            index..(index + del),
+            values.clone().map(|e| e.maybe_packable2()),
+        );
+
+        let cursor = self
+            .slabs
+            .get_where_or_last(|acc, next| index < acc.pos() + next.pos());
+
+        let mut acc = cursor.weight.acc();
+
+        debug_assert_eq!(
+            self.iter()
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
                 .sum::<Acc>(),
             self.acc()
         );
@@ -577,7 +682,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         debug_assert_eq!(
             self.iter()
-                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
                 .sum::<Acc>(),
             self.acc()
         );
@@ -616,7 +721,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         let col = ColumnData::init(len, SlabTree::new2(slab));
         debug_assert_eq!(
             col.iter()
-                .map(|i| i.map(<C::Item>::agg).unwrap_or_default())
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
                 .sum::<Acc>(),
             col.acc()
         );
@@ -650,7 +755,7 @@ where
                 while let Some(mut run) = iter.next() {
                     if iter.cursor.contains(&run, agg) {
                         while let Some(value) = iter.cursor.pop(&mut run) {
-                            if <C::Item>::maybe_agg(value) == agg {
+                            if <C::Item>::maybe_agg(&value) == agg {
                                 results.push(pos)
                             }
                             pos += 1;
@@ -679,12 +784,37 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
     (start, end)
 }
 
+/*
 impl<C: ColumnCursor, M: MaybePackable<C::Item> + Debug + Clone> FromIterator<M> for ColumnData<C> {
-    fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
-        let mut col = ColumnData::new();
+     fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
         let data = iter.into_iter().collect::<Vec<_>>();
-        col.splice(0, 0, data);
+        let mut encoder : Encoder<'_,C>= Encoder::new();
+        for item in data.iter() {
+          encoder.append_item(item.maybe_packable());
+        }
+        let col2 = encoder.into_column_data();
+        let mut col = ColumnData::new();
+        col.splice_v1(0, 0, data);
+        assert_eq!(col.to_vec(),col2.to_vec());
+        assert_eq!(col.len,col2.len);
+        debug_assert_eq!(col.debug,col2.debug);
         col
+    }
+}
+*/
+
+impl<'a, C, M> FromIterator<M> for ColumnData<C>
+where
+    C: ColumnCursor,
+    M: MaybePackable2<'a, C::Item>,
+    C::Item: 'a,
+{
+    fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
+        let mut encoder = Encoder::new();
+        for item in iter {
+            encoder.append_item(item.maybe_packable2());
+        }
+        encoder.into_column_data()
     }
 }
 
@@ -706,7 +836,7 @@ pub(crate) mod tests {
         index: usize,
         values: Vec<E>,
     ) where
-        E: MaybePackable<C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
+        E: MaybePackable2<'a, C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
     {
         vec.splice(index..index, values.clone());
         col.splice(index, 0, values);
@@ -729,7 +859,7 @@ pub(crate) mod tests {
             let advance_by = rng.gen_range(1..(data.len() - advanced_by));
             iter.advance_by(advance_by);
             let expected = data[advance_by + advanced_by..].to_vec();
-            let actual = C::to_vec(iter.clone());
+            let actual = iter.clone().to_vec();
             assert_eq!(expected, actual);
             advanced_by += advance_by;
         }
@@ -1289,29 +1419,29 @@ pub(crate) mod tests {
         ];
         let mut col = ColumnData::<RleCursor<4, u64>>::new();
         col.splice(0, 0, data);
-        let range = col.scope_to_value(Some(4), ..);
+        let range = col.scope_to_value(&Some(Cow::Owned(4)), ..);
         assert_eq!(range, 7..15);
 
-        let range = col.scope_to_value(Some(4), ..11);
+        let range = col.scope_to_value(&Some(4), ..11);
         assert_eq!(range, 7..11);
-        let range = col.scope_to_value(Some(4), ..8);
+        let range = col.scope_to_value(&Some(4), ..8);
         assert_eq!(range, 7..8);
-        let range = col.scope_to_value(Some(4), 0..1);
+        let range = col.scope_to_value(&Some(4), 0..1);
         assert_eq!(range, 1..1);
-        let range = col.scope_to_value(Some(4), 8..9);
+        let range = col.scope_to_value(&Some(4), 8..9);
         assert_eq!(range, 8..9);
-        let range = col.scope_to_value(Some(4), 9..);
+        let range = col.scope_to_value(&Some(4), 9..);
         assert_eq!(range, 9..15);
-        let range = col.scope_to_value(Some(4), 14..16);
+        let range = col.scope_to_value(&Some(4), 14..16);
         assert_eq!(range, 14..15);
 
-        let range = col.scope_to_value(Some(2), ..);
+        let range = col.scope_to_value(&Some(2), ..);
         assert_eq!(range, 0..3);
-        let range = col.scope_to_value(Some(7), ..);
+        let range = col.scope_to_value(&Some(7), ..);
         assert_eq!(range, 22..22);
-        let range = col.scope_to_value(Some(8), ..);
+        let range = col.scope_to_value(&Some(8), ..);
         assert_eq!(range, 22..23);
-        let range = col.scope_to_value(Some(9), ..);
+        let range = col.scope_to_value(&Some(9), ..);
         assert_eq!(range, 23..25);
     }
 
@@ -1396,7 +1526,7 @@ pub(crate) mod tests {
             assert!(acc <= Acc::from(n));
             assert!(acc == last_acc || acc == last_acc + last_item_agg);
             last_acc = acc;
-            last_item_agg = item.agg();
+            last_item_agg = item.map(|v| <u64 as Packable>::agg(&v)).unwrap_or_default();
         }
     }
 

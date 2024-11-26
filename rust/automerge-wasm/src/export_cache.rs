@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::ops::RangeFull;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use std::borrow::{Borrow,Cow};
 
 use am::ObjId;
 
@@ -53,7 +54,7 @@ impl<'a> Pending<'a> {
     ) -> Result<Task<'a>, error::Export> {
         match self {
             Self::Map(js_obj, map_item, iter, obj, datatype) => {
-                export.set_prop(&js_obj, map_item.key, &value)?;
+                export.set_prop(&js_obj, &map_item.key, &value)?;
                 Ok(Task::Map(js_obj, iter, obj, datatype))
             }
             Self::List(js_array, _list_item, iter, obj, datatype) => {
@@ -119,7 +120,7 @@ impl<'a> Task<'a> {
                     return Ok(Progress::Pending(pending));
                 }
                 am::Value::Scalar(s) => {
-                    export.set_prop(&js_obj, map_item.key, &export.export_scalar(&s)?)?
+                    export.set_prop(&js_obj, &map_item.key, &export.export_scalar(&s)?)?
                 }
             }
         }
@@ -163,7 +164,7 @@ enum Progress<'a> {
 pub(crate) struct ExportCache<'a> {
     pub(crate) objs: HashMap<ObjId, CachedObject, FxBuildHasher>,
     datatypes: HashMap<Datatype, JsString, FxBuildHasher>,
-    keys: HashMap<&'a str, JsString>,
+    keys: HashMap<Cow<'a,str>, JsString>,
     definition: Object,
     value_key: JsValue,
     meta_sym: Symbol,
@@ -235,11 +236,11 @@ impl<'a> ExportCache<'a> {
     pub(crate) fn set_prop(
         &mut self,
         obj: &Object,
-        key: &'a str,
+        key: &Cow<'a,str>,
         value: &JsValue,
     ) -> Result<(), error::Export> {
         self.ensure_key(key);
-        let key = self.keys.get(&key).unwrap(); // save - ensure above
+        let key = self.keys.get(key).unwrap(); // save - ensure above
         Reflect::set(obj, key, value).map_err(|error| error::SetProp {
             property: JsValue::from(key),
             error,
@@ -293,8 +294,8 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn ensure_key(&mut self, key: &'a str) {
-        self.keys.entry(key).or_insert_with(|| JsString::from(key));
+    fn ensure_key(&mut self, key: &Cow<'a,str>) {
+        self.keys.entry(key.clone()).or_insert_with(|| JsString::from(key.borrow()));
     }
 
     #[inline(never)]

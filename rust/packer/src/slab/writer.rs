@@ -1,6 +1,8 @@
 use super::Slab;
 use crate::aggregate::{Acc, Agg};
 use crate::leb128::{lebsize, ulebsize};
+use crate::pack::Packable;
+use crate::Cow;
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -12,8 +14,8 @@ pub enum WriteOp<'a> {
     UIntAcc(u64, Agg),
     BoolRun(u64, bool),
     Int(i64),
-    Bytes(&'a [u8]),
-    Raw(&'a [u8]),
+    Bytes(Cow<'a, [u8]>),
+    Raw(Cow<'a, [u8]>),
     Cpy(&'a [u8], Range<usize>, Acc, Option<bool>),
 }
 
@@ -41,14 +43,28 @@ impl<'a> From<usize> for WriteOp<'a> {
     }
 }
 
-impl<'a> From<&'a str> for WriteOp<'a> {
-    fn from(s: &'a str) -> WriteOp<'a> {
-        WriteOp::Bytes(s.as_bytes())
+impl<'a> From<Cow<'a, str>> for WriteOp<'a> {
+    fn from(s: Cow<'a, str>) -> WriteOp<'a> {
+        match s {
+            Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
+            Cow::Borrowed(s) => WriteOp::Bytes(Cow::from(s.as_bytes())),
+        }
     }
 }
 
-impl<'a> From<&'a [u8]> for WriteOp<'a> {
-    fn from(bytes: &'a [u8]) -> WriteOp<'a> {
+/*
+impl<'a,T: Packable> From<Cow<'a,T>> for WriteOp<'a> {
+    fn from(s: Cow<'a,T>) -> WriteOp<'a> {
+        match s {
+          Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
+          Cow::Borrowed(s) => WriteOp::Bytes(Cow::from(s.as_bytes()))
+        }
+    }
+}
+*/
+
+impl<'a> From<Cow<'a, [u8]>> for WriteOp<'a> {
+    fn from(bytes: Cow<'a, [u8]>) -> WriteOp<'a> {
         WriteOp::Bytes(bytes)
     }
 }
@@ -157,18 +173,18 @@ impl<'a> WriteOp<'a> {
             }
             Self::Bytes(b) => {
                 leb128::write::unsigned(buff, b.len() as u64).unwrap();
-                buff.extend(b);
+                buff.extend_from_slice(&b);
                 //println!("write bytes {:?}",&buff[start..]);
             }
             Self::Raw(b) => {
-                buff.extend(b);
+                buff.extend_from_slice(b.as_ref());
                 //println!("write raw {:?}", &buff[start..]);
             }
             Self::LitHead(n) => {
                 leb128::write::signed(buff, -n).unwrap();
             }
             Self::Cpy(s, r, _, _) => {
-                buff.extend(&s[r]);
+                buff.extend_from_slice(&s[r]);
                 //println!("write import ({:?} bytes)",buff[start..].len());
             }
         }
@@ -248,8 +264,14 @@ pub struct SlabWriter<'a> {
     max: usize,
 }
 
+impl<'a> Default for SlabWriter<'a> {
+    fn default() -> Self {
+        Self::new(usize::MAX, 0)
+    }
+}
+
 impl<'a> SlabWriter<'a> {
-    pub fn new(max: usize, cap: usize, _origin: &'a [u8]) -> Self {
+    pub fn new(max: usize, cap: usize) -> Self {
         let mut actions = Vec::with_capacity(cap);
         actions.push(WriteAction::SlabHead);
         SlabWriter {
@@ -444,9 +466,9 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
-    pub fn flush_lit_run<W: Debug + Copy + Into<WriteOp<'a>>>(&mut self, run: &[W]) {
+    pub fn flush_lit_run<P: Packable + ?Sized>(&mut self, run: &[Cow<'a, P>]) {
         for value in run.iter() {
-            self.push_lit((*value).into(), 1, 1);
+            self.push_lit(P::pack(value.clone()), 1, 1);
         }
     }
 
@@ -456,15 +478,16 @@ impl<'a> SlabWriter<'a> {
         self.push(WriteAction::Op(op), count, width);
     }
 
-    pub fn flush_run<W: Debug + Into<WriteOp<'a>>>(&mut self, count: i64, value: W) {
-        let value_op = value.into();
+    pub fn flush_run<P: Packable + ?Sized>(&mut self, count: i64, value: Cow<'a, P>) {
+        //let value_op = value.into();
+        let value_op = P::pack(value);
         let width = lebsize(count) as usize + value_op.width();
         self.push(WriteAction::Pair(count, value_op), count as usize, width);
     }
 
-    pub fn flush_bytes(&mut self, data: &'a [u8], count: usize) {
-        //self.push(WriteAction::Raw(data), count, data.len());
-        self.push(WriteAction::Op(WriteOp::Raw(data)), count, data.len());
+    pub fn flush_bytes(&mut self, data: Cow<'a, [u8]>) {
+        let items = data.len();
+        self.push(WriteAction::Op(WriteOp::Raw(data)), items, items);
     }
 
     pub fn flush_null(&mut self, count: usize) {

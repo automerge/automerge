@@ -2,6 +2,7 @@ use super::packer::{
     lebsize, ulebsize, Agg, MaybePackable, PackError, Packable, RleCursor, WriteOp,
 };
 use super::types::ScalarValue;
+use std::borrow::Cow;
 
 #[derive(Debug)]
 pub(crate) enum ValueType {
@@ -101,33 +102,32 @@ impl<'a> From<&'a ScalarValue<'a>> for ValueMeta {
 }
 
 impl Packable for ValueMeta {
-    type Unpacked<'a> = ValueMeta;
-    type Owned = ValueMeta;
+    //type Unpacked<'a> = ValueMeta;
 
-    fn agg(item: ValueMeta) -> Agg {
+    fn agg(item: &ValueMeta) -> Agg {
         Agg::from(item.length())
     }
 
-    fn own(item: ValueMeta) -> ValueMeta {
-        item
+    fn pack(item: Cow<'_, ValueMeta>) -> WriteOp<'static> {
+        WriteOp::UIntAcc(item.0, Agg::from(item.length()))
     }
 
-    fn unpack(mut buff: &[u8]) -> Result<(usize, Self::Unpacked<'_>), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
-        Ok((start_len - buff.len(), ValueMeta(val)))
+        Ok((start_len - buff.len(), Cow::Owned(ValueMeta(val))))
     }
 }
 
 impl MaybePackable<ValueMeta> for ValueMeta {
-    fn maybe_packable(&self) -> Option<ValueMeta> {
-        Some(*self)
+    fn maybe_packable(&self) -> Option<Cow<'static, ValueMeta>> {
+        Some(Cow::Owned(*self))
     }
 }
 
 impl MaybePackable<ValueMeta> for Option<ValueMeta> {
-    fn maybe_packable(&self) -> Option<ValueMeta> {
-        *self
+    fn maybe_packable(&self) -> Option<Cow<'static, ValueMeta>> {
+        self.map(Cow::Owned)
     }
 }
 
@@ -153,32 +153,32 @@ mod tests {
         let mut iter = col.iter().with_acc();
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(1)));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(1)));
         assert_eq!(r.acc, 0);
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(6 + (30 << 4))));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(6 + (30 << 4))));
         assert_eq!(r.acc, 0);
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(6 + (10 << 4))));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(6 + (10 << 4))));
         assert_eq!(r.acc, 30);
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
         assert_eq!(r.acc, 40);
 
         let mut iter = col.iter().with_acc();
         iter.advance_by(3);
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
         assert_eq!(r.acc, 40);
 
         let mut iter = col.iter_range(3..5).with_acc();
 
         let r = iter.next().unwrap();
-        assert_eq!(r.item, Some(ValueMeta(3)));
+        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
         assert_eq!(r.acc, 40);
     }
 }

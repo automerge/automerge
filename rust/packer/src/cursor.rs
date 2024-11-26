@@ -1,6 +1,8 @@
 use super::aggregate::{Acc, Agg};
-use super::pack::{MaybePackable, PackError, Packable};
+use super::encoder::{Encoder, EncoderState, SpliceEncoder};
+use super::pack::{MaybePackable, MaybePackable2, PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
+use super::Cow;
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -44,26 +46,38 @@ impl HasAcc for SlabWeight {
     }
 }
 
+/*
+#[derive(Debug, PartialEq)]
+pub enum MyCow<'a, T: PartialEq + ?Sized + ToOwned> {
+  Owned(T::Owned),
+  Borrowed(&'a T)
+}
+*/
+
 #[derive(Debug, PartialEq, Default)]
 pub struct Run<'a, P: Packable + ?Sized> {
     pub count: usize,
-    pub value: Option<P::Unpacked<'a>>,
+    pub value: Option<Cow<'a, P>>,
 }
 
-impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> {}
+impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> where Cow<'a, P>: Copy {}
+
 impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
     fn clone(&self) -> Self {
-        *self
+        Run {
+            count: self.count,
+            value: self.value.clone(),
+        }
     }
 }
 
 impl<'a, P: Packable + ?Sized> Iterator for Run<'a, P> {
-    type Item = Option<P::Unpacked<'a>>;
+    type Item = Option<Cow<'a, P>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.count >= 1 {
             self.count -= 1;
-            Some(self.value)
+            Some(self.value.clone())
         } else {
             None
         }
@@ -72,7 +86,7 @@ impl<'a, P: Packable + ?Sized> Iterator for Run<'a, P> {
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if self.count > n {
             self.count -= n + 1;
-            Some(self.value)
+            Some(self.value.clone())
         } else {
             self.count = 0;
             None
@@ -86,7 +100,7 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
             None
         } else {
             let count = self.count - n;
-            let value = self.value;
+            let value = self.value.clone();
             Some(Run { count, value })
         }
     }
@@ -96,7 +110,7 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 
     pub fn agg(&self) -> Agg {
-        self.value.as_ref().map(|i| T::agg(*i)).unwrap_or_default()
+        self.value.as_ref().map(|i| T::agg(i)).unwrap_or_default()
     }
     pub fn acc(&self) -> Acc {
         self.agg() * self.count
@@ -105,18 +119,12 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
 
 impl<'a> Run<'a, i64> {
     pub fn delta(&self) -> i64 {
-        self.count as i64 * self.value.unwrap_or(0)
+        self.count as i64 * self.value.as_deref().cloned().unwrap_or(0)
     }
-
-    /*
-        pub fn delta_minus_one(&self) -> i64 {
-            (self.count as i64 - 1) * self.value.unwrap_or(0)
-        }
-    */
 }
 
 impl<'a, T: Packable + ?Sized> Run<'a, T> {
-    pub fn new(count: usize, value: Option<T::Unpacked<'a>>) -> Self {
+    pub fn new(count: usize, value: Option<Cow<'a, T>>) -> Self {
         Run { count, value }
     }
 
@@ -126,42 +134,14 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 }
 
-#[derive(Debug)]
-pub struct Encoder<'a, C: ColumnCursor, S, P> {
-    pub slab: &'a Slab,
-    pub state: S, // S, : C::State<'a>,
-    pub current: SlabWriter<'a>,
-    pub post: P, //C::PostState<'a>,
-    pub acc: Acc,
-    pub deleted: usize,
-    pub overflow: usize,
-    pub cursor: C,
-}
-
-impl<'a, C: ColumnCursor<State<'a> = S, PostState<'a> = P>, S, P> Encoder<'a, C, S, P> {
-    //pub(crate) fn append(&mut self, v: Option<<C::Item as Packable>::Unpacked<'a>>) -> usize {
-    //    C::append(&mut self.state, &mut self.current, v)
-    //}
-
-    #[inline(never)]
-    pub(crate) fn finish(mut self) -> Vec<Slab> {
-        if let Some(cursor) = C::finalize_state(
-            self.slab,
-            &mut self.current,
-            self.state,
-            self.post,
-            self.cursor,
-        ) {
-            C::finish(self.slab, &mut self.current, cursor)
-        }
-        self.current.finish()
-    }
-}
-
 pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     type Item: Packable + ?Sized;
-    type State<'a>: Default + Debug;
-    type PostState<'a>;
+    type State<'a>: EncoderState<'a, Self::Item>
+    where
+        <Self as ColumnCursor>::Item: 'a;
+    type PostState<'a>
+    where
+        Self::Item: 'a;
     type Export: Debug + PartialEq + Clone;
     type SlabIndex: Debug + Clone + HasPos + HasAcc + SpanWeight<Slab>;
 
@@ -171,95 +151,30 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Self::empty()
     }
 
-    fn write<'a>(
-        writer: &mut SlabWriter<'a>,
-        slab: &'a Slab,
-        mut state: Self::State<'a>,
-    ) -> Self::State<'a> {
-        let mut size = slab.len();
-
-        let mut c0 = None;
-        let mut last = None;
-        for (run, c) in slab.run_iter::<Self>().with_cursor() {
-            if c0.is_none() {
-                size -= run.count;
-                if Self::append_first_chunk(&mut state, writer, run, slab) {
-                    c0 = Some(c);
-                }
-            } else {
-                last = Some((run, c));
-            }
-        }
-
-        if c0.is_none() || last.is_none() {
-            return state;
-        }
-
-        let c0 = c0.unwrap();
-        let (run1, c1) = last.unwrap();
-
-        size -= run1.count;
-
-        if size == 0 {
-            Self::append_chunk(&mut state, writer, run1);
-            return state;
-        }
-
-        Self::flush_state(writer, state);
-
-        Self::copy_between(slab.as_slice(), writer, c0, c1, run1, size)
-    }
-
     fn compute_min_max(_slabs: &mut [Slab]) {}
 
-    fn is_empty(v: Option<<Self::Item as Packable>::Unpacked<'_>>) -> bool {
+    fn is_empty(v: Option<Cow<'_, Self::Item>>) -> bool {
         v.is_none()
     }
 
     fn contains(&self, run: &Run<'_, Self::Item>, agg: Agg) -> bool {
-        agg == <Self::Item>::maybe_agg(run.value)
+        agg == <Self::Item>::maybe_agg(&run.value)
     }
 
-    fn pop<'a>(
-        &self,
-        run: &mut Run<'a, Self::Item>,
-    ) -> Option<Option<<Self::Item as Packable>::Unpacked<'a>>> {
+    fn pop<'a>(&self, run: &mut Run<'a, Self::Item>) -> Option<Option<Cow<'a, Self::Item>>> {
         run.next()
     }
 
+    // ENCODER
     fn finalize_state<'a>(
         slab: &'a Slab,
-        writer: &mut SlabWriter<'a>,
-        state: Self::State<'a>,
+        encoder: &mut Encoder<'a, Self>,
         post: Self::PostState<'a>,
         cursor: Self,
     ) -> Option<Self>;
 
+    // ENCODER
     fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self);
-
-    fn append<'a>(
-        state: &mut Self::State<'a>,
-        writer: &mut SlabWriter<'a>,
-        value: Option<<Self::Item as Packable>::Unpacked<'a>>,
-    ) -> usize {
-        Self::append_chunk(state, writer, Run { count: 1, value })
-    }
-
-    fn append_first_chunk<'a>(
-        state: &mut Self::State<'a>,
-        writer: &mut SlabWriter<'a>,
-        chunk: Run<'a, Self::Item>,
-        _slab: &Slab,
-    ) -> bool {
-        Self::append_chunk(state, writer, chunk);
-        true
-    }
-
-    fn append_chunk<'a>(
-        state: &mut Self::State<'a>,
-        writer: &mut SlabWriter<'a>,
-        chunk: Run<'a, Self::Item>,
-    ) -> usize;
 
     fn copy_between<'a>(
         slab: &'a [u8],
@@ -270,29 +185,21 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         size: usize,
     ) -> Self::State<'a>;
 
-    fn flush_state<'a>(writer: &mut SlabWriter<'a>, state: Self::State<'a>);
-
-    fn encode(
+    fn splice_encoder(
         index: usize,
         del: usize,
         slab: &Slab,
         capacity: usize,
-    ) -> Encoder<'_, Self, Self::State<'_>, Self::PostState<'_>>;
+    ) -> SpliceEncoder<'_, Self>;
+
+    fn slab_size() -> usize;
 
     fn try_next<'a>(&mut self, data: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError>;
 
-    fn to_vec<'a, I>(values: I) -> Vec<Self::Export>
-    where
-        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>,
-    {
-        let mut result = vec![];
-        Self::export_splice(&mut result, 0..0, values);
-        result
-    }
-
     fn export_splice<'a, I>(data: &mut Vec<Self::Export>, range: Range<usize>, values: I)
     where
-        I: Iterator<Item = Option<<Self::Item as Packable>::Unpacked<'a>>>;
+        I: Iterator<Item = Option<Cow<'a, Self::Item>>>,
+        Self::Item: 'a;
 
     fn next<'a>(&mut self, data: &'a [u8]) -> Option<Run<'a, Self::Item>> {
         match self.try_next(data).unwrap() {
@@ -328,35 +235,62 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         panic!()
     }
 
-    /*
-        fn scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
-            let mut cursor = Self::empty();
-            while let Some(val) = cursor.try_next(data)? {
-                Self::Item::validate(&val.value, m)?;
-            }
-            Ok(cursor)
-        }
-    */
-
     fn debug_scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
         let mut cursor = Self::empty();
         while let Some(val) = cursor.try_next(data)? {
-            Self::Item::validate(&val.value, m)?;
+            Self::Item::validate(val.value.as_deref(), m)?;
         }
         Ok(cursor)
     }
 
     #[inline(never)]
-    fn splice<E>(slab: &Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
+    fn splice_v1<E>(slab: &Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
     where
         E: MaybePackable<Self::Item> + Debug,
     {
-        let mut encoder = Self::encode(index, del, slab, values.len());
+        let mut encoder = Self::splice_encoder(index, del, slab, values.len());
         let mut add = 0;
         let mut value_acc = Acc::new();
         for v in &values {
             value_acc += v.agg();
-            add += Self::append(&mut encoder.state, &mut encoder.current, v.maybe_packable());
+            add += encoder.append_item(v.maybe_packable());
+        }
+        assert!(encoder.overflow == 0);
+        let deleted = encoder.deleted;
+        let acc = encoder.acc;
+        let slabs = encoder.finish();
+        if deleted == 0 {
+            debug_assert_eq!(
+                slabs.iter().map(|s| s.acc()).sum::<Acc>(),
+                slab.acc() + value_acc
+            );
+        }
+        SpliceResult::Replace(add, deleted, acc, slabs)
+    }
+
+    // pub trait MaybePackable2<'a, T: Packable + ?Sized> {
+    //    fn maybe_packable(self) -> Option<Cow<'a, T>>;
+    //    fn agg(&self) -> Agg { todo!() }
+    // }
+
+    fn splice<'a, 'b, I, M>(slab: &'a Slab, index: usize, del: usize, values: I) -> SpliceResult
+    where
+        M: MaybePackable2<'b, Self::Item>,
+        I: Iterator<Item = M> + ExactSizeIterator,
+        Self::Item: 'b,
+    {
+        // THIS FAILS when i use append3() - says `'a` must outlive `'b` on the Self::encode()
+        // note - I cannot guarentee 'a outlives 'b
+        let mut encoder = Self::splice_encoder(index, del, slab, values.len());
+        let mut add = 0;
+        let mut value_acc = Acc::new();
+        for v in values {
+            value_acc += v.agg2();
+            // signature for encode.append() and append_item()
+            // pub fn append<M: MaybePackable2<'a, C::Item> + 'a>(&mut self, value: M) -> usize {
+            // pub fn append_item(&mut self, value: Option<Cow<'a, C::Item>>) -> usize {
+            // add += encoder.append(v); // this FAILS when i use it instead of append_item()
+            add += encoder.append_item(v.maybe_packable2());
         }
         assert!(encoder.overflow == 0);
         let deleted = encoder.deleted;
@@ -421,7 +355,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2, &[]);
+            let mut writer = SlabWriter::new(usize::MAX, 2);
             writer.flush_null(len);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -447,7 +381,6 @@ pub enum SpliceResult {
 pub struct RunIter<'a, C: ColumnCursor> {
     pub(crate) slab: &'a [u8],
     pub(crate) cursor: C,
-    //pub(crate) weight_left: C::SlabIndex,
     pub(crate) pos_left: usize,
     pub(crate) acc_left: Acc,
 }
@@ -457,7 +390,6 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
         RunIter {
             slab: &[],
             cursor: C::empty(),
-            //weight_left: <C::SlabIndex>::default(),
             pos_left: 0,
             acc_left: Acc::new(),
         }
@@ -515,7 +447,10 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
     }
 }
 
-impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
+impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C>
+where
+    C::Item: 'a,
+{
     type Item = Run<'a, C::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -528,7 +463,10 @@ impl<'a, C: ColumnCursor> Iterator for RunIter<'a, C> {
 
 pub(crate) struct RunIterWithCursor<'a, C: ColumnCursor>(RunIter<'a, C>);
 
-impl<'a, C: ColumnCursor> Iterator for RunIterWithCursor<'a, C> {
+impl<'a, C: ColumnCursor> Iterator for RunIterWithCursor<'a, C>
+where
+    C::Item: 'a,
+{
     type Item = (Run<'a, C::Item>, C);
 
     fn next(&mut self) -> Option<Self::Item> {

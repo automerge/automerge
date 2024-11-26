@@ -215,10 +215,10 @@ impl Automerge {
         let mut map = Map::new();
         for top in self.ops().top_ops(obj, clock.cloned()) {
             let key = self.ops().to_string(top.elemid_or_key());
-            let value = self.hydrate_op(top, clock);
             //let id = top.op.exid();
             let id = self.ops().id_to_exid(top.id);
             let conflict = top.conflict;
+            let value = self.hydrate_op(top, clock);
             map.insert(key, MapValue::new(value, id, conflict));
         }
         Value::Map(map)
@@ -227,10 +227,10 @@ impl Automerge {
     pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
         let mut list = List::new();
         for top in self.ops().top_ops(obj, clock.cloned()) {
-            let value = self.hydrate_op(top, clock);
             //let id = top.exid();
             let id = self.ops().id_to_exid(top.id);
             let conflict = top.conflict;
+            let value = self.hydrate_op(top, clock);
             list.push(value, id, conflict);
         }
         Value::List(list)

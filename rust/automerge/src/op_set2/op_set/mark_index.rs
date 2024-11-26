@@ -1,9 +1,10 @@
 use crate::types::{Clock, OpId};
 use packer::{
-    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
-    Slab, SpanWeight, WriteOp,
+    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, MaybePackable2, PackError,
+    Packable, RleCursor, Slab, SpanWeight, WriteOp,
 };
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 
@@ -38,13 +39,13 @@ impl SpanWeight<Slab> for MarkIndexSpanner {
         let mut cursor = MarkIndex::default();
         let bytes = slab.as_slice();
         while let Some(run) = cursor.next(bytes) {
-            match run.value {
+            match run.value.as_deref() {
                 Some(MarkIndexValue::Start(id)) => {
-                    start.insert(id);
+                    start.insert(*id);
                 }
                 Some(MarkIndexValue::End(id)) => {
-                    if !start.remove(&id) {
-                        end.insert(id);
+                    if !start.remove(id) {
+                        end.insert(*id);
                     }
                 }
                 None => {}
@@ -126,12 +127,22 @@ impl MarkIndexColumn {
     pub(crate) fn new() -> Self {
         Self(ColumnData::new())
     }
-    pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
+
+    pub(crate) fn splice<'a, E>(&mut self, index: usize, del: usize, values: Vec<E>)
     where
-        E: MaybePackable<MarkIndexValue> + Debug + Clone,
+        E: MaybePackable2<'a, MarkIndexValue> + Debug + Clone,
     {
         self.0.splice(index, del, values);
     }
+
+    /*
+        pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
+        where
+            E: MaybePackable<MarkIndexValue> + Debug + Clone,
+        {
+            self.0.splice(index, del, values);
+        }
+    */
 
     pub(crate) fn marks_at<'a>(
         &self,
@@ -149,13 +160,13 @@ impl MarkIndexColumn {
         let bytes = sub.element.as_slice();
         while let Some(run) = cursor.next(bytes) {
             pos += run.count;
-            match run.value {
+            match run.value.as_deref() {
                 Some(MarkIndexValue::Start(id)) => {
-                    start.insert(id);
+                    start.insert(*id);
                 }
                 Some(MarkIndexValue::End(id)) => {
-                    if !start.remove(&id) {
-                        end.insert(id);
+                    if !start.remove(id) {
+                        end.insert(*id);
                     }
                 }
                 None => {}
@@ -210,24 +221,26 @@ impl From<MarkIndexValue> for i64 {
 }
 
 impl Packable for MarkIndexValue {
-    type Unpacked<'a> = MarkIndexValue;
-    type Owned = MarkIndexValue;
+    //type Unpacked<'a> = MarkIndexValue;
 
-    fn own(item: MarkIndexValue) -> MarkIndexValue {
-        item
+    fn pack(item: Cow<'_, MarkIndexValue>) -> WriteOp<'static> {
+        WriteOp::Int(i64::from(*item))
     }
 
-    fn unpack(mut buff: &[u8]) -> Result<(usize, MarkIndexValue), PackError> {
+    fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, MarkIndexValue>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::signed(&mut buff)?;
         assert_eq!(i64::from(MarkIndexValue::from(val)), val);
-        Ok((start_len - buff.len(), MarkIndexValue::from(val)))
+        Ok((
+            start_len - buff.len(),
+            Cow::Owned(MarkIndexValue::from(val)),
+        ))
     }
 }
 
 impl MaybePackable<MarkIndexValue> for Option<MarkIndexValue> {
-    fn maybe_packable(&self) -> Option<MarkIndexValue> {
-        *self
+    fn maybe_packable(&self) -> Option<Cow<'_, MarkIndexValue>> {
+        self.map(Cow::Owned)
     }
 }
 

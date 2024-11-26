@@ -1,6 +1,7 @@
 pub(crate) use packer;
 pub(crate) use packer::PackError;
 
+pub(crate) mod change;
 pub(crate) mod columns;
 pub(crate) mod meta;
 pub(crate) mod op;
@@ -12,6 +13,7 @@ pub use parents::{Parent, Parents};
 
 pub(crate) use op::{ChangeOp, Op, OpBuilder2, SuccInsert};
 pub(crate) use types::{ActorIdx, Key, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value};
+//pub(crate) use change::{ChangeBuilder, ChangeWriter };
 
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
