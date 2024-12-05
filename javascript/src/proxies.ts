@@ -96,7 +96,11 @@ function valueAt<T extends Target>(
         ]) as unknown as ValueType<T>
       }
     case "str":
-      return val as ValueType<T>
+      if (textV2) {
+        return new RawString(val as string) as ValueType<T>
+      } else {
+        return val as ValueType<T>
+      }
     case "uint":
       return val as ValueType<T>
     case "int":
@@ -1017,7 +1021,10 @@ function printPath(path: Prop[]): string {
   }
 }
 
-function isRawString(obj: any): obj is RawString {
+/*
+ * Check if an object is a {@link RawString}
+ */
+export function isRawString(obj: any): obj is RawString {
   // We used to determine whether something was a RawString by doing an instanceof check, but
   // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
   // of a symbol to determine if something is a RawString
@@ -1029,7 +1036,10 @@ function isRawString(obj: any): obj is RawString {
   )
 }
 
-function isText(obj: any): obj is Text {
+/*
+ * Check if an object is a {@link Text}
+ */
+export function isText(obj: any): obj is Text {
   // We used to determine whether something was a Text by doing an instanceof check, but
   // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
   // of a symbol to determine if something is a TEXT
