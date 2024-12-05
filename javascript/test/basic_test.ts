@@ -796,4 +796,18 @@ describe("Automerge", () => {
       assert.deepStrictEqual(doc.foo, new RawString("something"))
     })
   })
+
+  it("should export a predicate to check if something is a rawstring", () => {
+    let doc = Automerge.from({
+      foo: new Automerge.RawString("someval2"),
+      bar: "notarawstring",
+    })
+    assert.strictEqual(Automerge.isRawString(doc.foo), true)
+    assert.strictEqual(Automerge.isRawString(doc.bar), false)
+
+    doc = Automerge.change(doc, d => {
+      assert.strictEqual(Automerge.isRawString(d.foo), true)
+      assert.strictEqual(Automerge.isRawString(d.bar), false)
+    })
+  })
 })
