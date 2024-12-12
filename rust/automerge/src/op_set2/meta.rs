@@ -1,6 +1,4 @@
-use super::packer::{
-    lebsize, ulebsize, Agg, MaybePackable, PackError, Packable, RleCursor, WriteOp,
-};
+use super::packer::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor, WriteOp};
 use super::types::ScalarValue;
 use std::borrow::Cow;
 
@@ -116,18 +114,6 @@ impl Packable for ValueMeta {
         let start_len = buff.len();
         let val = leb128::read::unsigned(&mut buff)?;
         Ok((start_len - buff.len(), Cow::Owned(ValueMeta(val))))
-    }
-}
-
-impl MaybePackable<ValueMeta> for ValueMeta {
-    fn maybe_packable(&self) -> Option<Cow<'static, ValueMeta>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<ValueMeta> for Option<ValueMeta> {
-    fn maybe_packable(&self) -> Option<Cow<'static, ValueMeta>> {
-        self.map(Cow::Owned)
     }
 }
 

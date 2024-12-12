@@ -4,7 +4,7 @@ use super::cursor::{
     ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, ScanMeta, SpliceResult,
 };
 use super::encoder::Encoder;
-use super::pack::{MaybePackable, MaybePackable2, PackError, Packable};
+use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
 use super::slab;
 use super::slab::{Slab, SlabTree, SpanTree};
@@ -72,7 +72,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
-    pub fn remap<'a, F, M: MaybePackable<C::Item> + Debug + Clone + 'a>(&'a mut self, _f: F)
+    pub fn remap<'a, F, M: MaybePackable<'a, C::Item> + Debug + Clone + 'a>(&'a mut self, _f: F)
     where
         F: Fn(Option<Cow<'a, C::Item>>) -> Option<Cow<'a, C::Item>>,
     {
@@ -555,86 +555,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::<C>::external(data, range, &Default::default())
     }
 
-    /*
-        pub fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
-        where
-            E: MaybePackable<C::Item> + Debug + Clone,
-        {
-            self.splice_v1(index, del, values)
-        }
-    */
-
-    pub fn splice_v1<E>(&mut self, index: usize, del: usize, values: Vec<E>) -> Acc
-    where
-        E: MaybePackable<C::Item> + Debug + Clone,
-    {
-        assert!(index <= self.len);
-        assert!(!self.slabs.is_empty());
-        if values.is_empty() && del == 0 {
-            return Acc::new(); // really none
-        }
-
-        #[cfg(debug_assertions)]
-        C::export_splice(
-            &mut self.debug,
-            index..(index + del),
-            values.iter().map(|e| e.maybe_packable()),
-        );
-
-        let cursor = self
-            .slabs
-            .get_where_or_last(|acc, next| index < acc.pos() + next.pos());
-
-        let mut acc = cursor.weight.acc();
-
-        debug_assert_eq!(
-            self.iter()
-                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
-                .sum::<Acc>(),
-            self.acc()
-        );
-
-        match C::splice_v1(cursor.element, index - cursor.weight.pos(), del, values) {
-            SpliceResult::Replace(add, del, g, mut slabs) => {
-                acc += g;
-                C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
-                self.len = self.len + add - del;
-                #[cfg(debug_assertions)]
-                for s in &slabs {
-                    let (_run, c) = C::seek(s.len(), s);
-                    assert_eq!(s.acc(), c.acc());
-                }
-                self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
-                assert!(!self.slabs.is_empty());
-            }
-        }
-
-        debug_assert_eq!(
-            self.iter()
-                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
-                .sum::<Acc>(),
-            self.acc()
-        );
-
-        #[cfg(debug_assertions)]
-        if self.debug != self.to_vec() {
-            log!(":: debug={:?}", self.debug);
-            log!(":: col={:?}", self.to_vec());
-            let col = self.to_vec();
-            assert_eq!(self.debug.len(), col.len());
-            for (i, dbg) in col.iter().enumerate() {
-                if dbg != &col[i] {
-                    panic!("index={} {:?} vs {:?}", i, dbg, col[i]);
-                }
-            }
-            panic!()
-        }
-        acc
-    }
-
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
     where
-        M: MaybePackable2<'b, C::Item>,
+        M: MaybePackable<'b, C::Item>,
         I: IntoIterator<Item = M, IntoIter: ExactSizeIterator + Clone>,
         C::Item: 'b,
     {
@@ -649,7 +572,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         C::export_splice(
             &mut self.debug,
             index..(index + del),
-            values.clone().map(|e| e.maybe_packable2()),
+            values.clone().map(|e| e.maybe_packable()),
         );
 
         let cursor = self
@@ -784,35 +707,16 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
     (start, end)
 }
 
-/*
-impl<C: ColumnCursor, M: MaybePackable<C::Item> + Debug + Clone> FromIterator<M> for ColumnData<C> {
-     fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
-        let data = iter.into_iter().collect::<Vec<_>>();
-        let mut encoder : Encoder<'_,C>= Encoder::new();
-        for item in data.iter() {
-          encoder.append_item(item.maybe_packable());
-        }
-        let col2 = encoder.into_column_data();
-        let mut col = ColumnData::new();
-        col.splice_v1(0, 0, data);
-        assert_eq!(col.to_vec(),col2.to_vec());
-        assert_eq!(col.len,col2.len);
-        debug_assert_eq!(col.debug,col2.debug);
-        col
-    }
-}
-*/
-
 impl<'a, C, M> FromIterator<M> for ColumnData<C>
 where
     C: ColumnCursor,
-    M: MaybePackable2<'a, C::Item>,
+    M: MaybePackable<'a, C::Item>,
     C::Item: 'a,
 {
     fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
         let mut encoder = Encoder::new();
         for item in iter {
-            encoder.append_item(item.maybe_packable2());
+            encoder.append_item(item.maybe_packable());
         }
         encoder.into_column_data()
     }
@@ -836,7 +740,7 @@ pub(crate) mod tests {
         index: usize,
         values: Vec<E>,
     ) where
-        E: MaybePackable2<'a, C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
+        E: MaybePackable<'a, C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
     {
         vec.splice(index..index, values.clone());
         col.splice(index, 0, values);

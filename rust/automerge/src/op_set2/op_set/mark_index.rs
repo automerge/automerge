@@ -1,7 +1,7 @@
 use crate::types::{Clock, OpId};
 use packer::{
-    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, MaybePackable2, PackError,
-    Packable, RleCursor, Slab, SpanWeight, WriteOp,
+    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
+    Slab, SpanWeight, WriteOp,
 };
 
 use std::borrow::Cow;
@@ -130,19 +130,10 @@ impl MarkIndexColumn {
 
     pub(crate) fn splice<'a, E>(&mut self, index: usize, del: usize, values: Vec<E>)
     where
-        E: MaybePackable2<'a, MarkIndexValue> + Debug + Clone,
+        E: MaybePackable<'a, MarkIndexValue> + Debug + Clone,
     {
         self.0.splice(index, del, values);
     }
-
-    /*
-        pub(crate) fn splice<E>(&mut self, index: usize, del: usize, values: Vec<E>)
-        where
-            E: MaybePackable<MarkIndexValue> + Debug + Clone,
-        {
-            self.0.splice(index, del, values);
-        }
-    */
 
     pub(crate) fn marks_at<'a>(
         &self,
@@ -235,12 +226,6 @@ impl Packable for MarkIndexValue {
             start_len - buff.len(),
             Cow::Owned(MarkIndexValue::from(val)),
         ))
-    }
-}
-
-impl MaybePackable<MarkIndexValue> for Option<MarkIndexValue> {
-    fn maybe_packable(&self) -> Option<Cow<'_, MarkIndexValue>> {
-        self.map(Cow::Owned)
     }
 }
 

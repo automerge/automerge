@@ -49,7 +49,7 @@ pub use cursor::{ColumnCursor, HasAcc, HasPos, Run, ScanMeta, SpliceDel};
 pub use delta::DeltaCursor;
 pub use encoder::Encoder;
 pub use leb128::{lebsize, ulebsize};
-pub use pack::{MaybePackable, MaybePackable2, PackError, Packable};
+pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
 pub use rle::{IntCursor, RleCursor, StrCursor, UIntCursor};
 pub use slab::{tree, Slab, SlabTree, SlabWeight, SlabWriter, SpanTree, SpanWeight, WriteOp};

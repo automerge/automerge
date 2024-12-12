@@ -3,7 +3,6 @@ use super::cursor::ScanMeta;
 use super::slab::WriteOp;
 use super::Cow;
 
-use std::borrow::Borrow;
 use std::fmt::Debug;
 
 #[derive(thiserror::Error, Debug)]
@@ -34,8 +33,6 @@ impl PackError {
 pub trait Packable:
     PartialEq + Debug + ToOwned<Owned: Debug + Clone + PartialEq> + PartialOrd
 {
-    //type Unpacked<'a>: Clone + Copy + Debug + PartialEq + PartialOrd + ToOwned + Borrow<Self>;
-
     fn agg(_item: &Self) -> Agg {
         Agg::default()
     }
@@ -50,13 +47,10 @@ pub trait Packable:
         Ok(())
     }
 
-    //fn own(item: Self::Unpacked<'_>) -> Self::Owned;
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError>;
 }
 
 impl Packable for i64 {
-    //type Unpacked<'a> = i64;
-
     fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
@@ -84,8 +78,6 @@ impl Packable for i64 {
 }
 
 impl Packable for u32 {
-    //type Unpacked<'a> = u32;
-
     fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
@@ -114,8 +106,6 @@ impl Packable for u32 {
 }
 
 impl Packable for u64 {
-    //type Unpacked<'a> = u64;
-
     fn maybe_agg(item: &Option<Cow<'_, u64>>) -> Agg {
         Agg::from(item.as_deref().cloned().unwrap_or(0))
     }
@@ -147,10 +137,6 @@ impl Packable for u64 {
 }
 
 impl Packable for usize {
-    //type Unpacked<'a> = usize;
-
-    //    fn own(item: usize) -> usize { item }
-
     fn pack(item: Cow<'_, usize>) -> WriteOp<'static> {
         WriteOp::UIntAcc(*item as u64, Agg::from(*item))
     }
@@ -162,10 +148,6 @@ impl Packable for usize {
 }
 
 impl Packable for bool {
-    //type Unpacked<'a> = bool;
-
-    //    fn own(item: bool) -> bool { item }
-
     fn agg(item: &bool) -> Agg {
         if *item {
             Agg::from(1_u32)
@@ -184,8 +166,6 @@ impl Packable for bool {
 }
 
 impl Packable for [u8] {
-    //type Unpacked<'a> = &'a [u8];
-
     fn pack(item: Cow<'_, [u8]>) -> WriteOp<'_> {
         WriteOp::Bytes(item)
     }
@@ -199,8 +179,6 @@ impl Packable for [u8] {
 }
 
 impl Packable for str {
-    //type Unpacked<'a> = &'a str;
-
     fn pack(item: Cow<'_, str>) -> WriteOp<'_> {
         match item {
             Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
@@ -217,221 +195,88 @@ impl Packable for str {
     }
 }
 
-pub trait MaybePackable2<'a, T: Packable + ?Sized> {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>>;
-    fn agg2(&self) -> Agg;
+pub trait MaybePackable<'a, T: Packable + ?Sized> {
+    fn maybe_packable(self) -> Option<Cow<'a, T>>;
+    fn agg(&self) -> Agg;
 }
 
-impl<'a, T: Packable> MaybePackable2<'a, T> for T {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
+impl<'a, T: Packable> MaybePackable<'a, T> for T {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         Some(Cow::Owned(self.to_owned()))
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         T::agg(self)
     }
 }
 
-impl<'a> MaybePackable2<'a, str> for Option<String> {
-    fn maybe_packable2(self) -> Option<Cow<'a, str>> {
+impl<'a> MaybePackable<'a, str> for Option<String> {
+    fn maybe_packable(self) -> Option<Cow<'a, str>> {
         self.map(Cow::Owned)
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         self.as_deref().map(str::agg).unwrap_or_default()
     }
 }
 
-impl<'a> MaybePackable2<'a, str> for String {
-    fn maybe_packable2(self) -> Option<Cow<'a, str>> {
+impl<'a> MaybePackable<'a, str> for String {
+    fn maybe_packable(self) -> Option<Cow<'a, str>> {
         Some(Cow::Owned(self))
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         str::agg(self)
     }
 }
 
-impl<'a> MaybePackable2<'a, [u8]> for Vec<u8> {
-    fn maybe_packable2(self) -> Option<Cow<'a, [u8]>> {
+impl<'a> MaybePackable<'a, [u8]> for Vec<u8> {
+    fn maybe_packable(self) -> Option<Cow<'a, [u8]>> {
         Some(Cow::Owned(self))
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         <[u8]>::agg(self)
     }
 }
 
-impl<'a, T: Packable + ?Sized> MaybePackable2<'a, T> for &'a T {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
+impl<'a, T: Packable + ?Sized> MaybePackable<'a, T> for &'a T {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         Some(Cow::Borrowed(self))
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         T::agg(*self)
     }
 }
 
-impl<'a, T: Packable + ?Sized> MaybePackable2<'a, T> for Cow<'a, T> {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
+impl<'a, T: Packable + ?Sized> MaybePackable<'a, T> for Cow<'a, T> {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         Some(self)
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         T::agg(self)
     }
 }
 
-impl<'a, T: Packable + ?Sized> MaybePackable2<'a, T> for Option<Cow<'a, T>> {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
+impl<'a, T: Packable + ?Sized> MaybePackable<'a, T> for Option<Cow<'a, T>> {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         self
     }
-    fn agg2(&self) -> Agg {
+    fn agg(&self) -> Agg {
         self.as_deref().map(T::agg).unwrap_or_default()
     }
 }
 
-impl<'a, T: Packable> MaybePackable2<'a, T> for Option<T> {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
+impl<'a, T: Packable> MaybePackable<'a, T> for Option<T> {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         self.map(|t| Cow::Owned(t.to_owned()))
     }
-    fn agg2(&self) -> Agg {
-        self.as_ref().map(|t| T::agg(t)).unwrap_or_default()
-    }
-}
-
-impl<'a, T: Packable + ?Sized> MaybePackable2<'a, T> for Option<&'a T> {
-    fn maybe_packable2(self) -> Option<Cow<'a, T>> {
-        self.map(|t| Cow::Borrowed(t))
-    }
-    fn agg2(&self) -> Agg {
-        self.map(|t| T::agg(t)).unwrap_or_default()
-    }
-}
-
-pub trait MaybePackable<T: Packable + ?Sized> {
-    fn maybe_packable(&self) -> Option<Cow<'_, T>>;
     fn agg(&self) -> Agg {
-        self.maybe_packable()
-            .map(|n| T::agg(&n))
-            .unwrap_or_default()
+        self.as_ref().map(T::agg).unwrap_or_default()
     }
 }
 
-impl MaybePackable<i64> for i64 {
-    fn maybe_packable(&self) -> Option<Cow<'static, i64>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<i64> for Option<i64> {
-    fn maybe_packable(&self) -> Option<Cow<'static, i64>> {
-        self.map(Cow::Owned)
-    }
-}
-
-impl MaybePackable<u64> for u64 {
-    fn maybe_packable(&self) -> Option<Cow<'static, u64>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<u32> for u32 {
-    fn maybe_packable(&self) -> Option<Cow<'static, u32>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<usize> for Option<usize> {
-    fn maybe_packable(&self) -> Option<Cow<'static, usize>> {
-        self.map(Cow::Owned)
-    }
-}
-
-impl MaybePackable<usize> for usize {
-    fn maybe_packable(&self) -> Option<Cow<'static, usize>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<u64> for Option<u64> {
-    fn maybe_packable(&self) -> Option<Cow<'static, u64>> {
-        self.map(Cow::Owned)
-    }
-}
-
-impl MaybePackable<[u8]> for &[u8] {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        Some(Cow::Borrowed(self))
-    }
-}
-
-impl MaybePackable<[u8]> for Vec<u8> {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        Some(Cow::Borrowed(self.as_slice()))
-    }
-}
-
-impl<'a> MaybePackable<[u8]> for Option<Cow<'a, [u8]>> {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        self.as_ref().map(|c| Cow::Borrowed(c.borrow()))
-    }
-}
-
-impl<'a> MaybePackable<[u8]> for Cow<'a, [u8]> {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        Some(Cow::Borrowed(self.borrow()))
-    }
-}
-
-/*
-impl<'a> MaybePackable<[u8]> for std::borrow::Cow<'a, [u8]> {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        Some(Cow::Borrowed(self.borrow()))
-    }
-}
-*/
-
-impl MaybePackable<str> for &str {
-    fn maybe_packable(&self) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed(self))
-    }
-}
-
-impl MaybePackable<str> for String {
-    fn maybe_packable(&self) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed(self.as_str()))
-    }
-}
-
-impl MaybePackable<str> for Option<&str> {
-    fn maybe_packable(&self) -> Option<Cow<'_, str>> {
+impl<'a, T: Packable + ?Sized> MaybePackable<'a, T> for Option<&'a T> {
+    fn maybe_packable(self) -> Option<Cow<'a, T>> {
         self.map(Cow::Borrowed)
     }
-}
-
-impl MaybePackable<str> for Option<String> {
-    fn maybe_packable(&self) -> Option<Cow<'_, str>> {
-        self.as_ref().map(|s| Cow::Borrowed(s.as_str()))
+    fn agg(&self) -> Agg {
+        self.map(T::agg).unwrap_or_default()
     }
 }
-
-impl<'a> MaybePackable<str> for Option<Cow<'a, str>> {
-    fn maybe_packable(&self) -> Option<Cow<'_, str>> {
-        self.as_ref().map(|s| Cow::Borrowed(s.borrow()))
-    }
-}
-
-impl MaybePackable<bool> for Option<bool> {
-    fn maybe_packable(&self) -> Option<Cow<'static, bool>> {
-        self.map(Cow::Owned)
-    }
-}
-
-impl MaybePackable<bool> for bool {
-    fn maybe_packable(&self) -> Option<Cow<'static, bool>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-/*
-impl<'a> MaybePackable<[u8]> for Cow<'a, [u8]> {
-    fn maybe_packable(&self) -> Option<Cow<'_, [u8]>> {
-        Some(Cow::Borrowed(self.as_ref()))
-    }
-}
-*/

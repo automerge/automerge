@@ -3,7 +3,7 @@ use super::boolean::BooleanState;
 use super::columndata::ColumnData;
 use super::cursor::{ColumnCursor, Run};
 use super::delta::DeltaState;
-use super::pack::{MaybePackable2, Packable};
+use super::pack::{MaybePackable, Packable};
 use super::rle::RleState;
 use super::slab::{Slab, SlabWriter};
 use crate::Cow;
@@ -266,8 +266,8 @@ impl<'a, C: ColumnCursor> Encoder<'a, C>
 where
     C::Item: 'a,
 {
-    pub fn append<M: MaybePackable2<'a, C::Item>>(&mut self, value: M) -> usize {
-        self.state.append(&mut self.writer, value.maybe_packable2())
+    pub fn append<M: MaybePackable<'a, C::Item>>(&mut self, value: M) -> usize {
+        self.state.append(&mut self.writer, value.maybe_packable())
     }
 
     pub fn append_item(&mut self, value: Option<Cow<'a, C::Item>>) -> usize {
@@ -376,7 +376,7 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
         self.encoder.append_item(v)
     }
 
-    pub fn append<M: MaybePackable2<'a, C::Item>>(&mut self, v: M) -> usize {
+    pub fn append<M: MaybePackable<'a, C::Item>>(&mut self, v: M) -> usize {
         self.encoder.append(v)
     }
 

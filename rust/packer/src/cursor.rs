@@ -1,6 +1,6 @@
 use super::aggregate::{Acc, Agg};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder};
-use super::pack::{MaybePackable, MaybePackable2, PackError, Packable};
+use super::pack::{MaybePackable, PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
 use super::Cow;
 
@@ -243,54 +243,18 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Ok(cursor)
     }
 
-    #[inline(never)]
-    fn splice_v1<E>(slab: &Slab, index: usize, del: usize, values: Vec<E>) -> SpliceResult
-    where
-        E: MaybePackable<Self::Item> + Debug,
-    {
-        let mut encoder = Self::splice_encoder(index, del, slab, values.len());
-        let mut add = 0;
-        let mut value_acc = Acc::new();
-        for v in &values {
-            value_acc += v.agg();
-            add += encoder.append_item(v.maybe_packable());
-        }
-        assert!(encoder.overflow == 0);
-        let deleted = encoder.deleted;
-        let acc = encoder.acc;
-        let slabs = encoder.finish();
-        if deleted == 0 {
-            debug_assert_eq!(
-                slabs.iter().map(|s| s.acc()).sum::<Acc>(),
-                slab.acc() + value_acc
-            );
-        }
-        SpliceResult::Replace(add, deleted, acc, slabs)
-    }
-
-    // pub trait MaybePackable2<'a, T: Packable + ?Sized> {
-    //    fn maybe_packable(self) -> Option<Cow<'a, T>>;
-    //    fn agg(&self) -> Agg { todo!() }
-    // }
-
     fn splice<'a, 'b, I, M>(slab: &'a Slab, index: usize, del: usize, values: I) -> SpliceResult
     where
-        M: MaybePackable2<'b, Self::Item>,
+        M: MaybePackable<'b, Self::Item>,
         I: Iterator<Item = M> + ExactSizeIterator,
         Self::Item: 'b,
     {
-        // THIS FAILS when i use append3() - says `'a` must outlive `'b` on the Self::encode()
-        // note - I cannot guarentee 'a outlives 'b
         let mut encoder = Self::splice_encoder(index, del, slab, values.len());
         let mut add = 0;
         let mut value_acc = Acc::new();
         for v in values {
-            value_acc += v.agg2();
-            // signature for encode.append() and append_item()
-            // pub fn append<M: MaybePackable2<'a, C::Item> + 'a>(&mut self, value: M) -> usize {
-            // pub fn append_item(&mut self, value: Option<Cow<'a, C::Item>>) -> usize {
-            // add += encoder.append(v); // this FAILS when i use it instead of append_item()
-            add += encoder.append_item(v.maybe_packable2());
+            value_acc += v.agg();
+            add += encoder.append_item(v.maybe_packable());
         }
         assert!(encoder.overflow == 0);
         let deleted = encoder.deleted;

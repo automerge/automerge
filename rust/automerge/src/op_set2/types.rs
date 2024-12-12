@@ -8,7 +8,7 @@ use crate::value;
 use std::fmt;
 
 use super::meta::ValueType;
-use super::packer::{MaybePackable, PackError, Packable, RleCursor, ScanMeta, WriteOp};
+use super::packer::{PackError, Packable, RleCursor, ScanMeta, WriteOp};
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -625,18 +625,6 @@ impl Packable for Action {
     }
 }
 
-impl MaybePackable<Action> for Action {
-    fn maybe_packable(&self) -> Option<Cow<'static, Action>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<Action> for Option<Action> {
-    fn maybe_packable(&self) -> Option<Cow<'static, Action>> {
-        self.map(Cow::Owned)
-    }
-}
-
 impl Packable for ActorIdx {
     //type Unpacked<'a> = ActorIdx;
 
@@ -656,18 +644,6 @@ impl Packable for ActorIdx {
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, Cow::Owned(ActorIdx::from(*result))))
-    }
-}
-
-impl MaybePackable<ActorIdx> for ActorIdx {
-    fn maybe_packable(&self) -> Option<Cow<'static, ActorIdx>> {
-        Some(Cow::Owned(*self))
-    }
-}
-
-impl MaybePackable<ActorIdx> for Option<ActorIdx> {
-    fn maybe_packable(&self) -> Option<Cow<'_, ActorIdx>> {
-        self.as_ref().map(Cow::Borrowed)
     }
 }
 
