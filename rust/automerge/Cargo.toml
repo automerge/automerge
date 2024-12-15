@@ -18,7 +18,7 @@ utf16-indexing = []
 packer = { path = "../packer" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
-sha2 = "^0.10.0"
+sha2 = "^0.11.0-pre.4"
 thiserror = "^1.0.16"
 itertools = "0.13.0"
 flate2 = "^1.0.22"

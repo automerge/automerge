@@ -113,9 +113,9 @@ pub struct MarkSet {
 }
 
 impl MarkSet {
-    pub(crate) fn new(name: &str, value: op_set2::ScalarValue<'_>) -> Arc<MarkSet> {
+    pub(crate) fn new(name: &str, value: &op_set2::ScalarValue<'_>) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
-        m.insert(SmolStr::from(name), value.into_owned());
+        m.insert(SmolStr::from(name), value.to_owned());
         Arc::new(m)
     }
 
@@ -245,13 +245,13 @@ impl<'a> MarkStateMachine<'a> {
             if let Some(below) = Self::mark_below(&mut self.state, index, mark.clone()) {
                 if below.value != mark.value {
                     Arc::make_mut(&mut self.current)
-                        .insert(SmolStr::from(mark.name.as_ref()), mark.value.into());
+                        .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                     result = true
                 }
             } else {
                 // nothing above or below
                 Arc::make_mut(&mut self.current)
-                    .insert(SmolStr::from(mark.name.as_ref()), mark.value.into());
+                    .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                 result = true
             }
         }

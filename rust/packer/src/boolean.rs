@@ -1,6 +1,6 @@
 use super::aggregate::Acc;
 use super::cursor::{ColumnCursor, Run, SpliceDel};
-use super::encoder::{Encoder, EncoderState, SpliceEncoder};
+use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter};
 use super::Cow;
@@ -11,6 +11,7 @@ use std::ops::Range;
 pub struct BooleanState {
     pub(crate) value: bool,
     pub(crate) count: usize,
+    pub(crate) flushed: bool,
 }
 
 impl BooleanState {
@@ -25,9 +26,13 @@ impl BooleanState {
 
 impl<'a> From<Run<'a, bool>> for BooleanState {
     fn from(run: Run<'a, bool>) -> Self {
+        let count = run.count;
+        let value = *run.value.as_deref().unwrap_or(&false);
+        let flushed = true;
         Self {
-            count: run.count,
-            value: *run.value.unwrap_or(Cow::Owned(false)),
+            count,
+            value,
+            flushed,
         }
     }
 }
@@ -54,7 +59,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Self::default()
     }
 
-    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, bool>, cursor: Self) {
         writer.copy(
             slab.as_slice(),
             cursor.offset..slab.as_slice().len(),
@@ -111,7 +116,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn copy_between<'a>(
         slab: &'a [u8],
-        writer: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a, bool>,
         c0: Self,
         c1: Self,
         run: Run<'a, bool>,
@@ -121,6 +126,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         let mut next_state = BooleanState {
             value: run.value.as_deref().copied().unwrap_or_default(),
             count: 0,
+            flushed: true,
         };
         next_state.append_chunk(writer, run);
         next_state
@@ -139,16 +145,21 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
+        let flushed = run.is_some();
         let count = run.as_ref().map(|r| r.count).unwrap_or(0);
         let value = run
             .as_ref()
             .and_then(|r| r.value.as_deref().cloned())
             .unwrap_or_default();
 
-        let mut state = BooleanState { count, value };
+        let mut state = BooleanState {
+            count,
+            value,
+            flushed,
+        };
         let acc = cursor.acc - state.acc();
-        let state2 = BooleanState::from(run.unwrap_or_default());
-        assert_eq!(state, state2);
+        //let state2 = BooleanState::from(run.unwrap_or_default());
+        //assert_eq!(state, state2);
         let mut post = None;
 
         let delta = cursor.index - index;
@@ -220,7 +231,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2);
+            let mut writer = SlabWriter::<bool>::new(usize::MAX, 2);
             writer.flush_bool_run(len, false);
             writer.finish().pop().unwrap_or_default()
         } else {

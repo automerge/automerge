@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -24,7 +25,7 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<OpBuilder2>,
-    //pending2: ChangeBuilder<'static>,
+    //pending2: ChangeWriter<'static>,
 }
 
 /// Arguments required to create a new transaction
@@ -64,6 +65,7 @@ impl TransactionInner {
             checkpoint,
             deps,
             pending: vec![],
+            //pending2: Default::default(),
             scope,
         }
     }
@@ -128,12 +130,29 @@ impl TransactionInner {
         hash
     }
 
-    #[tracing::instrument(skip(self, osd))]
+    pub(crate) fn _change_meta<'a>(
+        &self,
+        //osd: &'a OpSet,
+    ) -> crate::op_set2::change::ChangeMetadata<'a> {
+        crate::op_set2::change::ChangeMetadata {
+            actor: self.actor.into(),
+            //actors: &osd.actors,
+            seq: self.seq,
+            start_op: self.start_op,
+            timestamp: self.time,
+            message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
+            extra_bytes: Cow::Borrowed(&[]),
+        }
+    }
+
+    #[inline(never)]
     pub(crate) fn export(self, osd: &OpSet) -> Change {
         use crate::storage::{change::PredOutOfOrder, convert::ob_as_actor_id};
 
         let actor = osd.get_actor(self.actor).clone();
         let deps = self.deps.clone();
+        // let meta = self._change_meta();
+        // let stored = self.pending2.finish(meta, &osd.actors);
         let stored = match StoredChange::builder()
             .with_actor(actor)
             .with_seq(self.seq)
@@ -141,7 +160,7 @@ impl TransactionInner {
             .with_message(self.message.clone())
             .with_dependencies(deps)
             .with_timestamp(self.time)
-            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)), None)
+            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)))
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
@@ -149,6 +168,24 @@ impl TransactionInner {
                 panic!("preds out of order");
             }
         };
+        /*
+                if stored.bytes != stored2.bytes {
+                    let raw1 = stored.ops_meta.raw_columns();
+                    let raw2 = stored2.ops_meta.raw_columns();
+                    let spec1 = raw1.0.iter().map(|c| c.spec()).collect::<HashSet<_>>();
+                    let spec2 = raw2.0.iter().map(|c| c.spec()).collect::<HashSet<_>>();
+                    if spec1 != spec2 {
+                        println!("1 -> {:?}", spec1.difference(&spec2));
+                        println!("2 -> {:?}", spec2.difference(&spec1));
+                        panic!();
+                    }
+                    assert_eq!(
+                        raw1.0.iter().map(|c| c.spec()).collect::<Vec<_>>(),
+                        raw2.0.iter().map(|c| c.spec()).collect::<Vec<_>>()
+                    );
+                    assert_eq!(raw1, raw2);
+                }
+        */
         #[cfg(debug_assertions)]
         {
             //let realized_ops = self.operations(osd).collect::<Vec<_>>();
@@ -281,6 +318,7 @@ impl TransactionInner {
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         op: OpBuilder2,
+        //op2: Op<'static>,
         succ: &[SuccInsert],
     ) {
         if !op.is_delete() {
@@ -291,6 +329,7 @@ impl TransactionInner {
 
         self.finalize_op(patch_log, &op, None);
 
+        //self.pending2.append(op2);
         self.pending.push(op);
     }
 
@@ -358,9 +397,11 @@ impl TransactionInner {
             insert: true,
             pred: vec![],
         };
+        //let op2 = Op::new2(pos, id, obj.id, index, action, key, true, vec![]);
 
         doc.ops_mut().insert(&op);
         self.finalize_op(patch_log, &op, marks);
+        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(id)
@@ -417,6 +458,8 @@ impl TransactionInner {
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
+        //let op2 = Op::new();
+
         let inc_value = op.get_increment_value();
 
         let succ: Vec<_> = query
@@ -459,6 +502,7 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
+        let pred = query.ops.iter().map(|op| op.id).collect();
         let op = OpBuilder2 {
             id,
             obj: *obj,
@@ -467,8 +511,9 @@ impl TransactionInner {
             action,
             key: key.into_owned(),
             insert: false,
-            pred: query.ops.iter().map(|op| op.id).collect(),
+            pred,
         };
+        //let op2 = Op::new();
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -639,6 +684,7 @@ impl TransactionInner {
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let op = self.next_delete(obj, query_elemid, &query.ops);
+            //let op2 = Op::new();
             let ops_pos = query
                 .ops
                 .iter()
@@ -649,6 +695,7 @@ impl TransactionInner {
 
             deleted += step;
 
+            //self.pending2.append(op2);
             self.pending.push(op);
         }
 
@@ -674,11 +721,13 @@ impl TransactionInner {
 
             for v in &values {
                 let op = self.next_insert(obj, pos, elemid, v.clone());
+                //let op2 = Op::new();
 
                 elemid = ElemId(op.id);
 
                 doc.ops_mut().insert(&op);
 
+                //self.pending2.append(op2);
                 self.pending.push(op);
                 pos += 1;
             }
@@ -790,6 +839,7 @@ impl TransactionInner {
             insert: true,
             pred: vec![],
         };
+        //let op2 = Op::new();
 
         doc.ops_mut().insert(&op);
 
@@ -801,6 +851,7 @@ impl TransactionInner {
             false,
         );
 
+        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(doc.ops().id_to_exid(id))
@@ -848,6 +899,7 @@ impl TransactionInner {
             insert: false,
             pred: vec![],
         };
+        //let op2 = Op::new();
 
         let found = doc
             .ops()
@@ -892,6 +944,7 @@ impl TransactionInner {
 
         patch_log.delete_seq(text_obj.id, index, 1);
 
+        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(())

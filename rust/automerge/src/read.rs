@@ -266,7 +266,7 @@ pub trait ReadDoc {
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash>;
 
     /// Get a change by its hash.
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
 
     /// Return some statistics about the document
     fn stats(&self) -> Stats;

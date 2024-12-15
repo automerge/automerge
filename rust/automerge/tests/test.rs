@@ -845,11 +845,7 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
     doc1.commit();
     doc1.insert(&list, 3, "d")?;
     doc1.commit();
-    let changes = doc1
-        .get_changes(&[])
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let changes = doc1.get_changes(&[]).into_iter().collect::<Vec<_>>();
     doc2.apply_changes(changes[2..].to_vec())?;
     doc2.apply_changes(changes[2..].to_vec())?;
     doc2.apply_changes(changes)?;
@@ -1009,7 +1005,7 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).into_iter().cloned();
+    let changes = doc.get_changes(&[]).into_iter();
 
     let mut doc = AutoCommit::new();
     doc.apply_changes(changes).unwrap();
@@ -1194,7 +1190,7 @@ fn delete_only_change() {
 
     let changes = doc4.get_changes(&[]);
     assert_eq!(changes.len(), 3);
-    let c = changes[2];
+    let c = &changes[2];
     assert_eq!(c.start_op().get(), 4);
 }
 
@@ -1300,7 +1296,7 @@ fn save_and_load_incremented_counter() {
     doc.commit();
     doc.increment(ROOT, "counter", 1).unwrap();
     doc.commit();
-    let changes1: Vec<Change> = doc.get_changes(&[]).into_iter().cloned().collect();
+    let changes1: Vec<Change> = doc.get_changes(&[]).into_iter().collect();
     let json: Vec<_> = changes1
         .iter()
         .map(|c| serde_json::to_string(&c.decode()).unwrap())
@@ -1499,7 +1495,7 @@ fn bad_change_on_optree_node_boundary() {
     })
     .unwrap();
     let change = doc.get_changes(&doc2.get_heads());
-    doc2.apply_changes(change.into_iter().cloned().collect::<Vec<_>>())
+    doc2.apply_changes(change.into_iter().collect::<Vec<_>>())
         .unwrap();
     Automerge::load(doc2.save().as_slice()).unwrap();
 }
@@ -1862,13 +1858,10 @@ fn test_load_incremental_partial_load() {
 
     let changes = doc.get_changes(&start_heads);
 
-    let encoded = changes
-        .into_iter()
-        .cloned()
-        .fold(Vec::new(), |mut acc, mut change| {
-            acc.extend_from_slice(change.bytes().as_ref());
-            acc
-        });
+    let encoded = changes.into_iter().fold(Vec::new(), |mut acc, mut change| {
+        acc.extend_from_slice(change.bytes().as_ref());
+        acc
+    });
 
     let mut doc2 = Automerge::new();
     doc2.load_incremental(&encoded).unwrap();

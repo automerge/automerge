@@ -1,7 +1,7 @@
 /// An implementation of column specifications as specified in [1]
 ///
 /// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, Hash, PartialEq, Clone, Copy)]
 pub(crate) struct ColumnSpec(u32);
 
 impl PartialOrd for ColumnSpec {

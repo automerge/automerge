@@ -72,16 +72,27 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
-    pub fn remap<'a, F, M: MaybePackable<'a, C::Item> + Debug + Clone + 'a>(&'a mut self, _f: F)
+    pub fn and_remap<F>(self, f: F) -> Self
     where
-        F: Fn(Option<Cow<'a, C::Item>>) -> Option<Cow<'a, C::Item>>,
+        F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
     {
-        /*
-                let mut new_data = ColumnData::new();
-                std::mem::swap(self, &mut new_data);
-                let new_ids = new_data.iter().map(f).collect::<Vec<_>>();
-                self.splice(0, 0, new_ids);
-        */
+        // TODO this could be much faster
+        // if we did it a run at a time instead of an item at a time
+        // but delta runs are special and don't remap easily
+        let mut encoder = Encoder::new();
+        for item in self.iter() {
+            encoder.append_item(f(item));
+        }
+        //std::mem::swap(self, &mut col);
+        encoder.into_column_data()
+    }
+
+    pub fn write_unless_empty(&self, out: &mut Vec<u8>) -> Range<usize> {
+        if self.is_empty() {
+            out.len()..out.len()
+        } else {
+            self.write(out)
+        }
     }
 
     pub fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
@@ -98,7 +109,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         } else {
             let mut encoder: Encoder<C> = Encoder::with_capacity(self.slabs.len() * 7);
             for s in &self.slabs {
-                encoder.write(s);
+                encoder.copy_slab(s);
             }
             encoder.flush();
             encoder.writer.write(out);
@@ -125,16 +136,6 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
     slab: RunIter<'a, C>,
     run: Option<Run<'a, C::Item>>,
 }
-
-/*
-impl<'a, C> Copy for ColumnDataIter<'a, C>
-where
-    C: ColumnCursor,
-    C::SlabIndex: Copy,
-    C::Item: ToOwned<Owned: Copy>,
-{
-}
-*/
 
 impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
     fn clone(&self) -> Self {
@@ -1396,8 +1397,8 @@ pub(crate) mod tests {
 
     #[test]
     fn iter_range_with_acc() {
-        //let seed = rand::random::<u64>();
-        let seed = 1829446311097720029;
+        let seed = rand::random::<u64>();
+        //let seed = 1829446311097720029;
         log!("SEED={:?}", seed);
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];

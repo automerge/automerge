@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
+pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::{ChangeOp, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents};
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
@@ -181,8 +182,6 @@ pub struct Automerge {
     queue: Vec<Change>,
     /// The history of changes that form this document, topologically sorted too.
     history: Vec<Change>,
-    /// Mapping from change hash to index into the history list.
-    history_index: HashMap<ChangeHash, usize>,
     /// Graph of changes
     change_graph: ChangeGraph,
     /// Mapping from actor index to list of seqs seen for them.
@@ -203,7 +202,6 @@ impl Automerge {
         Automerge {
             queue: vec![],
             history: vec![],
-            history_index: HashMap::new(),
             change_graph: ChangeGraph::new(),
             states: HashMap::new(),
             ops: Default::default(),
@@ -223,7 +221,7 @@ impl Automerge {
 
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
-        self.history.is_empty() && self.queue.is_empty()
+        self.change_graph.is_empty() && self.queue.is_empty()
     }
 
     pub(crate) fn actor_id(&self) -> ActorId {
@@ -301,7 +299,7 @@ impl Automerge {
             }
             None => {
                 actor_index = self.get_actor_index();
-                seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+                seq = self.change_graph.seq_for_actor(actor_index) + 1;
                 deps = self.get_heads();
                 scope = None;
                 if seq > 1 {
@@ -459,24 +457,35 @@ impl Automerge {
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
         let mut heads = heads.to_vec();
-        let mut changes = vec![];
+        let mut hashes = vec![];
         while let Some(hash) = heads.pop() {
-            if let Some(change) = self.get_change_by_hash(&hash) {
-                for dep in change.deps() {
-                    if !seen.contains(dep) {
-                        heads.push(*dep);
-                    }
-                }
-                changes.push(change);
-                seen.insert(hash);
-            } else {
+            if !self.change_graph.has_change(&hash) {
                 return Err(AutomergeError::InvalidHash(hash));
             }
+            for dep in self.change_graph.deps_for_hash(&hash) {
+                if !seen.contains(&dep) {
+                    heads.push(dep);
+                }
+            }
+            hashes.push(hash);
+            seen.insert(hash);
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
-        f.apply_changes(changes.into_iter().rev().cloned())?;
+        let changes = self.get_changes_by_hashes(hashes.into_iter().rev().collect());
+        f.apply_changes(changes)?;
         Ok(f)
+    }
+
+    fn get_changes_by_hashes(&self, hashes: Vec<ChangeHash>) -> Vec<Change> {
+        let changes1 =
+            ChangeCollector::for_hashes(&self.ops, &self.change_graph, hashes.clone()).unwrap();
+        let changes = hashes
+            .iter()
+            .map(|h| self.get_change_by_hash(h).unwrap().clone())
+            .collect();
+        assert_eq!(changes1, changes);
+        changes
     }
 
     pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
@@ -759,14 +768,15 @@ impl Automerge {
         Ok(delta)
     }
 
+    fn seq_for_actor(&self, actor: &ActorId) -> u64 {
+        self.ops
+            .lookup_actor(actor)
+            .map(|idx| self.change_graph.seq_for_actor(idx))
+            .unwrap_or(0)
+    }
+
     fn duplicate_seq(&self, change: &Change) -> bool {
-        let mut dup = false;
-        if let Some(actor_index) = self.ops.lookup_actor(change.actor_id()) {
-            if let Some(s) = self.states.get(&actor_index) {
-                dup = s.len() >= change.seq() as usize;
-            }
-        }
-        dup
+        self.seq_for_actor(change.actor_id()) >= change.seq()
     }
 
     /// Apply changes to this document.
@@ -891,11 +901,7 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
-        let changes = self
-            .get_changes_added(other)
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let changes = self.get_changes_added(other);
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
@@ -974,40 +980,50 @@ impl Automerge {
     }
 
     /// Get the changes since `have_deps` in this document using a clock internally.
-    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        // get the clock for the given deps
-        let clock = self.clock_at(have_deps);
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
+        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
+        /*
+                let changes2 = ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps);
+                let m = self.change_graph.get_metadata_clock(have_deps);
+                // get the clock for the given deps
+                let clock = self.clock_at(have_deps);
 
-        // get the documents current clock
+                // get the documents current clock
 
-        let mut change_indexes: Vec<usize> = Vec::new();
-        // walk the state from the given deps clock and add them into the vec
-        for (actor_index, actor_changes) in &self.states {
-            if let Some(clock_data) = clock.get_for_actor(actor_index) {
-                // find the change in this actors sequence of changes that corresponds to the max_op
-                // recorded for them in the clock
-                change_indexes.extend(&actor_changes[clock_data.seq as usize..]);
-            } else {
-                change_indexes.extend(&actor_changes[..]);
-            }
-        }
+                let mut change_indexes: Vec<usize> = Vec::new();
+                // walk the state from the given deps clock and add them into the vec
+                for (actor_index, actor_changes) in &self.states {
+                    if let Some(clock_data) = clock.get_for_actor(actor_index) {
+                        // find the change in this actors sequence of changes that corresponds to the max_op
+                        // recorded for them in the clock
+                        change_indexes.extend(&actor_changes[clock_data.seq as usize..]);
+                    } else {
+                        change_indexes.extend(&actor_changes[..]);
+                    }
+                }
 
-        // ensure the changes are still in sorted order
-        change_indexes.sort_unstable();
+                // ensure the changes are still in sorted order
+                change_indexes.sort_unstable();
 
-        change_indexes
-            .into_iter()
-            .map(|i| &self.history[i])
-            .collect()
+                let changes = change_indexes
+                    .into_iter()
+                    .map(|i| self.history[i].clone())
+                    .collect();
+
+                assert_eq!(changes,changes2);
+
+                changes
+        */
     }
 
     /// Get the last change this actor made to the document.
-    pub fn get_last_local_change(&self) -> Option<&Change> {
+    pub fn get_last_local_change(&self) -> Option<Change> {
         return self
             .history
             .iter()
             .rev()
-            .find(|c| c.actor_id() == self.get_actor());
+            .find(|c| c.actor_id() == self.get_actor())
+            .cloned();
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
@@ -1038,7 +1054,7 @@ impl Automerge {
             clock = self.clock_at(heads); // need to recompute the clock b/c the actor indexes may have changed
         }
 
-        let seq = self.states.get(&actor_index).map_or(0, |v| v.len()) as u64 + 1;
+        let seq = self.change_graph.seq_for_actor(actor_index) + 1;
 
         Isolation {
             actor_index,
@@ -1048,20 +1064,21 @@ impl Automerge {
     }
 
     fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
-        self.states
-            .get(&actor)
-            .and_then(|v| v.get(seq as usize - 1))
-            .and_then(|&i| self.history.get(i))
-            .map(|c| c.hash())
-            .ok_or(AutomergeError::InvalidSeq(seq))
+        self.change_graph.get_hash_for_actor_seq(actor, seq)
+        /*
+                self.states
+                    .get(&actor)
+                    .and_then(|v| v.get(seq as usize - 1))
+                    .and_then(|&i| self.change_graph.get_hash(i).copied())
+                    .ok_or(AutomergeError::InvalidSeq(seq))
+        */
     }
 
     fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
         self.states
             .get(&actor_index)
             .and_then(|s| s.last())
-            .and_then(|index| self.history.get(*index))
-            .map(|change| change.max_op())
+            .and_then(|index| self.change_graph.get_max_op(*index))
             .unwrap_or(0)
     }
 
@@ -1079,7 +1096,6 @@ impl Automerge {
             .or_default()
             .push(history_index);
 
-        self.history_index.insert(change.hash(), history_index);
         self.change_graph
             .add_change(&change, actor_index)
             .expect("Change's deps should already be in the document");
@@ -1158,7 +1174,7 @@ impl Automerge {
                 .ops
                 .lookup_actor(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
-            let obj = ExId::Id(counter, self.ops.get_actor(actor).clone(), actor);
+            let obj = ExId::Id(counter, self.ops.get_actor(actor.into()).clone(), actor);
             Ok(obj)
         }
     }
@@ -1274,12 +1290,12 @@ impl Automerge {
         deps
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
         self.get_changes_clock(have_deps)
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
+    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
         let mut stack: Vec<_> = other.get_heads();
@@ -1290,18 +1306,14 @@ impl Automerge {
             if !seen_hashes.contains(&hash) && !self.has_change(&hash) {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
-                if let Some(change) = other.get_change_by_hash(&hash) {
-                    stack.extend(change.deps());
-                }
+                stack.extend(other.change_graph.deps_for_hash(&hash));
             }
         }
         // Return those changes in the reverse of the order in which the depth-first search
         // found them. This is not necessarily a topological sort, but should usually be close.
         added_change_hashes.reverse();
-        added_change_hashes
-            .into_iter()
-            .filter_map(|h| other.get_change_by_hash(&h))
-            .collect()
+
+        other.get_changes_by_hashes(added_change_hashes)
     }
 
     /// Get the hash of the change that contains the given `opid`.
@@ -1333,7 +1345,7 @@ impl Automerge {
                     })
                     .ok()?;
                 let change_index = actor_indices.get(change_index_index).unwrap();
-                Some(self.history.get(*change_index).unwrap().hash())
+                Some(*self.change_graph.get_hash(*change_index)?)
             }
         }
     }
@@ -1944,15 +1956,31 @@ impl ReadDoc for Automerge {
         missing
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
-        self.history_index
-            .get(hash)
-            .and_then(|index| self.history.get(*index))
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
+        ChangeCollector::for_hashes(&self.ops, &self.change_graph, [hash.clone()])
+            .ok()?
+            .pop()
+        /*
+                let (metadata, deps) = self.change_graph.get_metadata_for_hash(hash)?;
+                let change = self
+                    .change_graph
+                    .hash_to_index(hash)
+                    .and_then(|index| self.history.get(index))?;
+                assert_eq!(metadata.seq, change.seq());
+                assert_eq!(deps, change.deps());
+                assert_eq!(metadata.start_op, change.start_op());
+                assert_eq!(
+                    metadata.message.as_deref(),
+                    change.message().as_deref().map(|x| x.as_str())
+                );
+                assert_eq!(changes, Some(vec![change.clone()]));
+                Some(change)
+        */
     }
 
     fn stats(&self) -> crate::read::Stats {
         crate::read::Stats {
-            num_changes: self.history.len() as u64,
+            num_changes: self.change_graph.len() as u64,
             num_ops: self.ops.len() as u64,
         }
     }
@@ -2004,26 +2032,20 @@ pub(crate) fn reconstruct_document<'a>(
         op_set,
         heads,
         max_op,
+        change_graph,
     } = storage::load::reconstruct_opset(doc, mode)
         .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
 
-    let mut hashes_by_index = HashMap::new();
+    // TODO - lets remove this
     let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut change_graph = ChangeGraph::new();
     for (index, change) in changes.iter().enumerate() {
-        // SAFETY: This should be fine because we just constructed an opset containing
-        // all the changes
         let actor_index = op_set.lookup_actor(change.actor_id()).unwrap();
         actor_to_history.entry(actor_index).or_default().push(index);
-        hashes_by_index.insert(index, change.hash());
-        change_graph.add_change(change, actor_index)?;
     }
-    //let op_set = OpSet::new(doc)?;
-    let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+
     Ok(Automerge {
         queue: vec![],
         history: changes,
-        history_index,
         states: actor_to_history,
         change_graph,
         ops: op_set,

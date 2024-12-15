@@ -328,7 +328,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
 

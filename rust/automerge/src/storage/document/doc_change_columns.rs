@@ -1,5 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
+use packer::{ColumnCursor, CursorIter, StrCursor};
+
 use crate::{
     columnar::{
         column_range::{
@@ -23,15 +25,27 @@ const MESSAGE_COL_ID: ColumnId = ColumnId::new(3);
 const DEPS_COL_ID: ColumnId = ColumnId::new(4);
 const EXTRA_COL_ID: ColumnId = ColumnId::new(5);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ChangeMetadata<'a> {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) max_op: u64,
     pub(crate) timestamp: i64,
-    pub(crate) message: Option<smol_str::SmolStr>,
+    //pub(crate) message: Option<smol_str::SmolStr>,
+    pub(crate) message: Option<Cow<'a, str>>,
     pub(crate) deps: Vec<u64>,
     pub(crate) extra: Cow<'a, [u8]>,
+}
+
+impl<'a> ChangeMetadata<'a> {
+    pub(crate) fn message_str(&self) -> &str {
+        if let Some(s) = self.message.as_deref() {
+            s
+            //s.as_str()
+        } else {
+            ""
+        }
+    }
 }
 
 /// A row to be encoded as change metadata in the document format
@@ -72,11 +86,14 @@ impl DocChangeColumns {
             seq: self.seq.decoder(data),
             max_op: self.max_op.decoder(data),
             time: self.time.decoder(data),
-            message: if self.message.is_empty() {
-                None
-            } else {
-                Some(self.message.decoder(data))
-            },
+            /*
+                        message: if self.message.is_empty() {
+                            None
+                        } else {
+                            Some(self.message.decoder(data))
+                        },
+            */
+            message: packer::StrCursor::iter(&data[self.message.as_ref().clone()]),
             deps: self.deps.iter(data),
             extra: ExtraDecoder {
                 val: self.extra.iter(data),
@@ -170,8 +187,12 @@ pub(crate) enum ReadChangeError {
     MismatchingColumn { index: usize },
     #[error("incorrect value in extra bytes column")]
     InvalidExtraBytes,
+    #[error("max_op is lower than start_op")]
+    InvalidMaxOp,
     #[error(transparent)]
     ReadColumn(#[from] DecodeColumnError),
+    #[error(transparent)]
+    PackError(#[from] packer::PackError),
 }
 
 impl From<MismatchingColumn> for ReadChangeError {
@@ -186,7 +207,8 @@ pub(crate) struct DocChangeColumnIter<'a> {
     seq: DeltaDecoder<'a>,
     max_op: DeltaDecoder<'a>,
     time: DeltaDecoder<'a>,
-    message: Option<RleDecoder<'a, smol_str::SmolStr>>,
+    //message: Option<RleDecoder<'a, smol_str::SmolStr>>,
+    message: CursorIter<'a, StrCursor>,
     deps: DepsIter<'a>,
     extra: ExtraDecoder<'a>,
 }
@@ -213,11 +235,8 @@ impl<'a> DocChangeColumnIter<'a> {
             u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value("seq", e.to_string()))
         })?;
         let time = self.time.next_in_col("time")?;
-        let message = if let Some(ref mut message) = self.message {
-            message.maybe_next_in_col("message")?
-        } else {
-            None
-        };
+        // would be nice if this had per column error handling too
+        let message = self.message.next().transpose()?.flatten();
         let deps = self.deps.next_in_col("deps")?;
         let extra = self.extra.next().transpose()?.unwrap_or(Cow::Borrowed(&[]));
         Ok(Some(ChangeMetadata {

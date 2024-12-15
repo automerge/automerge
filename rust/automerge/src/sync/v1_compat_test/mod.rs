@@ -137,7 +137,7 @@ impl Automerge {
         &self,
         have: &[Have],
         need: &[ChangeHash],
-    ) -> Result<Vec<&Change>, AutomergeError> {
+    ) -> Result<Vec<Change>, AutomergeError> {
         if have.is_empty() {
             Ok(need
                 .iter()

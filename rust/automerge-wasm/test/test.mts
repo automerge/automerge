@@ -2133,6 +2133,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
 
+    // FIXME - this has a rare failure - find out why
     it("should report whether the other end has our changes", () => {
       const left = create()
       left.put("/", "foo", "bar")

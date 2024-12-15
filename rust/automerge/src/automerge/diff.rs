@@ -28,8 +28,8 @@ struct Winner<'a> {
 
 impl<'a> Winner<'a> {
     fn value(&self) -> hydrate::Value {
-        if let Some(v) = self.value_at {
-            hydrate::Value::Scalar(v.into_owned())
+        if let Some(v) = &self.value_at {
+            hydrate::Value::Scalar(v.to_owned())
         } else {
             self.op.hydrate_value()
         }
@@ -505,7 +505,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
 

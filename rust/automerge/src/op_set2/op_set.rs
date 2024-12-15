@@ -477,7 +477,7 @@ impl OpSet {
         counters
             .find_by_value(id.counter())
             .into_iter()
-            .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(ActorIdx::from(id.actor())))))
+            .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(id.actoridx()))))
     }
 
     fn seek_list_op_fast(
@@ -699,7 +699,7 @@ impl OpSet {
             .no_marks()
             .visible(clock)
             .top_ops()
-            .map(|op| op.as_str())
+            .map(|op| op.as_str_cow())
             .collect()
     }
 
@@ -902,6 +902,7 @@ impl OpSet {
         self.actors.binary_search(actor).ok()
     }
 
+    #[inline(never)]
     pub(crate) fn new(doc: &Document<'_>) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = Arc::new(doc.op_raw_bytes().to_vec());
@@ -1185,7 +1186,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                             // grab its name and value
                             if let Some(ref mark) = op.mark_name {
                                 mark_name = Some(mark.clone());
-                                value = op.value;
+                                value = op.value.clone();
                                 // and if it changes the mark state start recording
                                 if marks.process(op.id, op.action()) {
                                     start = Some(index);
@@ -1197,7 +1198,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                                 match (marks.covered(target, mark), start) {
                                     (true, Some(s)) => {
                                         // the mark is either covered up (so we're done)
-                                        let ms = MarkSet::new(mark.as_ref(), value);
+                                        let ms = MarkSet::new(mark.as_ref(), &value);
                                         patch_log.mark(obj.id, s, index - s, &ms);
                                         start = None;
                                     }
@@ -1215,7 +1216,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     }
                     if let Some(s) = start {
                         if let Some(mark) = mark_name {
-                            let ms = MarkSet::new(&mark, value);
+                            let ms = MarkSet::new(&mark, &value);
                             patch_log.mark(obj.id, s, index - s, &ms);
                         }
                     }
@@ -1249,7 +1250,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     patch_log.put(
                         obj.id,
                         &key,
-                        before.value().into(),
+                        before.hydrate_value(),
                         before.id,
                         conflict,
                         true,
@@ -2175,7 +2176,7 @@ mod tests {
                 id: test_op.id,
                 obj: test_op.obj,
                 action: test_op.action,
-                value: test_op.value,
+                value: test_op.value.clone(),
                 key: test_op.key.clone(),
                 insert: test_op.insert,
                 expand: test_op.expand,
@@ -2219,7 +2220,7 @@ mod tests {
                 id: OpId::new(2, 1),
                 obj: ObjId::root(),
                 action: Action::Set,
-                value: ScalarValue::Str("value1"),
+                value: ScalarValue::str("value1"),
                 key: KeyRef::Map("key1".into()),
                 insert: false,
                 succs: vec![],
@@ -2230,7 +2231,7 @@ mod tests {
                 id: OpId::new(3, 1),
                 obj: ObjId::root(),
                 action: Action::Set,
-                value: ScalarValue::Str("value2"),
+                value: ScalarValue::str("value2"),
                 key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![OpId::new(6, 1)],
@@ -2241,7 +2242,7 @@ mod tests {
                 id: OpId::new(4, 1),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("inner_value1"),
+                value: ScalarValue::str("inner_value1"),
                 key: KeyRef::Map("inner_key1".into()),
                 insert: false,
                 succs: vec![OpId::new(7, 1), OpId::new(8, 2), OpId::new(9, 1)],
@@ -2252,7 +2253,7 @@ mod tests {
                 id: OpId::new(5, 1),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("inner_value2"),
+                value: ScalarValue::str("inner_value2"),
                 key: KeyRef::Map("inner_key2".into()),
                 insert: false,
                 succs: vec![],
@@ -2320,7 +2321,7 @@ mod tests {
                 id: OpId::new(3, 1),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value1"),
+                value: ScalarValue::str("value1"),
                 key: KeyRef::Map("key1".into()),
                 insert: false,
                 succs: vec![],
@@ -2331,7 +2332,7 @@ mod tests {
                 id: OpId::new(4, 1),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value2a"),
+                value: ScalarValue::str("value2a"),
                 key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![],
@@ -2342,7 +2343,7 @@ mod tests {
                 id: OpId::new(4, 2),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value2b"),
+                value: ScalarValue::str("value2b"),
                 key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![OpId::new(5, 2)],
@@ -2353,7 +2354,7 @@ mod tests {
                 id: OpId::new(5, 2),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value2c"),
+                value: ScalarValue::str("value2c"),
                 key: KeyRef::Map("key2".into()),
                 insert: false,
                 succs: vec![],
@@ -2364,7 +2365,7 @@ mod tests {
                 id: OpId::new(6, 1),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value3a"),
+                value: ScalarValue::str("value3a"),
                 key: KeyRef::Map("key3".into()),
                 insert: false,
                 succs: vec![OpId::new(7, 2)],
@@ -2375,7 +2376,7 @@ mod tests {
                 id: OpId::new(7, 2),
                 obj: ObjId(OpId::new(1, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("value3b"),
+                value: ScalarValue::str("value3b"),
                 key: KeyRef::Map("key3".into()),
                 insert: false,
                 succs: vec![],
@@ -2386,7 +2387,7 @@ mod tests {
                 id: OpId::new(8, 1),
                 obj: ObjId(OpId::new(2, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("a"),
+                value: ScalarValue::str("a"),
                 key: KeyRef::Seq(ElemId::head()),
                 insert: true,
                 succs: vec![],
@@ -2397,7 +2398,7 @@ mod tests {
                 id: OpId::new(9, 1),
                 obj: ObjId(OpId::new(2, 1)),
                 action: Action::Set,
-                value: ScalarValue::Str("b"),
+                value: ScalarValue::str("b"),
                 key: KeyRef::Seq(ElemId(OpId::new(8, 1))),
                 insert: true,
                 succs: vec![],

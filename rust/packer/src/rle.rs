@@ -137,7 +137,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         run: Option<Run<'a, P>>,
         index: usize,
         cap: usize,
-    ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a>) {
+    ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a, P>) {
         let mut post = None;
         let mut acc = cursor.acc();
 
@@ -210,7 +210,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
 
     fn copy_between<'a>(
         slab: &'a [u8],
-        writer: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a, P>,
         c0: Self,
         c1: Self,
         run: Run<'a, Self::Item>,
@@ -276,7 +276,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         }
     }
 
-    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, P>, cursor: Self) {
         let num_left = cursor.num_left();
         let range = cursor.offset..slab.as_slice().len();
         writer.copy(

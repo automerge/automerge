@@ -1,5 +1,5 @@
 use super::aggregate::{Acc, Agg};
-use super::encoder::{Encoder, EncoderState, SpliceEncoder};
+use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
 use super::Cow;
@@ -151,6 +151,14 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Self::empty()
     }
 
+    fn iter<'a>(slab: &'a [u8]) -> CursorIter<'a, Self> {
+        CursorIter {
+            slab,
+            cursor: Self::empty(),
+            run: None,
+        }
+    }
+
     fn compute_min_max(_slabs: &mut [Slab]) {}
 
     fn is_empty(v: Option<Cow<'_, Self::Item>>) -> bool {
@@ -174,11 +182,11 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     ) -> Option<Self>;
 
     // ENCODER
-    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self);
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, Self::Item>, cursor: Self);
 
     fn copy_between<'a>(
         slab: &'a [u8],
-        writer: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a, Self::Item>,
         c0: Self,
         c1: Self,
         run: Run<'a, Self::Item>,
@@ -319,7 +327,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::new(usize::MAX, 2);
+            let mut writer = SlabWriter::<Self::Item>::new(usize::MAX, 2);
             writer.flush_null(len);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -339,6 +347,62 @@ pub enum SpliceResult {
     //Done(usize, usize),
     //Add(usize, usize, Vec<Slab>),
     Replace(usize, usize, Acc, Vec<Slab>),
+}
+
+// TODO : this needs tests
+#[derive(Debug)]
+pub struct CursorIter<'a, C: ColumnCursor> {
+    pub(crate) slab: &'a [u8],
+    pub(crate) cursor: C,
+    pub(crate) run: Option<Run<'a, C::Item>>,
+}
+
+impl<'a, C: ColumnCursor> Clone for CursorIter<'a, C> {
+    fn clone(&self) -> Self {
+        CursorIter {
+            slab: self.slab,
+            cursor: self.cursor,
+            run: self.run.clone(),
+        }
+    }
+}
+
+impl<'a, C: ColumnCursor> CursorIter<'a, C> {
+    fn next_run(&mut self) -> Result<Option<Run<'a, C::Item>>, PackError> {
+        while let Some(run) = self.cursor.try_next(self.slab)? {
+            if run.count > 0 {
+                return Ok(Some(run));
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl<'a, C: ColumnCursor> Iterator for CursorIter<'a, C>
+where
+    C::Item: 'a,
+{
+    type Item = Result<Option<Cow<'a, C::Item>>, PackError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.run.as_mut() {
+            Some(Run { count, value }) if *count > 0 => {
+                *count -= 1;
+                Some(Ok(value.clone()))
+            }
+            _ => match self.next_run() {
+                Ok(Some(Run { count, value })) if count > 0 => {
+                    self.run = Some(Run {
+                        count: count - 1,
+                        value: value.clone(),
+                    });
+                    Some(Ok(value))
+                }
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Copy)]

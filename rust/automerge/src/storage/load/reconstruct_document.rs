@@ -1,4 +1,10 @@
-use super::change_collector::ChangeCollector;
+//use super::change_collector::ChangeCollector;
+//use super::change_collector::{ChangeCollector2 as ChangeCollector};
+//use super::change_collector::ChangeCollector3 as ChangeCollector;
+//use super::change_collector::ChangeCollector4 as ChangeCollector;
+use crate::change_graph::ChangeGraph;
+use crate::op_set2::change::{ChangeCollector, CollectedChanges};
+use crate::storage::document::ReadChangeError;
 use std::collections::BTreeSet;
 
 use crate::{
@@ -28,10 +34,13 @@ pub(crate) enum Error {
     PackErr(#[from] PackError),
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
+    #[error(transparent)]
+    ReadChangeError(#[from] ReadChangeError),
 }
 
 pub(crate) struct MismatchedHeads {
-    changes: Vec<StoredChange<'static, Verified>>,
+    //changes: Vec<StoredChange<'static, Verified>>,
+    changes: Vec<Change>,
     expected_heads: BTreeSet<ChangeHash>,
     derived_heads: BTreeSet<ChangeHash>,
 }
@@ -57,7 +66,7 @@ pub(crate) fn reconstruct_opset<'a>(
     mode: VerificationMode,
 ) -> Result<ReconOpSet, Error> {
     let mut op_set = OpSet::new(doc)?;
-    let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
+    let mut change_collector = ChangeCollector::new(doc.iter_changes(), &op_set)?;
     let mut iter = op_set.iter();
     let mut index_builder = op_set.index_builder();
 
@@ -66,7 +75,7 @@ pub(crate) fn reconstruct_opset<'a>(
         let op_is_counter = op.is_counter();
         let op_succ = op.succ();
         index_builder.process_op(&op);
-        change_collector.process_op(op)?;
+        change_collector.process_op(op);
 
         for id in op_succ {
             change_collector.process_succ(op_id, id);
@@ -74,7 +83,8 @@ pub(crate) fn reconstruct_opset<'a>(
         }
     }
 
-    let (changes, heads, max_op) = flush_changes(change_collector, doc, mode, &op_set)?;
+    let (changes, heads, max_op, change_graph) =
+        flush_changes(change_collector, doc, mode, &op_set)?;
 
     op_set.set_indexes(index_builder);
 
@@ -83,40 +93,39 @@ pub(crate) fn reconstruct_opset<'a>(
         max_op,
         op_set,
         heads,
+        change_graph,
     })
 }
 
 // create all binary changes
 // look for mismatched heads
 
+#[inline(never)]
 fn flush_changes(
     change_collector: ChangeCollector<'_>,
     doc: &Document<'_>,
     mode: VerificationMode,
     op_set: &OpSet,
-) -> Result<(Vec<Change>, BTreeSet<ChangeHash>, u64), Error> {
-    let super::change_collector::CollectedChanges {
-        history,
+) -> Result<(Vec<Change>, BTreeSet<ChangeHash>, u64, ChangeGraph), Error> {
+    let CollectedChanges {
+        changes,
         heads,
         max_op,
+        change_graph,
     } = change_collector.finish(op_set)?;
+
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
         if expected_heads != heads {
             tracing::error!(?expected_heads, ?heads, "mismatching heads");
             return Err(Error::MismatchingHeads(MismatchedHeads {
-                changes: history,
+                changes,
                 expected_heads,
                 derived_heads: heads,
             }));
         }
     }
-    let changes = history.into_iter().map(Change::new).collect::<Vec<_>>();
-    let max_op2 = changes.iter().map(|c| c.max_op()).max().unwrap_or(0);
-    if max_op != max_op2 {
-        return Err(Error::MismatchingMaxOp(max_op, max_op2));
-    }
-    Ok((changes, heads, max_op))
+    Ok((changes, heads, max_op, change_graph))
 }
 
 pub(crate) struct ReconOpSet {
@@ -124,4 +133,5 @@ pub(crate) struct ReconOpSet {
     pub(crate) max_op: u64,
     pub(crate) op_set: OpSet,
     pub(crate) heads: BTreeSet<ChangeHash>,
+    pub(crate) change_graph: ChangeGraph,
 }

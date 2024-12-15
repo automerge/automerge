@@ -1,4 +1,4 @@
-use super::packer::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor, WriteOp};
+use super::packer::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
 use super::types::ScalarValue;
 use std::borrow::Cow;
 
@@ -46,12 +46,6 @@ impl ValueMeta {
 impl From<u64> for ValueMeta {
     fn from(raw: u64) -> Self {
         ValueMeta(raw)
-    }
-}
-
-impl<'a> From<ValueMeta> for WriteOp<'a> {
-    fn from(v: ValueMeta) -> WriteOp<'static> {
-        WriteOp::UIntAcc(v.0, Agg::from(v.length()))
     }
 }
 
@@ -106,8 +100,12 @@ impl Packable for ValueMeta {
         Agg::from(item.length())
     }
 
-    fn pack(item: Cow<'_, ValueMeta>) -> WriteOp<'static> {
-        WriteOp::UIntAcc(item.0, Agg::from(item.length()))
+    fn width(item: &ValueMeta) -> usize {
+        packer::ulebsize(item.0) as usize
+    }
+
+    fn pack(item: &ValueMeta, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, item.0).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {

@@ -61,7 +61,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a>, cursor: Self) {
+    fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, i64>, cursor: Self) {
         writer.set_abs(cursor.abs);
         SubCursor::<B>::finish(slab, writer, cursor.rle)
     }
@@ -125,7 +125,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn copy_between<'a>(
         slab: &'a [u8],
-        writer: &mut SlabWriter<'a>,
+        writer: &mut SlabWriter<'a, i64>,
         c0: Self,
         c1: Self,
         run: Run<'a, i64>,

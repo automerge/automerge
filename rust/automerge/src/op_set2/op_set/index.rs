@@ -30,6 +30,7 @@ impl IndexBuilder {
         }
     }
 
+    #[inline(never)]
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         self.marks.push(op.mark_index());
 
@@ -48,6 +49,7 @@ impl IndexBuilder {
         }
     }
 
+    #[inline(never)]
     pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
         if op_is_counter {
             self.counters.entry(id).or_default().push(self.incs.len());
@@ -55,6 +57,7 @@ impl IndexBuilder {
         self.incs.push(None); // will update later
     }
 
+    #[inline(never)]
     pub(crate) fn finish(self) -> Indexes {
         let mut text = ColumnData::new();
         text.splice(0, 0, self.widths);

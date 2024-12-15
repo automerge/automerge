@@ -203,7 +203,7 @@ impl From<crate::ExpandedChange> for Change {
             .with_timestamp(e.time)
             .with_start_op(e.start_op)
             .with_message(e.message)
-            .build(e.operations.iter(), None);
+            .build(e.operations.iter());
         match stored {
             Ok(c) => Change::new(c),
             Err(crate::storage::change::PredOutOfOrder) => {

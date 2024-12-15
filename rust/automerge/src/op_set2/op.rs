@@ -61,6 +61,19 @@ pub(crate) struct OpBuilder2 {
     pub(crate) pred: Vec<OpId>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct OpBuilder3<'a> {
+    pub(crate) id: OpId,
+    pub(crate) obj: ObjId,
+    pub(crate) action: Action,
+    pub(crate) key: KeyRef<'a>,
+    pub(crate) value: ScalarValue<'a>,
+    pub(crate) insert: bool,
+    pub(crate) expand: bool,
+    pub(crate) mark_name: Option<Cow<'a, str>>,
+    pub(super) pred: Vec<OpId>,
+}
+
 impl OpBuilder2 {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
         match &self.action {
@@ -334,6 +347,24 @@ pub(crate) struct SuccInsert {
 }
 
 impl<'a> Op<'a> {
+    /*
+        pub(crate) fn new() -> Self {
+            Self {
+                pos: 0,
+                conflict: false,
+                id: OpId::default(),
+                action: Action::default(),
+                obj: ObjId::root(),
+                key: KeyRef::Seq(ElemId::head()),
+                insert: false,
+                value: ScalarValue::Null,
+                expand: false,
+                mark_name: None,
+                succ_cursors: SuccCursors::default(),
+            }
+        }
+    */
+
     pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
         match (&self.action, &self.mark_name) {
             (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
@@ -360,11 +391,21 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn as_str(&self) -> &'a str {
+    pub(crate) fn as_str_cow(&self) -> Cow<'a, str> {
+        if self.action == Action::Mark {
+            Cow::Borrowed("")
+        } else if let ScalarValue::Str(s) = &self.value {
+            s.clone()
+        } else {
+            Cow::Borrowed("\u{fffc}")
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
         if self.action == Action::Mark {
             ""
         } else if let ScalarValue::Str(s) = &self.value {
-            s
+            s.as_ref()
         } else {
             "\u{fffc}"
         }
@@ -381,7 +422,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn op_type(&self) -> OpType<'a> {
-        OpType::from_action_and_value(self.action, self.value, self.mark_name.clone(), self.expand)
+        OpType::from_action_and_value(self.action, &self.value, &self.mark_name, self.expand)
     }
 
     pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = OpId> + 'a {
@@ -429,9 +470,9 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
-        match (self.action, self.value) {
-            (Action::Increment, ScalarValue::Int(i)) => Some(i),
-            (Action::Increment, ScalarValue::Uint(i)) => Some(i as i64),
+        match (self.action, &self.value) {
+            (Action::Increment, ScalarValue::Int(i)) => Some(*i),
+            (Action::Increment, ScalarValue::Uint(i)) => Some(*i as i64),
             _ => None,
         }
     }
@@ -443,9 +484,9 @@ impl<'a> Op<'a> {
     pub(crate) fn value(&self) -> Value<'a> {
         match &self.action() {
             OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(*scalar),
-            OpType::MarkBegin(_, _) => Value::Scalar(ScalarValue::Str("markBegin")),
-            OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str("markEnd")),
+            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
+            OpType::MarkBegin(_, _) => Value::Scalar(ScalarValue::Str(Cow::Borrowed("markBegin"))),
+            OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str(Cow::Borrowed("markEnd"))),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -453,8 +494,8 @@ impl<'a> Op<'a> {
     pub(crate) fn hydrate_value(&self) -> hydrate::Value {
         match &self.action() {
             OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
-            OpType::Put(scalar) => hydrate::Value::from(scalar.into_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::from(mark.value),
+            OpType::Put(scalar) => hydrate::Value::from(scalar.to_owned()),
+            OpType::MarkBegin(_, mark) => hydrate::Value::from(&mark.value),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
@@ -490,6 +531,20 @@ impl<'a> Op<'a> {
             key: self.key.clone().into_owned(),
             insert: self.insert,
             pred: pred.collect(),
+        }
+    }
+
+    pub(crate) fn build3(self, pred: Vec<OpId>) -> OpBuilder3<'a> {
+        OpBuilder3 {
+            id: self.id,
+            obj: self.obj,
+            action: self.action,
+            value: self.value,
+            key: self.key,
+            insert: self.insert,
+            expand: self.expand,
+            mark_name: self.mark_name,
+            pred,
         }
     }
 
@@ -561,7 +616,7 @@ impl<'a> AsDocOp<'a> for Op<'a> {
         self.action.into()
     }
     fn val(&self) -> Cow<'a, crate::value::ScalarValue> {
-        Cow::Owned(self.value.into())
+        Cow::Owned(self.value.to_owned())
     }
     fn succ(&self) -> Self::SuccIter {
         self.succ_cursors.clone()

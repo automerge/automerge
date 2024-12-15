@@ -6,7 +6,7 @@ use crate::{convert, ActorId, ChangeHash, ScalarValue};
 use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
 
 mod change_op_columns;
-use change_op_columns::ChangeOpsColumns;
+pub(crate) use change_op_columns::ChangeOpsColumns;
 pub(crate) use change_op_columns::{ChangeOp, ReadChangeOpError};
 
 mod change_actors;
@@ -44,21 +44,21 @@ impl OpReadState for Unverified {}
 #[derive(Clone, Debug)]
 pub(crate) struct Change<'a, O: OpReadState> {
     /// The raw bytes of the entire chunk containing this change, including the header.
-    bytes: Cow<'a, [u8]>,
-    header: Header,
-    dependencies: Vec<ChangeHash>,
-    actor: ActorId,
-    other_actors: Vec<ActorId>,
-    seq: u64,
-    start_op: NonZeroU64,
-    timestamp: i64,
-    message: Option<String>,
-    ops_meta: ChangeOpsColumns,
+    pub(crate) bytes: Cow<'a, [u8]>,
+    pub(crate) header: Header,
+    pub(crate) dependencies: Vec<ChangeHash>,
+    pub(crate) actor: ActorId,
+    pub(crate) other_actors: Vec<ActorId>,
+    pub(crate) seq: u64,
+    pub(crate) start_op: NonZeroU64,
+    pub(crate) timestamp: i64,
+    pub(crate) message: Option<String>,
+    pub(crate) ops_meta: ChangeOpsColumns,
     /// The range in `Self::bytes` where the ops column data is
-    ops_data: Range<usize>,
-    extra_bytes: Range<usize>,
-    num_ops: usize,
-    _phantom: PhantomData<O>,
+    pub(crate) ops_data: Range<usize>,
+    pub(crate) extra_bytes: Range<usize>,
+    pub(crate) num_ops: usize,
+    pub(crate) _phantom: PhantomData<O>,
 }
 
 impl<'a, O: OpReadState> PartialEq for Change<'a, O> {
@@ -456,7 +456,6 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
     pub(crate) fn build<'a, 'b, A, I, O>(
         self,
         ops: I,
-        _ops2: Option<ChangeBuilder2<'b>>,
     ) -> Result<Change<'static, Verified>, PredOutOfOrder>
     where
         A: AsChangeOp<'a, OpId = O> + 'a + std::fmt::Debug,

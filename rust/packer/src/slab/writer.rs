@@ -1,5 +1,6 @@
 use super::Slab;
-use crate::aggregate::{Acc, Agg};
+use crate::aggregate::Acc;
+use crate::encoder::Writer;
 use crate::leb128::{lebsize, ulebsize};
 use crate::pack::Packable;
 use crate::Cow;
@@ -7,139 +8,83 @@ use crate::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 
-#[derive(Clone, PartialEq)]
-pub enum WriteOp<'a> {
-    LitHead(i64),
-    UInt(u64),
-    UIntAcc(u64, Agg),
-    BoolRun(u64, bool),
-    Int(i64),
-    Bytes(Cow<'a, [u8]>),
-    Raw(Cow<'a, [u8]>),
+#[derive(PartialEq)]
+pub enum WriteOp<'a, P: Packable + ?Sized> {
+    Value(Cow<'a, P>),
     Cpy(&'a [u8], Range<usize>, Acc, Option<bool>),
 }
 
-impl<'a> From<i64> for WriteOp<'a> {
-    fn from(n: i64) -> WriteOp<'static> {
-        WriteOp::Int(n)
-    }
-}
-
-impl<'a> From<u64> for WriteOp<'a> {
-    fn from(n: u64) -> WriteOp<'static> {
-        WriteOp::UIntAcc(n, Agg::from(n))
-    }
-}
-
-impl<'a> From<u32> for WriteOp<'a> {
-    fn from(n: u32) -> WriteOp<'static> {
-        WriteOp::UIntAcc(n as u64, Agg::from(n))
-    }
-}
-
-impl<'a> From<usize> for WriteOp<'a> {
-    fn from(n: usize) -> WriteOp<'static> {
-        WriteOp::UIntAcc(n as u64, Agg::from(n))
-    }
-}
-
-impl<'a> From<Cow<'a, str>> for WriteOp<'a> {
-    fn from(s: Cow<'a, str>) -> WriteOp<'a> {
-        match s {
-            Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
-            Cow::Borrowed(s) => WriteOp::Bytes(Cow::from(s.as_bytes())),
+impl<'a, P: Packable + ?Sized> Clone for WriteOp<'a, P> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Value(c) => Self::Value(c.clone()),
+            Self::Cpy(a, b, c, d) => Self::Cpy(*a, b.clone(), *c, *d),
         }
     }
 }
 
-/*
-impl<'a,T: Packable> From<Cow<'a,T>> for WriteOp<'a> {
-    fn from(s: Cow<'a,T>) -> WriteOp<'a> {
-        match s {
-          Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
-          Cow::Borrowed(s) => WriteOp::Bytes(Cow::from(s.as_bytes()))
-        }
-    }
-}
-*/
-
-impl<'a> From<Cow<'a, [u8]>> for WriteOp<'a> {
-    fn from(bytes: Cow<'a, [u8]>) -> WriteOp<'a> {
-        WriteOp::Bytes(bytes)
-    }
-}
-
-impl<'a> From<bool> for WriteOp<'a> {
-    fn from(_bool: bool) -> WriteOp<'a> {
-        panic!()
-    }
-}
-
-impl<'a> Debug for WriteOp<'a> {
+impl<'a, P: Packable + ?Sized> Debug for WriteOp<'a, P> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut s = fmt.debug_struct("WriteOp");
         match self {
-            Self::UInt(a) => s.field("uint", a),
-            Self::UIntAcc(a, b) => s.field("acc_uint", a).field("acc", b),
-            Self::BoolRun(a, b) => s.field("bool_run", a).field("bool", b),
-            Self::Int(a) => s.field("int", a),
-            Self::LitHead(a) => s.field("lit_head", a),
-            Self::Bytes(a) => s.field("bytes", &a.len()),
-            Self::Raw(a) => s.field("raw", &a.len()),
+            Self::Value(a) => s.field("value", a),
             Self::Cpy(_a, b, _c, _) => s.field("import", b),
         }
         .finish()
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum WriteAction<'a> {
-    Op(WriteOp<'a>),
-    Pair(i64, WriteOp<'a>),
+#[derive(Debug, PartialEq)]
+pub enum WriteAction<'a, P: Packable + ?Sized> {
+    Op(WriteOp<'a, P>),
+    LitHead(i64),
+    BoolRun(u64, bool),
+    Run(i64, Cow<'a, P>),
+    NullRun(u64),
+    Raw(Cow<'a, [u8]>),
     Slab(usize, Acc, i64, usize),
     SlabHead,
 }
 
-impl<'a> WriteOp<'a> {
-    fn acc(&self) -> Acc {
+impl<'a, P: Packable + ?Sized> Clone for WriteAction<'a, P> {
+    fn clone(&self) -> Self {
         match self {
-            Self::Cpy(_, _, acc, _) => *acc,
-            Self::UIntAcc(_, agg) => *agg * 1,
-            Self::BoolRun(c, b) if *b => Acc::from(*c),
-            _ => Acc::new(),
+            Self::Op(op) => Self::Op(op.clone()),
+            Self::Run(n, value) => Self::Run(*n, value.clone()),
+            Self::Raw(bytes) => Self::Raw(bytes.clone()),
+            Self::LitHead(n) => Self::LitHead(*n),
+            Self::NullRun(n) => Self::NullRun(*n),
+            Self::BoolRun(a, b) => Self::BoolRun(*a, *b),
+            Self::Slab(a, b, c, d) => Self::Slab(*a, *b, *c, *d),
+            Self::SlabHead => Self::SlabHead,
         }
     }
+}
 
-    fn agg(&self) -> Agg {
+impl<'a, P: Packable + ?Sized> WriteOp<'a, P> {
+    fn acc(&self) -> Acc {
         match self {
-            Self::UIntAcc(_, agg) => *agg,
-            _ => Agg::default(),
+            Self::Value(v) => P::agg(v) * 1,
+            Self::Cpy(_, _, acc, _) => *acc,
         }
     }
 
     fn abs(&self) -> i64 {
         match self {
-            Self::Int(i) => *i,
+            Self::Value(v) => P::abs(v),
             _ => 0,
         }
     }
 
     fn width(&self) -> usize {
         match self {
-            Self::UInt(i) => ulebsize(*i) as usize,
-            Self::UIntAcc(i, _) => ulebsize(*i) as usize,
-            Self::BoolRun(i, _) => ulebsize(*i) as usize,
-            Self::Int(i) => lebsize(*i) as usize,
-            Self::LitHead(i) => lebsize(*i) as usize,
-            Self::Bytes(b) => ulebsize(b.len() as u64) as usize + b.len(),
-            Self::Raw(b) => b.len(),
+            Self::Value(v) => P::width(v),
             Self::Cpy(_, r, _, _) => r.end - r.start,
         }
     }
 
     fn bool_value(&self) -> Option<bool> {
         match self {
-            Self::BoolRun(_, v) => Some(*v),
             Self::Cpy(_, _, _, v) => *v,
             _ => None,
         }
@@ -152,36 +97,27 @@ impl<'a> WriteOp<'a> {
         }
     }
 
+    fn write_and_remap<'b, F>(self, buff: &mut Vec<u8>, f: &F)
+    where
+        F: Fn(&P) -> Option<&'b P>,
+        P: 'b,
+    {
+        match self {
+            Self::Value(value) => {
+                let v = f(&value).unwrap_or(&value);
+                P::pack(&v, buff)
+            }
+            Self::Cpy(s, r, _, _) => {
+                buff.extend_from_slice(&s[r]);
+            }
+        }
+    }
     fn write(self, buff: &mut Vec<u8>) {
         //let start = buff.len();
         match self {
-            Self::UInt(i) => {
-                leb128::write::unsigned(buff, i).unwrap();
-                //println!("write uint {} {:?}",i, &buff[start..]);
-            }
-            Self::UIntAcc(i, _) => {
-                leb128::write::unsigned(buff, i).unwrap();
-                //println!("write acc uint {} {:?}",i, &buff[start..]);
-            }
-            Self::BoolRun(i, _) => {
-                leb128::write::unsigned(buff, i).unwrap();
-                //println!("write acc uint {} {:?}",i, &buff[start..]);
-            }
-            Self::Int(i) => {
-                leb128::write::signed(buff, i).unwrap();
-                //println!("write int {} {:?}",i, &buff[start..]);
-            }
-            Self::Bytes(b) => {
-                leb128::write::unsigned(buff, b.len() as u64).unwrap();
-                buff.extend_from_slice(&b);
-                //println!("write bytes {:?}",&buff[start..]);
-            }
-            Self::Raw(b) => {
-                buff.extend_from_slice(b.as_ref());
-                //println!("write raw {:?}", &buff[start..]);
-            }
-            Self::LitHead(n) => {
-                leb128::write::signed(buff, -n).unwrap();
+            Self::Value(v) => {
+                P::pack(&v, buff)
+                //println!("write value {} {:?}",v, &buff[start..]);
             }
             Self::Cpy(s, r, _, _) => {
                 buff.extend_from_slice(&s[r]);
@@ -191,22 +127,23 @@ impl<'a> WriteOp<'a> {
     }
 }
 
-impl<'a> WriteAction<'a> {
+impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
     fn lithead(i: i64) -> Self {
-        WriteAction::Op(WriteOp::LitHead(i))
+        WriteAction::LitHead(i)
     }
 
     fn acc(&self) -> Acc {
         match self {
             Self::Op(op) => op.acc(),
-            Self::Pair(count, op) => op.agg() * *count as usize,
+            Self::BoolRun(c, b) if *b => Acc::from(*c),
+            Self::Run(count, value) => P::agg(&value) * *count as usize,
             _ => Acc::new(),
         }
     }
 
     fn abs(&self) -> i64 {
         match self {
-            Self::Pair(count, WriteOp::Int(value)) => count * value,
+            Self::Run(count, value) => P::abs(value) * count,
             _ => 0,
         }
     }
@@ -231,16 +168,45 @@ impl<'a> WriteAction<'a> {
     fn bool_value(&self) -> Option<bool> {
         match self {
             Self::Op(op) => op.bool_value(),
+            Self::BoolRun(_, v) => Some(*v),
             _ => None,
+        }
+    }
+
+    fn write_and_remap<'b, F>(self, buff: &mut Vec<u8>, f: &F)
+    where
+        F: Fn(&P) -> Option<&'b P>,
+        P: 'b,
+    {
+        match self {
+            Self::Op(op) => op.write_and_remap(buff, f),
+            Self::Run(count, value) => {
+                leb128::write::signed(buff, count).unwrap();
+                let v = f(&value).unwrap_or(&value);
+                P::pack(&v, buff);
+            }
+            _ => self.write(buff),
         }
     }
 
     fn write(self, buff: &mut Vec<u8>) {
         match self {
             Self::Op(op) => op.write(buff),
-            Self::Pair(count, op2) => {
+            Self::LitHead(n) => {
+                leb128::write::signed(buff, -n).unwrap();
+            }
+            Self::Raw(b) => buff.extend_from_slice(b.as_ref()),
+            Self::BoolRun(i, _) => {
+                leb128::write::unsigned(buff, i).unwrap();
+            }
+            Self::NullRun(count) => {
+                buff.push(0);
+                leb128::write::unsigned(buff, count).unwrap();
+            }
+            Self::Run(count, value) => {
                 leb128::write::signed(buff, count).unwrap();
-                op2.write(buff)
+                P::pack(&value, buff);
+                //op.write(buff);
             }
             Self::Slab(_, _, _, _) => {}
             Self::SlabHead => {}
@@ -248,9 +214,9 @@ impl<'a> WriteAction<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SlabWriter<'a> {
-    actions: Vec<WriteAction<'a>>,
+#[derive(Debug)]
+pub struct SlabWriter<'a, P: Packable + ?Sized> {
+    actions: Vec<WriteAction<'a, P>>,
     width: usize,
     items: usize,
     acc: Acc,
@@ -264,13 +230,70 @@ pub struct SlabWriter<'a> {
     max: usize,
 }
 
-impl<'a> Default for SlabWriter<'a> {
-    fn default() -> Self {
-        Self::new(usize::MAX, 0)
+impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
+    fn clone(&self) -> Self {
+        Self {
+            actions: self.actions.clone(),
+            width: self.width,
+            items: self.items,
+            acc: self.acc,
+            bools: self.bools,
+            abs: self.abs,
+            init_abs: self.init_abs,
+            lit_items: self.lit_items,
+            lit_head: self.lit_head,
+            slab_head: self.slab_head,
+            num_slabs: self.num_slabs,
+            max: self.max,
+        }
     }
 }
 
-impl<'a> SlabWriter<'a> {
+impl<'a, P: Packable + ?Sized> Writer<'a, P> for SlabWriter<'a, P> {
+    /*
+      fn flush_null(&mut self, count: usize) {}
+      fn flush_lit_run(&mut self, run: &[Cow<'_,P>]) {}
+      fn flush_run(&mut self, count: i64, value: Cow<'_,P>) {}
+      fn flush_bool_run(&mut self, count: usize, value: bool) {}
+      fn flush_bytes(&mut self, bytes: Cow<'_,[u8]>) {}
+    */
+
+    fn flush_lit_run(&mut self, run: &[Cow<'a, P>]) {
+        for value in run.iter() {
+            self.push_lit(WriteOp::Value(value.clone()), 1, 1);
+        }
+    }
+
+    fn flush_bool_run(&mut self, count: usize, value: bool) {
+        let action = WriteAction::BoolRun(count as u64, value);
+        let width = ulebsize(count as u64) as usize;
+        self.push(action, count, width);
+    }
+
+    fn flush_run(&mut self, count: i64, value: Cow<'a, P>) {
+        let value_width = P::width(&value);
+        let width = lebsize(count) as usize + value_width;
+        self.push(WriteAction::Run(count, value), count as usize, width);
+    }
+
+    fn flush_bytes(&mut self, data: Cow<'a, [u8]>) {
+        let items = data.len();
+        self.push(WriteAction::Raw(data), items, items);
+    }
+
+    fn flush_null(&mut self, count: usize) {
+        let width = 1 + ulebsize(count as u64) as usize;
+        self.push(WriteAction::NullRun(count as u64), count, width);
+    }
+}
+
+impl<'a, P: Packable + ?Sized> Default for SlabWriter<'a, P> {
+    fn default() -> Self {
+        Self::new(usize::MAX, 4)
+    }
+}
+
+impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
     pub fn new(max: usize, cap: usize) -> Self {
         let mut actions = Vec::with_capacity(cap);
         actions.push(WriteAction::SlabHead);
@@ -298,7 +321,7 @@ impl<'a> SlabWriter<'a> {
         self.abs = abs;
     }
 
-    fn push_lit(&mut self, op: WriteOp<'a>, lit: usize, items: usize) {
+    fn push_lit(&mut self, op: WriteOp<'a, P>, lit: usize, items: usize) {
         let mut width = op.width();
         if width == 0 {
             return;
@@ -330,7 +353,7 @@ impl<'a> SlabWriter<'a> {
         self.check_max();
     }
 
-    fn push(&mut self, action: WriteAction<'a>, items: usize, width: usize) {
+    fn push(&mut self, action: WriteAction<'a, P>, items: usize, width: usize) {
         //assert_eq!(width, action.width());
         if width == 0 {
             return;
@@ -350,9 +373,9 @@ impl<'a> SlabWriter<'a> {
         // we cant count items b/c we might
         // have copied over a zero run of false's
         if self.width == 0 && val == Some(true) {
-            let op = WriteOp::BoolRun(0, false);
-            let width = op.width();
-            self.push(WriteAction::Op(op), 0, width);
+            let action = WriteAction::BoolRun(0, false);
+            let width = 1;
+            self.push(action, 0, width);
         }
     }
 
@@ -403,6 +426,10 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.actions.len() <= 1 // first action is slab_head
+    }
+
     pub fn write(mut self, out: &mut Vec<u8>) {
         self.close_lit();
         for action in self.actions {
@@ -410,10 +437,24 @@ impl<'a> SlabWriter<'a> {
         }
     }
 
+    pub fn write_and_remap<'b, F>(mut self, out: &mut Vec<u8>, f: F)
+    where
+        F: Fn(&P) -> Option<&'b P>,
+        P: 'b,
+    {
+        self.close_lit();
+        for action in self.actions {
+            action.write_and_remap(out, &f)
+        }
+    }
+
     pub fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
             self.close_slab();
+        }
+        if self.num_slabs == 0 {
+            return vec![];
         }
         self.actions.pop();
         let mut result = Vec::with_capacity(self.num_slabs);
@@ -464,36 +505,5 @@ impl<'a> SlabWriter<'a> {
                 self.push(WriteAction::Op(op), size, width)
             }
         }
-    }
-
-    pub fn flush_lit_run<P: Packable + ?Sized>(&mut self, run: &[Cow<'a, P>]) {
-        for value in run.iter() {
-            self.push_lit(P::pack(value.clone()), 1, 1);
-        }
-    }
-
-    pub fn flush_bool_run(&mut self, count: usize, value: bool) {
-        let op = WriteOp::BoolRun(count as u64, value);
-        let width = op.width();
-        self.push(WriteAction::Op(op), count, width);
-    }
-
-    pub fn flush_run<P: Packable + ?Sized>(&mut self, count: i64, value: Cow<'a, P>) {
-        //let value_op = value.into();
-        let value_op = P::pack(value);
-        let width = lebsize(count) as usize + value_op.width();
-        self.push(WriteAction::Pair(count, value_op), count as usize, width);
-    }
-
-    pub fn flush_bytes(&mut self, data: Cow<'a, [u8]>) {
-        let items = data.len();
-        self.push(WriteAction::Op(WriteOp::Raw(data)), items, items);
-    }
-
-    pub fn flush_null(&mut self, count: usize) {
-        //let null_op = WriteOp::Int(0);
-        let count_op = WriteOp::UInt(count as u64);
-        let width = 1 + count_op.width();
-        self.push(WriteAction::Pair(0, count_op), count, width);
     }
 }

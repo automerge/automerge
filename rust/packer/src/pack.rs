@@ -1,7 +1,7 @@
 use super::aggregate::Agg;
 use super::cursor::ScanMeta;
-use super::slab::WriteOp;
 use super::Cow;
+use super::{lebsize, ulebsize};
 
 use std::fmt::Debug;
 
@@ -33,11 +33,17 @@ impl PackError {
 pub trait Packable:
     PartialEq + Debug + ToOwned<Owned: Debug + Clone + PartialEq> + PartialOrd
 {
+    fn abs(_item: &Self) -> i64 {
+        0
+    }
+
     fn agg(_item: &Self) -> Agg {
         Agg::default()
     }
 
-    fn pack(item: Cow<'_, Self>) -> WriteOp<'_>;
+    fn width(item: &Self) -> usize;
+
+    fn pack(item: &Self, out: &mut Vec<u8>);
 
     fn maybe_agg(_item: &Option<Cow<'_, Self>>) -> Agg {
         Agg::default()
@@ -51,6 +57,9 @@ pub trait Packable:
 }
 
 impl Packable for i64 {
+    fn abs(item: &Self) -> i64 {
+        *item
+    }
     fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
         if let Some(a) = val {
             if *a >= u32::MAX as Self {
@@ -66,8 +75,12 @@ impl Packable for i64 {
         Agg::from(item.as_deref().cloned().unwrap_or(0))
     }
 
-    fn pack(item: Cow<'_, i64>) -> WriteOp<'static> {
-        WriteOp::Int(*item)
+    fn width(item: &i64) -> usize {
+        lebsize(*item) as usize
+    }
+
+    fn pack(item: &i64, out: &mut Vec<u8>) {
+        leb128::write::signed(out, *item).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'_, i64>), PackError> {
@@ -91,10 +104,12 @@ impl Packable for u32 {
         Agg::from(*item)
     }
 
-    //    fn own(item: u32) -> u32 { item }
+    fn width(item: &u32) -> usize {
+        ulebsize(*item as u64) as usize
+    }
 
-    fn pack(item: Cow<'_, u32>) -> WriteOp<'static> {
-        WriteOp::UIntAcc(*item as u64, Agg::from(*item))
+    fn pack(item: &u32, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, *item as u64).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, u32>), PackError> {
@@ -123,10 +138,12 @@ impl Packable for u64 {
         Agg::from(*item)
     }
 
-    //    fn own(item: u64) -> u64 { item }
+    fn width(item: &u64) -> usize {
+        ulebsize(*item) as usize
+    }
 
-    fn pack(item: Cow<'_, u64>) -> WriteOp<'static> {
-        WriteOp::UIntAcc(*item, Agg::from(*item))
+    fn pack(item: &u64, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, *item).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, u64>), PackError> {
@@ -137,8 +154,11 @@ impl Packable for u64 {
 }
 
 impl Packable for usize {
-    fn pack(item: Cow<'_, usize>) -> WriteOp<'static> {
-        WriteOp::UIntAcc(*item as u64, Agg::from(*item))
+    fn width(item: &Self) -> usize {
+        ulebsize(*item as u64) as usize
+    }
+    fn pack(item: &usize, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, *item as u64).unwrap();
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
@@ -156,7 +176,10 @@ impl Packable for bool {
         }
     }
 
-    fn pack(_item: Cow<'_, bool>) -> WriteOp<'static> {
+    fn width(_item: &bool) -> usize {
+        panic!()
+    }
+    fn pack(_item: &bool, _out: &mut Vec<u8>) {
         panic!()
     }
 
@@ -166,8 +189,12 @@ impl Packable for bool {
 }
 
 impl Packable for [u8] {
-    fn pack(item: Cow<'_, [u8]>) -> WriteOp<'_> {
-        WriteOp::Bytes(item)
+    fn width(item: &[u8]) -> usize {
+        ulebsize(item.len() as u64) as usize + item.len()
+    }
+    fn pack(item: &[u8], out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, item.len() as u64).unwrap();
+        out.extend_from_slice(item);
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
@@ -179,11 +206,13 @@ impl Packable for [u8] {
 }
 
 impl Packable for str {
-    fn pack(item: Cow<'_, str>) -> WriteOp<'_> {
-        match item {
-            Cow::Owned(s) => WriteOp::Bytes(Cow::from(s.into_bytes())),
-            Cow::Borrowed(s) => WriteOp::Bytes(Cow::from(s.as_bytes())),
-        }
+    fn width(item: &str) -> usize {
+        <[u8]>::width(item.as_bytes())
+    }
+    fn pack(item: &str, out: &mut Vec<u8>) {
+        let item = item.as_bytes();
+        leb128::write::unsigned(out, item.len() as u64).unwrap();
+        out.extend_from_slice(item);
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {

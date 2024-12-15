@@ -12,7 +12,7 @@ use super::packer::{PackError, Packable, RleCursor, ScanMeta, WriteOp};
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
-pub(crate) struct ActorIdx(pub(crate) u64); // FIXME - shouldnt this be usize? (wasm is 32bit)
+pub(crate) struct ActorIdx(pub(crate) u32); // FIXME - shouldnt this be usize? (wasm is 32bit)
 
 impl fmt::Display for ActorIdx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,19 +22,25 @@ impl fmt::Display for ActorIdx {
 
 impl From<usize> for ActorIdx {
     fn from(val: usize) -> Self {
-        ActorIdx(val as u64)
+        ActorIdx(val as u32)
+    }
+}
+
+impl From<&usize> for ActorIdx {
+    fn from(val: &usize) -> Self {
+        ActorIdx((*val) as u32)
     }
 }
 
 impl From<u64> for ActorIdx {
     fn from(val: u64) -> Self {
-        ActorIdx(val)
+        ActorIdx(val as u32)
     }
 }
 
 impl From<ActorIdx> for u64 {
     fn from(val: ActorIdx) -> Self {
-        val.0
+        val.0 as u64
     }
 }
 
@@ -154,8 +160,8 @@ impl<'a> OpType<'a> {
 
     pub(crate) fn from_action_and_value(
         action: Action,
-        value: ScalarValue<'a>,
-        mark_name: Option<Cow<'a, str>>,
+        value: &ScalarValue<'a>,
+        mark_name: &Option<Cow<'a, str>>,
         expand: bool,
     ) -> OpType<'a> {
         match action {
@@ -163,15 +169,21 @@ impl<'a> OpType<'a> {
             Action::MakeList => Self::Make(ObjType::List),
             Action::MakeText => Self::Make(ObjType::Text),
             Action::MakeTable => Self::Make(ObjType::Table),
-            Action::Set => Self::Put(value),
+            Action::Set => Self::Put(value.clone()),
             Action::Delete => Self::Delete,
             Action::Increment => match value {
-                ScalarValue::Int(i) => Self::Increment(i),
-                ScalarValue::Uint(i) => Self::Increment(i as i64),
+                ScalarValue::Int(i) => Self::Increment(*i),
+                ScalarValue::Uint(i) => Self::Increment(*i as i64),
                 _ => unreachable!("validate_action_and_value returned NonNumericInc"),
             },
             Action::Mark => match mark_name {
-                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
+                Some(name) => Self::MarkBegin(
+                    expand,
+                    MarkData {
+                        name: name.clone(),
+                        value: value.clone(),
+                    },
+                ),
                 None => Self::MarkEnd(expand),
             },
             //_ => unreachable!("validate_action_and_value returned UnknownAction"),
@@ -179,17 +191,17 @@ impl<'a> OpType<'a> {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ScalarValue<'a> {
-    Bytes(&'a [u8]),
-    Str(&'a str),
+    Bytes(Cow<'a, [u8]>),
+    Str(Cow<'a, str>),
     Int(i64),
     Uint(u64),
     F64(f64),
     Counter(i64),
     Timestamp(i64),
     Boolean(bool),
-    Unknown { type_code: u8, bytes: &'a [u8] },
+    Unknown { type_code: u8, bytes: Cow<'a, [u8]> },
     Null,
 }
 
@@ -218,7 +230,7 @@ impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
 
 impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
     fn from(s: &ScalarValue<'a>) -> Self {
-        s.into_owned()
+        s.to_owned()
     }
 }
 
@@ -228,38 +240,29 @@ impl<'a> From<Value<'a>> for types::Value<'static> {
     }
 }
 
-impl<'a> From<&'a types::OpType> for ScalarValue<'a> {
-    fn from(o: &'a types::OpType) -> Self {
-        match o {
-            types::OpType::Put(s) => ScalarValue::from(s),
-            types::OpType::Increment(i) => ScalarValue::Int(*i),
-            types::OpType::MarkBegin(_, OldMarkData { value, .. }) => ScalarValue::from(value),
-            _ => ScalarValue::Null,
-        }
-    }
-}
-
-impl<'a> From<&'a types::ScalarValue> for ScalarValue<'a> {
-    fn from(s: &'a types::ScalarValue) -> Self {
-        match s {
-            types::ScalarValue::Bytes(b) => ScalarValue::Bytes(b.as_slice()),
-            types::ScalarValue::Str(s) => ScalarValue::Str(s.as_str()),
-            types::ScalarValue::Int(n) => ScalarValue::Int(*n),
-            types::ScalarValue::Uint(n) => ScalarValue::Uint(*n),
-            types::ScalarValue::F64(n) => ScalarValue::F64(*n),
-            types::ScalarValue::Counter(n) => ScalarValue::Counter(n.into()),
-            types::ScalarValue::Timestamp(n) => ScalarValue::Timestamp(*n),
-            types::ScalarValue::Boolean(b) => ScalarValue::Boolean(*b),
-            types::ScalarValue::Unknown { type_code, bytes } => ScalarValue::Unknown {
-                type_code: *type_code,
-                bytes: bytes.as_slice(),
-            },
-            types::ScalarValue::Null => ScalarValue::Null,
-        }
-    }
-}
-
 impl<'a> ScalarValue<'a> {
+    pub fn str(s: &'a str) -> Self {
+        Self::Str(Cow::Borrowed(s))
+    }
+
+    pub(crate) fn to_owned(&self) -> types::ScalarValue {
+        match self {
+            Self::Bytes(b) => types::ScalarValue::Bytes(b.to_vec()),
+            Self::Str(s) => types::ScalarValue::Str(s.to_string().into()),
+            Self::Int(n) => types::ScalarValue::Int(*n),
+            Self::Uint(n) => types::ScalarValue::Uint(*n),
+            Self::F64(n) => types::ScalarValue::F64(*n),
+            Self::Counter(n) => types::ScalarValue::Counter(n.into()),
+            Self::Timestamp(n) => types::ScalarValue::Timestamp(*n),
+            Self::Boolean(b) => types::ScalarValue::Boolean(*b),
+            Self::Unknown { type_code, bytes } => types::ScalarValue::Unknown {
+                type_code: *type_code,
+                bytes: bytes.to_vec(),
+            },
+            Self::Null => types::ScalarValue::Null,
+        }
+    }
+
     pub(crate) fn into_owned(self) -> types::ScalarValue {
         match self {
             Self::Bytes(b) => types::ScalarValue::Bytes(b.to_vec()),
@@ -294,33 +297,34 @@ impl<'a> ScalarValue<'a> {
             }
             ValueType::String => {
                 let s = std::str::from_utf8(raw).map_err(|_| ReadScalarError::Str)?;
-                Ok(ScalarValue::Str(s))
+                Ok(ScalarValue::Str(Cow::Borrowed(s)))
             }
-            ValueType::Bytes => Ok(ScalarValue::Bytes(raw)),
+            ValueType::Bytes => Ok(ScalarValue::Bytes(Cow::Borrowed(raw))),
             ValueType::Counter => Ok(ScalarValue::Counter(parse_leb128(raw)?)),
             ValueType::Timestamp => Ok(ScalarValue::Timestamp(parse_leb128(raw)?)),
             ValueType::Unknown(u8) => Ok(ScalarValue::Unknown {
                 type_code: u8,
-                bytes: raw,
+                bytes: Cow::Borrowed(raw),
             }),
         }
     }
 
-    pub(super) fn to_raw(self) -> Option<Cow<'a, [u8]>> {
+    pub(super) fn to_raw(&self) -> Option<Cow<'a, [u8]>> {
         match self {
-            Self::Bytes(b) => Some(Cow::Borrowed(b)),
-            Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
+            Self::Bytes(b) => Some(b.clone()),
+            Self::Str(Cow::Borrowed(s)) => Some(Cow::Borrowed(s.as_bytes())),
+            Self::Str(Cow::Owned(s)) => Some(Cow::Owned(s.as_bytes().to_vec())),
             Self::Null => None,
             Self::Boolean(_) => None,
             Self::Uint(i) => {
                 let mut out = Vec::new();
-                leb128::write::unsigned(&mut out, i).unwrap();
+                leb128::write::unsigned(&mut out, *i).unwrap();
                 Some(Cow::Owned(out))
             }
             Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
                 let mut out = Vec::new();
                 //let mut out = [8; u8];//Vec::new();
-                leb128::write::signed(&mut out, i).unwrap();
+                leb128::write::signed(&mut out, *i).unwrap();
                 Some(Cow::Owned(out))
             }
             Self::F64(f) => {
@@ -331,7 +335,7 @@ impl<'a> ScalarValue<'a> {
             Self::Unknown {
                 type_code: _,
                 bytes,
-            } => Some(Cow::Borrowed(bytes)),
+            } => Some(bytes.clone()),
         }
     }
 
@@ -434,7 +438,7 @@ impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
     fn eq(&self, other: &types::ScalarValue) -> bool {
         match (self, other) {
             (ScalarValue::Bytes(a), types::ScalarValue::Bytes(b)) => a == &b.as_slice(),
-            (ScalarValue::Str(a), types::ScalarValue::Str(b)) => a == b,
+            (ScalarValue::Str(a), types::ScalarValue::Str(b)) => **a == **b,
             (ScalarValue::Int(a), types::ScalarValue::Int(b)) => a == b,
             (ScalarValue::Uint(a), types::ScalarValue::Uint(b)) => a == b,
             (ScalarValue::F64(a), types::ScalarValue::F64(b)) => a == b,
@@ -514,14 +518,25 @@ pub(crate) enum Key {
 }
 
 impl Key {
-    /*
-        pub(crate) fn to_ref<'a>(&'a self) -> KeyRef<'a> {
-            match self {
-                Key::Map(s) => KeyRef::Map(s),
-                Key::Seq(e) => KeyRef::Seq(*e),
-            }
+    pub(crate) fn key_str(&self) -> Option<Cow<'static, str>> {
+        match self {
+            Self::Map(s) => Some(Cow::Owned(s.to_owned())),
+            Self::Seq(_) => None,
         }
-    */
+    }
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        match self {
+            Self::Map(_) => None,
+            Self::Seq(e) => e.actor(),
+        }
+    }
+
+    pub(crate) fn icounter(&self) -> Option<i64> {
+        match self {
+            Self::Map(_) => None,
+            Self::Seq(e) => Some(e.icounter()),
+        }
+    }
 }
 
 impl From<ElemId> for Key {
@@ -581,7 +596,7 @@ impl<'a> types::Exportable for KeyRef<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
     Object(ObjType),
     Scalar(ScalarValue<'a>),
@@ -597,10 +612,12 @@ impl<'a> Value<'a> {
 }
 
 impl Packable for Action {
-    //type Unpacked<'a> = Action;
+    fn width(item: &Action) -> usize {
+        packer::ulebsize(u64::from(*item)) as usize
+    }
 
-    fn pack(item: Cow<'_, Action>) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(*item))
+    fn pack(item: &Action, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, u64::from(*item)).unwrap();
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
@@ -626,16 +643,19 @@ impl Packable for Action {
 }
 
 impl Packable for ActorIdx {
-    //type Unpacked<'a> = ActorIdx;
+    fn width(item: &ActorIdx) -> usize {
+        packer::ulebsize(u64::from(*item)) as usize
+    }
 
-    fn pack(item: Cow<'_, ActorIdx>) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(*item))
+    fn pack(item: &ActorIdx, out: &mut Vec<u8>) {
+        leb128::write::unsigned(out, u64::from(*item)).unwrap();
     }
 
     fn validate(val: Option<&Self>, m: &ScanMeta) -> Result<(), PackError> {
         if let Some(&ActorIdx(a)) = val {
-            if a >= m.actors as u64 {
-                return Err(PackError::ActorIndexOutOfRange(a, m.actors));
+            if a >= m.actors as u32 {
+                // FIXME - PackError shouldnt know about Actors
+                return Err(PackError::ActorIndexOutOfRange(a as u64, m.actors));
             }
         }
         Ok(())
@@ -644,18 +664,6 @@ impl Packable for ActorIdx {
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
         Ok((len, Cow::Owned(ActorIdx::from(*result))))
-    }
-}
-
-impl<'a> From<ActorIdx> for WriteOp<'a> {
-    fn from(n: ActorIdx) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(n))
-    }
-}
-
-impl<'a> From<Action> for WriteOp<'a> {
-    fn from(a: Action) -> WriteOp<'static> {
-        WriteOp::UInt(u64::from(a))
     }
 }
 

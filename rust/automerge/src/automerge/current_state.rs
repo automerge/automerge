@@ -68,7 +68,7 @@ fn log_list_patches<'a, I: OpQuery<'a>>(
     ops: I,
 ) {
     for (index, op) in ops.visible(None).top_ops().enumerate() {
-        patch_log.insert(obj.id, index, op.value().into(), op.id, op.conflict);
+        patch_log.insert(obj.id, index, op.hydrate_value(), op.id, op.conflict);
     }
 }
 
@@ -80,7 +80,7 @@ fn log_map_patches<'a, I: OpQuery<'a>>(
 ) {
     for op in ops.visible(None).top_ops() {
         if let Some(key) = op.key.key_str() {
-            patch_log.put_map(obj.id, &key, op.value().into(), op.id, op.conflict, false);
+            patch_log.put_map(obj.id, &key, op.hydrate_value(), op.id, op.conflict, false);
         }
     }
 }

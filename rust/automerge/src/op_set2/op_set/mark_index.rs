@@ -1,7 +1,7 @@
 use crate::types::{Clock, OpId};
 use packer::{
     Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
-    Slab, SpanWeight, WriteOp,
+    Slab, SpanWeight,
 };
 
 use std::borrow::Cow;
@@ -172,12 +172,6 @@ impl MarkIndexColumn {
     }
 }
 
-impl<'a> From<MarkIndexValue> for WriteOp<'a> {
-    fn from(v: MarkIndexValue) -> WriteOp<'static> {
-        WriteOp::Int(i64::from(v))
-    }
-}
-
 impl From<i64> for MarkIndexValue {
     fn from(v: i64) -> Self {
         if v < 0 {
@@ -212,10 +206,12 @@ impl From<MarkIndexValue> for i64 {
 }
 
 impl Packable for MarkIndexValue {
-    //type Unpacked<'a> = MarkIndexValue;
+    fn width(item: &MarkIndexValue) -> usize {
+        packer::lebsize(i64::from(*item)) as usize
+    }
 
-    fn pack(item: Cow<'_, MarkIndexValue>) -> WriteOp<'static> {
-        WriteOp::Int(i64::from(*item))
+    fn pack(item: &MarkIndexValue, out: &mut Vec<u8>) {
+        leb128::write::signed(out, i64::from(*item)).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, MarkIndexValue>), PackError> {

@@ -448,23 +448,23 @@ impl AutoCommit {
     }
 
     /// Get the last change made by this documents actor ID
-    pub fn get_last_local_change(&mut self) -> Option<&Change> {
+    pub fn get_last_local_change(&mut self) -> Option<Change> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<Change> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
 
-    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<&Change> {
+    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<Change> {
         self.ensure_transaction_closed();
         self.doc.get_change_by_hash(hash)
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<&'a Change> {
+    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<Change> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -820,7 +820,7 @@ impl ReadDoc for AutoCommit {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change> {
         self.doc.get_change_by_hash(hash)
     }
 

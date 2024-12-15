@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
@@ -6,8 +7,10 @@ use std::{
 
 use tracing::instrument;
 
+use crate::change::Change;
+use crate::storage::document::ReadChangeError;
 use crate::{
-    op_set2::{change::ChangeBuilder, KeyRef, Op, OpBuilder2, OpSet},
+    op_set2::{change::ChangeBuilder, ActorIdx, KeyRef, Op, OpBuilder2, OpSet},
     storage::{
         change::{PredOutOfOrder, Verified},
         convert::ob_as_actor_id,
@@ -32,6 +35,8 @@ pub(crate) enum Error {
     IncorrectMaxOp,
     #[error("missing ops")]
     MissingOps,
+    #[error("missing ops")]
+    MissingDep(#[from] crate::change_graph::MissingDep),
 }
 
 #[derive(Default)]
@@ -51,14 +56,17 @@ pub(crate) struct CollectedChanges<'a> {
 impl<'a> ChangeCollector<'a> {
     pub(crate) fn new<E: std::error::Error + Send + Sync + 'static, I>(
         changes: I,
+        _op_set: &OpSet,
     ) -> Result<ChangeCollector<'a>, Error>
     where
         I: IntoIterator<Item = Result<ChangeMetadata<'a>, E>>,
     {
         let mut changes_by_actor = ChangesByActor::default();
+        let mut max_ops = vec![];
         for (index, change) in changes.into_iter().enumerate() {
             tracing::trace!(?change, "importing change osd");
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
+            max_ops.push(change.max_op);
             let actor_changes = changes_by_actor.0.entry(change.actor).or_default();
             if let Some(prev) = actor_changes.last() {
                 // Note that we allow max_op to be equal to the previous max_op in case the
@@ -68,8 +76,6 @@ impl<'a> ChangeCollector<'a> {
                 }
             }
 
-            let start_op = actor_changes.last().map(|pc| pc.max_op).unwrap_or(0) + 1;
-
             actor_changes.push(PartialChange {
                 index,
                 deps: change.deps,
@@ -77,10 +83,9 @@ impl<'a> ChangeCollector<'a> {
                 seq: change.seq,
                 timestamp: change.timestamp,
                 max_op: change.max_op,
-                message: change.message,
+                message: change.message.map(|s| smol_str::SmolStr::new(&s)),
                 extra_bytes: change.extra,
                 ops: Vec::new(),
-                ops2: ChangeBuilder::new(start_op),
             })
         }
         let num_changes: usize = changes_by_actor.0.values().map(|v| v.len()).sum();
@@ -91,11 +96,13 @@ impl<'a> ChangeCollector<'a> {
         })
     }
 
+    #[inline(never)]
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
         self.preds.entry(succ_id).or_default().push(op_id);
     }
 
+    #[inline(never)]
     pub(crate) fn process_op(&mut self, op: Op<'a>) -> Result<(), Error> {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
         let next = Some((op.obj, op.elemid_or_key()));
@@ -116,11 +123,11 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
+    #[inline(never)]
     pub(crate) fn flush_deletes(&mut self) -> Result<(), Error> {
         if let Some((obj, key)) = self.last.take() {
             for (id, pred) in &self.preds {
                 let del2 = Op::del(*id, obj, key.clone());
-                //self.collect2(del2, &pred)?;
                 let del = OpBuilder2::del(
                     *id,
                     obj.into(),
@@ -134,7 +141,7 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    #[instrument(skip(self, op_set))]
+    #[inline(never)]
     pub(crate) fn finish(mut self, op_set: &OpSet) -> Result<CollectedChanges<'static>, Error> {
         self.flush_deletes()?;
 
@@ -180,75 +187,11 @@ impl<'a> ChangeCollector<'a> {
     }
 }
 
-/*
-struct ChangeColumns {
-
-    const OBJ_COL_ID: ColumnId = ColumnId::new(0);
-    const KEY_COL_ID: ColumnId = ColumnId::new(1);
-    const INSERT_COL_ID: ColumnId = ColumnId::new(3);
-    const ACTION_COL_ID: ColumnId = ColumnId::new(4);
-    const VAL_COL_ID: ColumnId = ColumnId::new(5);
-    const PRED_COL_ID: ColumnId = ColumnId::new(7);
-    const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
-    const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
-
-                    (OBJ_COL_ID, ColumnType::Actor) => obj_actor = Some(col.range().into()),
-                    (OBJ_COL_ID, ColumnType::Integer) => obj_ctr = Some(col.range().into()),
-                    (KEY_COL_ID, ColumnType::Actor) => key_actor = Some(col.range().into()),
-                    (KEY_COL_ID, ColumnType::DeltaInteger) => key_ctr = Some(col.range().into()),
-                    (KEY_COL_ID, ColumnType::String) => key_str = Some(col.range().into()),
-                    (INSERT_COL_ID, ColumnType::Boolean) => insert = Some(col.range()),
-                    (ACTION_COL_ID, ColumnType::Integer) => action = Some(col.range()),
-                    (VAL_COL_ID, ColumnType::ValueMetadata) => match col.into_ranges() {
-                        GenericColumnRange::Value(v) => {
-                            val = Some(v);
-                        }
-                        _ => return Err(ParseChangeColumnsError::MismatchingColumn { index }),
-                    },
-                    (PRED_COL_ID, ColumnType::Group) => match col.into_ranges() {
-                        GenericColumnRange::Group(GroupRange { num, values }) => {
-                            let mut cols = values.into_iter();
-                            pred_group = Some(num);
-                            // If there was no data in the group at all then the columns won't be
-                            // present
-                            if cols.len() == 0 {
-                                pred_actor = Some((0..0).into());
-                                pred_ctr = Some((0..0).into());
-                            } else {
-                                let first = cols.next();
-                                let second = cols.next();
-                                match (first, second) {
-                                    (
-                                        Some(GroupedColumnRange::Simple(SimpleColRange::RleInt(
-                                            actor_range,
-                                        ))),
-                                        Some(GroupedColumnRange::Simple(SimpleColRange::Delta(
-                                            ctr_range,
-                                        ))),
-                                    ) => {
-                                        pred_actor = Some(actor_range);
-                                        pred_ctr = Some(ctr_range);
-                                    }
-                                    _ => {
-                                        return Err(ParseChangeColumnsError::MismatchingColumn {
-                                            index,
-                                        })
-                                    }
-                                }
-                            }
-                            if cols.next().is_some() {
-                                return Err(ParseChangeColumnsError::MismatchingColumn { index });
-                            }
-                        }
-                        _ => return Err(ParseChangeColumnsError::MismatchingColumn { index }),
-                    },
-}
-    */
-
 #[derive(Default)]
 struct ChangesByActor<'a>(HashMap<usize, Vec<PartialChange<'a>>, FxBuildHasher>);
 
 impl<'a> ChangesByActor<'a> {
+    #[inline(never)]
     fn collect(&mut self, op: OpBuilder2, op2: Op<'a>, pred: Vec<OpId>) -> Result<(), Error> {
         let actor_changes = self.0.get_mut(&op.id.actor()).ok_or_else(|| {
             tracing::error!(missing_actor = op.id.actor(), "missing actor for op");
@@ -260,7 +203,6 @@ impl<'a> ChangesByActor<'a> {
             Error::MissingChange
         })?;
         change.ops.push(op);
-        change.ops2.append(op2, pred);
         Ok(())
     }
 }
@@ -276,7 +218,28 @@ struct PartialChange<'a> {
     message: Option<smol_str::SmolStr>,
     extra_bytes: Cow<'a, [u8]>,
     ops: Vec<OpBuilder2>,
-    ops2: ChangeBuilder<'a>,
+}
+
+#[inline(never)]
+fn index_to_deps(
+    indexes: &[u64],
+    known_changes: &HashMap<usize, ChangeHash, FxBuildHasher>,
+) -> Result<Vec<ChangeHash>, Error> {
+    let deps_len = indexes.len();
+    let mut deps = indexes.into_iter().try_fold::<_, _, Result<_, Error>>(
+        Vec::with_capacity(deps_len),
+        |mut acc, dep| {
+            acc.push(
+                known_changes
+                    .get(&(*dep as usize))
+                    .cloned()
+                    .ok_or(Error::MissingChange)?,
+            );
+            Ok(acc)
+        },
+    )?;
+    deps.sort();
+    Ok(deps)
 }
 
 impl<'a> PartialChange<'a> {
@@ -290,22 +253,8 @@ impl<'a> PartialChange<'a> {
         known_changes: &HashMap<usize, ChangeHash, FxBuildHasher>,
         op_set: &OpSet,
     ) -> Result<StoredChange<'a, Verified>, Error> {
-        let deps_len = self.deps.len();
-        let mut deps = self.deps.into_iter().try_fold::<_, _, Result<_, Error>>(
-            Vec::with_capacity(deps_len),
-            |mut acc, dep| {
-                acc.push(known_changes.get(&(dep as usize)).cloned().ok_or_else(|| {
-                    tracing::error!(
-                        dependent_index = self.index,
-                        dep_index = dep,
-                        "could not find dependency"
-                    );
-                    Error::MissingChange
-                })?);
-                Ok(acc)
-            },
-        )?;
-        deps.sort();
+        let deps = index_to_deps(&self.deps, known_changes)?;
+
         let num_ops = self.ops.len() as u64;
         self.ops.sort();
         let actor = op_set
@@ -328,22 +277,14 @@ impl<'a> PartialChange<'a> {
             .with_timestamp(self.timestamp)
             .with_message(self.message.map(|s| s.to_string()))
             .with_extra_bytes(self.extra_bytes.into_owned())
-            .build(
-                self.ops.iter().map(|op| ob_as_actor_id(op_set, op)),
-                Some(self.ops2.clone()),
-            ) {
+            .build(self.ops.iter().map(|op| ob_as_actor_id(op_set, op)))
+        {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
                 // SAFETY: types::OpBuilder::preds is `types::OpIds` which ensures ops are always sorted
                 panic!("preds out of order");
             }
         };
-        #[cfg(not(debug_assertions))]
-        tracing::trace!(?change, hash=?change.hash(), "collected change");
-        #[cfg(debug_assertions)]
-        {
-            tracing::trace!(?change, ops=?self.ops, hash=?change.hash(), "collected change");
-        }
         Ok(change)
     }
 }

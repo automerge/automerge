@@ -576,7 +576,7 @@ impl OpId {
     }
 
     pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
-        crate::op_set2::ActorIdx(self.1 as u64)
+        crate::op_set2::ActorIdx(self.1 as u32)
     }
 
     #[inline]

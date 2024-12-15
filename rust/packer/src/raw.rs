@@ -26,7 +26,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         Self::default()
     }
 
-    fn finish<'a>(_slab: &'a Slab, _writer: &mut SlabWriter<'a>, _cursor: Self) {}
+    fn finish<'a>(_slab: &'a Slab, _writer: &mut SlabWriter<'a, [u8]>, _cursor: Self) {}
 
     fn finalize_state<'a>(
         slab: &'a Slab,
@@ -43,7 +43,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
     fn copy_between<'a>(
         _slab: &'a [u8],
-        _writer: &mut SlabWriter<'a>,
+        _writer: &mut SlabWriter<'a, [u8]>,
         _c0: Self,
         _c1: Self,
         _run: Run<'a, [u8]>,

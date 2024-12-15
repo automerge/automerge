@@ -284,10 +284,13 @@ impl Header {
 }
 
 fn hash(typ: ChunkType, data: &[u8]) -> ChangeHash {
-    let mut out = vec![u8::from(typ)];
-    leb128::write::unsigned(&mut out, data.len() as u64).unwrap();
-    out.extend(data);
-    let hash_result = Sha256::digest(out);
+    let mut header = Vec::with_capacity(5);
+    header.push(u8::from(typ));
+    leb128::write::unsigned(&mut header, data.len() as u64).unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(&header);
+    hasher.update(&data);
+    let hash_result = hasher.finalize();
     let array: [u8; 32] = hash_result.into();
     ChangeHash(array)
 }
