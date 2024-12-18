@@ -1709,6 +1709,11 @@ impl Automerge {
         }
         paths
     }
+
+    /// Whether the peer represented by `other` has all the changes we have
+    pub fn has_our_changes(&self, other: &crate::sync::State) -> bool {
+        other.shared_heads == self.get_heads()
+    }
 }
 
 impl ReadDoc for Automerge {
@@ -1943,6 +1948,13 @@ impl ReadDoc for Automerge {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
+    }
+
+    fn stats(&self) -> crate::read::Stats {
+        crate::read::Stats {
+            num_changes: self.history.len() as u64,
+            num_ops: self.ops.len() as u64,
+        }
     }
 }
 

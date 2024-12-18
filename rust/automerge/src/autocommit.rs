@@ -619,6 +619,12 @@ impl AutoCommit {
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut self.patch_log);
         }
     }
+
+    /// Whether the peer represented by `other` has all the changes we have
+    pub fn has_our_changes(&mut self, state: &crate::sync::State) -> bool {
+        self.ensure_transaction_closed();
+        self.doc.has_our_changes(state)
+    }
 }
 
 impl ReadDoc for AutoCommit {
@@ -823,6 +829,10 @@ impl ReadDoc for AutoCommit {
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.doc.get_change_by_hash(hash)
+    }
+
+    fn stats(&self) -> crate::read::Stats {
+        self.doc.stats()
     }
 }
 

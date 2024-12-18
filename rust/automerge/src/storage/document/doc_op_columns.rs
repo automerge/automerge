@@ -60,21 +60,6 @@ pub(crate) struct DocOpColumns {
     mark_name: RleRange<smol_str::SmolStr>,
 }
 
-struct DocId {
-    actor: usize,
-    counter: u64,
-}
-
-impl convert::OpId<usize> for DocId {
-    fn actor(&self) -> usize {
-        self.actor
-    }
-
-    fn counter(&self) -> u64 {
-        self.counter
-    }
-}
-
 /// A row to be encoded as an op in the document format
 ///
 /// The lifetime `'a` is the lifetime of the value and key data types. For types which cannot

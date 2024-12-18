@@ -117,6 +117,7 @@ export {
   decodeSyncState,
   generateSyncMessage,
   receiveSyncMessage,
+  hasOurChanges,
   initSyncState,
   encodeChange,
   decodeChange,
@@ -135,6 +136,10 @@ export {
   initializeBase64Wasm,
   wasmInitialized,
   isWasmInitialized,
+  hasHeads,
+  topoHistoryTraversal,
+  inspectChange,
+  stats,
 } from "./stable.js"
 
 export type InitOptions<T> = {

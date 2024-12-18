@@ -3,8 +3,8 @@ use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
-    PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
+    ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
 use std::fs;
 
@@ -2227,4 +2227,52 @@ fn allows_empty_keys_in_mappings() {
             "" => { 1 },
         }
     );
+}
+
+#[test]
+fn has_our_changes() {
+    let mut left = AutoCommit::new();
+    left.put(&automerge::ROOT, "a", 1).unwrap();
+
+    let mut right = AutoCommit::new();
+    right.put(&automerge::ROOT, "b", 2).unwrap();
+
+    let mut left_to_right = automerge::sync::State::new();
+    let mut right_to_left = automerge::sync::State::new();
+
+    assert!(!left.has_our_changes(&left_to_right));
+    assert!(!right.has_our_changes(&right_to_left));
+
+    while !left.has_our_changes(&left_to_right) || !right.has_our_changes(&right_to_left) {
+        let mut quiet = true;
+        if let Some(msg) = left.sync().generate_sync_message(&mut left_to_right) {
+            quiet = false;
+            right
+                .sync()
+                .receive_sync_message(&mut right_to_left, msg)
+                .unwrap();
+        }
+        if let Some(msg) = right.sync().generate_sync_message(&mut right_to_left) {
+            quiet = false;
+            left.sync()
+                .receive_sync_message(&mut left_to_right, msg)
+                .unwrap();
+        }
+        if quiet {
+            panic!("no messages sent but the sync state says we're not in sync");
+        }
+    }
+    assert!(right.has_our_changes(&right_to_left));
+}
+
+#[test]
+fn stats_smoke_test() {
+    let mut doc = AutoCommit::new();
+    doc.put(&automerge::ROOT, "a", 1).unwrap();
+    doc.commit();
+    doc.put(&automerge::ROOT, "b", 2).unwrap();
+    doc.commit();
+    let stats = doc.stats();
+    assert_eq!(stats.num_changes, 2);
+    assert_eq!(stats.num_ops, 2);
 }

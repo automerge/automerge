@@ -35,7 +35,6 @@ const HEAD_STR: &str = "_head";
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
 // changing the ActorId implementation in ways which might affect the Ord implementation
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
 impl fmt::Debug for ActorId {

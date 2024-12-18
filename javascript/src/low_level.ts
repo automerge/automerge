@@ -68,12 +68,12 @@ export const ApiHandler: API = {
 /* eslint-enable */
 
 /**
- * Initialize the wasm module 
+ * Initialize the wasm module
  *
  * @param wasmBlob - The wasm module as a Uint8Array, Request, Promise<Uint8Array> or string. If this argument is a string then it is assumed to be a URL and the library will attempt to fetch the wasm module from that URL.
  *
  * @remarks
- * If you are using the `/slim` subpath export then this function must be 
+ * If you are using the `/slim` subpath export then this function must be
  * called before any other functions in the library. If you are using any of
  * the other subpath exports then it will have already been called for you.
  */

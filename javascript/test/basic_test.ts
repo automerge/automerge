@@ -799,4 +799,97 @@ describe("Automerge", () => {
       assert.deepEqual(path, pathCopy)
     })
   })
+
+  describe("the hasHeads function", () => {
+    it("should return true if the document in question has all the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+      assert(Automerge.hasHeads(doc, heads))
+    })
+
+    it("should return false if the document does not have the heads", () => {
+      let doc = Automerge.init<any>()
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let heads = Automerge.getHeads(doc)
+
+      let otherDoc = Automerge.init<any>()
+      assert(!Automerge.hasHeads(otherDoc, heads))
+    })
+  })
+
+  describe("the topoHistoryTraversal function", () => {
+    it("should return the correct history", () => {
+      let doc = Automerge.from({ a: "a" }, { actor: "aaaaaa" })
+      let hash1 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      let doc2 = Automerge.clone(doc, { actor: "bbbbbb" })
+
+      doc = Automerge.change(doc, d => (d.a = "b"))
+      let hash2 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc)!,
+      ).hash
+
+      doc2 = Automerge.change(doc2, d => (d.a = "c"))
+      let hash3 = Automerge.decodeChange(
+        Automerge.getLastLocalChange(doc2)!,
+      ).hash
+
+      doc = Automerge.merge(doc, doc2)
+
+      let hashes = [hash1, hash2, hash3]
+      let topo = Automerge.topoHistoryTraversal(doc)
+      assert.deepStrictEqual(topo, hashes)
+    })
+  })
+
+  describe("the inspectChange function", () => {
+    it("should return a decoded representation of the change", () => {
+      let doc = Automerge.init<{ a: string | null }>({ actor: "aaaaaa" })
+      doc = Automerge.change(doc, { time: 123 }, d => (d.a = "a"))
+      let hash1 = Automerge.topoHistoryTraversal(doc)[0]
+
+      const change = Automerge.inspectChange(doc, hash1)
+      assert.deepStrictEqual(change, {
+        actor: "aaaaaa",
+        deps: [],
+        hash: hash1,
+        message: null,
+        ops: [
+          {
+            action: "makeText",
+            key: "a",
+            obj: "_root",
+            pred: [],
+          },
+          {
+            action: "set",
+            elemId: "_head",
+            insert: true,
+            obj: "1@aaaaaa",
+            pred: [],
+            value: "a",
+          },
+        ],
+        seq: 1,
+        startOp: 1,
+        time: 123,
+      })
+    })
+  })
+
+  describe("the stats function", () => {
+    it("should return stats about the document", () => {
+      let doc = Automerge.init<{ a: number }>()
+      doc = Automerge.change(doc, d => (d.a = 1))
+      doc = Automerge.change(doc, d => (d.a = 2))
+      const stats = Automerge.stats(doc)
+      assert.deepStrictEqual(stats, {
+        numChanges: 2,
+        numOps: 2,
+      })
+    })
+  })
 })

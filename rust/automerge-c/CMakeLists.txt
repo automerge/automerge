@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-project(automerge-c VERSION 0.2.2
+project(automerge-c VERSION 0.3.0
                     LANGUAGES C
                     DESCRIPTION "C bindings for the Automerge Rust library.")
 
@@ -160,6 +160,7 @@ add_custom_command(
         src/actor_id.rs
         src/byte_span.rs
         src/change.rs
+        src/cursor.rs
         src/doc.rs
         src/doc/list.rs
         src/doc/map.rs

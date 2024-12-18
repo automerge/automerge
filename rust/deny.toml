@@ -68,6 +68,7 @@ unlicensed = "deny"
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
 allow = [
     "MIT",
+    "BSD-2-Clause",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
 ]

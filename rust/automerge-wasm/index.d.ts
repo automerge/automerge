@@ -276,11 +276,13 @@ export class Automerge {
   // sync over network
   receiveSyncMessage(state: SyncState, message: SyncMessage): void;
   generateSyncMessage(state: SyncState): SyncMessage | null;
+  hasOurChanges(state: SyncState): boolean;
 
   // low level change functions
   applyChanges(changes: Change[]): void;
   getChanges(have_deps: Heads): Change[];
   getChangeByHash(hash: Hash): Change | null;
+  getDecodedChangeByHash(hash: Hash): DecodedChange | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
   getLastLocalChange(): Change | null;
@@ -297,6 +299,10 @@ export class Automerge {
   // experimental api can go here
   applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
   applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
+
+  topoHistoryTraversal(): Hash[];
+
+  stats(): {numChanges: number, numOps: number};
 }
 
 export interface JsSyncState {

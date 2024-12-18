@@ -129,7 +129,6 @@ function copyAndFixupWasm(wasmBuildTarball) {
   const outputPath = path.join(jsProjectDir, "src", "wasm_bindgen_output")
   fs.rmSync(outputPath, { recursive: true, force: true })
 
-
   const automergeWasmPath = path.join(
     __dirname,
     "..",
@@ -169,13 +168,12 @@ function copyAndFixupWasm(wasmBuildTarball) {
     jsProjectDir,
     "src",
     "wasm_bindgen_output",
-    "workerd"
+    "workerd",
   )
-  fs.cpSync(
-    webOutputPath,
-    workerdOutputPath,
-    { recursive: true, dereference: true }
-  )
+  fs.cpSync(webOutputPath, workerdOutputPath, {
+    recursive: true,
+    dereference: true,
+  })
 
   console.log(
     "encoding the 'wasm' blob in the 'web' target into a base64 string",
@@ -252,7 +250,10 @@ function compileTypescript() {
     "copying wasm_bindgen_output directory to dist/mjs/wasm_bindgen_output",
   )
   fs.mkdirSync(mjsWasmDir, { recursive: true })
-  fs.cpSync(wasmBindgenSrcDir, mjsWasmDir, { recursive: true, dereference: true })
+  fs.cpSync(wasmBindgenSrcDir, mjsWasmDir, {
+    recursive: true,
+    dereference: true,
+  })
 
   fs.copyFileSync(
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
@@ -287,9 +288,7 @@ async function transpileCjs() {
   const iifeDir = path.join(distDir, "iife")
   await build({
     absWorkingDir: distDir,
-    entryPoints: [
-      `${inDir}/entrypoints/iife.js`,
-    ],
+    entryPoints: [`${inDir}/entrypoints/iife.js`],
     outdir: iifeDir,
     bundle: true,
     format: "iife",
