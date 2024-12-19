@@ -239,19 +239,20 @@ fn test_cursors() -> Result<(), AutomergeError> {
         Err(AutomergeError::InvalidCursor(cursor3))
     );
 
-    // test before cursor
     let mut tx = doc.transaction();
     let text2 = tx.put_object(ROOT, "hi", ObjType::Text).unwrap();
     tx.splice_text(&text2, 0, 0, "aaa@bbb").unwrap();
     tx.commit();
 
+    // s, b, a, e denote the positions of the start/before/after/end cursors
+    // aaa@bbb
+    // ^  ^   ^
+    // s  ba  e
+
     let before_cursor = doc.get_cursor_moving(&text2, 3, None, MoveCursor::Before).unwrap();
     let after_cursor = doc.get_cursor_moving(&text2, 3, None, MoveCursor::After).unwrap();
     let start_cursor = doc.get_cursor(&text2, CursorPosition::Start, None).unwrap();
     let end_cursor = doc.get_cursor(&text2, CursorPosition::End, None).unwrap();
-
-    // aaa@bbb
-    //    ^ cursor
 
     let mut tx = doc.transaction();
     tx.splice_text(&text2, 3, 1, "~~~").unwrap();
