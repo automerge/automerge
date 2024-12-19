@@ -1,7 +1,8 @@
 /** @hidden **/
 export { /** @hidden */ uuid } from "./uuid.js"
 
-import { rootProxy } from "./proxies.js"
+import { isRawString, rootProxy } from "./proxies.js"
+export { isText } from "./proxies.js"
 import { STATE } from "./constants.js"
 
 import {
@@ -1249,7 +1250,7 @@ function registerDatatypes(handle: Automerge, textV2: boolean) {
         return new RawString(n)
       },
       s => {
-        if (s instanceof RawString) {
+        if (isRawString(s)) {
           return s.val
         }
       },

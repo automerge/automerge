@@ -3,6 +3,8 @@ import { TEXT, STATE } from "./constants.js"
 import type { InternalState } from "./internal_state.js"
 
 export class Text {
+  // Used to detect whether a value is a Text object rather than using an instanceof check
+  [TEXT] = true
   //eslint-disable-next-line @typescript-eslint/no-explicit-any
   elems: Array<any>
   str: string | undefined

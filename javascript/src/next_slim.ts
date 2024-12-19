@@ -141,6 +141,7 @@ export {
   inspectChange,
   stats,
 } from "./stable.js"
+export { isRawString } from "./proxies.js"
 
 export type InitOptions<T> = {
   /** The actor ID to use for this document, a random one will be generated if `null` is passed */

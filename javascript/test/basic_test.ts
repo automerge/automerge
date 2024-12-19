@@ -3,6 +3,8 @@ import { next as Automerge } from "../src/entrypoints/fullfat_node.js"
 import * as oldAutomerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
+import { RAW_STRING } from "../src/constants.js"
+import { RawString } from "../src/next.js"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -766,6 +768,46 @@ describe("Automerge", () => {
         numChanges: 2,
         numOps: 2,
       })
+    })
+  })
+
+  describe("When handling RawString", () => {
+    it("should treat any class which has the correct symbol as a RawString", () => {
+      // Exactly the same as `RawString`
+      class FakeRawString {
+        val: string;
+        [RAW_STRING] = true
+        constructor(val: string) {
+          this.val = val
+        }
+
+        /**
+         * Returns the content of the RawString object as a simple string
+         */
+        toString(): string {
+          return this.val
+        }
+      }
+
+      let doc = Automerge.from<{ foo: FakeRawString | null }>({ foo: null })
+      doc = Automerge.change(doc, d => {
+        d.foo = new FakeRawString("something")
+      })
+      assert.deepStrictEqual(doc.foo, new RawString("something"))
+    })
+  })
+
+  it("should export a predicate to check if something is a rawstring", () => {
+    let doc = Automerge.from({
+      foo: new Automerge.RawString("someval2"),
+      bar: "notarawstring",
+    })
+    assert.strictEqual(Automerge.isRawString(doc.foo), true)
+    assert.strictEqual(Automerge.isRawString(doc.bar), false)
+
+    doc = Automerge.change(doc, d => {
+      assert.strictEqual(Automerge.isRawString(d.foo), true)
+      assert.strictEqual(Automerge.isRawString(d.bar), false)
     })
   })
 })
