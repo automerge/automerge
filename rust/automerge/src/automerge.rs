@@ -8,6 +8,7 @@ use itertools::Itertools;
 
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
+use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet, MarkStateMachine};
@@ -503,21 +504,21 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn cursor_to_opid(
+    pub(crate) fn op_cursor_to_opid(
         &self,
-        cursor: &Cursor,
+        cursor: &OpCursor,
         clock: Option<&Clock>,
     ) -> Result<OpId, AutomergeError> {
-        if let Some(idx) = self.ops.osd.actors.lookup(cursor.actor()) {
-            let opid = OpId::new(cursor.ctr(), idx);
+        if let Some(idx) = self.ops.osd.actors.lookup(&cursor.actor) {
+            let opid = OpId::new(cursor.ctr, idx);
             match clock {
                 Some(clock) if !clock.covers(&opid) => {
-                    Err(AutomergeError::InvalidCursor(cursor.clone()))
+                    Err(AutomergeError::InvalidCursor(Cursor::Op(cursor.clone())))
                 }
                 _ => Ok(opid),
             }
         } else {
-            Err(AutomergeError::InvalidCursor(cursor.clone()))
+            Err(AutomergeError::InvalidCursor(Cursor::Op(cursor.clone())))
         }
     }
 
@@ -1479,23 +1480,35 @@ impl Automerge {
     pub(crate) fn get_cursor_for(
         &self,
         obj: &ExId,
-        position: usize,
+        position: CursorPosition,
         clock: Option<Clock>,
+        move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
-            let found = self.ops.seek_ops_by_prop(
-                &obj.id,
-                position.into(),
-                TextRepresentation::String.encoding(obj.typ),
-                clock.as_ref(),
-            );
-            if let Some(op) = found.ops.last() {
-                Ok(Cursor::new(*op.id(), &self.ops.osd))
-            } else {
-                Err(AutomergeError::InvalidIndex(position))
+            match position {
+                CursorPosition::Start => Ok(Cursor::Start),
+                CursorPosition::End => Ok(Cursor::End),
+                CursorPosition::Index(i) => {
+                    let found = self.ops.seek_ops_by_prop(
+                        &obj.id,
+                        i.into(),
+                        TextRepresentation::String.encoding(obj.typ),
+                        clock.as_ref(),
+                    );
+
+                    if let Some(op) = found.ops.last() {
+                        return Ok(Cursor::Op(OpCursor::new(
+                            *op.id(),
+                            &self.ops.osd,
+                            move_cursor,
+                        )));
+                    }
+
+                    Err(AutomergeError::InvalidIndex(i))
+                }
             }
         }
     }
@@ -1506,18 +1519,36 @@ impl Automerge {
         cursor: &Cursor,
         clock: Option<Clock>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
-        let found = self
-            .ops
-            .seek_list_opid(
-                &obj.id,
-                opid,
-                TextRepresentation::String.encoding(obj.typ),
-                clock.as_ref(),
-            )
-            .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
-        Ok(found.index)
+        match cursor {
+            Cursor::Start => Ok(0),
+            Cursor::End => Ok(self.length_for(obj, clock)),
+            Cursor::Op(op) => {
+                let obj = self.exid_to_obj(obj)?;
+                let opid = self.op_cursor_to_opid(op, clock.as_ref())?;
+
+                let found = self
+                    .ops
+                    .seek_list_opid(
+                        &obj.id,
+                        opid,
+                        TextRepresentation::String.encoding(obj.typ),
+                        clock.as_ref(),
+                    )
+                    .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
+
+                match op.move_cursor {
+                    MoveCursor::After => Ok(found.index),
+                    MoveCursor::Before => {
+                        if found.visible || found.index == 0 {
+                            Ok(found.index)
+                        } else {
+                            // walk upwards through props of this op, find first visible op?
+                            todo!()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn marks_for(
@@ -1810,14 +1841,25 @@ impl ReadDoc for Automerge {
         self.spans_for(obj.as_ref(), Some(clock))
     }
 
-    fn get_cursor<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
-        position: usize,
+        position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
         let clock = at.map(|heads| self.clock_at(heads));
-        self.get_cursor_for(obj.as_ref(), position, clock)
+        self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
+    }
+
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(

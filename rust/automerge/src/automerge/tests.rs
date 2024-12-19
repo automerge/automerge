@@ -239,6 +239,27 @@ fn test_cursors() -> Result<(), AutomergeError> {
         Err(AutomergeError::InvalidCursor(cursor3))
     );
 
+    // test before cursor
+    let mut tx = doc.transaction();
+    let text2 = tx.put_object(ROOT, "hi", ObjType::Text).unwrap();
+    tx.splice_text(&text2, 0, 0, "aaa@bbb").unwrap();
+    tx.commit();
+
+    let cursor4 = doc.get_cursor_moving(&text2, 3, None, MoveCursor::Before).unwrap();
+
+    // aaa@bbb
+    //    ^ cursor
+
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 3, 1, "~~~").unwrap();
+    tx.commit();
+
+    // aaa~~~bbb
+    //   ^ cursor should move here
+
+    let pos5 = doc.get_cursor_position(&text2, &cursor4, None).unwrap();
+    assert_eq!(pos5, 2);
+
     Ok(())
 }
 
