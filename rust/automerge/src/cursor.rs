@@ -21,7 +21,7 @@ const MOVE_AFTER_TAG: u8 = 2;
 ///
 /// This can be persisted using [`Self::to_bytes()`] and [`TryFrom<&[u8]>`][TryFrom].
 ///
-/// A cursor is obtained from [`ReadDoc::get_cursor()`] and dereferenced with
+/// A cursor is obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and dereferenced with
 /// [`ReadDoc::get_cursor_position()`].
 #[derive(Clone, PartialEq, Debug)]
 pub enum Cursor {
@@ -35,7 +35,7 @@ pub enum Cursor {
     Op(OpCursor),
 }
 
-/// A cursor which represents a specific op in a sequence
+/// A cursor which represents a specific op in a sequence.
 #[derive(Clone, PartialEq, Debug)]
 pub struct OpCursor {
     pub(crate) ctr: u64,

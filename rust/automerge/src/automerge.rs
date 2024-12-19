@@ -1523,15 +1523,15 @@ impl Automerge {
             Cursor::Start => Ok(0),
             Cursor::End => Ok(self.length_for(obj, clock)),
             Cursor::Op(op) => {
-                let obj = self.exid_to_obj(obj)?;
+                let obj_meta = self.exid_to_obj(obj)?;
                 let opid = self.op_cursor_to_opid(op, clock.as_ref())?;
 
                 let found = self
                     .ops
                     .seek_list_opid(
-                        &obj.id,
+                        &obj_meta.id,
                         opid,
-                        TextRepresentation::String.encoding(obj.typ),
+                        TextRepresentation::String.encoding(obj_meta.typ),
                         clock.as_ref(),
                     )
                     .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
@@ -1542,8 +1542,33 @@ impl Automerge {
                         if found.visible || found.index == 0 {
                             Ok(found.index)
                         } else {
-                            // walk upwards through props of this op, find first visible op?
-                            todo!()
+                            // TODO: this is done very naively and should use the query system
+                            // and is possibly incorrect
+
+                            // find last item that's visible now in seq that was also visible at time of cursor creation
+                            // idea is to iterate reverse over keys
+
+                            let mut key = found.op.key().elemid().unwrap().0;
+
+                            loop {
+                                let f = self.ops.seek_list_opid(
+                                    &obj_meta.id,
+                                    key,
+                                    TextRepresentation::String.encoding(obj_meta.typ),
+                                    clock.as_ref(),
+                                );
+
+                                if let Some(f) = f {
+                                    key = f.op.key().elemid().unwrap().0;
+                                    if f.visible {
+                                        return Ok(f.index);
+                                    }
+                                } else {
+                                    // i think we reach this when we've gone before the beginning of the sequence?
+                                    break;
+                                }
+                            }
+                            Ok(0)
                         }
                     }
                 }
