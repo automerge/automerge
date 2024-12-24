@@ -767,5 +767,19 @@ describe("Automerge", () => {
         numOps: 2,
       })
     })
+  }),
+
+  describe("the toJS function", () => {
+    it("should return the document at its correct heads", () => {
+      const doc = Automerge.from<any>({ x: 1 })
+
+      const doc1 = Automerge.change(doc, doc => {
+        doc.a = 123;
+        doc.b = 456;
+      })
+
+      assert.deepStrictEqual(Automerge.toJS(doc), { x: 1 })
+      assert.deepStrictEqual(Automerge.toJS(doc1), { a: 123, b: 456, x: 1 })
+    })
   })
 })

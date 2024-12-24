@@ -1182,7 +1182,7 @@ export function dump<T>(doc: Doc<T>) {
 export function toJS<T>(doc: Doc<T>): T {
   const state = _state(doc)
   const enabled = state.handle.enableFreeze(false)
-  const result = state.handle.materialize()
+  const result = state.handle.materialize("/", state.heads)
   state.handle.enableFreeze(enabled)
   return result as T
 }
