@@ -1551,7 +1551,7 @@ impl Automerge {
                     MoveCursor::Before => {
                         // `MoveCursor::Before` behaves like `MoveCursor::After` but in the opposite direction:
                         // - if the item is visible at `clock`, just return its index
-                        // - if the item isn't visible at `clock`, find the index of the **previous** item 
+                        // - if the item isn't visible at `clock`, find the index of the **previous** item
                         //   that's visible at `clock` that was also visible at the time of cursor creation.
                         // - if none of the previous items are visible (or the index of the original item is 0),
                         //   our position is `0`.

@@ -779,8 +779,12 @@ impl ReadDoc for AutoCommit {
         at: Option<&[ChangeHash]>,
         move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
-        self.doc
-            .get_cursor_for(obj.as_ref(), position.into(), self.get_scope(at), move_cursor)
+        self.doc.get_cursor_for(
+            obj.as_ref(),
+            position.into(),
+            self.get_scope(at),
+            move_cursor,
+        )
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(

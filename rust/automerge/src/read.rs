@@ -1,5 +1,12 @@
 use crate::{
-    cursor::{CursorPosition, MoveCursor}, error::AutomergeError, exid::ExId, hydrate, iter::{Keys, ListRange, MapRange, Spans, Values}, marks::{Mark, MarkSet}, parents::Parents, Change, ChangeHash, Cursor, ObjType, Prop, Value
+    cursor::{CursorPosition, MoveCursor},
+    error::AutomergeError,
+    exid::ExId,
+    hydrate,
+    iter::{Keys, ListRange, MapRange, Spans, Values},
+    marks::{Mark, MarkSet},
+    parents::Parents,
+    Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
 use std::{collections::HashMap, ops::RangeBounds};
@@ -165,7 +172,7 @@ pub trait ReadDoc {
     ) -> Result<Spans<'_>, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
-    /// 
+    ///
     /// **This is equivalent to [`Self::get_cursor_moving()`] with `move_cursor` = `MoveCursor::After`.**
     fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
@@ -175,20 +182,20 @@ pub trait ReadDoc {
     ) -> Result<Cursor, AutomergeError>;
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
-    /// 
+    ///
     /// # Use cases
     /// - User cursor tracking, to maintain contextual position while merging remote changes.
     /// - Indexing sentences in a text field.
-    /// 
+    ///
     /// # Cursor movement
-    /// 
+    ///
     /// `move_cursor` determines how the cursor resolves its position if the item originally referenced at the given position is **removed** in later versions of the document. See [`MoveCursor`] for more details.
-    /// 
+    ///
     /// # Start/end cursors
     /// If you'd like a cursor which follows the start (`position = 0`) or end (`position = sequence.length`) of the sequence, pass `CursorPosition::Start` or `CursorPosition::End` respectively.
-    /// 
+    ///
     /// Conceptually, start cursors behaves like a cursor pointed an index of `-1`. End cursors behave like a cursor pointed at `sequence.length`.
-    /// 
+    ///
     /// Note that `move_cursor` does not affect start/end cursors, as the start/end positions can never be removed.
     ///
     /// To translate a cursor into a position, see [`Self::get_cursor_position()`].
@@ -197,7 +204,7 @@ pub trait ReadDoc {
         obj: O,
         position: I,
         at: Option<&[ChangeHash]>,
-        move_cursor: MoveCursor
+        move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError>;
 
     /// Translate Cursor in a Sequence into an absolute position of type [`usize`].

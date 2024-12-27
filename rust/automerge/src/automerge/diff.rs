@@ -438,12 +438,12 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     }
 
     fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
-            &self,
-            obj: O,
-            position: I,
-            at: Option<&[ChangeHash]>,
-            move_cursor: crate::cursor::MoveCursor
-        ) -> Result<Cursor, AutomergeError> {
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: crate::cursor::MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor_moving(obj, position, at, move_cursor)
     }
 
