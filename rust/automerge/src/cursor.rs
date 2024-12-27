@@ -21,8 +21,8 @@ const MOVE_AFTER_TAG: u8 = 2;
 ///
 /// This can be persisted using [`Self::to_bytes()`] and [`TryFrom<&[u8]>`][TryFrom].
 ///
-/// A cursor is obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and dereferenced with
-/// [`ReadDoc::get_cursor_position()`].
+/// A cursor is obtained from [`ReadDoc::get_cursor()`] or [`ReadDoc::get_cursor_moving()`] and
+/// is dereferenced to a position using [`ReadDoc::get_cursor_position()`].
 #[derive(Clone, PartialEq, Debug)]
 pub enum Cursor {
     // cursor always dereferences to position = 0
@@ -69,9 +69,11 @@ impl From<usize> for CursorPosition {
 
 /// `MoveCursor` determines how the cursor will resolve its position if the item originally referenced by the cursor is removed.
 ///
-/// With `MoveCursor::Before`, the cursor will shift to the **previous item that was visible at the time of cursor creation.**
+/// With `MoveCursor::Before`, the cursor will shift to the **previous item that was visible at the time of cursor creation.**.
+/// If no previous item is found that's still visible, the cursor will dereference to `0`.
 ///
 /// With `MoveCursor::After`, the cursor will shift to the **next item that was visible at the time of cursor creation.**
+/// If no next item is found that's still visible, the cursor will dereference to `sequence.length`.
 #[derive(Clone, PartialEq, Debug)]
 pub enum MoveCursor {
     Before,

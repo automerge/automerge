@@ -1537,16 +1537,35 @@ impl Automerge {
                     .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
 
                 match op.move_cursor {
+                    // `MoveCursor::After` mimics the original behavior of cursors.
+                    //
+                    // The original behavior was to just return the `FoundOpId::index` found by
+                    // `OpSetInternal::seek_list_opid()`.
+                    //
+                    // This index always corresponds to the:
+                    // - index of the item itself (if it's visible at `clock`)
+                    // - next index of visible item that **was also visible at the time of cursor creation**
+                    //   (if the item is not visible at `clock`).
+                    // - or `sequence.length` if none of the next items are visible at `clock`.
                     MoveCursor::After => Ok(found.index),
                     MoveCursor::Before => {
+                        // `MoveCursor::Before` behaves like `MoveCursor::After` but in the opposite direction:
+                        // - if the item is visible at `clock`, just return its index
+                        // - if the item isn't visible at `clock`, find the index of the **previous** item 
+                        //   that's visible at `clock` that was also visible at the time of cursor creation.
+                        // - if none of the previous items are visible (or the index of the original item is 0),
+                        //   our position is `0`.
                         if found.visible || found.index == 0 {
+                            // we always want to return the index if the item is still visible.
+                            // if the index is 0, there's no possible previous items to look for.
                             Ok(found.index)
                         } else {
-                            // TODO: this is done very naively and should use the query system
-                            // and is possibly incorrect
-
-                            // find last item that's visible now in seq that was also visible at time of cursor creation
-                            // idea is to iterate reverse over keys
+                            // in this case, we'll:
+                            // - get the clock representing the document at the state of the op
+                            // - find index of the op at the time of cursor creation
+                            // - walk towards 0
+                            //   - if we find an item that's still visible, get its current position
+                            //   - if we don't find any previous visible items, return 0.
 
                             let mut key = found.op.key().elemid().unwrap().0;
 
