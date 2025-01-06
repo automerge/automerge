@@ -129,6 +129,8 @@ pub enum HydrateError {
     InvalidTextOp(PatchAction),
     #[error("invalid prop in patch: {0}")]
     ApplyInvalidProp(PatchAction),
+    #[error("invalid encoding for text value")]
+    InvalidEncoding,
 }
 
 #[derive(Error, Debug)]

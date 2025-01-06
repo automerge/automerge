@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use crate::marks::MarkSet;
 use crate::read::ReadDocInternal;
+use crate::text_value::ConcreteTextValue;
 use crate::{ObjId, Prop, ReadDoc, Value};
 
-use super::{Patch, PatchAction};
+use super::{Patch, PatchAction, TextRepresentation};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone)]
@@ -14,11 +15,16 @@ pub(crate) struct PatchBuilder<'a, R> {
     patches: Vec<Patch>,
     last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
     visible_paths: Option<HashMap<ObjId, Vec<(ObjId, Prop)>>>,
+    text_rep: TextRepresentation,
     doc: &'a R,
 }
 
 impl<'a, R: ReadDocInternal> PatchBuilder<'a, R> {
-    pub(crate) fn new(doc: &'a R, patches_size_hint: Option<usize>) -> Self {
+    pub(crate) fn new(
+        doc: &'a R,
+        patches_size_hint: Option<usize>,
+        text_rep: TextRepresentation,
+    ) -> Self {
         // If we are expecting a lot of patches then precompute all the visible
         // paths up front to avoid doing many seek operations in the `Parents`
         // iterator in `Self::get_path`
@@ -32,6 +38,7 @@ impl<'a, R: ReadDocInternal> PatchBuilder<'a, R> {
             last_mark_set: None,
             visible_paths: path_lookup,
             doc,
+            text_rep,
         }
     }
 }
@@ -111,7 +118,7 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         if let Some(path) = self.get_path(&obj) {
             let action = PatchAction::SpliceText {
                 index,
-                value: value.into(),
+                value: ConcreteTextValue::new(value, self.text_rep),
                 marks: marks.as_deref().cloned(),
             };
             self.push(Patch { obj, path, action });

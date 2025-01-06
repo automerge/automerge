@@ -350,6 +350,10 @@ impl<'a> ReadDoc for Transaction<'a> {
     fn stats(&self) -> crate::read::Stats {
         self.doc.stats()
     }
+
+    fn text_encoding(&self) -> crate::TextEncoding {
+        self.doc.text_encoding()
+    }
 }
 
 impl<'a> Transactable for Transaction<'a> {

@@ -1,7 +1,7 @@
 use crate::marks::MarkData;
 use crate::op_set::Op;
 use crate::op_tree::{OpSetData, OpTree, OpTreeNode};
-use crate::types::{Key, ListEncoding, OpId, OpType};
+use crate::types::{Key, ListEncoding, OpId, OpType, TextEncoding};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -55,11 +55,12 @@ pub(crate) enum QueryResult {
 #[derive(Clone, Debug, PartialEq)]
 struct TextWidth {
     width: usize,
+    encoding: TextEncoding,
 }
 
 impl TextWidth {
     fn add_op(&mut self, op: Op<'_>) {
-        self.width += op.width(ListEncoding::Text);
+        self.width += op.width(ListEncoding::Text(self.encoding));
     }
 
     fn remove_op(&mut self, op: Op<'_>) {
@@ -90,7 +91,9 @@ impl TextWidth {
         //
         // Really this is a sign that we should be tracking the type of the Index (List or Text) at
         // the type level, but for now we just look the other way.
-        self.width = self.width.saturating_sub(op.width(ListEncoding::Text));
+        self.width = self
+            .width
+            .saturating_sub(op.width(ListEncoding::Text(self.encoding)));
     }
 
     fn merge(&mut self, other: &TextWidth) {
@@ -110,6 +113,7 @@ pub(crate) struct Index {
     mark_end: Vec<OpId>,
     /// The ID of the last block in this index, if any
     pub(crate) block: Option<OpId>,
+    pub(crate) text_encoding: TextEncoding,
 }
 
 impl Index {
@@ -117,15 +121,19 @@ impl Index {
         self.never_seen_puts
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(text_encoding: TextEncoding) -> Self {
         Index {
             visible: Default::default(),
-            visible_text: TextWidth { width: 0 },
+            visible_text: TextWidth {
+                width: 0,
+                encoding: text_encoding,
+            },
             ops: Default::default(),
             never_seen_puts: true,
             mark_begin: Default::default(),
             mark_end: Default::default(),
             block: None,
+            text_encoding,
         }
     }
 
@@ -133,7 +141,7 @@ impl Index {
     pub(crate) fn visible_len(&self, encoding: ListEncoding) -> usize {
         match encoding {
             ListEncoding::List => self.visible.len(),
-            ListEncoding::Text => self.visible_text.width,
+            ListEncoding::Text(_) => self.visible_text.width,
         }
     }
 
@@ -252,11 +260,5 @@ impl Index {
         self.visible_text.merge(&other.visible_text);
         self.block = other.block;
         self.never_seen_puts &= other.never_seen_puts;
-    }
-}
-
-impl Default for Index {
-    fn default() -> Self {
-        Self::new()
     }
 }

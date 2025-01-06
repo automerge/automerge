@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use crate::exid::ExId;
+use crate::patches::TextRepresentation;
 use crate::types::Prop;
 use crate::{PatchAction, ScalarValue};
 
@@ -21,7 +22,11 @@ impl Map {
         self.0.iter()
     }
 
-    pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
+    pub(crate) fn apply(
+        &mut self,
+        text_rep: TextRepresentation,
+        patch: PatchAction,
+    ) -> Result<(), HydrateError> {
         match patch {
             PatchAction::DeleteMap { key } => {
                 self.0.remove(&key);
@@ -32,8 +37,9 @@ impl Map {
                 value,
                 conflict,
             } => {
+                let h_value = Value::new(value.0, text_rep);
                 self.0
-                    .insert(key, MapValue::new(value.0.into(), value.1, conflict));
+                    .insert(key, MapValue::new(h_value, value.1, conflict));
                 Ok(())
             }
             PatchAction::Increment {

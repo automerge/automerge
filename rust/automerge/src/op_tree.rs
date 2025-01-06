@@ -2,6 +2,7 @@ use crate::marks::MarkSet;
 pub(crate) use crate::op_set::{Op, OpSetData};
 use crate::op_tree::node::OpIdx;
 use crate::patches::PatchLog;
+use crate::types::TextEncoding;
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
@@ -46,9 +47,9 @@ pub(crate) struct LastInsert {
 }
 
 impl OpTree {
-    pub(crate) fn new(objtype: ObjType) -> Self {
+    pub(crate) fn new(objtype: ObjType, text_encoding: TextEncoding) -> Self {
         Self {
-            internal: OpTreeInternal::new(objtype),
+            internal: OpTreeInternal::new(objtype, text_encoding),
             objtype,
             parent: None,
             last_insert: None,
@@ -63,10 +64,10 @@ impl OpTree {
         self.internal.len()
     }
 
-    pub(crate) fn add_index(&mut self, osd: &OpSetData) {
-        self.internal.has_index = true;
+    pub(crate) fn add_index(&mut self, osd: &OpSetData, text_encoding: TextEncoding) {
+        self.internal.has_index = HasIndex::Yes(text_encoding);
         if let Some(root) = self.internal.root_node.as_mut() {
-            root.add_index(osd);
+            root.add_index(osd, text_encoding);
         }
     }
 
@@ -130,7 +131,8 @@ impl<'a> FoundOpWithPatchLog<'a> {
             } else if obj.typ == ObjType::Text && !op.action().is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
-                patch_log.insert(obj.id, self.index, op.value().into(), *op.id(), false);
+                let value = crate::hydrate::Value::new(op.value(), patch_log.text_rep());
+                patch_log.insert(obj.id, self.index, value, *op.id(), false);
             }
             return;
         }
@@ -152,14 +154,9 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
-                    patch_log.put(
-                        obj.id,
-                        &key,
-                        before.value().into(),
-                        *before.id(),
-                        conflict,
-                        true,
-                    );
+                    let before_val =
+                        crate::hydrate::Value::new(before.value(), patch_log.text_rep());
+                    patch_log.put(obj.id, &key, before_val, *before.id(), conflict, true);
                 }
                 _ => { /* do nothing */ }
             }
@@ -178,28 +175,40 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(obj.id, self.index, op.value().into(), *op.id(), conflict);
+                let val = crate::hydrate::Value::new(op.value(), patch_log.text_rep());
+                patch_log.insert(obj.id, self.index, val, *op.id(), conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.value().into(), *op.id(), conflict, false);
+                let val = crate::hydrate::Value::new(op.value(), patch_log.text_rep());
+                patch_log.put(obj.id, &key, val, *op.id(), conflict, false);
             }
         }
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum HasIndex {
+    Yes(TextEncoding),
+    No,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal {
     pub(crate) root_node: Option<OpTreeNode>,
-    pub(crate) has_index: bool,
+    pub(crate) has_index: HasIndex,
 }
 
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
-    pub(crate) fn new(obj_type: ObjType) -> Self {
-        let has_index = obj_type.is_sequence();
+    pub(crate) fn new(obj_type: ObjType, text_encoding: TextEncoding) -> Self {
+        let has_index = if obj_type.is_sequence() {
+            HasIndex::Yes(text_encoding)
+        } else {
+            HasIndex::No
+        };
         Self {
             root_node: None,
             has_index,
@@ -540,7 +549,12 @@ impl OpTreeInternal {
 
             if root.is_full() {
                 let original_len = root.len();
-                let new_root = OpTreeNode::new(root.index.is_some());
+                let new_root = OpTreeNode::new(
+                    root.index
+                        .as_ref()
+                        .map(|i| HasIndex::Yes(i.text_encoding))
+                        .unwrap_or(HasIndex::No),
+                );
 
                 // move new_root to root position
                 let old_root = mem::replace(root, new_root);
@@ -664,8 +678,8 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t: OpTree = OpTree::new(ObjType::List);
-        let mut osd = OpSetData::default();
+        let mut t: OpTree = OpTree::new(ObjType::List, TextEncoding::default());
+        let mut osd = OpSetData::new(TextEncoding::default());
         let d = &mut osd;
         t.internal.insert(0, op(d), d);
         t.internal.insert(1, op(d), d);
@@ -678,8 +692,8 @@ mod tests {
 
     #[test]
     fn insert_book() {
-        let mut t: OpTree = OpTree::new(ObjType::List);
-        let mut osd = OpSetData::default();
+        let mut t: OpTree = OpTree::new(ObjType::List, TextEncoding::default());
+        let mut osd = OpSetData::new(TextEncoding::default());
 
         for i in 0..100 {
             t.internal.insert(i % 2, op(&mut osd), &osd);
@@ -688,10 +702,10 @@ mod tests {
 
     #[test]
     fn insert_book_vec() {
-        let mut t: OpTree = OpTree::new(ObjType::List);
+        let mut t: OpTree = OpTree::new(ObjType::List, TextEncoding::default());
         let mut v = Vec::new();
 
-        let mut osd = OpSetData::default();
+        let mut osd = OpSetData::new(TextEncoding::default());
         for i in 0..100 {
             let idx = op(&mut osd);
             t.internal.insert(i % 3, idx, &osd);

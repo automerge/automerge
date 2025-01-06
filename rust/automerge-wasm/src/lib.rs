@@ -32,6 +32,7 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
+use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
@@ -85,7 +86,9 @@ impl From<TextRepresentation> for am::patches::TextRepresentation {
     fn from(tr: TextRepresentation) -> Self {
         match tr {
             TextRepresentation::Array => am::patches::TextRepresentation::Array,
-            TextRepresentation::String => am::patches::TextRepresentation::String,
+            TextRepresentation::String => {
+                am::patches::TextRepresentation::String(TextEncoding::Utf16CodeUnit)
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::marks::Mark;
 use crate::patches::TextRepresentation;
 use crate::read::ReadDocInternal;
 use crate::types::ObjMeta;
+use crate::types::TextEncoding;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
     patches::PatchLog,
@@ -131,12 +132,14 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
             )
         });
 
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
-            log_text_diff(patch_log, &obj, diffs)
-        } else if obj.typ.is_sequence() {
-            log_list_diff(patch_log, &obj, diffs);
-        } else {
-            log_map_diff(doc, patch_log, &obj, diffs);
+        match (obj.typ, patch_log.text_rep()) {
+            (ObjType::Text, TextRepresentation::String(encoding)) => {
+                log_text_diff(patch_log, &obj, encoding, diffs)
+            }
+            (ObjType::Text, TextRepresentation::Array) | (ObjType::List, _) => {
+                log_list_diff(patch_log, &obj, diffs)
+            }
+            (ObjType::Map | ObjType::Table, _) => log_map_diff(doc, patch_log, &obj, diffs),
         }
     }
 }
@@ -148,7 +151,10 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
-            let value = winner.op.value_at(Some(winner.clock)).into();
+            let value = crate::hydrate::Value::new(
+                winner.op.value_at(Some(winner.clock)),
+                patch_log.text_rep(),
+            );
             let id = *winner.op.id();
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
@@ -157,7 +163,10 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Update { before, after, .. } => {
             let conflict = !before.conflict && after.conflict;
-            let value = after.op.value_at(Some(after.clock)).into();
+            let value = crate::hydrate::Value::new(
+                after.op.value_at(Some(after.clock)),
+                patch_log.text_rep(),
+            );
             let id = *after.op.id();
             let expose = after.cross_visible;
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);
@@ -189,16 +198,20 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
+    text_encoding: TextEncoding,
     patches: I,
 ) {
-    let encoding = ListEncoding::Text;
+    let encoding = ListEncoding::Text(text_encoding);
     patches.fold(0, |index, patch| match &patch {
         Patch::New(winner, marks) => {
             if winner.op.is_put() {
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = winner.op.value_at(Some(winner.clock)).into();
+                let value = crate::hydrate::Value::new(
+                    winner.op.value_at(Some(winner.clock)),
+                    patch_log.text_rep(),
+                );
                 let id = *winner.op.id();
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -239,7 +252,10 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
-                let value = winner.op.value_at(Some(winner.clock)).into();
+                let value = crate::hydrate::Value::new(
+                    winner.op.value_at(Some(winner.clock)),
+                    patch_log.text_rep(),
+                );
                 let id = *winner.op.id();
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -247,7 +263,10 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             Patch::Update { before, after, .. } => {
                 let conflict = !before.conflict && after.conflict;
-                let value = after.op.value_at(Some(after.clock)).into();
+                let value = crate::hydrate::Value::new(
+                    after.op.value_at(Some(after.clock)),
+                    patch_log.text_rep(),
+                );
                 let id = *after.op.id();
                 let expose = after.cross_visible;
                 patch_log.put_map(obj.id, key, value, id, conflict, expose)
@@ -536,6 +555,10 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     fn stats(&self) -> crate::read::Stats {
         self.doc.stats()
     }
+
+    fn text_encoding(&self) -> TextEncoding {
+        self.doc.text_encoding()
+    }
 }
 
 impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
@@ -552,7 +575,7 @@ mod tests {
     use crate::{
         hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
         transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop,
-        ScalarValue, Value, ROOT,
+        ScalarValue, TextEncoding, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -1357,7 +1380,7 @@ mod tests {
     #[test]
     fn diff_with_before_and_after_heads() {
         let mut doc = AutoCommit::new();
-        doc.set_text_rep(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
 
         let text = doc.put_object(ROOT, "value", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "aaa").unwrap();

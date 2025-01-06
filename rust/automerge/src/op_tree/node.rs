@@ -4,12 +4,14 @@ use std::{
     mem,
 };
 
-use crate::op_set::Op;
 pub(crate) use crate::op_set::{OpIdx, OpSetData};
+use crate::{op_set::Op, types::TextEncoding};
 use crate::{
     query::{ChangeVisibility, Index, QueryResult, TreeQuery},
     types::OpId,
 };
+
+use super::HasIndex;
 
 pub const B: usize = 16;
 
@@ -22,8 +24,12 @@ pub(crate) struct OpTreeNode {
 }
 
 impl OpTreeNode {
-    pub(crate) fn new(has_index: bool) -> Self {
-        let index = if has_index { Some(Index::new()) } else { None };
+    pub(crate) fn new(has_index: HasIndex) -> Self {
+        let index = if let HasIndex::Yes(text_encoding) = has_index {
+            Some(Index::new(text_encoding))
+        } else {
+            None
+        };
         Self {
             elements: Vec::new(),
             children: Vec::new(),
@@ -90,7 +96,8 @@ impl OpTreeNode {
 
     fn reindex(&mut self, osd: &OpSetData) {
         if self.index.is_some() {
-            let mut index = Index::new();
+            let text_encoding = self.index.as_ref().map(|i| i.text_encoding).unwrap();
+            let mut index = Index::new(text_encoding);
             for c in &self.children {
                 if let Some(i) = &c.index {
                     index.merge(i);
@@ -126,11 +133,11 @@ impl OpTreeNode {
         panic!("index {} not found in node with len {}", index, self.len())
     }
 
-    pub(crate) fn add_index(&mut self, osd: &OpSetData) -> &Index {
+    pub(crate) fn add_index(&mut self, osd: &OpSetData, text_encoding: TextEncoding) -> &Index {
         if self.index.is_none() {
-            let mut index = Index::new();
+            let mut index = Index::new(text_encoding);
             for c in &mut self.children {
-                index.merge(c.add_index(osd))
+                index.merge(c.add_index(osd, text_encoding))
             }
             for i in &self.elements {
                 index.insert(i.as_op(osd));
@@ -207,7 +214,12 @@ impl OpTreeNode {
 
         // Create a new node which is going to store (B-1) keys
         // of the full child.
-        let mut successor_sibling = OpTreeNode::new(self.index.is_some());
+        let mut successor_sibling = OpTreeNode::new(
+            self.index
+                .as_ref()
+                .map(|i| HasIndex::Yes(i.text_encoding))
+                .unwrap_or(HasIndex::No),
+        );
 
         let original_len = full_child.len();
         assert!(full_child.is_full());

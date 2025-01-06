@@ -1,12 +1,12 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{text_value::TextValue, PatchAction, ScalarValue};
+use crate::{patches::TextRepresentation, text_value::ConcreteTextValue, PatchAction, ScalarValue};
 
-use super::{HydrateError, Value};
+use super::HydrateError;
 
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Text {
-    value: TextValue,
+    value: ConcreteTextValue,
     marks: HashMap<String, ScalarValue>,
 }
 
@@ -23,7 +23,9 @@ impl Text {
     pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
         match patch {
             PatchAction::SpliceText { index, value, .. } => {
-                self.value.splice_text_value(index, &value);
+                self.value
+                    .splice_text_value(index, &value)
+                    .map_err(|_| HydrateError::InvalidEncoding)?;
                 Ok(())
             }
             PatchAction::DeleteSeq { index, length } => {
@@ -39,17 +41,11 @@ impl Text {
         }
     }
 
-    pub(crate) fn new(value: TextValue) -> Self {
+    pub fn new<S: AsRef<str>>(text_rep: TextRepresentation, text: S) -> Self {
         Self {
-            value,
+            value: ConcreteTextValue::new(text.as_ref(), text_rep),
             marks: Default::default(),
         }
-    }
-}
-
-impl From<TextValue> for Value {
-    fn from(text: TextValue) -> Self {
-        Value::Text(Text::new(text))
     }
 }
 
@@ -65,14 +61,29 @@ impl Display for Text {
     }
 }
 
-impl From<String> for Text {
-    fn from(value: String) -> Self {
-        Text::new(value.into())
+impl From<ConcreteTextValue> for Text {
+    fn from(value: ConcreteTextValue) -> Self {
+        Self {
+            value,
+            marks: Default::default(),
+        }
     }
 }
 
-impl<'a> From<&'a str> for Text {
-    fn from(value: &'a str) -> Self {
-        Text::new(value.into())
+impl From<&ConcreteTextValue> for Text {
+    fn from(value: &ConcreteTextValue) -> Self {
+        Self::from(value.clone())
+    }
+}
+
+impl From<ConcreteTextValue> for crate::hydrate::Value {
+    fn from(value: ConcreteTextValue) -> Self {
+        crate::hydrate::Value::Text(Text::from(value))
+    }
+}
+
+impl From<&ConcreteTextValue> for crate::hydrate::Value {
+    fn from(value: &ConcreteTextValue) -> Self {
+        Self::from(value.clone())
     }
 }

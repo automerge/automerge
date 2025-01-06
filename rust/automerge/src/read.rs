@@ -6,7 +6,7 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Spans, Values},
     marks::{Mark, MarkSet},
     parents::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value,
 };
 
 use std::{collections::HashMap, ops::RangeBounds};
@@ -284,6 +284,8 @@ pub trait ReadDoc {
 
     /// Return some statistics about the document
     fn stats(&self) -> Stats;
+
+    fn text_encoding(&self) -> TextEncoding;
 }
 
 pub(crate) trait ReadDocInternal: ReadDoc {

@@ -1087,7 +1087,7 @@ impl Automerge {
                 match self.text_rep {
                     TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
                     TextRepresentation::Array => {
-                        let val = String::from(value);
+                        let val = value.make_string();
                         let elems = val
                             .chars()
                             .map(|c| {
@@ -1222,7 +1222,7 @@ impl Automerge {
                 let length = string.length();
                 let before = string.slice(0, index);
                 let after = string.slice(index, length);
-                let result = before.concat(&String::from(value).into()).concat(&after);
+                let result = before.concat(&value.make_string().into()).concat(&after);
                 Ok(result.into())
             }
             _ => Ok(string.into()),
@@ -1637,7 +1637,7 @@ fn export_patch(
         } => {
             js_set(&result, "action", "splice")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
-            js_set(&result, "value", String::from(&value))?;
+            js_set(&result, "value", value.make_string())?;
             if let Some(m) = marks {
                 if m.num_marks() > 0 {
                     let marks = Object::new();
@@ -1751,7 +1751,13 @@ pub(super) fn js_val_to_hydrate(
                 let Some(obj) = js_obj.text() else {
                     return Err(error::JsValToHydrate::InvalidText);
                 };
-                Ok(am::hydrate::Value::Text(obj.into()))
+                // This code path is only used in `next`, which uses a string representation
+                // and we're targeting JS, which uses utf16 strings
+                let text_rep =
+                    am::patches::TextRepresentation::String(am::TextEncoding::Utf16CodeUnit);
+                Ok(am::hydrate::Value::Text(am::hydrate::Text::new(
+                    text_rep, obj,
+                )))
             }
         }
     } else if let Some(val) = doc.import_scalar(&value, datatype) {

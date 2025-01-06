@@ -2,6 +2,7 @@ use super::change_collector::ChangeCollector;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::storage::document::ReadDocOpError;
+use crate::types::TextEncoding;
 use crate::{
     change::Change,
     columnar::Key as DocOpKey,
@@ -94,9 +95,9 @@ struct ReconstructionState<'a> {
 }
 
 impl<'a> ReconstructionState<'a> {
-    fn new(doc: &'a Document<'a>) -> Result<Self, Error> {
+    fn new(doc: &'a Document<'a>, text_encoding: TextEncoding) -> Result<Self, Error> {
         Ok(Self {
-            op_set: OpSet::from_actors(doc.actors().to_vec()),
+            op_set: OpSet::from_actors(doc.actors().to_vec(), text_encoding),
             max_op: 0,
             last_obj: None,
             last_key: None,
@@ -110,8 +111,9 @@ impl<'a> ReconstructionState<'a> {
 pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
+    text_encoding: TextEncoding,
 ) -> Result<ReconOpSet, Error> {
-    let mut state = ReconstructionState::new(doc)?;
+    let mut state = ReconstructionState::new(doc, text_encoding)?;
     let mut iter_ops = doc.iter_ops();
     let mut next = next_op(&mut iter_ops, &mut state.op_set)?;
     while let Some(NextDocOp {
@@ -152,7 +154,7 @@ pub(crate) fn reconstruct_opset<'a>(
         flush_ops(&obj, next.as_ref(), &mut state)?;
     }
 
-    state.op_set.add_indexes();
+    state.op_set.add_indexes(text_encoding);
 
     let op_set = state.op_set;
     let change_collector = state.change_collector;
