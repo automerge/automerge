@@ -1023,7 +1023,7 @@ impl Automerge {
         // `impl TryFrom<JS> for CursorPosition`
         let len = match heads {
             Some(ref heads) => self.doc.length_at(&obj, heads),
-            None => self.doc.length(&obj)
+            None => self.doc.length(&obj),
         };
 
         let position = match position {
