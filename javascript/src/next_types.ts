@@ -14,8 +14,10 @@ export {
   type MarkRange,
   type MarkValue,
   type Cursor,
+  type CursorPosition,
+  type MoveCursor,
   type PatchInfo,
-  type PatchSource,
+  type PatchSource
 } from "./types.js"
 
 import { RawString } from "./raw_string.js"

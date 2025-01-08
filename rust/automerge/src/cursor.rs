@@ -6,13 +6,6 @@ use crate::ReadDoc;
 use crate::{ActorId, AutomergeError};
 use std::fmt;
 
-const VERSION_TAG: u8 = 1;
-const START_TAG: u8 = 1;
-const END_TAG: u8 = 2;
-const OP_TAG: u8 = 3;
-const MOVE_BEFORE_TAG: u8 = 1;
-const MOVE_AFTER_TAG: u8 = 2;
-
 /// An identifier of a position in a Sequence (either Self::List or Self::Text).
 ///
 /// Every element in an Automerge Sequence can be internally identified with an operation ID.
@@ -53,7 +46,7 @@ impl OpCursor {
     }
 }
 
-/// A position in a sequence that a cursor can represent.
+/// Locations in sequences that a cursor can represent.
 #[derive(Debug)]
 pub enum CursorPosition {
     Start,
@@ -79,6 +72,21 @@ pub enum MoveCursor {
     Before,
     After,
 }
+
+impl Default for MoveCursor {
+    fn default() -> Self {
+        Self::After
+    }
+}
+
+const VERSION_TAG: u8 = 1;
+
+const START_TAG: u8 = 1;
+const END_TAG: u8 = 2;
+const OP_TAG: u8 = 3;
+
+const MOVE_BEFORE_TAG: u8 = 1;
+const MOVE_AFTER_TAG: u8 = 2;
 
 impl Cursor {
     fn from_str(s: &str) -> Option<Self> {
@@ -121,16 +129,18 @@ impl Cursor {
 
         ; tags:
         version   = %d01 ; for version 1
+
         start     = %d01 ; Cursor::Start
         end       = %d02 ; Cursor::End
         opid_tag  = %d03 ; Cursor::Op
-        move_type = %d01 ; before
-                  / %d02 ; after
+
+        move      = %d01 ; MoveCursor::Before
+                  / %d02 ; MoveCursor::After
 
         counter = uleb128
         actor_id = uleb128 bytes ; length prefixed bytes of the actor ID
 
-        opid = opid_tag actor_id counter move_type
+        opid = opid_tag actor_id counter move
 
         cursor = version (start / end / opid)
          */
@@ -144,7 +154,9 @@ impl Cursor {
                 move_cursor,
             }) => {
                 let actor_bytes = actor.to_bytes();
-                let mut bytes = Vec::with_capacity(1 + 4 + actor_bytes.len() + 4 + 1);
+
+                // (version + opid_tag + uleb128 + bytes + counter + move)
+                let mut bytes = Vec::with_capacity(1 + 1 + 8 + actor_bytes.len() + 8 + 1);
 
                 bytes.push(VERSION_TAG);
                 bytes.push(OP_TAG);

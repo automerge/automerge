@@ -174,4 +174,49 @@ describe("cursors", () => {
       assert.equal(cursor, cursor2)
     })
   })
+
+  it("should allow for usage of start/end cursors", () => {
+      let doc = Automerge.from({ text: "abc" })
+
+      const end = Automerge.getCursor(doc, ["text"], 'end')
+      const start = Automerge.getCursor(doc, ["text"], 'start')
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], end, 0, "def")
+      })
+
+      assert.equal(doc.text, "abcdef")
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], start, 0, "hello")
+      })
+
+      assert.equal(doc.text, "helloabcdef")
+  })
+
+  it("should allow for usage of move before/after", () => {
+      let doc = Automerge.from({ text: "aaa@bbb" })
+
+      const before = Automerge.getCursor(doc, ["text"], 3, 'before')
+      const after = Automerge.getCursor(doc, ["text"], 3, 'after')
+
+      doc = Automerge.change(doc, d => {
+        // aaa~~~bbb
+        Automerge.splice(d, ["text"], 3, 1, "~~~")
+      })
+
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], before), 2)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], after), 6)
+  })
+
+  it("should convert negative indices into a start cursor", () => {
+      let doc = Automerge.from({ text: "is awesome" })
+      const cursor = Automerge.getCursor(doc, ["text"], -1)
+
+      doc = Automerge.change(doc, d => {
+        Automerge.splice(d, ["text"], cursor, 0, "Automerge ")
+      })
+
+      assert.equal(doc.text, "Automerge is awesome")
+  })
 })

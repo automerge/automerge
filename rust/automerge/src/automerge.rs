@@ -1550,24 +1550,28 @@ impl Automerge {
                     MoveCursor::After => Ok(found.index),
                     MoveCursor::Before => {
                         // `MoveCursor::Before` behaves like `MoveCursor::After` but in the opposite direction:
+                        //
                         // - if the item is visible at `clock`, just return its index
                         // - if the item isn't visible at `clock`, find the index of the **previous** item
                         //   that's visible at `clock` that was also visible at the time of cursor creation.
                         // - if none of the previous items are visible (or the index of the original item is 0),
-                        //   our position is `0`.
+                        //   our index is `0`.
                         if found.visible || found.index == 0 {
-                            // we always want to return the index if the item is still visible.
-                            // if the index is 0, there's no possible previous items to look for.
                             Ok(found.index)
                         } else {
-                            // in this case, we'll:
-                            // - get the clock representing the document at the state of the op
-                            // - find index of the op at the time of cursor creation
-                            // - walk towards 0
-                            //   - if we find an item that's still visible, get its current position
-                            //   - if we don't find any previous visible items, return 0.
+                            // FIXME: this should probably be an `OpSet` query
+                            // also this implementation is likely very inefficient
 
-                            let mut key = found.op.key().elemid().unwrap().0;
+                            // current implementation walks upwards through `key` of op pointed to by cursor
+                            // and checks if `key` is visible by using `seek_list_opid()`.
+
+                            let mut key = match found.op.key().elemid() {
+                                None => {
+                                    tracing::error!("failed to get initial cursor key opid");
+                                    return Ok(0);
+                                }
+                                Some(e) => e.0,
+                            };
 
                             loop {
                                 let f = self.ops.seek_list_opid(
@@ -1577,14 +1581,25 @@ impl Automerge {
                                     clock.as_ref(),
                                 );
 
-                                if let Some(f) = f {
-                                    key = f.op.key().elemid().unwrap().0;
-                                    if f.visible {
-                                        return Ok(f.index);
+                                match f {
+                                    Some(f) => {
+                                        key = match f.op.key().elemid() {
+                                            None => {
+                                                tracing::error!(
+                                                    "failed to get key for op {:#?}",
+                                                    f
+                                                );
+                                                return Ok(0);
+                                            }
+                                            Some(e) => e.0,
+                                        };
+
+                                        if f.visible {
+                                            return Ok(f.index);
+                                        }
                                     }
-                                } else {
-                                    // i think we reach this when we've gone before the beginning of the sequence?
-                                    break;
+                                    // reached when we've gone outside the sequence
+                                    None => break,
                                 }
                             }
                             Ok(0)

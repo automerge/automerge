@@ -55,6 +55,8 @@ export {
 
 import type {
   Cursor,
+  CursorPosition,
+  MoveCursor,
   Mark,
   MarkSet,
   MarkRange,
@@ -282,7 +284,7 @@ function cursorToIndex<T>(
   index: number | Cursor,
 ): number {
   if (typeof index == "string") {
-    if (/^[0-9]+@[0-9a-zA-z]+$/.test(index)) {
+    if (/^-?[0-9]+@[0-9a-zA-Z]+$|^[se]$/.test(index)) {
       return state.handle.getCursorPosition(value, index)
     } else {
       throw new RangeError("index must be a number or cursor")
@@ -522,22 +524,35 @@ export function updateSpans<T>(
  * The string representation is shareable, and so you can use this both
  * to edit the document yourself (using {@link splice}) or to share multiple
  * collaborator's current cursor positions over the network.
+ * 
+ * The cursor's position can either be an index, `'start'` or `'end'`.
+ * - `'start'` ensures this cursor always resolves to `0`
+ * - `'end'` ensures this cursor always resolves to `string.length`
+ * 
+ * `move` determines the position the cursor resolves to if the character at
+ * `index` is removed:
+ * - `'after'` causes the cursor to resolve towards `string.length`
+ * - `'before'` causes the cursor to resolve towards `0`
+ * 
+ * `move` is `'after'` by default.
  *
  * @typeParam T - The type of the value contained in the document
  * @param doc - The document
  * @param path - The path to the string
- * @param index - The current index of the position of the cursor
+ * @param position - The position of the cursor, either an index, `'start'` or `'end'`
+ * @param move - The direction the cursor should resolve to, defaults to 'after'
  */
 export function getCursor<T>(
   doc: Doc<T>,
   path: stable.Prop[],
-  index: number,
+  position: CursorPosition,
+  move?: MoveCursor
 ): Cursor {
   const objPath = absoluteObjPath(doc, path, "getCursor")
   const state = _state(doc, false)
 
   try {
-    return state.handle.getCursor(objPath, index, state.heads)
+    return state.handle.getCursor(objPath, position, state.heads, move)
   } catch (e) {
     throw new RangeError(`Cannot getCursor: ${e}`)
   }

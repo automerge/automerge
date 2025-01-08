@@ -364,8 +364,6 @@ fn test_cursors() -> Result<(), AutomergeError> {
     tx.splice_text(&text2, 0, 0, "hello").unwrap();
     tx.commit();
 
-    // println!("{}", serde_json::to_string_pretty(&AutoSerde::from(&doc)).unwrap());
-
     // hellohellobbb
     // ^         ^  ^
     // sb        a  e
@@ -393,11 +391,6 @@ fn test_cursors() -> Result<(), AutomergeError> {
     tx.splice_text(&text2, 5, 8, "").unwrap();
     tx.commit();
 
-    // println!(
-    //     "{}",
-    //     serde_json::to_string_pretty(&AutoSerde::from(&doc)).unwrap()
-    // );
-
     // hello
     // ^    ^
     // sb   ae
@@ -420,9 +413,8 @@ fn test_cursors() -> Result<(), AutomergeError> {
     assert_eq!(pos_start, 0);
     assert_eq!(pos_end, 5);
 
-    // test for semantics of `MoveCursor::After`/`seek_list_op()`
+    // test for semantics of `MoveCursor::After`
     // -----------------------------------------------------------------------------------------
-    // setup for test:
     let mut tx = doc.transaction();
     let text2 = tx.put_object(ROOT, "hi", ObjType::Text).unwrap();
     tx.splice_text(&text2, 0, 0, "aaa@bbb").unwrap();
@@ -442,9 +434,9 @@ fn test_cursors() -> Result<(), AutomergeError> {
     // ^  ^   ^
     // s  ba  e
 
-    // beginning of semantic test: ----------------------------------------------
+    // beginning of test: ----------------------------------------------
 
-    // remove "@bb", note that we've left one 'b'
+    // remove "@bb"
 
     let mut tx = doc.transaction();
     tx.splice_text(&text2, 3, 3, "!!!").unwrap();
@@ -455,20 +447,9 @@ fn test_cursors() -> Result<(), AutomergeError> {
         serde_json::to_string_pretty(&AutoSerde::from(&doc)).unwrap()
     );
 
-    // correct semantics (current behavior)
     // aaa!!!b
     // ^ ^   ^ ^
     // s b   a e
-    // (notice how the `after` cursor moves to the 'b' which is correct; it's the next visible item that was also visible at cursor creation)
-    // (also note that the `after` cursor is JUST returning the index found by `seek_list_op()`)
-
-    // alex:
-    // if `seek_list_op()` just returned the index of the first visible item (regardless if it was visible at cursor creation)
-    // we'd get this incorrect result:
-    //
-    // aaa!!!b
-    // ^ ^^   ^
-    // s ba   e
 
     let pos_before = doc
         .get_cursor_position(&text2, &before_cursor, None)

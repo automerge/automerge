@@ -26,6 +26,7 @@
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::CursorPosition;
 use am::OnPartialLoad;
 use am::ScalarValue;
 use am::StringMigration;
@@ -1000,16 +1001,40 @@ impl Automerge {
     pub fn get_cursor(
         &mut self,
         obj: JsValue,
-        index: f64,
+        position: JsValue,
         heads: Option<Array>,
+        move_cursor: JsValue,
     ) -> Result<String, error::Cursor> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         if obj_type != am::ObjType::Text {
             return Err(error::Cursor::InvalidObjType(obj_type));
         }
-        let index = index as usize;
+
         let heads = get_heads(heads)?;
-        let cursor = self.doc.get_cursor(obj, index, heads.as_deref())?;
+
+        let position: CursorPosition = JS(position)
+            .try_into()
+            .map_err(|_| error::Cursor::InvalidCursorPosition)?;
+
+        // TODO this does not work here for some reason
+        // allows users to pass position >= string.length which gets converted into `CursorPosition::End`
+
+        // let position = match position {
+        //     CursorPosition::Index(i) if i >= self.doc.length_at(&obj, heads.as_deref().unwrap_or(&[])) => CursorPosition::End,
+        //     _ => position,
+        // };
+
+        let cursor = if move_cursor.is_undefined() {
+            self.doc.get_cursor(obj, position, heads.as_deref())?
+        } else {
+            let move_cursor = JS(move_cursor)
+                .try_into()
+                .map_err(|_| error::Cursor::InvalidMoveCursor)?;
+
+            self.doc
+                .get_cursor_moving(obj, position, heads.as_deref(), move_cursor)?
+        };
+
         Ok(cursor.to_string())
     }
 
@@ -1664,6 +1689,10 @@ pub mod error {
         //Export(#[from] interop::error::Export),
         #[error("invalid cursor")]
         InvalidCursor,
+        #[error("invalid position - must be an index, 'start' or 'end'")]
+        InvalidCursorPosition,
+        #[error("invalid move - must be 'before' or 'after'")]
+        InvalidMoveCursor,
         #[error("cursors only valid on text - obj type: {0}")]
         InvalidObjType(ObjType),
         #[error("bad heads: {0}")]

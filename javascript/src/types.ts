@@ -7,6 +7,8 @@ import { Counter } from "./counter.js"
 import type { Patch } from "./wasm_types.js"
 export type {
   Cursor,
+  CursorPosition,
+  MoveCursor,
   MapObjType,
   MarkSet,
   Mark,
