@@ -1016,13 +1016,20 @@ impl Automerge {
             .try_into()
             .map_err(|_| error::Cursor::InvalidCursorPosition)?;
 
-        // TODO this does not work here for some reason
-        // allows users to pass position >= string.length which gets converted into `CursorPosition::End`
+        // TODO do we want this?
 
-        // let position = match position {
-        //     CursorPosition::Index(i) if i >= self.doc.length_at(&obj, heads.as_deref().unwrap_or(&[])) => CursorPosition::End,
-        //     _ => position,
-        // };
+        // convert positions >= string.length into `CursorPosition::End`
+        // note: negative indices are converted to `CursorPosition::Start` in
+        // `impl TryFrom<JS> for CursorPosition`
+        let len = match heads {
+            Some(ref heads) => self.doc.length_at(&obj, heads),
+            None => self.doc.length(&obj)
+        };
+
+        let position = match position {
+            CursorPosition::Index(i) if i >= len => CursorPosition::End,
+            _ => position,
+        };
 
         let cursor = if move_cursor.is_undefined() {
             self.doc.get_cursor(obj, position, heads.as_deref())?

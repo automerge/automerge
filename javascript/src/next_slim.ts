@@ -525,9 +525,13 @@ export function updateSpans<T>(
  * to edit the document yourself (using {@link splice}) or to share multiple
  * collaborator's current cursor positions over the network.
  * 
- * The cursor's position can either be an index, `'start'` or `'end'`.
+ * The cursor's `position` can be an index in the string, `'start'` or `'end'`.
  * - `'start'` ensures this cursor always resolves to `0`
  * - `'end'` ensures this cursor always resolves to `string.length`
+ * 
+ * Start cursors can be created by passing any negative number in `position`.
+ * 
+ * End cursors can be created by passing a number `>= string.length` in `position`.
  * 
  * `move` determines the position the cursor resolves to if the character at
  * `index` is removed:
