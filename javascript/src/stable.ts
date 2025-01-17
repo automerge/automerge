@@ -1,7 +1,8 @@
 /** @hidden **/
 export { /** @hidden */ uuid } from "./uuid.js"
 
-import { rootProxy } from "./proxies.js"
+import { isRawString, rootProxy } from "./proxies.js"
+export { isText } from "./proxies.js"
 import { STATE } from "./constants.js"
 
 import {
@@ -1182,7 +1183,7 @@ export function dump<T>(doc: Doc<T>) {
 export function toJS<T>(doc: Doc<T>): T {
   const state = _state(doc)
   const enabled = state.handle.enableFreeze(false)
-  const result = state.handle.materialize()
+  const result = state.handle.materialize("/", state.heads)
   state.handle.enableFreeze(enabled)
   return result as T
 }
@@ -1249,7 +1250,7 @@ function registerDatatypes(handle: Automerge, textV2: boolean) {
         return new RawString(n)
       },
       s => {
-        if (s instanceof RawString) {
+        if (isRawString(s)) {
           return s.val
         }
       },
