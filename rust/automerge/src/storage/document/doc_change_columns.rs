@@ -102,7 +102,11 @@ impl DocChangeColumns {
         }
     }
 
-    pub(crate) fn encode<'a, I, C>(changes: I, change_graph: &ChangeGraph, out: &mut Vec<u8>) -> DocChangeColumns
+    pub(crate) fn encode<'a, I, C>(
+        changes: I,
+        change_graph: &ChangeGraph,
+        out: &mut Vec<u8>,
+    ) -> DocChangeColumns
     where
         C: AsChangeMeta<'a>,
         I: Iterator<Item = C> + Clone,

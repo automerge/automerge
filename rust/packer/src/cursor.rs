@@ -148,21 +148,21 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     // TODO: needs a test
     fn encode<'a, I>(out: &mut Vec<u8>, values: I, force: bool) -> Range<usize>
     where
-    I: Iterator<Item = Option<Cow<'a, Self::Item>>>,
-    Self::Item: 'a,
+        I: Iterator<Item = Option<Cow<'a, Self::Item>>>,
+        Self::Item: 'a,
     {
-    let start = out.len();
-    let mut state = Self::State::default();
-    for v in values {
-        state.append(out, v);
-    }
-    if !force && out.len() == start && state.is_empty() {
-        out.truncate(start);
-        return start..start;
-    }
-    state.flush(out);
-    let end = out.len();
-    start..end
+        let start = out.len();
+        let mut state = Self::State::default();
+        for v in values {
+            state.append(out, v);
+        }
+        if !force && out.len() == start && state.is_empty() {
+            out.truncate(start);
+            return start..start;
+        }
+        state.flush(out);
+        let end = out.len();
+        start..end
     }
 
     fn empty() -> Self;

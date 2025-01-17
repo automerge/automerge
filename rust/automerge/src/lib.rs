@@ -207,7 +207,7 @@
     html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",
     html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"
 )]
-#![allow(
+#![warn(
     missing_debug_implementations,
     // missing_docs, // TODO: add documentation!
     rust_2018_idioms,

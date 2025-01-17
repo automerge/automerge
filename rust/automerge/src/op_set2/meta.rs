@@ -95,7 +95,7 @@ impl<'a> From<&'a ScalarValue<'a>> for ValueMeta {
 
 impl From<&[u8]> for ValueMeta {
     fn from(b: &[u8]) -> Self {
-       Self(((b.len() as u64) << 4) | 7)
+        Self(((b.len() as u64) << 4) | 7)
     }
 }
 

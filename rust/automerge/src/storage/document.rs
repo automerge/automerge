@@ -2,8 +2,8 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 
-use crate::op_set2::OpSet;
 use crate::change_graph::ChangeGraph;
+use crate::op_set2::OpSet;
 use crate::storage::columns::compression::Uncompressed;
 use crate::{convert, ActorId, ChangeHash};
 
@@ -215,77 +215,29 @@ impl<'a> Document<'a> {
         ))
     }
 
-    pub(crate) fn new<'b, C, IC, I, D, O>(
+    //pub(crate) fn new<'b, C, IC, I, D, O>(
+    pub(crate) fn new(
         op_set: &OpSet,
         change_graph: &ChangeGraph,
-        heads_with_indices: Vec<(ChangeHash, usize)>,
-        _ops: I,
-        changes: IC,
+        //_heads_with_indices: Vec<(ChangeHash, usize)>,
+        //_ops: I,
+        //_changes: IC,
         compress: CompressConfig,
     ) -> Document<'static>
-    where
-        I: Iterator<Item = D> + Clone + ExactSizeIterator,
-        O: convert::OpId<usize>,
-        D: AsDocOp<'b, OpId = O>,
-        C: AsChangeMeta<'b>,
-        IC: Iterator<Item = C> + Clone,
+where
+        //I: Iterator<Item = D> + Clone + ExactSizeIterator,
+        //O: convert::OpId<usize>,
+        //D: AsDocOp<'b, OpId = O>,
+        //C: AsChangeMeta<'b>,
+        //IC: Iterator<Item = C> + Clone,
     {
-        #[cfg(debug_assertions)]
-        let mut ops_out_a = Vec::new();
-        #[cfg(debug_assertions)]
-        let ops_meta_ax = DocOpColumns::encode(op_set.iter(), &mut ops_out_a);
-
         let (op_metadata, ops_out_b) = op_set.export();
-        #[cfg(debug_assertions)]
-        let op_meta_a = ops_meta_ax.raw_columns();
-        #[cfg(debug_assertions)]
-        if op_meta_a != op_metadata {
-            op_set.dump();
-            let specs: std::collections::BTreeSet<_> = op_meta_a
-                .0
-                .iter()
-                .chain(op_metadata.0.iter())
-                .map(|c| c.spec())
-                .collect();
-            for s in specs {
-                let d1 = op_meta_a
-                    .0
-                    .iter()
-                    .find(|c| c.spec() == s)
-                    .map(|c| c.data())
-                    .unwrap();
-                let d2 = op_metadata
-                    .0
-                    .iter()
-                    .find(|c| c.spec() == s)
-                    .map(|c| c.data())
-                    .unwrap_or(0..0);
-                let d1 = &ops_out_a[d1];
-                let d2 = &ops_out_b[d2];
-                if d1 != d2 {
-                    log!(" s={:?}|{:?} ", s.id(), s.col_type());
-                    log!(" {:?} ", d1);
-                    log!(" {:?} ", d2);
-                    OpSet::decode(s, d1);
-                    OpSet::decode(s, d2);
-                }
-                //log!(" s={:?}|{:14}   d1={:?}   d2={:?}",s.id(),format!("{:?}",s.col_type()),d1,d2);
-            }
-            panic!()
-        }
-        #[cfg(debug_assertions)]
-        assert_eq!(ops_out_a, ops_out_b);
 
         let mut change_out = Vec::new();
-        let mut change_out2 = Vec::new();
-        let change_meta2 = change_graph.encode(&mut change_out2);
-        let change_meta = DocChangeColumns::encode(changes, change_graph, &mut change_out);
-        assert_eq!(change_meta2.raw_columns(), change_meta.raw_columns());
-        assert_eq!(change_out, change_out2);
+        let change_meta = change_graph.encode(&mut change_out);
 
         // actors already sorted
         let actors = op_set.actors.clone();
-        //actors.sort_unstable();
 
         let mut data = Vec::with_capacity(ops_out_b.len() + change_out.len());
         leb128::write::unsigned(&mut data, actors.len() as u64).unwrap();
@@ -293,8 +245,12 @@ impl<'a> Document<'a> {
             leb128::write::unsigned(&mut data, actor.to_bytes().len() as u64).unwrap();
             data.extend(actor.to_bytes());
         }
-        leb128::write::unsigned(&mut data, heads_with_indices.len() as u64).unwrap();
-        for (head, _) in &heads_with_indices {
+
+        let heads = change_graph.heads().collect::<Vec<_>>();
+        let head_indices = change_graph.head_indexes().collect::<Vec<_>>();
+
+        leb128::write::unsigned(&mut data, heads.len() as u64).unwrap();
+        for head in &heads {
             data.extend(head.as_bytes());
         }
         let prefix_len = data.len();
@@ -309,10 +265,6 @@ impl<'a> Document<'a> {
         data.extend(ops_out_b);
         let suffix_start = data.len();
 
-        let head_indices = heads_with_indices
-            .iter()
-            .map(|(_, i)| *i as u64)
-            .collect::<Vec<_>>();
         for index in &head_indices {
             leb128::write::unsigned(&mut data, *index).unwrap();
         }
@@ -354,7 +306,7 @@ impl<'a> Document<'a> {
             bytes: Cow::Owned(bytes),
             compressed_bytes,
             header,
-            heads: heads_with_indices.into_iter().map(|(h, _)| h).collect(),
+            heads,
             op_metadata,
             op_bytes,
             change_metadata: change_meta,

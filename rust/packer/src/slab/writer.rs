@@ -18,7 +18,7 @@ impl<'a, P: Packable + ?Sized> Clone for WriteOp<'a, P> {
     fn clone(&self) -> Self {
         match self {
             Self::Value(c) => Self::Value(c.clone()),
-            Self::Cpy(a, b, c, d) => Self::Cpy(*a, b.clone(), *c, *d),
+            Self::Cpy(a, b, c, d) => Self::Cpy(a, b.clone(), *c, *d),
         }
     }
 }
@@ -105,7 +105,7 @@ impl<'a, P: Packable + ?Sized> WriteOp<'a, P> {
         match self {
             Self::Value(value) => {
                 let v = f(&value).unwrap_or(&value);
-                P::pack(&v, buff)
+                P::pack(v, buff)
             }
             Self::Cpy(s, r, _, _) => {
                 buff.extend_from_slice(&s[r]);
@@ -136,7 +136,7 @@ impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
         match self {
             Self::Op(op) => op.acc(),
             Self::BoolRun(c, b) if *b => Acc::from(*c),
-            Self::Run(count, value) => P::agg(&value) * *count as usize,
+            Self::Run(count, value) => P::agg(value) * *count as usize,
             _ => Acc::new(),
         }
     }
@@ -183,7 +183,7 @@ impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
             Self::Run(count, value) => {
                 leb128::write::signed(buff, count).unwrap();
                 let v = f(&value).unwrap_or(&value);
-                P::pack(&v, buff);
+                P::pack(v, buff);
             }
             _ => self.write(buff),
         }
