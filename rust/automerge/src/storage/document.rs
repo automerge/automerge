@@ -3,6 +3,7 @@ use std::{borrow::Cow, ops::Range};
 use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 
 use crate::op_set2::OpSet;
+use crate::change_graph::ChangeGraph;
 use crate::storage::columns::compression::Uncompressed;
 use crate::{convert, ActorId, ChangeHash};
 
@@ -10,7 +11,7 @@ mod doc_op_columns;
 pub(crate) use doc_op_columns::AsDocOp;
 pub(crate) use doc_op_columns::DocOpColumns;
 mod doc_change_columns;
-use doc_change_columns::DocChangeColumns;
+pub(crate) use doc_change_columns::DocChangeColumns;
 pub(crate) use doc_change_columns::{AsChangeMeta, ChangeMetadata, ReadChangeError};
 mod compression;
 
@@ -216,6 +217,7 @@ impl<'a> Document<'a> {
 
     pub(crate) fn new<'b, C, IC, I, D, O>(
         op_set: &OpSet,
+        change_graph: &ChangeGraph,
         heads_with_indices: Vec<(ChangeHash, usize)>,
         _ops: I,
         changes: IC,
@@ -275,7 +277,11 @@ impl<'a> Document<'a> {
         assert_eq!(ops_out_a, ops_out_b);
 
         let mut change_out = Vec::new();
-        let change_meta = DocChangeColumns::encode(changes, &mut change_out);
+        let mut change_out2 = Vec::new();
+        let change_meta2 = change_graph.encode(&mut change_out2);
+        let change_meta = DocChangeColumns::encode(changes, change_graph, &mut change_out);
+        assert_eq!(change_meta2.raw_columns(), change_meta.raw_columns());
+        assert_eq!(change_out, change_out2);
 
         // actors already sorted
         let actors = op_set.actors.clone();

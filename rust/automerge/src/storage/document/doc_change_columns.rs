@@ -3,6 +3,7 @@ use std::{borrow::Cow, convert::TryFrom};
 use packer::{ColumnCursor, CursorIter, StrCursor};
 
 use crate::{
+    change_graph::ChangeGraph,
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
@@ -68,15 +69,15 @@ pub(crate) trait AsChangeMeta<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DocChangeColumns {
-    actor: RleRange<u64>,
-    seq: DeltaRange,
-    max_op: DeltaRange,
-    time: DeltaRange,
-    message: RleRange<smol_str::SmolStr>,
-    deps: DepsRange,
-    extra: ValueRange,
+    pub(crate) actor: RleRange<u64>,
+    pub(crate) seq: DeltaRange,
+    pub(crate) max_op: DeltaRange,
+    pub(crate) time: DeltaRange,
+    pub(crate) message: RleRange<smol_str::SmolStr>,
+    pub(crate) deps: DepsRange,
+    pub(crate) extra: ValueRange,
     #[allow(dead_code)]
-    other: Columns,
+    pub(crate) other: Columns,
 }
 
 impl DocChangeColumns {
@@ -101,7 +102,7 @@ impl DocChangeColumns {
         }
     }
 
-    pub(crate) fn encode<'a, I, C>(changes: I, out: &mut Vec<u8>) -> DocChangeColumns
+    pub(crate) fn encode<'a, I, C>(changes: I, change_graph: &ChangeGraph, out: &mut Vec<u8>) -> DocChangeColumns
     where
         C: AsChangeMeta<'a>,
         I: Iterator<Item = C> + Clone,

@@ -1,13 +1,20 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroU64;
+use std::cmp::Ordering;
+
+use packer::{UIntCursor, RawCursor, ColumnCursor, DeltaCursor, StrCursor};
 
 use crate::{
     clock::{Clock, ClockData},
+      columnar::column_range::{DepsRange, ValueRange},
+    storage::{ DocChangeColumns,
+    },
+    types::OpId,
     error::AutomergeError,
     op_set2::{
-        change::{ChangeMetadata, ExtraChangeMetadata},
-        ActorIdx,
+        ActorCursor, ValueMeta, MetaCursor, change::{ChangeMetadata, ExtraChangeMetadata},
+        ActorIdx, ScalarValue,
     },
     Change, ChangeHash,
 };
@@ -59,6 +66,12 @@ struct ChangeNode {
     parents: Option<EdgeIdx>,
 }
 
+impl ChangeNode {
+     fn start_op(&self) -> u64 {
+      self.max_op - self.num_ops as u64 + 1
+     }
+}
+
 impl ChangeGraph {
     pub(crate) fn new() -> Self {
         Self {
@@ -95,6 +108,19 @@ impl ChangeGraph {
         }
     }
 
+    pub(crate) fn remove_actor(&mut self, idx: usize) {
+        for node in &mut self.nodes {
+            if node.actor_index.0 > idx as u32 {
+                node.actor_index.0 -= 1;
+            }
+        }
+        assert!(self.seq_index[idx].len() == 0);
+        self.seq_index.remove(idx);
+        for clock in &mut self.clock_cache {
+            clock.remove_actor(idx)
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.nodes.len()
     }
@@ -111,11 +137,76 @@ impl ChangeGraph {
         self.hashes.get(index)
     }
 
+    pub(crate) fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
+        self.seq_index
+            .get(actor_index)
+            .and_then(|s| s.last())
+            .and_then(|index| self.nodes.get(index.0 as usize).map(|n| n.max_op))
+            .unwrap_or(0)
+    }
+
     pub(crate) fn seq_for_actor(&self, actor: usize) -> u64 {
         self.seq_index
             .get(actor)
             .map(|v| v.len() as u64)
             .unwrap_or(0)
+    }
+
+    pub(crate) fn encode_dry_run(&self, out: &mut Vec<u8>) -> DocChangeColumns {
+      let start = out.len();
+      let result = self.encode(out);
+      out.truncate(start);
+      assert_eq!(out.len(), start);
+      result
+    }
+
+    pub(crate) fn encode(&self, out: &mut Vec<u8>) -> DocChangeColumns {
+        let mut changes = self.nodes.iter();
+
+        let actor = ActorCursor::encode(out, changes.clone().map(|c| Some(Cow::Owned(c.actor_index))), false);
+        let seq = DeltaCursor::encode(out, changes.clone().map(|c| Some(Cow::Owned(c.seq as i64))), false);
+        let max_op = DeltaCursor::encode(out, changes.clone().map(|c| Some(Cow::Owned(c.max_op as i64))), false);
+        let time = DeltaCursor::encode(out, changes.clone().map(|c| Some(Cow::Owned(c.timestamp as i64))), false);
+        let message = StrCursor::encode(out, changes.clone().map(|c| c.message.as_deref().map(Cow::Borrowed)), false);
+
+        let num_deps = UIntCursor::encode(out, (0..self.nodes.len()).map(|i| Some(Cow::Owned(self.parents(NodeIdx(i as u32)).count() as u64))), false);
+        let deps = DeltaCursor::encode(out, (0..self.nodes.len()).map(|i| self.parents(NodeIdx(i as u32)).map(|n| Some(Cow::Owned(n.0 as i64)))).flatten(), false);
+
+        let meta = MetaCursor::encode(out, changes.clone().map(|c| Some(Cow::Owned(ValueMeta::from(c.extra_bytes.as_slice())))), false);
+        let raw = RawCursor::encode(out, changes.clone().map(|c| Some(Cow::Borrowed(c.extra_bytes.as_slice()))), false);
+
+        DocChangeColumns {
+            actor: actor.into(),
+            seq: seq.into(),
+            max_op: max_op.into(),
+            time: time.into(),
+            message: message.into(),
+            deps: DepsRange::new(num_deps.into(), deps.into()),
+            extra: ValueRange::new(meta.into(), raw.into()),
+            other: crate::storage::Columns::empty(),
+        }
+    }
+
+    pub(crate) fn opid_to_hash(&self, id: OpId) -> Option<ChangeHash> {
+                let actor_indices = self.seq_index.get(id.actor())?;
+                let index = actor_indices
+                    .binary_search_by(|n| {
+                        let node = self.nodes.get(n.0 as usize).unwrap(); // unwrap from a node_id
+                        let start = node.start_op();
+                        let max_op = node.max_op;
+                        let counter = id.counter();
+                        if counter < start {
+                            Ordering::Greater
+                        } else if max_op <= counter {
+                            Ordering::Less
+                        } else {
+                            Ordering::Equal
+                        }
+                    })
+                    .ok()?;
+                let node_idx = actor_indices[index];
+                let hash_idx = self.nodes.get(node_idx.0 as usize)?.hash_idx;
+                self.hashes.get(hash_idx.0 as usize).cloned()
     }
 
     pub(crate) fn deps_for_hash(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
@@ -161,7 +252,7 @@ impl ChangeGraph {
             .map(|p| self.nodes[p.0 as usize].hash_idx)
             .map(|h| self.hashes[h.0 as usize])
             .collect();
-        let start_op = NonZeroU64::new(node.max_op - node.num_ops as u64 + 1)?;
+        let start_op = NonZeroU64::new(node.start_op())?;
         let seq = node.seq;
         Some((
             ChangeMetadata {

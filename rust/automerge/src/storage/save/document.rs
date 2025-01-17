@@ -7,6 +7,7 @@ use itertools::Itertools;
 use crate::{
     indexed_cache::IndexedCache,
     op_set2::OpSet,
+    change_graph::ChangeGraph,
     storage::{change::DEFLATE_MIN_SIZE, AsChangeMeta, CompressConfig, Document},
     types::ActorId,
     Change, ChangeHash,
@@ -21,6 +22,7 @@ use crate::{
 pub(crate) fn save_document<'a, I>(
     changes: I,
     op_set: &OpSet,
+    change_graph: &ChangeGraph,
     heads: &[ChangeHash],
     config: Option<CompressConfig>,
 ) -> Vec<u8>
@@ -28,6 +30,7 @@ where
     I: Iterator<Item = &'a Change> + Clone + 'a,
 {
     let mut op_set = Cow::Borrowed(op_set);
+    let mut change_graph = Cow::Borrowed(change_graph);
 
     let mut actor_lookup = HashMap::with_capacity(op_set.actors.len());
     let mut actor_ids = changes
@@ -51,6 +54,7 @@ where
             let actor_idx = op_set.lookup_actor(actor_id).unwrap();
             if actor_idx != index {
                 op_set.to_mut().remove_actor(actor_idx - 1);
+                change_graph.to_mut().remove_actor(actor_idx - 1);
                 continue;
             }
             actor_lookup.insert(actor_idx, index);
@@ -71,6 +75,7 @@ where
 
     let doc = Document::new(
         op_set.borrow(),
+        change_graph.borrow(),
         hash_graph.heads_with_indices(heads.to_vec()),
         doc_ops,
         changes,

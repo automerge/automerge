@@ -700,7 +700,8 @@ where
     I: Iterator<Item = Option<Cow<'a, C::Item>>>,
     C::Item: 'a,
 {
-    _encode_column::<C, I>(out, values, true)
+    //_encode_column::<C, I>(out, values, true)
+    C::encode::<I>(out, values, true)
 }
 
 fn encode_column<'a, C, I>(out: &mut Vec<u8>, values: I) -> Range<usize>
@@ -709,7 +710,8 @@ where
     I: Iterator<Item = Option<Cow<'a, C::Item>>>,
     C::Item: 'a,
 {
-    _encode_column::<C, I>(out, values, false)
+    //_encode_column::<C, I>(out, values, false)
+    C::encode::<I>(out, values, false)
 }
 
 fn _encode_column<'a, C, I>(out: &mut Vec<u8>, values: I, force: bool) -> Range<usize>
