@@ -1,109 +1,73 @@
-## Automerge
 
-Automerge is a library of data structures for building collaborative
-applications, this package is the javascript implementation.
+## Status
 
-Detailed documentation is available at [automerge.org](http://automerge.org/)
-but see the following for a short getting started guid.
+This is a preview of the next major release of automerge.  The primary goal has been to reduce the memory footprint of automerge by implementing columnar compression on in memory ops and changes and to do so with as little cost to performance as possible.  This is to get the code into the hands of early adopters and start to smoke out problems.  PLEASE do not use this with any important data.
 
-## Quickstart
+## Known Issues
 
-First, install the library.
+The code is not fully optimized but reading and writing to a document should be at worst 2x to 10x of the mainline release's performance.
+
+These are the issues know of at the time of release.  Issues will be delbt with in order of criticality.
+
+### Critical
+
+The test `automerge-wasm::sync::should report whether the other end has our changes` fails about one time in 10.
+
+### Hight
+
+The opset is missing an index related to repeated updates on a single map key or list element.  Reading or writing to these elements triggers a sequential scan of all past updates leading to O(N) performance.
+The internal get_object_type() method needs to be optimized leading to poor performance in documents with many objects or a large number of ops.
+
+### Medium
+
+Continue to increase performance to be on par with current mainline releases.
+Implement columnar compress of the change graph.
+
+## Api Changes
+
+Currently the only external api change has been that methods that used to return references to changes chached interally (get_change_by_hash, get_changes, get_last_local_change) now return the owned changes.
+
+## Benchmarks
+
+All benchmarks were done on an apple M1 processor in native rust using (orionz/automerge-battery)[https://github.com/orionz/automerge-battery]
+
+### Edit Trace
+
+Reads and writes are not fully optimized and will be improved before release.
+
+------------------------------------------------------------------+
+|       test             |    op_set2     |    main    |  ratio   |
+------------------------------------------------------------------+
+| edit_trace_many_tx     |    10.4 s      |  965.1 ms  |  10.77   |
+| edit_trace_single_tx   |     4.9 s      |    323 ms  |  15.17   |
+------------------------------------------------------------------+
+
+### Load And Save (median score, N=100,000)
+
+Save and load is alraedy benefiting from the new memory footprint.
+
+------------------------------------------------------------------+
+|       document         |    op_set2     |    main    |  ratio   |
+------------------------------------------------------------------+
+| load_big_paste         |    22.33 ms    |  108.3 ms  |  0.206   |
+| load_chunky            |    22.96 ms    |  122.1 ms  |  0.188   |
+| load_typing            |    133.7 ms    |  345.5 ms  |  0.387   |
+| save_big_paste         |     2.16 ms    |   11.7 ms  |  0.185   |
+| save_chunky            |     2.97 ms    |  12.78 ms  |  0.232   |
+| save_typing            |     5.35 ms    |  39.63 ms  |  0.135   |
+------------------------------------------------------------------+
+
+### Memory Usage
+
+Memory usage is greatly improved.  The document `big_paste` is the best case scenario with a single transaction with a single 100,000 character paste.  The `chunky` document has 1,000 pastes with 100 characters each representing the middle ground.  And the `typing` document has 100,000 changes with a single op each.
 
 ```
-yarn add @automerge/automerge
+------------------------------------------------------------------+
+|       document         |    op_set2     |    main    |  ratio   |
+------------------------------------------------------------------+
+| big_paste              |    106.7 KB    |   40.3 MB  |  0.002   |
+| chunky                 |    174.8 KB    |   38.2 MB  |  0.004   |
+| typing                 |     19.4 MB    |    126 MB  |  0.153   |
+------------------------------------------------------------------+
 ```
 
-If you're writing a `node` application, you can skip straight to [Make some
-data](#make-some-data). If you're in a browser you need a bundler
-
-### Bundler setup
-
-`@automerge/automerge` is a wrapper around a core library which is written in
-rust, compiled to WebAssembly and distributed as a separate package called
-`@automerge/automerge-wasm`. Browsers don't currently support WebAssembly
-modules taking part in ESM module imports, so you must use a bundler to import
-`@automerge/automerge` in the browser. There are a lot of bundlers out there, we
-have examples for common bundlers in the `examples` folder. Here is a short
-example using Webpack 5.
-
-Assuming a standard setup of a new webpack project, you'll need to enable the
-`asyncWebAssembly` experiment. In a typical webpack project that means adding
-something like this to `webpack.config.js`
-
-```javascript
-module.exports = {
-  ...
-  experiments: { asyncWebAssembly: true },
-  performance: {       // we dont want the wasm blob to generate warnings
-     hints: false,
-     maxEntrypointSize: 512000,
-     maxAssetSize: 512000
-  }
-};
-```
-
-### Make some data
-
-Automerge allows to separate threads of execution to make changes to some data
-and always be able to merge their changes later.
-
-```javascript
-import * as automerge from "@automerge/automerge"
-import * as assert from "assert"
-
-let doc1 = automerge.from({
-  tasks: [
-    { description: "feed fish", done: false },
-    { description: "water plants", done: false },
-  ],
-})
-
-// Create a new thread of execution
-let doc2 = automerge.clone(doc1)
-
-// Now we concurrently make changes to doc1 and doc2
-
-// Complete a task in doc2
-doc2 = automerge.change(doc2, d => {
-  d.tasks[0].done = true
-})
-
-// Add a task in doc1
-doc1 = automerge.change(doc1, d => {
-  d.tasks.push({
-    description: "water fish",
-    done: false,
-  })
-})
-
-// Merge changes from both docs
-doc1 = automerge.merge(doc1, doc2)
-doc2 = automerge.merge(doc2, doc1)
-
-// Both docs are merged and identical
-assert.deepEqual(doc1, {
-  tasks: [
-    { description: "feed fish", done: true },
-    { description: "water plants", done: false },
-    { description: "water fish", done: false },
-  ],
-})
-
-assert.deepEqual(doc2, {
-  tasks: [
-    { description: "feed fish", done: true },
-    { description: "water plants", done: false },
-    { description: "water fish", done: false },
-  ],
-})
-```
-
-## Development
-
-See [HACKING.md](./HACKING.md)
-
-## Meta
-
-Copyright 2017–present, the Automerge contributors. Released under the terms of the
-MIT license (see `LICENSE`).
