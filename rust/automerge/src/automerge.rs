@@ -1524,6 +1524,11 @@ impl Automerge {
             Cursor::End => Ok(self.length_for(obj, clock)),
             Cursor::Op(op) => {
                 let obj_meta = self.exid_to_obj(obj)?;
+
+                if !obj_meta.typ.is_sequence() {
+                    return Err(AutomergeError::InvalidCursor(cursor.clone()));
+                }
+
                 let opid = self.op_cursor_to_opid(op, clock.as_ref())?;
 
                 let found = self
@@ -1565,13 +1570,12 @@ impl Automerge {
                             // current implementation walks upwards through `key` of op pointed to by cursor
                             // and checks if `key` is visible by using `seek_list_opid()`.
 
-                            let mut key = match found.op.key().elemid() {
-                                None => {
-                                    tracing::error!("failed to get initial cursor key opid");
-                                    return Ok(0);
-                                }
-                                Some(e) => e.0,
-                            };
+                            let mut key = found
+                                .op
+                                .key()
+                                .elemid()
+                                .expect("failed to retrieve initial cursor op key for MoveCursor::Before")
+                                .0;
 
                             loop {
                                 let f = self.ops.seek_list_opid(
@@ -1583,26 +1587,23 @@ impl Automerge {
 
                                 match f {
                                     Some(f) => {
-                                        key = match f.op.key().elemid() {
-                                            None => {
-                                                tracing::error!(
-                                                    "failed to get key for op {:#?}",
-                                                    f
-                                                );
-                                                return Ok(0);
-                                            }
-                                            Some(e) => e.0,
-                                        };
-
                                         if f.visible {
                                             return Ok(f.index);
                                         }
+
+                                        key = f
+                                            .op
+                                            .key()
+                                            .elemid()
+                                            .expect(
+                                                "failed to retrieve op key in MoveCursor::Before",
+                                            )
+                                            .0;
                                     }
-                                    // reached when we've gone outside the sequence
-                                    None => break,
+                                    // reached when we've gone before the beginning of the sequence
+                                    None => break Ok(0),
                                 }
                             }
-                            Ok(0)
                         }
                     }
                 }
