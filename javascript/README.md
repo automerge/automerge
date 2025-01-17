@@ -15,8 +15,8 @@ The test `automerge-wasm::sync::should report whether the other end has our chan
 
 ### Hight
 
-The opset is missing an index related to repeated updates on a single map key or list element.  Reading or writing to these elements triggers a sequential scan of all past updates leading to O(N) performance.
-The internal get_object_type() method needs to be optimized leading to poor performance in documents with many objects or a large number of ops.
+The opset is missing an index related to repeated updates on a single map key or list element.  Reading or writing to these elements triggers a sequential scan of all past updates leading to `O(N)` performance.
+The internal `get_object_type()` method needs to be optimized leading to poor performance in documents with many objects or a large number of ops.
 
 ### Medium
 
@@ -25,27 +25,30 @@ Implement columnar compress of the change graph.
 
 ## Api Changes
 
-Currently the only external api change has been that methods that used to return references to changes chached interally (get_change_by_hash, get_changes, get_last_local_change) now return the owned changes.
+Currently the only external api change has been that methods that used to return references to changes chached interally (`get_change_by_hash`, `get_changes`, `get_last_local_change`) now return the owned changes.
 
 ## Benchmarks
 
-All benchmarks were done on an apple M1 processor in native rust using (orionz/automerge-battery)[https://github.com/orionz/automerge-battery]
+All benchmarks were done on an apple M1 processor in native rust using [orionz/automerge-battery](https://github.com/orionz/automerge-battery)
 
 ### Edit Trace
 
 Reads and writes are not fully optimized and will be improved before release.
 
+```
 ------------------------------------------------------------------+
 |       test             |    op_set2     |    main    |  ratio   |
 ------------------------------------------------------------------+
 | edit_trace_many_tx     |    10.4 s      |  965.1 ms  |  10.77   |
 | edit_trace_single_tx   |     4.9 s      |    323 ms  |  15.17   |
 ------------------------------------------------------------------+
+```
 
 ### Load And Save (median score, N=100,000)
 
 Save and load is alraedy benefiting from the new memory footprint.
 
+```
 ------------------------------------------------------------------+
 |       document         |    op_set2     |    main    |  ratio   |
 ------------------------------------------------------------------+
@@ -56,6 +59,7 @@ Save and load is alraedy benefiting from the new memory footprint.
 | save_chunky            |     2.97 ms    |  12.78 ms  |  0.232   |
 | save_typing            |     5.35 ms    |  39.63 ms  |  0.135   |
 ------------------------------------------------------------------+
+```
 
 ### Memory Usage
 
