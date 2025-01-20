@@ -1,6 +1,5 @@
 use std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
-use crate::op_set2::change::ChangeBuilder as ChangeBuilder2;
 use crate::{convert, ActorId, ChangeHash, ScalarValue};
 
 use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};

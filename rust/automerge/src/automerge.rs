@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
@@ -219,6 +219,10 @@ impl Automerge {
         &self.ops
     }
 
+    pub(crate) fn changes(&self) -> &ChangeGraph {
+        &self.change_graph
+    }
+
     /// Whether this document has any operations
     pub fn is_empty(&self) -> bool {
         self.change_graph.is_empty() && self.queue.is_empty()
@@ -264,7 +268,7 @@ impl Automerge {
 
     pub(crate) fn get_actor_index2(&self) -> Option<usize> {
         match &self.actor {
-            Actor::Unused(actor) => None,
+            Actor::Unused(_) => None,
             Actor::Cached(index) => Some(*index),
         }
     }
@@ -918,15 +922,13 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        let heads = self.get_heads();
-        //let c = self.history.iter();
         let compress = if options.deflate {
             None
         } else {
             Some(CompressConfig::None)
         };
         let mut bytes =
-            crate::storage::save::save_document(&self.ops, &self.change_graph, &heads, compress);
+            crate::storage::save::save_document(&self.ops, &self.change_graph, compress);
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
@@ -1356,30 +1358,6 @@ impl Automerge {
             ExId::Id(..) => {
                 let opid = self.exid_to_opid(exid).ok()?;
                 self.change_graph.opid_to_hash(opid)
-                /*
-                                let actor_indices = self.states.get(&opid.actor())?;
-                                let change_index_index = actor_indices
-                                    .binary_search_by(|change_index| {
-                                        let change = self
-                                            .history
-                                            .get(*change_index)
-                                            .expect("State index should refer to a valid change");
-                                        let start = change.start_op().get();
-                                        let len = change.len() as u64;
-                                        if opid.counter() < start {
-                                            Ordering::Greater
-                                        } else if start + len <= opid.counter() {
-                                            Ordering::Less
-                                        } else {
-                                            Ordering::Equal
-                                        }
-                                    })
-                                    .ok()?;
-                                let change_index = actor_indices.get(change_index_index).unwrap();
-                                let result = Some(*self.change_graph.get_hash(*change_index)?);
-                                assert_eq!(result, self.change_graph.opid_to_hash(opid));
-                                result
-                */
             }
         }
     }
@@ -1994,28 +1972,20 @@ impl ReadDoc for Automerge {
         ChangeCollector::for_hashes(&self.ops, &self.change_graph, [hash.clone()])
             .ok()?
             .pop()
-        /*
-                let (metadata, deps) = self.change_graph.get_metadata_for_hash(hash)?;
-                let change = self
-                    .change_graph
-                    .hash_to_index(hash)
-                    .and_then(|index| self.history.get(index))?;
-                assert_eq!(metadata.seq, change.seq());
-                assert_eq!(deps, change.deps());
-                assert_eq!(metadata.start_op, change.start_op());
-                assert_eq!(
-                    metadata.message.as_deref(),
-                    change.message().as_deref().map(|x| x.as_str())
-                );
-                assert_eq!(changes, Some(vec![change.clone()]));
-                Some(change)
-        */
     }
 
     fn stats(&self) -> crate::read::Stats {
+        let num_changes = self.change_graph.len() as u64;
+        let num_ops = self.ops.len() as u64;
+        let cargo_package_name = env!("CARGO_PKG_NAME");
+        let cargo_package_version = env!("CARGO_PKG_VERSION");
+        let rustc_version = env!("CARGO_PKG_RUST_VERSION");
         crate::read::Stats {
-            num_changes: self.change_graph.len() as u64,
-            num_ops: self.ops.len() as u64,
+            num_changes,
+            num_ops,
+            cargo_package_name,
+            cargo_package_version,
+            rustc_version,
         }
     }
 }

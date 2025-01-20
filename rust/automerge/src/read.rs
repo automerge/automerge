@@ -280,10 +280,16 @@ pub(crate) trait ReadDocInternal: ReadDoc {
 /// Statistics about the document
 ///
 /// This is returned by [`ReadDoc::stats()`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stats {
     /// The number of operations in the document
     pub num_ops: u64,
     /// The number of changes in the change graph for the document
     pub num_changes: u64,
+    /// package name from cargo.toml ("automerge");
+    pub cargo_package_name: &'static str,
+    /// package version from cargo.toml
+    pub cargo_package_version: &'static str,
+    /// version of rustc used to compile this
+    pub rustc_version: &'static str,
 }

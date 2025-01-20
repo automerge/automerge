@@ -4,7 +4,6 @@ use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValu
 use super::{Value, ValueMeta};
 
 use crate::convert;
-use crate::storage::document::AsDocOp;
 
 use crate::error::AutomergeError;
 use crate::exid::ExId;
@@ -590,43 +589,3 @@ impl<'a> std::hash::Hash for Op<'a> {
 }
 
 impl<'a> Eq for Op<'a> {}
-
-impl<'a> AsDocOp<'a> for Op<'a> {
-    type ActorId = usize;
-    type OpId = OpId;
-    type SuccIter = SuccCursors<'a>;
-
-    fn obj(&self) -> convert::ObjId<Self::OpId> {
-        self.obj.into()
-    }
-    fn id(&self) -> Self::OpId {
-        self.id
-    }
-    fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match &self.key {
-            KeyRef::Map(s) => convert::Key::Prop(Cow::Owned(smol_str::SmolStr::from(s.as_ref()))),
-            KeyRef::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            KeyRef::Seq(ElemId(op)) => convert::Key::Elem(convert::ElemId::Op(*op)),
-        }
-    }
-    fn insert(&self) -> bool {
-        self.insert
-    }
-    fn action(&self) -> u64 {
-        self.action.into()
-    }
-    fn val(&self) -> Cow<'a, crate::value::ScalarValue> {
-        Cow::Owned(self.value.to_owned())
-    }
-    fn succ(&self) -> Self::SuccIter {
-        self.succ_cursors.clone()
-    }
-    fn expand(&self) -> bool {
-        self.expand
-    }
-    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        self.mark_name
-            .as_ref()
-            .map(|s| Cow::Owned(smol_str::SmolStr::from(s.as_ref())))
-    }
-}

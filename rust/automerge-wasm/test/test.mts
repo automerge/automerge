@@ -2133,7 +2133,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc5.text("/bad_text"), 'X\ufffcC')
     })
 
-    // FIXME - this has a rare failure - find out why
     it("should report whether the other end has our changes", () => {
       const left = create()
       left.put("/", "foo", "bar")
@@ -2397,7 +2396,11 @@ describe('Automerge', () => {
       doc.put("/", "baz", "qux")
       doc.commit()
       const stats = doc.stats()
-      assert.deepStrictEqual(stats, { numChanges: 2, numOps: 2 })
+      assert.equal(stats.numChanges, 2);
+      assert.equal(stats.numOps, 2);
+      assert.equal(typeof stats.rustcVersion, "string");
+      assert.equal(typeof stats.cargoPackageName, "string");
+      assert.equal(typeof stats.cargoPackageVersion, "string");
     })
   })
 })

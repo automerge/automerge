@@ -302,7 +302,7 @@ export class Automerge {
 
   topoHistoryTraversal(): Hash[];
 
-  stats(): {numChanges: number, numOps: number};
+  stats(): {numChanges: number, numOps: number, cargoPackageName: string, cargoPackageVersion: string, rustcVersion: string };
 }
 
 export interface JsSyncState {

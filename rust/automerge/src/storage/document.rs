@@ -8,11 +8,10 @@ use crate::storage::columns::compression::Uncompressed;
 use crate::{convert, ActorId, ChangeHash};
 
 mod doc_op_columns;
-pub(crate) use doc_op_columns::AsDocOp;
 pub(crate) use doc_op_columns::DocOpColumns;
 mod doc_change_columns;
 pub(crate) use doc_change_columns::DocChangeColumns;
-pub(crate) use doc_change_columns::{AsChangeMeta, ChangeMetadata, ReadChangeError};
+pub(crate) use doc_change_columns::{ChangeMetadata, ReadChangeError};
 mod compression;
 
 #[allow(dead_code)]
@@ -215,22 +214,11 @@ impl<'a> Document<'a> {
         ))
     }
 
-    //pub(crate) fn new<'b, C, IC, I, D, O>(
     pub(crate) fn new(
         op_set: &OpSet,
         change_graph: &ChangeGraph,
-        //_heads_with_indices: Vec<(ChangeHash, usize)>,
-        //_ops: I,
-        //_changes: IC,
         compress: CompressConfig,
-    ) -> Document<'static>
-where
-        //I: Iterator<Item = D> + Clone + ExactSizeIterator,
-        //O: convert::OpId<usize>,
-        //D: AsDocOp<'b, OpId = O>,
-        //C: AsChangeMeta<'b>,
-        //IC: Iterator<Item = C> + Clone,
-    {
+    ) -> Document<'static> {
         let (op_metadata, ops_out_b) = op_set.export();
 
         let mut change_out = Vec::new();

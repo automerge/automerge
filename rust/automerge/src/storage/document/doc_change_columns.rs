@@ -38,35 +38,6 @@ pub(crate) struct ChangeMetadata<'a> {
     pub(crate) extra: Cow<'a, [u8]>,
 }
 
-impl<'a> ChangeMetadata<'a> {
-    pub(crate) fn message_str(&self) -> &str {
-        if let Some(s) = self.message.as_deref() {
-            s
-            //s.as_str()
-        } else {
-            ""
-        }
-    }
-}
-
-/// A row to be encoded as change metadata in the document format
-///
-/// The lifetime `'a` is the lifetime of the extra bytes Cow. For types which cannot
-/// provide a reference (e.g. because they are decoding from some columnar storage on each
-/// iteration) this should be `'static`.
-pub(crate) trait AsChangeMeta<'a> {
-    /// The type of the iterator over dependency indices
-    type DepsIter: Iterator<Item = u64> + ExactSizeIterator;
-
-    fn actor(&self) -> u64;
-    fn seq(&self) -> u64;
-    fn max_op(&self) -> u64;
-    fn timestamp(&self) -> i64;
-    fn message(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
-    fn deps(&self) -> Self::DepsIter;
-    fn extra(&self) -> Cow<'a, [u8]>;
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct DocChangeColumns {
     pub(crate) actor: RleRange<u64>,
@@ -99,41 +70,6 @@ impl DocChangeColumns {
             extra: ExtraDecoder {
                 val: self.extra.iter(data),
             },
-        }
-    }
-
-    pub(crate) fn encode<'a, I, C>(
-        changes: I,
-        change_graph: &ChangeGraph,
-        out: &mut Vec<u8>,
-    ) -> DocChangeColumns
-    where
-        C: AsChangeMeta<'a>,
-        I: Iterator<Item = C> + Clone,
-    {
-        let actor = RleRange::<u64>::encode(
-            // TODO: make this fallible once iterators have a try_splice
-            changes.clone().map(|c| Some(c.actor())),
-            out,
-        );
-        let seq = DeltaRange::encode(changes.clone().map(|c| Some(c.seq() as i64)), out);
-        let max_op = DeltaRange::encode(changes.clone().map(|c| Some(c.max_op() as i64)), out);
-        let time = DeltaRange::encode(changes.clone().map(|c| Some(c.timestamp())), out);
-        let message = RleRange::encode(changes.clone().map(|c| c.message()), out);
-        let deps = DepsRange::encode(changes.clone().map(|c| c.deps()), out);
-        let extra = ValueRange::encode(
-            changes.map(|c| Cow::Owned(ScalarValue::Bytes(c.extra().to_vec()))),
-            out,
-        );
-        DocChangeColumns {
-            actor,
-            seq,
-            max_op,
-            time,
-            message,
-            deps,
-            extra,
-            other: Columns::empty(),
         }
     }
 

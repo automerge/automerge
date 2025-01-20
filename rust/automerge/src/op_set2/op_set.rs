@@ -234,15 +234,19 @@ impl OpSet {
             return None;
         }
 
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(&obj.counter());
+        /*
+                let range = self
+                    .cols
+                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+                    .scope_to_value(&obj.counter());
 
-        let range = self
-            .cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(&obj.actor());
+                let range = self
+                    .cols
+                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+                    .scope_to_value(&obj.actor());
+
+        */
+        let range = self.scope_to_obj(obj);
 
         if index == 0 {
             return None;
@@ -434,15 +438,19 @@ impl OpSet {
             return None;
         }
 
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(&obj.counter());
+        /*
+                let range = self
+                    .cols
+                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+                    .scope_to_value(&obj.counter());
 
-        let range = self
-            .cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(&obj.actor());
+                let range = self
+                    .cols
+                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+                    .scope_to_value(&obj.actor());
+        */
+
+        let range = self.scope_to_obj(obj);
 
         let mut iter = self.text_index.iter_range(range.clone()).with_acc();
 
@@ -493,15 +501,18 @@ impl OpSet {
             return None;
         }
 
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(&obj.counter());
+        /*
+                let range = self
+                    .cols
+                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+                    .scope_to_value(&obj.counter());
 
-        let range = self
-            .cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(&obj.actor());
+                let range = self
+                    .cols
+                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+                    .scope_to_value(&obj.actor());
+        */
+        let range = self.scope_to_obj(obj);
 
         let op_pos = self.get_op_id_pos(target.0).unwrap();
 
@@ -976,15 +987,29 @@ impl OpSet {
         (raw.into_iter().collect(), data)
     }
 
-    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
+    #[inline(never)]
+    fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
         let range = self
             .cols
             .get_integer(OBJ_ID_COUNTER_COL_SPEC)
             .scope_to_value(&obj.counter());
-        let range = self
-            .cols
+        self.cols
             .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(&obj.actor());
+            .scope_to_value(&obj.actor())
+    }
+
+    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
+        /*
+                let range = self
+                    .cols
+                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
+                    .scope_to_value(&obj.counter());
+                let range = self
+                    .cols
+                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+                    .scope_to_value(&obj.actor());
+        */
+        let range = self.scope_to_obj(obj);
         let range = self
             .cols
             .get_str_range(KEY_STR_COL_SPEC, &range)

@@ -1184,13 +1184,16 @@ impl Automerge {
     pub fn stats(&mut self) -> JsValue {
         let stats = self.doc.stats();
         let result = Object::new();
-        js_set(
-            &result,
-            "numChanges",
-            JsValue::from(stats.num_changes as usize),
-        )
-        .unwrap();
-        js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
+        let num_changes = JsValue::from(stats.num_changes as usize);
+        let num_ops = JsValue::from(stats.num_ops as usize);
+        let cargo_package_name = JsValue::from(stats.cargo_package_name);
+        let cargo_package_version = JsValue::from(stats.cargo_package_version);
+        let rustc_version = JsValue::from(stats.rustc_version);
+        js_set(&result, "numChanges", num_changes).unwrap();
+        js_set(&result, "numOps", num_ops).unwrap();
+        js_set(&result, "cargoPackageName", cargo_package_name).unwrap();
+        js_set(&result, "cargoPackageVersion", cargo_package_version).unwrap();
+        js_set(&result, "rustcVersion", rustc_version).unwrap();
         result.into()
     }
 }

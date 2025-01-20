@@ -53,6 +53,7 @@ impl<'a> ExtraChangeMetadata<'a> {
 #[derive(Debug)]
 struct ChangeBuilder<'a> {
     actor: usize,
+    seq: u64,
     change: usize,
     start_op: u64,
     ops: Vec<Option<OpBuilder3<'a>>>,
@@ -129,13 +130,14 @@ impl<'a> ChangeCollector<'a> {
             .enumerate()
             .map(|(index, e)| ChangeBuilder {
                 actor: e.actor,
+                seq: e.seq,
                 change: index,
                 start_op: e.start_op,
                 ops: vec![None; e.num_ops()],
             })
             .collect();
 
-        builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.start_op.cmp(&b.start_op)));
+        builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.seq.cmp(&b.seq)));
 
         builders
             .iter()
@@ -169,14 +171,14 @@ impl<'a> ChangeCollector<'a> {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        let (mut changes, num_deps) = change_graph.get_metadata2(hashes)?;
+        let (changes, num_deps) = change_graph.get_metadata2(hashes)?;
         Ok(Self::from_metadata(op_set, change_graph, changes, num_deps))
     }
 
     fn from_metadata(
         op_set: &OpSet,
         change_graph: &'a ChangeGraph,
-        mut changes: Vec<ExtraChangeMetadata<'a>>,
+        changes: Vec<ExtraChangeMetadata<'a>>,
         num_deps: usize,
     ) -> Vec<Change> {
         let mut collector = Self::from_change_meta(changes, num_deps);
@@ -192,7 +194,7 @@ impl<'a> ChangeCollector<'a> {
         }
 
         // this can error on load but should never on a live document
-        let changes = collector.finish2(change_graph, &op_set.actors).unwrap();
+        let changes = collector.finish(change_graph, &op_set.actors).unwrap();
 
         changes
     }
@@ -254,7 +256,7 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[inline(never)]
-    pub(crate) fn finish2(
+    pub(crate) fn finish(
         mut self,
         change_graph: &ChangeGraph,
         actors: &[ActorId],
@@ -285,7 +287,7 @@ impl<'a> ChangeCollector<'a> {
     }
 
     #[inline(never)]
-    pub(crate) fn finish(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
+    pub(crate) fn build_changegraph(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
         self.flush_deletes();
 
         let num_actors = op_set.actors.len();

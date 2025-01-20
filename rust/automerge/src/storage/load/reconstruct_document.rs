@@ -21,8 +21,6 @@ pub(crate) enum Error {
     //OpsOutOfOrder,
     #[error("invalid changes: {0}")]
     InvalidChanges(#[from] super::change_collector::Error),
-    #[error("mismatched max_op ops={0}, changes={0}")]
-    MismatchingMaxOp(u64, u64),
     #[error("mismatching heads")]
     MismatchingHeads(MismatchedHeads),
     // FIXME - i need to do this check
@@ -112,7 +110,7 @@ fn flush_changes(
         heads,
         max_op,
         change_graph,
-    } = change_collector.finish(op_set)?;
+    } = change_collector.build_changegraph(op_set)?;
 
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();

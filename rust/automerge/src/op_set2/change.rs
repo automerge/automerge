@@ -13,7 +13,7 @@ use fxhash::FxBuildHasher;
 use itertools::Itertools;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::marker::PhantomData;
 use std::num::NonZero;
@@ -23,16 +23,6 @@ pub(crate) mod collector;
 
 pub(crate) use collector::{ChangeCollector, CollectedChanges, ExtraChangeMetadata};
 
-/*
-const OBJ_COL_ID: ColumnId = ColumnId::new(0);
-const KEY_COL_ID: ColumnId = ColumnId::new(1);
-const INSERT_COL_ID: ColumnId = ColumnId::new(3);
-const ACTION_COL_ID: ColumnId = ColumnId::new(4);
-const VAL_COL_ID: ColumnId = ColumnId::new(5);
-const PRED_COL_ID: ColumnId = ColumnId::new(7);
-const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
-const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
-*/
 pub(crate) trait AsOpBuilder3<'a> {
     fn get(&self) -> &OpBuilder3<'a>;
 }
@@ -50,17 +40,20 @@ impl<'a> AsOpBuilder3<'a> for Option<OpBuilder3<'a>> {
 }
 
 #[inline(never)]
-pub(crate) fn build_change<'a, T: AsOpBuilder3<'a>>(
+pub(crate) fn build_change<'a, T>(
     ops: &[T],
     meta: &ExtraChangeMetadata<'_>,
-    //hashes: &HashMap<usize, ChangeHash, FxBuildHasher>,
     graph: &ChangeGraph,
     actors: &[ActorId],
-) -> Change<'static, Verified> {
+) -> Change<'static, Verified>
+where
+    T: CanBeChangeOp,
+{
     let value_size: usize = ops
         .iter()
-        .filter_map(|p| p.get().value.to_raw().map(|s| s.len()))
+        .map(HasSizeEstimate::get)
         .sum();
+
     let size_estimate = value_size + 25 * ops.len(); // highest in our beasiary is 23;
 
     let num_ops = ops.len();
@@ -68,7 +61,7 @@ pub(crate) fn build_change<'a, T: AsOpBuilder3<'a>>(
 
     let start_op = ops
         .first()
-        .map(|p| p.get().id.counter())
+        .map(HasOpIdCtr::get)
         .unwrap_or(meta.max_op + 1);
 
     let (ops_meta, other_actors) = write_change_ops(ops, &meta, actors, &mut col_data);
@@ -80,7 +73,6 @@ pub(crate) fn build_change<'a, T: AsOpBuilder3<'a>>(
     let deps: Vec<_> = meta
         .deps
         .iter()
-        //.map(|i| hashes.get(&(*i as usize)).unwrap().clone())
         .map(|i| graph.index_to_hash(*i as usize).unwrap().clone())
         .collect();
 
@@ -142,23 +134,6 @@ pub(crate) fn build_change<'a, T: AsOpBuilder3<'a>>(
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ChangeBuilder<'a, T> {
-    pub(crate) meta: ChangeMetadata<'a>,
-    deps: Vec<T>,
-    max_op: u64,
-    index: usize,
-    len: u64,
-    pending_ops: BTreeSet<OpBuilder3<'a>>,
-    writer: ChangeWriter<'a>,
-}
-
-impl<'a, T> PartialEq for ChangeBuilder<'a, T> {
-    fn eq(&self, other: &ChangeBuilder<'a, T>) -> bool {
-        self.meta == other.meta
-    }
-}
-
 impl<'a> PartialOrd for OpBuilder3<'a> {
     fn partial_cmp(&self, other: &OpBuilder3<'a>) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -168,92 +143,6 @@ impl<'a> PartialOrd for OpBuilder3<'a> {
 impl<'a> Ord for OpBuilder3<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.id.cmp(&other.id)
-    }
-}
-
-impl<'a> ChangeBuilder<'a, ChangeHash> {
-    pub(crate) fn finish(mut self, actors: &[ActorId]) -> Change<'static, Verified> {
-        self.flush();
-        self.writer.finish(self.meta, self.deps, actors)
-    }
-}
-
-impl<'a, T> ChangeBuilder<'a, T> {
-    pub(crate) fn index(&self) -> usize {
-        self.index
-    }
-
-    pub(crate) fn max_op(&self) -> u64 {
-        self.max_op
-    }
-
-    pub(crate) fn seq(&self) -> u64 {
-        self.meta.seq
-    }
-
-    pub(crate) fn new(meta: ChangeMetadata<'a>, deps: Vec<T>, max_op: u64, index: usize) -> Self {
-        ChangeBuilder {
-            meta,
-            deps,
-            max_op,
-            len: 0,
-            index,
-            pending_ops: BTreeSet::default(),
-            writer: ChangeWriter::default(),
-        }
-    }
-
-    #[inline(never)]
-    pub(crate) fn finish_where<F>(mut self, actors: &[ActorId], f: F) -> Change<'static, Verified>
-    where
-        F: Fn(Vec<T>) -> Vec<ChangeHash>,
-    {
-        if let Some(o) = self.pending_ops.first() {
-            if self.len == 0 {
-                // documents exist in the wild where start_op is wrong here - not sure why
-                // see automerge-battery embark.automerge
-                self.meta.start_op = NonZero::new(o.id.counter()).unwrap();
-            }
-        }
-        self.flush();
-        //println!("pending_ops={:?} max={} start={} len={}", self.pending_ops, self.max_op, self.meta.start_op, self.len);
-        assert!(self.pending_ops.is_empty());
-        self.writer.finish(self.meta, f(self.deps), actors)
-    }
-
-    #[inline(never)]
-    pub(crate) fn flush(&mut self) {
-        while let Some(pending) = self.pending_ops.first() {
-            if pending.id.counter() != self.meta.start_op.get() + self.len {
-                break;
-            }
-            let pending = self.pending_ops.pop_first().unwrap();
-            self.writer.append3(pending);
-            self.len += 1;
-        }
-    }
-
-    fn start_op(&self) -> u64 {
-        self.meta.start_op.get()
-    }
-
-    fn contains(&self, id: &OpId) -> bool {
-        id.actoridx() == self.meta.actor
-            && id.counter() >= self.start_op()
-            && id.counter() <= self.max_op
-    }
-
-    #[inline(never)]
-    pub(crate) fn append(&mut self, op: Op<'a>, pred: Vec<OpId>) {
-        if self.contains(&op.id) {
-            if op.id.counter() == self.meta.start_op.get() + self.len {
-                self.writer.append(op, pred);
-                self.len += 1;
-                self.flush();
-            } else {
-                self.pending_ops.insert(op.build3(pred));
-            }
-        }
     }
 }
 
@@ -601,12 +490,15 @@ impl<'a> PartialEq for OpBuilder3<'a> {
 impl<'a> Eq for OpBuilder3<'a> {}
 
 #[inline(never)]
-fn write_change_ops<'a, T: AsOpBuilder3<'a>>(
+fn write_change_ops<'a, T>(
     ops: &[T],
     meta: &ExtraChangeMetadata<'_>,
     actors: &[ActorId],
     data: &mut Vec<u8>,
-) -> (ChangeOpsColumns2, Vec<ActorId>) {
+) -> (ChangeOpsColumns2, Vec<ActorId>)
+where
+    T: CanBeChangeOp,
+{
     if ops.len() == 0 {
         return (ChangeOpsColumns::default().into(), vec![]);
     }
@@ -617,25 +509,36 @@ fn write_change_ops<'a, T: AsOpBuilder3<'a>>(
         actor.map(|a| Cow::Owned(actor_map[usize::from(*a)].unwrap()))
     };
 
-    let iter = ops.iter().map(|o| o.get());
+    //let iter = ops.iter().map(|o| o.get());
+    let iter = ops.iter();
 
     let obj_actor =
-        encode_column::<ActorCursor, _>(data, iter.clone().map(_obj_actor).map(&_remap));
-    let obj_ctr = encode_column::<UIntCursor, _>(data, iter.clone().map(_obj_ctr));
+        encode_column::<ActorCursor, _>(data, iter.clone().map(HasObjActor::get).map(&_remap));
+    let obj_ctr = encode_column::<UIntCursor, _>(data, iter.clone().map(HasObjCtr::get));
     let key_actor =
-        encode_column::<ActorCursor, _>(data, iter.clone().map(_key_actor).map(&_remap));
-    let key_ctr = encode_column::<DeltaCursor, _>(data, iter.clone().map(_key_ctr));
-    let key_str = encode_column::<StrCursor, _>(data, iter.clone().map(_key_str));
-    let insert = force_encode_column::<BooleanCursor, _>(data, iter.clone().map(_insert));
-    let action = encode_column::<ActionCursor, _>(data, iter.clone().map(_action));
-    let value_meta = encode_column::<MetaCursor, _>(data, iter.clone().map(_value_meta));
-    let value = encode_column::<RawCursor, _>(data, iter.clone().map(_value));
-    let pred_count = encode_column::<UIntCursor, _>(data, iter.clone().map(_pred_count));
-    let pred_actor =
-        encode_column::<ActorCursor, _>(data, iter.clone().flat_map(_pred_actor).map(&_remap));
-    let pred_ctr = encode_column::<DeltaCursor, _>(data, iter.clone().flat_map(_pred_ctr));
-    let expand = encode_column::<BooleanCursor, _>(data, iter.clone().map(_expand));
-    let mark_name = encode_column::<StrCursor, _>(data, iter.clone().map(_mark_name));
+        encode_column::<ActorCursor, _>(data, iter.clone().map(HasKeyActor::get).map(&_remap));
+    let key_ctr = encode_column::<DeltaCursor, _>(data, iter.clone().map(HasKeyCtr::get));
+    let key_str = encode_column::<StrCursor, _>(data, iter.clone().map(HasKeyStr::get));
+    let insert = force_encode_column::<BooleanCursor, _>(data, iter.clone().map(HasInsert::get));
+    let action = encode_column::<ActionCursor, _>(data, iter.clone().map(HasAction::get));
+    let value_meta = encode_column::<MetaCursor, _>(data, iter.clone().map(HasValueMeta::get));
+    let value = encode_column::<RawCursor, _>(data, iter.clone().map(HasValue::get));
+    let pred_count = encode_column::<UIntCursor, _>(data, iter.clone().map(HasPredCount::get));
+    //let pred_actor = encode_column::<ActorCursor, _>(data, iter.clone().flat_map(_pred_actor).map(&_remap));
+    let pred_actor = encode_column::<ActorCursor, _>(
+        data,
+        HasPred::iter(ops)
+            .map(|id| Some(Cow::Owned(id.actoridx())))
+            .map(&_remap),
+    );
+    //let pred_ctr = encode_column::<DeltaCursor, _>(data, iter.clone().flat_map(_pred_ctr));
+    let pred_ctr = encode_column::<DeltaCursor, _>(
+        data,
+        HasPred::iter(ops).map(|id| Some(Cow::Owned(id.icounter()))),
+    );
+    //let pred_actor = encode_column::<ActorCursor, _>(data, iter.clone().flat_map(HasPredActor::get).map(&_remap));
+    let expand = encode_column::<BooleanCursor, _>(data, iter.clone().map(HasExpand::get));
+    let mark_name = encode_column::<StrCursor, _>(data, iter.clone().map(HasMarkName::get));
 
     let cols = ChangeOpsColumns {
         obj_actor,
@@ -658,7 +561,7 @@ fn write_change_ops<'a, T: AsOpBuilder3<'a>>(
 }
 
 #[inline(never)]
-fn remap_actors<'a, T: AsOpBuilder3<'a>>(
+fn remap_actors<'a, T: CanBeChangeOp>(
     ops: &[T],
     meta: &ExtraChangeMetadata<'_>,
     actors: &[ActorId],
@@ -668,15 +571,15 @@ fn remap_actors<'a, T: AsOpBuilder3<'a>>(
     let mut seen_index = 0;
 
     for op in ops {
-        if let Some(actor) = op.get().obj.actor() {
-            seen_actors[usize::from(actor)] = true;
+        if let Some(actor) = HasObjActor::get(op).as_deref() {
+            seen_actors[usize::from(*actor)] = true;
         }
-        if let Some(actor) = op.get().key.actor() {
-            seen_actors[usize::from(actor)] = true;
+        if let Some(actor) = HasKeyActor::get(op).as_deref() {
+            seen_actors[usize::from(*actor)] = true;
         }
-        for id in &op.get().pred {
-            seen_actors[id.actor()] = true;
-        }
+    }
+    for id in HasPred::iter(ops) {
+        seen_actors[id.actor()] = true;
     }
 
     seen_actors[meta.actor] = false;
@@ -732,6 +635,302 @@ where
     state.flush(out);
     let end = out.len();
     start..end
+}
+
+trait CanBeChangeOp:
+    HasObjActor
+    + HasObjCtr
+    + HasKeyActor
+    + HasKeyCtr
+    + HasKeyStr
+    + HasInsert
+    + HasAction
+    + HasValue
+    + HasValueMeta
+    + HasPredCount
+    + HasPred
+    + HasExpand
+    + HasMarkName
+    + HasOpIdCtr
+    + HasSizeEstimate
+{
+}
+
+trait HasObjActor {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, ActorIdx>>;
+}
+
+trait HasObjCtr {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, u64>>;
+}
+
+trait HasOpIdCtr {
+    fn get(op: &Self) -> u64;
+}
+
+trait HasSizeEstimate {
+    fn get(op: &Self) -> usize;
+}
+
+trait HasKeyActor {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, ActorIdx>>;
+}
+
+trait HasKeyCtr {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, i64>>;
+}
+
+trait HasKeyStr {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, str>>;
+}
+
+trait HasInsert {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, bool>>;
+}
+
+trait HasAction {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, Action>>;
+}
+
+trait HasValue {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, [u8]>>;
+}
+
+trait HasValueMeta {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, ValueMeta>>;
+}
+
+trait HasPredCount {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, u64>>;
+}
+
+trait HasPred {
+    type Iter<'a>: Iterator<Item = &'a OpId>
+    where
+        Self: 'a;
+    fn iter(ops: &[Self]) -> Self::Iter<'_>
+    where
+        Self: Sized;
+    fn get(op: &Self) -> &[OpId];
+}
+
+trait HasExpand {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, bool>>;
+}
+
+trait HasMarkName {
+    fn get<'a>(op: &'a Self) -> Option<Cow<'a, str>>;
+}
+
+impl<T: HasObjActor> HasObjActor for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        HasObjActor::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasObjCtr> HasObjCtr for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, u64>> {
+        HasObjCtr::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasOpIdCtr> HasOpIdCtr for Option<T> {
+    fn get(op: &Self) -> u64 {
+       op.as_ref().map(HasOpIdCtr::get).unwrap_or(0)
+    }
+}
+
+impl<T: HasSizeEstimate> HasSizeEstimate for Option<T> {
+    fn get(op: &Self) -> usize {
+       op.as_ref().map(HasSizeEstimate::get).unwrap_or(0)
+    }
+}
+
+impl<T: HasKeyActor> HasKeyActor for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        HasKeyActor::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasKeyCtr> HasKeyCtr for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, i64>> {
+        HasKeyCtr::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasKeyStr> HasKeyStr for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, str>> {
+        HasKeyStr::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasInsert> HasInsert for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, bool>> {
+        HasInsert::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasAction> HasAction for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, Action>> {
+        HasAction::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasValue> HasValue for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, [u8]>> {
+        HasValue::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasValueMeta> HasValueMeta for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, ValueMeta>> {
+        HasValueMeta::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasPredCount> HasPredCount for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, u64>> {
+        HasPredCount::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasExpand> HasExpand for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, bool>> {
+        HasExpand::get(op.as_ref()?)
+    }
+}
+
+impl<T: HasMarkName> HasMarkName for Option<T> {
+    fn get(op: &Self) -> Option<Cow<'_, str>> {
+        HasMarkName::get(op.as_ref()?)
+    }
+}
+
+impl<'a> CanBeChangeOp for OpBuilder3<'a> {}
+
+impl<'a> CanBeChangeOp for Option<OpBuilder3<'a>> {}
+
+impl<'a> HasObjActor for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, ActorIdx>> {
+        op.obj.actor().map(Cow::Owned)
+    }
+}
+
+impl<'a> HasObjCtr for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, u64>> {
+        op.obj.counter().map(Cow::Owned)
+    }
+}
+
+impl<'a> HasOpIdCtr for OpBuilder3<'a> {
+    fn get(op: &OpBuilder3<'a>) -> u64 {
+        op.id.counter()
+    }
+}
+
+impl<'a> HasSizeEstimate for OpBuilder3<'a> {
+    fn get(op: &OpBuilder3<'a>) -> usize {
+        op.value.to_raw().map(|s| s.len() + 25).unwrap_or(0) // largest in our bestiary was 23
+    }
+}
+
+impl<'a> HasKeyActor for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, ActorIdx>> {
+        op.key.actor().map(Cow::Owned)
+    }
+}
+
+impl<'a> HasKeyCtr for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, i64>> {
+        op.key.icounter().map(Cow::Owned)
+    }
+}
+
+impl<'a> HasKeyStr for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, str>> {
+        op.key.key_str()
+    }
+}
+
+impl<'a> HasInsert for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, bool>> {
+        Some(Cow::Owned(op.insert))
+    }
+}
+
+impl<'a> HasExpand for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, bool>> {
+        Some(Cow::Owned(op.expand))
+    }
+}
+
+impl<'a> HasMarkName for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, str>> {
+        op.mark_name.clone()
+    }
+}
+
+impl<'a> HasAction for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, Action>> {
+        Some(Cow::Owned(op.action))
+    }
+}
+
+impl<'a> HasValue for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, [u8]>> {
+        op.value.to_raw()
+    }
+}
+
+impl<'a> HasValueMeta for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, ValueMeta>> {
+        Some(Cow::Owned(ValueMeta::from(&op.value)))
+    }
+}
+
+impl<'a> HasPredCount for OpBuilder3<'a> {
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> Option<Cow<'b, u64>> {
+        Some(Cow::Owned(op.pred.len() as u64))
+    }
+}
+
+use std::iter::FlatMap;
+use std::slice::Iter;
+
+impl<'a> HasPred for OpBuilder3<'a> {
+    type Iter<'c> = FlatMap<Iter<'c, OpBuilder3<'a>>, &'c [OpId], fn(&'c OpBuilder3<'a>) -> &'c [OpId]> where Self: 'c;
+
+    fn iter<'b>(ops: &'b [OpBuilder3<'a>]) -> Self::Iter<'b> {
+        ops.iter().flat_map(|op| op.pred.as_slice())
+    }
+
+    fn get<'b>(op: &'b OpBuilder3<'a>) -> &'b [OpId] {
+        op.pred.as_slice()
+    }
+}
+
+/*
+impl<'a> HasPred for Option<OpBuilder3<'a>> {
+    type Iter<'c> = FlatMap<Iter<'c, Option<OpBuilder3<'a>>>, &'c [OpId],
+        fn(&'c Option<OpBuilder3<'a>>) -> &'c [OpId]> where Self: 'c;
+    fn iter<'b>(ops: &'b [Option<OpBuilder3<'a>>]) -> Self::Iter<'b> {
+        ops.iter().flat_map(|op| op.as_ref().unwrap().pred.as_slice())
+    }
+}
+*/
+
+impl<'a, T: HasPred> HasPred for Option<T> {
+    //type Iter<'c> = FlatMap<Iter<'c, Option<T>>, &'c [OpId], fn(&'c Option<T>) -> &'c [OpId]> where Self: 'c;
+    type Iter<'c> = FlatMap<Iter<'c, Self>, &'c [OpId], fn(&'c Self) -> &'c [OpId]> where Self: 'c;
+
+    fn iter<'b>(ops: &'b [Option<T>]) -> Self::Iter<'b> {
+        //ops.iter().flat_map(|op| op.as_ref().unwrap().pred.as_slice())
+        ops.iter().flat_map(HasPred::get)
+    }
+
+    fn get(op: &Option<T>) -> &[OpId] {
+        HasPred::get(op.as_ref().unwrap())
+    }
 }
 
 fn _obj_actor<'a>(op: &OpBuilder3<'a>) -> Option<Cow<'a, ActorIdx>> {

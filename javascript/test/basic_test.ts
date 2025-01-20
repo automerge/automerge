@@ -764,10 +764,11 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => (d.a = 1))
       doc = Automerge.change(doc, d => (d.a = 2))
       const stats = Automerge.stats(doc)
-      assert.deepStrictEqual(stats, {
-        numChanges: 2,
-        numOps: 2,
-      })
+      assert.equal(stats.numChanges, 2);
+      assert.equal(stats.numOps, 2);
+      assert.equal(typeof stats.cargoPackageName, "string");
+      assert.equal(typeof stats.cargoPackageVersion, "string");
+      assert.equal(typeof stats.rustcVersion, "string");
     })
   }),
 

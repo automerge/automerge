@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
+use crate::change_graph::ChangeGraph;
 use crate::exid::ExId;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
@@ -25,6 +26,7 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<OpBuilder2>,
+    //pending2: Vec<OpBuilder3>,
     //pending2: ChangeWriter<'static>,
 }
 
@@ -116,7 +118,7 @@ impl TransactionInner {
         }
 
         let num_ops = self.pending_ops();
-        let change = self.export(doc.ops());
+        let change = self.export(doc.ops(), doc.changes());
         let hash = change.hash();
         #[cfg(not(debug_assertions))]
         tracing::trace!(commit=?hash, deps=?change.deps(), "committing transaction");
@@ -130,13 +132,23 @@ impl TransactionInner {
         hash
     }
 
-    pub(crate) fn _change_meta<'a>(
-        &self,
-        //osd: &'a OpSet,
-    ) -> crate::op_set2::change::ChangeMetadata<'a> {
+    pub(crate) fn _change_meta2<'a>(&self) -> crate::op_set2::change::ExtraChangeMetadata<'a> {
+        crate::op_set2::change::ExtraChangeMetadata {
+            actor: self.actor.into(),
+            seq: self.seq,
+            start_op: self.start_op.get(),
+            max_op: self.start_op.get() + self.pending.len() as u64 - 1,
+            timestamp: self.time,
+            message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
+            extra: Cow::Borrowed(&[]),
+            builder: 0,
+            deps: Vec::new(), // FIXME
+        }
+    }
+
+    pub(crate) fn _change_meta<'a>(&self) -> crate::op_set2::change::ChangeMetadata<'a> {
         crate::op_set2::change::ChangeMetadata {
             actor: self.actor.into(),
-            //actors: &osd.actors,
             seq: self.seq,
             start_op: self.start_op,
             timestamp: self.time,
@@ -146,13 +158,13 @@ impl TransactionInner {
     }
 
     #[inline(never)]
-    pub(crate) fn export(self, osd: &OpSet) -> Change {
+    pub(crate) fn export(self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
         use crate::storage::{change::PredOutOfOrder, convert::ob_as_actor_id};
 
-        let actor = osd.get_actor(self.actor).clone();
+        let actor = op_set.get_actor(self.actor).clone();
         let deps = self.deps.clone();
-        // let meta = self._change_meta();
-        // let stored = self.pending2.finish(meta, &osd.actors);
+        let meta = self._change_meta2();
+        // let stored = self.pending2.finish(meta, &op_set.actors);
         let stored = match StoredChange::builder()
             .with_actor(actor)
             .with_seq(self.seq)
@@ -160,7 +172,7 @@ impl TransactionInner {
             .with_message(self.message.clone())
             .with_dependencies(deps)
             .with_timestamp(self.time)
-            .build(self.pending.iter().map(|o| ob_as_actor_id(osd, o)))
+            .build(self.pending.iter().map(|o| ob_as_actor_id(op_set, o)))
         {
             Ok(s) => s,
             Err(PredOutOfOrder) => {
@@ -188,7 +200,7 @@ impl TransactionInner {
         */
         #[cfg(debug_assertions)]
         {
-            //let realized_ops = self.operations(osd).collect::<Vec<_>>();
+            //let realized_ops = self.operations(op_set).collect::<Vec<_>>();
             tracing::trace!(?stored, ops=?self.pending, "committing change");
         }
         #[cfg(not(debug_assertions))]
@@ -899,7 +911,6 @@ impl TransactionInner {
             insert: false,
             pred: vec![],
         };
-        //let op2 = Op::new();
 
         let found = doc
             .ops()
@@ -913,7 +924,6 @@ impl TransactionInner {
                 );
         */
         let index = found.index;
-        //let pos = found.op.pos;
         let succ_pos = vec![found.op.add_succ(op.id, None)];
         /*
                 {
@@ -944,7 +954,6 @@ impl TransactionInner {
 
         patch_log.delete_seq(text_obj.id, index, 1);
 
-        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(())

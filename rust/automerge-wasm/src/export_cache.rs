@@ -6,11 +6,11 @@ use automerge as am;
 use automerge::ChangeHash;
 use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 use std::ops::RangeFull;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use std::borrow::{Borrow,Cow};
 
 use am::ObjId;
 
@@ -164,7 +164,7 @@ enum Progress<'a> {
 pub(crate) struct ExportCache<'a> {
     pub(crate) objs: HashMap<ObjId, CachedObject, FxBuildHasher>,
     datatypes: HashMap<Datatype, JsString, FxBuildHasher>,
-    keys: HashMap<Cow<'a,str>, JsString>,
+    keys: HashMap<Cow<'a, str>, JsString>,
     definition: Object,
     value_key: JsValue,
     meta_sym: Symbol,
@@ -236,7 +236,7 @@ impl<'a> ExportCache<'a> {
     pub(crate) fn set_prop(
         &mut self,
         obj: &Object,
-        key: &Cow<'a,str>,
+        key: &Cow<'a, str>,
         value: &JsValue,
     ) -> Result<(), error::Export> {
         self.ensure_key(key);
@@ -294,8 +294,10 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn ensure_key(&mut self, key: &Cow<'a,str>) {
-        self.keys.entry(key.clone()).or_insert_with(|| JsString::from(key.borrow()));
+    fn ensure_key(&mut self, key: &Cow<'a, str>) {
+        self.keys
+            .entry(key.clone())
+            .or_insert_with(|| JsString::from(key.borrow()));
     }
 
     #[inline(never)]

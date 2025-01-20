@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU64;
 
-use packer::{ColumnCursor, DeltaCursor, MaybePackable, RawCursor, StrCursor, UIntCursor};
+use packer::{ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 
 use crate::{
     clock::{Clock, ClockData},
@@ -11,7 +11,7 @@ use crate::{
     error::AutomergeError,
     op_set2::{
         change::{ChangeMetadata, ExtraChangeMetadata},
-        ActorCursor, ActorIdx, MetaCursor, ScalarValue, ValueMeta,
+        ActorCursor, ActorIdx, MetaCursor, ValueMeta,
     },
     storage::{Columns, DocChangeColumns},
     types::OpId,
@@ -193,7 +193,7 @@ impl ChangeGraph {
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> DocChangeColumns {
-        let mut changes = self.nodes.iter();
+        let changes = self.nodes.iter();
 
         let actor_iter = changes.clone().map(as_actor);
         let actor = ActorCursor::encode(out, actor_iter, false).into();
@@ -219,7 +219,7 @@ impl ChangeGraph {
         let meta_iter = changes.clone().map(as_meta);
         let meta = MetaCursor::encode(out, meta_iter, false).into();
 
-        let raw_iter = changes.clone().map(as_extra_bytes);
+        let raw_iter = changes.map(as_extra_bytes);
         let raw = RawCursor::encode(out, raw_iter, false).into();
 
         DocChangeColumns {
@@ -321,7 +321,7 @@ impl ChangeGraph {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        let mut indexes: Vec<_> = hashes
+        let indexes: Vec<_> = hashes
             .into_iter()
             .map(|hash| {
                 self.nodes_by_hash
@@ -662,6 +662,7 @@ pub struct MissingDep(ChangeHash);
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeMap,
         num::NonZeroU64,
         time::{SystemTime, UNIX_EPOCH},
     };
