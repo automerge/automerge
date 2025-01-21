@@ -32,9 +32,9 @@ const exec = util.promisify(child_process.exec)
 // - In node as an ES module
 // - In node using the slim package as an ES module and late initializing
 //
-// In general the approach we will use to perform these tests is to use 
+// In general the approach we will use to perform these tests is to use
 // `npm pack` to create the package, then install it in a temporary project.
-// 
+//
 // For browser tests we will use `puppetteer` to run the tests.
 
 /**
@@ -44,7 +44,7 @@ async function runWebpackTest(tmpProjectDir) {
   consola.info("running webpack")
   const webpackProcess = child_process.spawn(
     "./node_modules/.bin/webpack",
-    { 
+    {
       cwd: tmpProjectDir,
     }
   )
@@ -115,7 +115,7 @@ async function runViteDevServerTest(tmpProjectDir) {
   const viteProcess = child_process.spawn(
     "./node_modules/.bin/vite",
     ["--port", port.toString()],
-    { 
+    {
       cwd: tmpProjectDir,
     }
   )
@@ -148,7 +148,7 @@ async function runViteBuildTest(tmpProjectDir) {
   const viteProcess = child_process.spawn(
     "./node_modules/.bin/vite",
     ["preview", "--port", port.toString()],
-    { 
+    {
       cwd: tmpProjectDir,
     }
   )
@@ -186,7 +186,10 @@ async function findFreePort() {
  */
 async function loadTestPage(url) {
   consola.info("opening test page")
-  const browser = await puppeteer.launch()
+  // This `--no-sandbox` flag is necessary to run puppeteer in github actions where
+  // there is no sandbox available. It's dangerous if you're running untrusted content,
+  // but everything we are loading is hosted in the respository
+  const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] })
   const page = await browser.newPage()
   page.setDefaultTimeout(5000)
 
@@ -233,7 +236,7 @@ async function runWorkerdTest(tmpProjectDir) {
   const wranglerProcess = child_process.spawn(
     "./node_modules/.bin/wrangler",
     ["dev", "--port", port.toString()],
-    { 
+    {
       cwd: tmpProjectDir,
       env: {
         ...process.env,
@@ -434,7 +437,7 @@ async function run() {
         consola.error(e)
         consola.error(`The failed build is in ${tmpProjectDir}`)
         process.exit(1)
-      } 
+      }
       await fs.rm(tmpProjectDir, { recursive: true })
       consola.success("Test passed")
     }
@@ -447,5 +450,5 @@ async function run() {
   } catch (e) {
     console.error(e)
     process.exit(1)
-  } 
+  }
 })()
