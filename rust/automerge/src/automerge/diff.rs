@@ -2,6 +2,7 @@ use itertools::Itertools;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use crate::cursor::CursorPosition;
 use crate::iter::Keys;
 use crate::iter::ListRange;
 use crate::iter::MapRange;
@@ -427,13 +428,23 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
             .get_marks(obj, index, Some(heads.unwrap_or(self.heads)))
     }
 
-    fn get_cursor<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
-        position: usize,
+        position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
         self.doc.get_cursor(obj, position, at)
+    }
+
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: crate::cursor::MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor_moving(obj, position, at, move_cursor)
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(

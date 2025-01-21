@@ -3,9 +3,9 @@ use crate::export_cache::CachedObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
-use automerge as am;
 use automerge::ReadDoc;
 use automerge::ROOT;
+use automerge::{self as am};
 use automerge::{
     iter::{Span, Spans},
     Change, ChangeHash, ObjType, Prop,
@@ -18,7 +18,7 @@ use std::ops::Deref;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
+use am::{marks::ExpandMark, CursorPosition, MoveCursor, ObjId, Patch, PatchAction, Value};
 
 pub(crate) use crate::export_cache::ExportCache;
 
@@ -135,6 +135,49 @@ impl TryFrom<JS> for usize {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         value.as_f64().map(|n| n as usize).ok_or(error::BadNumber)
+    }
+}
+
+impl TryFrom<JS> for CursorPosition {
+    type Error = error::BadCursorPosition;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        match value.as_f64() {
+            Some(idx) => {
+                if idx < 0f64 {
+                    Ok(CursorPosition::Start)
+                } else {
+                    Ok(CursorPosition::Index(idx as usize))
+                }
+            }
+            None => value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "start" => Some(CursorPosition::Start),
+                    "end" => Some(CursorPosition::End),
+                    _ => None,
+                })
+                .ok_or(error::BadCursorPosition),
+        }
+    }
+}
+
+impl TryFrom<JS> for MoveCursor {
+    type Error = error::BadMoveCursor;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.is_undefined() {
+            Ok(MoveCursor::default())
+        } else {
+            value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "before" => Some(MoveCursor::Before),
+                    "after" => Some(MoveCursor::After),
+                    _ => None,
+                })
+                .ok_or(error::BadMoveCursor)
+        }
     }
 }
 
@@ -1987,6 +2030,13 @@ pub(crate) mod error {
         #[error("path did not refer to an object")]
         NotAnObject,
     }
+    #[derive(Debug, thiserror::Error)]
+    #[error("cursor position must be an index (number), 'start' or 'end'")]
+    pub struct BadCursorPosition;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("move must be 'before' or 'after' - is 'after' by default")]
+    pub struct BadMoveCursor;
 
     #[derive(Debug, thiserror::Error)]
     #[error("expand must be 'left', 'right', 'both', or 'none' - is 'right' by default")]
