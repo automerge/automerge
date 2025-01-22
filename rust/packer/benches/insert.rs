@@ -6,7 +6,7 @@ use std::ops::Rem;
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::thread_rng();
-    for n in [100_000] {
+    for n in [10_000, 100_000] {
         c.bench_function(&format!("insert_u64_n:{}_large", n), |b| {
             let max = u32::MAX as u64;
             let mut col = gen_col(&mut rng, n, max).collect();
@@ -21,7 +21,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-fn gen_col<'a, N>(rng: &'a mut ThreadRng, n: usize, max: N) -> impl Iterator<Item = N> + 'a
+fn gen_col<N>(rng: &mut ThreadRng, n: usize, max: N) -> impl Iterator<Item = N> + '_
 where
     Standard: Distribution<N>,
     N: Rem<Output = N> + Copy + 'static,

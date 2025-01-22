@@ -2,13 +2,13 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::types::{ElemId, ObjType, OldMarkData};
+use crate::types::{ElemId, ObjType};
 use crate::value;
 
 use std::fmt;
 
 use super::meta::ValueType;
-use super::packer::{PackError, Packable, RleCursor, ScanMeta, WriteOp};
+use super::packer::{PackError, Packable, RleCursor, ScanMeta};
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -54,15 +54,6 @@ impl From<ActorIdx> for usize {
 pub(crate) struct MarkData<'a> {
     pub(crate) name: Cow<'a, str>,
     pub(crate) value: ScalarValue<'a>,
-}
-
-impl<'a> MarkData<'a> {
-    fn into_owned(self) -> OldMarkData {
-        OldMarkData {
-            name: self.name.into(),
-            value: self.value.into_owned(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
@@ -147,17 +138,6 @@ pub(crate) enum OpType<'a> {
 }
 
 impl<'a> OpType<'a> {
-    pub(crate) fn into_owned(self) -> types::OpType {
-        match self {
-            Self::Make(t) => types::OpType::Make(t),
-            Self::Delete => types::OpType::Delete,
-            Self::Increment(i) => types::OpType::Increment(i),
-            Self::Put(v) => types::OpType::Put(v.into_owned()),
-            Self::MarkBegin(ex, mark) => types::OpType::MarkBegin(ex, mark.into_owned()),
-            Self::MarkEnd(ex) => types::OpType::MarkEnd(ex),
-        }
-    }
-
     pub(crate) fn from_action_and_value(
         action: Action,
         value: &ScalarValue<'a>,
@@ -517,27 +497,7 @@ pub(crate) enum Key {
     Seq(ElemId),
 }
 
-impl Key {
-    pub(crate) fn key_str(&self) -> Option<Cow<'static, str>> {
-        match self {
-            Self::Map(s) => Some(Cow::Owned(s.to_owned())),
-            Self::Seq(_) => None,
-        }
-    }
-    pub(crate) fn actor(&self) -> Option<ActorIdx> {
-        match self {
-            Self::Map(_) => None,
-            Self::Seq(e) => e.actor(),
-        }
-    }
-
-    pub(crate) fn icounter(&self) -> Option<i64> {
-        match self {
-            Self::Map(_) => None,
-            Self::Seq(e) => Some(e.icounter()),
-        }
-    }
-}
+impl Key {}
 
 impl From<ElemId> for Key {
     fn from(e: ElemId) -> Key {
@@ -545,9 +505,21 @@ impl From<ElemId> for Key {
     }
 }
 
+impl From<ElemId> for KeyRef<'static> {
+    fn from(e: ElemId) -> KeyRef<'static> {
+        KeyRef::Seq(e)
+    }
+}
+
 impl From<String> for Key {
     fn from(s: String) -> Key {
         Key::Map(s)
+    }
+}
+
+impl From<String> for KeyRef<'static> {
+    fn from(s: String) -> KeyRef<'static> {
+        KeyRef::Map(Cow::Owned(s))
     }
 }
 
@@ -565,17 +537,18 @@ impl<'a> KeyRef<'a> {
             KeyRef::Seq(e) => Some(e.icounter()),
         }
     }
-    pub(crate) fn into_owned(self) -> Key {
-        match self {
-            KeyRef::Map(s) => Key::Map(s.to_string()),
-            KeyRef::Seq(e) => Key::Seq(e),
-        }
-    }
 
     pub(crate) fn key_str(&self) -> Option<Cow<'a, str>> {
         match self {
-            KeyRef::Map(s) => Some(s.clone()),
-            KeyRef::Seq(_) => None,
+            Self::Map(s) => Some(s.clone()),
+            Self::Seq(_) => None,
+        }
+    }
+
+    pub(crate) fn into_owned(self) -> KeyRef<'static> {
+        match self {
+            KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.to_string())),
+            KeyRef::Seq(e) => KeyRef::Seq(e),
         }
     }
 

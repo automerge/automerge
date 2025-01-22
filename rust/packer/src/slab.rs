@@ -262,10 +262,10 @@ pub(crate) mod tests {
             min: Agg::from(3),
             max: Agg::from(0),
         };
-        assert_eq!(baseline.clone().maybe_sub(&max_eq), false);
-        assert_eq!(baseline.clone().maybe_sub(&max_gr), false);
-        assert_eq!(baseline.clone().maybe_sub(&max_lt), true);
-        assert_eq!(baseline.clone().maybe_sub(&max_none), true);
+        assert!(!baseline.clone().maybe_sub(&max_eq));
+        assert!(!baseline.clone().maybe_sub(&max_gr));
+        assert!(baseline.clone().maybe_sub(&max_lt));
+        assert!(baseline.clone().maybe_sub(&max_none));
 
         let min_eq = SlabWeight {
             pos: 50,
@@ -291,9 +291,9 @@ pub(crate) mod tests {
             min: Agg::from(0),
             max: Agg::from(19),
         };
-        assert_eq!(baseline.clone().maybe_sub(&min_eq), false);
-        assert_eq!(baseline.clone().maybe_sub(&min_gr), true);
-        assert_eq!(baseline.clone().maybe_sub(&min_lt), false);
-        assert_eq!(baseline.clone().maybe_sub(&min_none), true);
+        assert!(!baseline.clone().maybe_sub(&min_eq));
+        assert!(baseline.clone().maybe_sub(&min_gr));
+        assert!(!baseline.clone().maybe_sub(&min_lt));
+        assert!(baseline.clone().maybe_sub(&min_none));
     }
 }

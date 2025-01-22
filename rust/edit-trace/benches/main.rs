@@ -1,6 +1,5 @@
 use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use serde_json::Value;
 use std::fs;
 
 fn replay_trace_tx(commands: Vec<(usize, isize, String)>) -> Automerge {
@@ -44,7 +43,7 @@ fn bench(c: &mut Criterion) {
     let contents = fs::read_to_string("edits.json").expect("cannot read edits file");
     let edits = jzon::parse(&contents).expect("cant parse edits");
     let mut commands = vec![];
-    for edit in &edits {
+    for edit in edits.as_array().unwrap() {
         let pos: usize = edit.as_array().unwrap()[0].as_u64().unwrap() as usize;
         let del: isize = edit.as_array().unwrap()[1].as_i64().unwrap() as isize;
         let mut vals = String::new();

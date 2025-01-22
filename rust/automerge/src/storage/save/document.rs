@@ -1,13 +1,10 @@
 use std::borrow::{Borrow, Cow};
-use std::{collections::HashMap, iter::Iterator};
+use std::iter::Iterator;
 
 use crate::{
     change_graph::ChangeGraph,
-    indexed_cache::IndexedCache,
     op_set2::OpSet,
     storage::{change::DEFLATE_MIN_SIZE, CompressConfig, Document},
-    types::ActorId,
-    Change, ChangeHash,
 };
 
 /// # Panics

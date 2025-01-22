@@ -464,7 +464,7 @@ where
 pub(super) fn tuple2<'a, F, E, G, H, Er>(
     mut f: F,
     mut g: G,
-) -> impl FnMut(Input<'a>) -> ParseResult<'_, (E, H), Er>
+) -> impl FnMut(Input<'a>) -> ParseResult<'a, (E, H), Er>
 where
     F: Parser<'a, E, Er>,
     G: Parser<'a, H, Er>,
@@ -480,7 +480,7 @@ where
 pub(super) fn apply_n<'a, F, E, Er>(
     n: usize,
     mut f: F,
-) -> impl FnMut(Input<'a>) -> ParseResult<'_, Vec<E>, Er>
+) -> impl FnMut(Input<'a>) -> ParseResult<'a, Vec<E>, Er>
 where
     F: Parser<'a, E, Er>,
 {

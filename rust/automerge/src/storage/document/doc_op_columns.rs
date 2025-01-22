@@ -1,21 +1,15 @@
-use std::{borrow::Cow, convert::TryFrom};
+use std::convert::TryFrom;
 
 use crate::{
-    columnar::{
-        column_range::{
-            generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
-            BooleanRange, DeltaRange, KeyEncoder, KeyRange, MaybeBooleanRange, ObjIdEncoder,
-            ObjIdRange, OpIdEncoder, OpIdListEncoder, OpIdListRange, OpIdRange, RleRange,
-            ValueEncoder, ValueRange,
-        },
-        encoding::{BooleanEncoder, MaybeBooleanEncoder, RleEncoder},
+    columnar::column_range::{
+        generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
+        BooleanRange, DeltaRange, KeyRange, MaybeBooleanRange, ObjIdRange, OpIdListRange,
+        OpIdRange, RleRange, ValueRange,
     },
-    convert,
     storage::{
         columns::{compression, ColumnId, ColumnSpec, ColumnType},
         Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    types::ScalarValue,
 };
 
 const OBJ_COL_ID: ColumnId = ColumnId::new(0);

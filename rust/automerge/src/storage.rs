@@ -3,7 +3,6 @@ use std::ops::Range;
 pub(crate) mod change;
 mod chunk;
 pub(crate) mod columns;
-pub(crate) mod convert;
 pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
@@ -13,7 +12,7 @@ pub use load::VerificationMode;
 pub(crate) use {
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
-    columns::{ColumnSpec, ColumnType, Columns, MismatchingColumn, RawColumn, RawColumns},
+    columns::{ColumnSpec, Columns, MismatchingColumn, RawColumn, RawColumns},
     document::{ChangeMetadata, CompressConfig, DocChangeColumns, Document},
 };
 

@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
-use crate::change_graph::{ChangeGraph, MissingDep};
+use crate::change_graph::ChangeGraph;
 use crate::storage::document::ReadChangeError;
 use crate::{
     change::Change,
@@ -41,12 +41,7 @@ impl<'a> ExtraChangeMetadata<'a> {
     }
 
     pub(crate) fn message_str(&self) -> &str {
-        if let Some(s) = self.message.as_deref() {
-            s
-            //s.as_str()
-        } else {
-            ""
-        }
+        self.message.as_deref().unwrap_or_default()
     }
 }
 
@@ -84,7 +79,7 @@ impl<'a> ChangeBuilder<'a> {
 }
 
 impl<'a> ChangeCollector<'a> {
-    pub(crate) fn new<I>(changes: I, op_set: &OpSet) -> Result<ChangeCollector<'a>, ReadChangeError>
+    pub(crate) fn new<I>(changes: I) -> Result<ChangeCollector<'a>, ReadChangeError>
     where
         I: Iterator<Item = Result<ChangeMetadata<'a>, ReadChangeError>>,
     {
@@ -171,7 +166,7 @@ impl<'a> ChangeCollector<'a> {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        let (changes, num_deps) = change_graph.get_metadata2(hashes)?;
+        let (changes, num_deps) = change_graph.get_metadata(hashes)?;
         Ok(Self::from_metadata(op_set, change_graph, changes, num_deps))
     }
 
@@ -194,9 +189,7 @@ impl<'a> ChangeCollector<'a> {
         }
 
         // this can error on load but should never on a live document
-        let changes = collector.finish(change_graph, &op_set.actors).unwrap();
-
-        changes
+        collector.finish(change_graph, &op_set.actors).unwrap()
     }
 
     #[inline(never)]
@@ -265,7 +258,7 @@ impl<'a> ChangeCollector<'a> {
 
         let mut changes = Vec::with_capacity(self.changes.len());
 
-        for (index, change) in self.changes.into_iter().enumerate() {
+        for change in self.changes.into_iter() {
             let actor = change.actor;
 
             if actor >= actors.len() {
@@ -278,7 +271,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), change.max_op);
             }
 
-            let finished = super::build_change(&ops, &change, &change_graph, &actors);
+            let finished = super::build_change(ops, &change, change_graph, actors);
 
             changes.push(Change::new(finished));
         }
@@ -297,7 +290,7 @@ impl<'a> ChangeCollector<'a> {
         let mut heads = BTreeSet::new();
         let mut change_graph = ChangeGraph::with_capacity(self.changes.len(), self.num_deps);
 
-        for (index, change) in self.changes.into_iter().enumerate() {
+        for change in self.changes.into_iter() {
             let actor = change.actor;
 
             if actor >= num_actors {
@@ -325,7 +318,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), max_op);
             }
 
-            let finished = super::build_change(&ops, &change, &change_graph, &op_set.actors);
+            let finished = super::build_change(ops, &change, &change_graph, &op_set.actors);
 
             let hash = finished.hash();
 
@@ -339,7 +332,7 @@ impl<'a> ChangeCollector<'a> {
 
             let change = Change::new(finished);
 
-            change_graph.add_change(&change, actor.into())?;
+            change_graph.add_change(&change, actor)?;
 
             changes.push(change);
         }

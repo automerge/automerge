@@ -244,9 +244,8 @@ mod test {
         assert!(agg0 == agg0);
         assert!(agg2 == agg2);
         assert!(agg1 < agg2);
-        assert!(!(agg0 < agg1));
-        assert!(!(agg0 > agg1));
-        assert!(!(agg0 == agg1));
-        assert!(!(agg1 >= agg2));
+        assert!(agg0.partial_cmp(&agg1).is_none());
+        assert!(agg0.partial_cmp(&agg1).is_none());
+        assert!(agg1.partial_cmp(&agg2) == Some(Ordering::Less));
     }
 }

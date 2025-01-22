@@ -29,7 +29,7 @@ impl<'a, P: Packable + ?Sized> Writer<'a, P> for Vec<u8> {
         let len = run.len() as i64;
         leb128::write::signed(self, -len).unwrap();
         for value in run {
-            P::pack(&value, self);
+            P::pack(value, self);
         }
     }
     fn flush_run(&mut self, count: i64, value: Cow<'a, P>) {
@@ -107,7 +107,7 @@ pub trait EncoderState<'a, P: Packable + ?Sized + 'a>: Debug + Default + Clone {
 
 impl<'a> EncoderState<'a, bool> for BooleanState {
     fn is_empty(&self) -> bool {
-        self.value == false || self.count == 0
+        !self.value || self.count == 0
     }
 
     fn append_chunk<W: Writer<'a, bool>>(&mut self, writer: &mut W, run: Run<'a, bool>) -> usize {
@@ -115,7 +115,7 @@ impl<'a> EncoderState<'a, bool> for BooleanState {
         if self.value == item {
             self.count += run.count;
         } else {
-            if self.count > 0 || self.flushed == false {
+            if self.count > 0 || !self.flushed {
                 writer.flush_bool_run(self.count, self.value);
                 self.flushed = true;
             }
@@ -209,7 +209,7 @@ impl<'a, P: Packable + ?Sized> EncoderState<'a, P> for RleState<'a, P> {
         match self {
             RleState::Empty => true,
             RleState::LoneValue(None) => true,
-            RleState::Run { value, .. } if value == &None => true,
+            RleState::Run { value, .. } if value.is_none() => true,
             _ => false,
         }
     }
@@ -451,7 +451,7 @@ where
         F: Fn(&C::Item) -> Option<&'b C::Item>,
         C::Item: 'b,
     {
-        let range = if !self.is_empty() {
+        if !self.is_empty() {
             self.state.flush(&mut self.writer);
             let start = out.len();
             self.writer.write_and_remap(out, f);
@@ -459,8 +459,7 @@ where
             start..end
         } else {
             out.len()..out.len()
-        };
-        range
+        }
     }
 
     pub fn into_column_data(self) -> ColumnData<C> {

@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
-use std::num::NonZeroU64;
 
 use packer::{ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 
@@ -9,10 +8,7 @@ use crate::{
     clock::{Clock, ClockData},
     columnar::column_range::{DepsRange, ValueRange},
     error::AutomergeError,
-    op_set2::{
-        change::{ChangeMetadata, ExtraChangeMetadata},
-        ActorCursor, ActorIdx, MetaCursor, ValueMeta,
-    },
+    op_set2::{change::ExtraChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
     storage::{Columns, DocChangeColumns},
     types::OpId,
     Change, ChangeHash,
@@ -101,7 +97,7 @@ impl ChangeGraph {
         self.seq_index
             .iter()
             .enumerate()
-            .filter_map(|(i, v)| if v.len() > 0 { Some(i) } else { None })
+            .filter_map(|(i, v)| if !v.is_empty() { Some(i) } else { None })
     }
 
     pub(crate) fn heads(&self) -> impl Iterator<Item = ChangeHash> + '_ {
@@ -133,7 +129,7 @@ impl ChangeGraph {
                 node.actor_index.0 -= 1;
             }
         }
-        assert!(self.seq_index[idx].len() == 0);
+        assert!(self.seq_index[idx].is_empty());
         self.seq_index.remove(idx);
         for clock in &mut self.clock_cache {
             clock.remove_actor(idx)
@@ -171,16 +167,8 @@ impl ChangeGraph {
             .unwrap_or(0)
     }
 
-    pub(crate) fn encode_dry_run(&self, out: &mut Vec<u8>) -> DocChangeColumns {
-        let start = out.len();
-        let result = self.encode(out);
-        out.truncate(start);
-        assert_eq!(out.len(), start);
-        result
-    }
-
     fn deps_iter(&self) -> impl Iterator<Item = NodeIdx> + '_ {
-        self.node_ids().map(|n| self.parents(n)).flatten()
+        self.node_ids().flat_map(|n| self.parents(n))
     }
 
     fn num_deps(&self) -> impl Iterator<Item = usize> + '_ {
@@ -273,48 +261,7 @@ impl ChangeGraph {
         self.nodes_by_hash.contains_key(hash)
     }
 
-    pub(crate) fn get_max_op(&self, index: usize) -> Option<u64> {
-        self.nodes.get(index).map(|n| n.max_op)
-    }
-
-    pub(crate) fn get_metadata_for_hash(
-        &self,
-        hash: &ChangeHash,
-    ) -> Option<(ChangeMetadata<'_>, Vec<ChangeHash>)> {
-        let index = self.hash_to_index(hash)?;
-        self.get_metadata(index)
-    }
-
-    pub(crate) fn get_metadata(
-        &self,
-        index: usize,
-    ) -> Option<(ChangeMetadata<'_>, Vec<ChangeHash>)> {
-        let node = self.nodes.get(index)?;
-        let actor = node.actor_index.into();
-        let timestamp = node.timestamp;
-        let message = node.message.as_deref().map(|n| Cow::Borrowed(n));
-        let extra_bytes = Cow::Borrowed(node.extra_bytes.as_slice());
-        let deps = self
-            .parents(NodeIdx(index as u32))
-            .map(|p| self.nodes[p.0 as usize].hash_idx)
-            .map(|h| self.hashes[h.0 as usize])
-            .collect();
-        let start_op = NonZeroU64::new(node.start_op())?;
-        let seq = node.seq;
-        Some((
-            ChangeMetadata {
-                actor,
-                seq,
-                start_op,
-                timestamp,
-                message,
-                extra_bytes,
-            },
-            deps,
-        ))
-    }
-
-    pub(crate) fn get_metadata2<I>(
+    pub(crate) fn get_metadata<I>(
         &self,
         hashes: I,
     ) -> Result<(Vec<ExtraChangeMetadata<'_>>, usize), MissingDep>
@@ -346,7 +293,7 @@ impl ChangeGraph {
                 let actor = node.actor_index.into();
                 let timestamp = node.timestamp;
                 let max_op = node.max_op;
-                let message = node.message.as_deref().map(|n| Cow::Borrowed(n));
+                let message = node.message.as_deref().map(Cow::Borrowed);
                 let extra = Cow::Borrowed(node.extra_bytes.as_slice());
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
                 num_deps += deps.len();
@@ -403,17 +350,10 @@ impl ChangeGraph {
         self.seq_index
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
-            //.and_then(|&i| self.change_graph.get_hash(i).copied())
             .and_then(|i| self.nodes.get(i.0 as usize))
             .and_then(|n| self.hashes.get(n.hash_idx.0 as usize))
             .ok_or(AutomergeError::InvalidSeq(seq))
             .copied()
-    }
-
-    pub(crate) fn get_hash(&self, index: usize) -> Option<&ChangeHash> {
-        self.nodes
-            .get(index)
-            .and_then(|n| self.hashes.get(n.hash_idx.0 as usize))
     }
 
     fn update_heads(&mut self, change: &Change) {
@@ -604,54 +544,39 @@ impl ChangeGraph {
     }
 }
 
-pub(crate) struct DepIter<'a> {
-    graph: &'a ChangeGraph,
-    parent: Option<EdgeIdx>,
-}
-
-impl<'a> Iterator for DepIter<'a> {
-    type Item = ChangeHash;
-    fn next(&mut self) -> Option<ChangeHash> {
-        let edge = self.graph.edges.get(self.parent?.0 as usize)?;
-        self.parent = edge.next;
-        let node = self.graph.nodes.get(edge.target.0 as usize)?;
-        self.graph.hashes.get(node.hash_idx.0 as usize).cloned()
-    }
-}
-
 fn as_num_deps(num: usize) -> Option<Cow<'static, u64>> {
     Some(Cow::Owned(num as u64))
 }
 
-fn as_message<'a>(c: &'a ChangeNode) -> Option<Cow<'a, str>> {
+fn as_message(c: &ChangeNode) -> Option<Cow<'_, str>> {
     c.message.as_deref().map(Cow::Borrowed)
 }
 
-fn as_seq<'a>(c: &'a ChangeNode) -> Option<Cow<'a, i64>> {
+fn as_seq(c: &ChangeNode) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(c.seq as i64))
 }
 
-fn as_actor<'a>(c: &'a ChangeNode) -> Option<Cow<'a, ActorIdx>> {
+fn as_actor(c: &ChangeNode) -> Option<Cow<'_, ActorIdx>> {
     Some(Cow::Owned(c.actor_index))
 }
 
-fn as_max_op<'a>(c: &'a ChangeNode) -> Option<Cow<'a, i64>> {
+fn as_max_op(c: &ChangeNode) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(c.max_op as i64))
 }
 
-fn as_timestamp<'a>(c: &'a ChangeNode) -> Option<Cow<'a, i64>> {
-    Some(Cow::Owned(c.timestamp as i64))
+fn as_timestamp(c: &ChangeNode) -> Option<Cow<'_, i64>> {
+    Some(Cow::Owned(c.timestamp))
 }
 
 fn as_deps(n: NodeIdx) -> Option<Cow<'static, i64>> {
     Some(Cow::Owned(n.0 as i64))
 }
 
-fn as_meta<'a>(c: &'a ChangeNode) -> Option<Cow<'a, ValueMeta>> {
+fn as_meta(c: &ChangeNode) -> Option<Cow<'_, ValueMeta>> {
     Some(Cow::Owned(ValueMeta::from(c.extra_bytes.as_slice())))
 }
 
-fn as_extra_bytes<'a>(c: &'a ChangeNode) -> Option<Cow<'a, [u8]>> {
+fn as_extra_bytes(c: &ChangeNode) -> Option<Cow<'_, [u8]>> {
     Some(Cow::Borrowed(c.extra_bytes.as_slice()))
 }
 
@@ -663,15 +588,12 @@ pub struct MissingDep(ChangeHash);
 mod tests {
     use std::{
         collections::BTreeMap,
-        num::NonZeroU64,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use crate::{
         clock::ClockData,
-        op_set2::{Key, OpBuilder2, OpSet},
-        storage::change::ChangeBuilder,
-        storage::convert::ob_as_actor_id,
+        op_set2::{change::build_change, KeyRef, OpBuilder2, OpSet},
         types::{ObjId, ObjMeta, ObjType, OpId},
         ActorId,
     };
@@ -725,6 +647,7 @@ mod tests {
     struct TestGraphBuilder {
         actors: Vec<ActorId>,
         changes: Vec<Change>,
+        graph: ChangeGraph,
         seqs_by_actor: BTreeMap<ActorId, u64>,
     }
 
@@ -733,6 +656,7 @@ mod tests {
             TestGraphBuilder {
                 actors: Vec::new(),
                 changes: Vec::new(),
+                graph: ChangeGraph::new(),
                 seqs_by_actor: BTreeMap::new(),
             }
         }
@@ -784,7 +708,7 @@ mod tests {
                     index: 0,
                     id: OpId::new(start_op + opnum as u64, actor_idx),
                     action: crate::OpType::Put("value".into()),
-                    key: Key::Map("key".into()),
+                    key: KeyRef::Map(Cow::Owned("key".into())),
                     pred: vec![],
                     insert: false,
                 })
@@ -795,18 +719,24 @@ mod tests {
                 .unwrap()
                 .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
-            let change = Change::new(
-                ChangeBuilder::new()
-                    .with_dependencies(parents.to_vec())
-                    .with_start_op(NonZeroU64::new(start_op).unwrap())
-                    .with_actor(actor.clone())
-                    .with_seq(*seq)
-                    .with_timestamp(timestamp)
-                    .build(ops.iter().map(|o| ob_as_actor_id(&osd, o)))
-                    .unwrap(),
-            );
+            let meta = ExtraChangeMetadata {
+                actor: actor_idx,
+                builder: 0,
+                deps: parents
+                    .iter()
+                    .map(|h| self.graph.hash_to_index(h).unwrap() as u64)
+                    .collect(),
+                seq: *seq,
+                max_op: start_op + ops.len() as u64 - 1,
+                start_op,
+                timestamp,
+                message: None,
+                extra: Cow::Owned(vec![]),
+            };
+            let change = Change::new(build_change(&ops, &meta, &self.graph, &osd.actors));
             *seq = seq.checked_add(1).unwrap();
             let hash = change.hash();
+            self.graph.add_change(&change, actor_idx).unwrap();
             self.changes.push(change);
             hash
         }
@@ -814,7 +744,7 @@ mod tests {
         fn build(&self) -> ChangeGraph {
             let mut graph = ChangeGraph::new();
             for change in &self.changes {
-                let actor_idx = self.index(change.actor_id()).into();
+                let actor_idx = self.index(change.actor_id());
                 graph.add_change(change, actor_idx).unwrap();
             }
             graph

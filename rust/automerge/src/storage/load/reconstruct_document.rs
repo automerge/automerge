@@ -1,7 +1,3 @@
-//use super::change_collector::ChangeCollector;
-//use super::change_collector::{ChangeCollector2 as ChangeCollector};
-//use super::change_collector::ChangeCollector3 as ChangeCollector;
-//use super::change_collector::ChangeCollector4 as ChangeCollector;
 use crate::change_graph::ChangeGraph;
 use crate::op_set2::change::{ChangeCollector, CollectedChanges};
 use crate::storage::document::ReadChangeError;
@@ -10,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::{
     change::Change,
     op_set2::{OpSet, PackError, ReadOpError},
-    storage::{change::Verified, Change as StoredChange, Document},
+    storage::Document,
     types::ChangeHash,
 };
 
@@ -33,7 +29,7 @@ pub(crate) enum Error {
     #[error(transparent)]
     ReadOpErr(#[from] ReadOpError),
     #[error(transparent)]
-    ReadChangeError(#[from] ReadChangeError),
+    ReadChange(#[from] ReadChangeError),
 }
 
 pub(crate) struct MismatchedHeads {
@@ -64,7 +60,7 @@ pub(crate) fn reconstruct_opset<'a>(
     mode: VerificationMode,
 ) -> Result<ReconOpSet, Error> {
     let mut op_set = OpSet::new(doc)?;
-    let mut change_collector = ChangeCollector::new(doc.iter_changes(), &op_set)?;
+    let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut iter = op_set.iter();
     let mut index_builder = op_set.index_builder();
 

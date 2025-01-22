@@ -1,9 +1,7 @@
-use super::op_set::{MarkIndexValue, OpLike, OpSet};
+use super::op_set::{MarkIndexValue, OpSet};
 use super::packer::{ColumnDataIter, DeltaCursor, IntCursor};
-use super::types::{Action, ActorCursor, Key, KeyRef, OpType, PropRef, ScalarValue};
+use super::types::{Action, ActorCursor, ActorIdx, KeyRef, OpType, PropRef, ScalarValue};
 use super::{Value, ValueMeta};
-
-use crate::convert;
 
 use crate::error::AutomergeError;
 use crate::exid::ExId;
@@ -19,7 +17,7 @@ use std::cmp::Ordering;
 pub(crate) struct ChangeOp {
     pub(crate) id: OpId,
     pub(crate) obj: ObjId,
-    pub(crate) key: Key,
+    pub(crate) key: KeyRef<'static>,
     pub(crate) insert: bool,
     pub(crate) action: u64,
     pub(crate) val: types::ScalarValue,
@@ -54,7 +52,7 @@ pub(crate) struct OpBuilder2 {
     pub(crate) obj: ObjMeta,
     pub(crate) pos: usize,
     pub(crate) index: usize,
-    pub(crate) key: Key,
+    pub(crate) key: KeyRef<'static>,
     pub(crate) action: types::OpType,
     pub(crate) insert: bool,
     pub(crate) pred: Vec<OpId>,
@@ -82,7 +80,12 @@ impl OpBuilder2 {
         }
     }
 
-    pub(crate) fn del<I: Iterator<Item = OpId>>(id: OpId, obj: ObjMeta, key: Key, pred: I) -> Self {
+    pub(crate) fn del<I: Iterator<Item = OpId>>(
+        id: OpId,
+        obj: ObjMeta,
+        key: KeyRef<'static>,
+        pred: I,
+    ) -> Self {
         OpBuilder2 {
             id,
             obj,
@@ -106,7 +109,7 @@ impl OpBuilder2 {
     }
 
     pub(crate) fn prop(&self) -> PropRef<'_> {
-        if let Key::Map(s) = &self.key {
+        if let KeyRef::Map(s) = &self.key {
             PropRef::Map(s)
         } else {
             PropRef::Seq(self.index)
@@ -144,7 +147,7 @@ impl OpBuilder2 {
     }
 
     pub(crate) fn is_list_op(&self) -> bool {
-        self.elemid().is_some()
+        self.key().elemid().is_some()
     }
 
     pub(crate) fn obj(&self) -> ObjMeta {
@@ -163,18 +166,26 @@ impl OpLike for OpBuilder2 {
         self.action.action()
     }
 
-    fn elemid(&self) -> Option<ElemId> {
+    fn key(&self) -> KeyRef<'_> {
         match &self.key {
-            Key::Seq(e) => Some(*e),
-            _ => None,
+            KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
+            _ => self.key.clone(),
         }
     }
-    fn map_key(&self) -> Option<&str> {
-        match &self.key {
-            Key::Map(s) => Some(s),
-            _ => None,
+    /*
+        fn elemid(&self) -> Option<ElemId> {
+            match &self.key {
+                KeyRef::Seq(e) => Some(*e),
+                _ => None,
+            }
         }
-    }
+        fn map_key(&self) -> Option<&str> {
+            match &self.key {
+                KeyRef::Map(s) => Some(s),
+                _ => None,
+            }
+        }
+    */
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.action.to_raw()
@@ -185,8 +196,8 @@ impl OpLike for OpBuilder2 {
     fn insert(&self) -> bool {
         self.insert
     }
-    fn mark_name(&self) -> Option<&str> {
-        self.action.mark_name()
+    fn mark_name(&self) -> Option<Cow<'_, str>> {
+        self.action.mark_name().map(Cow::Borrowed)
     }
     fn expand(&self) -> bool {
         self.action.expand()
@@ -224,14 +235,8 @@ impl<'a> OpLike for Op<'a> {
         self.action
     }
 
-    fn elemid(&self) -> Option<ElemId> {
-        self.key.elemid()
-    }
-    fn map_key(&self) -> Option<&str> {
-        match &self.key {
-            KeyRef::Map(s) => Some(s.as_ref()),
-            KeyRef::Seq(_) => None,
-        }
+    fn key(&self) -> KeyRef<'_> {
+        self.key.clone()
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
@@ -249,8 +254,8 @@ impl<'a> OpLike for Op<'a> {
     fn expand(&self) -> bool {
         self.expand
     }
-    fn mark_name(&self) -> Option<&str> {
-        self.mark_name.as_deref()
+    fn mark_name(&self) -> Option<Cow<'_, str>> {
+        self.mark_name.clone()
     }
 }
 
@@ -520,19 +525,6 @@ impl<'a> Op<'a> {
         self.action == Action::Mark
     }
 
-    pub(crate) fn build<I: Iterator<Item = OpId>>(&self, pred: I) -> OpBuilder2 {
-        OpBuilder2 {
-            id: self.id,
-            obj: self.obj.into(),
-            pos: 0,
-            index: 0,
-            action: self.op_type().into_owned(),
-            key: self.key.clone().into_owned(),
-            insert: self.insert,
-            pred: pred.collect(),
-        }
-    }
-
     pub(crate) fn build3(self, pred: Vec<OpId>) -> OpBuilder3<'a> {
         OpBuilder3 {
             id: self.id,
@@ -589,3 +581,194 @@ impl<'a> std::hash::Hash for Op<'a> {
 }
 
 impl<'a> Eq for Op<'a> {}
+
+pub(crate) trait AsChangeOp {
+    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>>;
+    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>>;
+    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>>;
+    fn key_ctr(op: &Self) -> Option<Cow<'_, i64>>;
+    fn key_str(op: &Self) -> Option<Cow<'_, str>>;
+    fn insert(op: &Self) -> Option<Cow<'_, bool>>;
+    fn action(op: &Self) -> Option<Cow<'_, Action>>;
+    fn value(op: &Self) -> Option<Cow<'_, [u8]>>;
+    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>>;
+    fn pred_count(op: &Self) -> Option<Cow<'_, u64>>;
+    fn expand(op: &Self) -> Option<Cow<'_, bool>>;
+    fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
+    fn op_id_ctr(op: &Self) -> u64;
+    fn size_estimate(op: &Self) -> usize;
+    fn pred(op: &Self) -> &[OpId];
+
+    fn id_actor(id: &OpId) -> Option<Cow<'_, ActorIdx>> {
+        Some(Cow::Owned(id.actoridx()))
+    }
+
+    fn id_ctr(id: &OpId) -> Option<Cow<'_, i64>> {
+        Some(Cow::Owned(id.icounter()))
+    }
+}
+
+impl<T: AsChangeOp> AsChangeOp for Option<T> {
+    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        T::obj_actor(op.as_ref()?)
+    }
+    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
+        T::obj_ctr(op.as_ref()?)
+    }
+    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        T::key_actor(op.as_ref()?)
+    }
+    fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
+        T::key_ctr(op.as_ref()?)
+    }
+    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
+        T::key_str(op.as_ref()?)
+    }
+    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
+        T::insert(op.as_ref()?)
+    }
+    fn action(op: &Self) -> Option<Cow<'_, Action>> {
+        T::action(op.as_ref()?)
+    }
+    fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
+        T::value(op.as_ref()?)
+    }
+    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
+        T::value_meta(op.as_ref()?)
+    }
+    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
+        T::pred_count(op.as_ref()?)
+    }
+    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
+        T::expand(op.as_ref()?)
+    }
+    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
+        T::mark_name(op.as_ref()?)
+    }
+    fn op_id_ctr(op: &Self) -> u64 {
+        op.as_ref().map(|o| T::op_id_ctr(o)).unwrap_or(0)
+    }
+    fn pred(op: &Self) -> &[OpId] {
+        op.as_ref().map(T::pred).unwrap_or(&[])
+    }
+    fn size_estimate(op: &Self) -> usize {
+        op.as_ref().map(|o| T::size_estimate(o)).unwrap_or(0)
+    }
+}
+
+impl<'a> AsChangeOp for OpBuilder3<'a> {
+    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        op.obj.actor().map(Cow::Owned)
+    }
+
+    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
+        op.obj.counter().map(Cow::Owned)
+    }
+
+    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        op.key.actor().map(Cow::Owned)
+    }
+    fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
+        op.key.icounter().map(Cow::Owned)
+    }
+    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
+        op.key.key_str()
+    }
+    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
+        Some(Cow::Owned(op.insert))
+    }
+    fn action(op: &Self) -> Option<Cow<'_, Action>> {
+        Some(Cow::Owned(op.action))
+    }
+    fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
+        op.value.to_raw()
+    }
+    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
+        Some(Cow::Owned(ValueMeta::from(&op.value)))
+    }
+    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
+        Some(Cow::Owned(op.pred.len() as u64))
+    }
+    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
+        Some(Cow::Owned(op.expand))
+    }
+    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
+        op.mark_name.clone()
+    }
+    fn op_id_ctr(op: &Self) -> u64 {
+        op.id.counter()
+    }
+    fn pred(op: &Self) -> &[OpId] {
+        op.pred.as_slice()
+    }
+    fn size_estimate(op: &Self) -> usize {
+        // largest in our bestiary was 23
+        op.value.to_raw().map(|s| s.len()).unwrap_or(0) + 25
+    }
+}
+
+impl AsChangeOp for OpBuilder2 {
+    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        op.obj.id.actor().map(Cow::Owned)
+    }
+
+    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
+        op.obj.id.counter().map(Cow::Owned)
+    }
+
+    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
+        op.key.actor().map(Cow::Owned)
+    }
+    fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
+        op.key.icounter().map(Cow::Owned)
+    }
+    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
+        op.key.key_str()
+    }
+    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
+        Some(Cow::Owned(op.insert))
+    }
+    fn action(op: &Self) -> Option<Cow<'_, Action>> {
+        Some(Cow::Owned(op.action.action()))
+    }
+    fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
+        op.action.to_raw()
+    }
+    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
+        Some(Cow::Owned(ValueMeta::from(op.action.value().as_ref())))
+    }
+    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
+        Some(Cow::Owned(op.pred.len() as u64))
+    }
+    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
+        Some(Cow::Owned(op.action.expand()))
+    }
+    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
+        op.action.mark_name().map(Cow::Borrowed)
+    }
+    fn op_id_ctr(op: &Self) -> u64 {
+        op.id.counter()
+    }
+    fn pred(op: &Self) -> &[OpId] {
+        op.pred.as_slice()
+    }
+    fn size_estimate(op: &Self) -> usize {
+        op.action.to_raw().map(|s| s.len()).unwrap_or(0) + 25
+    }
+}
+
+pub(super) trait OpLike: std::fmt::Debug {
+    fn id(&self) -> OpId;
+    fn obj(&self) -> ObjId;
+    fn action(&self) -> Action;
+    fn key(&self) -> KeyRef<'_>;
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
+    fn meta_value(&self) -> ValueMeta;
+    fn insert(&self) -> bool;
+    fn expand(&self) -> bool;
+    // allocation
+    fn succ(&self) -> Vec<OpId> {
+        vec![]
+    }
+    fn mark_name(&self) -> Option<Cow<'_, str>>;
+}

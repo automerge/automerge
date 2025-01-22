@@ -1255,7 +1255,7 @@ pub(crate) mod tests {
         );
         assert_eq!(*tree.weight().unwrap(), MAX * 10 + 90 + 990);
 
-        let result = tree.iter().map(|t| usize::alloc(t)).sum::<usize>();
+        let result = tree.iter().map(usize::alloc).sum::<usize>();
         assert_eq!(tree.weight(), Some(&result));
     }
 

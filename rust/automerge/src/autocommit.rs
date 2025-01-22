@@ -464,7 +464,7 @@ impl AutoCommit {
     }
 
     /// Get changes in `other` that are not in `self`
-    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<Change> {
+    pub fn get_changes_added(&mut self, other: &mut Self) -> Vec<Change> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)

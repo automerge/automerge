@@ -100,7 +100,7 @@ impl<'a> Change<'a, Unverified> {
     pub(crate) fn parse_following_header(
         input: parse::Input<'a>,
         header: Header,
-    ) -> parse::ParseResult<'_, Change<'a, Unverified>, ParseError> {
+    ) -> parse::ParseResult<'a, Change<'a, Unverified>, ParseError> {
         let (i, deps) = parse::length_prefixed(parse::change_hash)(input)?;
         let (i, actor) = parse::actor_id(i)?;
         let (i, seq) = parse::leb128_u64(i)?;

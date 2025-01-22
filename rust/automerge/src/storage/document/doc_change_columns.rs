@@ -3,7 +3,6 @@ use std::{borrow::Cow, convert::TryFrom};
 use packer::{ColumnCursor, CursorIter, StrCursor};
 
 use crate::{
-    change_graph::ChangeGraph,
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},

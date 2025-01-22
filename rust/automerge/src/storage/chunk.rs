@@ -289,7 +289,7 @@ fn hash(typ: ChunkType, data: &[u8]) -> ChangeHash {
     leb128::write::unsigned(&mut header, data.len() as u64).unwrap();
     let mut hasher = Sha256::new();
     hasher.update(&header);
-    hasher.update(&data);
+    hasher.update(data);
     let hash_result = hasher.finalize();
     let array: [u8; 32] = hash_result.into();
     ChangeHash(array)

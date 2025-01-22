@@ -87,6 +87,20 @@ impl<C: ColumnCursor> ColumnData<C> {
         encoder.into_column_data()
     }
 
+    pub fn remap<F>(&mut self, f: F) 
+    where
+        F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
+    {
+        // TODO this could be much faster
+        // if we did it a run at a time instead of an item at a time
+        // but delta runs are special and don't remap easily
+        let mut encoder = Encoder::new();
+        for item in self.iter() {
+            encoder.append_item(f(item));
+        }
+        *self = encoder.into_column_data();
+    }
+
     pub fn write_unless_empty(&self, out: &mut Vec<u8>) -> Range<usize> {
         if self.is_empty() {
             out.len()..out.len()
@@ -625,6 +639,15 @@ impl<C: ColumnCursor> ColumnData<C> {
             panic!()
         }
         acc
+    }
+
+    pub fn fill_if_empty(&mut self, len: usize) -> bool {
+        if self.len == 0 && len > 0 {
+          *self = Self::init_empty(len);
+          true
+        } else {
+          false
+        }
     }
 
     pub fn init_empty(len: usize) -> Self {
@@ -1456,8 +1479,8 @@ pub(crate) mod tests {
         let mut rle_col = ColumnData::<RleCursor<16, u64>>::new();
         rle_col.splice(0, 0, data_u64.clone());
 
-        for i in 0..data_u64.len() {
-            if let Some(val) = &data_u64[i] {
+        for (i, val) in data_u64.iter().enumerate() {
+            if let Some(val) = val {
                 assert!(rle_col.find_by_value(*val).contains(&i));
             }
         }
@@ -1465,8 +1488,8 @@ pub(crate) mod tests {
         let mut delta_col = ColumnData::<DeltaCursorInternal<16>>::new();
         delta_col.splice(0, 0, data_i64.clone());
 
-        for i in 0..data_i64.len() {
-            if let Some(val) = &data_i64[i] {
+        for (i, val) in data_i64.iter().enumerate() {
+            if let Some(val) = val {
                 assert!(delta_col.find_by_value(*val).contains(&i));
             }
         }

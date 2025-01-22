@@ -171,7 +171,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Self::empty()
     }
 
-    fn iter<'a>(slab: &'a [u8]) -> CursorIter<'a, Self> {
+    fn iter(slab: &[u8]) -> CursorIter<'_, Self> {
         CursorIter {
             slab,
             cursor: Self::empty(),

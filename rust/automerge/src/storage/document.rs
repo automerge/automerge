@@ -5,7 +5,7 @@ use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 use crate::change_graph::ChangeGraph;
 use crate::op_set2::OpSet;
 use crate::storage::columns::compression::Uncompressed;
-use crate::{convert, ActorId, ChangeHash};
+use crate::{ActorId, ChangeHash};
 
 mod doc_op_columns;
 pub(crate) use doc_op_columns::DocOpColumns;
@@ -317,7 +317,7 @@ impl<'a> Document<'a> {
 
     pub(crate) fn iter_changes(
         &'a self,
-    ) -> impl Iterator<Item = Result<ChangeMetadata<'_>, ReadChangeError>> + Clone + 'a {
+    ) -> impl Iterator<Item = Result<ChangeMetadata<'a>, ReadChangeError>> + Clone + 'a {
         self.change_metadata
             .iter(&self.bytes[self.change_bytes.clone()])
     }

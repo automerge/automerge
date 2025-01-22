@@ -160,10 +160,10 @@ impl From<am::iter::MapRange<'static, RangeTo<String>>> for AMresult {
     }
 }
 
-impl From<Option<&am::Change>> for AMresult {
-    fn from(maybe: Option<&am::Change>) -> Self {
+impl From<Option<am::Change>> for AMresult {
+    fn from(maybe: Option<am::Change>) -> Self {
         Self::item(match maybe {
-            Some(change) => change.clone().into(),
+            Some(change) => change.into(),
             None => Default::default(),
         })
     }
@@ -451,14 +451,9 @@ impl From<&[am::Change]> for AMresult {
     }
 }
 
-impl From<Vec<&am::Change>> for AMresult {
-    fn from(changes: Vec<&am::Change>) -> Self {
-        Self::items(
-            changes
-                .into_iter()
-                .map(|change| change.clone().into())
-                .collect(),
-        )
+impl From<Vec<am::Change>> for AMresult {
+    fn from(changes: Vec<am::Change>) -> Self {
+        Self::items(changes.into_iter().map(|change| change.into()).collect())
     }
 }
 

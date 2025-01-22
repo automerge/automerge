@@ -1,6 +1,5 @@
 use automerge::ObjType;
-use automerge::{ReadDoc, transaction::Transactable, AutoCommit, AutomergeError, ROOT};
-use serde_json::Value;
+use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ReadDoc, ROOT};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {

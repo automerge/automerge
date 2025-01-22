@@ -3,9 +3,7 @@ use crate::cursor::Cursor;
 use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine, RichTextQueryState};
 use crate::patches::TextRepresentation;
-use crate::storage::{
-    columns::compression, columns::ColumnId, ColumnSpec, Document, RawColumn, RawColumns,
-};
+use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
 use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
@@ -13,20 +11,15 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
-use super::columns::Column;
-use super::op::{ChangeOp, Op, OpBuilder2, SuccInsert};
-use super::packer::{
-    BooleanCursor, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, PackError, RawCursor,
-    RawReader, Run, SlabWeight, StrCursor, UIntCursor,
-};
-use super::types::{
-    Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue,
-};
-use super::{Key, MetaCursor, ValueMeta};
+use super::op::{ChangeOp, Op, OpBuilder2, OpLike, SuccInsert};
+use super::packer::{ColumnData, ColumnDataIter, IntCursor, PackError, Run, UIntCursor};
+
+use super::columns::Columns;
+
+use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
@@ -124,29 +117,34 @@ impl OpSet {
         self.mark_index = indexes.mark;
     }
 
-    pub(crate) fn insert(&mut self, op: &OpBuilder2) {
-        self.cols.insert(op.pos, op);
+    #[inline(never)]
+    fn insert_mark_index(&mut self, op: &OpBuilder2) {
         self.mark_index.splice(op.pos, 0, vec![op.mark_index()]);
+    }
+
+    #[inline(never)]
+    fn insert_text_index(&mut self, op: &OpBuilder2) {
         if op.succ().is_empty() {
             let width = op.width(ListEncoding::Text) as u64;
             self.text_index.splice(op.pos, 0, [width]);
         } else {
             self.text_index.splice(op.pos, 0, [0]);
         }
+    }
+
+    #[inline(never)]
+    pub(crate) fn insert(&mut self, op: &OpBuilder2) {
+        self.cols.insert(op.pos, op);
+        self.insert_mark_index(op);
+        self.insert_text_index(op);
         self.len += 1;
-        self.validate()
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {
         for i in op_pos.iter().rev() {
-            let succ_num = self.cols.get_group_mut(SUCC_COUNT_COL_SPEC);
-            succ_num.splice(i.pos, 1, [i.len + 1]);
-
-            let succ_actor = self.cols.get_actor_mut(SUCC_ACTOR_COL_SPEC);
-            succ_actor.splice(i.sub_pos, 0, [id.actoridx()]);
-
-            let succ_counter = self.cols.get_delta_mut(SUCC_COUNTER_COL_SPEC);
-            succ_counter.splice(i.sub_pos, 0, [id.counter() as i64]);
+            self.cols.succ_count.splice(i.pos, 1, [i.len + 1]);
+            self.cols.succ_actor.splice(i.sub_pos, 0, [id.actoridx()]);
+            self.cols.succ_ctr.splice(i.sub_pos, 0, [id.icounter()]);
 
             self.inc_index.splice(i.sub_pos, 0, [i.inc]);
 
@@ -366,32 +364,12 @@ impl OpSet {
         }
     }
 
-    fn value_meta_col(&self) -> &ColumnData<MetaCursor> {
-        match self.cols.0.get(&VALUE_META_COL_SPEC) {
-            Some(Column::ValueMeta(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn value_col(&self) -> &ColumnData<RawCursor> {
-        match self.cols.0.get(&VALUE_COL_SPEC) {
-            Some(Column::Value(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn mark_name_col(&self) -> &ColumnData<StrCursor> {
-        match self.cols.0.get(&MARK_NAME_COL_SPEC) {
-            Some(Column::Str(c)) => c,
-            _ => panic!(),
-        }
-    }
-
     fn get_value(&self, pos: usize) -> Option<ScalarValue<'_>> {
-        let meta = self.value_meta_col().get_with_acc(pos)?;
+        let meta = self.cols.value_meta.get_with_acc(pos)?;
         let length = meta.item.as_ref()?.length();
         let raw = if length > 0 {
-            self.value_col()
+            self.cols
+                .value
                 .raw_reader(meta.acc.as_usize())
                 .read_next(length)
                 .ok()?
@@ -402,7 +380,7 @@ impl OpSet {
     }
 
     fn get_mark_name(&self, pos: usize) -> Option<Cow<'_, str>> {
-        self.mark_name_col().get(pos).flatten()
+        self.cols.mark_name.get(pos).flatten()
     }
 
     fn get_rich_text_at(&self, pos: usize, clock: Option<&Clock>) -> RichTextQueryState<'_> {
@@ -480,8 +458,8 @@ impl OpSet {
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
-        let counters = self.cols.get_delta_col(ID_COUNTER_COL_SPEC);
-        let actors = self.cols.get_actor_col(ID_ACTOR_COL_SPEC);
+        let counters = &self.cols.id_ctr;
+        let actors = &self.cols.id_actor;
         counters
             .find_by_value(id.counter())
             .into_iter()
@@ -726,27 +704,9 @@ impl OpSet {
         Cursor::new(id, self)
     }
 
-    fn get_obj_ctr(&self) -> ColumnDataIter<'_, UIntCursor> {
-        self.cols.get_integer(OBJ_ID_COUNTER_COL_SPEC)
-    }
-
-    fn get_obj_actor(&self) -> ColumnDataIter<'_, ActorCursor> {
-        self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC)
-    }
-
-    fn validate(&self) {
-        let mut ctr = self.get_obj_ctr();
-        let mut last = 0;
-        while let Some(Run { value, .. }) = ctr.next_run() {
-            let value = value.as_deref().copied().unwrap_or(0);
-            assert!(last <= value);
-            last = value;
-        }
-    }
-
     fn iter_obj_ids(&self) -> IterObjIds<'_> {
-        let mut ctr = self.get_obj_ctr();
-        let mut actor = self.get_obj_actor();
+        let mut ctr = self.cols.obj_ctr.iter();
+        let mut actor = self.cols.obj_actor.iter();
         let next_ctr = ctr.next_run();
         let next_actor = actor.next_run();
         let pos = 0;
@@ -812,10 +772,7 @@ impl OpSet {
             Some(ObjType::Map)
         } else {
             let pos = self.get_op_id_pos(obj.0)?;
-            let action = *self
-                .cols
-                .get_action_range(ACTION_COL_SPEC, &(pos..(pos + 1)))
-                .next()??;
+            let action = *self.cols.action.iter_range(pos..(pos + 1)).next()??;
             action.try_into().ok()
         }
     }
@@ -826,13 +783,13 @@ impl OpSet {
         encoding: ListEncoding,
     ) -> FoundOpWithPatchLog<'a> {
         match &new_op.key {
-            Key::Seq(e) => {
+            KeyRef::Seq(e) => {
                 let r =
                     self.seek_list_op(&new_op.obj, *e, new_op.id, new_op.insert, encoding, None);
                 self.found_op_with_patch_log(new_op, r.ops, r.pos, r.index, r.marks)
             }
-            Key::Map(s) => {
-                let iter = self.iter_prop(&new_op.obj, s);
+            KeyRef::Map(s) => {
+                let iter = self.iter_prop(&new_op.obj, s.as_ref());
                 let mut pos = iter.end_pos();
                 let mut ops = vec![];
                 for mut o in iter {
@@ -942,22 +899,11 @@ impl OpSet {
     }
 
     fn from_parts(
-        cols: RawColumns<compression::Uncompressed>,
+        cols: RawColumns<Uncompressed>,
         data: Arc<Vec<u8>>,
         actors: Vec<ActorId>,
     ) -> Result<Self, PackError> {
-        let mut cols = Columns(
-            cols.iter()
-                .map(|c| {
-                    Ok((
-                        c.spec(),
-                        Column::external(c.spec(), data.clone(), c.data(), &actors)?,
-                    ))
-                })
-                .collect::<Result<_, PackError>>()?,
-        );
-
-        cols.init_missing();
+        let cols = Columns::load(cols.iter(), data, &actors)?;
 
         let len = cols.len();
 
@@ -973,99 +919,65 @@ impl OpSet {
         Ok(op_set)
     }
 
-    pub(crate) fn export(&self) -> (RawColumns<compression::Uncompressed>, Vec<u8>) {
-        let mut data = vec![]; // should be able to do with_capacity here
-        let mut raw = vec![];
-        for (spec, c) in self.cols.iter() {
-            if !c.is_empty() || (spec.id() == ColumnId::new(3) && self.len > 0) {
-                let range = c.write(&mut data);
-                if !range.is_empty() {
-                    raw.push(RawColumn::new(*spec, range));
-                }
-            }
-        }
-        (raw.into_iter().collect(), data)
+    pub(crate) fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {
+        self.cols.export()
     }
 
     #[inline(never)]
     fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(&obj.counter());
+        let range = self.cols.obj_ctr.iter().scope_to_value(&obj.counter());
         self.cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
+            .obj_actor
+            .iter_range(range)
             .scope_to_value(&obj.actor())
     }
 
     pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
-        /*
-                let range = self
-                    .cols
-                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                    .scope_to_value(&obj.counter());
-                let range = self
-                    .cols
-                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-                    .scope_to_value(&obj.actor());
-        */
         let range = self.scope_to_obj(obj);
         let range = self
             .cols
-            .get_str_range(KEY_STR_COL_SPEC, &range)
+            .key_str
+            .iter_range(range)
             .scope_to_value(&Some(prop));
         self.iter_range(&range)
     }
 
     pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a> {
-        let range = self
-            .cols
-            .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-            .scope_to_value(&obj.counter());
-        let range = self
-            .cols
-            .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-            .scope_to_value(&obj.actor());
+        let range = self.scope_to_obj(obj);
         self.iter_range(&range)
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value_meta = self.cols.get_value_meta_range(VALUE_META_COL_SPEC, range);
-        let value = self
-            .cols
-            .get_value_range(VALUE_COL_SPEC, value_meta.calculate_acc().as_usize());
+        let value_meta = self.cols.value_meta.iter_range(range.clone());
+        let value_advance = value_meta.calculate_acc().as_usize();
+        let value = self.cols.value.raw_reader(value_advance);
 
-        let succ_count = self.cols.get_group_range(SUCC_COUNT_COL_SPEC, range);
+        let succ_count = self.cols.succ_count.iter_range(range.clone());
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
-        let succ_actor = self.cols.get_actor_range(SUCC_ACTOR_COL_SPEC, &succ_range);
-        let succ_counter = self
-            .cols
-            .get_delta_integer_range(SUCC_COUNTER_COL_SPEC, &succ_range);
+        let succ_actor = self.cols.succ_actor.iter_range(succ_range.clone());
+        let succ_counter = self.cols.succ_ctr.iter_range(succ_range.clone());
+
         let inc_values = self.inc_index.iter_range(succ_range);
 
         OpIter {
             pos: range.start,
-            id_actor: self.cols.get_actor_range(ID_ACTOR_COL_SPEC, range),
-            id_counter: self
-                .cols
-                .get_delta_integer_range(ID_COUNTER_COL_SPEC, range),
-            obj_id_actor: self.cols.get_actor_range(OBJ_ID_ACTOR_COL_SPEC, range),
-            obj_id_counter: self.cols.get_integer_range(OBJ_ID_COUNTER_COL_SPEC, range),
-            key_actor: self.cols.get_actor_range(KEY_ACTOR_COL_SPEC, range),
-            key_counter: self
-                .cols
-                .get_delta_integer_range(KEY_COUNTER_COL_SPEC, range),
-            key_str: self.cols.get_str_range(KEY_STR_COL_SPEC, range),
+            id_actor: self.cols.id_actor.iter_range(range.clone()),
+            id_counter: self.cols.id_ctr.iter_range(range.clone()),
+            obj_id_actor: self.cols.obj_actor.iter_range(range.clone()),
+            obj_id_counter: self.cols.obj_ctr.iter_range(range.clone()),
+            key_actor: self.cols.key_actor.iter_range(range.clone()),
+            key_counter: self.cols.key_ctr.iter_range(range.clone()),
+            key_str: self.cols.key_str.iter_range(range.clone()),
             succ_count,
             succ_actor,
             succ_counter,
             inc_values,
-            insert: self.cols.get_boolean_range(INSERT_COL_SPEC, range),
-            action: self.cols.get_action_range(ACTION_COL_SPEC, range),
+            insert: self.cols.insert.iter_range(range.clone()),
+            action: self.cols.action.iter_range(range.clone()),
             value_meta,
             value,
-            mark_name: self.cols.get_str_range(MARK_NAME_COL_SPEC, range),
-            expand: self.cols.get_boolean_range(EXPAND_COL_SPEC, range),
+            mark_name: self.cols.mark_name.iter_range(range.clone()),
+            expand: self.cols.expand.iter_range(range.clone()),
             op_set: self,
         }
     }
@@ -1073,23 +985,23 @@ impl OpSet {
     pub(crate) fn iter(&self) -> OpIter<'_> {
         OpIter {
             pos: 0,
-            id_actor: self.cols.get_actor(ID_ACTOR_COL_SPEC),
-            id_counter: self.cols.get_delta_integer(ID_COUNTER_COL_SPEC),
-            obj_id_actor: self.cols.get_actor(OBJ_ID_ACTOR_COL_SPEC),
-            obj_id_counter: self.cols.get_integer(OBJ_ID_COUNTER_COL_SPEC),
-            key_actor: self.cols.get_actor(KEY_ACTOR_COL_SPEC),
-            key_counter: self.cols.get_delta_integer(KEY_COUNTER_COL_SPEC),
-            key_str: self.cols.get_str(KEY_STR_COL_SPEC),
-            succ_count: self.cols.get_group(SUCC_COUNT_COL_SPEC),
-            succ_actor: self.cols.get_actor(SUCC_ACTOR_COL_SPEC),
-            succ_counter: self.cols.get_delta_integer(SUCC_COUNTER_COL_SPEC),
+            id_actor: self.cols.id_actor.iter(),
+            id_counter: self.cols.id_ctr.iter(),
+            obj_id_actor: self.cols.obj_actor.iter(),
+            obj_id_counter: self.cols.obj_ctr.iter(),
+            key_actor: self.cols.key_actor.iter(),
+            key_counter: self.cols.key_ctr.iter(),
+            key_str: self.cols.key_str.iter(),
+            succ_count: self.cols.succ_count.iter(),
+            succ_actor: self.cols.succ_actor.iter(),
+            succ_counter: self.cols.succ_ctr.iter(),
             inc_values: self.inc_index.iter(),
-            insert: self.cols.get_boolean(INSERT_COL_SPEC),
-            action: self.cols.get_action(ACTION_COL_SPEC),
-            value_meta: self.cols.get_value_meta(VALUE_META_COL_SPEC),
-            value: self.cols.get_value(VALUE_COL_SPEC),
-            mark_name: self.cols.get_str(MARK_NAME_COL_SPEC),
-            expand: self.cols.get_boolean(EXPAND_COL_SPEC),
+            insert: self.cols.insert.iter(),
+            action: self.cols.action.iter(),
+            value_meta: self.cols.value_meta.iter(),
+            value: self.cols.value.raw_reader(0),
+            mark_name: self.cols.mark_name.iter(),
+            expand: self.cols.expand.iter(),
             op_set: self,
         }
     }
@@ -1256,8 +1168,8 @@ impl<'a> FoundOpWithPatchLog<'a> {
         }
 
         let key: Prop = match &op.key {
-            Key::Map(s) => Prop::from(s),
-            Key::Seq(_) => Prop::from(self.index),
+            KeyRef::Map(s) => Prop::from(s.as_ref()),
+            KeyRef::Seq(_) => Prop::from(self.index),
         };
 
         if op.is_delete() {
@@ -1334,116 +1246,281 @@ impl<'a> OpsFound<'a> {
     }
 }
 
+/*
 #[derive(Debug, Clone)]
-struct Columns(BTreeMap<ColumnSpec, Column>);
+struct Columns {
+    id_actor: ColumnData<ActorCursor>,
+    id_ctr: ColumnData<DeltaCursor>,
+    obj_actor: ColumnData<ActorCursor>,
+    obj_ctr: ColumnData<UIntCursor>,
+    key_actor: ColumnData<ActorCursor>,
+    key_ctr: ColumnData<DeltaCursor>,
+    key_str: ColumnData<StrCursor>,
+    succ_count: ColumnData<UIntCursor>,
+    succ_actor: ColumnData<ActorCursor>,
+    succ_ctr: ColumnData<DeltaCursor>,
+    insert: ColumnData<BooleanCursor>,
+    action: ColumnData<ActionCursor>,
+    value_meta: ColumnData<MetaCursor>,
+    value: ColumnData<RawCursor>,
+    mark_name: ColumnData<StrCursor>,
+    expand: ColumnData<BooleanCursor>,
+}
 
 impl Default for Columns {
     fn default() -> Self {
-        let mut btree = BTreeMap::new();
-        for spec in &ALL_COLUMN_SPECS {
-            let col = Column::new(*spec);
-            assert!(!col.slabs().is_empty());
-            btree.insert(*spec, col);
+        Self {
+            id_actor: ColumnData::new(),
+            id_ctr: ColumnData::new(),
+            obj_actor: ColumnData::new(),
+            obj_ctr: ColumnData::new(),
+            key_actor: ColumnData::new(),
+            key_ctr: ColumnData::new(),
+            key_str: ColumnData::new(),
+            succ_count: ColumnData::new(),
+            succ_actor: ColumnData::new(),
+            succ_ctr: ColumnData::new(),
+            insert: ColumnData::new(),
+            action: ColumnData::new(),
+            value_meta: ColumnData::new(),
+            value: ColumnData::new(),
+            mark_name: ColumnData::new(),
+            expand: ColumnData::new(),
         }
-        Self(btree)
-    }
-}
-
-pub(super) trait OpLike {
-    fn id(&self) -> OpId;
-    fn obj(&self) -> ObjId;
-    fn action(&self) -> Action;
-    fn map_key(&self) -> Option<&str>;
-    fn elemid(&self) -> Option<ElemId>;
-    fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
-    fn meta_value(&self) -> ValueMeta;
-    fn insert(&self) -> bool;
-    fn expand(&self) -> bool;
-    // allocation
-    fn succ(&self) -> Vec<OpId> {
-        vec![]
-    }
-    fn mark_name(&self) -> Option<&str>;
-}
-
-// TODO? add inc value to the succ column
-
-const NONE: &str = ".";
-
-fn fmt<T: std::fmt::Display + packer::Packable + ?Sized>(t: Option<Option<Cow<'_, T>>>) -> String {
-    match t {
-        None => NONE.to_owned(),
-        Some(None) => "-".to_owned(),
-        Some(Some(t)) => format!("{}", t.as_ref()).to_owned(),
     }
 }
 
 impl Columns {
-    // FIXME - this could be much much more efficient
-    fn rewrite_with_new_actor(&mut self, idx: usize) {
-        for col in self.0.values_mut() {
-            if let Column::Actor(col_data) = col {
-                // col_data.remap(|a| match a {
-                //   Some(ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
-                //   old => old,
-                // })
-                let new_ids = col_data
-                    .iter()
-                    .map(|a| match a.as_deref() {
-                        Some(&ActorIdx(id)) if id as usize >= idx => Some(ActorIdx(id + 1)),
-                        old => old.copied(),
-                    })
-                    .collect::<Vec<_>>();
-                let mut new_data = ColumnData::<ActorCursor>::new();
-                new_data.splice(0, 0, new_ids);
-                std::mem::swap(col_data, &mut new_data);
+    fn write_unless_empty<C: ColumnCursor>(
+        spec: &ColumnSpec,
+        c: &ColumnData<C>,
+        data: &mut Vec<u8>,
+    ) -> Option<RawColumn<Uncompressed>> {
+        if !c.is_empty() || spec.id() == ColumnId::new(3) {
+            let range = c.write(data);
+            if !range.is_empty() {
+                return Some(RawColumn::new(*spec, range));
             }
         }
+        None
+    }
+
+    fn export_column(
+        &self,
+        spec: &ColumnSpec,
+        data: &mut Vec<u8>,
+    ) -> Option<RawColumn<Uncompressed>> {
+        match *spec {
+            ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.id_actor, data),
+            ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.id_ctr, data),
+            OBJ_ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.obj_actor, data),
+            OBJ_ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.obj_ctr, data),
+            KEY_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.key_actor, data),
+            KEY_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.key_ctr, data),
+            KEY_STR_COL_SPEC => Self::write_unless_empty(spec, &self.key_str, data),
+            INSERT_COL_SPEC => Self::write_unless_empty(spec, &self.insert, data),
+            ACTION_COL_SPEC => Self::write_unless_empty(spec, &self.action, data),
+            MARK_NAME_COL_SPEC => Self::write_unless_empty(spec, &self.mark_name, data),
+            EXPAND_COL_SPEC => Self::write_unless_empty(spec, &self.expand, data),
+            SUCC_COUNT_COL_SPEC => Self::write_unless_empty(spec, &self.succ_count, data),
+            SUCC_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.succ_actor, data),
+            SUCC_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.succ_ctr, data),
+            VALUE_META_COL_SPEC => Self::write_unless_empty(spec, &self.value_meta, data),
+            VALUE_COL_SPEC => Self::write_unless_empty(spec, &self.value, data),
+            _ => None,
+        }
+    }
+
+    fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {
+        let mut data = vec![];
+
+        let mut cols = ALL_COLUMN_SPECS;
+        cols.sort();
+
+        let raw = cols
+            .iter()
+            .filter_map(|spec| self.export_column(spec, &mut data))
+            .collect();
+
+        (raw, data)
+    }
+
+    fn load_column<C: ColumnCursor>(
+        spec: ColumnSpec,
+        cols: &BTreeMap<ColumnSpec, Range<usize>>,
+        data: &Arc<Vec<u8>>,
+        m: &ScanMeta,
+        len: usize,
+    ) -> Result<ColumnData<C>, PackError> {
+        if let Some(range) = cols.get(&spec) {
+            let column = ColumnData::external(data.clone(), range.clone(), m)?;
+            /*
+                        println!(
+                            "spec={:?} range={:?} len={:?} column_len={:?}",
+                            spec, range, len, column.len
+                        );
+                        println!("::{:?}", &data[range.clone()]);
+                        println!("::{:?}", column.iter().collect::<Vec<_>>());
+                        assert!(column.len == len || len == 0);
+            */
+            Ok(column)
+        } else {
+            Ok(ColumnData::init_empty(len))
+        }
+    }
+
+    fn load<'a, I: Iterator<Item = &'a RawColumn<Uncompressed>>>(
+        iter: I,
+        data: Arc<Vec<u8>>,
+        actors: &[ActorId],
+    ) -> Result<Self, PackError> {
+        let m = ScanMeta {
+            actors: actors.len(),
+        };
+        let cols = iter.map(|c| (c.spec(), c.data())).collect();
+
+        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, &data, &m, 0)?;
+        let len = id_actor.len();
+
+        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
+        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
+        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
+        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
+        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
+        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, &data, &m, len)?;
+        let insert = Self::load_column(INSERT_COL_SPEC, &cols, &data, &m, len)?;
+        let action = Self::load_column(ACTION_COL_SPEC, &cols, &data, &m, len)?;
+        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, &data, &m, len)?;
+        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, &data, &m, len)?;
+
+        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, &data, &m, len)?;
+        let succ_len = succ_count.acc().as_usize();
+        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, &data, &m, succ_len)?;
+        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, &data, &m, succ_len)?;
+
+        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, &data, &m, len)?;
+        let value_len = value_meta.acc().as_usize();
+        let value = Self::load_column(VALUE_COL_SPEC, &cols, &data, &m, value_len)?;
+
+        Ok(Self {
+            id_actor,
+            id_ctr,
+            obj_actor,
+            obj_ctr,
+            key_actor,
+            key_ctr,
+            key_str,
+            succ_count,
+            succ_actor,
+            succ_ctr,
+            insert,
+            action,
+            value_meta,
+            value,
+            mark_name,
+            expand,
+        })
+    }
+
+    fn remap_actors<F>(&mut self, f: F)
+    where
+        F: Fn(Option<Cow<'_, ActorIdx>>) -> Option<Cow<'_, ActorIdx>>,
+    {
+        self.id_actor.remap(&f);
+        self.obj_actor.remap(&f);
+        self.key_actor.remap(&f);
+        self.succ_actor.remap(&f);
+    }
+
+    fn rewrite_with_new_actor(&mut self, idx: usize) {
+        let idx = idx as u32;
+        self.remap_actors(move |a| match a.as_deref() {
+            Some(&ActorIdx(actor)) if actor >= idx => Some(Cow::Owned(ActorIdx(actor + 1))),
+            _ => a,
+        });
     }
 
     fn rewrite_without_actor(&mut self, idx: usize) {
-        for col in self.0.values_mut() {
-            if let Column::Actor(col_data) = col {
-                let new_ids = col_data
-                    .iter()
-                    .map(|a| match a.as_deref() {
-                        Some(&ActorIdx(id)) if id as usize > idx => Some(ActorIdx(id - 1)),
-                        Some(&ActorIdx(id)) if id as usize == idx => {
-                            panic!("cant rewrite - actor is present")
-                        }
-                        old => old.copied(),
-                    })
-                    .collect::<Vec<_>>();
-                let mut new_data = ColumnData::<ActorCursor>::new();
-                new_data.splice(0, 0, new_ids);
-                std::mem::swap(col_data, &mut new_data);
+        let idx = idx as u32;
+        self.remap_actors(move |a| match a.as_deref() {
+            Some(&ActorIdx(id)) if id > idx => Some(Cow::Owned(ActorIdx(id - 1))),
+            Some(&ActorIdx(id)) if id == idx => {
+                panic!("cant rewrite - actor is present")
             }
+            _ => a,
+        });
+    }
+
+    #[inline(never)]
+    fn splice_value<O: OpLike>(&mut self, pos: usize, op: &O) {
+        let acc_pos = self.value_meta.splice(pos, 0, [op.meta_value()]).as_usize();
+        if let Some(v) = op.raw_value() {
+            self.value.splice(acc_pos, 0, [v]);
         }
     }
 
+    #[inline(never)]
+    fn splice_succ<O: OpLike>(&mut self, pos: usize, op: &O) {
+        let succ = op.succ();
+        let acc_pos = self
+            .succ_count
+            .splice(pos, 0, [succ.len() as u64])
+            .as_usize();
+        if !succ.is_empty() {
+            self.succ_actor
+                .splice(acc_pos, 0, succ.iter().map(|id| id.actoridx()));
+            self.succ_ctr
+                .splice(acc_pos, 0, succ.iter().map(|id| id.icounter()));
+        }
+    }
+
+    #[inline(never)]
+    fn insert<O: OpLike>(&mut self, pos: usize, op: &O) {
+        self.id_actor.splice(pos, 0, [op.id().actoridx()]);
+        self.id_ctr.splice(pos, 0, [op.id().icounter()]);
+        self.obj_actor.splice(pos, 0, [op.obj().actor()]);
+        self.obj_ctr.splice(pos, 0, [op.obj().counter()]);
+        self.key_actor.splice(pos, 0, [op.key().actor()]);
+        self.key_ctr.splice(pos, 0, [op.key().icounter()]);
+        self.key_str.splice(pos, 0, [op.key().key_str()]);
+        self.insert.splice(pos, 0, [op.insert()]);
+        self.action.splice(pos, 0, [op.action()]);
+        self.expand.splice(pos, 0, [op.expand()]);
+        self.mark_name.splice(pos, 0, [op.mark_name()]);
+        self.splice_value(pos, op);
+        self.splice_succ(pos, op);
+    }
+
+    #[cfg(test)]
+    fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
+        let mut op_set = Self::default();
+        for (i, op) in ops.enumerate() {
+            op_set.insert(i, &op);
+        }
+        op_set
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.id_actor.len()
+    }
+
+    pub(crate) fn sub_len(&self) -> usize {
+        self.succ_actor.len()
+    }
+
     fn dump(&self) {
-        let mut id_a = self.get_actor(ID_ACTOR_COL_SPEC);
-        let mut id_c = self.get_delta_integer(ID_COUNTER_COL_SPEC);
-        let mut act = self.get_action(ACTION_COL_SPEC);
-        let mut obj_a = self.get_actor(OBJ_ID_ACTOR_COL_SPEC);
-        let mut obj_c = self.get_integer(OBJ_ID_COUNTER_COL_SPEC);
-        let mut key_str = self.get_str(KEY_STR_COL_SPEC);
-        let mut key_a = self.get_actor(KEY_ACTOR_COL_SPEC);
-        let mut key_c = self.get_delta_integer(KEY_COUNTER_COL_SPEC);
-        let mut meta = self.get_value_meta(VALUE_META_COL_SPEC);
-        let mut value = self.get_value(VALUE_COL_SPEC);
-        let mut succ = self.get_group(SUCC_COUNT_COL_SPEC);
-        let mut insert = self.get_boolean(INSERT_COL_SPEC);
-        /*
-                if let Some(Column::Value(c)) = self.0.get(&VALUE_COL_SPEC)  {
-                  let mut x = vec![];
-                  c.write(&mut x);
-                  unsafe {
-                    println!("VALUE={:?}",std::str::from_utf8_unchecked(&x));
-                    println!("VALUE={:?}",x.iter().map(|c| char::from_u32(*c as u32).unwrap()).collect::<Vec<_>>());
-                  }
-                }
-        */
+        let mut id_a = self.id_actor.iter();
+        let mut id_c = self.id_ctr.iter();
+        let mut act = self.action.iter();
+        let mut obj_a = self.obj_actor.iter();
+        let mut obj_c = self.obj_ctr.iter();
+        let mut key_str = self.key_str.iter();
+        let mut key_a = self.key_actor.iter();
+        let mut key_c = self.key_ctr.iter();
+        let mut meta = self.value_meta.iter();
+        let mut value = self.value.raw_reader(0);
+        let mut succ = self.succ_count.iter();
+        let mut insert = self.insert.iter();
         log!(":: id      obj     key        elem     ins act  suc value");
         loop {
             let id_a = fmt(id_a.next());
@@ -1484,493 +1561,26 @@ impl Columns {
             );
         }
     }
-
-    fn insert<O: OpLike + std::fmt::Debug>(&mut self, pos: usize, op: &O) {
-        let mut group = None;
-        let mut acc_pos = 0;
-        for (spec, col) in self.0.iter_mut() {
-            if group == Some(spec.id()) {
-                match col {
-                    Column::Actor(c) => {
-                        if *spec == SUCC_ACTOR_COL_SPEC {
-                            c.splice(acc_pos, 0, op.succ().iter().map(|s| s.actoridx()));
-                        };
-                    }
-                    Column::Delta(c) => {
-                        if *spec == SUCC_COUNTER_COL_SPEC {
-                            c.splice(acc_pos, 0, op.succ().iter().map(|s| s.counter() as i64));
-                        };
-                    }
-                    Column::Value(c) => {
-                        let value = if *spec == VALUE_COL_SPEC {
-                            op.raw_value()
-                        } else {
-                            None
-                        };
-                        if let Some(v) = value {
-                            c.splice(acc_pos, 0, [v]);
-                        }
-                    }
-                    _ => {
-                        log!("unknown group column %{:?}", spec);
-                    }
-                }
-            } else {
-                group = spec.group_id();
-                match col {
-                    Column::Actor(c) => {
-                        let value = match *spec {
-                            ID_ACTOR_COL_SPEC => Some(op.id().actoridx()),
-                            OBJ_ID_ACTOR_COL_SPEC => op.obj().actor(),
-                            KEY_ACTOR_COL_SPEC => op.elemid().and_then(|e| e.actor()),
-                            _ => None,
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Delta(c) => {
-                        let value = match *spec {
-                            ID_COUNTER_COL_SPEC => Some(op.id().counter() as i64),
-                            KEY_COUNTER_COL_SPEC => op.elemid().map(|e| e.counter() as i64),
-                            _ => None,
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Integer(c) => {
-                        let value = if *spec == OBJ_ID_COUNTER_COL_SPEC {
-                            op.obj().counter()
-                        } else {
-                            None
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Str(c) => {
-                        let value = match *spec {
-                            KEY_STR_COL_SPEC => op.map_key(),
-                            MARK_NAME_COL_SPEC => op.mark_name(),
-                            _ => None,
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Bool(c) => {
-                        let value = match *spec {
-                            INSERT_COL_SPEC => Some(op.insert()),
-                            EXPAND_COL_SPEC => Some(op.expand()),
-                            _ => None,
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Action(c) => {
-                        let value = if *spec == ACTION_COL_SPEC {
-                            Some(op.action())
-                        } else {
-                            None
-                        };
-                        c.splice(pos, 0, [value]);
-                    }
-                    Column::Value(_c) => {
-                        panic!("VALUE spliced outside of a group");
-                    }
-                    Column::ValueMeta(c) => {
-                        let value = if *spec == VALUE_META_COL_SPEC {
-                            Some(op.meta_value())
-                        } else {
-                            None
-                        };
-                        acc_pos = c.splice(pos, 0, [value]).as_usize();
-                    }
-                    Column::Group(c) => {
-                        let value = if *spec == SUCC_COUNT_COL_SPEC {
-                            Some(op.succ().iter().len() as u64)
-                        } else {
-                            None
-                        };
-                        acc_pos = c.splice(pos, 0, [value]).as_usize();
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
-        // FIXME this should insert NULL values into columns we dont recognize
-
-        let mut columns = BTreeMap::new();
-
-        let mut id_actor = ColumnData::<ActorCursor>::new();
-        id_actor.splice(
-            0,
-            0,
-            ops.clone().map(|op| op.id.actoridx()).collect::<Vec<_>>(),
-        );
-        columns.insert(ID_ACTOR_COL_SPEC, Column::Actor(id_actor));
-
-        let mut id_counter = ColumnData::<DeltaCursor>::new();
-        id_counter.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| op.id.counter() as i64)
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(ID_COUNTER_COL_SPEC, Column::Delta(id_counter));
-
-        let mut obj_actor_col = ColumnData::<ActorCursor>::new();
-        obj_actor_col.splice(
-            0,
-            0,
-            ops.clone().map(|op| op.obj.actor()).collect::<Vec<_>>(),
-        );
-        columns.insert(OBJ_ID_ACTOR_COL_SPEC, Column::Actor(obj_actor_col));
-
-        let mut obj_counter_col = ColumnData::<UIntCursor>::new();
-        obj_counter_col.splice(
-            0,
-            0,
-            ops.clone().map(|op| op.obj.0.counter()).collect::<Vec<_>>(),
-        );
-        columns.insert(OBJ_ID_COUNTER_COL_SPEC, Column::Integer(obj_counter_col));
-
-        let mut key_actor = ColumnData::<ActorCursor>::new();
-        key_actor.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| match op.key {
-                    KeyRef::Map(_) => None,
-                    KeyRef::Seq(e) => e.actor(),
-                })
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(KEY_ACTOR_COL_SPEC, Column::Actor(key_actor));
-
-        let mut key_counter = ColumnData::<DeltaCursor>::new();
-        key_counter.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| match op.key {
-                    KeyRef::Map(_) => None,
-                    KeyRef::Seq(e) => {
-                        if e.is_head() {
-                            None
-                        } else {
-                            Some(e.0.counter() as i64)
-                        }
-                    }
-                })
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(KEY_COUNTER_COL_SPEC, Column::Delta(key_counter));
-
-        let mut key_str = ColumnData::<StrCursor>::new();
-        key_str.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| match op.key {
-                    KeyRef::Map(s) => Some(s),
-                    KeyRef::Seq(_) => None,
-                })
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(KEY_STR_COL_SPEC, Column::Str(key_str));
-
-        let mut succ_count = ColumnData::<UIntCursor>::new();
-        succ_count.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| op.succ().len() as u64)
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(SUCC_COUNT_COL_SPEC, Column::Group(succ_count));
-
-        let mut succ_actor = ColumnData::<ActorCursor>::new();
-        succ_actor.splice(
-            0,
-            0,
-            ops.clone()
-                .flat_map(|op| op.succ().map(|n| n.actoridx()))
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(SUCC_ACTOR_COL_SPEC, Column::Actor(succ_actor));
-
-        let mut succ_counter = ColumnData::<DeltaCursor>::new();
-        succ_counter.splice(
-            0,
-            0,
-            ops.clone()
-                .flat_map(|op| op.succ().map(|n| n.counter() as i64))
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(SUCC_COUNTER_COL_SPEC, Column::Delta(succ_counter));
-
-        let mut insert = ColumnData::<BooleanCursor>::new();
-        insert.splice(0, 0, ops.clone().map(|op| op.insert).collect::<Vec<_>>());
-        columns.insert(INSERT_COL_SPEC, Column::Bool(insert));
-
-        let mut action = ColumnData::<ActionCursor>::new();
-        action.splice(0, 0, ops.clone().map(|op| op.action).collect::<Vec<_>>());
-        columns.insert(ACTION_COL_SPEC, Column::Action(action));
-
-        let mut value_meta = ColumnData::<MetaCursor>::new();
-        value_meta.splice(
-            0,
-            0,
-            ops.clone()
-                .map(|op| ValueMeta::from(&op.value))
-                .collect::<Vec<_>>(),
-        );
-        columns.insert(VALUE_META_COL_SPEC, Column::ValueMeta(value_meta));
-
-        let mut value = ColumnData::<super::packer::RawCursor>::new();
-        let values = ops
-            .clone()
-            .filter_map(|op| op.value.to_raw())
-            .collect::<Vec<_>>();
-        value.splice(0, 0, values);
-        columns.insert(VALUE_COL_SPEC, Column::Value(value));
-
-        let mut mark_name = ColumnData::<StrCursor>::new();
-        mark_name.splice(0, 0, ops.clone().map(|op| op.mark_name).collect::<Vec<_>>());
-        columns.insert(MARK_NAME_COL_SPEC, Column::Str(mark_name));
-
-        let mut expand = ColumnData::<BooleanCursor>::new();
-        expand.splice(0, 0, ops.clone().map(|op| op.expand).collect::<Vec<_>>());
-        columns.insert(EXPAND_COL_SPEC, Column::Bool(expand));
-
-        Columns(columns)
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.0.get(&ID_ACTOR_COL_SPEC).map(|c| c.len()).unwrap_or(0)
-    }
-
-    pub(crate) fn sub_len(&self) -> usize {
-        self.0
-            .get(&SUCC_ACTOR_COL_SPEC)
-            .map(|c| c.len())
-            .unwrap_or(0)
-    }
-
-    fn get_actor_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<ActorCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Actor(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn get_delta_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<DeltaCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Delta(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn get_delta_col(&self, spec: ColumnSpec) -> &ColumnData<DeltaCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Delta(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn get_actor(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActorCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Actor(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_actor_col(&self, spec: ColumnSpec) -> &ColumnData<ActorCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Actor(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn get_actor_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, ActorCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Actor(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, UIntCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Integer(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_integer_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, UIntCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Integer(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_action(&self, spec: ColumnSpec) -> ColumnDataIter<'_, ActionCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Action(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_action_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, ActionCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Action(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_delta_integer(&self, spec: ColumnSpec) -> ColumnDataIter<'_, DeltaCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Delta(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_delta_integer_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, DeltaCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Delta(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_str(&self, spec: ColumnSpec) -> ColumnDataIter<'_, StrCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Str(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_str_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, StrCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Str(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_boolean(&self, spec: ColumnSpec) -> ColumnDataIter<'_, BooleanCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Bool(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_boolean_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, BooleanCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Bool(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_value_meta(&self, spec: ColumnSpec) -> ColumnDataIter<'_, MetaCursor> {
-        match self.0.get(&spec) {
-            Some(Column::ValueMeta(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_value_meta_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, MetaCursor> {
-        match self.0.get(&spec) {
-            Some(Column::ValueMeta(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_value(&self, spec: ColumnSpec) -> RawReader<'_, SlabWeight> {
-        match self.0.get(&spec) {
-            Some(Column::Value(c)) => c.raw_reader(0),
-            _ => RawReader::empty(),
-        }
-    }
-
-    fn get_value_range(&self, spec: ColumnSpec, advance: usize) -> RawReader<'_, SlabWeight> {
-        // FIXME - range??
-        match self.0.get(&spec) {
-            Some(Column::Value(c)) => c.raw_reader(advance),
-            _ => RawReader::empty(),
-        }
-    }
-
-    fn get_group_mut(&mut self, spec: ColumnSpec) -> &mut ColumnData<UIntCursor> {
-        match self.0.get_mut(&spec) {
-            Some(Column::Group(c)) => c,
-            _ => panic!(),
-        }
-    }
-
-    fn get_group(&self, spec: ColumnSpec) -> ColumnDataIter<'_, UIntCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Group(c)) => c.iter(),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn get_group_range(
-        &self,
-        spec: ColumnSpec,
-        range: &Range<usize>,
-    ) -> ColumnDataIter<'_, UIntCursor> {
-        match self.0.get(&spec) {
-            Some(Column::Group(c)) => c.iter_range(range.clone()),
-            _ => ColumnDataIter::empty(),
-        }
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (&ColumnSpec, &Column)> {
-        self.0.iter()
-    }
-
-    fn init_missing(&mut self) {
-        let len = self.len();
-        let mut group = None;
-        for spec in &ALL_COLUMN_SPECS {
-            if group == Some(spec.id()) {
-                if !self.0.contains_key(spec) {
-                    let col = Column::new(*spec);
-                    self.0.insert(*spec, col);
-                }
-            } else {
-                group = spec.group_id();
-                if !self.0.contains_key(spec) {
-                    let col = Column::init_empty(*spec, len);
-                    self.0.insert(*spec, col);
-                }
-            }
-        }
-    }
 }
+*/
+
+/*
+pub(super) trait OpLike: std::fmt::Debug {
+    fn id(&self) -> OpId;
+    fn obj(&self) -> ObjId;
+    fn action(&self) -> Action;
+    fn key(&self) -> KeyRef<'_>;
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
+    fn meta_value(&self) -> ValueMeta;
+    fn insert(&self) -> bool;
+    fn expand(&self) -> bool;
+    // allocation
+    fn succ(&self) -> Vec<OpId> {
+        vec![]
+    }
+    fn mark_name(&self) -> Option<Cow<'_, str>>;
+}
+*/
 
 struct IterObjIds<'a> {
     ctr: ColumnDataIter<'a, UIntCursor>,
@@ -2019,6 +1629,7 @@ impl<'a> Iterator for IterObjIds<'a> {
     }
 }
 
+/*
 // Stick all of the column ID initialization in a module so we can turn off
 // rustfmt for the whole thing
 #[rustfmt::skip]
@@ -2072,6 +1683,7 @@ pub(crate) mod ids {
     ];
 }
 pub(super) use ids::*;
+*/
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2080,7 +1692,7 @@ mod tests {
         op_set2::{
             op::SuccCursors,
             packer::{ColumnData, DeltaCursor},
-            types::{Action, ActorCursor, ActorIdx, ScalarValue},
+            types::{Action, ActorCursor, ScalarValue},
             KeyRef,
         },
         storage::Document,
@@ -2288,14 +1900,7 @@ mod tests {
         ];
 
         with_test_ops(actors, &ops, |opset| {
-            let range = opset
-                .cols
-                .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                .scope_to_value(&Some(1));
-            let range = opset
-                .cols
-                .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-                .scope_to_value(&Some(ActorIdx::from(1_usize)));
+            let range = opset.scope_to_obj(&ObjId(OpId::new(1, 1)));
             let mut iter = opset.iter_range(&range);
             println!(
                 "ITER :: range={:?} pos={} max={}",

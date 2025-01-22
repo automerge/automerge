@@ -576,7 +576,7 @@ impl OpId {
     }
 
     pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
-        crate::op_set2::ActorIdx(self.1 as u32)
+        crate::op_set2::ActorIdx(self.1)
     }
 
     #[inline]
@@ -719,10 +719,6 @@ impl ElemId {
         } else {
             Ok(ElemId(self.0.map(actor_map)?))
         }
-    }
-
-    pub(crate) fn counter(&self) -> u64 {
-        self.0.counter()
     }
 
     pub(crate) fn icounter(&self) -> i64 {

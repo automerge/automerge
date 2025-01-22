@@ -65,13 +65,6 @@ impl ColumnSpec {
         self.0.to_be_bytes()[3].into()
     }
 
-    pub(crate) fn group_id(&self) -> Option<ColumnId> {
-        match self.col_type() {
-            ColumnType::Group | ColumnType::ValueMetadata => Some(self.id()),
-            _ => None,
-        }
-    }
-
     pub(crate) fn id(&self) -> ColumnId {
         ColumnId(self.0 >> 4)
     }

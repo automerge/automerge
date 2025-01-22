@@ -7,9 +7,9 @@ use crate::change_graph::ChangeGraph;
 use crate::exid::ExId;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpBuilder2, OpSet, OpSetCheckpoint, PropRef, SuccInsert};
 use crate::patches::{PatchLog, TextRepresentation};
-use crate::storage::Change as StoredChange;
 use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue};
 use crate::Automerge;
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
@@ -26,8 +26,6 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<OpBuilder2>,
-    //pending2: Vec<OpBuilder3>,
-    //pending2: ChangeWriter<'static>,
 }
 
 /// Arguments required to create a new transaction
@@ -67,7 +65,6 @@ impl TransactionInner {
             checkpoint,
             deps,
             pending: vec![],
-            //pending2: Default::default(),
             scope,
         }
     }
@@ -132,9 +129,12 @@ impl TransactionInner {
         hash
     }
 
-    pub(crate) fn _change_meta2<'a>(&self) -> crate::op_set2::change::ExtraChangeMetadata<'a> {
+    pub(crate) fn change_meta<'a>(
+        &self,
+        deps: Vec<u64>,
+    ) -> crate::op_set2::change::ExtraChangeMetadata<'a> {
         crate::op_set2::change::ExtraChangeMetadata {
-            actor: self.actor.into(),
+            actor: self.actor,
             seq: self.seq,
             start_op: self.start_op.get(),
             max_op: self.start_op.get() + self.pending.len() as u64 - 1,
@@ -142,69 +142,20 @@ impl TransactionInner {
             message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
             extra: Cow::Borrowed(&[]),
             builder: 0,
-            deps: Vec::new(), // FIXME
-        }
-    }
-
-    pub(crate) fn _change_meta<'a>(&self) -> crate::op_set2::change::ChangeMetadata<'a> {
-        crate::op_set2::change::ChangeMetadata {
-            actor: self.actor.into(),
-            seq: self.seq,
-            start_op: self.start_op,
-            timestamp: self.time,
-            message: self.message.as_ref().map(|s| Cow::Owned(s.to_string())),
-            extra_bytes: Cow::Borrowed(&[]),
+            deps,
         }
     }
 
     #[inline(never)]
-    pub(crate) fn export(self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
-        use crate::storage::{change::PredOutOfOrder, convert::ob_as_actor_id};
-
-        let actor = op_set.get_actor(self.actor).clone();
-        let deps = self.deps.clone();
-        let meta = self._change_meta2();
-        // let stored = self.pending2.finish(meta, &op_set.actors);
-        let stored = match StoredChange::builder()
-            .with_actor(actor)
-            .with_seq(self.seq)
-            .with_start_op(self.start_op)
-            .with_message(self.message.clone())
-            .with_dependencies(deps)
-            .with_timestamp(self.time)
-            .build(self.pending.iter().map(|o| ob_as_actor_id(op_set, o)))
-        {
-            Ok(s) => s,
-            Err(PredOutOfOrder) => {
-                // SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted
-                panic!("preds out of order");
-            }
-        };
-        /*
-                if stored.bytes != stored2.bytes {
-                    let raw1 = stored.ops_meta.raw_columns();
-                    let raw2 = stored2.ops_meta.raw_columns();
-                    let spec1 = raw1.0.iter().map(|c| c.spec()).collect::<HashSet<_>>();
-                    let spec2 = raw2.0.iter().map(|c| c.spec()).collect::<HashSet<_>>();
-                    if spec1 != spec2 {
-                        println!("1 -> {:?}", spec1.difference(&spec2));
-                        println!("2 -> {:?}", spec2.difference(&spec1));
-                        panic!();
-                    }
-                    assert_eq!(
-                        raw1.0.iter().map(|c| c.spec()).collect::<Vec<_>>(),
-                        raw2.0.iter().map(|c| c.spec()).collect::<Vec<_>>()
-                    );
-                    assert_eq!(raw1, raw2);
-                }
-        */
-        #[cfg(debug_assertions)]
-        {
-            //let realized_ops = self.operations(op_set).collect::<Vec<_>>();
-            tracing::trace!(?stored, ops=?self.pending, "committing change");
-        }
-        #[cfg(not(debug_assertions))]
-        tracing::trace!(?stored, "committing change");
+    pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
+        self.deps.sort_unstable();
+        let deps_index = self
+            .deps
+            .iter()
+            .filter_map(|hash| Some(change_graph.hash_to_index(hash)? as u64))
+            .collect();
+        let meta = self.change_meta(deps_index);
+        let stored = build_change(&self.pending, &meta, change_graph, &op_set.actors);
         Change::new(stored)
     }
 
@@ -312,17 +263,6 @@ impl TransactionInner {
             elemid.into(),
             ops.iter().map(|op| op.id),
         )
-        /*
-                    id: self.next_id(),
-                    obj,
-                    pos: 0,
-                    index: 0,
-                    action: OpType::Delete,
-                    key: elemid.into(),
-                    insert: false,
-                    pred: ops.iter().map(|op| op.id).collect(),
-                }
-        */
     }
 
     fn insert_local_op(
@@ -330,7 +270,6 @@ impl TransactionInner {
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         op: OpBuilder2,
-        //op2: Op<'static>,
         succ: &[SuccInsert],
     ) {
         if !op.is_delete() {
@@ -341,7 +280,6 @@ impl TransactionInner {
 
         self.finalize_op(patch_log, &op, None);
 
-        //self.pending2.append(op2);
         self.pending.push(op);
     }
 
@@ -409,11 +347,9 @@ impl TransactionInner {
             insert: true,
             pred: vec![],
         };
-        //let op2 = Op::new2(pos, id, obj.id, index, action, key, true, vec![]);
 
         doc.ops_mut().insert(&op);
         self.finalize_op(patch_log, &op, marks);
-        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(id)
@@ -470,7 +406,6 @@ impl TransactionInner {
             insert: false,
             pred: query.ops.iter().map(|op| op.id).collect(),
         };
-        //let op2 = Op::new();
 
         let inc_value = op.get_increment_value();
 
@@ -525,7 +460,6 @@ impl TransactionInner {
             insert: false,
             pred,
         };
-        //let op2 = Op::new();
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -668,17 +602,6 @@ impl TransactionInner {
             let query = doc
                 .ops()
                 .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
-            /*
-                        let query = doc
-                            .ops()
-                            .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
-            */
-            /*
-                        let query = doc.ops().search(
-                            &obj.id,
-                            query::Nth::new(index, encoding, self.scope.clone(), doc.osd()),
-                        );
-            */
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -696,7 +619,6 @@ impl TransactionInner {
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let op = self.next_delete(obj, query_elemid, &query.ops);
-            //let op2 = Op::new();
             let ops_pos = query
                 .ops
                 .iter()
@@ -707,7 +629,6 @@ impl TransactionInner {
 
             deleted += step;
 
-            //self.pending2.append(op2);
             self.pending.push(op);
         }
 
@@ -721,25 +642,17 @@ impl TransactionInner {
             let query = doc
                 .ops()
                 .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
-            /*
-            let query = doc.ops().search(
-                &obj.id,
-                query::InsertNth::new(index, encoding, self.scope.clone()),
-            );
-            */
             let mut pos = query.pos;
             let mut elemid = query.elemid;
             let marks = query.marks;
 
             for v in &values {
                 let op = self.next_insert(obj, pos, elemid, v.clone());
-                //let op2 = Op::new();
 
                 elemid = ElemId(op.id);
 
                 doc.ops_mut().insert(&op);
 
-                //self.pending2.append(op2);
                 self.pending.push(op);
                 pos += 1;
             }
@@ -851,7 +764,6 @@ impl TransactionInner {
             insert: true,
             pred: vec![],
         };
-        //let op2 = Op::new();
 
         doc.ops_mut().insert(&op);
 
@@ -863,7 +775,6 @@ impl TransactionInner {
             false,
         );
 
-        //self.pending2.append(op2);
         self.pending.push(op);
 
         Ok(doc.ops().id_to_exid(id))
@@ -917,39 +828,9 @@ impl TransactionInner {
             .seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref())
             .unwrap();
         // FIXME - no clock?
-        /*
-                let query = doc.ops().search(
-                    &text_obj.id,
-                    query::OpIdSearch::opid(block_id, patch_log.text_rep().encoding(text_obj.typ), None),
-                );
-        */
         let index = found.index;
         let succ_pos = vec![found.op.add_succ(op.id, None)];
-        /*
-                {
-                    let mut iter = doc.ops().iter(&text_obj.id);
-                    let mut next = iter.nth(pos);
-                    while let Some(e) = next {
-                        if e.elemid_or_key() != op.elemid_or_key() {
-                            break;
-                        }
-                        let visible = e.visible_at(self.scope.as_ref(), &iter);
-                        if visible {
-                            succ_pos.push(pos);
-                        }
-                        pos += 1;
-                        pred_ids.push(e.id);
-                        next = iter.next();
-                    }
-                }
 
-                let op_idx = doc
-                    .ops_mut()
-                    .load_with_range(text_obj.id, op, &mut self.idx_range);
-
-                doc.ops_mut().add_succ(&text_obj.id, &succ_pos, op_idx);
-
-        */
         doc.ops_mut().add_succ(&succ_pos, op.id);
 
         patch_log.delete_seq(text_obj.id, index, 1);

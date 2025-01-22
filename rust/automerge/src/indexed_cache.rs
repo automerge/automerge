@@ -42,9 +42,11 @@ where
         }
     */
 
-    pub(crate) fn lookup(&self, item: &T) -> Option<usize> {
-        self.lookup.get(item).cloned()
-    }
+    /*
+        pub(crate) fn lookup(&self, item: &T) -> Option<usize> {
+            self.lookup.get(item).cloned()
+        }
+    */
 
     #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
