@@ -1,3 +1,4 @@
+use crate::patches::TextRepresentation;
 use crate::types::{Clock, ObjId, Op, OpType};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
 use std::borrow::Cow;
@@ -9,6 +10,8 @@ mod text;
 
 #[cfg(test)]
 mod tests;
+
+use crate::Automerge;
 
 pub use list::{List, ListValue};
 pub use map::{Map, MapValue};
@@ -23,6 +26,16 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_rep: TextRepresentation) -> Self {
+        match value.into() {
+            value::Value::Object(ObjType::Map) => Value::Map(Map::default()),
+            value::Value::Object(ObjType::List) => Value::List(List::default()),
+            value::Value::Object(ObjType::Text) => Value::Text(Text::new(text_rep, "")),
+            value::Value::Object(ObjType::Table) => Value::Map(Map::default()),
+            value::Value::Scalar(s) => Value::Scalar(s.into_owned()),
+        }
+    }
+
     pub fn is_scalar(&self) -> bool {
         matches!(self, Value::Scalar(_))
     }
@@ -33,10 +46,11 @@ impl Value {
 
     pub fn apply_patches<P: IntoIterator<Item = Patch>>(
         &mut self,
+        text_rep: TextRepresentation,
         patches: P,
     ) -> Result<(), HydrateError> {
         for p in patches {
-            self.apply(p.path.iter().map(|(_, prop)| prop), p.action)?;
+            self.apply(p.path.iter().map(|(_, prop)| prop), text_rep, p.action)?;
         }
         Ok(())
     }
@@ -44,19 +58,20 @@ impl Value {
     pub(crate) fn apply<'a, P: Iterator<Item = &'a Prop>>(
         &mut self,
         mut path: P,
+        text_rep: TextRepresentation,
         patch: PatchAction,
     ) -> Result<(), HydrateError> {
         match (path.next(), self) {
             (Some(Prop::Seq(n)), Value::List(list)) => list
                 .get_mut(*n)
                 .ok_or_else(|| HydrateError::ApplyInvalidProp(patch.clone()))?
-                .apply(path, patch),
+                .apply(path, text_rep, patch),
             (Some(Prop::Map(s)), Value::Map(map)) => map
                 .get_mut(s)
                 .ok_or_else(|| HydrateError::ApplyInvalidProp(patch.clone()))?
-                .apply(path, patch),
-            (None, Value::Map(map)) => map.apply(patch),
-            (None, Value::List(list)) => list.apply(patch),
+                .apply(path, text_rep, patch),
+            (None, Value::Map(map)) => map.apply(text_rep, patch),
+            (None, Value::List(list)) => list.apply(text_rep, patch),
             (None, Value::Text(text)) => text.apply(patch),
             _ => Err(HydrateError::Fail),
         }
@@ -73,18 +88,6 @@ impl Value {
         match self {
             Value::List(l) => Some(l),
             _ => None,
-        }
-    }
-}
-
-impl From<value::Value<'_>> for Value {
-    fn from(value: value::Value<'_>) -> Self {
-        match value {
-            value::Value::Object(ObjType::Map) => Value::Map(Map::default()),
-            value::Value::Object(ObjType::List) => Value::List(List::default()),
-            value::Value::Object(ObjType::Text) => Value::Text(Text::default()),
-            value::Value::Object(ObjType::Table) => Value::Map(Map::default()),
-            value::Value::Scalar(s) => Value::Scalar(s.into_owned()),
         }
     }
 }
@@ -129,19 +132,59 @@ impl From<&Value> for value::Value<'_> {
     }
 }
 
-impl<T: Into<ScalarValue>> From<T> for Value {
-    fn from(value: T) -> Self {
-        Value::Scalar(value.into())
-    }
-}
-
 impl From<HashMap<&str, Value>> for Value {
     fn from(value: HashMap<&str, Value>) -> Self {
         Value::Map(value.into())
     }
 }
 
-use crate::Automerge;
+impl<'a> From<&'a str> for Value {
+    fn from(value: &'a str) -> Self {
+        Value::Scalar(ScalarValue::Str(value.into()))
+    }
+}
+
+impl From<u32> for Value {
+    fn from(value: u32) -> Self {
+        Value::Scalar(ScalarValue::Uint(value as u64))
+    }
+}
+
+impl From<u64> for Value {
+    fn from(value: u64) -> Self {
+        Value::Scalar(ScalarValue::Uint(value))
+    }
+}
+
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Value::Scalar(ScalarValue::Int(value as i64))
+    }
+}
+
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Value::Scalar(ScalarValue::Int(value))
+    }
+}
+
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Value::Scalar(ScalarValue::F64(value))
+    }
+}
+
+impl From<f32> for Value {
+    fn from(value: f32) -> Self {
+        Value::Scalar(ScalarValue::F64(value as f64))
+    }
+}
+
+impl From<ScalarValue> for Value {
+    fn from(value: ScalarValue) -> Self {
+        Value::Scalar(value)
+    }
+}
 
 impl Automerge {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
@@ -169,7 +212,7 @@ impl Automerge {
 
     pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
         let text = self.ops().text(obj, clock.cloned());
-        Value::Text(Text::new(text.into()))
+        Value::Text(Text::new(self.text_encoding().into(), text))
     }
 
     pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
@@ -204,7 +247,7 @@ macro_rules! hydrate_list {
 #[macro_export]
 macro_rules! hydrate_text {
     {$t: expr} => {
-        $crate::hydrate::Text::from($t)
+        $crate::hydrate::Text::new($crate::patches::TextRepresentation::String($crate::TextEncoding::default()), $t)
     };
 }
 

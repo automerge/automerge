@@ -5,8 +5,10 @@ use automerge::{
     iter::Span,
     marks::{ExpandMark, Mark},
     op_tree::B,
+    patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ObjType, Patch, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
+    TextEncoding, ROOT,
 };
 use proptest::strategy::Strategy;
 use test_log::test;
@@ -214,7 +216,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 0,
-                value: "the ".into(),
+                value: ConcreteTextValue::new(
+                    "the ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -227,7 +232,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 4,
-                value: "quick ".into(),
+                value: ConcreteTextValue::new(
+                    "quick ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -243,7 +251,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 10,
-                value: "fox".into(),
+                value: ConcreteTextValue::new(
+                    "fox",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -263,7 +274,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 13,
-                value: " jumps".into(),
+                value: ConcreteTextValue::new(
+                    " jumps",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -279,7 +293,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 19,
-                value: " over the lazy dog".into(),
+                value: ConcreteTextValue::new(
+                    " over the lazy dog",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()

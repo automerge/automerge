@@ -238,7 +238,7 @@ mod tests {
         op_set::OpSetData,
         storage::{change::ChangeBuilder, convert::op_as_actor_id},
         types::{Key, ObjId, OpBuilder, OpId},
-        ActorId,
+        ActorId, TextEncoding,
     };
 
     use super::*;
@@ -322,7 +322,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let mut osd = OpSetData::from_actors(self.actors.clone());
+            let mut osd = OpSetData::from_actors(self.actors.clone(), TextEncoding::default());
             let key = osd.props.cache("key".to_string());
 
             let start_op = parents

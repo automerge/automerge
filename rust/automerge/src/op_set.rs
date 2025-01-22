@@ -12,9 +12,9 @@ use crate::op_tree::{
 use crate::parents::Parents;
 use crate::patches::TextRepresentation;
 use crate::query::{ChangeVisibility, TreeQuery};
-use crate::text_value::TextValue;
 use crate::types::{
-    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, OpId, OpIds, OpType, Prop,
+    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, OpId, OpIds, OpType,
+    Prop, TextEncoding,
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -53,19 +53,19 @@ pub(crate) struct OpSetInternal {
 }
 
 impl OpSetInternal {
-    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+    pub(crate) fn from_actors(actors: Vec<ActorId>, text_encoding: TextEncoding) -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), OpTree::new(ObjType::Map));
+        trees.insert(ObjId::root(), OpTree::new(ObjType::Map, text_encoding));
         OpSetInternal {
             trees,
             length: 0,
-            osd: OpSetData::from_actors(actors),
+            osd: OpSetData::from_actors(actors, text_encoding),
         }
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(text_encoding: TextEncoding) -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), OpTree::new(ObjType::Map));
+        trees.insert(ObjId::root(), OpTree::new(ObjType::Map, text_encoding));
         OpSetInternal {
             trees,
             length: 0,
@@ -74,6 +74,7 @@ impl OpSetInternal {
                 props: IndexedCache::new(),
                 ops: Vec::new(),
                 op_deps: Vec::new(),
+                text_encoding,
             },
         }
     }
@@ -357,10 +358,10 @@ impl OpSetInternal {
         idx
     }
 
-    pub(crate) fn add_indexes(&mut self) {
+    pub(crate) fn add_indexes(&mut self, text_encoding: TextEncoding) {
         for (_, tree) in self.trees.iter_mut() {
             if tree.objtype.is_sequence() {
-                tree.add_index(&self.osd)
+                tree.add_index(&self.osd, text_encoding)
             }
         }
     }
@@ -372,7 +373,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(*typ),
+                    internal: OpTreeInternal::new(*typ, self.osd.text_encoding),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),
@@ -395,7 +396,7 @@ impl OpSetInternal {
             self.trees.insert(
                 op.id().into(),
                 OpTree {
-                    internal: OpTreeInternal::new(*typ),
+                    internal: OpTreeInternal::new(*typ, self.osd.text_encoding),
                     objtype: *typ,
                     last_insert: None,
                     parent: Some(idx),
@@ -503,12 +504,6 @@ impl OpSetInternal {
     }
 }
 
-impl Default for OpSetInternal {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<'a> IntoIterator for &'a OpSetInternal {
     type Item = (&'a ObjId, ObjType, Op<'a>);
 
@@ -576,17 +571,7 @@ pub(crate) struct OpSetData {
     pub(crate) props: IndexedCache<String>,
     ops: Vec<OpRaw>,
     op_deps: Vec<OpDepRaw>,
-}
-
-impl Default for OpSetData {
-    fn default() -> Self {
-        Self {
-            actors: IndexedCache::new(),
-            props: IndexedCache::new(),
-            ops: Vec::new(),
-            op_deps: Vec::new(),
-        }
-    }
+    text_encoding: TextEncoding,
 }
 
 #[derive(Clone)]
@@ -660,6 +645,17 @@ impl<'a> DoubleEndedIterator for ChangeOpIter<'a> {
 }
 
 impl OpSetData {
+    #[cfg(test)]
+    pub(crate) fn new(text_encoding: TextEncoding) -> Self {
+        Self {
+            actors: IndexedCache::new(),
+            props: IndexedCache::new(),
+            ops: Vec::new(),
+            op_deps: Vec::new(),
+            text_encoding,
+        }
+    }
+
     pub(crate) fn start_range(&self) -> OpIdxRange {
         let len = self.ops.len() as u32;
         OpIdxRange {
@@ -801,7 +797,7 @@ impl OpSetData {
     pub(crate) fn push(&mut self, obj: ObjId, op: OpBuilder) -> OpIdx {
         let index = self.ops.len();
         //log!("push idx={:?} op={:?}", index, op);
-        let width = TextValue::width(op.to_str()) as u32; // TODO faster
+        let width = self.text_encoding.width(op.to_str()) as u32; // TODO faster
         self.ops.push(OpRaw {
             obj,
             width,
@@ -814,12 +810,13 @@ impl OpSetData {
         OpIdx::new(index)
     }
 
-    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+    pub(crate) fn from_actors(actors: Vec<ActorId>, text_encoding: TextEncoding) -> Self {
         Self {
             props: IndexedCache::new(),
             actors: actors.into_iter().collect(),
             ops: Vec::new(),
             op_deps: Vec::new(),
+            text_encoding,
         }
     }
 
@@ -864,7 +861,7 @@ pub(crate) mod tests {
         op_set::OpSet,
         op_tree::B,
         types::{Key, ListEncoding, ObjId, ObjMeta, OpBuilder, OpId, OpIds, ROOT},
-        ActorId, ScalarValue,
+        ActorId, ScalarValue, TextEncoding,
     };
 
     /// Create an optree in which the only visible ops are on the boundaries of the nodes,
@@ -904,7 +901,7 @@ pub(crate) mod tests {
     /// The opset in question and an op which should be inserted at the next position after the
     /// internally visible ops.
     pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, OpBuilder, OpIds) {
-        let mut set = OpSet::new();
+        let mut set = OpSet::new(TextEncoding::default());
         let actor = set.osd.actors.cache(ActorId::random());
         let a = set.osd.props.cache("a".to_string());
         let b = set.osd.props.cache("b".to_string());

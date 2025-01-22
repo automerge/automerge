@@ -347,7 +347,7 @@ pub(crate) mod gen {
             gen::{gen_hash, gen_op},
             ObjId, OpId,
         },
-        ActorId,
+        ActorId, TextEncoding,
     };
     use proptest::prelude::*;
 
@@ -367,7 +367,7 @@ pub(crate) mod gen {
     ) -> impl Strategy<Value = (Vec<(ObjId, OpIdx)>, OpSetData)> {
         let mut all_actors = vec![this_actor];
         all_actors.extend(other_actors);
-        let mut osd = OpSetData::from_actors(all_actors);
+        let mut osd = OpSetData::from_actors(all_actors, TextEncoding::default());
         osd.props.cache("someprop".to_string());
         let root_id = ObjId::root();
         (0_u64..10)

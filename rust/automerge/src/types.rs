@@ -592,21 +592,32 @@ impl ObjMeta {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TextEncoding {
+    UnicodeCodePoint,
+    Utf8CodeUnit,
+    Utf16CodeUnit,
+    GraphemeCluster,
+}
+
+impl TextEncoding {
+    pub(crate) fn width(&self, s: &str) -> usize {
+        match self {
+            Self::UnicodeCodePoint => s.chars().count(),
+            Self::Utf8CodeUnit => s.bytes().len(),
+            Self::Utf16CodeUnit => s.encode_utf16().count(),
+            Self::GraphemeCluster => {
+                unicode_segmentation::UnicodeSegmentation::graphemes(s, true).count()
+            }
+        }
+    }
+}
+
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ListEncoding {
     #[default]
     List,
-    Text,
-}
-
-impl From<Option<ObjType>> for ListEncoding {
-    fn from(obj: Option<ObjType>) -> Self {
-        if obj == Some(ObjType::Text) {
-            ListEncoding::Text
-        } else {
-            ListEncoding::List
-        }
-    }
+    Text(TextEncoding),
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]

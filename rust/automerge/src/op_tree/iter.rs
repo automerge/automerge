@@ -228,6 +228,7 @@ mod tests {
     use super::super::OpTreeInternal;
     use crate::op_set::{OpIdx, OpSetData};
     use crate::types::{Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, ROOT};
+    use crate::TextEncoding;
     use proptest::prelude::*;
 
     #[derive(Clone)]
@@ -309,7 +310,7 @@ mod tests {
     impl Model {
         fn insert(&self, index: usize, next_op_counter: u64) -> Self {
             let mut actions = self.actions.clone();
-            let mut osd = OpSetData::default();
+            let mut osd = OpSetData::new(TextEncoding::default());
             let op = op(next_op_counter, &mut osd);
             actions.push(Action::Insert(index, op));
             let mut model = self.model.clone();
@@ -372,7 +373,7 @@ mod tests {
                 Model {
                     actions: Vec::new(),
                     model: Vec::new(),
-                    osd: OpSetData::default(),
+                    osd: OpSetData::new(TextEncoding::default()),
                 },
             ))
             .boxed();
@@ -394,7 +395,7 @@ mod tests {
     }
 
     fn make_optree(actions: &[Action], osd: &OpSetData) -> super::OpTreeInternal {
-        let mut optree = OpTreeInternal::new(ObjType::List);
+        let mut optree = OpTreeInternal::new(ObjType::List, TextEncoding::default());
         for action in actions {
             match action {
                 Action::Insert(index, idx) => {

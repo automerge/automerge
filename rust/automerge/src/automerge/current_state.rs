@@ -34,7 +34,8 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // for each of those visible operations.
     for (obj, ops) in doc.ops().iter_objs() {
         let ops = ops.map(|i| i.as_op(doc.osd()));
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String(_))
+        {
             log_text_patches(doc, patch_log, &obj, ops)
         } else if obj.typ.is_sequence() {
             log_list_patches(doc, patch_log, &obj, ops);
@@ -57,8 +58,8 @@ fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
                 patch_log.splice(obj.id, index, &text, marks);
             }
             SpanInternal::Obj(id, index) => {
-                let value = Value::Object(ObjType::Map);
-                patch_log.insert(obj.id, index, value.into(), id, false);
+                let value = crate::hydrate::Value::Map(crate::hydrate::Map::new());
+                patch_log.insert(obj.id, index, value, id, false);
             }
         }
     }
@@ -92,7 +93,8 @@ fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            patch_log.insert(obj.id, index, value.clone().into(), opid, conflict);
+            let value = crate::hydrate::Value::new(value, patch_log.text_rep());
+            patch_log.insert(obj.id, index, value, opid, conflict);
         });
 }
 
@@ -138,7 +140,8 @@ fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
             if let Some(prop_index) = put.key.prop_index() {
                 if let Some(key) = doc.ops().osd.props.safe_get(prop_index) {
                     let conflict = i > 0;
-                    patch_log.put_map(obj.id, key, put.value.into(), put.id, conflict, false);
+                    let value = crate::hydrate::Value::new(put.value, patch_log.text_rep());
+                    patch_log.put_map(obj.id, key, value, put.id, conflict, false);
                 }
             }
         });
@@ -151,7 +154,7 @@ mod tests {
     use crate::{
         patches::{PatchLog, TextRepresentation},
         transaction::Transactable,
-        Automerge, ObjType, Patch, PatchAction, Prop, Value,
+        Automerge, ObjType, Patch, PatchAction, Prop, TextEncoding, Value,
     };
 
     // Patches often carry a "tagged value", which is a value and the OpID of the op which
@@ -355,7 +358,9 @@ mod tests {
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
 
-        let p = doc.document().current_state(TextRepresentation::default());
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -429,7 +434,9 @@ mod tests {
             .unwrap();
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
-        let p = doc.document().current_state(TextRepresentation::default());
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -464,8 +471,10 @@ mod tests {
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -501,8 +510,10 @@ mod tests {
 
         doc.merge(&mut doc2).unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -525,8 +536,10 @@ mod tests {
         doc.insert(&list, 0, 1).unwrap();
         doc.insert(&list, 1, 2).unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -563,8 +576,10 @@ mod tests {
         doc2.insert(&list, 0, 2).unwrap();
         doc.merge(&mut doc2).unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
-        let p = doc.document().current_state(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
+        let p = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(p),
@@ -598,8 +613,10 @@ mod tests {
         let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
         doc.put(&map, "key", "value").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
-        let patches = doc.document().current_state(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
+        let patches = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(patches),
@@ -636,9 +653,11 @@ mod tests {
         doc.put(&list, 0, "three").unwrap();
         doc.put(&list, 1, "four").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String);
+        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
 
-        let patches = doc.document().current_state(TextRepresentation::String);
+        let patches = doc
+            .document()
+            .current_state(TextRepresentation::String(TextEncoding::default()));
 
         assert_eq!(
             Patches::from(patches),
@@ -669,7 +688,7 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active(TextRepresentation::String);
+        let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::default()));
         let _doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
             crate::LoadOptions::new()
