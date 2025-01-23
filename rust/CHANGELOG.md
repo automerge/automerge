@@ -1,3 +1,12 @@
+# 0.6.0
+
+* Add the ability to set the text encoding used when calculating the indices
+  into text objects via the Automerge::new_with_encoding constructor.
+* Update the cursor API to allow creating cursors which point at the beginning
+  or end of the text and to allow configuring how the cursor position is
+  resolved when the original character which the cursor referenced has been
+  deleted.
+
 # 0.5.12
 
 * Allow empty keys in maps
