@@ -2,6 +2,7 @@ use crate::exid::ExId;
 use crate::Value;
 
 use crate::op_set2::op_set::OpQueryTerm;
+use crate::op_set2::OpSet;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -17,7 +18,7 @@ pub struct MapRangeItem<'a> {
 
 #[derive(Debug)]
 pub struct MapRange<'a, R: RangeBounds<String>> {
-    iter: Option<Box<dyn OpQueryTerm<'a> + 'a>>,
+    iter: Option<(&'a OpSet, Box<dyn OpQueryTerm<'a> + 'a>)>,
     range: Option<R>,
 }
 
@@ -35,7 +36,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let range = self.range.as_ref()?;
-        let iter = self.iter.as_mut()?;
+        let (op_set, iter) = self.iter.as_mut()?;
         while let Some(op) = iter.next() {
             let key = op.key.key_str()?;
             let s_key = key.to_string(); // FIXME
@@ -44,7 +45,6 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
                 continue;
             }
             let value = op.value().into();
-            let op_set = iter.get_opiter().op_set();
             let id = op.exid(op_set);
             let conflict = op.conflict;
             return Some(MapRangeItem {
@@ -59,9 +59,9 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(iter: I, range: R) -> Self {
+    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(op_set: &'a OpSet, iter: I, range: R) -> Self {
         Self {
-            iter: Some(Box::new(iter)),
+            iter: Some((op_set, Box::new(iter))),
             range: Some(range),
         }
     }

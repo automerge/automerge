@@ -7,54 +7,28 @@ use crate::{
     op_set2::{
         meta::MetaCursor,
         op::SuccCursors,
-        types::{ActionCursor, ActorCursor},
+        types::{Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, ScalarValue},
     },
     types::{ElemId, ObjId, OpId},
 };
 
-use super::{Op, OpSet};
+use super::Op;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
-
-/*
-use super::{
-    ACTION_COL_SPEC, ALL_COLUMN_SPECS, EXPAND_COL_SPEC, ID_ACTOR_COL_SPEC, ID_COUNTER_COL_SPEC,
-    INSERT_COL_SPEC, KEY_ACTOR_COL_SPEC, KEY_COUNTER_COL_SPEC, KEY_STR_COL_SPEC,
-    MARK_NAME_COL_SPEC, OBJ_ID_ACTOR_COL_SPEC, OBJ_ID_COUNTER_COL_SPEC, SUCC_ACTOR_COL_SPEC,
-    SUCC_COUNTER_COL_SPEC, SUCC_COUNT_COL_SPEC, VALUE_COL_SPEC, VALUE_META_COL_SPEC,
-};
-*/
-
-//pub(crate) trait OpReadState {}
-//#[derive(Debug, Clone, PartialEq, Default)]
-//pub(crate) struct Verified;
-//#[derive(Debug, Clone, PartialEq, Default)]
-//pub(crate) struct Unverified;
-//impl OpReadState for Verified {}
-//impl OpReadState for Unverified {}
+use std::ops::Range;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpIter<'a> {
     pub(super) pos: usize,
-    pub(super) id_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) id_counter: ColumnDataIter<'a, DeltaCursor>,
-    pub(super) obj_id_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) obj_id_counter: ColumnDataIter<'a, UIntCursor>,
-    pub(super) key_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) key_counter: ColumnDataIter<'a, DeltaCursor>,
-    pub(super) key_str: ColumnDataIter<'a, StrCursor>,
-    pub(super) succ_count: ColumnDataIter<'a, UIntCursor>,
-    pub(super) succ_actor: ColumnDataIter<'a, ActorCursor>,
-    pub(super) succ_counter: ColumnDataIter<'a, DeltaCursor>,
-    pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
-    pub(super) insert: ColumnDataIter<'a, BooleanCursor>,
-    pub(super) action: ColumnDataIter<'a, ActionCursor>,
-    pub(super) value_meta: ColumnDataIter<'a, MetaCursor>,
-    pub(super) value: RawReader<'a, SlabWeight>,
-    pub(super) mark_name: ColumnDataIter<'a, StrCursor>,
-    pub(super) expand: ColumnDataIter<'a, BooleanCursor>,
-    pub(crate) op_set: &'a OpSet,
+    pub(super) id: OpIdIter<'a>,
+    pub(super) obj: ObjIdIter<'a>,
+    pub(super) key: KeyIter<'a>,
+    pub(super) succ: SuccIterIter<'a>,
+    pub(super) insert: InsertIter<'a>,
+    pub(super) action: ActionIter<'a>,
+    pub(super) value: ValueIter<'a>,
+    pub(super) marks: MarkInfoIter<'a>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -65,16 +39,12 @@ pub(crate) enum ReadOpError {
     InvalidKey,
     #[error("missing key")]
     MissingKey,
-    #[error("missing action")]
-    MissingAction,
+    #[error("missing value: {0}")]
+    MissingValue(&'static str),
     #[error("error reading value column: {0}")]
     ReadValue(#[from] op_set2::packer::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
-    //#[error("missing object ID")]
-    //MissingObjId,
-    //#[error("missing mark name")]
-    //MissingMarkName,
 }
 
 impl<'a> ExactSizeIterator for OpIter<'a> {
@@ -84,31 +54,29 @@ impl<'a> ExactSizeIterator for OpIter<'a> {
 }
 
 impl<'a> OpIter<'a> {
-    pub(crate) fn op_set(&self) -> &'a OpSet {
-        self.op_set
+    pub(crate) fn range(&self) -> Range<usize> {
+        self.pos()..self.end_pos()
     }
 
     pub(crate) fn end_pos(&self) -> usize {
-        self.id_actor.end_pos()
+        self.id.actor.end_pos()
     }
 
     pub(crate) fn pos(&self) -> usize {
         self.pos
     }
 
-    #[inline(never)]
     pub(crate) fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
-        let Some(id) = self.read_opid()? else {
+        let Some(id) = self.id.maybe_try_next()? else {
             return Ok(None);
         };
-        let key = self.read_key()?;
-        let insert = self.read_insert()?;
-        let action = self.read_action()?;
-        let obj = self.read_obj()?;
-        let value = self.read_value()?;
-        let expand = self.read_expand()?;
-        let mark_name = self.read_mark_name()?;
-        let succ_cursors = self.read_successors()?;
+        let key = self.key.try_next()?;
+        let insert = self.insert.try_next()?;
+        let action = self.action.try_next()?;
+        let obj = self.obj.try_next()?;
+        let value = self.value.try_next()?;
+        let (mark_name, expand) = self.marks.try_next()?;
+        let succ_cursors = self.succ.try_next()?;
         let pos = self.pos;
         let conflict = false;
         self.pos += 1;
@@ -127,130 +95,34 @@ impl<'a> OpIter<'a> {
         }))
     }
 
-    fn read_opid(&mut self) -> Result<Option<OpId>, ReadOpError> {
-        let id_actor = self.id_actor.next();
-        let id_counter = self.id_counter.next();
-        match (id_actor, id_counter) {
-            (Some(Some(actor_idx)), Some(Some(counter))) => {
-                if *counter < 0 {
-                    Err(ReadOpError::InvalidOpId("negative counter".to_string()))
-                } else {
-                    Ok(Some(OpId::new(
-                        *counter as u64,
-                        u64::from(*actor_idx) as usize,
-                    )))
-                }
-            }
-            (None, None) => Ok(None),
-            _ => Err(ReadOpError::InvalidOpId(
-                "missing actor or counter".to_string(),
-            )),
-        }
-    }
-
-    fn read_key(&mut self) -> Result<op_set2::types::KeyRef<'a>, ReadOpError> {
-        let key_str = self.key_str.next().flatten();
-        let key_counter = self.key_counter.next();
-        let key_actor = self.key_actor.next();
-        match (key_str, key_counter, key_actor) {
-            (Some(key_str), None | Some(None), None | Some(None)) => {
-                Ok(op_set2::types::KeyRef::Map(key_str))
-            }
-            (None, Some(Some(Cow::Owned(0))) | None, Some(None) | None) => {
-                // ElemId::Head is represented as a counter of 0 and a null actor
-                Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(0, 0))))
-            }
-            (None, Some(Some(counter)), Some(Some(actor))) if *counter > 0 => {
-                Ok(op_set2::types::KeyRef::Seq(ElemId(OpId::new(
-                    *counter as u64,
-                    u64::from(*actor) as usize,
-                ))))
-            }
-            (None, Some(None), None | Some(None)) => Err(ReadOpError::MissingKey),
-            other => {
-                log!("InvalidKey: {:?}", other);
-                Err(ReadOpError::InvalidKey)
-            }
-        }
-    }
-
-    fn read_insert(&mut self) -> Result<bool, ReadOpError> {
-        match self.insert.next() {
-            Some(Some(b)) => Ok(*b),
-            Some(None) => Ok(false),
-            None => Ok(false),
-        }
-    }
-
-    fn read_action(&mut self) -> Result<op_set2::types::Action, ReadOpError> {
-        match self.action.next() {
-            Some(Some(a)) => Ok(*a),
-            _ => Err(ReadOpError::MissingAction),
-        }
-    }
-
-    fn read_value(&mut self) -> Result<op_set2::types::ScalarValue<'a>, ReadOpError> {
-        let Some(Some(meta)) = self.value_meta.next() else {
-            return Ok(op_set2::types::ScalarValue::Null);
+    #[inline(never)]
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<Option<Op<'a>>, ReadOpError> {
+        let Some(id) = self.id.maybe_try_nth(n)? else {
+            return Ok(None);
         };
-        let raw_data = if meta.length() == 0 {
-            &[]
-        } else {
-            self.value.read_next(meta.length())?
-        };
-        Ok(op_set2::types::ScalarValue::from_raw(*meta, raw_data)?)
-    }
-
-    fn read_obj(&mut self) -> Result<ObjId, ReadOpError> {
-        let obj_id_actor = self.obj_id_actor.next();
-        let obj_id_counter = self.obj_id_counter.next();
-        match (obj_id_actor, obj_id_counter) {
-            (Some(Some(actor_idx)), Some(Some(counter))) => {
-                if *counter == 0 {
-                    Ok(ObjId::root())
-                } else {
-                    Ok(OpId::new(*counter, u64::from(*actor_idx) as usize).into())
-                }
-            }
-            (Some(None), Some(None)) => Ok(ObjId::root()),
-            // This case occurs when the only object ID in the column is the root object ID,
-            // which results in a run of all null values. In this case we entirely omit the
-            // column
-            (None, None) => Ok(ObjId::root()),
-            _ => Err(ReadOpError::InvalidOpId(
-                "missing actor or counter".to_string(),
-            )),
-        }
-    }
-
-    fn read_expand(&mut self) -> Result<bool, ReadOpError> {
-        Ok(self
-            .expand
-            .next()
-            .flatten()
-            .as_deref()
-            .copied()
-            .unwrap_or(false))
-    }
-
-    fn read_mark_name(&mut self) -> Result<Option<Cow<'a, str>>, ReadOpError> {
-        Ok(self.mark_name.next().flatten())
-    }
-
-    fn read_successors(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
-        let num_succ = *self.succ_count.next().flatten().unwrap_or_default();
-        let result = SuccCursors {
-            len: num_succ as usize,
-            succ_actor: self.succ_actor.clone(),
-            succ_counter: self.succ_counter.clone(),
-            inc_values: self.inc_values.clone(),
-        };
-
-        self.succ_actor.advance_by(num_succ as usize);
-        self.succ_counter.advance_by(num_succ as usize);
-        self.inc_values.advance_by(num_succ as usize);
-
-        Ok(result)
+        let key = self.key.try_nth(n)?;
+        let insert = self.insert.try_nth(n)?;
+        let action = self.action.try_nth(n)?;
+        let obj = self.obj.try_nth(n)?;
+        let value = self.value.try_nth(n)?;
+        let (mark_name, expand) = self.marks.try_nth(n)?;
+        let succ_cursors = self.succ.try_nth(n)?;
+        let pos = self.pos + n;
+        let conflict = false;
+        self.pos += n + 1;
+        Ok(Some(Op {
+            pos,
+            conflict,
+            id,
+            key,
+            insert,
+            action,
+            obj,
+            value,
+            expand,
+            mark_name,
+            succ_cursors,
+        }))
     }
 }
 
@@ -259,5 +131,526 @@ impl<'a> Iterator for OpIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().unwrap()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).unwrap()
+    }
+}
+
+impl OpId {
+    pub(crate) fn try_load<'a>(
+        id_actor: Option<Cow<'a, ActorIdx>>,
+        id_counter: Option<Cow<'a, i64>>,
+    ) -> Result<OpId, ReadOpError> {
+        match (id_actor, id_counter) {
+            (Some(actor_idx), Some(counter)) => {
+                if *counter < 0 {
+                    Err(ReadOpError::InvalidOpId("negative counter".to_string()))
+                } else {
+                    Ok(OpId::new(*counter as u64, u64::from(*actor_idx) as usize))
+                }
+            }
+            _ => Err(ReadOpError::InvalidOpId(
+                "missing actor or counter".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn load<'a>(
+        id_actor: Option<Option<Cow<'a, ActorIdx>>>,
+        id_counter: Option<Option<Cow<'a, i64>>>,
+    ) -> Option<OpId> {
+        Self::try_load(id_actor?, id_counter?).ok()
+    }
+}
+
+impl ObjId {
+    fn try_load(
+        actor: Option<Cow<'_, ActorIdx>>,
+        ctr: Option<Cow<'_, u64>>,
+    ) -> Result<ObjId, ReadOpError> {
+        match (actor, ctr) {
+            (Some(actor_idx), Some(counter)) => {
+                if *counter == 0 {
+                    Ok(ObjId::root())
+                } else {
+                    Ok(ObjId(OpId::new(*counter, u64::from(*actor_idx) as usize)))
+                }
+            }
+            (None, None) => Ok(ObjId::root()),
+            _ => Err(ReadOpError::InvalidOpId(
+                "missing actor or counter".to_string(),
+            )),
+        }
+    }
+}
+
+impl ElemId {
+    fn try_load(
+        key_actor: Option<Cow<'_, ActorIdx>>,
+        key_counter: Option<Cow<'_, i64>>,
+    ) -> Result<Option<ElemId>, ReadOpError> {
+        match (key_counter, key_actor) {
+            (None, None) => Ok(None),
+            (Some(Cow::Owned(0)), None) => Ok(Some(ElemId(OpId::new(0, 0)))),
+            (Some(counter), Some(actor)) if *counter > 0 => Ok(Some(ElemId(OpId::new(
+                *counter as u64,
+                usize::from(*actor),
+            )))),
+            _ => Err(ReadOpError::InvalidKey),
+        }
+    }
+}
+
+impl<'a> KeyRef<'a> {
+    fn try_load(
+        key_str: Option<Cow<'a, str>>,
+        key_actor: Option<Cow<'a, ActorIdx>>,
+        key_counter: Option<Cow<'a, i64>>,
+    ) -> Result<KeyRef<'a>, ReadOpError> {
+        let elemid = ElemId::try_load(key_actor, key_counter)?;
+        match (key_str, elemid) {
+            (Some(key_str), None) => Ok(KeyRef::Map(key_str)),
+            (None, Some(elemid)) => Ok(KeyRef::Seq(elemid)),
+            (None, None) => Err(ReadOpError::MissingKey),
+            (Some(_), Some(_)) => Err(ReadOpError::InvalidKey),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OpIdIter<'a> {
+    actor: ColumnDataIter<'a, ActorCursor>,
+    ctr: ColumnDataIter<'a, DeltaCursor>,
+}
+
+impl<'a> OpIdIter<'a> {
+    pub(crate) fn new(
+        actor: ColumnDataIter<'a, ActorCursor>,
+        ctr: ColumnDataIter<'a, DeltaCursor>,
+    ) -> Self {
+        Self { actor, ctr }
+    }
+
+    pub(crate) fn maybe_try_next(&mut self) -> Result<Option<OpId>, ReadOpError> {
+        let actor = self.actor.next();
+        let ctr = self.ctr.next();
+        match (actor, ctr) {
+            (Some(actor), Some(ctr)) => Ok(Some(OpId::try_load(actor, ctr)?)),
+            (None, _) => Ok(None),
+            (Some(_), None) => Err(ReadOpError::MissingValue("id_counter")),
+        }
+    }
+
+    pub(crate) fn maybe_try_nth(&mut self, n: usize) -> Result<Option<OpId>, ReadOpError> {
+        let actor = self.actor.nth(n);
+        let ctr = self.ctr.nth(n);
+        match (actor, ctr) {
+            (Some(actor), Some(ctr)) => Ok(Some(OpId::try_load(actor, ctr)?)),
+            (None, _) => Ok(None),
+            (Some(_), None) => Err(ReadOpError::MissingValue("id_counter")),
+        }
+    }
+}
+
+impl<'a> Iterator for OpIdIter<'a> {
+    type Item = OpId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.maybe_try_next().ok().flatten()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.maybe_try_nth(n).ok().flatten()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InsertIter<'a> {
+    iter: ColumnDataIter<'a, BooleanCursor>,
+}
+
+impl<'a> InsertIter<'a> {
+    pub(crate) fn new(iter: ColumnDataIter<'a, BooleanCursor>) -> Self {
+        Self { iter }
+    }
+
+    fn try_next(&mut self) -> Result<bool, ReadOpError> {
+        self.iter
+            .next()
+            .flatten()
+            .as_deref()
+            .copied()
+            .ok_or(ReadOpError::MissingValue("insert"))
+    }
+
+    fn try_nth(&mut self, n: usize) -> Result<bool, ReadOpError> {
+        self.iter
+            .nth(n)
+            .flatten()
+            .as_deref()
+            .copied()
+            .ok_or(ReadOpError::MissingValue("insert"))
+    }
+}
+
+impl<'a> Iterator for InsertIter<'a> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct KeyIter<'a> {
+    key_str: ColumnDataIter<'a, StrCursor>,
+    key_actor: ColumnDataIter<'a, ActorCursor>,
+    key_ctr: ColumnDataIter<'a, DeltaCursor>,
+}
+
+impl<'a> KeyIter<'a> {
+    pub(crate) fn new(
+        key_str: ColumnDataIter<'a, StrCursor>,
+        key_actor: ColumnDataIter<'a, ActorCursor>,
+        key_ctr: ColumnDataIter<'a, DeltaCursor>,
+    ) -> Self {
+        Self {
+            key_str,
+            key_actor,
+            key_ctr,
+        }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<KeyRef<'a>, ReadOpError> {
+        let key_str = self
+            .key_str
+            .next()
+            .ok_or(ReadOpError::MissingValue("key_str"))?;
+        let key_actor = self
+            .key_actor
+            .next()
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let key_ctr = self
+            .key_ctr
+            .next()
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        KeyRef::try_load(key_str, key_actor, key_ctr)
+    }
+
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<KeyRef<'a>, ReadOpError> {
+        let key_str = self
+            .key_str
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("key_str"))?;
+        let key_actor = self
+            .key_actor
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("key_actor"))?;
+        let key_ctr = self
+            .key_ctr
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("key_ctr"))?;
+        KeyRef::try_load(key_str, key_actor, key_ctr)
+    }
+}
+
+impl<'a> Iterator for KeyIter<'a> {
+    type Item = KeyRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ObjIdIter<'a> {
+    actor: ColumnDataIter<'a, ActorCursor>,
+    ctr: ColumnDataIter<'a, UIntCursor>,
+}
+
+impl<'a> ObjIdIter<'a> {
+    pub(crate) fn new(
+        actor: ColumnDataIter<'a, ActorCursor>,
+        ctr: ColumnDataIter<'a, UIntCursor>,
+    ) -> Self {
+        Self { actor, ctr }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<ObjId, ReadOpError> {
+        let actor = self
+            .actor
+            .next()
+            .ok_or(ReadOpError::MissingValue("obj_actor"))?;
+        let ctr = self
+            .ctr
+            .next()
+            .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
+        ObjId::try_load(actor, ctr)
+    }
+
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<ObjId, ReadOpError> {
+        let actor = self
+            .actor
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("obj_actor"))?;
+        let ctr = self
+            .ctr
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
+        ObjId::try_load(actor, ctr)
+    }
+}
+
+impl<'a> Iterator for ObjIdIter<'a> {
+    type Item = ObjId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MarkInfoIter<'a> {
+    name: ColumnDataIter<'a, StrCursor>,
+    expand: ColumnDataIter<'a, BooleanCursor>,
+}
+
+impl<'a> MarkInfoIter<'a> {
+    pub(crate) fn new(
+        name: ColumnDataIter<'a, StrCursor>,
+        expand: ColumnDataIter<'a, BooleanCursor>,
+    ) -> Self {
+        Self { name, expand }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<(Option<Cow<'a, str>>, bool), ReadOpError> {
+        let expand = self
+            .expand
+            .next()
+            .ok_or(ReadOpError::MissingValue("expand"))?
+            .as_deref()
+            .cloned()
+            .unwrap_or(false);
+        let mark_name = self
+            .name
+            .next()
+            .ok_or(ReadOpError::MissingValue("mark_name"))?;
+        Ok((mark_name, expand))
+    }
+
+    pub(crate) fn try_nth(
+        &mut self,
+        n: usize,
+    ) -> Result<(Option<Cow<'a, str>>, bool), ReadOpError> {
+        let expand = self
+            .expand
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("expand"))?
+            .as_deref()
+            .cloned()
+            .unwrap_or(false);
+        let mark_name = self
+            .name
+            .nth(n)
+            .ok_or(ReadOpError::MissingValue("mark_name"))?;
+        Ok((mark_name, expand))
+    }
+}
+
+impl<'a> Iterator for MarkInfoIter<'a> {
+    type Item = (Option<Cow<'a, str>>, bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ActionIter<'a> {
+    iter: ColumnDataIter<'a, ActionCursor>,
+}
+
+impl<'a> ActionIter<'a> {
+    pub(crate) fn new(iter: ColumnDataIter<'a, ActionCursor>) -> Self {
+        Self { iter }
+    }
+
+    fn try_next(&mut self) -> Result<Action, ReadOpError> {
+        self.iter
+            .next()
+            .flatten()
+            .as_deref()
+            .copied()
+            .ok_or(ReadOpError::MissingValue("action"))
+    }
+
+    fn try_nth(&mut self, n: usize) -> Result<Action, ReadOpError> {
+        self.iter
+            .nth(n)
+            .flatten()
+            .as_deref()
+            .copied()
+            .ok_or(ReadOpError::MissingValue("action"))
+    }
+}
+
+impl<'a> Iterator for ActionIter<'a> {
+    type Item = Action;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ValueIter<'a> {
+    meta: ColumnDataIter<'a, MetaCursor>,
+    raw: RawReader<'a, SlabWeight>,
+}
+
+impl<'a> ValueIter<'a> {
+    pub(crate) fn new(
+        meta: ColumnDataIter<'a, MetaCursor>,
+        raw: RawReader<'a, SlabWeight>,
+    ) -> Self {
+        Self { meta, raw }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<ScalarValue<'a>, ReadOpError> {
+        let meta = self.meta.next().flatten();
+        let meta = meta.ok_or(ReadOpError::MissingValue("value_meta"))?;
+        let raw = self.raw.read_next(meta.length())?;
+        Ok(ScalarValue::from_raw(*meta, raw)?)
+    }
+
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<ScalarValue<'a>, ReadOpError> {
+        if n == 0 {
+            self.try_next()
+        } else {
+            let meta = self.meta.nth(n).flatten();
+            let meta = meta.ok_or(ReadOpError::MissingValue("value_meta"))?;
+            let raw_len = meta.length();
+            let raw_pos = self.meta.calculate_acc().as_usize();
+            self.raw.seek_to(raw_pos - raw_len);
+            let raw = self.raw.read_next(raw_len)?;
+            let value = ScalarValue::from_raw(*meta, raw)?;
+            Ok(value)
+        }
+    }
+}
+
+impl<'a> Iterator for ValueIter<'a> {
+    type Item = ScalarValue<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SuccIterIter<'a> {
+    count: ColumnDataIter<'a, UIntCursor>,
+    actor: ColumnDataIter<'a, ActorCursor>,
+    ctr: ColumnDataIter<'a, DeltaCursor>,
+    incs: ColumnDataIter<'a, IntCursor>,
+}
+
+impl<'a> SuccIterIter<'a> {
+    pub(crate) fn new(
+        count: ColumnDataIter<'a, UIntCursor>,
+        actor: ColumnDataIter<'a, ActorCursor>,
+        ctr: ColumnDataIter<'a, DeltaCursor>,
+        incs: ColumnDataIter<'a, IntCursor>,
+    ) -> Self {
+        Self {
+            count,
+            actor,
+            ctr,
+            incs,
+        }
+    }
+
+    pub(crate) fn try_next(&mut self) -> Result<SuccCursors<'a>, ReadOpError> {
+        let num_succ = self.count.next().flatten();
+        let num_succ = *num_succ.ok_or(ReadOpError::MissingValue("succ_count"))?;
+        let result = SuccCursors {
+            len: num_succ as usize,
+            succ_actor: self.actor.clone(),
+            succ_counter: self.ctr.clone(),
+            inc_values: self.incs.clone(),
+        };
+
+        self.actor.advance_by(num_succ as usize);
+        self.ctr.advance_by(num_succ as usize);
+        self.incs.advance_by(num_succ as usize);
+
+        Ok(result)
+    }
+
+    pub(crate) fn try_nth(&mut self, n: usize) -> Result<SuccCursors<'a>, ReadOpError> {
+        if n == 0 {
+            self.try_next()
+        } else {
+            let sub_pos1 = self.count.calculate_acc().as_u64();
+            let num_succ = self.count.nth(n).flatten();
+            let sub_pos2 = self.count.calculate_acc().as_u64();
+            let num_succ = *num_succ.ok_or(ReadOpError::MissingValue("succ_count"))?;
+
+            let seek = sub_pos2 - sub_pos1 - num_succ;
+            self.actor.advance_by(seek as usize);
+            self.ctr.advance_by(seek as usize);
+            self.incs.advance_by(seek as usize);
+
+            let result = SuccCursors {
+                len: num_succ as usize,
+                succ_actor: self.actor.clone(),
+                succ_counter: self.ctr.clone(),
+                inc_values: self.incs.clone(),
+            };
+
+            self.actor.advance_by(num_succ as usize);
+            self.ctr.advance_by(num_succ as usize);
+            self.incs.advance_by(num_succ as usize);
+
+            Ok(result)
+        }
+    }
+}
+
+impl<'a> Iterator for SuccIterIter<'a> {
+    type Item = SuccCursors<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.try_next().ok()
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.try_nth(n).ok()
     }
 }

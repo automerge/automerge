@@ -1,23 +1,20 @@
 use crate::marks::MarkSet;
 use crate::types::Clock;
 
-use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, TopOpIter, VisibleOpIter};
+use super::visible::{SkipIter, VisIter};
+use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
 
 #[cfg(test)]
 use crate::iter::KeyOpIter;
 
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::Arc;
 
-// is visible needs to compute counter
-// op_iter().is_visible(clock)
-//    id, succ, action, *value
-// op_iter().visible(clock)
-
 pub(crate) trait OpQueryTerm<'a>: Iterator<Item = Op<'a>> + Debug {
-    fn get_opiter(&self) -> &OpIter<'a>;
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>>;
+
+    fn range(&self) -> Range<usize>;
 }
 
 pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
@@ -42,19 +39,48 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
         VisibleOpIter::new(self, clock)
     }
 
+    fn visible2(self, op_set: &'a OpSet, clock: Option<&Clock>) -> FixCounters<'a, Self> {
+        let vis = VisIter::new(op_set, clock, self.range());
+        FixCounters::new(SkipIter::new(self, vis), clock)
+    }
+
     fn diff<'b>(self, before: &'b Clock, after: &'b Clock) -> DiffOpIter<'a, 'b, Self> {
         DiffOpIter::new(self, before, after)
     }
 }
 
 impl<'a> OpQueryTerm<'a> for OpIter<'a> {
-    fn get_opiter(&self) -> &OpIter<'a> {
-        self
-    }
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         None
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.range()
     }
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQuery<'a> for I {}
+
+pub(crate) struct FixCounters<'a, T: OpQuery<'a>> {
+    iter: SkipIter<T, VisIter<'a>>,
+    clock: Option<Clock>,
+}
+
+impl<'a, T: OpQuery<'a>> FixCounters<'a, T> {
+    fn new(iter: SkipIter<T, VisIter<'a>>, clock: Option<&Clock>) -> Self {
+        Self {
+            iter,
+            clock: clock.cloned(),
+        }
+    }
+}
+
+impl<'a, T: OpQuery<'a>> Iterator for FixCounters<'a, T> {
+    type Item = Op<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut op = self.iter.next()?;
+        op.fix_counter(self.clock.as_ref());
+        Some(op)
+    }
+}

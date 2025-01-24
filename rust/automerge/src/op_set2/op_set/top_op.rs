@@ -1,8 +1,9 @@
 use crate::marks::MarkSet;
 
-use super::{Op, OpIter, OpQueryTerm};
+use super::{Op, OpQueryTerm};
 
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -40,11 +41,10 @@ impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a>> OpQueryTerm<'a> for TopOpIter<'a, I> {
-    fn get_opiter(&self) -> &OpIter<'a> {
-        self.iter.get_opiter()
-    }
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         self.iter.get_marks()
+    }
+    fn range(&self) -> Range<usize> {
+        self.iter.range()
     }
 }

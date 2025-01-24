@@ -766,4 +766,30 @@ pub(crate) mod tests {
             vec![vec![ColExport::litrun(vec![1, 2, 4, 9, 4, 5, 6]),]]
         );
     }
+
+    #[test]
+    fn uint_iter_nth() {
+        let mut col: ColumnData<UIntCursor> = ColumnData::new();
+        let mut data = vec![];
+        for _ in 0..10000 {
+            let value = rand::random::<usize>() % 10;
+            if value > 0 {
+                data.push(Some(value as u64 - 1));
+            } else {
+                data.push(None);
+            }
+        }
+        col.splice(0, 0, data.clone());
+
+        for _ in 0..1000 {
+            let mut iter1 = data.iter();
+            let mut iter2 = col.iter();
+            let mut step = rand::random::<usize>() % 40;
+            while let Some(val1) = iter1.nth(step) {
+                let val2 = iter2.nth(step);
+                assert_eq!(val1.as_ref(), val2.flatten().as_deref());
+                step = rand::random::<usize>() % (data.len() / 2);
+            }
+        }
+    }
 }

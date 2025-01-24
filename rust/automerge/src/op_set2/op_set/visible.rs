@@ -1,10 +1,168 @@
 use crate::{marks::MarkSet, types::Clock};
 
-use super::{Op, OpId, OpIter, OpQueryTerm};
-use crate::op_set2::types::{Action, ScalarValue};
+use super::{Op, OpId, OpQueryTerm};
+use crate::op_set2::types::{Action, ActionCursor, ActorCursor, ScalarValue};
+use crate::op_set2::OpSet;
+
+use packer::{BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, UIntCursor};
 
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::Arc;
+
+pub(crate) struct SkipIter<I: Iterator, S: Iterator<Item = usize>> {
+    iter: I,
+    skip: S,
+}
+
+impl<I: Iterator, S: Iterator<Item = usize>> SkipIter<I, S> {
+    pub(crate) fn new(iter: I, skip: S) -> Self {
+        Self { iter, skip }
+    }
+}
+
+impl<I: Iterator, S: Iterator<Item = usize>> Iterator for SkipIter<I, S> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let skip = self.skip.next()?;
+        self.iter.nth(skip)
+    }
+}
+
+pub(crate) enum VisIter<'a> {
+    Indexed(IndexedVisIter<'a>),
+    Scan(ScanVisIter<'a>),
+}
+
+impl<'a> VisIter<'a> {
+    pub(crate) fn new(op_set: &'a OpSet, clock: Option<&Clock>, range: Range<usize>) -> Self {
+        if let Some(clock) = clock {
+            let scan = ScanVisIter::new(op_set, range, clock.clone());
+            Self::Scan(scan)
+        } else {
+            let indexed = IndexedVisIter::new(op_set, range);
+            Self::Indexed(indexed)
+        }
+    }
+}
+
+impl<'a> Iterator for VisIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Scan(s) => s.next(),
+            Self::Indexed(i) => i.next(),
+        }
+    }
+}
+
+pub(crate) struct IndexedVisIter<'a> {
+    iter: ColumnDataIter<'a, BooleanCursor>,
+    vis: usize,
+}
+
+impl<'a> IndexedVisIter<'a> {
+    fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
+        let iter = op_set.visible_index.iter_range(range);
+        Self { iter, vis: 0 }
+    }
+}
+
+impl<'a> Iterator for IndexedVisIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.vis > 0 {
+            self.vis -= 1;
+            Some(0)
+        } else {
+            let mut skip = 0;
+            // next_run can produce zero length runs so
+            // we loop
+            while let Some(run) = self.iter.next_run() {
+                if run.value.as_deref() == Some(&true) && run.count > 0 {
+                    self.vis = run.count - 1;
+                    break;
+                } else {
+                    skip += run.count;
+                }
+            }
+            Some(skip)
+        }
+    }
+}
+
+pub(crate) struct ScanVisIter<'a> {
+    id_actor: ColumnDataIter<'a, ActorCursor>,
+    id_ctr: ColumnDataIter<'a, DeltaCursor>,
+    action: ColumnDataIter<'a, ActionCursor>,
+    succ_count: ColumnDataIter<'a, UIntCursor>,
+    succ_actor: ColumnDataIter<'a, ActorCursor>,
+    succ_ctr: ColumnDataIter<'a, DeltaCursor>,
+    succ_inc: ColumnDataIter<'a, IntCursor>,
+    clock: Clock,
+}
+
+impl<'a> ScanVisIter<'a> {
+    fn new(op_set: &'a OpSet, range: Range<usize>, clock: Clock) -> Self {
+        let id_actor = op_set.cols.id_actor.iter_range(range.clone());
+        let id_ctr = op_set.cols.id_ctr.iter_range(range.clone());
+        let action = op_set.cols.action.iter_range(range.clone());
+        let succ_count = op_set.cols.succ_count.iter_range(range);
+        let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
+        let succ_actor = op_set.cols.succ_actor.iter_range(succ_range.clone());
+        let succ_ctr = op_set.cols.succ_ctr.iter_range(succ_range.clone());
+        let succ_inc = op_set.inc_index.iter_range(succ_range);
+        Self {
+            id_actor,
+            id_ctr,
+            action,
+            succ_count,
+            succ_actor,
+            succ_ctr,
+            succ_inc,
+            clock,
+        }
+    }
+
+    fn next_visible(&mut self) -> Option<bool> {
+        let id = OpId::load(self.id_actor.next(), self.id_ctr.next())?;
+        let action = self.action.next()?;
+        let is_inc = action.as_deref() == Some(&Action::Increment);
+        let succ_count = self.succ_count.next()?.unwrap_or_default();
+        let mut deleted = false;
+        for _ in 0..*succ_count {
+            let succ_id = OpId::load(self.succ_actor.next(), self.succ_ctr.next())?;
+            let inc = self.succ_inc.next()?;
+            if inc.is_none() && self.clock.covers(&succ_id) {
+                deleted = true;
+            }
+        }
+        if deleted || !self.clock.covers(&id) || is_inc {
+            Some(false)
+        } else {
+            Some(true)
+        }
+    }
+}
+
+impl<'a> Iterator for ScanVisIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut skip = 0;
+        while let Some(vis) = self.next_visible() {
+            if vis {
+                break;
+            } else {
+                skip += 1;
+            }
+        }
+        Some(skip)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct VisibleOpIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
@@ -107,12 +265,12 @@ impl<'a> Visibility<'a> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for VisibleOpIter<'a, I> {
-    fn get_opiter(&self) -> &OpIter<'a> {
-        self.iter.get_opiter()
-    }
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         self.iter.get_marks()
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.iter.range()
     }
 }
 

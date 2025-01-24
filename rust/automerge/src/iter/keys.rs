@@ -1,32 +1,32 @@
 #[cfg(test)]
 use crate::op_set2::Op;
-use crate::op_set2::{OpIter, OpQueryTerm, TopOpIter, VisibleOpIter};
+use crate::op_set2::{OpIter, OpSet, TopOpIter, VisibleOpIter};
 
 use std::fmt::Debug;
 
 #[derive(Clone, Debug, Default)]
 pub struct Keys<'a> {
-    pub(crate) iter: Option<TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>>,
+    pub(crate) iter: Option<(&'a OpSet, TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>)>,
 }
 
 impl<'a> Iterator for Keys<'a> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let op = self.iter.as_mut()?.next()?;
-        Some(
-            self.iter
-                .as_ref()?
-                .get_opiter()
-                .op_set
-                .to_string(op.elemid_or_key()),
-        )
+        let (op_set, iter) = self.iter.as_mut()?;
+        let op = iter.next()?;
+        Some(op_set.to_string(op.elemid_or_key()))
     }
 }
 
 impl<'a> Keys<'a> {
-    pub(crate) fn new(iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>) -> Self {
-        Self { iter: Some(iter) }
+    pub(crate) fn new(
+        op_set: &'a OpSet,
+        iter: TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>,
+    ) -> Self {
+        Self {
+            iter: Some((op_set, iter)),
+        }
     }
 }
 

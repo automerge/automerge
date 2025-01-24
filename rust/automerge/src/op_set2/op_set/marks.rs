@@ -1,8 +1,9 @@
 use crate::marks::{MarkSet, MarkStateMachine};
 
-use super::{Action, MarkData, Op, OpIter, OpQueryTerm};
+use super::{Action, MarkData, Op, OpQueryTerm};
 
 use std::fmt::Debug;
+use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -40,12 +41,12 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for MarkIter<'a, I> {
-    fn get_opiter(&self) -> &OpIter<'a> {
-        self.iter.get_opiter()
-    }
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         self.marks.current()
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.iter.range()
     }
 }
 
@@ -75,11 +76,11 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for NoMarkIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for NoMarkIter<'a, I> {
-    fn get_opiter(&self) -> &OpIter<'a> {
-        self.iter.get_opiter()
-    }
-
     fn get_marks(&self) -> Option<&Arc<MarkSet>> {
         None
+    }
+
+    fn range(&self) -> Range<usize> {
+        self.iter.range()
     }
 }

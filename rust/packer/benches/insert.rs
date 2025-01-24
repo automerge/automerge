@@ -1,47 +1,82 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use divan::Bencher;
 use packer::*;
-use rand::distributions::Standard;
-use rand::prelude::*;
-use std::ops::Rem;
+use std::time::Duration;
 
-fn criterion_benchmark(c: &mut Criterion) {
-    let mut rng = rand::thread_rng();
-    for n in [10_000, 100_000] {
-        c.bench_function(&format!("insert_u64_n:{}_large", n), |b| {
-            let max = u32::MAX as u64;
-            let mut col = gen_col(&mut rng, n, max).collect();
-            b.iter(|| int_insert(&mut rng, &mut col, max))
-        });
+use rand::{thread_rng, RngCore};
 
-        c.bench_function(&format!("insert_delta_n:{}_large", n), |b| {
-            let max = u32::MAX as i64;
-            let mut col = gen_col(&mut rng, n, max).collect();
-            b.iter(|| delta_insert(&mut rng, &mut col, max))
-        });
-    }
+const N: u64 = 10_000;
+
+fn main() {
+    divan::main();
 }
 
-fn gen_col<N>(rng: &mut ThreadRng, n: usize, max: N) -> impl Iterator<Item = N> + '_
-where
-    Standard: Distribution<N>,
-    N: Rem<Output = N> + Copy + 'static,
-{
-    (0..n).map(move |_| rng.gen::<N>() % max)
+const IRANGE: i64 = 1000;
+const URANGE: u64 = 1000;
+
+fn rand_u64() -> u64 {
+    thread_rng().next_u64() % URANGE
+}
+fn rand_i64() -> i64 {
+    rand_u64() as i64 - IRANGE / 2
+}
+fn rand_bool() -> bool {
+    rand_u64() % 2 == 0
+}
+fn rand_usize() -> usize {
+    thread_rng().next_u64() as usize
 }
 
-fn int_insert(rng: &mut ThreadRng, col: &mut ColumnData<UIntCursor>, max: u64) {
-    let val = rng.gen::<u64>() % max;
-    let pos: usize = rng.gen();
-    let pos = pos % (col.len() + 1);
-    col.splice(pos, 0, vec![val]);
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn insert_raw(bencher: Bencher) {
+    let mut col: ColumnData<RawCursor> = (0..N).map(|_| vec![0, 1, 2, 3, 4]).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % (col.len() / 5) * 5;
+        let value = vec![0, 1, 2, 3, 4];
+        col.splice(pos, 0, [value]);
+    });
 }
 
-fn delta_insert(rng: &mut ThreadRng, col: &mut ColumnData<DeltaCursor>, max: i64) {
-    let val = rng.gen::<i64>() % max;
-    let pos: usize = rng.gen();
-    let pos = pos % (col.len() + 1);
-    col.splice(pos, 0, vec![val]);
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn insert_uint(bencher: Bencher) {
+    let mut col: ColumnData<UIntCursor> = (0..N).map(|_| rand_u64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        let value = rand_u64();
+        col.splice(pos, 0, [value]);
+    });
 }
 
-criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn insert_int(bencher: Bencher) {
+    let mut col: ColumnData<IntCursor> = (0..N).map(|_| rand_i64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        let value = rand_i64();
+        col.splice(pos, 0, [value]);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn insert_delta(bencher: Bencher) {
+    let mut col: ColumnData<DeltaCursor> = (0..N).map(|_| rand_i64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        let value = rand_i64();
+        col.splice(pos, 0, [value]);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn insert_bool(bencher: Bencher) {
+    let mut col: ColumnData<BooleanCursor> = (0..N).map(|_| rand_bool()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        let value = rand_bool();
+        col.splice(pos, 0, [value]);
+    });
+}

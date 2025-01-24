@@ -1,5 +1,5 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, Run};
+use super::cursor::{ColumnCursor, HasPos, Run};
 use super::encoder::{Encoder, SpliceEncoder};
 use super::pack::PackError;
 use super::slab::{self, Slab, SlabWeight, SlabWriter, SpanWeight};
@@ -125,12 +125,12 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RawReader<'a, T: SpanWeight<Slab>> {
+pub struct RawReader<'a, T: SpanWeight<Slab> + HasPos> {
     pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab, T>,
     pub(crate) current: Option<(&'a Slab, usize)>,
 }
 
-impl<'a, T: SpanWeight<Slab>> RawReader<'a, T> {
+impl<'a, T: SpanWeight<Slab> + HasPos> RawReader<'a, T> {
     pub fn empty() -> RawReader<'static, T> {
         RawReader {
             slabs: slab::SpanTreeIter::default(),
@@ -144,6 +144,9 @@ impl<'a, T: SpanWeight<Slab>> RawReader<'a, T> {
     /// * The read would cross a slab boundary
     /// * The read would go past the end of the data
     pub fn read_next(&mut self, length: usize) -> Result<&'a [u8], ReadRawError> {
+        if length == 0 {
+            return Ok(&[]);
+        }
         let (slab, offset) = match self.current.take() {
             Some(state) => state,
             None => {
@@ -165,6 +168,15 @@ impl<'a, T: SpanWeight<Slab>> RawReader<'a, T> {
             self.current = Some((slab, new_offset));
         }
         Ok(result)
+    }
+
+    pub fn seek_to(&mut self, advance: usize) {
+        if let Some(slabs) = self.slabs.span_tree() {
+            let cursor = slabs.get_where_or_last(|acc, next| advance < acc.pos() + next.pos());
+            let current = Some((cursor.element, advance - cursor.weight.pos()));
+            let slabs = slab::SpanTreeIter::new(slabs, cursor);
+            *self = RawReader { slabs, current }
+        }
     }
 }
 

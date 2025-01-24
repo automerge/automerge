@@ -553,6 +553,16 @@ impl OpId {
         }
     }
 
+    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+        if self.actor() > idx {
+            Some(OpId(self.0, self.1 - 1))
+        } else if self.actor() == idx {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
@@ -616,6 +626,14 @@ impl ObjId {
             self
         } else {
             ObjId(self.0.with_new_actor(idx))
+        }
+    }
+
+    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+        if self.is_root() {
+            Some(self)
+        } else {
+            self.0.without_actor(idx).map(ObjId)
         }
     }
 

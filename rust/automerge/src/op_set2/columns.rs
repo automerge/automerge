@@ -123,17 +123,7 @@ impl Columns {
         len: usize,
     ) -> Result<ColumnData<C>, PackError> {
         if let Some(range) = cols.get(&spec) {
-            let column = ColumnData::external(data.clone(), range.clone(), m)?;
-            /*
-                        println!(
-                            "spec={:?} range={:?} len={:?} column_len={:?}",
-                            spec, range, len, column.len
-                        );
-                        println!("::{:?}", &data[range.clone()]);
-                        println!("::{:?}", column.iter().collect::<Vec<_>>());
-                        assert!(column.len == len || len == 0);
-            */
-            Ok(column)
+            ColumnData::external(data.clone(), range.clone(), m)
         } else {
             Ok(ColumnData::init_empty(len))
         }
@@ -262,7 +252,7 @@ impl Columns {
     }
 
     #[cfg(test)]
-    fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
+    pub(crate) fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
         let mut op_set = Self::default();
         for (i, op) in ops.enumerate() {
             op_set.insert(i, &op);

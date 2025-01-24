@@ -20,7 +20,6 @@ use std::sync::Arc;
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
     pub slabs: SpanTree<Slab, C::SlabIndex>,
-    //pub slabs: SpanTree<Slab, SlabWeight>,
     #[cfg(debug_assertions)]
     pub debug: Vec<C::Export>,
     _phantom: PhantomData<C>,
@@ -87,7 +86,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         encoder.into_column_data()
     }
 
-    pub fn remap<F>(&mut self, f: F) 
+    pub fn remap<F>(&mut self, f: F)
     where
         F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
     {
@@ -478,13 +477,22 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        if n == 0 {
+            return self.next();
+        }
         let target = self.pos() + n + 1;
         if self.slabs.weight().pos() < target {
             self.reset_iter_to_pos(target - 1)?;
             self.next()
         } else if self.run_count() > n {
             self.pos += n + 1;
-            self.run.as_mut().and_then(|r| r.nth(n))
+            //            self.run.as_mut().and_then(|r| r.nth(n))
+            let result = self.slab.cursor.pop_n(self.run.as_mut()?, n + 1);
+            if self.pos > self.max {
+                None
+            } else {
+                result
+            }
         } else {
             self.pos += self.run_count();
             let n = n - self.run_count();
@@ -643,10 +651,10 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn fill_if_empty(&mut self, len: usize) -> bool {
         if self.len == 0 && len > 0 {
-          *self = Self::init_empty(len);
-          true
+            *self = Self::init_empty(len);
+            true
         } else {
-          false
+            false
         }
     }
 

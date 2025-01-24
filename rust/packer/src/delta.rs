@@ -123,6 +123,19 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
+    fn pop_n<'a>(
+        &self,
+        run: &mut Run<'a, Self::Item>,
+        n: usize,
+    ) -> Option<Option<Cow<'a, Self::Item>>> {
+        assert!(n > 0);
+        if run.nth(n - 1)?.is_some() {
+            Some(Some(Cow::Owned(self.abs - run.delta())))
+        } else {
+            Some(None)
+        }
+    }
+
     fn copy_between<'a>(
         slab: &'a [u8],
         writer: &mut SlabWriter<'a, i64>,
@@ -576,5 +589,31 @@ pub(crate) mod tests {
         );
         let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
+    }
+
+    #[test]
+    fn delta_iter_nth() {
+        let mut col: ColumnData<DeltaCursor> = ColumnData::new();
+        let mut data = vec![];
+        for _ in 0..10000 {
+            let value = rand::random::<usize>() % 10;
+            if value > 0 {
+                data.push(Some(value as i64 - 1));
+            } else {
+                data.push(None);
+            }
+        }
+        col.splice(0, 0, data.clone());
+
+        for _ in 0..1000 {
+            let mut iter1 = data.iter();
+            let mut iter2 = col.iter();
+            let mut step = rand::random::<usize>() % 40;
+            while let Some(val1) = iter1.nth(step) {
+                let val2 = iter2.nth(step);
+                assert_eq!(val1.as_ref(), val2.flatten().as_deref());
+                step = rand::random::<usize>() % (data.len() / 2);
+            }
+        }
     }
 }

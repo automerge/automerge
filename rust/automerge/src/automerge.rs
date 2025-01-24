@@ -1404,7 +1404,7 @@ impl Automerge {
     pub(crate) fn values_for(&self, obj: &ExId, clock: Option<Clock>) -> Values<'_> {
         self.exid_to_obj(obj)
             .ok()
-            .map(|obj| Values::new(self.ops.top_ops(&obj.id, clock.clone()), clock))
+            .map(|obj| Values::new(&self.ops, self.ops.top_ops(&obj.id, clock.clone()), clock))
             .unwrap_or_default()
     }
 

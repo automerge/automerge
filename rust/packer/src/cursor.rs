@@ -193,6 +193,15 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         run.next()
     }
 
+    fn pop_n<'a>(
+        &self,
+        run: &mut Run<'a, Self::Item>,
+        n: usize,
+    ) -> Option<Option<Cow<'a, Self::Item>>> {
+        assert!(n > 0);
+        run.nth(n - 1)
+    }
+
     // ENCODER
     fn finalize_state<'a>(
         slab: &'a Slab,

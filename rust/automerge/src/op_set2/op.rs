@@ -3,6 +3,7 @@ use super::packer::{ColumnDataIter, DeltaCursor, IntCursor};
 use super::types::{Action, ActorCursor, ActorIdx, KeyRef, OpType, PropRef, ScalarValue};
 use super::{Value, ValueMeta};
 
+use crate::clock::Clock;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate;
@@ -132,6 +133,10 @@ impl OpBuilder2 {
         } else {
             None
         }
+    }
+
+    pub(crate) fn is_inc(&self) -> bool {
+        matches!(&self.action, types::OpType::Increment(_))
     }
 
     pub(crate) fn is_delete(&self) -> bool {
@@ -376,9 +381,12 @@ impl<'a> Op<'a> {
             _ => None,
         }
     }
-    pub(crate) fn add_succ(&self, id: OpId, inc: Option<i64>) -> SuccInsert {
+    pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
+        if inc.is_some() && !self.is_counter() {
+            inc = None;
+        }
         let len = succ.len() as u64;
         let mut sub_pos = succ.pos();
         while let Some(i) = succ.next() {
@@ -392,6 +400,24 @@ impl<'a> Op<'a> {
             inc,
             len,
             sub_pos,
+        }
+    }
+
+    pub(crate) fn fix_counter(&mut self, clock: Option<&Clock>) {
+        if let ScalarValue::Counter(n) = self.value {
+            let mut inc = 0;
+            for (i, val) in self.succ_inc() {
+                if let Some(v) = val {
+                    if let Some(c) = clock {
+                        if c.covers(&i) {
+                            inc += v;
+                        }
+                    } else {
+                        inc += v;
+                    }
+                }
+            }
+            self.value = ScalarValue::Counter(n + inc);
         }
     }
 

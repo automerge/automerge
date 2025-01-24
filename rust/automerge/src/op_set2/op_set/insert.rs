@@ -76,7 +76,6 @@ impl<'a> InsertQuery<'a> {
 
     pub(crate) fn resolve(&mut self, mut index: usize) -> Result<QueryNth, AutomergeError> {
         let mut last_width = None;
-        //let mut index = 0;
         let mut done = index >= self.target;
         let mut pos = self.iter.pos();
         let mut post_marks = vec![];

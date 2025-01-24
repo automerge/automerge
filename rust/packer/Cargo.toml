@@ -16,23 +16,28 @@ leb128 = "^0.2.5"
 thiserror = "^1.0.16"
 
 [dev-dependencies]
-criterion = "0.5.1"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
+divan = "0.1.15"
 
 [profile.release]
 debug = true
 
-
 [[bench]]
-name = "seek"
+name = "insert"
 harness = false
 
 [[bench]]
-name = "insert"
+name = "splice"
+harness = false
+
+[[bench]]
+name = "seek"
 harness = false
 
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]
 optional = true
+
+
