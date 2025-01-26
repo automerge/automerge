@@ -71,7 +71,7 @@ You can build and view the C API's HTML reference documentation like so:
 cmake -E make_directory automerge-c/build
 cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build --target automerge_docs
-firefox automerge-c/build/src/html/index.html
+firefox automerge-c/build/docs/html/index.html
 ```
 
 To get started quickly, look at the
