@@ -5,9 +5,11 @@ for other language bindings that have good support for calling C functions.
 
 # Installing
 
-See the main README for instructions on getting your environment set up and then
-you can build the automerge-c library and install its constituent files within
-a root directory of your choosing (e.g. "/usr/local") like so:
+See the [main
+README](https://github.com/automerge/automerge/tree/main/README.md#building) for
+instructions on getting your environment set up and then you can build the
+automerge-c library and install its constituent files within a root directory of
+your choosing (e.g. "/usr/local") like so:
 
 ```shell
 cmake -E make_directory automerge-c/build
@@ -65,7 +67,10 @@ array of valid UTF-8 code points.
 
 # Usage
 
-You can build and view the C API's HTML reference documentation like so:
+You can build and view the C API's HTML reference documentation. You will need
+the same build setup as described in the [main
+README](https://github.com/automerge/automerge/tree/main/README.md#building),
+plus [Doxygen](https://doxygen.nl/download.html).
 
 ```shell
 cmake -E make_directory automerge-c/build
