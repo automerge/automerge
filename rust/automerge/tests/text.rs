@@ -158,9 +158,6 @@ fn mark_created_after_insertion() {
         automerge::marks::ExpandMark::Both,
     )
     .unwrap();
-
-    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
 }
 
 #[test]
@@ -330,7 +327,6 @@ fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
     .unwrap();
 
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
     assert!(marks_are_consolidated(&spans));
 }
 
@@ -410,15 +406,9 @@ fn insertions_after_noexpand_spans_are_not_marked() {
 
     doc.update_spans(&text, new_blocks).unwrap();
 
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
-
     let heads_before = doc.get_heads();
     doc.splice_text(&text, 11, 0, "a").unwrap();
     let heads_after = doc.get_heads();
-
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
 
     let patches = doc.diff(&heads_before, &heads_after);
     assert_eq!(patches.len(), 1);
@@ -546,9 +536,7 @@ fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following
 
     doc.update_diff_cursor();
     let heads_before = doc.get_heads();
-    println!("doing splice");
     doc.splice_text(&text, doc.length(&text), 0, "a").unwrap();
-    println!("done splice");
     let heads_after = doc.get_heads();
 
     let patches = doc.diff(&heads_before, &heads_after);
@@ -665,17 +653,21 @@ fn test_remote_patches_for_marks_with_expand_after() {
     let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);
     let patches_b = doc_b.diff(&heads_before_b, &heads_after_b);
 
-    #[cfg(feature = "optree-visualisation")]
-    {
-        println!("--------------------------------");
-        println!("Doc A");
-        println!("{}", doc_a.visualise_optree(None));
-        println!("--------------------------------");
-        println!("Doc B");
-        println!("{}", doc_b.visualise_optree(None));
-    }
-
     assert_eq!(patches_a, patches_b);
+}
+
+#[test]
+fn update_text_change_at() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.update_text(&text, "a\n").unwrap();
+    let initial_heads = doc.get_heads();
+    doc.update_text(&text, "a\nb\n").unwrap();
+    doc.isolate(&initial_heads);
+    doc.update_text(&text, "a\nc\n").unwrap();
+    doc.integrate();
+
+    assert_eq!(doc.text(&text).unwrap(), "a\nc\nb\n");
 }
 
 proptest::proptest! {
