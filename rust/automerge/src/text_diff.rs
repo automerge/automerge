@@ -18,7 +18,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
-    let old = doc.text(text_obj)?;
+    let old = doc.text_for(text_obj, tx.get_scope().clone())?;
     let new = new.as_ref();
     let old_graphemes = old.graphemes(true).collect::<Vec<&str>>();
     let new_graphemes = new.graphemes(true).collect::<Vec<&str>>();
