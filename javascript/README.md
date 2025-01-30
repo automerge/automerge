@@ -75,3 +75,7 @@ Memory usage is greatly improved.  The document `big_paste` is the best case sce
 ------------------------------------------------------------------+
 ```
 
+### ChangeLog
+
+- **3.0.0-preview.2** : fixed a performance problem with documents with many objects and maps with deep update histories
+
