@@ -290,6 +290,7 @@ export class Automerge {
   getHeads(): Heads;
   getLastLocalChange(): Change | null;
   getMissingDeps(heads?: Heads): Heads;
+  frontier(heads: Heads): Heads;
 
   // memory management
   free(): void; // only needed if weak-refs are unsupported

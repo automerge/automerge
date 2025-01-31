@@ -2021,3 +2021,52 @@ fn hash_for_opid() {
     assert_eq!(doc.hash_for_opid(&id1), hash1);
     assert_eq!(doc.hash_for_opid(&id2), hash2);
 }
+
+mod frontier_tests {
+    use std::collections::BTreeSet;
+
+    use crate::{transaction::Transactable, AutoCommit, ROOT};
+
+    #[test]
+    fn frontier_direct_descendants() {
+        let mut doc = AutoCommit::new();
+        doc.put(&ROOT, "foo", "bar").unwrap();
+        let start_heads = doc.get_heads();
+
+        doc.put(&ROOT, "baz", "qux").unwrap();
+        let end_heads = doc.get_heads();
+
+        let combined_heads = [&start_heads[..], &end_heads[..]].concat();
+        assert_eq!(doc.frontier(combined_heads), BTreeSet::from_iter(end_heads));
+    }
+
+    #[test]
+    fn frontier_shared_ancestor() {
+        let mut doc = AutoCommit::new();
+        doc.put(&ROOT, "foo", "bar").unwrap();
+        let start_heads = doc.get_heads();
+
+        let mut left = doc.fork();
+        left.put(&ROOT, "baz", "qux").unwrap();
+        let left_heads = left.get_heads();
+
+        let mut right = doc.fork();
+        right.put(&ROOT, "baz", "qix").unwrap();
+        let right_heads = right.get_heads();
+
+        doc.merge(&mut left).unwrap();
+        doc.merge(&mut right).unwrap();
+
+        let left_and_right_heads = [&left_heads[..], &right_heads[..]].concat();
+        assert_eq!(
+            doc.frontier(left_and_right_heads.clone()),
+            BTreeSet::from_iter(left_and_right_heads.clone())
+        );
+
+        let with_ancestor = [start_heads[0], left_heads[0], right_heads[0]];
+        assert_eq!(
+            doc.frontier(with_ancestor),
+            BTreeSet::from_iter(left_and_right_heads)
+        );
+    }
+}

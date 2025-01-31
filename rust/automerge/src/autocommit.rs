@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ops::RangeBounds;
 
 use crate::automerge::SaveOptions;
@@ -653,6 +654,10 @@ impl AutoCommit {
     pub fn has_our_changes(&mut self, state: &crate::sync::State) -> bool {
         self.ensure_transaction_closed();
         self.doc.has_our_changes(state)
+    }
+
+    pub fn frontier<I: IntoIterator<Item = ChangeHash>>(&self, heads: I) -> BTreeSet<ChangeHash> {
+        self.doc.frontier(heads)
     }
 }
 

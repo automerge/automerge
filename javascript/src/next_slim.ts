@@ -143,6 +143,7 @@ export {
   topoHistoryTraversal,
   inspectChange,
   stats,
+  frontier,
 } from "./stable.js"
 export { isRawString } from "./proxies.js"
 

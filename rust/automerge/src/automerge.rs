@@ -1904,6 +1904,10 @@ impl Automerge {
     pub fn text_encoding(&self) -> TextEncoding {
         self.text_encoding
     }
+
+    pub fn frontier<I: IntoIterator<Item = ChangeHash>>(&self, heads: I) -> BTreeSet<ChangeHash> {
+        self.change_graph.frontier(&heads.into_iter().collect())
+    }
 }
 
 impl ReadDoc for Automerge {

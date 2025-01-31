@@ -1248,6 +1248,22 @@ impl Automerge {
         js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
         result.into()
     }
+
+    #[wasm_bindgen(js_name = frontier)]
+    pub fn frontier(&self, heads: JsValue) -> Result<JsValue, JsError> {
+        let heads = heads
+            .dyn_into::<Array>()
+            .map_err(|_| JsError::new(&"heads was not an array"))?;
+        let Some(heads) = get_heads(Some(heads))? else {
+            return Ok(Array::new().into());
+        };
+        let frontier = self.doc.frontier(heads);
+        let result = Array::new();
+        for change_hash in frontier {
+            result.push(&change_hash.to_string().into());
+        }
+        Ok(result.into())
+    }
 }
 
 #[wasm_bindgen(js_name = create)]

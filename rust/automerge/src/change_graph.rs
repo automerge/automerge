@@ -220,6 +220,67 @@ impl ChangeGraph {
             }
         }
     }
+
+    /// Returns the "frontier" nodes - nodes in the input set that have no descendants
+    /// also in the input set.
+    pub(crate) fn frontier(&self, changes: &BTreeSet<ChangeHash>) -> BTreeSet<ChangeHash> {
+        // Convert hashes to node indices and build a set of the original hashes
+        let mut node_indices = Vec::new();
+        let mut all_nodes = BTreeSet::new();
+
+        for hash in changes {
+            if let Some(&idx) = self.nodes_by_hash.get(hash) {
+                node_indices.push(idx);
+                all_nodes.insert(idx);
+            }
+        }
+
+        if node_indices.is_empty() {
+            return changes.clone();
+        }
+
+        // Find nodes that have descendants in our set
+        let mut has_descendants = BTreeSet::new();
+
+        // For each node, mark all its ancestors as "having descendants"
+        for &idx in &node_indices {
+            // Skip nodes we've already processed
+            if has_descendants.contains(&idx) {
+                continue;
+            }
+
+            // Process all ancestors
+            let mut to_visit = self.parents(idx).collect::<Vec<_>>();
+
+            while let Some(ancestor_idx) = to_visit.pop() {
+                // Skip if already processed
+                if has_descendants.insert(ancestor_idx) {
+                    // If this is new, add its parents to queue
+                    to_visit.extend(self.parents(ancestor_idx));
+                }
+            }
+        }
+
+        // Convert back to change hashes for the frontier
+        let frontier: BTreeSet<ChangeHash> = node_indices
+            .into_iter()
+            .filter(|idx| !has_descendants.contains(idx))
+            .map(|idx| {
+                let node = &self.nodes[idx.0 as usize];
+                self.hashes[node.hash_idx.0 as usize]
+            })
+            .collect();
+
+        // Add any hashes that weren't in our graph
+        let mut result = frontier;
+        for hash in changes {
+            if !self.nodes_by_hash.contains_key(hash) {
+                result.insert(*hash);
+            }
+        }
+
+        result
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

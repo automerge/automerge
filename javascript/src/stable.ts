@@ -1304,6 +1304,11 @@ export function stats(doc: Doc<unknown>): {
   return state.handle.stats()
 }
 
+export function frontier(doc: Doc<unknown>, heads: Heads): Heads {
+  const state = _state(doc)
+  return state.handle.frontier(heads)
+}
+
 export function saveBundle(
   doc: Doc<unknown>,
   start: Hash | null,
