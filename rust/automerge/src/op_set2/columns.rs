@@ -15,7 +15,6 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub(super) struct Columns {
@@ -118,12 +117,18 @@ impl Columns {
     fn load_column<C: ColumnCursor>(
         spec: ColumnSpec,
         cols: &BTreeMap<ColumnSpec, Range<usize>>,
-        data: &Arc<Vec<u8>>,
+        data: &[u8],
         m: &ScanMeta,
         len: usize,
     ) -> Result<ColumnData<C>, PackError> {
         if let Some(range) = cols.get(&spec) {
-            ColumnData::external(data.clone(), range.clone(), m)
+            //let c1 : ColumnData<C> = ColumnData::external(data.clone(), range.clone(), m)?;
+            let c2: ColumnData<C> = ColumnData::load_with(&data[range.clone()], m)?;
+            //assert_eq!(c1.to_vec(), c2.to_vec());
+            //assert_eq!(c1.export(), c2.export());
+            //assert_eq!(c1.len(), c2.len());
+            Ok(c2)
+            //Ok(c1)
         } else {
             Ok(ColumnData::init_empty(len))
         }
@@ -131,7 +136,7 @@ impl Columns {
 
     pub(crate) fn load<'a, I: Iterator<Item = &'a RawColumn<Uncompressed>>>(
         iter: I,
-        data: Arc<Vec<u8>>,
+        data: &[u8],
         actors: &[ActorId],
     ) -> Result<Self, PackError> {
         let m = ScanMeta {
@@ -139,28 +144,28 @@ impl Columns {
         };
         let cols = iter.map(|c| (c.spec(), c.data())).collect();
 
-        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, &data, &m, 0)?;
+        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, data, &m, 0)?;
         let len = id_actor.len();
 
-        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
-        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
-        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, &data, &m, len)?;
-        let insert = Self::load_column(INSERT_COL_SPEC, &cols, &data, &m, len)?;
-        let action = Self::load_column(ACTION_COL_SPEC, &cols, &data, &m, len)?;
-        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, &data, &m, len)?;
-        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, &data, &m, len)?;
+        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, data, &m, len)?;
+        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, data, &m, len)?;
+        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, data, &m, len)?;
+        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, data, &m, len)?;
+        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, data, &m, len)?;
+        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, data, &m, len)?;
+        let insert = Self::load_column(INSERT_COL_SPEC, &cols, data, &m, len)?;
+        let action = Self::load_column(ACTION_COL_SPEC, &cols, data, &m, len)?;
+        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, data, &m, len)?;
+        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, data, &m, len)?;
 
-        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, &data, &m, len)?;
+        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, data, &m, len)?;
         let succ_len = succ_count.acc().as_usize();
-        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, &data, &m, succ_len)?;
-        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, &data, &m, succ_len)?;
+        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, data, &m, succ_len)?;
+        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, data, &m, succ_len)?;
 
-        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, &data, &m, len)?;
+        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, data, &m, len)?;
         let value_len = value_meta.acc().as_usize();
-        let value = Self::load_column(VALUE_COL_SPEC, &cols, &data, &m, value_len)?;
+        let value = Self::load_column(VALUE_COL_SPEC, &cols, data, &m, value_len)?;
 
         Ok(Self {
             id_actor,

@@ -857,13 +857,18 @@ impl Automerge {
     #[wasm_bindgen(js_name = loadIncremental)]
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, error::Load> {
         let data = data.to_vec();
+        //am::log!("load_incremental: {:?}", data.as_slice());
         let len = self.doc.load_incremental(&data)?;
         Ok(len as f64)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), error::ApplyChangesError> {
-        let changes: Vec<_> = JS(changes).try_into()?;
+        let changes: Vec<Change> = JS(changes).try_into()?;
+
+        //for c in &changes {
+          //am::log!("apply change: {:?}", c.raw_bytes());
+        //}
         self.doc.apply_changes(changes)?;
         Ok(())
     }
@@ -961,6 +966,7 @@ impl Automerge {
         message: Uint8Array,
     ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
+        //am::log!("receive sync message: {:?}", message.as_slice());
         let message = am::sync::Message::decode(message.as_slice())?;
         self.doc
             .sync()
@@ -971,7 +977,9 @@ impl Automerge {
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
         if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
-            Uint8Array::from(message.encode().as_slice()).into()
+            let message = message.encode();
+            //am::log!("generate sync message: {:?}", message.as_slice());
+            Uint8Array::from(message.as_slice()).into()
         } else {
             JsValue::null()
         }
@@ -1217,6 +1225,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 #[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
+    //am::log!("load: {:?}", data.as_slice());
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     let text_v1 = js_get(&options, "text_v1")
         .ok()

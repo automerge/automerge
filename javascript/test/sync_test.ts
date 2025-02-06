@@ -1092,6 +1092,7 @@ describe("Data sync protocol", () => {
     })
   })
 
+  // FIXME - this fails one time in maybe 100
   it("should report whether the other end has our changes", () => {
     let left = Automerge.from({ foo: "bar" })
     let right = Automerge.from({ baz: "qux" })

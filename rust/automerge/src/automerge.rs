@@ -838,10 +838,10 @@ impl Automerge {
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change)?;
-        self.update_history(change, ops.len());
+        self.update_history(&change, ops.len());
         patch_log.migrate_actors(&self.ops().actors)?;
         for op in ops {
-            self.insert_op(op, patch_log)?;
+            self.insert_op(op, patch_log, change.raw_bytes())?;
         }
         Ok(())
     }
@@ -1038,10 +1038,10 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
-    pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) {
+    pub(crate) fn update_history(&mut self, change: &Change, num_ops: usize) {
         self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
 
-        self.update_deps(&change);
+        self.update_deps(change);
 
         //let history_index = self.history.len();
 
@@ -1055,7 +1055,7 @@ impl Automerge {
         */
 
         self.change_graph
-            .add_change(&change, actor_index)
+            .add_change(change, actor_index)
             .expect("Change's deps should already be in the document");
 
         //self.history.push(change);
@@ -1196,13 +1196,21 @@ impl Automerge {
         &mut self,
         op: ChangeOp,
         patch_log: &mut PatchLog,
+        change: &[u8],
     ) -> Result<(), AutomergeError> {
         let obj = self.get_obj_meta(op.obj)?;
         let encoding = patch_log.text_rep().encoding(obj.typ);
 
         let found = self.ops.find_op_with_patch_log(&op, encoding);
 
-        assert_eq!(op.pred.len(), found.succ.len());
+        if op.pred.len() != found.succ.len() {
+            log!("Error: did not find all pred ops");
+            log!("op={:?}", op);
+            log!("found={:?}", found);
+            log!("heads={:?}", self.get_heads());
+            log!("change={:?}", change);
+            panic!()
+        }
 
         let op = op.build(found.pos, obj);
 

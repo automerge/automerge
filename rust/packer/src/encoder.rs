@@ -128,6 +128,39 @@ impl<'a> EncoderState<'a, bool> for BooleanState {
     fn flush<W: Writer<'a, bool>>(&mut self, writer: &mut W) {
         let state = std::mem::take(self);
         writer.flush_bool_run(state.count, state.value);
+        self.flushed = true;
+    }
+
+    fn copy_slab<C: ColumnCursor<State<'a> = Self, Item = bool>>(
+        &mut self,
+        writer: &mut SlabWriter<'a, bool>,
+        slab: &'a Slab,
+    ) {
+        let mut cursor = C::empty();
+        let mut start = 0;
+        let mut first_count = 0;
+        let data = slab.as_slice();
+        while let Ok(Some(run)) = cursor.try_next(data) {
+            if run.count > 0 {
+                first_count = run.count;
+                self.append_chunk(writer, run);
+                start = cursor.offset();
+                break;
+            }
+        }
+
+        let mut end = 0;
+        while let Ok(Some(run)) = cursor.try_next(data) {
+            assert!(run.count != 0);
+            if cursor.index() == slab.len() {
+                let size = slab.len() - first_count - run.count;
+                self.flush(writer);
+                writer.copy(data, start..end, 0, size, Acc::new(), None);
+                self.append_chunk(writer, run);
+                break;
+            }
+            end = cursor.offset();
+        }
     }
 }
 
@@ -173,6 +206,34 @@ impl<'a> EncoderState<'a, i64> for DeltaState<'a> {
 
     fn flush<W: Writer<'a, i64>>(&mut self, writer: &mut W) {
         self.rle.flush(writer)
+    }
+
+    fn copy_slab<C>(&mut self, writer: &mut SlabWriter<'a, i64>, slab: &'a Slab)
+    where
+        C: ColumnCursor<State<'a> = Self, Item = i64>,
+    {
+        let mut cursor = C::new(slab);
+        let data = slab.as_slice();
+        while let Some(run) = cursor.next(data) {
+            match &run.value {
+                None => {
+                    self.append_chunk(writer, run);
+                }
+                Some(value) => {
+                    let first = **value + slab.abs();
+                    self.append(writer, Some(Cow::Owned(first)));
+                    if let Some(r) = run.pop() {
+                        self.append_chunk(writer, r);
+                    }
+                    self.abs = slab.abs() + run.delta();
+                    break;
+                }
+            }
+        }
+        // FIXME - would be faster to use a copy here
+        while let Some(run) = cursor.next(data) {
+            self.append_chunk(writer, run);
+        }
     }
 }
 
@@ -315,7 +376,7 @@ impl<'a, C: ColumnCursor> Default for Encoder<'a, C> {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::default(),
+            writer: SlabWriter::new(C::slab_size(), 0, false),
             _phantom: PhantomData,
         }
     }
@@ -368,21 +429,20 @@ where
         self.state.append_chunk(&mut self.writer, run)
     }
 
-    pub fn new() -> Self {
+    pub fn new(locked: bool) -> Self {
         Self {
             len: 0,
             state: C::State::default(),
-            //writer: SlabWriter::new(C::slab_size(), 0),
-            writer: SlabWriter::new(usize::MAX, 0),
+            writer: SlabWriter::new(C::slab_size(), 0, locked),
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_capacity(cap: usize) -> Self {
+    pub fn with_capacity(cap: usize, locked: bool) -> Self {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(usize::MAX, cap),
+            writer: SlabWriter::new(C::slab_size(), cap, locked),
             _phantom: PhantomData,
         }
     }

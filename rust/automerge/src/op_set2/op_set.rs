@@ -509,17 +509,6 @@ impl OpSet {
             return None;
         }
 
-        /*
-                let range = self
-                    .cols
-                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                    .scope_to_value(&obj.counter());
-
-                let range = self
-                    .cols
-                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-                    .scope_to_value(&obj.actor());
-        */
         let range = self.scope_to_obj(obj);
 
         let op_pos = self.get_op_id_pos(target.0).unwrap();
@@ -901,9 +890,10 @@ impl OpSet {
     #[inline(never)]
     pub(crate) fn new(doc: &Document<'_>) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
-        let data = Arc::new(doc.op_raw_bytes().to_vec());
+        let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.clone(), data, actors)
+        let op_set = Self::from_parts(doc.op_metadata.clone(), data, actors)?;
+        Ok(op_set)
     }
 
     #[cfg(test)]
@@ -930,7 +920,7 @@ impl OpSet {
 
     fn from_parts(
         cols: RawColumns<Uncompressed>,
-        data: Arc<Vec<u8>>,
+        data: &[u8],
         actors: Vec<ActorId>,
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.iter(), data, &actors)?;
@@ -1021,6 +1011,7 @@ impl OpSet {
                 self.cols.mark_name.iter_range(range.clone()),
                 self.cols.expand.iter_range(range.clone()),
             ),
+            op_set: self,
         }
     }
 
@@ -1044,6 +1035,7 @@ impl OpSet {
             action: ActionIter::new(self.cols.action.iter()),
             value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.raw_reader(0)),
             marks: MarkInfoIter::new(self.cols.mark_name.iter(), self.cols.expand.iter()),
+            op_set: self,
         }
     }
 

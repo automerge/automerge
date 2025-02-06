@@ -1,9 +1,10 @@
 use super::aggregate::Agg;
-use super::cursor::{ColumnCursor, Run, SpliceDel};
+use super::columndata::ColumnData;
+use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceDel};
 use super::encoder::{Encoder, SpliceEncoder};
-use super::pack::PackError;
+use super::pack::{PackError, Packable};
 use super::rle::{RleCursor, RleState};
-use super::slab::{Slab, SlabWeight, SlabWriter};
+use super::slab::{Slab, SlabTree, SlabWeight, SlabWriter};
 use super::Cow;
 
 use std::ops::Range;
@@ -161,8 +162,14 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
-        let (rle, post, acc, mut current) =
-            SubCursor::<B>::encode_inner(slab.as_slice(), &cursor.rle, run, index, cap * 2 + 9);
+        let (rle, post, acc, mut current) = SubCursor::<B>::encode_inner(
+            slab.as_slice(),
+            &cursor.rle,
+            run,
+            index,
+            cap * 2 + 9,
+            true,
+        );
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
@@ -170,6 +177,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         let init_abs = slab.abs();
         current.set_init_abs(init_abs);
         current.set_abs(abs - state.pending_delta());
+        current.unlock();
 
         let SpliceDel {
             deleted,
@@ -216,9 +224,36 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
+    fn debug_check(slabs: &[Slab]) -> bool {
+        for (snum, s) in slabs.iter().enumerate() {
+            let mut cursor = Self::new(s);
+            let mut run_no = 0;
+            let mut pos = 0;
+            while let Some(Run { count, value }) = cursor.next(s.as_slice()) {
+                if let Some(v) = value {
+                    let a = cursor.abs;
+                    let b = cursor.abs - *v * (count as i64 - 1);
+                    if a < 0 || b < 0 {
+                        log!("DEBUG CHECK SLAB len={} abs={}", s.len(), s.abs());
+                        log!("DEBUG CHECK a={:?} b={:}", a, b);
+                        log!(" :: snum={} run_no={} pos={}", snum, run_no, pos);
+                        log!(" :: s.abs={}", s.abs());
+                        return false;
+                    }
+                    run_no += 1;
+                    pos += count;
+                }
+            }
+        }
+        true
+    }
+
     fn compute_min_max(slabs: &mut [Slab]) {
         for s in slabs {
             let (_run, c) = Self::seek(s.len(), s);
+            let _next = c.clone().next(s.as_slice());
+            assert!(_run.is_some());
+            assert!(_next.is_none());
             s.set_min_max(c.min(), c.max());
         }
     }
@@ -232,6 +267,30 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn index(&self) -> usize {
         self.rle.index()
+    }
+
+    fn offset(&self) -> usize {
+        self.rle.offset()
+    }
+
+    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+        let mut cursor = Self::empty();
+        let cap = data.len() / B * 5;
+        let mut writer = SlabWriter::<i64>::new(B, cap, true);
+        let mut last_copy = Self::empty();
+        while let Some(run) = cursor.try_next(data)? {
+            i64::validate(run.value.as_deref(), m)?;
+            if cursor.rle.offset - last_copy.rle.offset >= B {
+                SubCursor::load_copy(data, &mut writer, &last_copy.rle, &cursor.rle);
+                writer.set_abs(cursor.abs);
+                writer.manual_slab_break(); // have to do this before not after
+                last_copy = cursor;
+            }
+        }
+        SubCursor::load_copy(data, &mut writer, &last_copy.rle, &cursor.rle);
+        let mut slabs = writer.finish();
+        Self::compute_min_max(&mut slabs);
+        Ok(ColumnData::init(cursor.rle.index, SlabTree::load(slabs)))
     }
 }
 

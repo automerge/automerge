@@ -8,6 +8,7 @@ use crate::{
         meta::MetaCursor,
         op::SuccCursors,
         types::{Action, ActionCursor, ActorCursor, ActorIdx, KeyRef, ScalarValue},
+        OpSet,
     },
     types::{ElemId, ObjId, OpId},
 };
@@ -29,6 +30,7 @@ pub(crate) struct OpIter<'a> {
     pub(super) action: ActionIter<'a>,
     pub(super) value: ValueIter<'a>,
     pub(super) marks: MarkInfoIter<'a>,
+    pub(super) op_set: &'a OpSet,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -130,7 +132,17 @@ impl<'a> Iterator for OpIter<'a> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().unwrap()
+        let result = self.try_next();
+        if result.is_err() {
+            log!("Key ERR!");
+            let key_str = self.op_set.cols.key_str.export();
+            let key_actor = self.op_set.cols.key_actor.export();
+            let key_ctr = self.op_set.cols.key_ctr.export();
+            log!(" :: key_str = {:?}", key_str.as_slice());
+            log!(" :: key_actor = {:?}", key_actor.as_slice());
+            log!(" :: key_ctr = {:?}", key_ctr.as_slice());
+        }
+        result.unwrap()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -340,7 +352,22 @@ impl<'a> KeyIter<'a> {
             .key_ctr
             .next()
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
-        KeyRef::try_load(key_str, key_actor, key_ctr)
+        let result = KeyRef::try_load(key_str.clone(), key_actor.clone(), key_ctr.clone());
+        if result.is_err() {
+            log!(
+                "Key error key={:?} actor={:?} ctr={:?}",
+                key_str,
+                key_actor,
+                key_ctr
+            );
+            log!(
+                "str={} actor={} ctr={}",
+                self.key_str.pos(),
+                self.key_actor.pos(),
+                self.key_ctr.pos()
+            );
+        }
+        result
     }
 
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<KeyRef<'a>, ReadOpError> {

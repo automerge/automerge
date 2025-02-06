@@ -26,14 +26,14 @@ pub(crate) const B: usize = 16;
 #[derive(Clone, Debug)]
 pub struct SpanTree<T, W = ()>
 where
-    T: Clone + Debug,
+    T: Clone + Debug + Default,
     W: SpanWeight<T>,
 {
     root_node: Option<TreeNode<T, W>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct TreeNode<T: Clone + Debug, W: SpanWeight<T>> {
+struct TreeNode<T: Clone + Debug + Default, W: SpanWeight<T>> {
     elements: Vec<T>,
     children: Vec<TreeNode<T, W>>,
     length: usize,
@@ -41,15 +41,15 @@ struct TreeNode<T: Clone + Debug, W: SpanWeight<T>> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SubCursor<'a, T: Clone + Debug, W: SpanWeight<T>> {
+pub struct SubCursor<'a, T: Clone + Debug + Default, W: SpanWeight<T>> {
     pub index: usize,
     pub weight: W,
     pub element: &'a T,
 }
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T> + Copy> Copy for SubCursor<'a, T, W> {}
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SubCursor<'a, T, W> {}
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T>> SubCursor<'a, T, W> {
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SubCursor<'a, T, W> {
     fn new(index: usize, weight: W, element: &'a T) -> Self {
         Self {
             index,
@@ -59,15 +59,28 @@ impl<'a, T: Clone + Debug, W: SpanWeight<T>> SubCursor<'a, T, W> {
     }
 }
 
-impl<T: Clone + Debug, W: SpanWeight<T>> SpanTree<T, W> {
+impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
     /// Construct a new, empty, sequence.
-    pub fn new() -> SpanTree<T, ()> {
-        Default::default()
-    }
+    /*
+        pub fn new() -> SpanTree<T, ()> {
+            Default::default()
+        }
+    */
 
     pub fn new2(element: T) -> Self {
         let mut t = Self::default();
         t.push(element);
+        t
+    }
+
+    pub fn load<I: IntoIterator<Item = T>>(elements: I) -> Self {
+        let mut t = Self::default();
+        for e in elements.into_iter() {
+            t.push(e);
+        }
+        if t.is_empty() {
+            t.push(T::default());
+        }
         t
     }
 
@@ -316,7 +329,7 @@ impl<T: Clone + Debug, W: SpanWeight<T>> SpanTree<T, W> {
     }
 }
 
-impl<T: Clone + Debug, W: SpanWeight<T>> TreeNode<T, W> {
+impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
     fn new() -> Self {
         Self {
             elements: Vec::new(),
@@ -892,13 +905,13 @@ impl<T: Clone + Debug, W: SpanWeight<T>> TreeNode<T, W> {
     }
 }
 
-impl<T: Clone + Debug, W: SpanWeight<T>> Default for SpanTree<T, W> {
+impl<T: Clone + Debug + Default, W: SpanWeight<T>> Default for SpanTree<T, W> {
     fn default() -> SpanTree<T, W> {
         Self { root_node: None }
     }
 }
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T>> IntoIterator for &'a SpanTree<T, W> {
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> IntoIterator for &'a SpanTree<T, W> {
     type Item = &'a T;
 
     type IntoIter = SpanTreeIter<'a, T, W>;
@@ -913,13 +926,13 @@ impl<'a, T: Clone + Debug, W: SpanWeight<T>> IntoIterator for &'a SpanTree<T, W>
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct SpanTreeIter<'a, T: Clone + Debug, W: SpanWeight<T>> {
+pub struct SpanTreeIter<'a, T: Clone + Debug + Default, W: SpanWeight<T>> {
     inner: Option<&'a SpanTree<T, W>>,
     index: usize,
     weight: W,
 }
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
     pub(crate) fn new(
         tree: &'a SpanTree<T, W>,
         cursor: SubCursor<'_, T, W>,
@@ -949,9 +962,9 @@ impl<'a, T: Clone + Debug, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
     }
 }
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T> + Copy> Copy for SpanTreeIter<'a, T, W> {}
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SpanTreeIter<'a, T, W> {}
 
-impl<'a, T: Clone + Debug, W: SpanWeight<T>> Iterator for SpanTreeIter<'a, T, W> {
+impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> Iterator for SpanTreeIter<'a, T, W> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -983,7 +996,7 @@ mod legacy_tests {
 
     #[test]
     fn push_back() {
-        let mut t = SpanTree::<u32>::new();
+        let mut t = SpanTree::<u32>::default();
 
         t.push(1);
         t.push(2);
@@ -997,7 +1010,7 @@ mod legacy_tests {
 
     #[test]
     fn insert() {
-        let mut t = SpanTree::<u32>::new();
+        let mut t = SpanTree::<u32>::default();
 
         t.insert(0, 1);
         t.insert(1, 1);
@@ -1019,7 +1032,7 @@ mod legacy_tests {
 
     #[test]
     fn insert_book_vec() {
-        let mut t = SpanTree::<()>::new();
+        let mut t = SpanTree::<()>::default();
         let mut v = Vec::new();
 
         for i in 0..100 {
@@ -1046,7 +1059,7 @@ mod legacy_tests {
 
         #[test]
         fn proptest_insert(indices in arb_indices()) {
-            let mut t = SpanTree::<usize,usize>::new();
+            let mut t = SpanTree::<usize,usize>::default();
             let mut v = Vec::new();
 
             for i in indices{
@@ -1069,7 +1082,7 @@ mod legacy_tests {
         #![proptest_config(ProptestConfig::with_cases(20))]
         #[test]
         fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
-            let mut t = SpanTree::<usize,usize>::new();
+            let mut t = SpanTree::<usize,usize>::default();
             let mut v = Vec::new();
 
             for i in inserts {

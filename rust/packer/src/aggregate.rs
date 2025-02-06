@@ -97,7 +97,7 @@ impl Mul<usize> for Agg {
 
 impl Sum<Agg> for Acc {
     fn sum<I: Iterator<Item = Agg>>(iter: I) -> Self {
-        Acc(iter.map(|a| a.as_usize()).sum::<usize>() as u64)
+        Acc(iter.map(|a| a.as_u64()).sum::<u64>())
     }
 }
 

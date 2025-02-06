@@ -78,7 +78,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         // TODO this could be much faster
         // if we did it a run at a time instead of an item at a time
         // but delta runs are special and don't remap easily
-        let mut encoder = Encoder::new();
+        let mut encoder = Encoder::new(false);
         for item in self.iter() {
             encoder.append_item(f(item));
         }
@@ -93,7 +93,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         // TODO this could be much faster
         // if we did it a run at a time instead of an item at a time
         // but delta runs are special and don't remap easily
-        let mut encoder = Encoder::new();
+        let mut encoder = Encoder::new(false);
         for item in self.iter() {
             encoder.append_item(f(item));
         }
@@ -113,14 +113,14 @@ impl<C: ColumnCursor> ColumnData<C> {
         if self.slabs.len() == 1 {
             let slab = self.slabs.get(0).unwrap();
             if slab.is_empty() {
-                let mut encoder: Encoder<C> = Encoder::with_capacity(2);
+                let mut encoder: Encoder<C> = Encoder::with_capacity(2, true);
                 encoder.flush();
                 encoder.writer.write(out);
             } else {
                 out.extend(slab.as_slice())
             }
         } else {
-            let mut encoder: Encoder<C> = Encoder::with_capacity(self.slabs.len() * 7);
+            let mut encoder: Encoder<C> = Encoder::with_capacity(self.slabs.len() * 7, true);
             for s in &self.slabs {
                 encoder.copy_slab(s);
             }
@@ -508,6 +508,10 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    pub(crate) fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
+        self.slabs.iter().flat_map(|s| s.run_iter::<C>())
+    }
+
     pub fn to_vec(&self) -> Vec<C::Export> {
         let mut result = vec![];
         C::export_splice(&mut result, 0..0, self.iter());
@@ -543,7 +547,8 @@ impl<C: ColumnCursor> ColumnData<C> {
         self
     }
 
-    fn init(len: usize, slabs: SlabTree<C::SlabIndex>) -> Self {
+    pub(crate) fn init(len: usize, slabs: SlabTree<C::SlabIndex>) -> Self {
+        assert_eq!(len, slabs.iter().map(|s| s.len()).sum::<usize>());
         let col = ColumnData {
             len,
             slabs,
@@ -573,9 +578,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub fn import(data: Vec<u8>) -> Result<ColumnData<C>, PackError> {
-        let range = 0..data.len();
-        let data = Arc::new(data);
-        ColumnData::<C>::external(data, range, &Default::default())
+        ColumnData::<C>::load(&data)
     }
 
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
@@ -590,6 +593,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         if values.len() == 0 && del == 0 {
             return Acc::new(); // really none
         }
+
+        let tmp_values = values
+            .clone()
+            .map(|e| e.maybe_packable())
+            .collect::<Vec<_>>();
 
         #[cfg(debug_assertions)]
         C::export_splice(
@@ -614,6 +622,14 @@ impl<C: ColumnCursor> ColumnData<C> {
         match C::splice(cursor.element, index - cursor.weight.pos(), del, values) {
             SpliceResult::Replace(add, del, g, mut slabs) => {
                 acc += g;
+                if !C::debug_check(&slabs) {
+                    log!(":: SPLICE ERROR ::");
+                    log!(":: index={} del={}", index - cursor.weight.pos(), del);
+                    log!(":: slab={:?}", cursor.element);
+                    log!(":: values={:?}", tmp_values);
+                    log!(":: result={:?}", slabs);
+                    panic!()
+                }
                 C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
                 #[cfg(debug_assertions)]
@@ -671,9 +687,40 @@ impl<C: ColumnCursor> ColumnData<C> {
         range: Range<usize>,
         m: &ScanMeta,
     ) -> Result<Self, PackError> {
+        let col2 = Self::load_with(&data.as_ref()[range.clone()], m)?;
         let slab = Slab::external::<C>(data, range, m)?;
         let len = slab.len();
         let col = ColumnData::init(len, SlabTree::new2(slab));
+        debug_assert_eq!(
+            col.iter()
+                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
+                .sum::<Acc>(),
+            col.acc()
+        );
+        assert_eq!(col.to_vec(), col2.to_vec());
+        assert_eq!(
+            col.run_iter().collect::<Vec<_>>(),
+            col2.run_iter().collect::<Vec<_>>()
+        );
+        let a = col.export();
+        let b = col2.export();
+        if a != b {
+            for i in 0..a.len() {
+                if a.get(i) != b.get(i) || i >= 2235 {
+                    log!(" {} {:?} {:?}", i, a.get(i), b.get(i));
+                }
+            }
+            panic!()
+        }
+        Ok(col)
+    }
+
+    pub fn load(data: &[u8]) -> Result<Self, PackError> {
+        Self::load_with(data, &ScanMeta::default())
+    }
+
+    pub fn load_with(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
+        let col = C::load_with(data, m)?;
         debug_assert_eq!(
             col.iter()
                 .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
@@ -746,7 +793,7 @@ where
     C::Item: 'a,
 {
     fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
-        let mut encoder = Encoder::new();
+        let mut encoder = Encoder::new(false);
         for item in iter {
             encoder.append_item(item.maybe_packable());
         }
@@ -764,7 +811,7 @@ pub(crate) mod tests {
     use rand::prelude::*;
     use rand::rngs::SmallRng;
 
-    const FUZZ_SIZE: usize = 100;
+    const FUZZ_SIZE: usize = 1_000;
 
     fn test_splice<'a, C: ColumnCursor, E>(
         vec: &'a mut Vec<E>,
@@ -782,6 +829,20 @@ pub(crate) mod tests {
             assert_eq!(c.max(), slab.max());
         }
         assert_eq!(vec, &col.to_vec());
+        let a = col.export();
+        let col2 = C::load(&a).unwrap();
+        assert_eq!(vec, &col2.to_vec());
+        let b = col2.export();
+        let col3 = C::load(&b).unwrap();
+        assert_eq!(vec, &col3.to_vec());
+        if a != b {
+            for i in 0..a.len() {
+                if a.get(i) != b.get(i) || i > 2310 {
+                    log!(" - {} -> {:?}  {:?}", i, a.get(i), b.get(i));
+                }
+            }
+            panic!()
+        }
     }
 
     fn test_advance_by<'a, C: ColumnCursor>(
@@ -1162,8 +1223,8 @@ pub(crate) mod tests {
     }
 
     fn make_rng() -> SmallRng {
-        //let seed = rand::random::<u64>();
-        let seed = 11016946475517489012;
+        let seed = rand::random::<u64>();
+        //let seed = 11016946475517489012;
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -1197,10 +1258,7 @@ pub(crate) mod tests {
         }
         let mut copy = vec![];
         col.write(&mut copy);
-        let range = 0..copy.len();
-        let export =
-            ColumnData::<RleCursor<64, u64>>::external(Arc::new(copy), range, &Default::default())
-                .unwrap();
+        let export = ColumnData::<RleCursor<64, u64>>::load(&copy).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
     }
 
@@ -1251,6 +1309,21 @@ pub(crate) mod tests {
         let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
     }
+
+    /*
+        #[test]
+        fn column_data_fuzz_test_delta2() {
+            let mut data: Vec<Option<i64>> = vec![];
+            let mut col = ColumnData::<DeltaCursor>::new();
+            let mut rng = make_rng();
+            for _ in 0..200_000 {
+                let (index, values) = generate_splice(data.len(), &mut rng);
+                test_splice(&mut data, &mut col, index, values[0..1].to_vec());
+            }
+            let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
+            assert_eq!(col.to_vec(), copy.to_vec());
+        }
+    */
 
     #[test]
     fn column_data_fuzz_test_advance_by_delta() {
@@ -1330,10 +1403,7 @@ pub(crate) mod tests {
         }
         let mut copy = vec![];
         col.write(&mut copy);
-        let range = 0..copy.len();
-        let export =
-            ColumnData::<BooleanCursor>::external(Arc::new(copy), range, &Default::default())
-                .unwrap();
+        let export = ColumnData::<BooleanCursor>::load(&copy).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
     }
 

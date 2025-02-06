@@ -228,6 +228,7 @@ pub struct SlabWriter<'a, P: Packable + ?Sized> {
     slab_head: usize,
     num_slabs: usize,
     max: usize,
+    locked: bool,
 }
 
 impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
@@ -245,6 +246,7 @@ impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
             slab_head: self.slab_head,
             num_slabs: self.num_slabs,
             max: self.max,
+            locked: self.locked,
         }
     }
 }
@@ -287,14 +289,8 @@ impl<'a, P: Packable + ?Sized> Writer<'a, P> for SlabWriter<'a, P> {
     }
 }
 
-impl<'a, P: Packable + ?Sized> Default for SlabWriter<'a, P> {
-    fn default() -> Self {
-        Self::new(usize::MAX, 4)
-    }
-}
-
 impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
-    pub fn new(max: usize, cap: usize) -> Self {
+    pub fn new(max: usize, cap: usize, locked: bool) -> Self {
         let mut actions = Vec::with_capacity(cap);
         actions.push(WriteAction::SlabHead);
         SlabWriter {
@@ -309,12 +305,17 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
             slab_head: 0,
             num_slabs: 0,
             items: 0,
+            locked,
             actions,
         }
     }
 
     pub fn set_init_abs(&mut self, abs: i64) {
         self.init_abs = abs;
+    }
+
+    pub fn unlock(&mut self) {
+        self.locked = false;
     }
 
     pub fn set_abs(&mut self, abs: i64) {
@@ -393,7 +394,18 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
     }
 
     fn check_max(&mut self) {
-        if self.width >= self.max {
+        if self.width >= self.max && !self.locked {
+            self.close_lit();
+            self.close_slab();
+            self.width = 0;
+            self.acc = Acc::new();
+            self.bools = 0;
+            self.items = 0;
+        }
+    }
+
+    pub(crate) fn manual_slab_break(&mut self) {
+        if self.width > 0 {
             self.close_lit();
             self.close_slab();
             self.width = 0;
@@ -416,7 +428,7 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
     }
 
     fn check_copy_overflow(&mut self, copy: usize) {
-        if self.width + copy > self.max && self.width > 0 {
+        if self.width + copy > self.max && self.width > 0 && !self.locked {
             self.close_lit();
             self.close_slab();
             self.width = 0;

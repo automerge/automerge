@@ -62,10 +62,10 @@ fn insert_int(bencher: Bencher) {
 #[inline(never)]
 #[divan::bench(max_time = Duration::from_secs(3))]
 fn insert_delta(bencher: Bencher) {
-    let mut col: ColumnData<DeltaCursor> = (0..N).map(|_| rand_i64()).collect();
+    let mut col: ColumnData<DeltaCursor> = (0..N).map(|_| rand_i64().abs()).collect();
     bencher.bench_local(|| {
         let pos = rand_usize() % col.len();
-        let value = rand_i64();
+        let value = rand_i64().abs();
         col.splice(pos, 0, [value]);
     });
 }

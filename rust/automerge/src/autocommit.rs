@@ -162,6 +162,7 @@ impl AutoCommit {
     ///
     /// If the cursor is no longer needed it can be reset with
     /// [`Self::reset_diff_cursor()`]
+    #[inline(never)]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
         self.patch_log.set_active(true);

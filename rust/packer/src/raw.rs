@@ -1,8 +1,9 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, HasPos, Run};
+use super::columndata::ColumnData;
+use super::cursor::{ColumnCursor, HasPos, Run, ScanMeta};
 use super::encoder::{Encoder, SpliceEncoder};
 use super::pack::PackError;
-use super::slab::{self, Slab, SlabWeight, SlabWriter, SpanWeight};
+use super::slab::{self, Slab, SlabTree, SlabWeight, SlabWriter, SpanWeight};
 use super::Cow;
 
 use std::fmt::Debug;
@@ -67,7 +68,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         let bytes = slab.as_slice();
 
         // everything before...
-        let mut current = SlabWriter::new(B, cap + 4);
+        let mut current = SlabWriter::new(B, cap + 4, false);
         current.copy(bytes, 0..index, 0, index, Acc::new(), None);
 
         let post;
@@ -121,6 +122,16 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
     fn index(&self) -> usize {
         self.offset
+    }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
+
+    fn load_with(data: &[u8], _m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+        let len = data.len();
+        let slab = Slab::new(data.to_vec(), len, Acc::default(), 0);
+        Ok(ColumnData::init(len, SlabTree::load([slab])))
     }
 }
 

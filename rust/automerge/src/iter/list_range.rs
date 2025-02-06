@@ -54,7 +54,7 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (op_set, iter) = self.iter.as_mut()?;
-        while let Some(op) = iter.next() {
+        for op in iter.by_ref() {
             let index = self.state;
             self.state += op.width(self.encoding);
             if !self.range.as_ref()?.contains(&index) {

@@ -37,7 +37,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     fn next(&mut self) -> Option<Self::Item> {
         let range = self.range.as_ref()?;
         let (op_set, iter) = self.iter.as_mut()?;
-        while let Some(op) = iter.next() {
+        for op in iter.by_ref() {
             let key = op.key.key_str()?;
             let s_key = key.to_string(); // FIXME
             if !range.contains(&s_key) {

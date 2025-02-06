@@ -6,6 +6,11 @@ import { PatchSource } from "../src/types.js"
 import { RAW_STRING } from "../src/constants.js"
 import { RawString } from "../src/next.js"
 
+import { readFile } from "fs/promises";
+import { join } from "path";
+import { fileURLToPath } from "url";
+
+
 describe("Automerge", () => {
   describe("basics", () => {
     it("should init clone and free", () => {
@@ -824,5 +829,13 @@ describe("Automerge", () => {
       assert.strictEqual(Automerge.isRawString(d.foo), true)
       assert.strictEqual(Automerge.isRawString(d.bar), false)
     })
+  })
+  it("rust preview number should match js preview number", async () => {
+    // this test can be removed after the alpha/preview peroid
+    const pkg = JSON.parse(await readFile("./package.json", "utf8"));
+    let doc = Automerge.init();
+    let stats = Automerge.stats(doc)
+    assert.strictEqual(stats.cargoPackageName, "automerge");
+    assert.strictEqual(stats.cargoPackageVersion.split(".").pop(), pkg.version.split(".").pop());
   })
 })

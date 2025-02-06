@@ -1,4 +1,5 @@
 use super::aggregate::{Acc, Agg};
+use super::columndata::ColumnData;
 use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{MaybePackable, PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
@@ -7,6 +8,7 @@ use super::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 
+// this is just a hack - need a more generic validator
 #[derive(Debug, Default)]
 pub struct ScanMeta {
     pub actors: usize,
@@ -139,7 +141,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
     type State<'a>: EncoderState<'a, Self::Item>
     where
         <Self as ColumnCursor>::Item: 'a;
-    type PostState<'a>
+    type PostState<'a>: Debug
     where
         Self::Item: 'a;
     type Export: Debug + PartialEq + Clone;
@@ -179,7 +181,18 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         }
     }
 
-    fn compute_min_max(_slabs: &mut [Slab]) {}
+    fn debug_check(_slabs: &[Slab]) -> bool {
+        true
+    }
+
+    fn compute_min_max(_slabs: &mut [Slab]) {
+        for s in _slabs {
+            let (_run, c) = Self::seek(s.len(), s);
+            let _next = c.clone().next(s.as_slice());
+            assert!(_run.is_some());
+            assert!(_next.is_none());
+        }
+    }
 
     fn is_empty(v: Option<Cow<'_, Self::Item>>) -> bool {
         v.is_none()
@@ -247,6 +260,8 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn index(&self) -> usize;
 
+    fn offset(&self) -> usize;
+
     fn acc(&self) -> Acc {
         Acc::new()
     }
@@ -280,6 +295,14 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Ok(cursor)
     }
 
+    fn debug_validate(_data: &[u8]) {}
+
+    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError>;
+
+    fn load(data: &[u8]) -> Result<ColumnData<Self>, PackError> {
+        Self::load_with(data, &ScanMeta::default())
+    }
+
     fn splice<'a, 'b, I, M>(slab: &'a Slab, index: usize, del: usize, values: I) -> SpliceResult
     where
         M: MaybePackable<'b, Self::Item>,
@@ -291,16 +314,24 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         let mut value_acc = Acc::new();
         for v in values {
             value_acc += v.agg();
-            add += encoder.append_item(v.maybe_packable());
+            let opt_v = v.maybe_packable();
+            add += encoder.append_item(opt_v);
         }
         assert!(encoder.overflow == 0);
         let deleted = encoder.deleted;
         let acc = encoder.acc;
         let slabs = encoder.finish();
+        for s in &slabs {
+            Self::debug_validate(s.as_slice());
+        }
         if deleted == 0 {
-            debug_assert_eq!(
+            assert_eq!(
                 slabs.iter().map(|s| s.acc()).sum::<Acc>(),
                 slab.acc() + value_acc
+            );
+            assert_eq!(
+                slabs.iter().map(|s| s.len()).sum::<usize>(),
+                slab.len() + add
             );
         }
         SpliceResult::Replace(add, deleted, acc, slabs)
@@ -356,7 +387,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::<Self::Item>::new(usize::MAX, 2);
+            let mut writer = SlabWriter::<Self::Item>::new(usize::MAX, 2, false);
             writer.flush_null(len);
             writer.finish().pop().unwrap_or_default()
         } else {

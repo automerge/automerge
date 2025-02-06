@@ -124,7 +124,7 @@ impl TransactionInner {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
-        doc.update_history(change, num_ops);
+        doc.update_history(&change, num_ops);
         //debug_assert_eq!(doc.get_heads(), vec![hash]);
         hash
     }

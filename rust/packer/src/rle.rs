@@ -1,9 +1,10 @@
 use super::aggregate::{Acc, Agg};
-use super::cursor::{ColumnCursor, HasAcc, HasPos, Run, SpliceDel};
+use super::columndata::ColumnData;
+use super::cursor::{ColumnCursor, HasAcc, HasPos, Run, ScanMeta, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
+use super::slab::{Slab, SlabTree, SlabWeight, SlabWriter, SpanWeight};
 use super::Cow;
 
 use std::fmt::Debug;
@@ -12,8 +13,8 @@ use std::ops::Range;
 
 #[derive(Debug, PartialEq)]
 pub struct RleCursor<const B: usize, P: Packable + ?Sized, X = SlabWeight> {
-    index: usize,
-    offset: usize,
+    pub(crate) index: usize,
+    pub(crate) offset: usize,
     acc: Acc,
     min: Agg,
     max: Agg,
@@ -137,6 +138,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         run: Option<Run<'a, P>>,
         index: usize,
         cap: usize,
+        locked: bool,
     ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a, P>) {
         let mut post = None;
         let mut acc = cursor.acc();
@@ -172,7 +174,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B, cap);
+        let mut current = SlabWriter::new(B, cap, locked);
 
         current.copy(slab, copy_range, 0, copy_size, copy_acc, None);
 
@@ -188,6 +190,46 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         }
 
         (state, post, acc, current)
+    }
+
+    pub(crate) fn load_copy<'a>(
+        slab: &'a [u8],
+        writer: &mut SlabWriter<'a, P>,
+        c0: &Self,
+        c1: &Self,
+    ) {
+        let acc = c1.acc() - c0.acc();
+        let size = c1.index - c0.index;
+        if size == 0 {
+            return;
+        }
+        match (c0.valid_lit(), c1.valid_lit()) {
+            // its one big lit-run
+            (Some(a), Some(b)) if a.offset == b.offset => {
+                writer.copy(slab, c0.offset..c1.offset, size, size, acc, None);
+            }
+            // its two different lit-runs
+            (Some(a), Some(b)) => {
+                let lit1 = a.len - a.index;
+                let lit2 = b.index;
+                let b_start = b.header_offset();
+                writer.copy(slab, c0.offset..b_start, lit1, size - lit2, acc, None);
+                writer.copy(slab, b.offset..c1.offset, lit2, lit2, Acc::new(), None);
+            }
+            (Some(a), None) => {
+                let lit = a.len - a.index;
+                writer.copy(slab, c0.offset..c1.offset, lit, size, acc, None);
+            }
+            (None, Some(b)) => {
+                let lit2 = b.index;
+                let b_start = b.header_offset();
+                writer.copy(slab, c0.offset..b_start, 0, size - lit2, Acc::new(), None);
+                writer.copy(slab, b.offset..c1.offset, lit2, lit2, acc, None);
+            }
+            _ => {
+                writer.copy(slab, c0.offset..c1.offset, 0, size, acc, None);
+            }
+        }
     }
 }
 
@@ -219,7 +261,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         match (c0.valid_lit(), c1.valid_lit()) {
             // its one big lit-run
             (Some(a), Some(b)) if a.offset == b.offset => {
-                let lit = a.len - 2;
+                let lit = a.len - 2; // FIXME - this number seems super wrong
                 writer.copy(slab, c0.offset..c1.last_offset, lit, size, Acc::new(), None);
             }
             // its two different lit-runs
@@ -303,7 +345,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
 
         let cap = cap * 2 + 9;
         let (state, post, acc, current) =
-            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, cap);
+            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, cap, false);
 
         let SpliceDel {
             deleted,
@@ -334,6 +376,9 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
     fn compute_min_max(slabs: &mut [Slab]) {
         for s in slabs {
             let (run, c) = Self::seek(s.len(), s);
+            let next = c.clone().next(s.as_slice());
+            assert!(run.is_some());
+            assert!(next.is_none());
             std::mem::drop(run);
             assert_eq!(s.acc(), c.acc());
             s.set_min_max(c.min(), c.max());
@@ -408,6 +453,29 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
 
     fn index(&self) -> usize {
         self.index
+    }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
+
+    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+        let mut cursor = Self::empty();
+        let cap = data.len() / B * 5;
+        let mut writer = SlabWriter::<P>::new(B, cap, true);
+        let mut last_copy = Self::empty();
+        while let Some(run) = cursor.try_next(data)? {
+            P::validate(run.value.as_deref(), m)?;
+            if cursor.offset - last_copy.offset >= B {
+                Self::load_copy(data, &mut writer, &last_copy, &cursor);
+                writer.manual_slab_break(); // have to do this before not after
+                last_copy = cursor;
+            }
+        }
+        Self::load_copy(data, &mut writer, &last_copy, &cursor);
+        let mut slabs = writer.finish();
+        Self::compute_min_max(&mut slabs);
+        Ok(ColumnData::init(cursor.index, SlabTree::load(slabs)))
     }
 }
 
@@ -791,5 +859,11 @@ pub(crate) mod tests {
                 step = rand::random::<usize>() % (data.len() / 2);
             }
         }
+    }
+
+    #[test]
+    fn load_empty_rle_data() {
+        let col = IntCursor::load(&[]).unwrap();
+        assert!(col.len() == 0);
     }
 }

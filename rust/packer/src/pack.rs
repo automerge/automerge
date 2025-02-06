@@ -179,6 +179,7 @@ impl Packable for bool {
     fn width(_item: &bool) -> usize {
         panic!()
     }
+
     fn pack(_item: &bool, _out: &mut Vec<u8>) {
         panic!()
     }

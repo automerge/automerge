@@ -1,8 +1,9 @@
 use super::aggregate::Acc;
-use super::cursor::{ColumnCursor, Run, SpliceDel};
+use super::columndata::ColumnData;
+use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabWeight, SlabWriter};
+use super::slab::{Slab, SlabTree, SlabWeight, SlabWriter};
 use super::Cow;
 
 use std::ops::Range;
@@ -59,6 +60,41 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Self::default()
     }
 
+    fn debug_validate(data: &[u8]) {
+        let mut cursor = Self::empty();
+        let mut total = 0;
+        while let Ok(Some(run)) = cursor.try_next(data) {
+            assert!(total == 0 || run.count > 0);
+            total += run.count;
+        }
+    }
+
+    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+        let mut cursor = Self::empty();
+        let mut last_cursor = Self::empty();
+        let cap = data.len() / B * 5;
+        let mut writer = SlabWriter::<bool>::new(B, cap, true);
+        let mut last_copy = Self::empty();
+        while let Some(run) = cursor.try_next(data)? {
+            bool::validate(run.value.as_deref(), m)?;
+            if cursor.offset - last_copy.offset >= B {
+                if !cursor.value {
+                    cursor_copy(data, &mut writer, &last_copy, &cursor);
+                    last_copy = cursor;
+                } else {
+                    cursor_copy(data, &mut writer, &last_copy, &last_cursor);
+                    last_copy = last_cursor;
+                }
+                writer.manual_slab_break();
+            }
+            last_cursor = cursor;
+        }
+        cursor_copy(data, &mut writer, &last_copy, &cursor);
+        let mut slabs = writer.finish();
+        Self::compute_min_max(&mut slabs);
+        Ok(ColumnData::init(cursor.index, SlabTree::load(slabs)))
+    }
+
     fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, bool>, cursor: Self) {
         writer.copy(
             slab.as_slice(),
@@ -90,7 +126,9 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         } else {
             let old_cursor = cursor;
             if let Ok(Some(val)) = cursor.try_next(slab.as_slice()) {
-                if val.value == Some(Cow::Owned(encoder.state.value)) {
+                if val.count == 0 {
+                    Self::finalize_state(slab, encoder, None, cursor)
+                } else if val.value == Some(Cow::Owned(encoder.state.value)) {
                     encoder
                         .writer
                         .flush_bool_run(encoder.state.count + val.count, encoder.state.value);
@@ -173,7 +211,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B, cap + 8);
+        let mut current = SlabWriter::new(B, cap + 8, false);
         current.copy(slab.as_slice(), range, 0, size, acc, None);
 
         let SpliceDel {
@@ -215,13 +253,16 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         self.index += count;
         self.last_offset = self.offset;
         self.offset += bytes;
-        if value {
-            self.acc += Acc::from(count); // agg(1) * count
-        }
+        /*
+                if value {
+                    self.acc += Acc::from(count); // agg(1) * count
+                }
+        */
         let run = Run {
             count,
             value: Some(Cow::Owned(value)),
         };
+        self.acc += run.acc();
         Ok(Some(run))
     }
 
@@ -229,9 +270,13 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         self.index
     }
 
+    fn offset(&self) -> usize {
+        self.offset
+    }
+
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::<bool>::new(usize::MAX, 2);
+            let mut writer = SlabWriter::<bool>::new(usize::MAX, 2, false);
             writer.flush_bool_run(len, false);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -242,6 +287,25 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     fn acc(&self) -> Acc {
         self.acc
     }
+}
+
+fn cursor_copy<'a, const B: usize>(
+    data: &'a [u8],
+    writer: &mut SlabWriter<'a, bool>,
+    from: &BooleanCursorInternal<B>,
+    to: &BooleanCursorInternal<B>,
+) {
+    if from.offset == to.offset {
+        return;
+    }
+    writer.copy(
+        data,
+        from.offset..to.offset,
+        0,
+        to.index - from.index,
+        to.acc - from.acc,
+        None,
+    );
 }
 
 #[cfg(test)]
@@ -408,5 +472,11 @@ pub(crate) mod tests {
         col8.splice::<bool, _>(4, 4, vec![]);
 
         assert_eq!(col8.test_dump(), vec![vec![ColExport::run(6, true),]]);
+    }
+
+    #[test]
+    fn load_empty_bool_data() {
+        let col = BooleanCursor::load(&[]).unwrap();
+        assert!(col.len() == 0);
     }
 }
