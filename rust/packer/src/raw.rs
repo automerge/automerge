@@ -61,14 +61,14 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         index: usize,
         del: usize,
         slab: &Slab,
-        cap: usize,
+        hint: usize,
     ) -> SpliceEncoder<'_, Self> {
         let state = ();
         let cursor = Self { offset: index };
         let bytes = slab.as_slice();
 
         // everything before...
-        let mut current = SlabWriter::new(B, cap + 4, false);
+        let mut current = SlabWriter::new(B, hint, false);
         current.copy(bytes, 0..index, 0, index, Acc::new(), None);
 
         let post;

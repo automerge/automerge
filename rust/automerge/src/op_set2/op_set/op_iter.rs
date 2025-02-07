@@ -135,9 +135,9 @@ impl<'a> Iterator for OpIter<'a> {
         let result = self.try_next();
         if result.is_err() {
             log!("Key ERR!");
-            let key_str = self.op_set.cols.key_str.export();
-            let key_actor = self.op_set.cols.key_actor.export();
-            let key_ctr = self.op_set.cols.key_ctr.export();
+            let key_str = self.op_set.cols.key_str.save();
+            let key_actor = self.op_set.cols.key_actor.save();
+            let key_ctr = self.op_set.cols.key_ctr.save();
             log!(" :: key_str = {:?}", key_str.as_slice());
             log!(" :: key_actor = {:?}", key_actor.as_slice());
             log!(" :: key_ctr = {:?}", key_ctr.as_slice());

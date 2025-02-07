@@ -3,7 +3,7 @@ use super::columndata::ColumnData;
 use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabTree, SlabWeight, SlabWriter};
+use super::slab::{Slab, SlabWeight, SlabWriter};
 use super::Cow;
 
 use std::ops::Range;
@@ -72,8 +72,8 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
         let mut last_cursor = Self::empty();
-        let cap = data.len() / B * 5;
-        let mut writer = SlabWriter::<bool>::new(B, cap, true);
+        let hint = data.len() * 2 / B;
+        let mut writer = SlabWriter::<bool>::new(B, hint, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
             bool::validate(run.value.as_deref(), m)?;
@@ -90,9 +90,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
             last_cursor = cursor;
         }
         cursor_copy(data, &mut writer, &last_copy, &cursor);
-        let mut slabs = writer.finish();
-        Self::compute_min_max(&mut slabs);
-        Ok(ColumnData::init(cursor.index, SlabTree::load(slabs)))
+        Ok(writer.into_column(cursor.index))
     }
 
     fn finish<'a>(slab: &'a Slab, writer: &mut SlabWriter<'a, bool>, cursor: Self) {
@@ -178,7 +176,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         index: usize,
         del: usize,
         slab: &Slab,
-        cap: usize,
+        hint: usize,
     ) -> SpliceEncoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
@@ -211,7 +209,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B, cap + 8, false);
+        let mut current = SlabWriter::new(B, hint, false);
         current.copy(slab.as_slice(), range, 0, size, acc, None);
 
         let SpliceDel {
@@ -346,9 +344,7 @@ pub(crate) mod tests {
                 ]
             ]
         );
-        let mut writer = Vec::new();
-        col1.write(&mut writer);
-        assert_eq!(writer, vec![0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+        assert_eq!(col1.save(), vec![0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
 
         let mut col2: ColumnData<BooleanCursorInternal<4>> = ColumnData::new();
         col2.splice(
@@ -383,16 +379,12 @@ pub(crate) mod tests {
                 ],
             ]
         );
-        let mut writer = Vec::new();
-        col2.write(&mut writer);
-        assert_eq!(writer, vec![3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+        assert_eq!(col2.save(), vec![3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
 
         // empty data
         let col5: ColumnData<BooleanCursor> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        let mut writer = Vec::new();
-        col5.write(&mut writer);
-        assert_eq!(writer, vec![0]);
+        assert_eq!(col5.save(), vec![0]);
     }
 
     #[test]

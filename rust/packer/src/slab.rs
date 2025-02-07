@@ -1,6 +1,5 @@
 use super::aggregate::{Acc, Agg};
-use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter, ScanMeta};
-use super::pack::{PackError, Packable};
+use super::cursor::{ColumnCursor, HasAcc, HasPos, RunIter};
 use super::Cow;
 
 pub mod tree;
@@ -16,24 +15,8 @@ use std::fmt::Debug;
 use std::ops::{Index, Range};
 use std::sync::Arc;
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Slab {
-    External(ReadOnlySlab),
-    Owned(OwnedSlab),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ReadOnlySlab {
-    data: Arc<Vec<u8>>,
-    range: Range<usize>,
-    len: usize,
-    acc: Acc,
-    min: Agg,
-    max: Agg,
-}
-
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct OwnedSlab {
+pub struct Slab {
     data: Arc<Vec<u8>>,
     len: usize,
     acc: Acc,
@@ -46,67 +29,38 @@ impl Index<Range<usize>> for Slab {
     type Output = [u8];
 
     fn index(&self, index: Range<usize>) -> &Self::Output {
-        match self {
-            Self::External(ReadOnlySlab { data, range, .. }) => {
-                // FIXME possible to go past range.end
-                &data[range.start + index.start..range.start + index.end]
-            }
-            Self::Owned(OwnedSlab { data, .. }) => &data[index],
-        }
-    }
-}
-
-impl Default for Slab {
-    fn default() -> Self {
-        Self::Owned(OwnedSlab::default())
+        &self.data[index]
     }
 }
 
 impl Slab {
     pub(crate) fn new(data: Vec<u8>, len: usize, acc: Acc, abs: i64) -> Self {
         let data = Arc::new(data);
-        Slab::Owned(OwnedSlab {
+        Slab {
             data,
             len,
             acc,
             abs,
             min: Agg::default(),
             max: Agg::default(),
-        })
+        }
     }
 
     pub fn set_min_max(&mut self, new_min: Agg, new_max: Agg) {
-        match self {
-            Self::External(ReadOnlySlab { min, max, .. }) => {
-                *min = new_min;
-                *max = new_max;
-            }
-            Self::Owned(OwnedSlab { min, max, .. }) => {
-                *min = new_min;
-                *max = new_max;
-            }
-        }
+                self.min = new_min;
+                self.max = new_max;
     }
 
     pub fn abs(&self) -> i64 {
-        match self {
-            Self::External(ReadOnlySlab { .. }) => 0,
-            Self::Owned(OwnedSlab { abs, .. }) => *abs,
-        }
+        self.abs
     }
 
     pub fn max(&self) -> Agg {
-        match self {
-            Self::External(ReadOnlySlab { max, .. }) => *max,
-            Self::Owned(OwnedSlab { max, .. }) => *max,
-        }
+        self.max
     }
 
     pub fn min(&self) -> Agg {
-        match self {
-            Self::External(ReadOnlySlab { min, .. }) => *min,
-            Self::Owned(OwnedSlab { min, .. }) => *min,
-        }
+        self.min
     }
 
     pub fn first_value<C: ColumnCursor>(&self) -> Option<Cow<'_, C::Item>> {
@@ -126,37 +80,11 @@ impl Slab {
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Owned(OwnedSlab { data, .. }) => data,
-            Self::External(ReadOnlySlab { data, range, .. }) => &data[range.clone()],
-        }
-    }
-
-    pub fn external<C: ColumnCursor>(
-        data: Arc<Vec<u8>>,
-        range: Range<usize>,
-        m: &ScanMeta,
-    ) -> Result<Self, PackError> {
-        let mut cursor = C::empty();
-        let bytes = &data.as_ref()[range.clone()];
-        while let Some(val) = cursor.try_next(bytes)? {
-            C::Item::validate(val.value.as_deref(), m)?;
-        }
-        Ok(Slab::External(ReadOnlySlab {
-            data,
-            range,
-            len: cursor.index(),
-            acc: cursor.acc(),
-            min: cursor.min(),
-            max: cursor.max(),
-        }))
+        &self.data
     }
 
     pub fn byte_len(&self) -> usize {
-        match self {
-            Self::External(ReadOnlySlab { data, range, .. }) => data[range.clone()].len(),
-            Self::Owned(OwnedSlab { data, .. }) => data.len(),
-        }
+        self.data.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -164,17 +92,11 @@ impl Slab {
     }
 
     pub fn len(&self) -> usize {
-        match self {
-            Self::External(ReadOnlySlab { len, .. }) => *len,
-            Self::Owned(OwnedSlab { len, .. }) => *len,
-        }
+        self.len
     }
 
     pub fn acc(&self) -> Acc {
-        match self {
-            Self::External(ReadOnlySlab { acc, .. }) => *acc,
-            Self::Owned(OwnedSlab { acc, .. }) => *acc,
-        }
+        self.acc
     }
 }
 
@@ -192,6 +114,7 @@ impl SpanWeight<Slab> for SlabWeight {
             pos: span.len(),
             acc: span.acc(),
             min: span.min(),
+
             max: span.max(),
         }
     }

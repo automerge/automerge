@@ -1,5 +1,7 @@
-use super::Slab;
+use super::{Slab, SlabTree};
 use crate::aggregate::Acc;
+use crate::columndata::ColumnData;
+use crate::cursor::ColumnCursor;
 use crate::encoder::Writer;
 use crate::leb128::{lebsize, ulebsize};
 use crate::pack::Packable;
@@ -128,10 +130,6 @@ impl<'a, P: Packable + ?Sized> WriteOp<'a, P> {
 }
 
 impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
-    fn lithead(i: i64) -> Self {
-        WriteAction::LitHead(i)
-    }
-
     fn acc(&self) -> Acc {
         match self {
             Self::Op(op) => op.acc(),
@@ -217,6 +215,7 @@ impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
 #[derive(Debug)]
 pub struct SlabWriter<'a, P: Packable + ?Sized> {
     actions: Vec<WriteAction<'a, P>>,
+    hint: usize,
     width: usize,
     items: usize,
     acc: Acc,
@@ -235,6 +234,7 @@ impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
     fn clone(&self) -> Self {
         Self {
             actions: self.actions.clone(),
+            hint: self.hint,
             width: self.width,
             items: self.items,
             acc: self.acc,
@@ -290,11 +290,13 @@ impl<'a, P: Packable + ?Sized> Writer<'a, P> for SlabWriter<'a, P> {
 }
 
 impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
-    pub fn new(max: usize, cap: usize, locked: bool) -> Self {
-        let mut actions = Vec::with_capacity(cap);
+    pub fn new(max: usize, hint: usize, locked: bool) -> Self {
+        let hint = hint + 10;
+        let mut actions = Vec::with_capacity(hint);
         actions.push(WriteAction::SlabHead);
         SlabWriter {
             max,
+            hint,
             width: 0,
             acc: Acc::new(),
             abs: 0,
@@ -327,23 +329,18 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
         if width == 0 {
             return;
         }
-        if self.lit_items == 0 {
-            // this is the first item for the lit run
-            // add the width of the lit run header
-            //
-            // we could make another entry here for self.lit_items == 127, etc
-            // for complete correctness
-            //
-            width += 1;
-        }
+
         self.check_copy_overflow(op.copy_width());
+
+        width += header_size(self.lit_items + lit) - header_size(self.lit_items);
+
         self.abs += op.abs();
         self.acc += op.acc();
         self.width += width;
         self.items += items;
         if self.lit_items == 0 && lit > 0 {
             self.lit_head = self.actions.len();
-            self.actions.push(WriteAction::lithead(0));
+            self.actions.push(WriteAction::LitHead(0));
         }
         self.lit_items += lit;
         self.actions.push(WriteAction::Op(op));
@@ -385,9 +382,9 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
             assert!(self.lit_items > 0);
             assert_eq!(
                 self.actions.get(self.lit_head),
-                Some(&WriteAction::lithead(0))
+                Some(&WriteAction::LitHead(0))
             );
-            self.actions[self.lit_head] = WriteAction::lithead(self.lit_items as i64);
+            self.actions[self.lit_head] = WriteAction::LitHead(self.lit_items as i64);
 
             self.lit_items = 0;
         }
@@ -460,6 +457,12 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
         }
     }
 
+    pub fn into_column<C: ColumnCursor>(self, length: usize) -> ColumnData<C> {
+        let mut slabs = self.finish();
+        C::compute_min_max(&mut slabs);
+        ColumnData::init(length, SlabTree::load(slabs))
+    }
+
     pub fn finish(mut self) -> Vec<Slab> {
         self.close_lit();
         if self.items > 0 {
@@ -480,7 +483,7 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
             match action {
                 WriteAction::Slab(next_len, next_acc, next_next_abs, next_width) => {
                     if !buffer.is_empty() {
-                        assert_eq!(width, buffer.len());
+                        debug_assert_eq!(width, buffer.len());
                         let data = std::mem::take(&mut buffer);
                         result.push(Slab::new(data, len, acc, abs));
                         abs = next_abs;
@@ -491,9 +494,12 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
                     width = next_width;
                     next_abs = next_next_abs;
                 }
-                action => action.write(&mut buffer),
+                action => {
+                    action.write(&mut buffer);
+                }
             }
         }
+        debug_assert_eq!(width, buffer.len());
         result.push(Slab::new(buffer, len, acc, abs));
         assert_eq!(self.num_slabs, result.len());
         result
@@ -517,5 +523,14 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
                 self.push(WriteAction::Op(op), size, width)
             }
         }
+    }
+}
+
+fn header_size(lit: usize) -> usize {
+    //lit == 0 || lit == 64 || lit == 8192
+    if lit == 0 {
+        0
+    } else {
+        lebsize(-(lit as i64)) as usize
     }
 }

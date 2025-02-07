@@ -398,13 +398,15 @@ where
     C::Item: 'a,
 {
     pub fn append<M: MaybePackable<'a, C::Item>>(&mut self, value: M) -> usize {
-        self.len += 1;
-        self.state.append(&mut self.writer, value.maybe_packable())
+        let items = self.state.append(&mut self.writer, value.maybe_packable());
+        self.len += items;
+        items
     }
 
     pub fn append_item(&mut self, value: Option<Cow<'a, C::Item>>) -> usize {
-        self.len += 1;
-        self.state.append(&mut self.writer, value)
+        let items = self.state.append(&mut self.writer, value);
+        self.len += items;
+        items
     }
 
     pub fn extend<I: Iterator<Item = Option<Cow<'a, C::Item>>>>(&mut self, iter: I)
@@ -479,7 +481,7 @@ where
         self.writer.finish()
     }
 
-    pub fn write(mut self, out: &mut Vec<u8>) -> Range<usize> {
+    pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
         self.state.flush(&mut self.writer);
         let start = out.len();
         self.writer.write(out);
@@ -491,14 +493,14 @@ where
         self.writer.is_empty() && self.state.is_empty()
     }
 
-    pub fn write_unless_empty(self, out: &mut Vec<u8>) -> Range<usize> {
+    pub fn save_to_unless_empty(self, out: &mut Vec<u8>) -> Range<usize> {
         let mut _tmp: Vec<u8> = vec![];
         #[cfg(debug_assertions)]
         self.clone()
             .into_column_data()
-            .write_unless_empty(&mut _tmp);
+            .save_to_unless_empty(&mut _tmp);
         let range = if !self.is_empty() {
-            self.write(out)
+            self.save_to(out)
         } else {
             out.len()..out.len()
         };
@@ -506,7 +508,7 @@ where
         range
     }
 
-    pub fn write_and_remap_unless_empty<'b, F>(mut self, out: &mut Vec<u8>, f: F) -> Range<usize>
+    pub fn save_to_and_remap_unless_empty<'b, F>(mut self, out: &mut Vec<u8>, f: F) -> Range<usize>
     where
         F: Fn(&C::Item) -> Option<&'b C::Item>,
         C::Item: 'b,
@@ -522,19 +524,9 @@ where
         }
     }
 
-    pub fn into_column_data(self) -> ColumnData<C> {
-        let mut slabs = self.finish();
-        C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
-        let mut col = ColumnData::default();
-        if !slabs.is_empty() {
-            col.len = slabs.iter().map(|s| s.len()).sum();
-            col.slabs.splice(0..1, slabs);
-        }
-        #[cfg(debug_assertions)]
-        {
-            col.debug = col.to_vec();
-        }
-        col
+    pub fn into_column_data(mut self) -> ColumnData<C> {
+        self.state.flush(&mut self.writer);
+        self.writer.into_column(self.len)
     }
 
     pub fn copy_slab(&mut self, slab: &'a Slab) {
@@ -573,5 +565,26 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
             C::finish(self.slab, &mut self.encoder.writer, cursor)
         }
         self.encoder.writer.finish()
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::super::rle::UIntCursor;
+    use super::*;
+
+    #[test]
+    fn test_encoding_large_lit_runs() {
+        for i in 0..10_000 {
+            let mut encoder = Encoder::<UIntCursor>::new(true); // locked
+            for j in 0..i {
+                encoder.append(Some(Cow::Owned(j)));
+            }
+            let col1 = encoder.into_column_data();
+            if i % 100 == 0 {
+                let col2 = UIntCursor::load(&col1.save()).unwrap();
+                assert_eq!(col1.to_vec(), col2.to_vec());
+            }
+        }
     }
 }

@@ -4,7 +4,7 @@ use super::cursor::{ColumnCursor, HasAcc, HasPos, Run, ScanMeta, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
-use super::slab::{Slab, SlabTree, SlabWeight, SlabWriter, SpanWeight};
+use super::slab::{Slab, SlabWeight, SlabWriter, SpanWeight};
 use super::Cow;
 
 use std::fmt::Debug;
@@ -137,7 +137,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
-        cap: usize,
+        hint: usize,
         locked: bool,
     ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a, P>) {
         let mut post = None;
@@ -174,7 +174,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B, cap, locked);
+        let mut current = SlabWriter::new(B, hint, locked);
 
         current.copy(slab, copy_range, 0, copy_size, copy_acc, None);
 
@@ -339,13 +339,13 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         index: usize,
         del: usize,
         slab: &Slab,
-        cap: usize,
+        hint: usize,
     ) -> SpliceEncoder<'_, Self> {
         let (run, cursor) = Self::seek(index, slab);
 
-        let cap = cap * 2 + 9;
+        let hint = hint * 2;
         let (state, post, acc, current) =
-            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, cap, false);
+            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, hint, false);
 
         let SpliceDel {
             deleted,
@@ -461,21 +461,19 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
 
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
-        let cap = data.len() / B * 5;
-        let mut writer = SlabWriter::<P>::new(B, cap, true);
+        let hint = data.len() * 10 / B;
+        let mut writer = SlabWriter::<P>::new(B, hint, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
             P::validate(run.value.as_deref(), m)?;
             if cursor.offset - last_copy.offset >= B {
                 Self::load_copy(data, &mut writer, &last_copy, &cursor);
-                writer.manual_slab_break(); // have to do this before not after
+                writer.manual_slab_break();
                 last_copy = cursor;
             }
         }
         Self::load_copy(data, &mut writer, &last_copy, &cursor);
-        let mut slabs = writer.finish();
-        Self::compute_min_max(&mut slabs);
-        Ok(ColumnData::init(cursor.index, SlabTree::load(slabs)))
+        Ok(writer.into_column(cursor.index))
     }
 }
 
@@ -679,9 +677,10 @@ pub(crate) mod tests {
                 sum += u64::agg(&v);
             }
         }
-        let mut writer = Vec::new();
-        col1.write(&mut writer);
-        assert_eq!(writer, vec![116, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(
+            col1.save(),
+            vec![116, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
 
         // lit run capped by runs
         let mut col2: ColumnData<RleCursor<5, u64>> = ColumnData::new();
@@ -701,9 +700,7 @@ pub(crate) mod tests {
                 sum += u64::agg(&v);
             }
         }
-        let mut writer = Vec::new();
-        col2.write(&mut writer);
-        assert_eq!(writer, vec![2, 1, 120, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10]);
+        assert_eq!(col2.save(), vec![2, 1, 120, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10]);
 
         // lit run capped by runs
         let mut col3: ColumnData<RleCursor<5, u64>> = ColumnData::new();
@@ -724,10 +721,8 @@ pub(crate) mod tests {
                 sum += u64::agg(&v);
             }
         }
-        let mut writer = Vec::new();
-        col3.write(&mut writer);
         assert_eq!(
-            writer,
+            col3.save(),
             vec![125, 1, 2, 3, 2, 4, 2, 5, 123, 6, 7, 8, 9, 10, 2, 11]
         );
 
@@ -765,19 +760,15 @@ pub(crate) mod tests {
                 sum += u64::agg(&v);
             }
         }
-        let mut writer = Vec::new();
-        col4.write(&mut writer);
         assert_eq!(
-            writer,
+            col4.save(),
             vec![2, 1, 2, 2, 2, 3, 2, 4, 2, 5, 2, 6, 2, 7, 2, 8, 2, 9]
         );
 
         // empty data
         let col5: ColumnData<RleCursor<5, u64>> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        let mut writer = Vec::new();
-        col5.write(&mut writer);
-        assert_eq!(writer, Vec::<u8>::new());
+        assert_eq!(col5.save(), Vec::<u8>::new());
     }
 
     #[test]

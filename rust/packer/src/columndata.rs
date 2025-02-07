@@ -14,7 +14,6 @@ use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ColumnData<C: ColumnCursor> {
@@ -100,15 +99,15 @@ impl<C: ColumnCursor> ColumnData<C> {
         *self = encoder.into_column_data();
     }
 
-    pub fn write_unless_empty(&self, out: &mut Vec<u8>) -> Range<usize> {
+    pub fn save_to_unless_empty(&self, out: &mut Vec<u8>) -> Range<usize> {
         if self.is_empty() {
             out.len()..out.len()
         } else {
-            self.write(out)
+            self.save_to(out)
         }
     }
 
-    pub fn write(&self, out: &mut Vec<u8>) -> Range<usize> {
+    pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         if self.slabs.len() == 1 {
             let slab = self.slabs.get(0).unwrap();
@@ -508,7 +507,7 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
-    pub(crate) fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
+    pub fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
         self.slabs.iter().flat_map(|s| s.run_iter::<C>())
     }
 
@@ -571,14 +570,10 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
-    pub fn export(&self) -> Vec<u8> {
+    pub fn save(&self) -> Vec<u8> {
         let mut data = vec![];
-        self.write(&mut data);
+        self.save_to(&mut data);
         data
-    }
-
-    pub fn import(data: Vec<u8>) -> Result<ColumnData<C>, PackError> {
-        ColumnData::<C>::load(&data)
     }
 
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
@@ -680,39 +675,6 @@ impl<C: ColumnCursor> ColumnData<C> {
         slabs.push(new_slab);
         assert!(!slabs.is_empty());
         ColumnData::init(len, slabs)
-    }
-
-    pub fn external(
-        data: Arc<Vec<u8>>,
-        range: Range<usize>,
-        m: &ScanMeta,
-    ) -> Result<Self, PackError> {
-        let col2 = Self::load_with(&data.as_ref()[range.clone()], m)?;
-        let slab = Slab::external::<C>(data, range, m)?;
-        let len = slab.len();
-        let col = ColumnData::init(len, SlabTree::new2(slab));
-        debug_assert_eq!(
-            col.iter()
-                .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())
-                .sum::<Acc>(),
-            col.acc()
-        );
-        assert_eq!(col.to_vec(), col2.to_vec());
-        assert_eq!(
-            col.run_iter().collect::<Vec<_>>(),
-            col2.run_iter().collect::<Vec<_>>()
-        );
-        let a = col.export();
-        let b = col2.export();
-        if a != b {
-            for i in 0..a.len() {
-                if a.get(i) != b.get(i) || i >= 2235 {
-                    log!(" {} {:?} {:?}", i, a.get(i), b.get(i));
-                }
-            }
-            panic!()
-        }
-        Ok(col)
     }
 
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
@@ -829,20 +791,6 @@ pub(crate) mod tests {
             assert_eq!(c.max(), slab.max());
         }
         assert_eq!(vec, &col.to_vec());
-        let a = col.export();
-        let col2 = C::load(&a).unwrap();
-        assert_eq!(vec, &col2.to_vec());
-        let b = col2.export();
-        let col3 = C::load(&b).unwrap();
-        assert_eq!(vec, &col3.to_vec());
-        if a != b {
-            for i in 0..a.len() {
-                if a.get(i) != b.get(i) || i > 2310 {
-                    log!(" - {} -> {:?}  {:?}", i, a.get(i), b.get(i));
-                }
-            }
-            panic!()
-        }
     }
 
     fn test_advance_by<'a, C: ColumnCursor>(
@@ -1256,9 +1204,7 @@ pub(crate) mod tests {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
-        let mut copy = vec![];
-        col.write(&mut copy);
-        let export = ColumnData::<RleCursor<64, u64>>::load(&copy).unwrap();
+        let export = ColumnData::<RleCursor<64, u64>>::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
     }
 
@@ -1282,7 +1228,7 @@ pub(crate) mod tests {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
-        let copy: ColumnData<StrCursor> = ColumnData::import(col.export()).unwrap();
+        let copy: ColumnData<StrCursor> = ColumnData::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
     }
 
@@ -1306,24 +1252,9 @@ pub(crate) mod tests {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
-        let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
+        let copy: ColumnData<DeltaCursor> = ColumnData::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
     }
-
-    /*
-        #[test]
-        fn column_data_fuzz_test_delta2() {
-            let mut data: Vec<Option<i64>> = vec![];
-            let mut col = ColumnData::<DeltaCursor>::new();
-            let mut rng = make_rng();
-            for _ in 0..200_000 {
-                let (index, values) = generate_splice(data.len(), &mut rng);
-                test_splice(&mut data, &mut col, index, values[0..1].to_vec());
-            }
-            let copy: ColumnData<DeltaCursor> = ColumnData::import(col.export()).unwrap();
-            assert_eq!(col.to_vec(), copy.to_vec());
-        }
-    */
 
     #[test]
     fn column_data_fuzz_test_advance_by_delta() {
@@ -1401,9 +1332,7 @@ pub(crate) mod tests {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
         }
-        let mut copy = vec![];
-        col.write(&mut copy);
-        let export = ColumnData::<BooleanCursor>::load(&copy).unwrap();
+        let export = ColumnData::<BooleanCursor>::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
     }
 

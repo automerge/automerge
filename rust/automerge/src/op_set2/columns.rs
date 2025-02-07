@@ -66,7 +66,7 @@ impl Columns {
         data: &mut Vec<u8>,
     ) -> Option<RawColumn<Uncompressed>> {
         if !c.is_empty() || spec.id() == ColumnId::new(3) {
-            let range = c.write(data);
+            let range = c.save_to(data);
             if !range.is_empty() {
                 return Some(RawColumn::new(*spec, range));
             }
