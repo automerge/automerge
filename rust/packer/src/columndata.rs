@@ -547,7 +547,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub(crate) fn init(len: usize, slabs: SlabTree<C::SlabIndex>) -> Self {
-        assert_eq!(len, slabs.iter().map(|s| s.len()).sum::<usize>());
+        debug_assert_eq!(len, slabs.iter().map(|s| s.len()).sum::<usize>());
         let col = ColumnData {
             len,
             slabs,
@@ -589,11 +589,6 @@ impl<C: ColumnCursor> ColumnData<C> {
             return Acc::new(); // really none
         }
 
-        let tmp_values = values
-            .clone()
-            .map(|e| e.maybe_packable())
-            .collect::<Vec<_>>();
-
         #[cfg(debug_assertions)]
         C::export_splice(
             &mut self.debug,
@@ -621,17 +616,11 @@ impl<C: ColumnCursor> ColumnData<C> {
                     log!(":: SPLICE ERROR ::");
                     log!(":: index={} del={}", index - cursor.weight.pos(), del);
                     log!(":: slab={:?}", cursor.element);
-                    log!(":: values={:?}", tmp_values);
                     log!(":: result={:?}", slabs);
                     panic!()
                 }
                 C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
-                #[cfg(debug_assertions)]
-                for s in &slabs {
-                    let (_run, c) = C::seek(s.len(), s);
-                    assert_eq!(s.acc(), c.acc());
-                }
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
                 assert!(!self.slabs.is_empty());
             }

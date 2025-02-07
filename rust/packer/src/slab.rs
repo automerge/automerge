@@ -47,8 +47,8 @@ impl Slab {
     }
 
     pub fn set_min_max(&mut self, new_min: Agg, new_max: Agg) {
-                self.min = new_min;
-                self.max = new_max;
+        self.min = new_min;
+        self.max = new_max;
     }
 
     pub fn abs(&self) -> i64 {

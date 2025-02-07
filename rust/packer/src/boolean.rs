@@ -60,15 +60,6 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Self::default()
     }
 
-    fn debug_validate(data: &[u8]) {
-        let mut cursor = Self::empty();
-        let mut total = 0;
-        while let Ok(Some(run)) = cursor.try_next(data) {
-            assert!(total == 0 || run.count > 0);
-            total += run.count;
-        }
-    }
-
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
         let mut last_cursor = Self::empty();

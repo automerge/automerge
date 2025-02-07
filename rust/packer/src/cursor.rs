@@ -295,8 +295,6 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Ok(cursor)
     }
 
-    fn debug_validate(_data: &[u8]) {}
-
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError>;
 
     fn load(data: &[u8]) -> Result<ColumnData<Self>, PackError> {
@@ -321,9 +319,6 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         let deleted = encoder.deleted;
         let acc = encoder.acc;
         let slabs = encoder.finish();
-        for s in &slabs {
-            Self::debug_validate(s.as_slice());
-        }
         if deleted == 0 {
             assert_eq!(
                 slabs.iter().map(|s| s.acc()).sum::<Acc>(),
