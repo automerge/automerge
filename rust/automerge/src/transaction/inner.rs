@@ -95,6 +95,10 @@ impl TransactionInner {
         time: Option<i64>,
     ) -> Option<ChangeHash> {
         if self.pending_ops() == 0 {
+            if self.seq == 1 {
+                // we added an actor for this tx - now roll it back
+                doc.rollback_actor(self.actor);
+            }
             return None;
         }
         Some(self.commit_impl(doc, message, time))
@@ -164,6 +168,9 @@ impl TransactionInner {
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending.len();
         doc.ops_mut().load_checkpoint(self.checkpoint);
+        if self.seq == 1 {
+            doc.rollback_actor(self.actor);
+        }
         num
     }
 

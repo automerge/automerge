@@ -1069,6 +1069,13 @@ impl OpSet {
         */
     }
 
+    pub(crate) fn insert_actor(&mut self, idx: usize, actor: ActorId) {
+        if self.actors.len() != idx {
+            self.rewrite_with_new_actor(idx)
+        }
+        self.actors.insert(idx, actor)
+    }
+
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         self.cols.rewrite_with_new_actor(idx);
         self.mark_index.rewrite_with_new_actor(idx);

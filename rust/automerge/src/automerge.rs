@@ -18,7 +18,8 @@ use crate::iter::{Keys, ListRange, MapRange};
 use crate::iter::{Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
-use crate::storage::{self, load, CompressConfig, VerificationMode};
+use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
+
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
@@ -42,7 +43,7 @@ pub(crate) enum Actor {
 }
 
 impl Actor {
-    fn rewrite_states_with_new_actor(&mut self, index: usize) {
+    fn rewrite_with_new_actor(&mut self, index: usize) {
         if let Actor::Cached(idx) = self {
             if *idx >= index {
                 *idx += 1;
@@ -201,9 +202,7 @@ impl Automerge {
     pub fn new() -> Self {
         Automerge {
             queue: vec![],
-            //history: vec![],
-            change_graph: ChangeGraph::new(),
-            //states: HashMap::new(),
+            change_graph: ChangeGraph::new(0),
             ops: Default::default(),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
@@ -253,6 +252,14 @@ impl Automerge {
             Actor::Unused(actor) => actor,
             Actor::Cached(index) => self.ops.get_actor(*index),
         }
+    }
+
+    pub(crate) fn rollback_actor(&mut self, actor: usize) {
+        if self.actor == Actor::Cached(actor) {
+            self.actor = Actor::Unused(self.ops.get_actor(actor).clone())
+        }
+        self.ops.remove_actor(actor);
+        self.change_graph.remove_actor(actor);
     }
 
     pub(crate) fn get_actor_index(&mut self) -> usize {
@@ -914,13 +921,12 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        let compress = if options.deflate {
-            None
-        } else {
-            Some(CompressConfig::None)
-        };
-        let mut bytes =
-            crate::storage::save::save_document(&self.ops, &self.change_graph, compress);
+        // make sure we dont have un-used actors
+        assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
+
+        let doc = Document::new(&self.ops, &self.change_graph, options.compress());
+        let mut bytes = doc.into_bytes();
+
         if options.retain_orphans {
             for orphaned in self.queue.iter() {
                 bytes.extend(orphaned.raw_bytes());
@@ -1043,43 +1049,17 @@ impl Automerge {
 
         self.update_deps(change);
 
-        //let history_index = self.history.len();
-
         let actor_index = self.put_actor_ref(change.actor_id());
-
-        /*
-                self.states
-                    .entry(actor_index)
-                    .or_default()
-                    .push(history_index);
-        */
 
         self.change_graph
             .add_change(change, actor_index)
             .expect("Change's deps should already be in the document");
-
-        //self.history.push(change);
-    }
-
-    fn rewrite_states_with_new_actor(&mut self, index: usize) {
-        self.actor.rewrite_states_with_new_actor(index);
-        /*
-                let old_states = std::mem::take(&mut self.states);
-                self.states = old_states
-                    .into_iter()
-                    .map(|(a, b)| if a >= index { (a + 1, b) } else { (a, b) })
-                    .collect();
-        */
     }
 
     fn insert_actor(&mut self, index: usize, actor: ActorId) -> usize {
-        // only rewrite if there are actors higher than index
-        if self.ops.actors.len() != index {
-            self.ops.rewrite_with_new_actor(index);
-            self.change_graph.rewrite_with_new_actor(index);
-            self.rewrite_states_with_new_actor(index);
-        }
-        self.ops.actors.insert(index, actor.clone());
+        self.ops.insert_actor(index, actor);
+        self.change_graph.insert_actor(index);
+        self.actor.rewrite_with_new_actor(index);
         index
     }
 
@@ -1946,6 +1926,16 @@ pub struct SaveOptions {
     pub deflate: bool,
     /// Whether to save changes which we do not have the dependencies for
     pub retain_orphans: bool,
+}
+
+impl SaveOptions {
+    fn compress(&self) -> CompressConfig {
+        if self.deflate {
+            CompressConfig::Threshold(change::DEFLATE_MIN_SIZE)
+        } else {
+            CompressConfig::None
+        }
+    }
 }
 
 impl std::default::Default for SaveOptions {

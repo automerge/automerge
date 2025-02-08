@@ -69,7 +69,7 @@ impl ChangeNode {
 }
 
 impl ChangeGraph {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(num_actors: usize) -> Self {
         Self {
             nodes: Vec::new(),
             edges: Vec::new(),
@@ -77,11 +77,11 @@ impl ChangeGraph {
             hashes: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: Vec::new(),
-            seq_index: Vec::new(),
+            seq_index: vec![vec![]; num_actors],
         }
     }
 
-    pub(crate) fn with_capacity(changes: usize, deps: usize) -> Self {
+    pub(crate) fn with_capacity(changes: usize, deps: usize, num_actors: usize) -> Self {
         Self {
             nodes: Vec::with_capacity(changes),
             edges: Vec::with_capacity(deps),
@@ -89,7 +89,7 @@ impl ChangeGraph {
             hashes: Vec::with_capacity(changes),
             heads: BTreeSet::new(),
             clock_cache: Vec::with_capacity(changes / CACHE_STEP as usize + 1),
-            seq_index: Vec::new(),
+            seq_index: vec![vec![]; num_actors],
         }
     }
 
@@ -110,17 +110,19 @@ impl ChangeGraph {
             .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
     }
 
-    pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        for node in &mut self.nodes {
-            if node.actor_index.0 >= idx as u32 {
-                node.actor_index.0 += 1;
+    pub(crate) fn insert_actor(&mut self, idx: usize) {
+        if self.seq_index.len() != idx {
+            for node in &mut self.nodes {
+                if node.actor_index.0 >= idx as u32 {
+                    node.actor_index.0 += 1;
+                }
+            }
+            // FIXME - this could get expensive - lookout
+            for clock in &mut self.clock_cache {
+                clock.rewrite_with_new_actor(idx)
             }
         }
         self.seq_index.insert(idx, vec![]);
-        // FIXME - this could get expensive - lookout
-        for clock in &mut self.clock_cache {
-            clock.rewrite_with_new_actor(idx)
-        }
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
@@ -129,8 +131,10 @@ impl ChangeGraph {
                 node.actor_index.0 -= 1;
             }
         }
-        assert!(self.seq_index[idx].is_empty());
-        self.seq_index.remove(idx);
+        if self.seq_index.get(idx).is_some() {
+            assert!(self.seq_index[idx].is_empty());
+            self.seq_index.remove(idx);
+        }
         for clock in &mut self.clock_cache {
             clock.remove_actor(idx)
         }
@@ -396,9 +400,7 @@ impl ChangeGraph {
 
     fn index_by_seq(&mut self, actor_index: ActorIdx, node_idx: NodeIdx, seq: u64) {
         let actor_index = actor_index.0 as usize;
-        while actor_index >= self.seq_index.len() {
-            self.seq_index.push(vec![]);
-        }
+        assert!(actor_index < self.seq_index.len());
         assert_eq!(self.seq_index[actor_index].len() + 1, seq as usize);
         self.seq_index[actor_index].push(node_idx);
     }
@@ -656,13 +658,14 @@ mod tests {
             TestGraphBuilder {
                 actors: Vec::new(),
                 changes: Vec::new(),
-                graph: ChangeGraph::new(),
+                graph: ChangeGraph::new(0),
                 seqs_by_actor: BTreeMap::new(),
             }
         }
 
         fn actor(&mut self) -> ActorId {
             let actor = ActorId::random();
+            self.graph.insert_actor(self.actors.len());
             self.actors.push(actor.clone());
             actor
         }
@@ -742,7 +745,7 @@ mod tests {
         }
 
         fn build(&self) -> ChangeGraph {
-            let mut graph = ChangeGraph::new();
+            let mut graph = ChangeGraph::new(self.actors.len());
             for change in &self.changes {
                 let actor_idx = self.index(change.actor_id());
                 graph.add_change(change, actor_idx).unwrap();

@@ -2205,13 +2205,18 @@ fn missing_actors_when_docs_are_forked() {
 
     doc1.put(ROOT, "b", 2).unwrap();
     doc2.merge(&mut doc1).unwrap();
+
+    let s1 = doc2.save();
+
     // This call creates a transaction which doesn't do anything (because the
     // "c" key doesn't exist) and so the actor ID (actor1) gets added to the
     // IndexedCache of doc2
     doc2.delete(ROOT, "c").unwrap();
 
     // error occurs here
-    doc2.save_and_verify().unwrap();
+    let s2 = doc2.save_and_verify().unwrap();
+
+    assert_eq!(s1,s2);
 }
 
 #[test]

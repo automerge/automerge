@@ -288,7 +288,8 @@ impl<'a> ChangeCollector<'a> {
         let mut seq = vec![0; num_actors];
         let mut changes = Vec::with_capacity(self.changes.len());
         let mut heads = BTreeSet::new();
-        let mut change_graph = ChangeGraph::with_capacity(self.changes.len(), self.num_deps);
+        let mut change_graph =
+            ChangeGraph::with_capacity(self.changes.len(), self.num_deps, num_actors);
 
         for change in self.changes.into_iter() {
             let actor = change.actor;

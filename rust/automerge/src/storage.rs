@@ -6,7 +6,6 @@ pub(crate) mod columns;
 pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
-pub(crate) mod save;
 
 pub use load::VerificationMode;
 pub(crate) use {
