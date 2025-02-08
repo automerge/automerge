@@ -11,7 +11,7 @@ mod doc_op_columns;
 pub(crate) use doc_op_columns::DocOpColumns;
 mod doc_change_columns;
 pub(crate) use doc_change_columns::DocChangeColumns;
-pub(crate) use doc_change_columns::{ChangeMetadata, ReadChangeError};
+pub(crate) use doc_change_columns::{DocChangeMetadata, ReadChangeError};
 mod compression;
 
 #[allow(dead_code)]
@@ -317,7 +317,7 @@ impl<'a> Document<'a> {
 
     pub(crate) fn iter_changes(
         &'a self,
-    ) -> impl Iterator<Item = Result<ChangeMetadata<'a>, ReadChangeError>> + Clone + 'a {
+    ) -> impl Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>> + Clone + 'a {
         self.change_metadata
             .iter(&self.bytes[self.change_bytes.clone()])
     }

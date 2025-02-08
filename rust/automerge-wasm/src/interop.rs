@@ -49,6 +49,32 @@ impl From<JS> for JsValue {
     }
 }
 
+impl AsRef<JsValue> for JS {
+    fn as_ref(&self) -> &JsValue {
+        &self.0
+    }
+}
+
+impl<'a> From<&am::ChangeMetadata<'a>> for JS {
+    fn from(c: &am::ChangeMetadata<'a>) -> Self {
+        let change = Object::new();
+        let message = c
+            .message
+            .as_deref()
+            .map(JsValue::from)
+            .unwrap_or(JsValue::NULL);
+        js_set(&change, "actor", c.actor.to_string()).unwrap();
+        js_set(&change, "seq", c.seq as f64).unwrap();
+        js_set(&change, "startOp", c.start_op as f64).unwrap();
+        js_set(&change, "maxOp", c.max_op as f64).unwrap();
+        js_set(&change, "time", c.timestamp as f64).unwrap();
+        js_set(&change, "message", message).unwrap();
+        js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
+        js_set(&change, "hash", c.hash.to_string()).unwrap();
+        JS(change.into())
+    }
+}
+
 impl From<am::sync::State> for JS {
     fn from(state: am::sync::State) -> Self {
         let shared_heads: JS = state.shared_heads.into();

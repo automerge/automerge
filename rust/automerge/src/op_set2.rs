@@ -12,6 +12,7 @@ pub(crate) mod types;
 pub use parents::{Parent, Parents};
 
 pub(crate) use op::{ChangeOp, Op, OpBuilder2, OpBuilder3, SuccInsert};
+pub use types::ChangeMetadata;
 pub(crate) use types::{
     ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue, Value,
 };

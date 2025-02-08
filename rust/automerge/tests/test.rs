@@ -1868,6 +1868,26 @@ fn test_load_incremental_partial_load() {
 }
 
 #[test]
+fn test_get_change_meta() {
+    let mut doc = Automerge::new();
+
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "a", 1).unwrap();
+    tx.commit();
+
+    let start_heads = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.put(&ROOT, "b", 2).unwrap();
+    tx.commit();
+
+    let changes = doc.get_changes_meta(&start_heads);
+
+    assert_eq!(changes.len(), 1);
+    assert_eq!(*changes[0].actor, *doc.get_actor());
+    assert_eq!(changes[0].seq, 2);
+}
+
+#[test]
 fn get_marks_at_heads() {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();

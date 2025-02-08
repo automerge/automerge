@@ -311,6 +311,24 @@ describe("Automerge", () => {
       assert.deepEqual(doc.list.indexOf(5), 5)
       assert.deepEqual(doc.text.indexOf("world"), 6)
     })
+    it("get change metadata", () => {
+      let doc = Automerge.from<any>({ text: "hello world" })
+      let heads = Automerge.getHeads(doc);
+      doc = Automerge.change(doc, d => { d.foo = "bar" })
+      doc = Automerge.change(doc, d => { d.zip = "zop" })
+      let changes = Automerge.getChangesSince(doc, heads).map(Automerge.decodeChange);
+      let meta = Automerge.getChangesMetaSince(doc, heads);
+      assert.equal(changes.length, 2);
+      assert.equal(meta.length, 2);
+      for (let i = 0; i < 2; i++) {
+        assert.equal(changes[i].actor, meta[i].actor);
+        assert.equal(changes[i].hash, meta[i].hash);
+        assert.equal(changes[i].message, meta[i].message);
+        assert.equal(changes[i].time, meta[i].time);
+        assert.deepEqual(changes[i].deps, meta[i].deps);
+        assert.deepEqual(changes[i].startOp, meta[i].startOp);
+      }
+    })
   })
 
   describe("explicitly allowing missing dependencies when loading", () => {

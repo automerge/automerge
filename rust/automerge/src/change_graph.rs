@@ -8,7 +8,7 @@ use crate::{
     clock::{Clock, ClockData},
     columnar::column_range::{DepsRange, ValueRange},
     error::AutomergeError,
-    op_set2::{change::ExtraChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
+    op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
     storage::{Columns, DocChangeColumns},
     types::OpId,
     Change, ChangeHash,
@@ -265,10 +265,10 @@ impl ChangeGraph {
         self.nodes_by_hash.contains_key(hash)
     }
 
-    pub(crate) fn get_metadata<I>(
+    pub(crate) fn get_build_metadata<I>(
         &self,
         hashes: I,
-    ) -> Result<(Vec<ExtraChangeMetadata<'_>>, usize), MissingDep>
+    ) -> Result<(Vec<BuildChangeMetadata<'_>>, usize), MissingDep>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
@@ -282,10 +282,10 @@ impl ChangeGraph {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(self.get_metadata_for_indexes(indexes))
+        Ok(self.get_build_metadata_for_indexes(indexes))
     }
 
-    fn get_metadata_for_indexes<I>(&self, indexes: I) -> (Vec<ExtraChangeMetadata<'_>>, usize)
+    fn get_build_metadata_for_indexes<I>(&self, indexes: I) -> (Vec<BuildChangeMetadata<'_>>, usize)
     where
         I: IntoIterator<Item = NodeIdx>,
     {
@@ -303,7 +303,7 @@ impl ChangeGraph {
                 num_deps += deps.len();
                 let start_op = node.max_op - node.num_ops as u64 + 1;
                 let seq = node.seq;
-                ExtraChangeMetadata {
+                BuildChangeMetadata {
                     actor,
                     seq,
                     start_op,
@@ -312,17 +312,17 @@ impl ChangeGraph {
                     message,
                     extra,
                     deps,
-                    builder: 0,
+                    builder: index.0 as usize,
                 }
             })
             .collect();
         (changes, num_deps)
     }
 
-    pub(crate) fn get_metadata_clock(
+    pub(crate) fn get_build_metadata_clock(
         &self,
         have_deps: &[ChangeHash],
-    ) -> (Vec<ExtraChangeMetadata<'_>>, usize) {
+    ) -> (Vec<BuildChangeMetadata<'_>>, usize) {
         // get the clock for the given deps
         let clock = self.clock_for_heads(have_deps);
 
@@ -343,7 +343,7 @@ impl ChangeGraph {
         // ensure the changes are still in sorted order
         change_indexes.sort_unstable();
 
-        self.get_metadata_for_indexes(change_indexes)
+        self.get_build_metadata_for_indexes(change_indexes)
     }
 
     pub(crate) fn get_hash_for_actor_seq(
@@ -722,7 +722,7 @@ mod tests {
                 .unwrap()
                 .as_millis() as i64;
             let seq = self.seqs_by_actor.entry(actor.clone()).or_insert(1);
-            let meta = ExtraChangeMetadata {
+            let meta = BuildChangeMetadata {
                 actor: actor_idx,
                 builder: 0,
                 deps: parents

@@ -8,7 +8,9 @@ use itertools::Itertools;
 
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::change::ChangeCollector;
-pub(crate) use crate::op_set2::{ChangeOp, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents};
+pub(crate) use crate::op_set2::{
+    ChangeMetadata, ChangeOp, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
+};
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
 use crate::change_graph::ChangeGraph;
@@ -490,14 +492,20 @@ impl Automerge {
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
-        let changes = self.get_changes_by_hashes(hashes.into_iter().rev().collect());
+        let changes = self.get_changes_by_hashes(hashes.into_iter().rev().collect())?;
         f.apply_changes(changes)?;
         Ok(f)
     }
 
-    fn get_changes_by_hashes(&self, hashes: Vec<ChangeHash>) -> Vec<Change> {
-        // FIXME - error?
-        ChangeCollector::for_hashes(&self.ops, &self.change_graph, hashes.clone()).unwrap()
+    fn get_changes_by_hashes(
+        &self,
+        hashes: Vec<ChangeHash>,
+    ) -> Result<Vec<Change>, AutomergeError> {
+        Ok(ChangeCollector::for_hashes(
+            &self.ops,
+            &self.change_graph,
+            hashes.clone(),
+        )?)
     }
 
     pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
@@ -989,11 +997,6 @@ impl Automerge {
         Ok(())
     }
 
-    /// Get the changes since `have_deps` in this document using a clock internally.
-    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
-        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
-    }
-
     /// Get the last change this actor made to the document.
     pub fn get_last_local_change(&self) -> Option<Change> {
         // TODO - i'd like tests for this
@@ -1239,7 +1242,17 @@ impl Automerge {
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<Change> {
-        self.get_changes_clock(have_deps)
+        ChangeCollector::exclude_hashes(&self.ops, &self.change_graph, have_deps)
+    }
+
+    pub fn get_changes_meta(&self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
+        ChangeCollector::exclude_hashes_meta(&self.ops, &self.change_graph, have_deps)
+    }
+
+    pub fn get_change_meta_by_hash(&self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
+        ChangeCollector::meta_for_hashes(&self.ops, &self.change_graph, [*hash])
+            .ok()?
+            .pop()
     }
 
     /// Get changes in `other` that are not in `self`
@@ -1261,7 +1274,8 @@ impl Automerge {
         // found them. This is not necessarily a topological sort, but should usually be close.
         added_change_hashes.reverse();
 
-        other.get_changes_by_hashes(added_change_hashes)
+        // safe to unwrap here b/c added_changes all came from the change_graph
+        other.get_changes_by_hashes(added_change_hashes).unwrap()
     }
 
     /// Get the hash of the change that contains the given `opid`.

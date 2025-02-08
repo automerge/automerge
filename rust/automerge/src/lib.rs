@@ -295,7 +295,7 @@ pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
-pub use op_set2::{Parent, Parents};
+pub use op_set2::{ChangeMetadata, Parent, Parents};
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;

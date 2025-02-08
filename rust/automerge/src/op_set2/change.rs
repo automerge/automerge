@@ -15,12 +15,12 @@ use std::ops::Range;
 
 pub(crate) mod collector;
 
-pub(crate) use collector::{ChangeCollector, CollectedChanges, ExtraChangeMetadata};
+pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
 #[inline(never)]
 pub(crate) fn build_change<T>(
     ops: &[T],
-    meta: &ExtraChangeMetadata<'_>,
+    meta: &BuildChangeMetadata<'_>,
     graph: &ChangeGraph,
     actors: &[ActorId],
 ) -> Change<'static, Verified>
@@ -157,7 +157,7 @@ impl<'a> Eq for OpBuilder3<'a> {}
 #[inline(never)]
 fn write_change_ops<T>(
     ops: &[T],
-    meta: &ExtraChangeMetadata<'_>,
+    meta: &BuildChangeMetadata<'_>,
     actors: &[ActorId],
     data: &mut Vec<u8>,
 ) -> (ChangeOpsColumns2, Vec<ActorId>)
@@ -215,7 +215,7 @@ where
 #[inline(never)]
 fn remap_actors<C>(
     ops: &[C],
-    meta: &ExtraChangeMetadata<'_>,
+    meta: &BuildChangeMetadata<'_>,
     actors: &[ActorId],
 ) -> (Vec<Option<ActorIdx>>, Vec<ActorId>)
 where

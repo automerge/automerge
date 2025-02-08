@@ -26,7 +26,7 @@ const DEPS_COL_ID: ColumnId = ColumnId::new(4);
 const EXTRA_COL_ID: ColumnId = ColumnId::new(5);
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChangeMetadata<'a> {
+pub(crate) struct DocChangeMetadata<'a> {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) max_op: u64,
@@ -154,7 +154,7 @@ pub(crate) struct DocChangeColumnIter<'a> {
 }
 
 impl<'a> DocChangeColumnIter<'a> {
-    fn try_next(&mut self) -> Result<Option<ChangeMetadata<'a>>, ReadChangeError> {
+    fn try_next(&mut self) -> Result<Option<DocChangeMetadata<'a>>, ReadChangeError> {
         let actor = match self.actors.maybe_next_in_col("actor")? {
             Some(actor) => actor as usize,
             None => {
@@ -179,7 +179,7 @@ impl<'a> DocChangeColumnIter<'a> {
         let message = self.message.next().transpose()?.flatten();
         let deps = self.deps.next_in_col("deps")?;
         let extra = self.extra.next().transpose()?.unwrap_or(Cow::Borrowed(&[]));
-        Ok(Some(ChangeMetadata {
+        Ok(Some(DocChangeMetadata {
             actor,
             seq,
             max_op,
@@ -192,7 +192,7 @@ impl<'a> DocChangeColumnIter<'a> {
 }
 
 impl<'a> Iterator for DocChangeColumnIter<'a> {
-    type Item = Result<ChangeMetadata<'a>, ReadChangeError>;
+    type Item = Result<DocChangeMetadata<'a>, ReadChangeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()

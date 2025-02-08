@@ -136,8 +136,8 @@ impl TransactionInner {
     pub(crate) fn change_meta<'a>(
         &self,
         deps: Vec<u64>,
-    ) -> crate::op_set2::change::ExtraChangeMetadata<'a> {
-        crate::op_set2::change::ExtraChangeMetadata {
+    ) -> crate::op_set2::change::BuildChangeMetadata<'a> {
+        crate::op_set2::change::BuildChangeMetadata {
             actor: self.actor,
             seq: self.seq,
             start_op: self.start_op.get(),

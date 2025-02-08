@@ -2403,4 +2403,25 @@ describe('Automerge', () => {
       assert.equal(typeof stats.cargoPackageVersion, "string");
     })
   })
+  describe("change metadata", () => {
+    it("mirrors decoded changes", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      doc.commit()
+      doc.put("/", "baz", "qux")
+      doc.commit()
+      let changes = doc.getChanges([]).map(decodeChange);
+      let meta = doc.getChangesMeta([]);
+      assert.equal(changes.length, 2);
+      assert.equal(meta.length, 2);
+      for (let i = 0; i < 2; i++) {
+        assert.equal(changes[i].actor, meta[i].actor);
+        assert.equal(changes[i].hash, meta[i].hash);
+        assert.equal(changes[i].message, meta[i].message);
+        assert.equal(changes[i].time, meta[i].time);
+        assert.deepEqual(changes[i].deps, meta[i].deps);
+        assert.deepEqual(changes[i].startOp, meta[i].startOp);
+      }
+    })
+  })
 })

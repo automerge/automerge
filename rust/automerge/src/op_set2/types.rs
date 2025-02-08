@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::types::{ElemId, ObjType};
+use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
 use crate::value;
 
 use std::fmt;
@@ -642,3 +642,32 @@ impl Packable for ActorIdx {
 
 pub(crate) type ActorCursor = RleCursor<64, ActorIdx>;
 pub(crate) type ActionCursor = RleCursor<64, Action>;
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct ChangeMetadata<'a> {
+    pub actor: Cow<'a, ActorId>,
+    pub seq: u64,
+    pub start_op: u64,
+    pub max_op: u64,
+    pub timestamp: i64,
+    pub message: Option<Cow<'a, str>>,
+    pub deps: Vec<ChangeHash>,
+    pub hash: ChangeHash,
+    pub extra: Cow<'a, [u8]>,
+}
+
+impl<'a> ChangeMetadata<'a> {
+    pub fn into_owned(self) -> ChangeMetadata<'static> {
+        ChangeMetadata {
+            actor: Cow::Owned(self.actor.into_owned()),
+            seq: self.seq,
+            start_op: self.start_op,
+            max_op: self.max_op,
+            timestamp: self.timestamp,
+            message: self.message.map(|s| Cow::Owned(s.into_owned())),
+            deps: self.deps,
+            hash: self.hash,
+            extra: Cow::Owned(self.extra.into_owned()),
+        }
+    }
+}

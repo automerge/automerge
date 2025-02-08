@@ -3,18 +3,19 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::change_graph::ChangeGraph;
+use crate::error::AutomergeError;
 use crate::storage::document::ReadChangeError;
 use crate::{
     change::Change,
-    op_set2::{KeyRef, Op, OpBuilder3, OpSet},
-    storage::ChangeMetadata,
+    op_set2::{ChangeMetadata, KeyRef, Op, OpBuilder3, OpSet},
+    storage::DocChangeMetadata,
     types::{ActorId, ChangeHash, ObjId, OpId},
 };
 
 use crate::storage::load::change_collector::Error;
 
 pub(crate) struct ChangeCollector<'a> {
-    changes: Vec<ExtraChangeMetadata<'a>>,
+    changes: Vec<BuildChangeMetadata<'a>>,
     builders: Vec<ChangeBuilder<'a>>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
@@ -23,7 +24,7 @@ pub(crate) struct ChangeCollector<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ExtraChangeMetadata<'a> {
+pub(crate) struct BuildChangeMetadata<'a> {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) max_op: u64,
@@ -35,7 +36,7 @@ pub(crate) struct ExtraChangeMetadata<'a> {
     pub(crate) builder: usize,
 }
 
-impl<'a> ExtraChangeMetadata<'a> {
+impl<'a> BuildChangeMetadata<'a> {
     fn num_ops(&self) -> usize {
         (1 + self.max_op - self.start_op) as usize
     }
@@ -81,12 +82,12 @@ impl<'a> ChangeBuilder<'a> {
 impl<'a> ChangeCollector<'a> {
     pub(crate) fn new<I>(changes: I) -> Result<ChangeCollector<'a>, ReadChangeError>
     where
-        I: Iterator<Item = Result<ChangeMetadata<'a>, ReadChangeError>>,
+        I: Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>>,
     {
         let mut num_deps = 0;
         let mut changes: Vec<_> = changes
             .map(|m| {
-                m.map(|meta| ExtraChangeMetadata {
+                m.map(|meta| BuildChangeMetadata {
                     actor: meta.actor,
                     seq: meta.seq,
                     max_op: meta.max_op,
@@ -117,7 +118,7 @@ impl<'a> ChangeCollector<'a> {
     }
 
     fn from_change_meta(
-        mut changes: Vec<ExtraChangeMetadata<'a>>,
+        mut changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
     ) -> ChangeCollector<'a> {
         let mut builders: Vec<_> = changes
@@ -154,26 +155,86 @@ impl<'a> ChangeCollector<'a> {
         change_graph: &'a ChangeGraph,
         have_deps: &[ChangeHash],
     ) -> Vec<Change> {
-        let (changes, num_deps) = change_graph.get_metadata_clock(have_deps);
-        Self::from_metadata(op_set, change_graph, changes, num_deps)
+        let (changes, num_deps) = change_graph.get_build_metadata_clock(have_deps);
+        Self::from_build_meta(op_set, change_graph, changes, num_deps)
+    }
+
+    pub(crate) fn exclude_hashes_meta(
+        op_set: &'a OpSet,
+        change_graph: &'a ChangeGraph,
+        have_deps: &[ChangeHash],
+    ) -> Vec<ChangeMetadata<'a>> {
+        let (changes, _) = change_graph.get_build_metadata_clock(have_deps);
+        changes
+            .into_iter()
+            .map(|c| ChangeMetadata {
+                actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                seq: c.seq,
+                start_op: c.start_op,
+                max_op: c.max_op,
+                timestamp: c.timestamp,
+                message: c.message,
+                deps: c
+                    .deps
+                    .iter()
+                    .filter_map(|n| change_graph.index_to_hash(*n as usize).cloned())
+                    .collect(),
+                hash: change_graph.index_to_hash(c.builder).cloned().unwrap(),
+                extra: c.extra,
+            })
+            .collect()
+    }
+
+    pub(crate) fn meta_for_hashes<I>(
+        op_set: &'a OpSet,
+        change_graph: &'a ChangeGraph,
+        hashes: I,
+    ) -> Result<Vec<ChangeMetadata<'a>>, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        let (changes, _) = change_graph.get_build_metadata(hashes)?;
+        Ok(changes
+            .into_iter()
+            .map(|c| ChangeMetadata {
+                actor: Cow::Borrowed(&op_set.actors[c.actor]),
+                seq: c.seq,
+                start_op: c.start_op,
+                max_op: c.max_op,
+                timestamp: c.timestamp,
+                message: c.message,
+                deps: c
+                    .deps
+                    .iter()
+                    .filter_map(|n| change_graph.index_to_hash(*n as usize).cloned())
+                    .collect(),
+                hash: change_graph.index_to_hash(c.builder).cloned().unwrap(),
+                extra: c.extra,
+            })
+            .collect())
     }
 
     pub(crate) fn for_hashes<I>(
         op_set: &OpSet,
         change_graph: &'a ChangeGraph,
         hashes: I,
-    ) -> Result<Vec<Change>, Error>
+    ) -> Result<Vec<Change>, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        let (changes, num_deps) = change_graph.get_metadata(hashes)?;
-        Ok(Self::from_metadata(op_set, change_graph, changes, num_deps))
+        let (changes, num_deps) = change_graph.get_build_metadata(hashes)?;
+        Ok(Self::from_build_meta(
+            op_set,
+            change_graph,
+            changes,
+            num_deps,
+        ))
     }
 
-    fn from_metadata(
+    fn from_build_meta(
         op_set: &OpSet,
         change_graph: &'a ChangeGraph,
-        changes: Vec<ExtraChangeMetadata<'a>>,
+        changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
     ) -> Vec<Change> {
         let mut collector = Self::from_change_meta(changes, num_deps);

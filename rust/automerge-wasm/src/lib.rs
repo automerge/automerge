@@ -867,7 +867,7 @@ impl Automerge {
         let changes: Vec<Change> = JS(changes).try_into()?;
 
         //for c in &changes {
-          //am::log!("apply change: {:?}", c.raw_bytes());
+        //am::log!("apply change: {:?}", c.raw_bytes());
         //}
         self.doc.apply_changes(changes)?;
         Ok(())
@@ -884,6 +884,14 @@ impl Automerge {
         Ok(changes)
     }
 
+    #[wasm_bindgen(js_name = getChangesMeta)]
+    pub fn get_changes_meta(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
+        let deps: Vec<_> = JS(have_deps).try_into()?;
+        let changes = self.doc.get_changes_meta(&deps);
+        let changes: Array = changes.iter().map(JS::from).collect();
+        Ok(changes)
+    }
+
     #[wasm_bindgen(js_name = getChangeByHash)]
     pub fn get_change_by_hash(
         &mut self,
@@ -893,6 +901,20 @@ impl Automerge {
         let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
+    #[wasm_bindgen(js_name = getChangeMetaByHash)]
+    pub fn get_change_meta_by_hash(
+        &mut self,
+        hash: JsValue,
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
+        let hash = JS(hash).try_into()?;
+        let change_meta = self.doc.get_change_meta_by_hash(&hash);
+        if let Some(c) = change_meta {
+            Ok(JS::from(&c).0)
         } else {
             Ok(JsValue::null())
         }

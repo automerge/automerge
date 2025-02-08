@@ -5,7 +5,7 @@ use crate::automerge::{current_state, diff};
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
-use crate::op_set2::Parents;
+use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -459,9 +459,19 @@ impl AutoCommit {
         self.doc.get_changes(have_deps)
     }
 
+    pub fn get_changes_meta(&mut self, have_deps: &[ChangeHash]) -> Vec<ChangeMetadata<'_>> {
+        self.ensure_transaction_closed();
+        self.doc.get_changes_meta(have_deps)
+    }
+
     pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<Change> {
         self.ensure_transaction_closed();
         self.doc.get_change_by_hash(hash)
+    }
+
+    pub fn get_change_meta_by_hash(&mut self, hash: &ChangeHash) -> Option<ChangeMetadata<'_>> {
+        self.ensure_transaction_closed();
+        self.doc.get_change_meta_by_hash(hash)
     }
 
     /// Get changes in `other` that are not in `self`
