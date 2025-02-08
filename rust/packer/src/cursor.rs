@@ -181,10 +181,6 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         }
     }
 
-    fn debug_check(_slabs: &[Slab]) -> bool {
-        true
-    }
-
     fn compute_min_max(_slabs: &mut [Slab]) {
         for s in _slabs {
             let (_run, c) = Self::seek(s.len(), s);
@@ -329,7 +325,11 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
                 slab.len() + add
             );
         }
-        SpliceResult::Replace(add, deleted, acc, slabs)
+        if slabs.len() == 0 {
+            SpliceResult::Noop
+        } else {
+            SpliceResult::Replace(add, deleted, acc, slabs)
+        }
     }
 
     fn splice_delete<'a>(
@@ -402,6 +402,7 @@ pub enum SpliceResult {
     //Done(usize, usize),
     //Add(usize, usize, Vec<Slab>),
     Replace(usize, usize, Acc, Vec<Slab>),
+    Noop,
 }
 
 // TODO : this needs tests

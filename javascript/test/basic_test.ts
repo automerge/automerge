@@ -838,4 +838,16 @@ describe("Automerge", () => {
     assert.strictEqual(stats.cargoPackageName, "automerge");
     assert.strictEqual(stats.cargoPackageVersion.split(".").pop(), pkg.version.split(".").pop());
   })
+  it("it should be able to roll back a transaction", () => {
+    let doc1 = Automerge.from<any>({ foo: "bar" });
+    let save1 = Automerge.save(doc1);
+    assert.throws(() => {
+      let doc2 = Automerge.change(doc1, d => {
+        d.key = "value";
+        throw new RangeError("no")
+      });
+    })
+    let save2 = Automerge.save(doc1);
+    assert.deepEqual(save1, save2);
+  })
 })

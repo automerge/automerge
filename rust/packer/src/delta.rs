@@ -218,30 +218,6 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn debug_check(slabs: &[Slab]) -> bool {
-        for (snum, s) in slabs.iter().enumerate() {
-            let mut cursor = Self::new(s);
-            let mut run_no = 0;
-            let mut pos = 0;
-            while let Some(Run { count, value }) = cursor.next(s.as_slice()) {
-                if let Some(v) = value {
-                    let a = cursor.abs;
-                    let b = cursor.abs - *v * (count as i64 - 1);
-                    if a < 0 || b < 0 {
-                        log!("DEBUG CHECK SLAB len={} abs={}", s.len(), s.abs());
-                        log!("DEBUG CHECK a={:?} b={:}", a, b);
-                        log!(" :: snum={} run_no={} pos={}", snum, run_no, pos);
-                        log!(" :: s.abs={}", s.abs());
-                        return false;
-                    }
-                    run_no += 1;
-                    pos += count;
-                }
-            }
-        }
-        true
-    }
-
     fn compute_min_max(slabs: &mut [Slab]) {
         for s in slabs {
             let (_run, c) = Self::seek(s.len(), s);

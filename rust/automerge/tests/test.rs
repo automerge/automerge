@@ -2216,7 +2216,7 @@ fn missing_actors_when_docs_are_forked() {
     // error occurs here
     let s2 = doc2.save_and_verify().unwrap();
 
-    assert_eq!(s1,s2);
+    assert_eq!(s1, s2);
 }
 
 #[test]
@@ -2297,5 +2297,21 @@ fn invalid_index() {
     assert_eq!(
         doc.put(&obj, 100, 2),
         Err(AutomergeError::InvalidIndex(100))
+    );
+}
+
+#[test]
+fn zero_length_data() {
+    let mut doc = AutoCommit::new();
+    doc.put(&ROOT, "string", "").unwrap();
+    doc.put(&ROOT, "bytes", vec![]).unwrap();
+    doc.commit();
+    assert_eq!(
+        doc.get(&ROOT, "string").unwrap().unwrap().0,
+        Value::from("")
+    );
+    assert_eq!(
+        doc.get(&ROOT, "bytes").unwrap().unwrap().0,
+        Value::from(vec![])
     );
 }

@@ -612,18 +612,12 @@ impl<C: ColumnCursor> ColumnData<C> {
         match C::splice(cursor.element, index - cursor.weight.pos(), del, values) {
             SpliceResult::Replace(add, del, g, mut slabs) => {
                 acc += g;
-                if !C::debug_check(&slabs) {
-                    log!(":: SPLICE ERROR ::");
-                    log!(":: index={} del={}", index - cursor.weight.pos(), del);
-                    log!(":: slab={:?}", cursor.element);
-                    log!(":: result={:?}", slabs);
-                    panic!()
-                }
                 C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
                 assert!(!self.slabs.is_empty());
             }
+            SpliceResult::Noop => {}
         }
 
         debug_assert_eq!(
