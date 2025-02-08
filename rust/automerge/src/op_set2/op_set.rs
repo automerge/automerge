@@ -20,7 +20,7 @@ use super::columns::Columns;
 
 use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::{Range, RangeBounds};
@@ -131,44 +131,32 @@ impl OpSet {
     }
 
     #[inline(never)]
-    fn insert_mark_index(&mut self, op: &OpBuilder2) {
-        self.mark_index.splice(op.pos, 0, vec![op.mark_index()]);
-    }
-
-    #[inline(never)]
-    fn insert_text_index(&mut self, op: &OpBuilder2) {
-        //if op.succ().is_empty() {
-        let width = op.width(ListEncoding::Text) as u64;
-        self.text_index.splice(op.pos, 0, [width]);
-        //} else {
-        //    self.text_index.splice(op.pos, 0, [0]);
-        //}
-    }
-
-    #[inline(never)]
-    fn insert_visible_index(&mut self, op: &OpBuilder2) {
-        if !op.is_inc() {
-            self.visible_index.splice(op.pos, 0, [true]);
-        } else {
-            self.visible_index.splice(op.pos, 0, [false]);
+    pub(crate) fn splice_objects<B: Borrow<OpBuilder2>>(&mut self, ops: &[B]) {
+        for op in ops {
+            if let Some(obj_info) = op.borrow().obj_info() {
+                self.obj_info.insert(op.borrow().id, obj_info);
+            }
         }
     }
 
     #[inline(never)]
-    pub(crate) fn insert_object(&mut self, op: &OpBuilder2) {
-        if let Some(obj_info) = op.obj_info() {
-            self.obj_info.insert(op.id, obj_info);
-        }
-    }
-
-    #[inline(never)]
-    pub(crate) fn insert(&mut self, op: &OpBuilder2) {
-        self.cols.insert(op.pos, op);
-        self.insert_object(op);
-        self.insert_mark_index(op);
-        self.insert_text_index(op);
-        self.insert_visible_index(op);
-        self.len += 1;
+    pub(crate) fn splice<B: Borrow<OpBuilder2>>(&mut self, pos: usize, ops: &[B]) {
+        self.cols.splice(pos, ops);
+        self.splice_objects(ops);
+        self.mark_index.splice(
+            pos,
+            0,
+            ops.iter().map(|o| o.borrow().mark_index()).collect(),
+        );
+        self.text_index.splice(
+            pos,
+            0,
+            ops.iter()
+                .map(|o| o.borrow().width(ListEncoding::Text) as u64),
+        );
+        self.visible_index
+            .splice(pos, 0, ops.iter().map(|o| !o.borrow().is_inc()));
+        self.len += ops.len();
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {

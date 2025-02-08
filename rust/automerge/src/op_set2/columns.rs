@@ -11,7 +11,7 @@ use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::ActorId;
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -217,51 +217,63 @@ impl Columns {
     }
 
     #[inline(never)]
-    fn splice_value<O: OpLike>(&mut self, pos: usize, op: &O) {
-        let acc_pos = self.value_meta.splice(pos, 0, [op.meta_value()]).as_usize();
-        if let Some(v) = op.raw_value() {
-            self.value.splice(acc_pos, 0, [v]);
-        }
-    }
+    pub(crate) fn splice<O: OpLike, B: Borrow<O>>(&mut self, pos: usize, ops: &[B]) {
+        self.id_actor
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().id().actoridx()));
+        self.id_ctr
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().id().icounter()));
+        self.obj_actor
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().obj().actor()));
+        self.obj_ctr
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().obj().counter()));
+        self.key_actor
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().actor()));
+        self.key_ctr
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().icounter()));
+        self.key_str
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().key_str()));
+        self.insert
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().insert()));
+        self.action
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().action()));
+        self.expand
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().expand()));
+        self.mark_name
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().mark_name()));
 
-    #[inline(never)]
-    fn splice_succ<O: OpLike>(&mut self, pos: usize, op: &O) {
-        let succ = op.succ();
+        let acc_pos = self
+            .value_meta
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().meta_value()))
+            .as_usize();
+        let value = ops
+            .iter()
+            .filter_map(|o| o.borrow().raw_value())
+            .collect::<Vec<_>>();
+        self.value.splice(acc_pos, 0, value);
+
         let acc_pos = self
             .succ_count
-            .splice(pos, 0, [succ.len() as u64])
+            .splice(pos, 0, ops.iter().map(|o| o.borrow().succ().len() as u64))
             .as_usize();
-        if !succ.is_empty() {
-            self.succ_actor
-                .splice(acc_pos, 0, succ.iter().map(|id| id.actoridx()));
-            self.succ_ctr
-                .splice(acc_pos, 0, succ.iter().map(|id| id.icounter()));
-        }
-    }
-
-    #[inline(never)]
-    pub(crate) fn insert<O: OpLike>(&mut self, pos: usize, op: &O) {
-        self.id_actor.splice(pos, 0, [op.id().actoridx()]);
-        self.id_ctr.splice(pos, 0, [op.id().icounter()]);
-        self.obj_actor.splice(pos, 0, [op.obj().actor()]);
-        self.obj_ctr.splice(pos, 0, [op.obj().counter()]);
-        self.key_actor.splice(pos, 0, [op.key().actor()]);
-        self.key_ctr.splice(pos, 0, [op.key().icounter()]);
-        self.key_str.splice(pos, 0, [op.key().key_str()]);
-        self.insert.splice(pos, 0, [op.insert()]);
-        self.action.splice(pos, 0, [op.action()]);
-        self.expand.splice(pos, 0, [op.expand()]);
-        self.mark_name.splice(pos, 0, [op.mark_name()]);
-        self.splice_value(pos, op);
-        self.splice_succ(pos, op);
+        let succ_actor = ops
+            .iter()
+            .flat_map(|o| o.borrow().succ().map(|id| id.actoridx()))
+            .collect::<Vec<_>>();
+        self.succ_actor.splice(acc_pos, 0, succ_actor);
+        let succ_ctr = ops
+            .iter()
+            .flat_map(|o| o.borrow().succ().map(|id| id.icounter()))
+            .collect::<Vec<_>>();
+        self.succ_ctr.splice(acc_pos, 0, succ_ctr);
     }
 
     #[cfg(test)]
-    pub(crate) fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
+    pub(crate) fn new<'a, I: Iterator<Item = super::op::Op<'a>> + ExactSizeIterator + Clone>(
+        ops: I,
+    ) -> Self {
         let mut op_set = Self::default();
-        for (i, op) in ops.enumerate() {
-            op_set.insert(i, &op);
-        }
+        let ops: Vec<_> = ops.collect();
+        op_set.splice(0, &ops);
         op_set
     }
 

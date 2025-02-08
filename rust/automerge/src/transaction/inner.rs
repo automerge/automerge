@@ -273,7 +273,7 @@ impl TransactionInner {
         succ: &[SuccInsert],
     ) {
         if !op.is_delete() {
-            doc.ops_mut().insert(&op);
+            doc.ops_mut().splice(op.pos, &[&op]);
         }
 
         doc.ops_mut().add_succ(succ, op.id);
@@ -348,7 +348,7 @@ impl TransactionInner {
             pred: vec![],
         };
 
-        doc.ops_mut().insert(&op);
+        doc.ops_mut().splice(op.pos, &[&op]);
         self.finalize_op(patch_log, &op, marks);
         self.pending.push(op);
 
@@ -646,16 +646,19 @@ impl TransactionInner {
             let mut elemid = query.elemid;
             let marks = query.marks;
 
+            let start = self.pending.len();
+            let start_pos = pos;
+
             for v in &values {
                 let op = self.next_insert(obj, pos, elemid, v.clone());
 
                 elemid = ElemId(op.id);
 
-                doc.ops_mut().insert(&op);
-
                 self.pending.push(op);
                 pos += 1;
             }
+
+            doc.ops_mut().splice(start_pos, &self.pending[start..]);
 
             if patch_log.is_active() {
                 match splice_type {
@@ -765,7 +768,7 @@ impl TransactionInner {
             pred: vec![],
         };
 
-        doc.ops_mut().insert(&op);
+        doc.ops_mut().splice(op.pos, &[&op]);
 
         patch_log.insert(
             obj.id,

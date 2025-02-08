@@ -1226,7 +1226,7 @@ impl Automerge {
             .collect();
 
         if !op.is_delete() {
-            self.ops.insert(&op);
+            self.ops.splice(op.pos, &[&op]);
         }
 
         self.ops.add_succ(&succ, op.id);

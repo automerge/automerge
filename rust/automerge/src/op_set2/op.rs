@@ -161,6 +161,12 @@ impl OpBuilder2 {
 }
 
 impl OpLike for OpBuilder2 {
+    type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
+
+    fn succ(&self) -> Self::SuccIter<'_> {
+        [].into_iter()
+    }
+
     fn id(&self) -> OpId {
         self.id
     }
@@ -230,6 +236,7 @@ impl Ord for OpBuilder2 {
 }
 
 impl<'a> OpLike for Op<'a> {
+    type SuccIter<'b> = SuccCursors<'a> where Self: 'b;
     fn id(&self) -> OpId {
         self.id
     }
@@ -250,8 +257,8 @@ impl<'a> OpLike for Op<'a> {
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.value)
     }
-    fn succ(&self) -> Vec<OpId> {
-        self.succ().collect()
+    fn succ(&self) -> Self::SuccIter<'_> {
+        self.succ()
     }
     fn insert(&self) -> bool {
         self.insert
@@ -455,7 +462,7 @@ impl<'a> Op<'a> {
         OpType::from_action_and_value(self.action, &self.value, &self.mark_name, self.expand)
     }
 
-    pub(crate) fn succ(&self) -> impl ExactSizeIterator<Item = OpId> + 'a {
+    pub(crate) fn succ(&self) -> SuccCursors<'a> {
         self.succ_cursors.clone()
     }
 
@@ -784,6 +791,9 @@ impl AsChangeOp for OpBuilder2 {
 }
 
 pub(super) trait OpLike: std::fmt::Debug {
+    type SuccIter<'b>: Iterator<Item = OpId> + ExactSizeIterator + 'b
+    where
+        Self: 'b;
     fn id(&self) -> OpId;
     fn obj(&self) -> ObjId;
     fn action(&self) -> Action;
@@ -792,9 +802,6 @@ pub(super) trait OpLike: std::fmt::Debug {
     fn meta_value(&self) -> ValueMeta;
     fn insert(&self) -> bool;
     fn expand(&self) -> bool;
-    // allocation
-    fn succ(&self) -> Vec<OpId> {
-        vec![]
-    }
+    fn succ(&self) -> Self::SuccIter<'_>;
     fn mark_name(&self) -> Option<Cow<'_, str>>;
 }
