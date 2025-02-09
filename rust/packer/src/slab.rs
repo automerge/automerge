@@ -18,6 +18,7 @@ use std::sync::Arc;
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Slab {
     data: Arc<Vec<u8>>,
+    //data: Vec<u8>,
     len: usize,
     acc: Acc,
     min: Agg,
