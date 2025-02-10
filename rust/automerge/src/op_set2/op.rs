@@ -184,18 +184,12 @@ impl OpLike for OpBuilder2 {
         }
     }
     /*
-        fn elemid(&self) -> Option<ElemId> {
-            match &self.key {
-                KeyRef::Seq(e) => Some(*e),
-                _ => None,
+            fn elemid(&self) -> Option<ElemId> {
+                match &self.key {
+                    KeyRef::Seq(e) => Some(*e),
+                    _ => None,
+                }
             }
-        }
-        fn map_key(&self) -> Option<&str> {
-            match &self.key {
-                KeyRef::Map(s) => Some(s),
-                _ => None,
-            }
-        }
     */
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
@@ -362,24 +356,47 @@ pub(crate) struct SuccInsert {
     pub(crate) sub_pos: usize,
 }
 
-impl<'a> Op<'a> {
-    /*
-        pub(crate) fn new() -> Self {
-            Self {
-                pos: 0,
-                conflict: false,
-                id: OpId::default(),
-                action: Action::default(),
-                obj: ObjId::root(),
-                key: KeyRef::Seq(ElemId::head()),
-                insert: false,
-                value: ScalarValue::Null,
-                expand: false,
-                mark_name: None,
-                succ_cursors: SuccCursors::default(),
-            }
+#[derive(Clone, Debug)]
+pub(crate) struct OpStepper<'a> {
+    obj: ObjId,
+    key: KeyRef<'a>,
+    id: OpId,
+}
+
+impl<'a> Default for OpStepper<'a> {
+    fn default() -> Self {
+        OpStepper {
+            obj: ObjId::root(),
+            key: KeyRef::Map(Cow::Borrowed("")),
+            id: OpId::default(),
         }
-    */
+    }
+}
+
+impl<'a> Op<'a> {
+    pub(crate) fn step(&self, stepper: &mut OpStepper<'a>) -> bool {
+        if self.obj != stepper.obj {
+            stepper.obj = self.obj;
+            stepper.key = self.elemid_or_key();
+            stepper.id = self.id;
+            self.obj > stepper.obj
+        } else {
+            let ok = if &self.elemid_or_key() == &stepper.key {
+                self.id > stepper.id
+            } else {
+                match (&self.key, &stepper.key) {
+                    (KeyRef::Map(s1), KeyRef::Map(s2)) => s1 > s2,
+                    (KeyRef::Seq(e1), KeyRef::Seq(e2)) if self.insert => {
+                        e1 == e2 || ElemId(self.id) < *e2
+                    }
+                    _ => false,
+                }
+            };
+            stepper.key = self.elemid_or_key();
+            stepper.id = self.id;
+            ok
+        }
+    }
 
     pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
         match (&self.action, &self.mark_name) {

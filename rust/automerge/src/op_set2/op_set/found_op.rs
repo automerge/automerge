@@ -29,9 +29,6 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
         for mut op in self.iter.by_ref() {
-            if op.action == Action::Increment {
-                continue;
-            }
             let key = op.elemid_or_key();
             if Some(&key) != self.last_key.as_ref() {
                 result = self.found.take();
@@ -40,7 +37,7 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
             }
             if let Some(found) = &mut self.found {
                 found.end_pos = op.pos + 1;
-                if op.scope_to_clock(self.clock.as_ref()) {
+                if op.action != Action::Increment && op.scope_to_clock(self.clock.as_ref()) {
                     found.ops.push(op);
                 }
             }

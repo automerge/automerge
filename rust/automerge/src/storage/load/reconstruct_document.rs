@@ -63,8 +63,11 @@ pub(crate) fn reconstruct_opset<'a>(
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut iter = op_set.iter();
     let mut index_builder = op_set.index_builder();
+    let mut stepper = Default::default();
+    let mut _ordered = true;
 
     while let Some(op) = iter.try_next()? {
+        _ordered &= op.step(&mut stepper);
         let op_id = op.id;
         let op_is_counter = op.is_counter();
         let op_succ = op.succ();
@@ -81,6 +84,10 @@ pub(crate) fn reconstruct_opset<'a>(
         flush_changes(change_collector, doc, mode, &op_set)?;
 
     op_set.set_indexes(index_builder);
+
+    //if !ordered {
+    //  log!("ERR: ops not ordered in document load");
+    //}
 
     Ok(ReconOpSet {
         changes,
