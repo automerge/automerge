@@ -188,6 +188,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let slabs = slab::SpanTreeIter::new(slabs, cursor);
         let pos = slabs.weight().pos() - slab.pos_left();
         let run = slab.sub_advance(0);
+        assert!(pos < max);
         ColumnDataIter {
             pos,
             max,
@@ -286,28 +287,26 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     // we only read the first element of each node and never
     // from the first node as we arent always including its first element
 
-    fn binary_search_for<B: Borrow<C::Item>>(
-        &self,
-        //target: &Option<Cow<'a,C::Item>>,
-        target: &Option<B>,
-    ) -> Option<usize> {
+    fn binary_search_for<B>(&self, target: Option<B>) -> Option<usize>
+    where
+        B: Borrow<C::Item> + Copy,
+    {
         let slabs = self.slabs.span_tree()?;
         let original_start = self.slab_index();
         let mut start = original_start;
         let mut end = slabs
             .get_where_or_last(|a, next| self.max < a.pos() + next.pos())
             .index;
-        while start < end {
-            let mid = (start + end + 1) / 2;
+        let mut mid = (start + end + 1) / 2;
+        while start < mid && mid < end {
             let slab = slabs.get(mid)?;
             let value = slab.first_value::<C>();
-            assert!(start != mid); // dont infinite loop
-            assert!(end != mid - 1); // dont infinite loop
-            match (value, target) {
+            match (value, target.as_ref()) {
                 (None, Some(_)) => start = mid,
                 (Some(a), Some(b)) if a.as_ref() < b.borrow() => start = mid,
-                _ => end = mid - 1,
+                _ => end = mid,
             }
+            mid = (start + end + 1) / 2;
         }
         if start != original_start {
             Some(start)
@@ -316,15 +315,13 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub fn scope_to_value<B: Borrow<C::Item>>(
-        &mut self,
-        //value: &Option<Cow<'a,C::Item>>,
-        value: &Option<B>,
-    ) -> Range<usize> {
+    pub fn scope_to_value<B>(&mut self, value: Option<B>) -> Range<usize>
+    where
+        B: Borrow<C::Item> + Copy,
+    {
         if let Some(index) = self.binary_search_for(value) {
             self.reset_iter_to_slab_index(index);
         }
-
         let pos = self.pos();
         let mut start = pos;
         let mut end = pos;
@@ -521,12 +518,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnDataIter::new(&self.slabs, 0, self.len)
     }
 
-    pub fn scope_to_value<B: Borrow<C::Item>, R: RangeBounds<usize>>(
-        &mut self,
-        //value: &Option<Cow<'a, C::Item>>,
-        value: &Option<B>,
-        range: R,
-    ) -> Range<usize> {
+    pub fn scope_to_value<B, R>(&self, value: Option<B>, range: R) -> Range<usize>
+    where
+        B: Borrow<C::Item> + Copy,
+        R: RangeBounds<usize>,
+    {
         let (start, end) = normalize_range(range);
         let mut iter = self.iter_range(start..end);
         iter.scope_to_value(value)
@@ -755,6 +751,7 @@ pub(crate) mod tests {
     use super::*;
     use rand::prelude::*;
     use rand::rngs::SmallRng;
+    use std::cmp::{max, min};
 
     const FUZZ_SIZE: usize = 1_000;
 
@@ -1337,29 +1334,29 @@ pub(crate) mod tests {
         ];
         let mut col = ColumnData::<RleCursor<4, u64>>::new();
         col.splice(0, 0, data);
-        let range = col.scope_to_value(&Some(Cow::Owned(4)), ..);
+        let range = col.scope_to_value(Some(4), ..);
         assert_eq!(range, 7..15);
 
-        let range = col.scope_to_value(&Some(4), ..11);
+        let range = col.scope_to_value(Some(4), ..11);
         assert_eq!(range, 7..11);
-        let range = col.scope_to_value(&Some(4), ..8);
+        let range = col.scope_to_value(Some(4), ..8);
         assert_eq!(range, 7..8);
-        let range = col.scope_to_value(&Some(4), 0..1);
+        let range = col.scope_to_value(Some(4), 0..1);
         assert_eq!(range, 1..1);
-        let range = col.scope_to_value(&Some(4), 8..9);
+        let range = col.scope_to_value(Some(4), 8..9);
         assert_eq!(range, 8..9);
-        let range = col.scope_to_value(&Some(4), 9..);
+        let range = col.scope_to_value(Some(4), 9..);
         assert_eq!(range, 9..15);
-        let range = col.scope_to_value(&Some(4), 14..16);
+        let range = col.scope_to_value(Some(4), 14..16);
         assert_eq!(range, 14..15);
 
-        let range = col.scope_to_value(&Some(2), ..);
+        let range = col.scope_to_value(Some(2), ..);
         assert_eq!(range, 0..3);
-        let range = col.scope_to_value(&Some(7), ..);
+        let range = col.scope_to_value(Some(7), ..);
         assert_eq!(range, 22..22);
-        let range = col.scope_to_value(&Some(8), ..);
+        let range = col.scope_to_value(Some(8), ..);
         assert_eq!(range, 22..23);
-        let range = col.scope_to_value(&Some(9), ..);
+        let range = col.scope_to_value(Some(9), ..);
         assert_eq!(range, 23..25);
     }
 
@@ -1482,6 +1479,43 @@ pub(crate) mod tests {
             if let Some(val) = val {
                 assert!(delta_col.find_by_value(*val).contains(&i));
             }
+        }
+    }
+
+    #[test]
+    fn fuzz_find_by_values() {
+        const N: usize = 10_000;
+        const STEP: usize = 3;
+        let mut rng = make_rng();
+        let col: ColumnData<UIntCursor> = (0..N)
+            .flat_map(|i| [i as u64 * 2 + 1; STEP].into_iter())
+            .collect();
+        for _ in 0..FUZZ_SIZE {
+            let roll = rng.gen::<usize>() % N;
+            let target1 = (roll * 2) as u64;
+            let target2 = (roll * 2 + 1) as u64;
+
+            let mut a = rng.gen::<usize>() % (N * STEP);
+            let mut b = rng.gen::<usize>() % (N * STEP);
+            if a > b {
+                std::mem::swap(&mut a, &mut b);
+            }
+
+            assert!(b > a);
+
+            let start = roll * 3;
+            let a_start = min(b, max(start, a));
+            let a_end1 = max(a_start, min(start, b));
+            let a_end2 = max(a_start, min(start + 3, b));
+
+            let answer1 = a_start..a_end1;
+            let answer2 = a_start..a_end2;
+
+            let result1 = col.scope_to_value(Some(target1), a..b);
+            let result2 = col.scope_to_value(Some(target2), a..b);
+
+            assert_eq!(answer1, result1);
+            assert_eq!(answer2, result2);
         }
     }
 }

@@ -434,18 +434,6 @@ impl OpSet {
             return None;
         }
 
-        /*
-                let range = self
-                    .cols
-                    .get_integer(OBJ_ID_COUNTER_COL_SPEC)
-                    .scope_to_value(&obj.counter());
-
-                let range = self
-                    .cols
-                    .get_actor_range(OBJ_ID_ACTOR_COL_SPEC, &range)
-                    .scope_to_value(&obj.actor());
-        */
-
         let range = self.scope_to_obj(obj);
 
         let mut iter = self.text_index.iter_range(range.clone()).with_acc();
@@ -935,11 +923,11 @@ impl OpSet {
 
     #[inline(never)]
     fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
-        let range = self.cols.obj_ctr.iter().scope_to_value(&obj.counter());
+        let range = self.cols.obj_ctr.iter().scope_to_value(obj.counter());
         self.cols
             .obj_actor
             .iter_range(range)
-            .scope_to_value(&obj.actor())
+            .scope_to_value(obj.actor())
     }
 
     pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
@@ -948,7 +936,7 @@ impl OpSet {
             .cols
             .key_str
             .iter_range(range)
-            .scope_to_value(&Some(prop));
+            .scope_to_value(Some(prop));
         self.iter_range(&range)
     }
 

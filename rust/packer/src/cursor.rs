@@ -325,7 +325,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
                 slab.len() + add
             );
         }
-        if slabs.len() == 0 {
+        if slabs.is_empty() {
             SpliceResult::Noop
         } else {
             SpliceResult::Replace(add, deleted, acc, slabs)

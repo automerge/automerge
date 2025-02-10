@@ -513,11 +513,7 @@ impl ChangeGraph {
     ///
     /// No guarantees are made about the order of traversal but each node will only be visited
     /// once.
-    fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(
-        &self,
-        mut to_visit: Vec<NodeIdx>,
-        mut f: F,
-    ) {
+    fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(&self, mut to_visit: Vec<NodeIdx>, mut f: F) {
         let mut visited = BTreeSet::new();
 
         while let Some(idx) = to_visit.pop() {
