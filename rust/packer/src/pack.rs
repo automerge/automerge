@@ -266,6 +266,15 @@ impl<'a> MaybePackable<'a, [u8]> for Vec<u8> {
     }
 }
 
+impl<'a> MaybePackable<'a, [u8]> for Option<Vec<u8>> {
+    fn maybe_packable(self) -> Option<Cow<'a, [u8]>> {
+        self.map(Cow::Owned)
+    }
+    fn agg(&self) -> Agg {
+        self.as_deref().map(<[u8]>::agg).unwrap_or_default()
+    }
+}
+
 impl<'a, T: Packable + ?Sized> MaybePackable<'a, T> for &'a T {
     fn maybe_packable(self) -> Option<Cow<'a, T>> {
         Some(Cow::Borrowed(self))

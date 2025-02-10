@@ -506,6 +506,7 @@ impl LitRunCursor {
     }
 }
 
+pub type ByteCursor = RleCursor<128, [u8]>;
 pub type StrCursor = RleCursor<128, str>;
 pub type UIntCursor = RleCursor<64, u64>;
 pub type IntCursor = RleCursor<64, i64>;
