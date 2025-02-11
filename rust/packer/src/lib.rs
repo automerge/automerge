@@ -51,7 +51,7 @@ pub use encoder::{Encoder, EncoderState};
 pub use leb128::{lebsize, ulebsize};
 pub use pack::{MaybePackable, PackError, Packable};
 pub use raw::{RawCursor, RawReader, ReadRawError};
-pub use rle::{IntCursor, RleCursor, ByteCursor, StrCursor, UIntCursor};
+pub use rle::{ByteCursor, IntCursor, RleCursor, StrCursor, UIntCursor};
 pub use slab::{tree, Slab, SlabTree, SlabWeight, SlabWriter, SpanTree, SpanWeight, WriteOp};
 
 pub(crate) use std::borrow::Cow;

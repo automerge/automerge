@@ -501,11 +501,7 @@ impl Automerge {
         &self,
         hashes: Vec<ChangeHash>,
     ) -> Result<Vec<Change>, AutomergeError> {
-        Ok(ChangeCollector::for_hashes(
-            &self.ops,
-            &self.change_graph,
-            hashes.clone(),
-        )?)
+        ChangeCollector::for_hashes(&self.ops, &self.change_graph, hashes.clone())
     }
 
     pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {

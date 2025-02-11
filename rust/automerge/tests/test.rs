@@ -1981,6 +1981,35 @@ fn rollback_with_no_ops() {
 }
 
 #[test]
+fn rollback_with_several_actors() {
+    let mut doc1 = AutoCommit::new().with_actor("aaaaaa".try_into().unwrap());
+    let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.splice_text(&text, 0, 0, "the sly fox jumped over the lazy dog")
+        .unwrap();
+    let map_a = doc1.put_object(&ROOT, "map_a", ObjType::Map).unwrap();
+    doc1.put(&map_a, "key1", "value1a").unwrap();
+    doc1.put(&map_a, "key2", "value2a").unwrap();
+
+    let mut doc2 = doc1.fork().with_actor("cccccc".try_into().unwrap());
+    doc2.splice_text(&text, 8, 3, "monkey").unwrap();
+    doc2.splice_text(&text, 36, 3, "pig").unwrap();
+    let map_c = doc2.put_object(&ROOT, "map_c", ObjType::Map).unwrap();
+    doc2.put(&map_a, "key2", "value2c").unwrap();
+    doc2.put(&map_a, "key3", "value3c").unwrap();
+    doc2.put(&map_c, "key1", "value").unwrap();
+
+    let mut doc3 = doc2.fork().with_actor("bbbbbb".try_into().unwrap());
+    doc3.splice_text(&text, 8, 5, "zebra").unwrap();
+    let map_b = doc3.put_object(&ROOT, "map_b", ObjType::Map).unwrap();
+    doc3.put(&map_a, "key1", "value3b").unwrap();
+    doc3.put(&map_a, "key3", "value3b").unwrap();
+    doc3.put(&map_b, "key1", "value").unwrap();
+    doc3.rollback();
+
+    assert_eq!(doc3.save(), doc2.save());
+}
+
+#[test]
 fn save_with_ops_which_reference_actors_only_via_delete() {
     let mut doc = Automerge::new();
 

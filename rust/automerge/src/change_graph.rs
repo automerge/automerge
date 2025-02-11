@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroU32;
 
-use packer::{ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
+use packer::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 
 use crate::{
     clock::{Clock, ClockData},
@@ -19,18 +20,21 @@ use crate::{
 /// This is a sort of adjacency list based representation, except that instead of using linked
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
     actors: Vec<ActorIdx>,
+    parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u64>,
     max_ops: Vec<u64>,
-    num_ops: Vec<u32>,
-    parents: Vec<Option<EdgeIdx>>,
-    timestamps: Vec<i64>,
-    messages: Vec<Option<String>>,
-    extra_bytes: Vec<Vec<u8>>,
+    num_ops: ColumnData<UIntCursor>,
+    timestamps: ColumnData<DeltaCursor>,
+    messages: ColumnData<StrCursor>,
+    messages2: Vec<Option<String>>,
+    extra_bytes_meta: ColumnData<MetaCursor>,
+    extra_bytes_raw: Vec<u8>,
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: Vec<Clock>,
@@ -43,7 +47,16 @@ const CACHE_STEP: u32 = 32;
 struct NodeIdx(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct EdgeIdx(u32);
+struct EdgeIdx(NonZeroU32);
+
+impl EdgeIdx {
+    fn new(value: usize) -> Self {
+        EdgeIdx(NonZeroU32::new(value as u32 + 1).unwrap())
+    }
+    fn get(&self) -> usize {
+        self.0.get() as usize - 1
+    }
+}
 
 #[derive(Debug, Clone)]
 struct Edge {
@@ -61,12 +74,14 @@ impl ChangeGraph {
             hashes: Vec::new(),
             actors: Vec::new(),
             max_ops: Vec::new(),
-            num_ops: Vec::new(),
+            num_ops: ColumnData::new(),
             seq: Vec::new(),
             parents: Vec::new(),
-            messages: Vec::new(),
-            timestamps: Vec::new(),
-            extra_bytes: Vec::new(),
+            messages: ColumnData::new(),
+            messages2: Vec::new(),
+            timestamps: ColumnData::new(),
+            extra_bytes_meta: ColumnData::new(),
+            extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: Vec::new(),
             seq_index: vec![vec![]; num_actors],
@@ -80,12 +95,14 @@ impl ChangeGraph {
             hashes: Vec::with_capacity(changes),
             actors: Vec::with_capacity(changes),
             max_ops: Vec::with_capacity(changes),
-            num_ops: Vec::with_capacity(changes),
+            num_ops: ColumnData::new(),
             seq: Vec::with_capacity(changes),
             parents: Vec::with_capacity(changes),
-            messages: Vec::with_capacity(changes),
-            timestamps: Vec::with_capacity(changes),
-            extra_bytes: Vec::with_capacity(changes),
+            messages: ColumnData::new(),
+            messages2: Vec::new(),
+            timestamps: ColumnData::new(),
+            extra_bytes_meta: ColumnData::new(),
+            extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
             clock_cache: Vec::with_capacity(changes / CACHE_STEP as usize + 1),
             seq_index: vec![vec![]; num_actors],
@@ -193,11 +210,9 @@ impl ChangeGraph {
         let max_op_iter = self.max_ops.iter().map(as_max_op);
         let max_op = DeltaCursor::encode(out, max_op_iter, false).into();
 
-        let time_iter = self.timestamps.iter().map(as_timestamp);
-        let time = DeltaCursor::encode(out, time_iter, false).into();
+        let time = self.timestamps.save_to_unless_empty(out).into();
 
-        let message_iter = self.messages.iter().map(as_message);
-        let message = StrCursor::encode(out, message_iter, false).into();
+        let message = self.messages.save_to_unless_empty(out).into();
 
         let num_deps_iter = self.num_deps().map(as_num_deps);
         let num_deps = UIntCursor::encode(out, num_deps_iter, false).into();
@@ -205,11 +220,10 @@ impl ChangeGraph {
         let deps_iter = self.deps_iter().map(as_deps);
         let deps = DeltaCursor::encode(out, deps_iter, false).into();
 
-        let meta_iter = self.extra_bytes.iter().map(as_meta);
-        let meta = MetaCursor::encode(out, meta_iter, false).into();
-
-        let raw_iter = self.extra_bytes.iter().map(as_extra_bytes);
-        let raw = RawCursor::encode(out, raw_iter, false).into();
+        // FIXME - we could eliminate this column if empty but meta isnt all null
+        let meta = self.extra_bytes_meta.save_to_unless_empty(out).into();
+        let raw = (out.len()..out.len() + self.extra_bytes_raw.len()).into();
+        out.extend(&self.extra_bytes_raw);
 
         DocChangeColumns {
             actor,
@@ -229,9 +243,9 @@ impl ChangeGraph {
         let index = actor_indices
             .binary_search_by(|n| {
                 let i = n.0 as usize;
-                let num_ops = self.num_ops[i];
+                let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
                 let max_op = self.max_ops[i];
-                let start = max_op - num_ops as u64 + 1;
+                let start = max_op - num_ops + 1;
                 if counter < start {
                     Ordering::Greater
                 } else if max_op <= counter {
@@ -250,7 +264,7 @@ impl ChangeGraph {
         let mut edge_idx = node_idx.and_then(|n| self.parents[n.0 as usize]);
         std::iter::from_fn(move || {
             let this_edge_idx = edge_idx?;
-            let edge = &self.edges[this_edge_idx.0 as usize];
+            let edge = &self.edges[this_edge_idx.get()];
             edge_idx = edge.next;
             let hash = self.hashes[edge.target.0 as usize];
             Some(hash)
@@ -291,14 +305,20 @@ impl ChangeGraph {
             .map(|index| {
                 let i = index.0 as usize;
                 let actor = self.actors[i].into();
-                let timestamp = self.timestamps[i];
+                let timestamp = *self.timestamps.get(i).flatten().unwrap_or_default();
                 let max_op = self.max_ops[i];
-                let num_ops = self.num_ops[i];
-                let message = self.messages[i].as_deref().map(Cow::Borrowed);
-                let extra = Cow::Borrowed(self.extra_bytes[i].as_slice());
+                let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
+                let message = self.messages.get(i).flatten();
+
+                // FIXME - this needs a test
+                let meta = self.extra_bytes_meta.get_with_acc(i).unwrap();
+                let meta_range =
+                    meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+                let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
+
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
                 num_deps += deps.len();
-                let start_op = max_op - num_ops as u64 + 1;
+                let start_op = max_op - num_ops + 1;
                 let seq = self.seq[i];
                 BuildChangeMetadata {
                     actor,
@@ -407,28 +427,30 @@ impl ChangeGraph {
         self.actors.push(actor_index);
         self.seq.push(change.seq());
         self.max_ops.push(change.max_op());
-        self.num_ops.push(change.len() as u32);
+        self.num_ops.push(change.len() as u64);
         self.timestamps.push(change.timestamp());
         self.messages.push(change.message().cloned());
-        self.extra_bytes.push(change.extra_bytes().to_vec());
+        self.messages2.push(change.message().cloned());
+        self.extra_bytes_meta
+            .push(ValueMeta::from(change.extra_bytes()));
+        self.extra_bytes_raw.extend(change.extra_bytes());
         self.parents.push(None);
         idx
     }
 
     fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
-        let new_edge_idx = EdgeIdx(self.edges.len() as u32);
+        let new_edge_idx = EdgeIdx::new(self.edges.len());
         let new_edge = Edge {
             target: parent_idx,
             next: None,
         };
         self.edges.push(new_edge);
 
-        //let child = &mut self.nodes[child_idx.0 as usize];
         let child = &mut self.parents[child_idx.0 as usize];
         if let Some(edge_idx) = child {
-            let mut edge = &mut self.edges[edge_idx.0 as usize];
+            let mut edge = &mut self.edges[edge_idx.get()];
             while let Some(next) = edge.next {
-                edge = &mut self.edges[next.0 as usize];
+                edge = &mut self.edges[next.get()];
             }
             edge.next = Some(new_edge_idx);
         } else {
@@ -440,7 +462,7 @@ impl ChangeGraph {
         let mut edge_idx = self.parents[node_idx.0 as usize];
         std::iter::from_fn(move || {
             let this_edge_idx = edge_idx?;
-            let edge = &self.edges[this_edge_idx.0 as usize];
+            let edge = &self.edges[this_edge_idx.get()];
             edge_idx = edge.next;
             Some(edge.target)
         })
@@ -533,10 +555,6 @@ fn as_num_deps(num: usize) -> Option<Cow<'static, u64>> {
     Some(Cow::Owned(num as u64))
 }
 
-fn as_message(m: &Option<String>) -> Option<Cow<'_, str>> {
-    m.as_deref().map(Cow::Borrowed)
-}
-
 fn as_seq(seq: &u64) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(*seq as i64))
 }
@@ -549,20 +567,8 @@ fn as_max_op(m: &u64) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(*m as i64))
 }
 
-fn as_timestamp(n: &i64) -> Option<Cow<'_, i64>> {
-    Some(Cow::Owned(*n))
-}
-
 fn as_deps(n: NodeIdx) -> Option<Cow<'static, i64>> {
     Some(Cow::Owned(n.0 as i64))
-}
-
-fn as_meta(b: &Vec<u8>) -> Option<Cow<'_, ValueMeta>> {
-    Some(Cow::Owned(ValueMeta::from(b.as_slice())))
-}
-
-fn as_extra_bytes(b: &Vec<u8>) -> Option<Cow<'_, [u8]>> {
-    Some(Cow::Borrowed(b.as_slice()))
 }
 
 #[derive(Debug, thiserror::Error)]

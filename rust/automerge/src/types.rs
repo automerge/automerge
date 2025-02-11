@@ -4,7 +4,7 @@ use crate::legacy as amp;
 use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::cmp::Eq;
+use std::cmp::{Eq, Ordering};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -554,12 +554,10 @@ impl OpId {
     }
 
     pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
-        if self.actor() > idx {
-            Some(OpId(self.0, self.1 - 1))
-        } else if self.actor() == idx {
-            None
-        } else {
-            Some(self)
+        match self.actor().cmp(&idx) {
+            Ordering::Greater => Some(OpId(self.0, self.1 - 1)),
+            Ordering::Equal => None,
+            Ordering::Less => Some(self),
         }
     }
 

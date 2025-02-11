@@ -574,10 +574,11 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn push<'b, M>(&mut self, value: M) -> Acc
     where
-        M: MaybePackable<'b, C::Item> + Clone, C::Item: 'b
+        M: MaybePackable<'b, C::Item> + Clone,
+        C::Item: 'b,
     {
-      let index = self.len();
-      self.splice(index, 0, [value])
+        let index = self.len();
+        self.splice(index, 0, [value])
     }
 
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
@@ -754,7 +755,7 @@ where
 pub(crate) mod tests {
     use super::super::boolean::BooleanCursor;
     use super::super::delta::{DeltaCursor, DeltaCursorInternal};
-    use super::super::rle::{RleCursor, ByteCursor, StrCursor, UIntCursor};
+    use super::super::rle::{ByteCursor, RleCursor, StrCursor, UIntCursor};
     use super::super::test::ColExport;
     use super::*;
     use rand::prelude::*;
@@ -1039,34 +1040,46 @@ pub(crate) mod tests {
 
     #[test]
     fn column_data_bytes() {
-        let bytes = vec![vec![1,1,1], vec![2,2,2], vec![3,3,3]];
+        let bytes = vec![vec![1, 1, 1], vec![2, 2, 2], vec![3, 3, 3]];
         let mut start = ColumnData::<ByteCursor>::new();
         start.splice(0, 0, bytes);
         assert_eq!(
             start.test_dump(),
-            vec![vec![ColExport::litrun(vec![vec![1,1,1], vec![2,2,2], vec![3,3,3]])]]
+            vec![vec![ColExport::litrun(vec![
+                vec![1, 1, 1],
+                vec![2, 2, 2],
+                vec![3, 3, 3]
+            ])]]
         );
         let mut col = start.clone();
-        col.splice(1, 0, vec![None, None, Some(vec![2,2,2]), Some(vec![2,2,2])]);
+        col.splice(
+            1,
+            0,
+            vec![None, None, Some(vec![2, 2, 2]), Some(vec![2, 2, 2])],
+        );
         assert_eq!(
             col.test_dump(),
             vec![vec![
-                ColExport::litrun(vec![vec![1,1,1]]),
+                ColExport::litrun(vec![vec![1, 1, 1]]),
                 ColExport::Null(2),
-                ColExport::run(3, vec![2,2,2]),
-                ColExport::litrun(vec![vec![3,3,3]]),
+                ColExport::run(3, vec![2, 2, 2]),
+                ColExport::litrun(vec![vec![3, 3, 3]]),
             ]]
         );
-        col.splice(0, 0, vec![None, None, Some(vec![3,3,3]), Some(vec![1,1,1])]);
+        col.splice(
+            0,
+            0,
+            vec![None, None, Some(vec![3, 3, 3]), Some(vec![1, 1, 1])],
+        );
         assert_eq!(
             col.test_dump(),
             vec![vec![
                 ColExport::Null(2),
-                ColExport::litrun(vec![vec![3,3,3]]),
-                ColExport::run(2, vec![1,1,1]),
+                ColExport::litrun(vec![vec![3, 3, 3]]),
+                ColExport::run(2, vec![1, 1, 1]),
                 ColExport::Null(2),
-                ColExport::run(3, vec![2,2,2]),
-                ColExport::litrun(vec![vec![3,3,3]]),
+                ColExport::run(3, vec![2, 2, 2]),
+                ColExport::litrun(vec![vec![3, 3, 3]]),
             ]]
         );
     }

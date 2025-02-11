@@ -381,7 +381,7 @@ impl<'a> Op<'a> {
             stepper.id = self.id;
             self.obj > stepper.obj
         } else {
-            let ok = if &self.elemid_or_key() == &stepper.key {
+            let ok = if self.elemid_or_key() == stepper.key {
                 self.id > stepper.id
             } else {
                 match (&self.key, &stepper.key) {
