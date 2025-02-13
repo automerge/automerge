@@ -555,15 +555,15 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'})
       doc1.putObject('_root', 'birds', [])
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.insertObject('1@aaaa', 0, { species: 'Goldfinch', count: 3 })
+      doc1.insertObject('1@aaaa', 0, { count: 3, species: 'Goldfinch' })
       assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] }
       ])
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.diffIncremental(), [
         { action: 'insert', path: [ 'birds', 0 ], values: [{}] },
-        { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch' },
         { action: 'put', path: [ 'birds', 0, 'count', ], value: 3 },
+        { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch' },
       ])
     })
 

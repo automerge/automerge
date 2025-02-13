@@ -413,6 +413,25 @@ impl<'a> ObjIdIter<'a> {
         Self { actor, ctr }
     }
 
+    #[cfg(test)]
+    pub(crate) fn pos(&self) -> usize {
+        debug_assert!(self.actor.pos() == self.ctr.pos());
+        self.actor.pos()
+    }
+
+    /*
+        pub(crate) fn run_count(&self) -> usize {
+            std::cmp::min(self.actor.run_count(), self.ctr.run_count())
+        }
+    */
+
+    pub(crate) fn seek_to_value(&mut self, obj: ObjId) -> Range<usize> {
+        let cr = self.ctr.seek_to_value(obj.counter(), ..);
+        let range = self.actor.seek_to_value(obj.actor(), cr.clone());
+        self.ctr.advance_to(range.start);
+        range
+    }
+
     pub(crate) fn try_next(&mut self) -> Result<ObjId, ReadOpError> {
         let actor = self
             .actor
@@ -679,5 +698,114 @@ impl<'a> Iterator for SuccIterIter<'a> {
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.try_nth(n).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use packer::ColumnData;
+
+    #[test]
+    fn obj_id_iter_seek() {
+        let r = ObjId::root();
+        let o11 = ObjId(OpId::new(1, 1));
+        let o12 = ObjId(OpId::new(1, 2));
+        let o21 = ObjId(OpId::new(2, 1));
+        let o22 = ObjId(OpId::new(2, 2));
+        let o31 = ObjId(OpId::new(3, 1));
+        let o32 = ObjId(OpId::new(3, 2));
+        let objs = [r, r, r, r, o11, o11, o12, o21, o21, o21, o22, o22, o32, o32];
+        let actor: ColumnData<ActorCursor> = objs.iter().map(|o| o.actor()).collect();
+        let ctr: ColumnData<UIntCursor> = objs.iter().map(|o| o.counter()).collect();
+
+        // seek each element and read it
+        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let range = iter.seek_to_value(r);
+        assert_eq!(range, 0..4);
+        assert_eq!(iter.pos(), 0);
+        assert_eq!(iter.next(), Some(r));
+        assert_eq!(iter.next(), Some(r));
+        assert_eq!(iter.next(), Some(r));
+        assert_eq!(iter.next(), Some(r));
+        let range = iter.seek_to_value(o11);
+        assert_eq!(range, 4..6);
+        assert_eq!(iter.pos(), 4);
+        assert_eq!(iter.next(), Some(o11));
+        assert_eq!(iter.next(), Some(o11));
+        let range = iter.seek_to_value(o12);
+        assert_eq!(range, 6..7);
+        assert_eq!(iter.pos(), 6);
+        assert_eq!(iter.next(), Some(o12));
+        let range = iter.seek_to_value(o21);
+        assert_eq!(range, 7..10);
+        assert_eq!(iter.pos(), 7);
+        assert_eq!(iter.next(), Some(o21));
+        assert_eq!(iter.next(), Some(o21));
+        assert_eq!(iter.next(), Some(o21));
+        let range = iter.seek_to_value(o22);
+        assert_eq!(range, 10..12);
+        assert_eq!(iter.pos(), 10);
+        assert_eq!(iter.next(), Some(o22));
+        assert_eq!(iter.next(), Some(o22));
+        let range = iter.seek_to_value(o31);
+        assert_eq!(range, 12..12);
+        assert_eq!(iter.pos(), 12);
+        let range = iter.seek_to_value(o32);
+        assert_eq!(range, 12..14);
+        assert_eq!(iter.pos(), 12);
+        assert_eq!(iter.next(), Some(o32));
+        assert_eq!(iter.next(), Some(o32));
+
+        // seek each element and DONT read it
+        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let range = iter.seek_to_value(r);
+        assert_eq!(range, 0..4);
+        assert_eq!(iter.pos(), 0);
+        let range = iter.seek_to_value(o11);
+        assert_eq!(range, 4..6);
+        assert_eq!(iter.pos(), 4);
+        let range = iter.seek_to_value(o12);
+        assert_eq!(range, 6..7);
+        assert_eq!(iter.pos(), 6);
+        let range = iter.seek_to_value(o21);
+        assert_eq!(range, 7..10);
+        assert_eq!(iter.pos(), 7);
+        let range = iter.seek_to_value(o22);
+        assert_eq!(range, 10..12);
+        assert_eq!(iter.pos(), 10);
+        let range = iter.seek_to_value(o31);
+        assert_eq!(range, 12..12);
+        assert_eq!(iter.pos(), 12);
+        let range = iter.seek_to_value(o32);
+        assert_eq!(range, 12..14);
+        assert_eq!(iter.pos(), 12);
+
+        // seek only odd items
+        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let range = iter.seek_to_value(o11);
+        assert_eq!(range, 4..6);
+        assert_eq!(iter.pos(), 4);
+        let range = iter.seek_to_value(o21);
+        assert_eq!(range, 7..10);
+        assert_eq!(iter.pos(), 7);
+        let range = iter.seek_to_value(o31);
+        assert_eq!(range, 12..12);
+        assert_eq!(iter.pos(), 12);
+
+        // seek only even items
+        let mut iter = ObjIdIter::new(actor.iter(), ctr.iter());
+        let range = iter.seek_to_value(r);
+        assert_eq!(range, 0..4);
+        assert_eq!(iter.pos(), 0);
+        let range = iter.seek_to_value(o12);
+        assert_eq!(range, 6..7);
+        assert_eq!(iter.pos(), 6);
+        let range = iter.seek_to_value(o22);
+        assert_eq!(range, 10..12);
+        assert_eq!(iter.pos(), 10);
+        let range = iter.seek_to_value(o32);
+        assert_eq!(range, 12..14);
+        assert_eq!(iter.pos(), 12);
     }
 }

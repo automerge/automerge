@@ -584,8 +584,8 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_set2::{change::build_change, KeyRef, OpBuilder2, OpSet},
-        types::{ObjId, ObjMeta, ObjType, OpId},
+        op_set2::{change::build_change, OpSet, TxOp},
+        types::{ObjMeta, OpId, OpType},
         ActorId,
     };
 
@@ -689,20 +689,16 @@ mod tests {
                 + 1;
 
             let actor_idx = self.index(actor);
-            let root = ObjMeta {
-                id: ObjId::root(),
-                typ: ObjType::Map,
-            };
             let ops = (0..num_new_ops)
-                .map(|opnum| OpBuilder2 {
-                    obj: root,
-                    pos: 0,
-                    index: 0,
-                    id: OpId::new(start_op + opnum as u64, actor_idx),
-                    action: crate::OpType::Put("value".into()),
-                    key: KeyRef::Map(Cow::Owned("key".into())),
-                    pred: vec![],
-                    insert: false,
+                .map(|opnum| {
+                    TxOp::map(
+                        OpId::new(start_op + opnum as u64, actor_idx),
+                        ObjMeta::root(),
+                        0,
+                        OpType::Put("value".into()),
+                        "key".to_string(),
+                        vec![],
+                    )
                 })
                 .collect::<Vec<_>>();
 

@@ -376,7 +376,7 @@ impl<'a, C: ColumnCursor> Default for Encoder<'a, C> {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), 0, false),
+            writer: SlabWriter::new(C::slab_size(), false),
             _phantom: PhantomData,
         }
     }
@@ -435,16 +435,16 @@ where
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), 0, locked),
+            writer: SlabWriter::new(C::slab_size(), locked),
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_capacity(cap: usize, locked: bool) -> Self {
+    pub fn with_capacity(_cap: usize, locked: bool) -> Self {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), cap, locked),
+            writer: SlabWriter::new(C::slab_size(), locked),
             _phantom: PhantomData,
         }
     }

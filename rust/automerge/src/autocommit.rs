@@ -330,7 +330,7 @@ impl AutoCommit {
         self.isolation = None;
     }
 
-    fn ensure_transaction_open(&mut self) {
+    pub(crate) fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
             let inner = TransactionInner::new(args);
@@ -338,7 +338,7 @@ impl AutoCommit {
         }
     }
 
-    fn ensure_transaction_closed(&mut self) {
+    pub(crate) fn ensure_transaction_closed(&mut self) {
         if let Some((patch_log, tx)) = self.transaction.take() {
             self.patch_log.merge(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
@@ -368,7 +368,7 @@ impl AutoCommit {
 
     pub fn apply_changes(
         &mut self,
-        changes: impl IntoIterator<Item = Change>,
+        changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         if self.isolation.is_some() {
@@ -377,6 +377,32 @@ impl AutoCommit {
         } else {
             self.doc
                 .apply_changes_log_patches(changes, &mut self.patch_log)
+        }
+    }
+
+    pub fn apply_changes_batch(
+        &mut self,
+        changes: impl IntoIterator<Item = Change> + Clone,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        if self.isolation.is_some() {
+            self.doc
+                .apply_changes_batch_log_patches(changes, &mut PatchLog::null())
+        } else {
+            self.doc
+                .apply_changes_batch_log_patches(changes, &mut self.patch_log)
+        }
+    }
+
+    pub fn apply_changes_iter(
+        &mut self,
+        changes: impl IntoIterator<Item = Change> + Clone,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_closed();
+        if self.isolation.is_some() {
+            self.doc.apply_changes_iter(changes, &mut PatchLog::null())
+        } else {
+            self.doc.apply_changes_iter(changes, &mut self.patch_log)
         }
     }
 
@@ -412,6 +438,11 @@ impl AutoCommit {
         let bytes = self.save();
         Self::load(&bytes)?;
         Ok(bytes)
+    }
+
+    #[cfg(test)]
+    pub fn debug_cmp(&self, other: &Self) {
+        self.doc.debug_cmp(&other.doc);
     }
 
     /// Save this document, but don't run it through DEFLATE afterwards

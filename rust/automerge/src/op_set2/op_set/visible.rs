@@ -65,7 +65,7 @@ pub(crate) struct IndexedVisIter<'a> {
 
 impl<'a> IndexedVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
-        let iter = op_set.visible_index.iter_range(range);
+        let iter = op_set.cols.index.visible.iter_range(range);
         Self { iter, vis: 0 }
     }
 }
@@ -114,7 +114,7 @@ impl<'a> ScanVisIter<'a> {
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
         let succ_actor = op_set.cols.succ_actor.iter_range(succ_range.clone());
         let succ_ctr = op_set.cols.succ_ctr.iter_range(succ_range.clone());
-        let succ_inc = op_set.inc_index.iter_range(succ_range);
+        let succ_inc = op_set.cols.index.inc.iter_range(succ_range);
         Self {
             id_actor,
             id_ctr,

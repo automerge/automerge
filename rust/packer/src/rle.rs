@@ -137,7 +137,6 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         cursor: &Self,
         run: Option<Run<'a, P>>,
         index: usize,
-        hint: usize,
         locked: bool,
     ) -> (RleState<'a, P>, Option<Run<'a, P>>, Acc, SlabWriter<'a, P>) {
         let mut post = None;
@@ -174,7 +173,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
             Some(Run { count, value }) => RleState::Run { count, value },
         };
 
-        let mut current = SlabWriter::new(B, hint, locked);
+        let mut current = SlabWriter::new(B, locked);
 
         current.copy(slab, copy_range, 0, copy_size, copy_acc, None);
 
@@ -335,17 +334,11 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         B
     }
 
-    fn splice_encoder(
-        index: usize,
-        del: usize,
-        slab: &Slab,
-        hint: usize,
-    ) -> SpliceEncoder<'_, Self> {
+    fn splice_encoder(index: usize, del: usize, slab: &Slab) -> SpliceEncoder<'_, Self> {
         let (run, cursor) = Self::seek(index, slab);
 
-        let hint = hint * 2;
         let (state, post, acc, current) =
-            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, hint, false);
+            RleCursor::encode_inner(slab.as_slice(), &cursor, run, index, false);
 
         let SpliceDel {
             deleted,
@@ -461,8 +454,7 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
 
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
-        let hint = data.len() * 10 / B;
-        let mut writer = SlabWriter::<P>::new(B, hint, true);
+        let mut writer = SlabWriter::<P>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
             P::validate(run.value.as_deref(), m)?;

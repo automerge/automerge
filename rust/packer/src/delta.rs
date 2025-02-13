@@ -105,14 +105,28 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn contains(&self, run: &Run<'_, i64>, agg: Agg) -> bool {
-        let value = run.value.as_deref().cloned().unwrap_or(0);
-        let a = Agg::from(self.abs);
-        let b = Agg::from(self.abs - value * (run.count as i64 - 1));
-        if a > b {
-            agg <= a && agg >= b
+    #[inline(never)]
+    fn contains(&self, run: &Run<'_, i64>, target: Agg) -> Option<Range<usize>> {
+        if target.is_none() && run.value.is_none() {
+            return Some(0..run.count);
+        }
+
+        let target = target.as_i64()?;
+        let value = run.value.as_deref().cloned()?;
+        let icount = run.count as i64;
+        let abs = self.abs;
+
+        let sign = (value > 0) as i64 * 2 - 1; // +1 or -1
+        let delta = sign * (abs - target);
+        let value = value * sign;
+
+        if value != 0 && delta % value == 0 && delta >= 0 && delta / value < icount {
+            let n = (icount - delta / value - 1) as usize;
+            Some(n..n + 1)
+        } else if value == 0 && target == abs {
+            Some(0..run.count)
         } else {
-            agg >= a && agg <= b
+            None
         }
     }
 
@@ -153,17 +167,12 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         B
     }
 
-    fn splice_encoder(
-        index: usize,
-        del: usize,
-        slab: &Slab,
-        hint: usize,
-    ) -> SpliceEncoder<'_, Self> {
+    fn splice_encoder(index: usize, del: usize, slab: &Slab) -> SpliceEncoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
         let (rle, post, acc, mut current) =
-            SubCursor::<B>::encode_inner(slab.as_slice(), &cursor.rle, run, index, hint * 2, true);
+            SubCursor::<B>::encode_inner(slab.as_slice(), &cursor.rle, run, index, true);
 
         let abs_delta = post.as_ref().map(|run| run.delta()).unwrap_or(0);
         let abs = cursor.abs - abs_delta;
@@ -198,6 +207,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         data.splice(range, values.map(|i| i.as_deref().cloned()));
     }
 
+    #[inline(never)]
     fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         if let Some(run) = self.rle.try_next(slab)? {
             let delta = run.delta();
@@ -245,8 +255,7 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
 
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
-        let hint = data.len() / 2; // if we do copies this will be smaller
-        let mut writer = SlabWriter::<i64>::new(B, hint, true);
+        let mut writer = SlabWriter::<i64>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
             i64::validate(run.value.as_deref(), m)?;
@@ -630,5 +639,31 @@ pub(crate) mod tests {
                 step = rand::random::<usize>() % (data.len() / 2);
             }
         }
+    }
+
+    #[test]
+    fn delta_contains() {
+        let mut cursor = DeltaCursor::default();
+        cursor.abs = 100;
+        assert_eq!(cursor.contains(&Run::init(1, 3), 100.into()), Some(0..1));
+
+        assert_eq!(cursor.contains(&Run::init(10, 3), 100.into()), Some(9..10));
+        assert_eq!(cursor.contains(&Run::init(10, 3), 97.into()), Some(8..9));
+        assert_eq!(cursor.contains(&Run::init(10, 3), 94.into()), Some(7..8));
+        assert_eq!(cursor.contains(&Run::init(10, 3), 103.into()), None);
+        assert_eq!(cursor.contains(&Run::init(10, 3), 73.into()), Some(0..1));
+        assert_eq!(cursor.contains(&Run::init(10, 3), 70.into()), None);
+
+        assert_eq!(cursor.contains(&Run::init(10, 0), 100.into()), Some(0..10));
+        assert_eq!(cursor.contains(&Run::init(10, 0), 101.into()), None);
+
+        assert_eq!(cursor.contains(&Run::init(1, -1), 100.into()), Some(0..1));
+        assert_eq!(cursor.contains(&Run::init(3, -1), 100.into()), Some(2..3));
+
+        assert_eq!(cursor.contains(&Run::init(3, -10), 110.into()), Some(1..2));
+        assert_eq!(cursor.contains(&Run::init(3, -10), 120.into()), Some(0..1));
+        assert_eq!(cursor.contains(&Run::init(3, -10), 130.into()), None);
+        assert_eq!(cursor.contains(&Run::init(3, -10), 90.into()), None);
+        assert_eq!(cursor.contains(&Run::init(3, -10), 101.into()), None);
     }
 }

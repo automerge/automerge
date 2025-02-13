@@ -1599,48 +1599,33 @@ fn regression_insert_opid() {
     }
 
     let patches = new_doc.make_patches(&mut patch_log);
-
-    let mut expected_patches = Vec::new();
-    expected_patches.push(Patch {
-        obj: ROOT,
-        path: vec![],
-        action: PatchAction::PutMap {
-            key: "list".to_string(),
-            value: (
-                Value::Object(ObjType::List),
-                ObjId::Id(1, doc.get_actor().clone(), 0),
-            ),
-            conflict: false,
-        },
-    });
+    let mut values = SequenceTree::new();
     for i in 0..=N {
-        let mut seq_tree = SequenceTree::new();
-        seq_tree.push((
-            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Null)),
-            ObjId::Id(2 * (i + 1) as u64, doc.get_actor().clone(), 0),
+        values.push((
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
+            ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
             false,
         ));
-        expected_patches.push(Patch {
-            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
-            path: vec![(ROOT, Prop::Map("list".into()))],
-            action: PatchAction::Insert {
-                index: i,
-                values: seq_tree,
-            },
-        });
-        expected_patches.push(Patch {
-            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
-            path: vec![(ROOT, Prop::Map("list".into()))],
-            action: PatchAction::PutSeq {
-                index: i,
+    }
+    let expected_patches = vec![
+        Patch {
+            obj: ROOT,
+            path: vec![],
+            action: PatchAction::PutMap {
+                key: "list".to_string(),
                 value: (
-                    Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
-                    ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
+                    Value::Object(ObjType::List),
+                    ObjId::Id(1, doc.get_actor().clone(), 0),
                 ),
                 conflict: false,
             },
-        });
-    }
+        },
+        Patch {
+            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            path: vec![(ROOT, Prop::Map("list".into()))],
+            action: PatchAction::Insert { index: 0, values },
+        },
+    ];
     assert_eq!(patches, expected_patches);
 }
 
@@ -1674,13 +1659,11 @@ fn big_list() {
         .unwrap();
 
     let patches = new_doc.make_patches(&mut patch_log);
-    let matches = matches!(
-        patches.last().unwrap(),
-        Patch {
-            action: PatchAction::PutSeq { index: N, .. },
-            ..
-        }
-    );
+    let matches = match &patches.last().unwrap().action {
+        PatchAction::PutSeq { index: N, .. } => true,
+        PatchAction::Insert { index: 0, values } if values.len() == N + 1 => true,
+        _ => false,
+    };
     assert!(matches);
 }
 
@@ -2363,4 +2346,22 @@ fn zero_length_data() {
         doc.get(&ROOT, "bytes").unwrap().unwrap().0,
         Value::from(vec![])
     );
+}
+
+#[test]
+fn xxx() {
+    let mut doc1 = AutoCommit::new();
+    let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.splice_text(&text, 0, 0, "hello world").unwrap();
+    let map = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
+    doc1.put(&map, "key", "value0").unwrap();
+    doc1.put(&map, "other_key", "value0").unwrap();
+    let mut doc2 = doc1.fork();
+
+    doc1.splice_text(&text, 2, 2, "xalksjdaskl").unwrap();
+    doc1.put(&map, "key", "value1").unwrap();
+    doc2.put(&map, "key", "value2").unwrap();
+    doc2.splice_text(&text, 3, 2, "99asda9das9da").unwrap();
+
+    doc1.merge(&mut doc2).unwrap();
 }

@@ -1,17 +1,18 @@
 use super::meta::MetaCursor;
 use super::op::OpLike;
+use super::op_set::MarkIndexColumn;
 use super::packer::{
-    BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, PackError, RawCursor, ScanMeta,
-    StrCursor, UIntCursor,
+    BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor,
+    ScanMeta, StrCursor, UIntCursor,
 };
-use super::types::{ActionCursor, ActorCursor, ActorIdx, ScalarValue};
+use super::types::{Action, ActionCursor, ActorCursor, ActorIdx, ScalarValue};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::ColumnId;
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::ActorId;
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -34,6 +35,26 @@ pub(super) struct Columns {
     pub(super) value: ColumnData<RawCursor>,
     pub(super) mark_name: ColumnData<StrCursor>,
     pub(super) expand: ColumnData<BooleanCursor>,
+    pub(super) index: Indexes,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Indexes {
+    pub(super) text: ColumnData<UIntCursor>,
+    pub(super) visible: ColumnData<BooleanCursor>,
+    pub(super) inc: ColumnData<IntCursor>,
+    pub(super) mark: MarkIndexColumn,
+}
+
+impl Default for Indexes {
+    fn default() -> Self {
+        Self {
+            text: ColumnData::new(),
+            visible: ColumnData::new(),
+            inc: ColumnData::new(),
+            mark: MarkIndexColumn::new(),
+        }
+    }
 }
 
 impl Default for Columns {
@@ -55,11 +76,61 @@ impl Default for Columns {
             value: ColumnData::new(),
             mark_name: ColumnData::new(),
             expand: ColumnData::new(),
+            index: Indexes::default(),
         }
     }
 }
 
+#[cfg(test)]
+fn debug_cmp<I: Debug + PartialEq>(tag: &str, a: Vec<I>, b: Vec<I>) -> bool {
+    if a == b {
+        true
+    } else {
+        let pos = a.iter().zip(b.iter()).position(|(a, b)| a != b);
+        log!("{} diff at {:?}", tag, pos);
+        log!(" :: {:?}", b);
+        log!(" :: {:?}", a);
+        false
+    }
+}
+
 impl Columns {
+    #[cfg(test)]
+    pub(super) fn debug_cmp(&self, other: &Self) {
+        let mut ok = true;
+        ok &= debug_cmp("ID_ACTOR", self.id_actor.to_vec(), other.id_actor.to_vec());
+        ok &= debug_cmp("ID_CTR", self.id_ctr.to_vec(), other.id_ctr.to_vec());
+        ok &= debug_cmp(
+            "OBJ_ACTOR",
+            self.obj_actor.to_vec(),
+            other.obj_actor.to_vec(),
+        );
+        ok &= debug_cmp("OBJ_CTR", self.obj_ctr.to_vec(), other.obj_ctr.to_vec());
+        assert!(ok);
+        log!("KEY_ACTOR");
+        assert_eq!(self.key_actor.to_vec(), other.key_actor.to_vec());
+        log!("KEY_STR");
+        assert_eq!(self.key_str.to_vec(), other.key_str.to_vec());
+        log!("INSERT");
+        assert_eq!(self.insert.to_vec(), other.insert.to_vec());
+        log!("ACTION");
+        assert_eq!(self.action.to_vec(), other.action.to_vec());
+        log!("MARK_NAME");
+        assert_eq!(self.mark_name.to_vec(), other.mark_name.to_vec());
+        log!("EXPAND");
+        assert_eq!(self.expand.to_vec(), other.expand.to_vec());
+        log!("SUCC_COUNT");
+        assert_eq!(self.succ_count.to_vec(), other.succ_count.to_vec());
+        log!("SUCC_ACTOR");
+        assert_eq!(self.succ_actor.to_vec(), other.succ_actor.to_vec());
+        log!("SUCC_CTR");
+        assert_eq!(self.succ_ctr.to_vec(), other.succ_ctr.to_vec());
+        log!("META");
+        assert_eq!(self.value_meta.to_vec(), other.value_meta.to_vec());
+        log!("VALUE");
+        assert_eq!(self.value.to_vec(), other.value.to_vec());
+    }
+
     fn write_unless_empty<C: ColumnCursor>(
         spec: &ColumnSpec,
         c: &ColumnData<C>,
@@ -167,6 +238,8 @@ impl Columns {
         let value_len = value_meta.acc().as_usize();
         let value = Self::load_column(VALUE_COL_SPEC, &cols, data, &m, value_len)?;
 
+        let index = Indexes::default();
+
         Ok(Self {
             id_actor,
             id_ctr,
@@ -184,6 +257,7 @@ impl Columns {
             value,
             mark_name,
             expand,
+            index,
         })
     }
 
@@ -217,54 +291,65 @@ impl Columns {
     }
 
     #[inline(never)]
-    pub(crate) fn splice<O: OpLike, B: Borrow<O>>(&mut self, pos: usize, ops: &[B]) {
-        self.id_actor
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().id().actoridx()));
-        self.id_ctr
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().id().icounter()));
-        self.obj_actor
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().obj().actor()));
-        self.obj_ctr
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().obj().counter()));
-        self.key_actor
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().actor()));
-        self.key_ctr
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().icounter()));
-        self.key_str
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().key().key_str()));
-        self.insert
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().insert()));
-        self.action
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().action()));
-        self.expand
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().expand()));
-        self.mark_name
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().mark_name()));
+    pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O])
+    where
+        O: OpLike,
+    {
+        println!(" SPLICE ");
+        let ops = ops.iter().filter(|o| O::action(o) != Action::Delete);
+        for o in ops.clone() {
+            println!(" :: OP id={:?} action={}", o.id(), O::action(o));
+        }
+        self.id_actor.splice(pos, 0, ops.clone().map(O::id_actor));
+        self.id_ctr.splice(pos, 0, ops.clone().map(O::id_ctr));
+        self.obj_actor.splice(pos, 0, ops.clone().map(O::obj_actor));
+        self.obj_ctr.splice(pos, 0, ops.clone().map(O::obj_ctr));
+        self.key_actor.splice(pos, 0, ops.clone().map(O::key_actor));
+        self.key_ctr.splice(pos, 0, ops.clone().map(O::key_ctr));
+        self.key_str.splice(pos, 0, ops.clone().map(O::key_str));
+        self.insert.splice(pos, 0, ops.clone().map(O::insert));
+        self.action.splice(pos, 0, ops.clone().map(O::action));
+        self.expand.splice(pos, 0, ops.clone().map(O::expand));
+        self.mark_name.splice(pos, 0, ops.clone().map(O::mark_name));
 
-        let acc_pos = self
+        let value_pos = self
             .value_meta
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().meta_value()))
+            .splice(pos, 0, ops.clone().map(|o| o.meta_value()))
             .as_usize();
-        let value = ops
-            .iter()
-            .filter_map(|o| o.borrow().raw_value())
-            .collect::<Vec<_>>();
-        self.value.splice(acc_pos, 0, value);
 
-        let acc_pos = self
+        self.value
+            .splice(value_pos, 0, ops.clone().filter_map(|o| o.raw_value()));
+
+        let succ_pos = self
             .succ_count
-            .splice(pos, 0, ops.iter().map(|o| o.borrow().succ().len() as u64))
+            .splice(pos, 0, ops.clone().map(|o| o.succ().len() as u64))
             .as_usize();
+
         let succ_actor = ops
-            .iter()
-            .flat_map(|o| o.borrow().succ().map(|id| id.actoridx()))
+            .clone()
+            .flat_map(|o| o.succ().map(|id| id.actoridx()))
             .collect::<Vec<_>>();
-        self.succ_actor.splice(acc_pos, 0, succ_actor);
+
+        self.succ_actor.splice(succ_pos, 0, &succ_actor);
+
         let succ_ctr = ops
-            .iter()
-            .flat_map(|o| o.borrow().succ().map(|id| id.icounter()))
+            .clone()
+            .flat_map(|o| o.succ().map(|id| id.icounter()))
             .collect::<Vec<_>>();
-        self.succ_ctr.splice(acc_pos, 0, succ_ctr);
+
+        self.succ_ctr.splice(succ_pos, 0, succ_ctr);
+
+        self.index
+            .inc
+            .splice(succ_pos, 0, ops.clone().flat_map(O::succ_inc));
+
+        self.index
+            .mark
+            .splice(pos, 0, ops.clone().map(O::mark_index).collect());
+        self.index.text.splice(pos, 0, ops.clone().map(O::width));
+        self.index
+            .visible
+            .splice(pos, 0, ops.clone().map(O::visible));
     }
 
     #[cfg(test)]
@@ -327,10 +412,10 @@ impl Columns {
             }
             log!(
                 ":: {:7} {:7} {:10} {:8} {:3} {:3}  {:1}   {}",
-                format!("({},{})", id_c, id_a),
-                format!("({},{})", obj_c, obj_a),
+                format!("({}, {})", id_c, id_a),
+                format!("({}, {})", obj_c, obj_a),
                 key_s,
-                format!("({},{})", key_c, key_a),
+                format!("({}, {})", key_c, key_a),
                 insert,
                 act,
                 succ,

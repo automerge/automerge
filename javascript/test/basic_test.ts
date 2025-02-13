@@ -397,6 +397,7 @@ describe("Automerge", () => {
       let docL = Automerge.load<DocShape>(Automerge.save(docM))
 
       assert.deepEqual(docM.sub.x, docL.sub.x)
+      assert.deepEqual(docM.sub.y, docL.sub.y)
     })
   })
 

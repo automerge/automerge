@@ -7,7 +7,7 @@ use crate::error::AutomergeError;
 use crate::storage::document::ReadChangeError;
 use crate::{
     change::Change,
-    op_set2::{ChangeMetadata, KeyRef, Op, OpBuilder3, OpSet},
+    op_set2::{ChangeMetadata, KeyRef, Op, OpBuilder, OpSet},
     storage::DocChangeMetadata,
     types::{ActorId, ChangeHash, ObjId, OpId},
 };
@@ -52,11 +52,11 @@ struct ChangeBuilder<'a> {
     seq: u64,
     change: usize,
     start_op: u64,
-    ops: Vec<Option<OpBuilder3<'a>>>,
+    ops: Vec<Option<OpBuilder<'a>>>,
 }
 
 impl<'a> ChangeBuilder<'a> {
-    pub(crate) fn get_ops(&self) -> Result<&[Option<OpBuilder3<'a>>], Error> {
+    pub(crate) fn get_ops(&self) -> Result<&[Option<OpBuilder<'a>>], Error> {
         let start_pos = self.ops.iter().position(|op| op.is_some()).unwrap_or(0);
         let ops = &self.ops[start_pos..];
 
@@ -71,7 +71,7 @@ impl<'a> ChangeBuilder<'a> {
         self.start_op + self.ops.len() as u64 - 1
     }
 
-    pub(crate) fn add(&mut self, op: OpBuilder3<'a>) {
+    pub(crate) fn add(&mut self, op: OpBuilder<'a>) {
         let counter = op.id.counter();
         //if counter >= self.start_op && counter <= self.max_op() && op.id.actor() == self.actor {
         self.ops[(counter - self.start_op) as usize] = Some(op);

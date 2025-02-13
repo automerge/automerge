@@ -1,5 +1,5 @@
 use super::meta::MetaCursor;
-use super::op::{AsChangeOp, OpBuilder3};
+use super::op::{AsChangeOp, OpBuilder};
 use super::packer::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use super::types::{ActionCursor, ActorCursor, ActorIdx};
 use crate::change_graph::ChangeGraph;
@@ -13,6 +13,7 @@ use std::marker::PhantomData;
 use std::num::NonZero;
 use std::ops::Range;
 
+pub(crate) mod batch;
 pub(crate) mod collector;
 
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
@@ -106,13 +107,13 @@ where
     }
 }
 
-impl<'a> PartialOrd for OpBuilder3<'a> {
-    fn partial_cmp(&self, other: &OpBuilder3<'a>) -> Option<Ordering> {
+impl<'a> PartialOrd for OpBuilder<'a> {
+    fn partial_cmp(&self, other: &OpBuilder<'a>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a> Ord for OpBuilder3<'a> {
+impl<'a> Ord for OpBuilder<'a> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.id.cmp(&other.id)
     }
@@ -146,13 +147,13 @@ fn length_prefixed_bytes<B: AsRef<[u8]>>(b: B, out: &mut Vec<u8>) -> usize {
     prefix_len + b.as_ref().len()
 }
 
-impl<'a> PartialEq for OpBuilder3<'a> {
-    fn eq(&self, other: &OpBuilder3<'a>) -> bool {
+impl<'a> PartialEq for OpBuilder<'a> {
+    fn eq(&self, other: &OpBuilder<'a>) -> bool {
         self.id == other.id
     }
 }
 
-impl<'a> Eq for OpBuilder3<'a> {}
+impl<'a> Eq for OpBuilder<'a> {}
 
 #[inline(never)]
 fn write_change_ops<T>(

@@ -63,8 +63,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
     fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
         let mut cursor = Self::empty();
         let mut last_cursor = Self::empty();
-        let hint = data.len() * 2 / B;
-        let mut writer = SlabWriter::<bool>::new(B, hint, true);
+        let mut writer = SlabWriter::<bool>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
             bool::validate(run.value.as_deref(), m)?;
@@ -163,12 +162,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         B
     }
 
-    fn splice_encoder(
-        index: usize,
-        del: usize,
-        slab: &Slab,
-        hint: usize,
-    ) -> SpliceEncoder<'_, Self> {
+    fn splice_encoder(index: usize, del: usize, slab: &Slab) -> SpliceEncoder<'_, Self> {
         // FIXME encode
         let (run, cursor) = Self::seek(index, slab);
 
@@ -200,7 +194,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
         let range = 0..cursor.last_offset;
         let size = cursor.index - count;
-        let mut current = SlabWriter::new(B, hint, false);
+        let mut current = SlabWriter::new(B, false);
         current.copy(slab.as_slice(), range, 0, size, acc, None);
 
         let SpliceDel {
@@ -265,7 +259,7 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::<bool>::new(usize::MAX, 2, false);
+            let mut writer = SlabWriter::<bool>::new(usize::MAX, false);
             writer.flush_bool_run(len, false);
             writer.finish().pop().unwrap_or_default()
         } else {

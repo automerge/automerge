@@ -215,7 +215,6 @@ impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
 #[derive(Debug)]
 pub struct SlabWriter<'a, P: Packable + ?Sized> {
     actions: Vec<WriteAction<'a, P>>,
-    hint: usize,
     width: usize,
     items: usize,
     acc: Acc,
@@ -234,7 +233,6 @@ impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
     fn clone(&self) -> Self {
         Self {
             actions: self.actions.clone(),
-            hint: self.hint,
             width: self.width,
             items: self.items,
             acc: self.acc,
@@ -290,13 +288,10 @@ impl<'a, P: Packable + ?Sized> Writer<'a, P> for SlabWriter<'a, P> {
 }
 
 impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
-    pub fn new(max: usize, hint: usize, locked: bool) -> Self {
-        let hint = hint + 10;
-        let mut actions = Vec::with_capacity(hint);
-        actions.push(WriteAction::SlabHead);
+    pub fn new(max: usize, locked: bool) -> Self {
+        let actions = vec![WriteAction::SlabHead];
         SlabWriter {
             max,
-            hint,
             width: 0,
             acc: Acc::new(),
             abs: 0,

@@ -23,6 +23,16 @@ impl Acc {
     }
 }
 
+impl Sub for Agg {
+    type Output = Agg;
+    fn sub(self, other: Self) -> Agg {
+        match (self.0, other.0) {
+            (Some(a), Some(b)) => Agg::from(a.get() - b.get()),
+            _ => Agg(None),
+        }
+    }
+}
+
 impl Sub for Acc {
     type Output = Acc;
     fn sub(self, other: Self) -> Acc {
@@ -132,6 +142,7 @@ impl From<usize> for Agg {
     }
 }
 
+// FIXME - panic for negative to i64?  Should never happen
 impl From<i64> for Agg {
     fn from(v: i64) -> Self {
         Self(u32::try_from(v).ok().and_then(NonZeroU32::new))
@@ -227,12 +238,18 @@ impl Agg {
         }
     }
 
+    // FIXME - shouldnt this be option<usize>
     pub fn as_usize(&self) -> usize {
         self.0.map(|v| v.get() as usize).unwrap_or(0)
     }
 
+    // FIXME - shouldnt this be option<u64>
     pub fn as_u64(&self) -> u64 {
         self.0.map(|v| v.get() as u64).unwrap_or(0)
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        self.0.map(|v| v.get() as i64)
     }
 }
 

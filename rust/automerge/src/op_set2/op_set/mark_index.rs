@@ -74,20 +74,28 @@ impl SpanWeight<Slab> for MarkIndexSpanner {
         //y.maybe_sub(other);
         //assert_eq!(x,y);
     }
+
     fn maybe_sub(&mut self, other: &Self) -> bool {
-        assert!(self.pos > other.pos);
-        self.pos -= other.pos;
-        for id in &other.start {
-            if !self.start.remove(id) {
-                self.end.insert(*id);
-            }
-        }
-        for id in &other.end {
-            if !self.end.remove(id) {
-                self.start.insert(*id);
-            }
-        }
-        true
+        false
+        // FIXME - this worked when I put ops in one at a time but now it doesnt?
+        /*
+                assert!(self.pos > other.pos);
+                log!(" -- SUB ");
+                log!(" -- :: A {:?}", self);
+                log!(" -- :: B {:?}", other);
+                self.pos -= other.pos;
+                for id in &other.start {
+                    if !self.start.remove(id) {
+                        self.end.insert(*id);
+                    }
+                }
+                for id in &other.end {
+                    if !self.end.remove(id) {
+                        self.start.insert(*id);
+                    }
+                }
+                true
+        */
     }
 }
 

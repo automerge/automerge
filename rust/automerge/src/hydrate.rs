@@ -1,6 +1,7 @@
 use crate::op_set2;
 use crate::op_set2::{Op, OpType};
-use crate::types::{Clock, ObjId, ScalarValue};
+use crate::text_value::TextValue;
+use crate::types::{Clock, ListEncoding, ObjId, ScalarValue};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -64,8 +65,23 @@ impl Value {
         matches!(self, Value::Scalar(_))
     }
 
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        if encoding == ListEncoding::List {
+            1
+        } else {
+            TextValue::width(self.as_str())
+        }
+    }
+
     pub fn is_object(&self) -> bool {
         !self.is_scalar()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        match &self {
+            Self::Scalar(ScalarValue::Str(s)) => s,
+            _ => "\u{fffc}",
+        }
     }
 
     pub fn apply_patches<P: IntoIterator<Item = Patch>>(
@@ -113,7 +129,7 @@ impl Value {
         }
     }
 
-    pub fn as_i64(&mut self) -> i64 {
+    pub fn as_i64(&self) -> i64 {
         match self {
             Value::Scalar(s) => s.as_i64(),
             _ => 0,

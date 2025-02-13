@@ -11,18 +11,15 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
-use super::op::{ChangeOp, Op, OpBuilder2, OpLike, SuccInsert};
-use super::packer::{
-    BooleanCursor, ColumnData, ColumnDataIter, IntCursor, PackError, Run, UIntCursor,
-};
+use super::op::{Op, OpBuilder, OpLike, SuccInsert, TxOp};
+use super::packer::{ColumnDataIter, PackError, Run, UIntCursor};
 
 use super::columns::Columns;
 
 use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
@@ -36,7 +33,7 @@ mod op_query;
 mod top_op;
 mod visible;
 
-pub(crate) use index::{IndexBuilder, ObjInfo};
+pub(crate) use index::{IndexBuilder, ObjIndex, ObjInfo};
 
 pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
@@ -54,13 +51,13 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
-    len: usize,
+    //len: usize,
     pub(crate) actors: Vec<ActorId>,
-    text_index: ColumnData<UIntCursor>,
-    visible_index: ColumnData<BooleanCursor>,
-    inc_index: ColumnData<IntCursor>,
-    mark_index: MarkIndexColumn,
-    obj_info: HashMap<OpId, ObjInfo>,
+    //text_index: ColumnData<UIntCursor>,
+    //visible_index: ColumnData<BooleanCursor>,
+    //inc_index: ColumnData<IntCursor>,
+    //mark_index: MarkIndexColumn,
+    pub(crate) obj_info: ObjIndex,
     cols: Columns,
 }
 
@@ -68,6 +65,11 @@ pub(crate) struct OpSet {
 pub(crate) struct OpSetCheckpoint(OpSet);
 
 impl OpSet {
+    #[cfg(test)]
+    pub(crate) fn debug_cmp(&self, other: &Self) {
+        self.cols.debug_cmp(&other.cols)
+    }
+
     pub(crate) fn save_checkpoint(&self) -> OpSetCheckpoint {
         OpSetCheckpoint(self.clone())
     }
@@ -79,20 +81,20 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         OpSet {
-            len: 0,
+            //len: 0,
             actors,
             cols: Columns::default(),
-            text_index: ColumnData::new(),
-            visible_index: ColumnData::new(),
-            inc_index: ColumnData::new(),
-            mark_index: MarkIndexColumn::new(),
-            obj_info: HashMap::new(),
+            //text_index: ColumnData::new(),
+            //visible_index: ColumnData::new(),
+            //inc_index: ColumnData::new(),
+            //mark_index: MarkIndexColumn::new(),
+            obj_info: ObjIndex::default(),
         }
     }
 
     pub(crate) fn dump(&self) {
         log!("OpSet");
-        log!("  len: {}", self.len);
+        log!("  len: {}", self.len());
         log!("  actors: {:?}", self.actors);
         self.cols.dump();
     }
@@ -123,54 +125,46 @@ impl OpSet {
         assert_eq!(indexes.visible.len(), self.len());
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
-        self.text_index = indexes.text;
-        self.visible_index = indexes.visible;
-        self.inc_index = indexes.inc;
-        self.mark_index = indexes.mark;
+        self.cols.index.text = indexes.text;
+        self.cols.index.visible = indexes.visible;
+        self.cols.index.inc = indexes.inc;
+        self.cols.index.mark = indexes.mark;
         self.obj_info = indexes.obj_info;
     }
 
     #[inline(never)]
-    pub(crate) fn splice_objects<B: Borrow<OpBuilder2>>(&mut self, ops: &[B]) {
+    pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
         for op in ops {
-            if let Some(obj_info) = op.borrow().obj_info() {
-                self.obj_info.insert(op.borrow().id, obj_info);
+            if let Some(obj_info) = op.obj_info() {
+                self.obj_info.insert(op.id(), obj_info);
             }
         }
     }
 
     #[inline(never)]
-    pub(crate) fn splice<B: Borrow<OpBuilder2>>(&mut self, pos: usize, ops: &[B]) {
+    pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) {
         self.cols.splice(pos, ops);
         self.splice_objects(ops);
-        self.mark_index.splice(
-            pos,
-            0,
-            ops.iter().map(|o| o.borrow().mark_index()).collect(),
-        );
-        self.text_index.splice(
-            pos,
-            0,
-            ops.iter()
-                .map(|o| o.borrow().width(ListEncoding::Text) as u64),
-        );
-        self.visible_index
-            .splice(pos, 0, ops.iter().map(|o| !o.borrow().is_inc()));
-        self.len += ops.len();
+        //self.len += ops.len();
     }
 
-    pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert], id: OpId) {
+    pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
+        let mut succ_inc = 0;
+        let mut last_pos = None;
         for i in op_pos.iter().rev() {
-            self.cols.succ_count.splice(i.pos, 1, [i.len + 1]);
-            self.cols.succ_actor.splice(i.sub_pos, 0, [id.actoridx()]);
-            self.cols.succ_ctr.splice(i.sub_pos, 0, [id.icounter()]);
-
-            self.inc_index.splice(i.sub_pos, 0, [i.inc]);
-
-            self.text_index.splice(i.pos, 1, [0]);
-
+            if last_pos == Some(i.pos) {
+                succ_inc += 1;
+            } else {
+                last_pos = Some(i.pos);
+                succ_inc = 1;
+            }
+            self.cols.succ_count.splice(i.pos, 1, [i.len + succ_inc]);
+            self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
+            self.cols.succ_ctr.splice(i.sub_pos, 0, [i.id.icounter()]);
+            self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
+            self.cols.index.text.splice(i.pos, 1, [0]);
             if i.inc.is_none() {
-                self.visible_index.splice(i.pos, 1, [false]);
+                self.cols.index.visible.splice(i.pos, 1, [false]);
             }
         }
     }
@@ -228,7 +222,8 @@ impl OpSet {
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.len
+        //self.len
+        self.cols.len()
     }
 
     pub(crate) fn sub_len(&self) -> usize {
@@ -261,7 +256,7 @@ impl OpSet {
         if index == 0 {
             return None;
         }
-        let mut iter = self.text_index.iter_range(range.clone()).with_acc();
+        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
         let tx = iter.nth(index - 1)?;
         let iter = self.iter_range(&(tx.pos..range.end));
         let marks = self.get_rich_text_at(tx.pos, clock);
@@ -402,7 +397,7 @@ impl OpSet {
     #[inline(never)]
     fn get_rich_text_at(&self, pos: usize, clock: Option<&Clock>) -> RichTextQueryState<'_> {
         let mut marks = RichTextQueryState::default();
-        for id in self.mark_index.marks_at(pos, clock) {
+        for id in self.cols.index.mark.marks_at(pos, clock) {
             let pos = self.get_op_id_pos(id).unwrap();
             let name = self.get_mark_name(pos).unwrap();
             let value = self.get_value(pos).unwrap();
@@ -413,7 +408,7 @@ impl OpSet {
 
     fn get_marks_at(&self, pos: usize, clock: Option<&Clock>) -> MarkStateMachine<'_> {
         let mut marks = MarkStateMachine::default();
-        for id in self.mark_index.marks_at(pos, clock) {
+        for id in self.cols.index.mark.marks_at(pos, clock) {
             let pos = self.get_op_id_pos(id).unwrap();
             let name = self.get_mark_name(pos).unwrap();
             let value = self.get_value(pos).unwrap();
@@ -436,7 +431,7 @@ impl OpSet {
 
         let range = self.scope_to_obj(obj);
 
-        let mut iter = self.text_index.iter_range(range.clone()).with_acc();
+        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
 
         let mut ops = vec![];
         let mut end_pos = range.end;
@@ -463,6 +458,7 @@ impl OpSet {
         })
     }
 
+    #[inline(never)]
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         let counters = &self.cols.id_ctr;
         let actors = &self.cols.id_actor;
@@ -472,6 +468,7 @@ impl OpSet {
             .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(id.actoridx()))))
     }
 
+    #[inline(never)]
     fn seek_list_op_fast(
         &self,
         obj: &ObjId,
@@ -489,8 +486,8 @@ impl OpSet {
 
         let op_pos = self.get_op_id_pos(target.0).unwrap();
 
-        let obj_acc = self.text_index.get_acc(range.start).as_usize();
-        let op_acc = self.text_index.get_acc(op_pos).as_usize();
+        let obj_acc = self.cols.index.text.get_acc(range.start).as_usize();
+        let op_acc = self.cols.index.text.get_acc(op_pos).as_usize();
 
         let iter = self.iter_range(&(op_pos..range.end));
         let mut marks = self.get_marks_at(op_pos, clock);
@@ -580,6 +577,7 @@ impl OpSet {
         }
     }
 
+    #[inline(never)]
     fn seek_list_op_slow(
         &self,
         obj: &ObjId,
@@ -763,16 +761,12 @@ impl OpSet {
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
-        if obj.is_root() {
-            Some(ObjType::Map)
-        } else {
-            self.obj_info.get(&obj.0).map(|p| p.obj_type)
-        }
+        self.obj_info.object_type(obj)
     }
 
     pub(crate) fn find_op_with_patch_log<'a>(
         &'a self,
-        new_op: &ChangeOp,
+        new_op: &OpBuilder<'_>,
         encoding: ListEncoding,
     ) -> FoundOpWithPatchLog<'a> {
         match &new_op.key {
@@ -799,7 +793,7 @@ impl OpSet {
 
     pub(crate) fn found_op_with_patch_log<'a>(
         &'a self,
-        new_op: &ChangeOp,
+        new_op: &OpBuilder<'_>,
         ops: Vec<(Op<'a>, bool)>,
         end_pos: usize,
         index: usize,
@@ -812,9 +806,6 @@ impl OpSet {
         let mut after = None;
         let mut succ = vec![];
         for (op, visible) in ops {
-            //for i in 0..ops.len() {
-            //    let (op, visible) = &ops[i];
-
             if found.is_none() && op.id > new_op.id {
                 found = Some(op.pos);
             }
@@ -880,17 +871,11 @@ impl OpSet {
         actors: Vec<ActorId>,
         ops: I,
     ) -> Self {
-        let len = ops.len();
         let cols = Columns::new(ops);
         OpSet {
             actors,
             cols,
-            len,
-            text_index: ColumnData::new(),
-            visible_index: ColumnData::new(),
-            inc_index: ColumnData::new(),
-            mark_index: MarkIndexColumn::new(),
-            obj_info: HashMap::new(),
+            obj_info: ObjIndex::default(),
         }
     }
 
@@ -901,17 +886,10 @@ impl OpSet {
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.iter(), data, &actors)?;
 
-        let len = cols.len();
-
         let op_set = OpSet {
             actors,
             cols,
-            len,
-            text_index: ColumnData::new(),
-            visible_index: ColumnData::new(),
-            inc_index: ColumnData::new(),
-            mark_index: MarkIndexColumn::new(),
-            obj_info: HashMap::new(),
+            obj_info: ObjIndex::default(),
         };
 
         Ok(op_set)
@@ -923,20 +901,13 @@ impl OpSet {
 
     #[inline(never)]
     fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
-        let range = self.cols.obj_ctr.iter().scope_to_value(obj.counter());
-        self.cols
-            .obj_actor
-            .iter_range(range)
-            .scope_to_value(obj.actor())
+        let range = self.cols.obj_ctr.scope_to_value(obj.counter(), ..);
+        self.cols.obj_actor.scope_to_value(obj.actor(), range)
     }
 
     pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
         let range = self.scope_to_obj(obj);
-        let range = self
-            .cols
-            .key_str
-            .iter_range(range)
-            .scope_to_value(Some(prop));
+        let range = self.cols.key_str.scope_to_value(Some(prop), range);
         self.iter_range(&range)
     }
 
@@ -955,7 +926,7 @@ impl OpSet {
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
         let succ_actor = self.cols.succ_actor.iter_range(succ_range.clone());
         let succ_counter = self.cols.succ_ctr.iter_range(succ_range.clone());
-        let inc_values = self.inc_index.iter_range(succ_range);
+        let inc_values = self.cols.index.inc.iter_range(succ_range);
         let succ = SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values);
 
         OpIter {
@@ -973,12 +944,6 @@ impl OpSet {
                 self.cols.key_actor.iter_range(range.clone()),
                 self.cols.key_ctr.iter_range(range.clone()),
             ),
-            /*
-                        succ_count,
-                        succ_actor,
-                        succ_counter,
-                        inc_values,
-            */
             succ,
             insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
@@ -989,6 +954,10 @@ impl OpSet {
             ),
             op_set: self,
         }
+    }
+
+    pub(crate) fn obj_id_iter(&self) -> ObjIdIter<'_> {
+        ObjIdIter::new(self.cols.obj_actor.iter(), self.cols.obj_ctr.iter())
     }
 
     pub(crate) fn iter(&self) -> OpIter<'_> {
@@ -1005,7 +974,7 @@ impl OpSet {
                 self.cols.succ_count.iter(),
                 self.cols.succ_actor.iter(),
                 self.cols.succ_ctr.iter(),
-                self.inc_index.iter(),
+                self.cols.index.inc.iter(),
             ),
             insert: InsertIter::new(self.cols.insert.iter()),
             action: ActionIter::new(self.cols.action.iter()),
@@ -1066,22 +1035,26 @@ impl OpSet {
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         self.cols.rewrite_with_new_actor(idx);
-        self.mark_index.rewrite_with_new_actor(idx);
-        self.obj_info = self
-            .obj_info
-            .iter()
-            .map(|(id, make)| (id.with_new_actor(idx), make.with_new_actor(idx)))
-            .collect();
+        self.cols.index.mark.rewrite_with_new_actor(idx);
+        self.obj_info = ObjIndex(
+            self.obj_info
+                .0
+                .iter()
+                .map(|(id, make)| (id.with_new_actor(idx), make.with_new_actor(idx)))
+                .collect(),
+        );
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
         self.actors.remove(idx);
         self.cols.rewrite_without_actor(idx);
-        self.obj_info = self
-            .obj_info
-            .iter()
-            .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
-            .collect();
+        self.obj_info = ObjIndex(
+            self.obj_info
+                .0
+                .iter()
+                .filter_map(|(id, make)| Some((id.without_actor(idx)?, make.without_actor(idx)?)))
+                .collect(),
+        );
     }
 }
 
@@ -1124,14 +1097,17 @@ impl<'a> FoundOpWithPatchLog<'a> {
     pub(crate) fn log_patches(
         &self,
         obj: &ObjMeta,
-        op: &OpBuilder2,
+        op: &TxOp,
         pred: &[OpId],
         doc: &Automerge,
         patch_log: &mut PatchLog,
     ) {
+        let end_pos = op.pos;
+        let op = &op.bld;
         if op.insert {
             if op.is_mark() {
-                if let crate::types::OpType::MarkEnd(_) = op.action {
+                //if let crate::types::OpType::MarkEnd(_) = op.op_type() {
+                if op.is_mark_end() {
                     let encoding = patch_log.text_rep().encoding(obj.typ);
                     let mut index = 0;
                     let mut marks = MarkStateMachine::default();
@@ -1139,7 +1115,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     let mut value = ScalarValue::Null;
                     let mut start = None;
                     let target = op.id.prev();
-                    let end_pos = op.pos;
+                    //let end_pos = op.pos;
                     for op in doc.ops().iter_obj(&obj.id).visible(None).top_ops() {
                         if op.pos == end_pos {
                             break;
@@ -1185,7 +1161,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     }
                 }
             // TODO - move this into patch_log()
-            } else if obj.typ == ObjType::Text && !op.action.is_block() {
+            } else if obj.typ == ObjType::Text && !op.is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
                 patch_log.insert(obj.id, self.index, op.hydrate_value(), op.id, false);
@@ -1272,342 +1248,6 @@ impl<'a> OpsFound<'a> {
     }
 }
 
-/*
-#[derive(Debug, Clone)]
-struct Columns {
-    id_actor: ColumnData<ActorCursor>,
-    id_ctr: ColumnData<DeltaCursor>,
-    obj_actor: ColumnData<ActorCursor>,
-    obj_ctr: ColumnData<UIntCursor>,
-    key_actor: ColumnData<ActorCursor>,
-    key_ctr: ColumnData<DeltaCursor>,
-    key_str: ColumnData<StrCursor>,
-    succ_count: ColumnData<UIntCursor>,
-    succ_actor: ColumnData<ActorCursor>,
-    succ_ctr: ColumnData<DeltaCursor>,
-    insert: ColumnData<BooleanCursor>,
-    action: ColumnData<ActionCursor>,
-    value_meta: ColumnData<MetaCursor>,
-    value: ColumnData<RawCursor>,
-    mark_name: ColumnData<StrCursor>,
-    expand: ColumnData<BooleanCursor>,
-}
-
-impl Default for Columns {
-    fn default() -> Self {
-        Self {
-            id_actor: ColumnData::new(),
-            id_ctr: ColumnData::new(),
-            obj_actor: ColumnData::new(),
-            obj_ctr: ColumnData::new(),
-            key_actor: ColumnData::new(),
-            key_ctr: ColumnData::new(),
-            key_str: ColumnData::new(),
-            succ_count: ColumnData::new(),
-            succ_actor: ColumnData::new(),
-            succ_ctr: ColumnData::new(),
-            insert: ColumnData::new(),
-            action: ColumnData::new(),
-            value_meta: ColumnData::new(),
-            value: ColumnData::new(),
-            mark_name: ColumnData::new(),
-            expand: ColumnData::new(),
-        }
-    }
-}
-
-impl Columns {
-    fn write_unless_empty<C: ColumnCursor>(
-        spec: &ColumnSpec,
-        c: &ColumnData<C>,
-        data: &mut Vec<u8>,
-    ) -> Option<RawColumn<Uncompressed>> {
-        if !c.is_empty() || spec.id() == ColumnId::new(3) {
-            let range = c.write(data);
-            if !range.is_empty() {
-                return Some(RawColumn::new(*spec, range));
-            }
-        }
-        None
-    }
-
-    fn export_column(
-        &self,
-        spec: &ColumnSpec,
-        data: &mut Vec<u8>,
-    ) -> Option<RawColumn<Uncompressed>> {
-        match *spec {
-            ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.id_actor, data),
-            ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.id_ctr, data),
-            OBJ_ID_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.obj_actor, data),
-            OBJ_ID_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.obj_ctr, data),
-            KEY_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.key_actor, data),
-            KEY_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.key_ctr, data),
-            KEY_STR_COL_SPEC => Self::write_unless_empty(spec, &self.key_str, data),
-            INSERT_COL_SPEC => Self::write_unless_empty(spec, &self.insert, data),
-            ACTION_COL_SPEC => Self::write_unless_empty(spec, &self.action, data),
-            MARK_NAME_COL_SPEC => Self::write_unless_empty(spec, &self.mark_name, data),
-            EXPAND_COL_SPEC => Self::write_unless_empty(spec, &self.expand, data),
-            SUCC_COUNT_COL_SPEC => Self::write_unless_empty(spec, &self.succ_count, data),
-            SUCC_ACTOR_COL_SPEC => Self::write_unless_empty(spec, &self.succ_actor, data),
-            SUCC_COUNTER_COL_SPEC => Self::write_unless_empty(spec, &self.succ_ctr, data),
-            VALUE_META_COL_SPEC => Self::write_unless_empty(spec, &self.value_meta, data),
-            VALUE_COL_SPEC => Self::write_unless_empty(spec, &self.value, data),
-            _ => None,
-        }
-    }
-
-    fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {
-        let mut data = vec![];
-
-        let mut cols = ALL_COLUMN_SPECS;
-        cols.sort();
-
-        let raw = cols
-            .iter()
-            .filter_map(|spec| self.export_column(spec, &mut data))
-            .collect();
-
-        (raw, data)
-    }
-
-    fn load_column<C: ColumnCursor>(
-        spec: ColumnSpec,
-        cols: &BTreeMap<ColumnSpec, Range<usize>>,
-        data: &Arc<Vec<u8>>,
-        m: &ScanMeta,
-        len: usize,
-    ) -> Result<ColumnData<C>, PackError> {
-        if let Some(range) = cols.get(&spec) {
-            let column = ColumnData::external(data.clone(), range.clone(), m)?;
-            /*
-                        println!(
-                            "spec={:?} range={:?} len={:?} column_len={:?}",
-                            spec, range, len, column.len
-                        );
-                        println!("::{:?}", &data[range.clone()]);
-                        println!("::{:?}", column.iter().collect::<Vec<_>>());
-                        assert!(column.len == len || len == 0);
-            */
-            Ok(column)
-        } else {
-            Ok(ColumnData::init_empty(len))
-        }
-    }
-
-    fn load<'a, I: Iterator<Item = &'a RawColumn<Uncompressed>>>(
-        iter: I,
-        data: Arc<Vec<u8>>,
-        actors: &[ActorId],
-    ) -> Result<Self, PackError> {
-        let m = ScanMeta {
-            actors: actors.len(),
-        };
-        let cols = iter.map(|c| (c.spec(), c.data())).collect();
-
-        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, &data, &m, 0)?;
-        let len = id_actor.len();
-
-        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
-        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, &data, &m, len)?;
-        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, &data, &m, len)?;
-        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, &data, &m, len)?;
-        let insert = Self::load_column(INSERT_COL_SPEC, &cols, &data, &m, len)?;
-        let action = Self::load_column(ACTION_COL_SPEC, &cols, &data, &m, len)?;
-        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, &data, &m, len)?;
-        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, &data, &m, len)?;
-
-        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, &data, &m, len)?;
-        let succ_len = succ_count.acc().as_usize();
-        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, &data, &m, succ_len)?;
-        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, &data, &m, succ_len)?;
-
-        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, &data, &m, len)?;
-        let value_len = value_meta.acc().as_usize();
-        let value = Self::load_column(VALUE_COL_SPEC, &cols, &data, &m, value_len)?;
-
-        Ok(Self {
-            id_actor,
-            id_ctr,
-            obj_actor,
-            obj_ctr,
-            key_actor,
-            key_ctr,
-            key_str,
-            succ_count,
-            succ_actor,
-            succ_ctr,
-            insert,
-            action,
-            value_meta,
-            value,
-            mark_name,
-            expand,
-        })
-    }
-
-    fn remap_actors<F>(&mut self, f: F)
-    where
-        F: Fn(Option<Cow<'_, ActorIdx>>) -> Option<Cow<'_, ActorIdx>>,
-    {
-        self.id_actor.remap(&f);
-        self.obj_actor.remap(&f);
-        self.key_actor.remap(&f);
-        self.succ_actor.remap(&f);
-    }
-
-    fn rewrite_with_new_actor(&mut self, idx: usize) {
-        let idx = idx as u32;
-        self.remap_actors(move |a| match a.as_deref() {
-            Some(&ActorIdx(actor)) if actor >= idx => Some(Cow::Owned(ActorIdx(actor + 1))),
-            _ => a,
-        });
-    }
-
-    fn rewrite_without_actor(&mut self, idx: usize) {
-        let idx = idx as u32;
-        self.remap_actors(move |a| match a.as_deref() {
-            Some(&ActorIdx(id)) if id > idx => Some(Cow::Owned(ActorIdx(id - 1))),
-            Some(&ActorIdx(id)) if id == idx => {
-                panic!("cant rewrite - actor is present")
-            }
-            _ => a,
-        });
-    }
-
-    #[inline(never)]
-    fn splice_value<O: OpLike>(&mut self, pos: usize, op: &O) {
-        let acc_pos = self.value_meta.splice(pos, 0, [op.meta_value()]).as_usize();
-        if let Some(v) = op.raw_value() {
-            self.value.splice(acc_pos, 0, [v]);
-        }
-    }
-
-    #[inline(never)]
-    fn splice_succ<O: OpLike>(&mut self, pos: usize, op: &O) {
-        let succ = op.succ();
-        let acc_pos = self
-            .succ_count
-            .splice(pos, 0, [succ.len() as u64])
-            .as_usize();
-        if !succ.is_empty() {
-            self.succ_actor
-                .splice(acc_pos, 0, succ.iter().map(|id| id.actoridx()));
-            self.succ_ctr
-                .splice(acc_pos, 0, succ.iter().map(|id| id.icounter()));
-        }
-    }
-
-    #[inline(never)]
-    fn insert<O: OpLike>(&mut self, pos: usize, op: &O) {
-        self.id_actor.splice(pos, 0, [op.id().actoridx()]);
-        self.id_ctr.splice(pos, 0, [op.id().icounter()]);
-        self.obj_actor.splice(pos, 0, [op.obj().actor()]);
-        self.obj_ctr.splice(pos, 0, [op.obj().counter()]);
-        self.key_actor.splice(pos, 0, [op.key().actor()]);
-        self.key_ctr.splice(pos, 0, [op.key().icounter()]);
-        self.key_str.splice(pos, 0, [op.key().key_str()]);
-        self.insert.splice(pos, 0, [op.insert()]);
-        self.action.splice(pos, 0, [op.action()]);
-        self.expand.splice(pos, 0, [op.expand()]);
-        self.mark_name.splice(pos, 0, [op.mark_name()]);
-        self.splice_value(pos, op);
-        self.splice_succ(pos, op);
-    }
-
-    #[cfg(test)]
-    fn new<'a, I: Iterator<Item = super::op::Op<'a>> + Clone>(ops: I) -> Self {
-        let mut op_set = Self::default();
-        for (i, op) in ops.enumerate() {
-            op_set.insert(i, &op);
-        }
-        op_set
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.id_actor.len()
-    }
-
-    pub(crate) fn sub_len(&self) -> usize {
-        self.succ_actor.len()
-    }
-
-    fn dump(&self) {
-        let mut id_a = self.id_actor.iter();
-        let mut id_c = self.id_ctr.iter();
-        let mut act = self.action.iter();
-        let mut obj_a = self.obj_actor.iter();
-        let mut obj_c = self.obj_ctr.iter();
-        let mut key_str = self.key_str.iter();
-        let mut key_a = self.key_actor.iter();
-        let mut key_c = self.key_ctr.iter();
-        let mut meta = self.value_meta.iter();
-        let mut value = self.value.raw_reader(0);
-        let mut succ = self.succ_count.iter();
-        let mut insert = self.insert.iter();
-        log!(":: id      obj     key        elem     ins act  suc value");
-        loop {
-            let id_a = fmt(id_a.next());
-            let id_c = fmt(id_c.next());
-            let obj_a = fmt(obj_a.next());
-            let obj_c = fmt(obj_c.next());
-            let act = fmt(act.next());
-            let insert = insert.next();
-            let insert = if insert.flatten().as_deref() == Some(&true) {
-                "t"
-            } else {
-                "-"
-            };
-            let key_s = fmt(key_str.next());
-            let key_a = fmt(key_a.next());
-            let key_c = fmt(key_c.next());
-            let succ = fmt(succ.next());
-            let m = meta.next();
-            let v = if let Some(Some(m)) = m {
-                let raw_data = value.read_next(m.length()).unwrap_or(&[]);
-                ScalarValue::from_raw(*m, raw_data).unwrap()
-            } else {
-                ScalarValue::Null
-            };
-            if id_a == NONE && id_c == NONE && obj_a == NONE && obj_c == NONE {
-                break;
-            }
-            log!(
-                ":: {:7} {:7} {:10} {:8} {:3} {:3}  {:1}   {}",
-                format!("({},{})", id_c, id_a),
-                format!("({},{})", obj_c, obj_a),
-                key_s,
-                format!("({},{})", key_c, key_a),
-                insert,
-                act,
-                succ,
-                v,
-            );
-        }
-    }
-}
-*/
-
-/*
-pub(super) trait OpLike: std::fmt::Debug {
-    fn id(&self) -> OpId;
-    fn obj(&self) -> ObjId;
-    fn action(&self) -> Action;
-    fn key(&self) -> KeyRef<'_>;
-    fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
-    fn meta_value(&self) -> ValueMeta;
-    fn insert(&self) -> bool;
-    fn expand(&self) -> bool;
-    // allocation
-    fn succ(&self) -> Vec<OpId> {
-        vec![]
-    }
-    fn mark_name(&self) -> Option<Cow<'_, str>>;
-}
-*/
-
 struct IterObjIds<'a> {
     ctr: ColumnDataIter<'a, UIntCursor>,
     actor: ColumnDataIter<'a, ActorCursor>,
@@ -1662,7 +1302,7 @@ mod tests {
     use crate::{
         op_set2::{
             op::SuccCursors,
-            packer::{ColumnData, DeltaCursor},
+            packer::{ColumnData, DeltaCursor, IntCursor},
             types::{Action, ActorCursor, ScalarValue},
             KeyRef,
         },

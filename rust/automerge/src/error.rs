@@ -2,6 +2,7 @@ use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
+use packer::PackError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -12,6 +13,8 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate actor {0}: possible document clone")]
+    DuplicateActorId(ActorId),
     #[error("general failure")]
     Fail,
     #[error("invalid actor ID `{0}`")]
@@ -63,6 +66,8 @@ pub enum AutomergeError {
     HydrateError(#[from] HydrateError),
     #[error("patch logs cannot be shared between documents")]
     PatchLogMismatch,
+    #[error(transparent)]
+    EncodingError(#[from] PackError),
 }
 
 impl PartialEq for AutomergeError {

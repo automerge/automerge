@@ -8,7 +8,7 @@ use crate::exid::ExId;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
-use crate::op_set2::{Op, OpBuilder2, OpSet, OpSetCheckpoint, PropRef, SuccInsert};
+use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue};
 use crate::Automerge;
@@ -25,7 +25,7 @@ pub(crate) struct TransactionInner {
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
-    pending: Vec<OpBuilder2>,
+    pending: Vec<TxOp>,
 }
 
 /// Arguments required to create a new transaction
@@ -244,30 +244,12 @@ impl TransactionInner {
         OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
-    fn next_insert(
-        &mut self,
-        obj: ObjMeta,
-        pos: usize,
-        elemid: ElemId,
-        value: ScalarValue,
-    ) -> OpBuilder2 {
-        OpBuilder2 {
-            id: self.next_id(),
-            obj,
-            pos,
-            index: 0,
-            action: OpType::Put(value),
-            key: elemid.into(),
-            insert: true,
-            pred: vec![],
-        }
-    }
-
-    fn next_delete(&mut self, obj: ObjMeta, elemid: ElemId, ops: &[Op<'_>]) -> OpBuilder2 {
-        OpBuilder2::del(
+    fn next_delete(&mut self, obj: ObjMeta, index: usize, elemid: ElemId, ops: &[Op<'_>]) -> TxOp {
+        TxOp::list_del(
             self.next_id(),
             obj,
-            elemid.into(),
+            index,
+            elemid,
             ops.iter().map(|op| op.id),
         )
     }
@@ -276,14 +258,14 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        op: OpBuilder2,
+        op: TxOp,
         succ: &[SuccInsert],
     ) {
         if !op.is_delete() {
             doc.ops_mut().splice(op.pos, &[&op]);
         }
 
-        doc.ops_mut().add_succ(succ, op.id);
+        doc.ops_mut().add_succ(succ);
 
         self.finalize_op(patch_log, &op, None);
 
@@ -342,18 +324,10 @@ impl TransactionInner {
 
         let marks = query.marks;
         let pos = query.pos;
-        let key = query.elemid.into();
 
-        let op = OpBuilder2 {
-            id,
-            obj: *obj,
-            pos,
-            index,
-            action,
-            key,
-            insert: true,
-            pred: vec![],
-        };
+        //let key = query.elemid.into();
+
+        let op = TxOp::insert(id, *obj, pos, index, action, query.elemid);
 
         doc.ops_mut().splice(op.pos, &[&op]);
         self.finalize_op(patch_log, &op, marks);
@@ -403,16 +377,8 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let op = OpBuilder2 {
-            id,
-            obj: *obj,
-            pos: query.end_pos,
-            index: 0,
-            action,
-            key: prop.into(),
-            insert: false,
-            pred: query.ops.iter().map(|op| op.id).collect(),
-        };
+        let pred = query.ops.iter().map(|op| op.id).collect();
+        let op = TxOp::map(id, *obj, query.end_pos, action, prop, pred);
 
         let inc_value = op.get_increment_value();
 
@@ -439,10 +405,10 @@ impl TransactionInner {
             doc.ops()
                 .seek_ops_by_index(&obj.id, index, ListEncoding::List, self.scope.as_ref());
         let id = self.next_id();
-        let key = query
+        let eid = query
             .ops
             .first()
-            .map(|op| op.elemid_or_key())
+            .and_then(|op| op.cursor().ok())
             .ok_or(AutomergeError::InvalidIndex(index))?;
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
@@ -457,16 +423,18 @@ impl TransactionInner {
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = OpBuilder2 {
-            id,
-            obj: *obj,
-            pos: query.end_pos,
-            index,
-            action,
-            key: key.into_owned(),
-            insert: false,
-            pred,
-        };
+        let op = TxOp::list(id, *obj, query.end_pos, index, action, eid, pred);
+        /*
+                    id,
+                    obj: *obj,
+                    pos: query.end_pos,
+                    index,
+                    action,
+                    key: key.into_owned(),
+                    insert: false,
+                    pred,
+                };
+        */
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -625,14 +593,14 @@ impl TransactionInner {
             };
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
-            let op = self.next_delete(obj, query_elemid, &query.ops);
+            let op = self.next_delete(obj, index, query_elemid, &query.ops);
             let ops_pos = query
                 .ops
                 .iter()
-                .map(|o| o.add_succ(op.id, None))
+                .map(|o| o.add_succ(op.id(), None))
                 .collect::<Vec<_>>();
 
-            doc.ops_mut().add_succ(&ops_pos, op.id);
+            doc.ops_mut().add_succ(&ops_pos);
 
             deleted += step;
 
@@ -657,9 +625,9 @@ impl TransactionInner {
             let start_pos = pos;
 
             for v in &values {
-                let op = self.next_insert(obj, pos, elemid, v.clone());
+                let op = TxOp::insert_val(self.next_id(), obj, pos, v.clone(), elemid);
 
-                elemid = ElemId(op.id);
+                elemid = ElemId(op.id());
 
                 self.pending.push(op);
                 pos += 1;
@@ -752,7 +720,6 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
 
-        let action = OpType::Make(ObjType::Map);
         let encoding = patch_log.text_rep().encoding(obj.typ);
 
         let query = doc
@@ -760,20 +727,10 @@ impl TransactionInner {
             .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
 
         let pos = query.pos;
-        let key = query.elemid.into();
 
         let id = self.next_id();
 
-        let op = OpBuilder2 {
-            id,
-            obj,
-            pos,
-            index,
-            action,
-            key,
-            insert: true,
-            pred: vec![],
-        };
+        let op = TxOp::insert_obj(id, obj, pos, index, ObjType::Map, query.elemid);
 
         doc.ops_mut().splice(op.pos, &[&op]);
 
@@ -818,30 +775,19 @@ impl TransactionInner {
             .ok_or(AutomergeError::InvalidIndex(index))?;
         let block_id = target.id;
 
-        let key = target.elemid_or_key().into_owned();
+        let elemid = target.elemid_or_key().elemid().unwrap();
 
-        let action = OpType::Delete;
-
-        let op = OpBuilder2 {
-            id: self.next_id(),
-            obj: text_obj,
-            pos: 0,
-            index,
-            action,
-            key,
-            insert: false,
-            pred: vec![],
-        };
-
+        // FIXME - no clock?
         let found = doc
             .ops()
             .seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref())
             .unwrap();
-        // FIXME - no clock?
-        let index = found.index;
-        let succ_pos = vec![found.op.add_succ(op.id, None)];
 
-        doc.ops_mut().add_succ(&succ_pos, op.id);
+        let op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
+
+        let succ_pos = vec![found.op.add_succ(op.id(), None)];
+
+        doc.ops_mut().add_succ(&succ_pos);
 
         patch_log.delete_seq(text_obj.id, index, 1);
 
@@ -861,26 +807,22 @@ impl TransactionInner {
         self.split_block(doc, patch_log, text, index)
     }
 
-    fn finalize_op(
-        &mut self,
-        patch_log: &mut PatchLog,
-        op: &OpBuilder2,
-        marks: Option<Arc<MarkSet>>,
-    ) {
-        let obj = op.obj();
+    fn finalize_op(&mut self, patch_log: &mut PatchLog, op: &TxOp, marks: Option<Arc<MarkSet>>) {
+        let obj_typ = op.obj_type;
+        let obj = op.bld.obj;
         if patch_log.is_active() {
-            if op.insert {
+            if op.bld.insert {
                 if !op.is_mark() {
-                    assert!(obj.typ.is_sequence());
-                    match (obj.typ, op.prop()) {
+                    assert!(obj_typ.is_sequence());
+                    match (obj_typ, op.prop()) {
                         (ObjType::List, PropRef::Seq(index)) => {
-                            patch_log.insert(obj.id, index, op.hydrate_value(), op.id, false);
+                            patch_log.insert(obj, index, op.hydrate_value(), op.id(), false);
                         }
                         (ObjType::Text, PropRef::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                patch_log.insert(obj.id, index, op.hydrate_value(), op.id, false);
+                                patch_log.insert(obj, index, op.hydrate_value(), op.id(), false);
                             } else {
-                                patch_log.splice(obj.id, index, op.as_str(), marks);
+                                patch_log.splice(obj, index, op.as_str(), marks);
                             }
                         }
                         _ => {}
@@ -888,13 +830,13 @@ impl TransactionInner {
                 }
             } else if op.is_delete() {
                 match op.prop() {
-                    PropRef::Seq(index) => patch_log.delete_seq(obj.id, index, 1),
-                    PropRef::Map(key) => patch_log.delete_map(obj.id, key),
+                    PropRef::Seq(index) => patch_log.delete_seq(obj, index, 1),
+                    PropRef::Map(key) => patch_log.delete_map(obj, key),
                 }
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment2(obj.id, op.prop(), value, op.id);
+                patch_log.increment2(obj, op.prop(), value, op.id());
             } else {
-                patch_log.put2(obj.id, op.prop(), op.hydrate_value(), op.id, false, false);
+                patch_log.put2(obj, op.prop(), op.hydrate_value(), op.id(), false, false);
             }
         }
     }

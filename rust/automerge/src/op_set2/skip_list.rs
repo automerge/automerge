@@ -2,9 +2,11 @@
 
 use fxhash::FxBuildHasher;
 //use im::HashMap;
+//use std::sync::Arc;
 use std::collections::HashMap;
-use rand::rngs::ThreadRng;
-use rand::Rng;
+//use rand::rngs::ThreadRng;
+use rand::prelude::*;
+//use rand::Rng;
 use std::cmp::{max, min};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -278,7 +280,7 @@ where
             level: 1,
         };
         let len = 0;
-        let rng = rand::thread_rng();
+        let rng = rand::rng();
         SkipList {
             nodes,
             head,
@@ -397,8 +399,32 @@ where
         suc
     }
 
+    pub(crate) fn splice<I>(&mut self, pos: usize, keys: I) -> bool where I: IntoIterator<Item = K> {
+      let mut prev = if pos == 0 {
+        None
+      } else {
+        self.key_of(pos - 1).cloned()
+      };
+      for k in keys.into_iter() {
+        self.insert(prev.as_ref(), k.clone());
+        prev = Some(k);
+      }
+      true
+    }
+
     pub(crate) fn insert_head(&mut self, key: K) -> bool {
         self.insert(None, key)
+    }
+
+    pub(crate) fn push(&mut self, key: K) -> bool {
+        if self.len == 0 {
+          self.insert(None, key)
+        } else {
+            self.key_of(self.len - 1)
+                .cloned()
+                .map(|suc| self.insert_after(&suc, key))
+                .unwrap_or(false)
+        }
     }
 
     pub(crate) fn insert_after(&mut self, predecessor: &K, key: K) -> bool {
@@ -471,6 +497,8 @@ where
         // Create random number between 0 and 2^32 - 1
         // Count leading zeros in that 32-bit number
         let rand: u32 = self.rng.gen();
+        //let rand: u32 = rand::thread_rng().gen();
+
         let mut level = 1;
         while rand < 1 << (32 - 2 * level) && level < 16 {
             level += 1

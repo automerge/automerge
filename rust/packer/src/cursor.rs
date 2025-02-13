@@ -119,6 +119,15 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 }
 
+impl<'a, T: Packable<Owned = T>> Run<'a, T> {
+    pub fn init(count: usize, value: T) -> Self {
+        Self {
+            count,
+            value: Some(Cow::Owned(value)),
+        }
+    }
+}
+
 impl<'a> Run<'a, i64> {
     pub fn delta(&self) -> i64 {
         self.count as i64 * self.value.as_deref().cloned().unwrap_or(0)
@@ -194,8 +203,12 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         v.is_none()
     }
 
-    fn contains(&self, run: &Run<'_, Self::Item>, agg: Agg) -> bool {
-        agg == <Self::Item>::maybe_agg(&run.value)
+    fn contains(&self, run: &Run<'_, Self::Item>, agg: Agg) -> Option<Range<usize>> {
+        if agg == <Self::Item>::maybe_agg(&run.value) {
+            Some(0..run.count)
+        } else {
+            None
+        }
     }
 
     fn pop<'a>(&self, run: &mut Run<'a, Self::Item>) -> Option<Option<Cow<'a, Self::Item>>> {
@@ -231,12 +244,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         size: usize,
     ) -> Self::State<'a>;
 
-    fn splice_encoder(
-        index: usize,
-        del: usize,
-        slab: &Slab,
-        capacity: usize,
-    ) -> SpliceEncoder<'_, Self>;
+    fn splice_encoder(index: usize, del: usize, slab: &Slab) -> SpliceEncoder<'_, Self>;
 
     fn slab_size() -> usize;
 
@@ -297,25 +305,39 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         Self::load_with(data, &ScanMeta::default())
     }
 
-    fn splice<'a, 'b, I, M>(slab: &'a Slab, index: usize, del: usize, values: I) -> SpliceResult
+    fn splice<'a, 'b, I, M>(
+        slab: &'a Slab,
+        index: usize,
+        del: usize,
+        values: I,
+        #[cfg(debug_assertions)] debug: (&mut Vec<Self::Export>, Range<usize>),
+    ) -> SpliceResult
     where
         M: MaybePackable<'b, Self::Item>,
-        I: Iterator<Item = M> + ExactSizeIterator,
+        I: Iterator<Item = M>,
         Self::Item: 'b,
     {
-        let mut encoder = Self::splice_encoder(index, del, slab, values.len());
+        #[cfg(debug_assertions)]
+        let mut copy_of_values = vec![];
+        let mut encoder = Self::splice_encoder(index, del, slab);
         let mut add = 0;
         let mut value_acc = Acc::new();
         for v in values {
             value_acc += v.agg();
             let opt_v = v.maybe_packable();
+            #[cfg(debug_assertions)]
+            copy_of_values.push(opt_v.clone());
             add += encoder.append_item(opt_v);
         }
         assert!(encoder.overflow == 0);
-        let deleted = encoder.deleted;
-        let acc = encoder.acc;
+
+        #[cfg(debug_assertions)]
+        Self::export_splice(debug.0, debug.1, copy_of_values.into_iter());
+
+        let del = encoder.deleted;
+        let group = encoder.acc;
         let slabs = encoder.finish();
-        if deleted == 0 {
+        if del == 0 {
             assert_eq!(
                 slabs.iter().map(|s| s.acc()).sum::<Acc>(),
                 slab.acc() + value_acc
@@ -328,7 +350,12 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
         if slabs.is_empty() {
             SpliceResult::Noop
         } else {
-            SpliceResult::Replace(add, deleted, acc, slabs)
+            SpliceResult::Replace {
+                add,
+                del,
+                group,
+                slabs,
+            }
         }
     }
 
@@ -382,7 +409,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
 
     fn init_empty(len: usize) -> Slab {
         if len > 0 {
-            let mut writer = SlabWriter::<Self::Item>::new(usize::MAX, 2, false);
+            let mut writer = SlabWriter::<Self::Item>::new(usize::MAX, false);
             writer.flush_null(len);
             writer.finish().pop().unwrap_or_default()
         } else {
@@ -399,9 +426,12 @@ pub struct SpliceDel<'a, C: ColumnCursor> {
 }
 
 pub enum SpliceResult {
-    //Done(usize, usize),
-    //Add(usize, usize, Vec<Slab>),
-    Replace(usize, usize, Acc, Vec<Slab>),
+    Replace {
+        add: usize,
+        del: usize,
+        group: Acc,
+        slabs: Vec<Slab>,
+    },
     Noop,
 }
 
@@ -537,6 +567,7 @@ where
 {
     type Item = Run<'a, C::Item>;
 
+    #[inline(never)]
     fn next(&mut self) -> Option<Self::Item> {
         let run = self.cursor.next(self.slab)?;
         self.pos_left -= run.count;

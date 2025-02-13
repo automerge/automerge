@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
@@ -9,24 +10,20 @@ use itertools::Itertools;
 pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::{
-    ChangeMetadata, ChangeOp, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
+    ChangeMetadata, ChangeOp, KeyRef, OpBuilder, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
 use crate::change_graph::ChangeGraph;
 use crate::exid::ExId;
 use crate::hydrate;
-use crate::iter::{Keys, ListRange, MapRange};
-use crate::iter::{Spans, Values};
+use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
-
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
-#[allow(unused_imports)]
-use crate::types::ScalarValue;
 
 use crate::types::{ActorId, ChangeHash, Clock, ListEncoding, ObjId, ObjMeta, OpId, Value};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
@@ -182,17 +179,13 @@ impl std::default::Default for LoadOptions<'static> {
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
-    queue: Vec<Change>,
-    /// The history of changes that form this document, topologically sorted too.
-    //history: Vec<Change>,
+    pub(crate) queue: Vec<Change>,
     /// Graph of changes
-    change_graph: ChangeGraph,
-    /// Mapping from actor index to list of seqs seen for them.
-    //states: HashMap<usize, Vec<usize>>,
+    pub(crate) change_graph: ChangeGraph,
     /// Current dependencies of this document (heads hashes).
     deps: HashSet<ChangeHash>,
     /// The set of operations that form this document.
-    ops: OpSet,
+    pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
     /// The maximum operation counter this document has seen.
@@ -229,10 +222,10 @@ impl Automerge {
         self.change_graph.is_empty() && self.queue.is_empty()
     }
 
-    pub(crate) fn actor_id(&self) -> ActorId {
+    pub(crate) fn actor_id(&self) -> &ActorId {
         match &self.actor {
-            Actor::Unused(id) => id.clone(),
-            Actor::Cached(idx) => self.ops.get_actor(*idx).clone(),
+            Actor::Unused(id) => id,
+            Actor::Cached(idx) => self.ops.get_actor(*idx),
         }
     }
 
@@ -764,7 +757,7 @@ impl Automerge {
                     .on_partial_load(OnPartialLoad::Ignore)
                     .verification_mode(VerificationMode::Check),
             )?;
-            doc = doc.with_actor(self.actor_id());
+            doc = doc.with_actor(self.actor_id().clone());
             if patch_log.is_active() {
                 current_state::log_current_state_patches(&doc, patch_log);
             }
@@ -791,7 +784,7 @@ impl Automerge {
             .unwrap_or(0)
     }
 
-    fn duplicate_seq(&self, change: &Change) -> bool {
+    pub(crate) fn duplicate_seq(&self, change: &Change) -> bool {
         self.seq_for_actor(change.actor_id()) >= change.seq()
     }
 
@@ -801,7 +794,7 @@ impl Automerge {
     /// ignored.
     pub fn apply_changes(
         &mut self,
-        changes: impl IntoIterator<Item = Change>,
+        changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
         self.apply_changes_log_patches(
             changes,
@@ -811,7 +804,24 @@ impl Automerge {
 
     /// Like [`Self::apply_changes()`] but log the resulting changes to the current state of the
     /// document to `patch_log`
-    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change>>(
+    pub fn apply_changes_log_patches<I: IntoIterator<Item = Change> + Clone>(
+        &mut self,
+        changes: I,
+        patch_log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        /*
+                let mut tmp = self.clone();
+                let mut tmp_patch_log = patch_log.clone();
+                let heads1 = tmp.get_heads();
+                tmp.apply_changes_iter(changes.clone(), &mut tmp_patch_log)?;
+                let heads2 = tmp.get_heads();
+                tmp.diff(&heads1, &heads2, TextRepresentation::default());
+        */
+        self.apply_changes_batch_log_patches(changes, patch_log)
+        //self.apply_changes_iter(changes, patch_log)
+    }
+
+    pub(crate) fn apply_changes_iter<I: IntoIterator<Item = Change> + Clone>(
         &mut self,
         changes: I,
         patch_log: &mut PatchLog,
@@ -822,6 +832,9 @@ impl Automerge {
         // states of the OpSet we can make this cleaner.
         for c in changes {
             if !self.has_change(&c.hash()) {
+                if c.actor_id() == self.actor_id() {
+                    return Err(AutomergeError::DuplicateActorId(c.actor_id().clone()));
+                }
                 if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
                         c.seq(),
@@ -886,17 +899,23 @@ impl Automerge {
                     .into_iter()
                     .map(|id| id.map(&actors))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(ChangeOp {
-                    id,
-                    obj,
-                    key,
-                    action: c.action,
-                    val: c.val,
-                    mark_name: c.mark_name,
-                    expand: c.expand,
-                    insert: c.insert,
-                    pred,
-                })
+                let change = ChangeOp {
+                    pos: None,
+                    subsort: 0,
+                    succ: vec![],
+                    bld: OpBuilder {
+                        id,
+                        obj,
+                        key,
+                        action: c.action.try_into()?,
+                        value: c.val.into_ref(),
+                        mark_name: c.mark_name.map(String::from).map(Cow::Owned),
+                        expand: c.expand,
+                        insert: c.insert,
+                        pred,
+                    },
+                };
+                Ok(change)
             })
             .collect()
     }
@@ -937,6 +956,11 @@ impl Automerge {
             }
         }
         bytes
+    }
+
+    #[cfg(test)]
+    pub fn debug_cmp(&self, other: &Self) {
+        self.ops.debug_cmp(&other.ops);
     }
 
     /// Save the entirety of this document in a compact form.
@@ -1177,12 +1201,13 @@ impl Automerge {
         patch_log: &mut PatchLog,
         change: &[u8],
     ) -> Result<(), AutomergeError> {
-        let obj = self.get_obj_meta(op.obj)?;
+        //log!("op_obj={:?}",op.obj);
+        let obj = self.get_obj_meta(op.bld.obj)?;
         let encoding = patch_log.text_rep().encoding(obj.typ);
 
-        let found = self.ops.find_op_with_patch_log(&op, encoding);
+        let found = self.ops.find_op_with_patch_log(&op.bld, encoding);
 
-        if op.pred.len() != found.succ.len() {
+        if op.pred().len() != found.succ.len() {
             log!("Error: did not find all pred ops");
             log!("op={:?}", op);
             log!("found={:?}", found);
@@ -1194,21 +1219,21 @@ impl Automerge {
         let op = op.build(found.pos, obj);
 
         if patch_log.is_active() {
-            found.log_patches(&obj, &op, &op.pred, self, patch_log);
+            found.log_patches(&obj, &op, &op.bld.pred, self, patch_log);
         }
 
         let inc_amount = op.get_increment_value();
         let succ: Vec<_> = found
             .succ
             .iter()
-            .map(|o| o.add_succ(op.id, inc_amount))
+            .map(|o| o.add_succ(op.id(), inc_amount))
             .collect();
 
         if !op.is_delete() {
-            self.ops.splice(op.pos, &[&op]);
+            self.ops.splice(op.pos, &[op]);
         }
 
-        self.ops.add_succ(&succ, op.id);
+        self.ops.add_succ(&succ);
 
         Ok(())
     }
@@ -1977,23 +2002,14 @@ pub(crate) fn reconstruct_document<'a>(
     } = storage::load::reconstruct_opset(doc, mode)
         .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
 
-    // TODO - lets remove this
-    /*
-        let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (index, change) in changes.iter().enumerate() {
-            let actor_index = op_set.lookup_actor(change.actor_id()).unwrap();
-            actor_to_history.entry(actor_index).or_default().push(index);
-        }
-    */
-
-    Ok(Automerge {
+    let doc = Automerge {
         queue: vec![],
-        //history: changes,
-        //states: actor_to_history,
         change_graph,
         ops: op_set,
         deps: heads.into_iter().collect(),
         actor: Actor::Unused(ActorId::random()),
         max_op,
-    })
+    };
+
+    Ok(doc)
 }

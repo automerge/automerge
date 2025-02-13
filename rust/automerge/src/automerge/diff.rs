@@ -69,13 +69,14 @@ fn push_top<'a>(
     match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
-            top.replace(Winner {
+            let conflict = top.is_some();
+            let winner = Winner {
                 op: op.clone(),
-                //clock,
                 value_at,
                 cross_visible,
-                conflict: top.is_some(),
-            });
+                conflict,
+            };
+            top.replace(winner);
         }
     }
 }
@@ -134,7 +135,7 @@ impl<'a> Patch<'a> {
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
-        let mut diff = RichTextDiff::new(doc);
+        let mut diff = RichTextDiff::default();
         let ops_by_key = ops.diff(before, after).chunk_by(|d| d.op.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
@@ -163,8 +164,8 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             index + 1
         }
-        Patch::Update { before, after, .. } => {
-            let conflict = !before.conflict && after.conflict;
+        Patch::Update { after, .. } => {
+            let conflict = after.conflict;
             let value = after.value();
             let id = after.op.id;
             let expose = after.cross_visible;
@@ -253,8 +254,8 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 let expose = winner.cross_visible;
                 patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
-            Patch::Update { before, after, .. } => {
-                let conflict = !before.conflict && after.conflict;
+            Patch::Update { after, .. } => {
+                let conflict = after.conflict;
                 let value = after.value();
                 let id = after.op.id;
                 let expose = after.cross_visible;
@@ -290,23 +291,14 @@ fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     None
 }
 
-#[derive(Debug, Clone)]
-struct RichTextDiff<'a> {
-    //doc: &'a Automerge,
-    before: MarkStateMachine<'a>,
-    after: MarkStateMachine<'a>,
+#[derive(Debug, Default, Clone)]
+pub(crate) struct RichTextDiff<'a> {
+    pub(crate) before: MarkStateMachine<'a>,
+    pub(crate) after: MarkStateMachine<'a>,
 }
 
 impl<'a> RichTextDiff<'a> {
-    fn new(_doc: &'a Automerge) -> Self {
-        RichTextDiff {
-            //doc,
-            before: MarkStateMachine::default(),
-            after: MarkStateMachine::default(),
-        }
-    }
-
-    fn current(&self) -> Option<Arc<MarkSet>> {
+    pub(crate) fn current(&self) -> Option<Arc<MarkSet>> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();

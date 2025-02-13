@@ -1,6 +1,8 @@
-use super::op_set::{MarkIndexValue, OpSet};
+use super::op_set::{MarkIndexValue, ObjInfo, OpSet};
 use super::packer::{ColumnDataIter, DeltaCursor, IntCursor};
-use super::types::{Action, ActorCursor, ActorIdx, KeyRef, OpType, PropRef, ScalarValue};
+use super::types::{
+    Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
+};
 use super::{Value, ValueMeta};
 
 use crate::clock::Clock;
@@ -9,58 +11,162 @@ use crate::exid::ExId;
 use crate::hydrate;
 use crate::text_value::TextValue;
 use crate::types;
-use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, OpId};
+use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, ObjType, OpId};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fmt::Debug;
+
+pub(crate) trait AsBuilder: Debug {
+    fn as_builder(&self) -> &OpBuilder<'_>;
+}
+
+impl AsBuilder for ChangeOp {
+    fn as_builder(&self) -> &OpBuilder<'static> {
+        &self.bld
+    }
+}
+
+impl<'a> AsBuilder for OpBuilder<'a> {
+    fn as_builder(&self) -> &OpBuilder<'a> {
+        self
+    }
+}
+
+impl<'a> AsBuilder for &OpBuilder<'a> {
+    fn as_builder(&self) -> &OpBuilder<'a> {
+        self
+    }
+}
+
+impl AsBuilder for TxOp {
+    fn as_builder(&self) -> &OpBuilder<'static> {
+        &self.bld
+    }
+}
+
+impl AsBuilder for &TxOp {
+    fn as_builder(&self) -> &OpBuilder<'static> {
+        &self.bld
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChangeOp {
-    pub(crate) id: OpId,
-    pub(crate) obj: ObjId,
-    pub(crate) key: KeyRef<'static>,
-    pub(crate) insert: bool,
-    pub(crate) action: u64,
-    pub(crate) val: types::ScalarValue,
-    pub(crate) mark_name: Option<smol_str::SmolStr>,
-    pub(crate) expand: bool,
-    pub(crate) pred: Vec<OpId>,
+    pub(crate) succ: Vec<(OpId, Option<i64>)>,
+    pub(crate) pos: Option<usize>,
+    pub(crate) subsort: usize,
+    pub(crate) bld: OpBuilder<'static>,
 }
 
 impl ChangeOp {
-    pub(crate) fn build(self, pos: usize, obj: ObjMeta) -> OpBuilder2 {
-        OpBuilder2 {
-            id: self.id,
-            obj,
+    pub(crate) fn prop2_static(&self) -> Option<PropRef2<'static>> {
+        match &self.bld.key {
+            KeyRef::Map(s) => Some(PropRef2::Map(Cow::Owned(String::from(s.as_ref())))),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn prop2(&self) -> Option<PropRef2<'_>> {
+        match &self.bld.key {
+            KeyRef::Map(Cow::Owned(s)) => Some(PropRef2::Map(Cow::Borrowed(s))),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef2::Map(Cow::Borrowed(s))),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn mark_data(&self) -> Option<MarkData<'static>> {
+        let name = self.bld.mark_name.as_ref()?.clone();
+        let value = self.bld.value.clone();
+        Some(MarkData { name, value })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn op_type(&self) -> OpType<'static> {
+        OpType::from_action_and_value(
+            self.bld.action,
+            &self.bld.value,
+            &self.bld.mark_name,
+            self.bld.expand,
+        )
+    }
+
+    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
+        self.bld.hydrate_value()
+    }
+
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        self.bld.width(encoding)
+    }
+
+    pub(crate) fn visible(&self) -> bool {
+        !(self.bld.is_inc()
+            || self.bld.is_delete()
+            || self.succ.iter().any(|(_, inc)| inc.is_none()))
+    }
+
+    pub(crate) fn insert(&self) -> bool {
+        self.bld.insert
+    }
+
+    pub(crate) fn action(&self) -> Action {
+        self.bld.action
+    }
+    pub(crate) fn value(&self) -> &ScalarValue<'static> {
+        &self.bld.value
+    }
+
+    pub(crate) fn key(&self) -> &KeyRef<'static> {
+        &self.bld.key
+    }
+
+    pub(crate) fn pred(&self) -> &[OpId] {
+        &self.bld.pred
+    }
+
+    pub(crate) fn id(&self) -> OpId {
+        self.bld.id
+    }
+
+    pub(crate) fn elemid_or_key(&self) -> KeyRef<'_> {
+        if self.bld.insert {
+            KeyRef::Seq(ElemId(self.bld.id))
+        } else {
+            match &self.bld.key {
+                KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
+                _ => self.bld.key.clone(),
+            }
+        }
+    }
+
+    pub(crate) fn build(self, pos: usize, obj: ObjMeta) -> TxOp {
+        TxOp {
+            obj_type: obj.typ,
             pos,
             index: 0,
-            key: self.key,
-            action: crate::types::OpType::from_action_and_value(
-                self.action,
-                self.val,
-                self.mark_name,
-                self.expand,
-            ),
-            insert: self.insert,
-            pred: self.pred,
+            bld: self.bld,
+        }
+    }
+
+    pub(crate) fn get_increment_value(&self) -> Option<i64> {
+        match (self.bld.action, &self.bld.value) {
+            (Action::Increment, ScalarValue::Int(i)) => Some(*i),
+            (Action::Increment, ScalarValue::Uint(i)) => Some(*i as i64),
+            _ => None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OpBuilder2 {
-    pub(crate) id: OpId,
-    pub(crate) obj: ObjMeta,
-    pub(crate) pos: usize,
+pub(crate) struct TxOp {
+    pub(crate) obj_type: ObjType,
     pub(crate) index: usize,
-    pub(crate) key: KeyRef<'static>,
-    pub(crate) action: types::OpType,
-    pub(crate) insert: bool,
-    pub(crate) pred: Vec<OpId>,
+    pub(crate) pos: usize,
+    pub(crate) bld: OpBuilder<'static>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OpBuilder3<'a> {
+pub(crate) struct OpBuilder<'a> {
     pub(crate) id: OpId,
     pub(crate) obj: ObjId,
     pub(crate) action: Action,
@@ -69,33 +175,15 @@ pub(crate) struct OpBuilder3<'a> {
     pub(crate) insert: bool,
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<Cow<'a, str>>,
-    pub(super) pred: Vec<OpId>,
+    pub(crate) pred: Vec<OpId>,
 }
 
-impl OpBuilder2 {
+impl<'a> OpBuilder<'a> {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
-        match &self.action {
-            types::OpType::MarkBegin(_, _) => Some(MarkIndexValue::Start(self.id())),
-            types::OpType::MarkEnd(_) => Some(MarkIndexValue::End(self.id().prev())),
+        match (self.action, &self.mark_name) {
+            (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
+            (Action::Mark, None) => Some(MarkIndexValue::End(self.id.prev())),
             _ => None,
-        }
-    }
-
-    pub(crate) fn del<I: Iterator<Item = OpId>>(
-        id: OpId,
-        obj: ObjMeta,
-        key: KeyRef<'static>,
-        pred: I,
-    ) -> Self {
-        OpBuilder2 {
-            id,
-            obj,
-            pos: 0,
-            index: 0,
-            action: types::OpType::Delete,
-            key,
-            insert: false,
-            pred: pred.collect(),
         }
     }
 
@@ -109,8 +197,231 @@ impl OpBuilder2 {
         }
     }
 
+    pub(crate) fn is_inc(&self) -> bool {
+        self.action == Action::Increment
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        self.action == Action::Mark
+    }
+
+    pub(crate) fn is_mark_end(&self) -> bool {
+        self.action == Action::Mark && self.mark_name.is_none()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        match (self.action, &self.value) {
+            (Action::Set, ScalarValue::Str(s)) => s,
+            (Action::Mark, _) => "",
+            _ => "\u{fffc}",
+        }
+    }
+
+    pub(crate) fn is_block(&self) -> bool {
+        self.action == Action::MakeMap
+    }
+
+    pub(crate) fn is_delete(&self) -> bool {
+        self.action == Action::Delete
+    }
+
+    pub(crate) fn get_increment_value(&self) -> Option<i64> {
+        match (self.action, &self.value) {
+            (Action::Increment, ScalarValue::Int(i)) => Some(*i),
+            (Action::Increment, ScalarValue::Uint(i)) => Some(*i as i64),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_list_op(&self) -> bool {
+        self.key.elemid().is_some()
+    }
+
+    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
+        match self.action {
+            Action::MakeMap => hydrate::Value::from(ObjType::Map),
+            Action::MakeList => hydrate::Value::from(ObjType::List),
+            Action::MakeText => hydrate::Value::from(ObjType::Text),
+            Action::MakeTable => hydrate::Value::from(ObjType::Table),
+            Action::Set => hydrate::Value::from(&self.value),
+            Action::Mark if self.mark_name.is_some() => hydrate::Value::from(&self.value),
+            Action::Mark => hydrate::Value::Scalar("markEnd".into()),
+            _ => panic!("cant convert op into a value"),
+        }
+    }
+}
+
+impl TxOp {
+    pub(crate) fn id(&self) -> OpId {
+        self.bld.id
+    }
+
+    pub(crate) fn list(
+        id: OpId,
+        obj: ObjMeta,
+        pos: usize,
+        index: usize,
+        _action: types::OpType,
+        elemid: ElemId,
+        pred: Vec<OpId>,
+    ) -> Self {
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            obj_type: obj.typ,
+            pos,
+            index,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                action,
+                value,
+                expand,
+                mark_name,
+                key: KeyRef::Seq(elemid),
+                insert: false,
+                pred,
+            },
+        }
+    }
+
+    pub(crate) fn map(
+        id: OpId,
+        obj: ObjMeta,
+        pos: usize,
+        _action: types::OpType,
+        prop: String,
+        pred: Vec<OpId>,
+    ) -> Self {
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            obj_type: obj.typ,
+            index: 0,
+            pos,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                value,
+                action,
+                expand,
+                mark_name,
+                key: KeyRef::Map(Cow::Owned(prop)),
+                insert: false,
+                pred,
+            },
+        }
+    }
+
+    pub(crate) fn insert(
+        id: OpId,
+        obj: ObjMeta,
+        pos: usize,
+        index: usize,
+        _action: types::OpType,
+        elemid: ElemId,
+    ) -> Self {
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            obj_type: obj.typ,
+            pos,
+            index,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                action,
+                value,
+                expand,
+                mark_name,
+                key: KeyRef::Seq(elemid),
+                insert: true,
+                pred: vec![],
+            },
+        }
+    }
+
+    pub(crate) fn insert_val(
+        id: OpId,
+        obj: ObjMeta,
+        pos: usize,
+        value: types::ScalarValue,
+        elemid: ElemId,
+    ) -> Self {
+        let _action = types::OpType::Put(value);
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            pos,
+            index: 0,
+            obj_type: obj.typ,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                action,
+                value,
+                expand,
+                mark_name,
+                key: KeyRef::Seq(elemid),
+                insert: true,
+                pred: vec![],
+            },
+        }
+    }
+
+    pub(crate) fn insert_obj(
+        id: OpId,
+        obj: ObjMeta,
+        pos: usize,
+        index: usize,
+        obj_type: types::ObjType,
+        elemid: ElemId,
+    ) -> Self {
+        let _action = types::OpType::Make(obj_type);
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            obj_type: obj.typ,
+            pos,
+            index,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                action,
+                value,
+                expand,
+                mark_name,
+                key: elemid.into(),
+                insert: true,
+                pred: vec![],
+            },
+        }
+    }
+
+    pub(crate) fn list_del<I: IntoIterator<Item = OpId>>(
+        id: OpId,
+        obj: ObjMeta,
+        index: usize,
+        elemid: ElemId,
+        pred: I,
+    ) -> Self {
+        let _action = types::OpType::Delete;
+        let (action, value, expand, mark_name) = _action.clone().decompose();
+        TxOp {
+            obj_type: obj.typ,
+            pos: 0,
+            index,
+            bld: OpBuilder {
+                id,
+                obj: obj.id,
+                action,
+                value,
+                expand,
+                mark_name,
+                key: elemid.into(),
+                insert: false,
+                pred: pred.into_iter().collect(),
+            },
+        }
+    }
+
     pub(crate) fn prop(&self) -> PropRef<'_> {
-        if let KeyRef::Map(s) = &self.key {
+        if let KeyRef::Map(s) = &self.bld.key {
             PropRef::Map(s)
         } else {
             PropRef::Seq(self.index)
@@ -118,127 +429,332 @@ impl OpBuilder2 {
     }
 
     pub(crate) fn hydrate_value(&self) -> hydrate::Value {
-        match &self.action {
-            types::OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
-            types::OpType::Put(scalar) => hydrate::Value::from(scalar.clone()),
-            types::OpType::MarkBegin(_, mark) => hydrate::Value::from(mark.value.clone()),
-            types::OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
-            _ => panic!("cant convert op into a value"),
-        }
+        self.bld.hydrate_value()
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
-        if let types::OpType::Increment(i) = &self.action {
-            Some(*i)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn is_inc(&self) -> bool {
-        matches!(&self.action, types::OpType::Increment(_))
+        self.bld.get_increment_value()
     }
 
     pub(crate) fn is_delete(&self) -> bool {
-        self.action == OpType::Delete
+        self.bld.is_delete()
     }
 
     pub(crate) fn as_str(&self) -> &str {
-        self.action.to_str()
+        self.bld.as_str()
     }
 
     pub(crate) fn is_mark(&self) -> bool {
-        self.action.is_mark()
-    }
-
-    pub(crate) fn is_list_op(&self) -> bool {
-        self.key().elemid().is_some()
-    }
-
-    pub(crate) fn obj(&self) -> ObjMeta {
-        self.obj
+        self.bld.is_mark()
     }
 }
 
-impl OpLike for OpBuilder2 {
-    type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
+impl OpLike for &TxOp {
+    type SuccIter<'b> = std::array::IntoIter<OpId, 0> where Self: 'b;
+
+    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+        op.bld.mark_index()
+    }
+
+    fn width(op: &Self) -> u64 {
+        op.bld.width(ListEncoding::Text) as u64
+    }
+
+    fn visible(op: &Self) -> bool {
+        !op.bld.is_inc()
+    }
+
+    fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.bld.action).ok()?;
+        let parent = self.bld.obj;
+        Some(ObjInfo { parent, obj_type })
+    }
+
+    fn id_actor(op: &Self) -> ActorIdx {
+        op.as_builder().id.actoridx()
+    }
+    fn id_ctr(op: &Self) -> i64 {
+        op.as_builder().id.icounter()
+    }
+
+    fn succ_inc(_op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
+        let v: Vec<Option<i64>> = vec![];
+        Box::new(v.into_iter())
+    }
 
     fn succ(&self) -> Self::SuccIter<'_> {
         [].into_iter()
     }
 
     fn id(&self) -> OpId {
-        self.id
+        self.as_builder().id
     }
     fn obj(&self) -> ObjId {
-        self.obj.id
+        self.as_builder().obj
     }
-    fn action(&self) -> Action {
-        self.action.action()
+    fn action(o: &Self) -> Action {
+        o.as_builder().action
+    }
+
+    fn key_str(o: &Self) -> Option<&str> {
+        match &o.as_builder().key {
+            KeyRef::Map(Cow::Owned(s)) => Some(s),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(*s),
+            _ => None,
+        }
     }
 
     fn key(&self) -> KeyRef<'_> {
-        match &self.key {
+        match &self.as_builder().key {
             KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
-            _ => self.key.clone(),
+            _ => self.as_builder().key.clone(),
         }
     }
-    /*
-            fn elemid(&self) -> Option<ElemId> {
-                match &self.key {
-                    KeyRef::Seq(e) => Some(*e),
-                    _ => None,
-                }
-            }
-    */
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
-        self.action.to_raw()
+        self.as_builder().value.to_raw()
     }
     fn meta_value(&self) -> ValueMeta {
-        ValueMeta::from(self.action.value().as_ref())
+        ValueMeta::from(&self.as_builder().value)
     }
-    fn insert(&self) -> bool {
-        self.insert
+    fn insert(o: &Self) -> bool {
+        o.as_builder().insert
     }
-    fn mark_name(&self) -> Option<Cow<'_, str>> {
-        self.action.mark_name().map(Cow::Borrowed)
+    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
+        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
     }
-    fn expand(&self) -> bool {
-        self.action.expand()
+    fn expand(o: &Self) -> bool {
+        o.as_builder().expand
     }
 }
 
-impl PartialEq<OpBuilder2> for OpBuilder2 {
+impl OpLike for TxOp {
+    type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
+
+    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+        op.bld.mark_index()
+    }
+
+    fn width(op: &Self) -> u64 {
+        op.bld.width(ListEncoding::Text) as u64
+    }
+
+    fn visible(op: &Self) -> bool {
+        !op.bld.is_inc()
+    }
+
+    fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.bld.action).ok()?;
+        let parent = self.bld.obj;
+        Some(ObjInfo { parent, obj_type })
+    }
+
+    fn id_actor(op: &Self) -> ActorIdx {
+        op.as_builder().id.actoridx()
+    }
+    fn id_ctr(op: &Self) -> i64 {
+        op.as_builder().id.icounter()
+    }
+
+    fn succ_inc(_op: &Self) -> Box<dyn Iterator<Item = Option<i64>>> {
+        let v: Vec<Option<i64>> = vec![];
+        Box::new(v.into_iter())
+    }
+
+    fn succ(&self) -> Self::SuccIter<'_> {
+        [].into_iter()
+    }
+
+    fn id(&self) -> OpId {
+        self.as_builder().id
+    }
+    fn obj(&self) -> ObjId {
+        self.as_builder().obj
+    }
+    fn action(o: &Self) -> Action {
+        o.as_builder().action
+    }
+
+    fn key_str(o: &Self) -> Option<&str> {
+        match &o.as_builder().key {
+            KeyRef::Map(Cow::Owned(s)) => Some(s),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(*s),
+            _ => None,
+        }
+    }
+
+    fn key(&self) -> KeyRef<'_> {
+        match &self.as_builder().key {
+            KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
+            _ => self.as_builder().key.clone(),
+        }
+    }
+
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
+        self.as_builder().value.to_raw()
+    }
+    fn meta_value(&self) -> ValueMeta {
+        ValueMeta::from(&self.as_builder().value)
+    }
+    fn insert(o: &Self) -> bool {
+        o.as_builder().insert
+    }
+    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
+        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
+    }
+    fn expand(o: &Self) -> bool {
+        o.as_builder().expand
+    }
+}
+
+impl OpLike for ChangeOp {
+    type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
+
+    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+        op.bld.mark_index()
+    }
+
+    fn width(op: &Self) -> u64 {
+        if Self::visible(op) {
+            op.bld.width(ListEncoding::Text) as u64
+        } else {
+            0
+        }
+    }
+
+    fn visible(op: &Self) -> bool {
+        !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+    }
+
+    fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.bld.action).ok()?;
+        let parent = self.bld.obj;
+        Some(ObjInfo { parent, obj_type })
+    }
+
+    fn id_actor(op: &Self) -> ActorIdx {
+        op.as_builder().id.actoridx()
+    }
+    fn id_ctr(op: &Self) -> i64 {
+        op.as_builder().id.icounter()
+    }
+
+    fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
+        Box::new(op.succ.iter().map(|o| o.1))
+    }
+
+    fn succ(&self) -> Self::SuccIter<'_> {
+        Box::new(self.succ.iter().map(|o| o.0))
+    }
+
+    fn id(&self) -> OpId {
+        self.as_builder().id
+    }
+    fn obj(&self) -> ObjId {
+        self.as_builder().obj
+    }
+    fn action(o: &Self) -> Action {
+        o.as_builder().action
+    }
+
+    fn key_str(o: &Self) -> Option<&str> {
+        match &o.as_builder().key {
+            KeyRef::Map(Cow::Owned(s)) => Some(s),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(*s),
+            _ => None,
+        }
+    }
+
+    fn key(&self) -> KeyRef<'_> {
+        match &self.as_builder().key {
+            KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
+            _ => self.as_builder().key.clone(),
+        }
+    }
+
+    fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
+        self.as_builder().value.to_raw()
+    }
+    fn meta_value(&self) -> ValueMeta {
+        ValueMeta::from(&self.as_builder().value)
+    }
+    fn insert(o: &Self) -> bool {
+        o.as_builder().insert
+    }
+    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
+        o.as_builder().mark_name.as_deref().map(Cow::Borrowed)
+    }
+    fn expand(o: &Self) -> bool {
+        o.as_builder().expand
+    }
+}
+
+impl PartialEq<TxOp> for TxOp {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.bld.id == other.bld.id
     }
 }
 
-impl Eq for OpBuilder2 {}
+impl Eq for TxOp {}
 
-impl PartialOrd for OpBuilder2 {
+impl PartialOrd for TxOp {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for OpBuilder2 {
+impl Ord for TxOp {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.id.cmp(&other.id)
+        self.bld.id.cmp(&other.bld.id)
     }
 }
 
 impl<'a> OpLike for Op<'a> {
     type SuccIter<'b> = SuccCursors<'a> where Self: 'b;
+
+    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+        op.mark_index()
+    }
+
+    fn width(op: &Self) -> u64 {
+        op.width(ListEncoding::Text) as u64
+    }
+
+    fn visible(_op: &Self) -> bool {
+        true // FIXME
+    }
+
+    fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.action).ok()?;
+        let parent = self.obj;
+        Some(ObjInfo { parent, obj_type })
+    }
+
+    fn id_actor(op: &Self) -> ActorIdx {
+        op.id.actoridx()
+    }
+    fn id_ctr(op: &Self) -> i64 {
+        op.id.icounter()
+    }
+
     fn id(&self) -> OpId {
         self.id
     }
+
     fn obj(&self) -> ObjId {
         self.obj
     }
-    fn action(&self) -> Action {
-        self.action
+
+    fn action(o: &Self) -> Action {
+        o.action
+    }
+
+    fn key_str(o: &Self) -> Option<&str> {
+        match &o.key {
+            KeyRef::Map(Cow::Owned(s)) => Some(s),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(*s),
+            _ => None,
+        }
     }
 
     fn key(&self) -> KeyRef<'_> {
@@ -248,20 +764,29 @@ impl<'a> OpLike for Op<'a> {
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
         self.value.to_raw()
     }
+
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.value)
     }
+
+    fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_> {
+        Box::new(IncCursors(op.succ_cursors.clone()))
+    }
+
     fn succ(&self) -> Self::SuccIter<'_> {
         self.succ()
     }
-    fn insert(&self) -> bool {
-        self.insert
+
+    fn insert(o: &Self) -> bool {
+        o.insert
     }
-    fn expand(&self) -> bool {
-        self.expand
+
+    fn expand(o: &Self) -> bool {
+        o.expand
     }
-    fn mark_name(&self) -> Option<Cow<'_, str>> {
-        self.mark_name.clone()
+
+    fn mark_name(o: &Self) -> Option<Cow<'_, str>> {
+        o.mark_name.clone()
     }
 }
 
@@ -303,6 +828,7 @@ impl<'a> std::fmt::Debug for SuccCursors<'a> {
 }
 
 struct SuccIncCursors<'a>(SuccCursors<'a>);
+struct IncCursors<'a>(SuccCursors<'a>);
 
 impl<'a> Iterator for SuccCursors<'a> {
     type Item = OpId;
@@ -342,14 +868,29 @@ impl<'a> Iterator for SuccIncCursors<'a> {
     }
 }
 
+impl<'a> Iterator for IncCursors<'a> {
+    type Item = Option<i64>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.len == 0 {
+            None
+        } else {
+            self.0.len -= 1;
+            let inc = self.0.inc_values.next()?.as_deref().copied();
+            Some(inc)
+        }
+    }
+}
+
 impl<'a> ExactSizeIterator for SuccIncCursors<'a> {
     fn len(&self) -> usize {
         self.0.len()
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SuccInsert {
+    pub(crate) id: OpId,
     pub(crate) pos: usize,
     pub(crate) inc: Option<i64>,
     pub(crate) len: u64,
@@ -420,6 +961,7 @@ impl<'a> Op<'a> {
             sub_pos = succ.pos();
         }
         SuccInsert {
+            id,
             pos,
             inc,
             len,
@@ -547,7 +1089,7 @@ impl<'a> Op<'a> {
 
     pub(crate) fn hydrate_value(&self) -> hydrate::Value {
         match &self.action() {
-            OpType::Make(obj_type) => hydrate::Value::from(*obj_type), // hydrate::Value::Object(*obj_type),
+            OpType::Make(obj_type) => hydrate::Value::from(*obj_type),
             OpType::Put(scalar) => hydrate::Value::from(scalar.to_owned()),
             OpType::MarkBegin(_, mark) => hydrate::Value::from(&mark.value),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
@@ -575,8 +1117,8 @@ impl<'a> Op<'a> {
         self.action == Action::Mark
     }
 
-    pub(crate) fn build3(self, pred: Vec<OpId>) -> OpBuilder3<'a> {
-        OpBuilder3 {
+    pub(crate) fn build3(self, pred: Vec<OpId>) -> OpBuilder<'a> {
+        OpBuilder {
             id: self.id,
             obj: self.obj,
             action: self.action,
@@ -587,6 +1129,10 @@ impl<'a> Op<'a> {
             mark_name: self.mark_name,
             pred,
         }
+    }
+
+    pub(crate) fn visible(&self) -> bool {
+        !(self.is_inc() || self.succ_inc().any(|(_, inc)| inc.is_none()))
     }
 
     pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {
@@ -603,6 +1149,11 @@ impl<'a> Op<'a> {
             mark_name: None,
             succ_cursors: SuccCursors::default(),
         }
+    }
+
+    pub(crate) fn prop2(&self) -> Option<PropRef2<'a>> {
+        let key_str = self.key.key_str()?;
+        Some(PropRef2::Map(key_str))
     }
 }
 
@@ -631,6 +1182,8 @@ impl<'a> std::hash::Hash for Op<'a> {
 }
 
 impl<'a> Eq for Op<'a> {}
+
+// TODO - AS ChangeOp and OpLike fill almost the exact same function
 
 pub(crate) trait AsChangeOp {
     fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>>;
@@ -706,119 +1259,89 @@ impl<T: AsChangeOp> AsChangeOp for Option<T> {
     }
 }
 
-impl<'a> AsChangeOp for OpBuilder3<'a> {
+impl<B: AsBuilder> AsChangeOp for B {
     fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.obj.actor().map(Cow::Owned)
+        op.as_builder().obj.actor().map(Cow::Owned)
     }
 
     fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
-        op.obj.counter().map(Cow::Owned)
+        op.as_builder().obj.counter().map(Cow::Owned)
     }
 
     fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.key.actor().map(Cow::Owned)
+        op.as_builder().key.actor().map(Cow::Owned)
     }
     fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
-        op.key.icounter().map(Cow::Owned)
+        op.as_builder().key.icounter().map(Cow::Owned)
     }
     fn key_str(op: &Self) -> Option<Cow<'_, str>> {
-        op.key.key_str()
+        op.as_builder().key.key_str()
     }
     fn insert(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.insert))
+        Some(Cow::Owned(op.as_builder().insert))
     }
     fn action(op: &Self) -> Option<Cow<'_, Action>> {
-        Some(Cow::Owned(op.action))
+        Some(Cow::Owned(op.as_builder().action))
     }
     fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
-        op.value.to_raw()
+        op.as_builder().value.to_raw()
     }
     fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
-        Some(Cow::Owned(ValueMeta::from(&op.value)))
+        Some(Cow::Owned(ValueMeta::from(&op.as_builder().value)))
     }
     fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
-        Some(Cow::Owned(op.pred.len() as u64))
+        Some(Cow::Owned(op.as_builder().pred.len() as u64))
     }
     fn expand(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.expand))
+        Some(Cow::Owned(op.as_builder().expand))
     }
     fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
-        op.mark_name.clone()
+        op.as_builder().mark_name.clone()
     }
     fn op_id_ctr(op: &Self) -> u64 {
-        op.id.counter()
+        op.as_builder().id.counter()
     }
     fn pred(op: &Self) -> &[OpId] {
-        op.pred.as_slice()
+        op.as_builder().pred.as_slice()
     }
     fn size_estimate(op: &Self) -> usize {
         // largest in our bestiary was 23
-        op.value.to_raw().map(|s| s.len()).unwrap_or(0) + 25
+        op.as_builder().value.to_raw().map(|s| s.len()).unwrap_or(0) + 25
     }
 }
 
-impl AsChangeOp for OpBuilder2 {
-    fn obj_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.obj.id.actor().map(Cow::Owned)
-    }
-
-    fn obj_ctr(op: &Self) -> Option<Cow<'_, u64>> {
-        op.obj.id.counter().map(Cow::Owned)
-    }
-
-    fn key_actor(op: &Self) -> Option<Cow<'_, ActorIdx>> {
-        op.key.actor().map(Cow::Owned)
-    }
-    fn key_ctr(op: &Self) -> Option<Cow<'_, i64>> {
-        op.key.icounter().map(Cow::Owned)
-    }
-    fn key_str(op: &Self) -> Option<Cow<'_, str>> {
-        op.key.key_str()
-    }
-    fn insert(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.insert))
-    }
-    fn action(op: &Self) -> Option<Cow<'_, Action>> {
-        Some(Cow::Owned(op.action.action()))
-    }
-    fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
-        op.action.to_raw()
-    }
-    fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
-        Some(Cow::Owned(ValueMeta::from(op.action.value().as_ref())))
-    }
-    fn pred_count(op: &Self) -> Option<Cow<'_, u64>> {
-        Some(Cow::Owned(op.pred.len() as u64))
-    }
-    fn expand(op: &Self) -> Option<Cow<'_, bool>> {
-        Some(Cow::Owned(op.action.expand()))
-    }
-    fn mark_name(op: &Self) -> Option<Cow<'_, str>> {
-        op.action.mark_name().map(Cow::Borrowed)
-    }
-    fn op_id_ctr(op: &Self) -> u64 {
-        op.id.counter()
-    }
-    fn pred(op: &Self) -> &[OpId] {
-        op.pred.as_slice()
-    }
-    fn size_estimate(op: &Self) -> usize {
-        op.action.to_raw().map(|s| s.len()).unwrap_or(0) + 25
-    }
-}
-
-pub(super) trait OpLike: std::fmt::Debug {
-    type SuccIter<'b>: Iterator<Item = OpId> + ExactSizeIterator + 'b
+pub(crate) trait OpLike: Debug {
+    type SuccIter<'b>: ExactSizeIterator<Item = OpId> + 'b
     where
         Self: 'b;
+    fn id_actor(op: &Self) -> ActorIdx;
+    fn id_ctr(op: &Self) -> i64;
     fn id(&self) -> OpId;
     fn obj(&self) -> ObjId;
-    fn action(&self) -> Action;
+    fn obj_actor(op: &Self) -> Option<ActorIdx> {
+        op.obj().actor()
+    }
+    fn obj_ctr(op: &Self) -> Option<u64> {
+        op.obj().counter()
+    }
+    fn action(o: &Self) -> Action;
+    fn key_str(o: &Self) -> Option<&str>;
+    fn key_actor(op: &Self) -> Option<ActorIdx> {
+        op.key().actor()
+    }
+    fn key_ctr(op: &Self) -> Option<i64> {
+        op.key().icounter()
+    }
     fn key(&self) -> KeyRef<'_>;
     fn raw_value(&self) -> Option<Cow<'_, [u8]>>; // allocation
     fn meta_value(&self) -> ValueMeta;
-    fn insert(&self) -> bool;
-    fn expand(&self) -> bool;
+    fn insert(op: &Self) -> bool;
+    fn expand(op: &Self) -> bool;
     fn succ(&self) -> Self::SuccIter<'_>;
-    fn mark_name(&self) -> Option<Cow<'_, str>>;
+    fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
+    fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
+    fn mark_index(op: &Self) -> Option<MarkIndexValue>;
+    fn width(op: &Self) -> u64;
+    fn visible(op: &Self) -> bool;
+    fn obj_info(&self) -> Option<ObjInfo>;
 }

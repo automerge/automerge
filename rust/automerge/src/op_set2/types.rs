@@ -5,6 +5,7 @@ use crate::types;
 use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
 use crate::value;
 
+use std::cmp::Ordering;
 use std::fmt;
 
 use super::meta::ValueType;
@@ -85,18 +86,20 @@ impl fmt::Display for Action {
 }
 
 impl crate::types::OpType {
-    pub(crate) fn action(&self) -> Action {
-        match self {
-            Self::Make(ObjType::Map) => Action::MakeMap,
-            Self::Put(_) => Action::Set,
-            Self::Make(ObjType::List) => Action::MakeList,
-            Self::Delete => Action::Delete,
-            Self::Make(ObjType::Text) => Action::MakeText,
-            Self::Increment(_) => Action::Increment,
-            Self::Make(ObjType::Table) => Action::MakeTable,
-            Self::MarkBegin(_, _) | Self::MarkEnd(_) => Action::Mark,
+    /*
+        pub(crate) fn action(&self) -> Action {
+            match self {
+                Self::Make(ObjType::Map) => Action::MakeMap,
+                Self::Put(_) => Action::Set,
+                Self::Make(ObjType::List) => Action::MakeList,
+                Self::Delete => Action::Delete,
+                Self::Make(ObjType::Text) => Action::MakeText,
+                Self::Increment(_) => Action::Increment,
+                Self::Make(ObjType::Table) => Action::MakeTable,
+                Self::MarkBegin(_, _) | Self::MarkEnd(_) => Action::Mark,
+            }
         }
-    }
+    */
 }
 
 impl From<Action> for u64 {
@@ -110,6 +113,27 @@ impl From<Action> for u64 {
             Action::Increment => 5,
             Action::MakeTable => 6,
             Action::Mark => 7,
+        }
+    }
+}
+
+impl TryFrom<u64> for Action {
+    type Error = PackError;
+
+    fn try_from(action: u64) -> Result<Self, Self::Error> {
+        match action {
+            0 => Ok(Action::MakeMap),
+            1 => Ok(Action::Set),
+            2 => Ok(Action::MakeList),
+            3 => Ok(Action::Delete),
+            4 => Ok(Action::MakeText),
+            5 => Ok(Action::Increment),
+            6 => Ok(Action::MakeTable),
+            7 => Ok(Action::Mark),
+            other => Err(PackError::invalid_value(
+                "valid action (integer between 0 and 7)",
+                format!("unexpected integer: {}", other),
+            )),
         }
     }
 }
@@ -221,6 +245,15 @@ impl<'a> From<Value<'a>> for types::Value<'static> {
 }
 
 impl<'a> ScalarValue<'a> {
+    pub fn as_i64(&self) -> i64 {
+        match self {
+            Self::Int(i) | Self::Timestamp(i) => *i,
+            Self::Counter(c) => *c,
+            Self::Uint(i) => *i as i64,
+            _ => 0,
+        }
+    }
+
     pub fn str(s: &'a str) -> Self {
         Self::Str(Cow::Borrowed(s))
     }
@@ -289,11 +322,12 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(super) fn to_raw(&self) -> Option<Cow<'a, [u8]>> {
+    pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
         match self {
-            Self::Bytes(b) => Some(b.clone()),
+            Self::Bytes(Cow::Borrowed(b)) => Some(Cow::Borrowed(b)),
+            Self::Bytes(Cow::Owned(b)) => Some(Cow::Borrowed(b.as_slice())),
             Self::Str(Cow::Borrowed(s)) => Some(Cow::Borrowed(s.as_bytes())),
-            Self::Str(Cow::Owned(s)) => Some(Cow::Owned(s.as_bytes().to_vec())),
+            Self::Str(Cow::Owned(s)) => Some(Cow::Borrowed(s.as_bytes())),
             Self::Null => None,
             Self::Boolean(_) => None,
             Self::Uint(i) => {
@@ -303,7 +337,6 @@ impl<'a> ScalarValue<'a> {
             }
             Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
                 let mut out = Vec::new();
-                //let mut out = [8; u8];//Vec::new();
                 leb128::write::signed(&mut out, *i).unwrap();
                 Some(Cow::Owned(out))
             }
@@ -312,10 +345,7 @@ impl<'a> ScalarValue<'a> {
                 out.extend_from_slice(&f.to_le_bytes());
                 Some(Cow::Owned(out))
             }
-            Self::Unknown {
-                type_code: _,
-                bytes,
-            } => Some(bytes.clone()),
+            Self::Unknown { bytes, .. } => Some(bytes.clone()),
         }
     }
 
@@ -335,53 +365,120 @@ impl<'a> ScalarValue<'a> {
 // vs into a temp vec and then into memory
 
 impl crate::types::OpType {
-    pub(crate) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+    pub(crate) fn decompose(
+        self,
+    ) -> (
+        Action,
+        ScalarValue<'static>,
+        bool,
+        Option<Cow<'static, str>>,
+    ) {
+        let (a, v, x, m) = self.clone().decompose2();
+        let tmp = types::OpType::from_action_and_value(
+            a.into(),
+            v.clone().into(),
+            m.clone().map(|s| s.into()),
+            x,
+        );
+        assert_eq!(tmp, self);
+        (a, v, x, m)
+    }
+
+    pub(crate) fn decompose2(
+        self,
+    ) -> (
+        Action,
+        ScalarValue<'static>,
+        bool,
+        Option<Cow<'static, str>>,
+    ) {
         match self {
-            Self::Put(v) => v.to_raw(),
-            Self::Increment(i) => {
-                let mut out = Vec::new();
-                leb128::write::signed(&mut out, *i).unwrap();
-                Some(Cow::Owned(out))
-            }
-            Self::MarkBegin(_, crate::types::OldMarkData { value, .. }) => value.to_raw(),
-            _ => None,
+            Self::Make(ObjType::Map) => (Action::MakeMap, ScalarValue::Null, false, None),
+            Self::Make(ObjType::List) => (Action::MakeList, ScalarValue::Null, false, None),
+            Self::Make(ObjType::Text) => (Action::MakeText, ScalarValue::Null, false, None),
+            Self::Make(ObjType::Table) => (Action::MakeTable, ScalarValue::Null, false, None),
+            Self::Delete => (Action::Delete, ScalarValue::Null, false, None),
+            Self::Increment(i) => (Action::Increment, ScalarValue::Int(i), false, None),
+            Self::Put(val) => (Action::Set, val.into_ref(), false, None),
+            Self::MarkBegin(expand, md) => (
+                Action::Mark,
+                md.value.into_ref(),
+                expand,
+                Some(Cow::Owned(String::from(md.name))),
+            ),
+            Self::MarkEnd(expand) => (Action::Mark, ScalarValue::Null, expand, None),
         }
     }
+
+    /*
+        pub(crate) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+            match self {
+                Self::Put(v) => v.to_raw(),
+                Self::Increment(i) => {
+                    let mut out = Vec::new();
+                    leb128::write::signed(&mut out, *i).unwrap();
+                    Some(Cow::Owned(out))
+                }
+                Self::MarkBegin(_, crate::types::OldMarkData { value, .. }) => value.to_raw(),
+                _ => None,
+            }
+        }
+    */
 }
 
 impl crate::types::ScalarValue {
-    pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+    pub(crate) fn into_ref(self) -> ScalarValue<'static> {
         match self {
-            Self::Bytes(b) => Some(Cow::Borrowed(b)),
-            Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
-            Self::Null => None,
-            Self::Boolean(_) => None,
-            Self::Uint(i) => {
-                let mut out = Vec::new();
-                leb128::write::unsigned(&mut out, *i).unwrap();
-                Some(Cow::Owned(out))
-            }
-            Self::Counter(i) => {
-                let mut out = Vec::new();
-                leb128::write::signed(&mut out, i.start).unwrap();
-                Some(Cow::Owned(out))
-            }
-            Self::Int(i) | Self::Timestamp(i) => {
-                let mut out = Vec::new();
-                leb128::write::signed(&mut out, *i).unwrap();
-                Some(Cow::Owned(out))
-            }
-            Self::F64(f) => {
-                let mut out = Vec::new();
-                out.extend_from_slice(&f.to_le_bytes());
-                Some(Cow::Owned(out))
-            }
-            Self::Unknown {
-                type_code: _,
-                bytes,
-            } => Some(Cow::Borrowed(bytes)),
+            Self::Bytes(b) => ScalarValue::Bytes(Cow::Owned(b)),
+            Self::Str(s) => ScalarValue::Str(Cow::Owned(String::from(s))),
+            Self::Int(i) => ScalarValue::Int(i),
+            Self::Uint(i) => ScalarValue::Uint(i),
+            Self::F64(n) => ScalarValue::F64(n),
+            Self::Counter(c) => ScalarValue::Counter(c.into()),
+            Self::Timestamp(i) => ScalarValue::Timestamp(i),
+            Self::Boolean(b) => ScalarValue::Boolean(b),
+            Self::Null => ScalarValue::Null,
+            Self::Unknown { type_code, bytes } => ScalarValue::Unknown {
+                type_code,
+                bytes: Cow::Owned(bytes),
+            },
         }
     }
+
+    /*
+        pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+            match self {
+                Self::Bytes(b) => Some(Cow::Borrowed(b)),
+                Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
+                Self::Null => None,
+                Self::Boolean(_) => None,
+                Self::Uint(i) => {
+                    let mut out = Vec::new();
+                    leb128::write::unsigned(&mut out, *i).unwrap();
+                    Some(Cow::Owned(out))
+                }
+                Self::Counter(i) => {
+                    let mut out = Vec::new();
+                    leb128::write::signed(&mut out, i.start).unwrap();
+                    Some(Cow::Owned(out))
+                }
+                Self::Int(i) | Self::Timestamp(i) => {
+                    let mut out = Vec::new();
+                    leb128::write::signed(&mut out, *i).unwrap();
+                    Some(Cow::Owned(out))
+                }
+                Self::F64(f) => {
+                    let mut out = Vec::new();
+                    out.extend_from_slice(&f.to_le_bytes());
+                    Some(Cow::Owned(out))
+                }
+                Self::Unknown {
+                    type_code: _,
+                    bytes,
+                } => Some(Cow::Borrowed(bytes)),
+            }
+        }
+    */
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -486,9 +583,25 @@ pub(crate) enum PropRef<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PropRef2<'a> {
+    Map(Cow<'a, str>),
+    Seq(usize),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum KeyRef<'a> {
     Map(Cow<'a, str>),
     Seq(ElemId),
+}
+
+impl<'a> PartialOrd for KeyRef<'a> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Self::Map(s1), Self::Map(s2)) => Some(s1.cmp(s2)),
+            (Self::Seq(e1), Self::Seq(e2)) => Some(e1.cmp(e2)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -524,6 +637,15 @@ impl From<String> for KeyRef<'static> {
 }
 
 impl<'a> KeyRef<'a> {
+    #[allow(dead_code)]
+    pub(crate) fn as_ref<'b>(key: &'b KeyRef<'_>) -> KeyRef<'b> {
+        match key {
+            KeyRef::Map(Cow::Owned(s)) => KeyRef::Map(Cow::Borrowed(s)),
+            KeyRef::Map(Cow::Borrowed(s)) => KeyRef::Map(Cow::Borrowed(s)),
+            KeyRef::Seq(s) => KeyRef::Seq(*s),
+        }
+    }
+
     pub(crate) fn actor(&self) -> Option<ActorIdx> {
         match self {
             KeyRef::Map(_) => None,
@@ -545,12 +667,14 @@ impl<'a> KeyRef<'a> {
         }
     }
 
-    pub(crate) fn into_owned(self) -> KeyRef<'static> {
-        match self {
-            KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.to_string())),
-            KeyRef::Seq(e) => KeyRef::Seq(e),
+    /*
+        pub(crate) fn into_owned(self) -> KeyRef<'static> {
+            match self {
+                KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.to_string())),
+                KeyRef::Seq(e) => KeyRef::Seq(e),
+            }
         }
-    }
+    */
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
@@ -595,22 +719,7 @@ impl Packable for Action {
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
         let (len, result) = u64::unpack(buff)?;
-        let action = match *result {
-            0 => Action::MakeMap,
-            1 => Action::Set,
-            2 => Action::MakeList,
-            3 => Action::Delete,
-            4 => Action::MakeText,
-            5 => Action::Increment,
-            6 => Action::MakeTable,
-            7 => Action::Mark,
-            other => {
-                return Err(PackError::invalid_value(
-                    "valid action (integer between 0 and 7)",
-                    format!("unexpected integer: {}", other),
-                ))
-            }
-        };
+        let action = Action::try_from(*result)?;
         Ok((len, Cow::Owned(action)))
     }
 }

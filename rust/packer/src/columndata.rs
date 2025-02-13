@@ -11,6 +11,7 @@ use super::slab::{Slab, SlabTree, SpanTree};
 use super::Cow;
 
 use std::borrow::Borrow;
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
@@ -238,7 +239,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         );
     }
 
-    fn run_count(&self) -> usize {
+    pub fn run_count(&self) -> usize {
         self.run.as_ref().map(|e| e.count).unwrap_or_default()
     }
 
@@ -278,6 +279,14 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.check_pos();
     }
 
+    pub fn advance_to(&mut self, target: usize) {
+        assert!(target >= self.pos());
+        if target > self.pos() {
+            self.advance_by(target - self.pos());
+        }
+        //assert_eq!(target, self.pos()); // max can stop this
+    }
+
     fn slab_index(&self) -> usize {
         self.slabs.index() - 1
     }
@@ -287,7 +296,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     // we only read the first element of each node and never
     // from the first node as we arent always including its first element
 
-    fn binary_search_for<B>(&self, target: Option<B>) -> Option<usize>
+    fn binary_search_for<B>(&self, target: Option<B>, max: usize) -> Option<usize>
     where
         B: Borrow<C::Item> + Copy,
     {
@@ -295,7 +304,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let original_start = self.slab_index();
         let mut start = original_start;
         let mut end = slabs
-            .get_where_or_last(|a, next| self.max < a.pos() + next.pos())
+            .get_where_or_last(|a, next| max < a.pos() + next.pos())
             .index;
         let mut mid = (start + end + 1) / 2;
         while start < mid && mid < end {
@@ -315,35 +324,70 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub fn scope_to_value<B>(&mut self, value: Option<B>) -> Range<usize>
+    // this function assumes all values within its range are ordered
+    // will give undefined results otherwise
+    pub fn seek_to_value<B, R>(&mut self, value: Option<B>, range: R) -> Range<usize>
     where
-        B: Borrow<C::Item> + Copy,
+        B: Borrow<C::Item> + Copy + Debug,
+        C::Item: Ord,
+        R: RangeBounds<usize>,
     {
-        if let Some(index) = self.binary_search_for(value) {
+        let (min, max) = normalize_range(range);
+        let max = std::cmp::min(max, self.max);
+        if min > self.pos() {
+            self.advance_to(min);
+        }
+
+        if let Some(index) = self.binary_search_for(value, max) {
             self.reset_iter_to_slab_index(index);
         }
-        let pos = self.pos();
-        let mut start = pos;
-        let mut end = pos;
-        let mut found = false;
-        while let Some(run) = self.next_run() {
-            match (value, &run.value) {
-                (None, None) => found = true,
-                (None, Some(_)) => break,
-                (Some(a), Some(b)) if a.borrow() < b.borrow() => break,
-                (Some(a), Some(b)) if a.borrow() == b.borrow() => found = true,
-                _ => {}
+        let mut end = self.pos();
+        let mut first_run = self.run.take();
+        let mut found = None;
+        while let Some(mut run) = first_run.take().or_else(|| self.pop_run()) {
+            if run.count == 0 {
+                continue;
             }
-            if !found {
-                start += run.count
+            let c = run.count;
+            match _cmp(value, &run.value) {
+                Ordering::Equal if found.is_none() => {
+                    let mut copy = self.clone();
+                    copy.run = Some(run.clone());
+                    found = Some(copy);
+                }
+                Ordering::Greater => {}
+                Ordering::Equal => {}
+                Ordering::Less => {
+                    self.run = Some(run);
+                    break;
+                }
             }
-            end += run.count
+            self.pos += c;
+            end += c;
+            if self.pos >= max {
+                let delta = self.pos - max;
+                self.pos -= delta;
+                end -= delta;
+                run.count = delta;
+                self.run = Some(run);
+                break;
+            }
         }
+        if let Some(f) = found {
+            // go back
+            *self = f;
+        }
+        let start = std::cmp::min(self.pos, max);
+        let end = std::cmp::min(end, max);
         start..end
     }
 
     pub fn end_pos(&self) -> usize {
         self.max
+    }
+
+    pub fn set_max(&mut self, max: usize) {
+        self.max = max
     }
 
     pub fn to_vec(self) -> Vec<C::Export> {
@@ -482,7 +526,6 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
             self.next()
         } else if self.run_count() > n {
             self.pos += n + 1;
-            //            self.run.as_mut().and_then(|r| r.nth(n))
             let result = self.slab.cursor.pop_n(self.run.as_mut()?, n + 1);
             if self.pos > self.max {
                 None
@@ -504,6 +547,7 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    #[inline(never)]
     pub fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
         self.slabs.iter().flat_map(|s| s.run_iter::<C>())
     }
@@ -520,12 +564,13 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn scope_to_value<B, R>(&self, value: Option<B>, range: R) -> Range<usize>
     where
-        B: Borrow<C::Item> + Copy,
+        B: Borrow<C::Item> + Copy + Debug,
         R: RangeBounds<usize>,
+        C::Item: Ord,
     {
-        let (start, end) = normalize_range(range);
-        let mut iter = self.iter_range(start..end);
-        iter.scope_to_value(value)
+        //let (start, end) = normalize_range(range);
+        //let mut iter = self.iter_range(start..end);
+        self.iter().seek_to_value(value, range)
     }
 
     pub fn iter_range(&self, range: Range<usize>) -> ColumnDataIter<'_, C> {
@@ -584,22 +629,17 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
     where
         M: MaybePackable<'b, C::Item>,
-        I: IntoIterator<Item = M, IntoIter: ExactSizeIterator + Clone>,
+        I: IntoIterator<Item = M>,
         C::Item: 'b,
     {
         assert!(index <= self.len);
         assert!(!self.slabs.is_empty());
         let values = values.into_iter();
-        if values.len() == 0 && del == 0 {
+
+        let mut values = values.peekable();
+        if values.peek().is_none() && del == 0 {
             return Acc::new(); // really none
         }
-
-        #[cfg(debug_assertions)]
-        C::export_splice(
-            &mut self.debug,
-            index..(index + del),
-            values.clone().map(|e| e.maybe_packable()),
-        );
 
         let cursor = self
             .slabs
@@ -614,9 +654,21 @@ impl<C: ColumnCursor> ColumnData<C> {
             self.acc()
         );
 
-        match C::splice(cursor.element, index - cursor.weight.pos(), del, values) {
-            SpliceResult::Replace(add, del, g, mut slabs) => {
-                acc += g;
+        match C::splice(
+            cursor.element,
+            index - cursor.weight.pos(),
+            del,
+            values,
+            #[cfg(debug_assertions)]
+            (&mut self.debug, index..(index + del)),
+        ) {
+            SpliceResult::Replace {
+                add,
+                del,
+                group,
+                mut slabs,
+            } => {
+                acc += group;
                 C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
@@ -693,30 +745,32 @@ impl<C: ColumnCursor> ColumnData<C>
 where
     C::SlabIndex: HasMinMax,
 {
+    #[inline(never)]
     pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> Vec<usize> {
+        // This should be C::Item but right now min/max is Agg
+        // this will break for negative values
         let agg = agg.into();
         let mut results = vec![];
         if agg.is_none() {
             return results;
         }
-        self.slabs
+        for cursor in self
+            .slabs
             .get_each(|_, slab| agg >= slab.min() && agg <= slab.max())
-            .for_each(|cursor| {
-                let mut pos = cursor.weight.pos();
-                let mut iter = cursor.element.run_iter::<C>();
-                while let Some(mut run) = iter.next() {
-                    if iter.cursor.contains(&run, agg) {
-                        while let Some(value) = iter.cursor.pop(&mut run) {
-                            if <C::Item>::maybe_agg(&value) == agg {
-                                results.push(pos)
-                            }
-                            pos += 1;
-                        }
-                    } else {
-                        pos += run.count;
+        {
+            let mut pos = cursor.weight.pos();
+            let mut iter = cursor.element.run_iter::<C>();
+            assert!(cursor.element.min() <= agg);
+            assert!(cursor.element.max() >= agg);
+            while let Some(run) = iter.next() {
+                if let Some(range) = iter.cursor.contains(&run, agg) {
+                    for i in range {
+                        results.push(pos + i)
                     }
                 }
-            });
+                pos += run.count;
+            }
+        }
         results
     }
 }
@@ -748,6 +802,20 @@ where
             encoder.append_item(item.maybe_packable());
         }
         encoder.into_column_data()
+    }
+}
+
+fn _cmp<A, B, C>(a: Option<A>, b: &Option<B>) -> Ordering
+where
+    A: Borrow<C>,
+    B: Borrow<C>,
+    C: Ord + ?Sized,
+{
+    match (a, b) {
+        (Some(a), Some(b)) => a.borrow().cmp(b.borrow()),
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
     }
 }
 
@@ -1208,6 +1276,7 @@ pub(crate) mod tests {
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
         //let seed = 11016946475517489012;
+        //let seed = 14014931343046114918;
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -1522,6 +1591,7 @@ pub(crate) mod tests {
         rle_col.splice(0, 0, data_u64.clone());
 
         for (i, val) in data_u64.iter().enumerate() {
+            log!(" find i={} val={:?}", i, val);
             if let Some(val) = val {
                 assert!(rle_col.find_by_value(*val).contains(&i));
             }
@@ -1556,7 +1626,7 @@ pub(crate) mod tests {
                 std::mem::swap(&mut a, &mut b);
             }
 
-            assert!(b > a);
+            assert!(b >= a);
 
             let start = roll * 3;
             let a_start = min(b, max(start, a));
@@ -1572,5 +1642,23 @@ pub(crate) mod tests {
             assert_eq!(answer1, result1);
             assert_eq!(answer2, result2);
         }
+    }
+
+    #[test]
+    fn iter_scope_to_value() {
+        let col: ColumnData<UIntCursor> = [
+            0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+        ]
+        .iter()
+        .collect();
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
+        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
+        assert_eq!(iter.seek_to_value(Some(8), ..), 12..15);
+
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
+        assert_eq!(iter.seek_to_value(Some(1), ..), 3..6);
+        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
     }
 }

@@ -1,5 +1,5 @@
 use crate::op_set2::op_set::{MarkIndexColumn, MarkIndexValue};
-use crate::op_set2::{Op, OpBuilder2, OpSet};
+use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ListEncoding, ObjId, ObjType, OpId};
 use packer::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
@@ -13,7 +13,24 @@ pub(crate) struct IndexBuilder {
     widths: Vec<u64>,
     incs: Vec<Option<i64>>,
     marks: Vec<Option<MarkIndexValue>>,
-    obj_info: HashMap<OpId, ObjInfo>,
+    obj_info: ObjIndex,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ObjIndex(pub(crate) HashMap<OpId, ObjInfo>);
+
+impl ObjIndex {
+    pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
+        if obj.is_root() {
+            Some(ObjType::Map)
+        } else {
+            self.0.get(&obj.0).map(|p| p.obj_type)
+        }
+    }
+
+    pub(crate) fn insert(&mut self, id: OpId, obj_info: ObjInfo) {
+        self.0.insert(id, obj_info);
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -46,10 +63,16 @@ impl<'a> Op<'a> {
     }
 }
 
-impl OpBuilder2 {
+impl ChangeOp {
     pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
-        let obj_type = ObjType::try_from(self.action.action()).ok()?;
-        let parent = self.obj.id;
+        self.bld.obj_info()
+    }
+}
+
+impl<'a> OpBuilder<'a> {
+    pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
+        let obj_type = ObjType::try_from(self.action).ok()?;
+        let parent = self.obj;
         Some(ObjInfo { parent, obj_type })
     }
 }
@@ -59,7 +82,7 @@ pub(crate) struct Indexes {
     pub(crate) visible: ColumnData<BooleanCursor>,
     pub(crate) inc: ColumnData<IntCursor>,
     pub(crate) mark: MarkIndexColumn,
-    pub(crate) obj_info: HashMap<OpId, ObjInfo>,
+    pub(crate) obj_info: ObjIndex,
 }
 
 impl IndexBuilder {
@@ -70,7 +93,7 @@ impl IndexBuilder {
             widths: Vec::with_capacity(op_set.len()),
             incs: Vec::with_capacity(op_set.sub_len()),
             marks: Vec::with_capacity(op_set.len()),
-            obj_info: HashMap::new(),
+            obj_info: ObjIndex::default(),
         }
     }
 

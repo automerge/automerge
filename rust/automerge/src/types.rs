@@ -228,7 +228,6 @@ impl OpType {
                 Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
             }
         }
-    */
 
     pub(crate) fn expand(&self) -> bool {
         matches!(self, OpType::MarkBegin(true, _) | OpType::MarkEnd(true))
@@ -242,6 +241,7 @@ impl OpType {
             _ => Cow::Owned(ScalarValue::Null),
         }
     }
+    */
 
     pub(crate) fn validate_action_and_value(
         action: u64,
@@ -285,31 +285,33 @@ impl OpType {
         }
     }
 
-    pub(crate) fn to_str(&self) -> &str {
-        if let OpType::Put(ScalarValue::Str(s)) = &self {
-            s
-        } else if self.is_mark() {
-            ""
-        } else {
-            "\u{fffc}"
+    /*
+        pub(crate) fn to_str(&self) -> &str {
+            if let OpType::Put(ScalarValue::Str(s)) = &self {
+                s
+            } else if self.is_mark() {
+                ""
+            } else {
+                "\u{fffc}"
+            }
         }
-    }
 
-    pub(crate) fn mark_name(&self) -> Option<&str> {
-        if let OpType::MarkBegin(_, data) = self {
-            Some(&data.name)
-        } else {
-            None
+        pub(crate) fn mark_name(&self) -> Option<&str> {
+            if let OpType::MarkBegin(_, data) = self {
+                Some(&data.name)
+            } else {
+                None
+            }
         }
-    }
 
-    pub(crate) fn is_mark(&self) -> bool {
-        matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
-    }
+        pub(crate) fn is_mark(&self) -> bool {
+            matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+        }
 
-    pub(crate) fn is_block(&self) -> bool {
-        &OpType::Make(ObjType::Map) == self
-    }
+        pub(crate) fn is_block(&self) -> bool {
+            &OpType::Make(ObjType::Map) == self
+        }
+    */
 }
 
 impl From<ObjType> for OpType {
