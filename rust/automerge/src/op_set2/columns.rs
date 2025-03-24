@@ -295,11 +295,7 @@ impl Columns {
     where
         O: OpLike,
     {
-        println!(" SPLICE ");
         let ops = ops.iter().filter(|o| O::action(o) != Action::Delete);
-        for o in ops.clone() {
-            println!(" :: OP id={:?} action={}", o.id(), O::action(o));
-        }
         self.id_actor.splice(pos, 0, ops.clone().map(O::id_actor));
         self.id_ctr.splice(pos, 0, ops.clone().map(O::id_ctr));
         self.obj_actor.splice(pos, 0, ops.clone().map(O::obj_actor));

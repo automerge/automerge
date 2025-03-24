@@ -400,9 +400,9 @@ impl AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         if self.isolation.is_some() {
-            self.doc.apply_changes_iter(changes, &mut PatchLog::null())
+            self.doc.apply_changes_iter(changes)
         } else {
-            self.doc.apply_changes_iter(changes, &mut self.patch_log)
+            self.doc.apply_changes_iter_log_patches(changes, &mut self.patch_log)
         }
     }
 

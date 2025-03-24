@@ -813,15 +813,23 @@ impl Automerge {
                 let mut tmp = self.clone();
                 let mut tmp_patch_log = patch_log.clone();
                 let heads1 = tmp.get_heads();
-                tmp.apply_changes_iter(changes.clone(), &mut tmp_patch_log)?;
+                tmp.apply_changes_iter_log_patches(changes.clone(), &mut tmp_patch_log)?;
                 let heads2 = tmp.get_heads();
                 tmp.diff(&heads1, &heads2, TextRepresentation::default());
         */
         self.apply_changes_batch_log_patches(changes, patch_log)
-        //self.apply_changes_iter(changes, patch_log)
+        //self.apply_changes_iter_log_patches(changes, patch_log)
     }
 
-    pub(crate) fn apply_changes_iter<I: IntoIterator<Item = Change> + Clone>(
+    pub fn apply_changes_iter<I: IntoIterator<Item = Change> + Clone>(
+        &mut self,
+        changes: I,
+    ) -> Result<(), AutomergeError> {
+      self.apply_changes_iter_log_patches(changes,
+            &mut PatchLog::inactive(TextRepresentation::default()))
+    }
+
+    pub fn apply_changes_iter_log_patches<I: IntoIterator<Item = Change> + Clone>(
         &mut self,
         changes: I,
         patch_log: &mut PatchLog,

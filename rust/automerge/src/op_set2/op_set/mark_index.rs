@@ -70,9 +70,6 @@ impl SpanWeight<Slab> for MarkIndexSpanner {
                 self.end.insert(*id);
             }
         }
-        //let mut y = self.clone();
-        //y.maybe_sub(other);
-        //assert_eq!(x,y);
     }
 
     fn maybe_sub(&mut self, other: &Self) -> bool {
