@@ -2348,20 +2348,3 @@ fn zero_length_data() {
     );
 }
 
-#[test]
-fn xxx() {
-    let mut doc1 = AutoCommit::new();
-    let text = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
-    doc1.splice_text(&text, 0, 0, "hello world").unwrap();
-    let map = doc1.put_object(&ROOT, "map", ObjType::Map).unwrap();
-    doc1.put(&map, "key", "value0").unwrap();
-    doc1.put(&map, "other_key", "value0").unwrap();
-    let mut doc2 = doc1.fork();
-
-    doc1.splice_text(&text, 2, 2, "xalksjdaskl").unwrap();
-    doc1.put(&map, "key", "value1").unwrap();
-    doc2.put(&map, "key", "value2").unwrap();
-    doc2.splice_text(&text, 3, 2, "99asda9das9da").unwrap();
-
-    doc1.merge(&mut doc2).unwrap();
-}

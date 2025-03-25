@@ -379,12 +379,7 @@ struct OpValue {
 }
 
 #[derive(Debug, Default, Clone)]
-//struct OpValueOption(Option<OpValue>);
-enum OpValueOption {
-    #[default]
-    None,
-    Value(OpValue),
-}
+struct OpValueOption(Option<OpValue>);
 
 impl OpValueOption {
     fn id(&self) -> Option<OpId> {
@@ -393,7 +388,7 @@ impl OpValueOption {
 
     fn increment(&mut self, n: i64) {
         match self {
-            Self::Value(ov) => {
+            Self(Some(ov)) => {
                 if let Value::Scalar(ScalarValue::Counter(c)) = &mut ov.value {
                     c.increment(n);
                 }
@@ -404,7 +399,7 @@ impl OpValueOption {
 
     fn expose(&mut self) {
         match self {
-            Self::Value(ov) => {
+            Self(Some(ov)) => {
                 ov.expose = true;
             }
             _ => {}
@@ -416,13 +411,13 @@ impl OpValueOption {
             self.expose();
         } else {
             let conflict = self.is_visible();
-            *self = Self::Value(OpValue {
+            *self = Self(Some(OpValue {
                 value,
                 id,
                 conflict,
                 deleted,
                 expose: false,
-            });
+            }));
         }
     }
 
@@ -431,10 +426,7 @@ impl OpValueOption {
     }
 
     fn value(&self) -> Option<&OpValue> {
-        match self {
-            Self::Value(ov) => Some(ov),
-            _ => None,
-        }
+        self.0.as_ref()
     }
 
     fn is_visible(&self) -> bool {
@@ -446,16 +438,11 @@ impl OpValueOption {
     }
 
     fn take(&mut self) -> Self {
-        let mut value = Self::default();
-        std::mem::swap(&mut value, self);
-        value
+        Self(self.0.take())
     }
 
     fn to_value(self) -> Option<OpValue> {
-        match self {
-            Self::Value(ov) => Some(ov),
-            _ => None,
-        }
+        self.0
     }
 }
 
@@ -465,8 +452,8 @@ impl<'a> ValueState<'a> {
             obj,
             encoding,
             key: None,
-            doc: OpValueOption::None,
-            change: OpValueOption::None,
+            doc: OpValueOption(None),
+            change: OpValueOption(None),
             marks: RichTextDiff::default(),
         }
     }
@@ -612,16 +599,16 @@ impl<'a> ValueState<'a> {
                 _ => {}
             }
         } else {
-            match (doc, change) {
-                (OpValueOption::None, OpValueOption::Value(c)) => {
+            match (doc.0, change.0) {
+                (None, Some(c)) => {
                     let marks = marks.after.current().cloned();
                     log.splice(obj, index, c.value.as_str(), marks);
                 }
-                (OpValueOption::Value(d), OpValueOption::None) if d.deleted => {
+                (Some(d), None) if d.deleted => {
                     let w = d.value.width(encoding);
                     log.delete_seq(obj, index, w);
                 }
-                (OpValueOption::Value(d), OpValueOption::None) => {
+                (Some(d), None) => {
                     if let Some(m) = marks.current() {
                         log.mark(obj, index, d.value.width(encoding), &m);
                     }
