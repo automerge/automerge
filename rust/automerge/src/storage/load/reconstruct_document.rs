@@ -3,6 +3,7 @@ use crate::op_set2::change::{ChangeCollector, CollectedChanges};
 use crate::storage::document::ReadChangeError;
 use std::collections::BTreeSet;
 
+use crate::types::TextEncoding;
 use crate::{
     change::Change,
     op_set2::{OpSet, PackError, ReadOpError},
@@ -58,8 +59,9 @@ pub enum VerificationMode {
 pub(crate) fn reconstruct_opset<'a>(
     doc: &'a Document<'a>,
     mode: VerificationMode,
+    text_encoding: TextEncoding,
 ) -> Result<ReconOpSet, Error> {
-    let mut op_set = OpSet::new(doc)?;
+    let mut op_set = OpSet::from_doc(doc, text_encoding)?;
     let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
     let mut iter = op_set.iter();
     let mut index_builder = op_set.index_builder();

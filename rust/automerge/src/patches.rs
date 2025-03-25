@@ -5,19 +5,33 @@ pub use patch::{Patch, PatchAction};
 pub(crate) use patch_builder::PatchBuilder;
 pub use patch_log::PatchLog;
 
-use crate::{types::ListEncoding, ObjType};
+use crate::types::{ListEncoding, ObjType, TextEncoding};
 
-#[derive(Default, Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {
     Array,
-    #[default]
-    String,
+    String(TextEncoding),
+}
+
+impl From<ListEncoding> for TextRepresentation {
+    fn from(encoding: ListEncoding) -> Self {
+        match encoding {
+            ListEncoding::Text(encoding) => Self::String(encoding),
+            ListEncoding::List => Self::Array,
+        }
+    }
+}
+
+impl From<TextEncoding> for TextRepresentation {
+    fn from(value: TextEncoding) -> Self {
+        Self::String(value)
+    }
 }
 
 impl TextRepresentation {
     pub(crate) fn encoding(&self, typ: ObjType) -> ListEncoding {
         match (self, typ) {
-            (&Self::String, ObjType::Text) => ListEncoding::Text,
+            (&Self::String(encoding), ObjType::Text) => ListEncoding::Text(encoding),
             _ => ListEncoding::List,
         }
     }
@@ -27,6 +41,6 @@ impl TextRepresentation {
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self, TextRepresentation::String)
+        matches!(self, TextRepresentation::String(_))
     }
 }

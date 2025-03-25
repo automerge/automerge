@@ -1,7 +1,7 @@
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set2::op_set::OpIter;
 use crate::op_set2::{KeyRef, Op, OpQuery, OpType, VisibleOpIter};
-use crate::types::Clock;
+use crate::types::{Clock, TextEncoding};
 use crate::types::{ListEncoding, ObjType, OpId};
 use crate::Automerge;
 
@@ -18,6 +18,7 @@ struct SpansState<'a> {
     text: String,
     block: Option<Op<'a>>,
     marks: MarkStateMachine<'a>,
+    text_encoding: TextEncoding,
 }
 
 #[derive(Debug)]
@@ -87,7 +88,7 @@ impl<'a> SpansState<'a> {
                     if let Some(next_marks) = self.next_marks.take() {
                         let mut result = None;
                         if next_marks == self.current_marks {
-                            self.len += op.width(ListEncoding::Text);
+                            self.len += op.width(ListEncoding::Text(self.text_encoding));
                         } else {
                             // only flush if the marks are actually changing. One situation where
                             // they might not change is if a zero length mark was encountered in
@@ -95,12 +96,12 @@ impl<'a> SpansState<'a> {
                             // would change `next_marks` to the empty span, and then back again.
                             result = self.flush();
                             self.current_marks = next_marks;
-                            self.len = op.width(ListEncoding::Text);
+                            self.len = op.width(ListEncoding::Text(self.text_encoding));
                         }
                         self.text.push_str(op.as_str());
                         result
                     } else {
-                        self.len += op.width(ListEncoding::Text);
+                        self.len += op.width(ListEncoding::Text(self.text_encoding));
                         self.text.push_str(op.as_str());
                         None
                     }
@@ -127,7 +128,7 @@ impl<'a> SpansState<'a> {
 
             Some(span)
         } else if let Some(block) = self.block.take() {
-            let width = block.width(ListEncoding::Text);
+            let width = block.width(ListEncoding::Text(self.text_encoding));
             let block = SpanInternal::Obj(block.id, self.index);
             self.index += width;
             Some(block)
@@ -143,7 +144,7 @@ impl<'a> Iterator for SpansInternal<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(block) = self.state.block.take() {
-            let width = block.width(ListEncoding::Text);
+            let width = block.width(ListEncoding::Text(self.state.text_encoding));
             let block = SpanInternal::Obj(block.id, self.state.index);
             self.state.index += width;
             return Some(block);

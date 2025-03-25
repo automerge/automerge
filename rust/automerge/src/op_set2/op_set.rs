@@ -1,5 +1,4 @@
 use super::parents::Parents;
-use crate::cursor::Cursor;
 use crate::exid::ExId;
 use crate::marks::{MarkSet, MarkStateMachine, RichTextQueryState};
 use crate::patches::TextRepresentation;
@@ -7,6 +6,7 @@ use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, R
 use crate::types;
 use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
+    TextEncoding,
 };
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
@@ -59,6 +59,7 @@ pub(crate) struct OpSet {
     //mark_index: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
+    pub(crate) text_encoding: TextEncoding,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +90,7 @@ impl OpSet {
             //inc_index: ColumnData::new(),
             //mark_index: MarkIndexColumn::new(),
             obj_info: ObjIndex::default(),
+            text_encoding: TextEncoding::default(),
         }
     }
 
@@ -114,7 +116,7 @@ impl OpSet {
     }
 
     pub(crate) fn index_builder(&self) -> IndexBuilder {
-        IndexBuilder::new(self)
+        IndexBuilder::new(self, self.text_encoding)
     }
 
     pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
@@ -143,7 +145,7 @@ impl OpSet {
 
     #[inline(never)]
     pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) {
-        self.cols.splice(pos, ops);
+        self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
         //self.len += ops.len();
     }
@@ -247,7 +249,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<QueryNth> {
-        if encoding != ListEncoding::Text || clock.is_some() {
+        if encoding == ListEncoding::List || clock.is_some() {
             return None;
         }
 
@@ -425,7 +427,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<OpsFound<'a>> {
-        if encoding != ListEncoding::Text || clock.is_some() {
+        if encoding == ListEncoding::List || clock.is_some() {
             return None;
         }
 
@@ -478,7 +480,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<SeekOpIdResult<'_>> {
-        if encoding != ListEncoding::Text || clock.is_some() || target.is_head() {
+        if encoding == ListEncoding::List || clock.is_some() || target.is_head() {
             return None;
         }
 
@@ -693,10 +695,6 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn id_to_cursor(&self, id: OpId) -> Cursor {
-        Cursor::new(id, self)
-    }
-
     fn iter_obj_ids(&self) -> IterObjIds<'_> {
         let mut ctr = self.cols.obj_ctr.iter();
         let mut actor = self.cols.obj_actor.iter();
@@ -854,12 +852,24 @@ impl OpSet {
         self.actors.binary_search(actor).ok()
     }
 
+    pub(crate) fn new(text_encoding: TextEncoding) -> Self {
+        OpSet {
+            actors: vec![],
+            cols: Columns::default(),
+            obj_info: ObjIndex::default(),
+            text_encoding,
+        }
+    }
+
     #[inline(never)]
-    pub(crate) fn new(doc: &Document<'_>) -> Result<Self, PackError> {
+    pub(crate) fn from_doc(
+        doc: &Document<'_>,
+        text_encoding: TextEncoding,
+    ) -> Result<Self, PackError> {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
-        let op_set = Self::from_parts(doc.op_metadata.clone(), data, actors)?;
+        let op_set = Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)?;
         Ok(op_set)
     }
 
@@ -876,6 +886,7 @@ impl OpSet {
             actors,
             cols,
             obj_info: ObjIndex::default(),
+            text_encoding: TextEncoding::default(),
         }
     }
 
@@ -883,6 +894,7 @@ impl OpSet {
         cols: RawColumns<Uncompressed>,
         data: &[u8],
         actors: Vec<ActorId>,
+        text_encoding: TextEncoding,
     ) -> Result<Self, PackError> {
         let cols = Columns::load(cols.iter(), data, &actors)?;
 
@@ -890,6 +902,7 @@ impl OpSet {
             actors,
             cols,
             obj_info: ObjIndex::default(),
+            text_encoding,
         };
 
         Ok(op_set)
@@ -1164,7 +1177,13 @@ impl<'a> FoundOpWithPatchLog<'a> {
             } else if obj.typ == ObjType::Text && !op.is_block() {
                 patch_log.splice(obj.id, self.index, op.as_str(), self.marks.clone());
             } else {
-                patch_log.insert(obj.id, self.index, op.hydrate_value(), op.id, false);
+                patch_log.insert(
+                    obj.id,
+                    self.index,
+                    op.hydrate_value(TextRepresentation::Array),
+                    op.id,
+                    false,
+                );
             }
             return;
         }
@@ -1189,7 +1208,7 @@ impl<'a> FoundOpWithPatchLog<'a> {
                     patch_log.put(
                         obj.id,
                         &key,
-                        before.hydrate_value(),
+                        before.hydrate_value(TextRepresentation::Array),
                         before.id,
                         conflict,
                         true,
@@ -1212,13 +1231,26 @@ impl<'a> FoundOpWithPatchLog<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                patch_log.insert(obj.id, self.index, op.hydrate_value(), op.id, conflict);
+                patch_log.insert(
+                    obj.id,
+                    self.index,
+                    op.hydrate_value(TextRepresentation::Array),
+                    op.id,
+                    conflict,
+                );
             } else if self.after.is_some() {
                 if self.before.is_none() {
                     patch_log.flag_conflict(obj.id, &key);
                 }
             } else {
-                patch_log.put(obj.id, &key, op.hydrate_value(), op.id, conflict, false);
+                patch_log.put(
+                    obj.id,
+                    &key,
+                    op.hydrate_value(TextRepresentation::Array),
+                    op.id,
+                    conflict,
+                    false,
+                );
             }
         }
     }
@@ -1324,7 +1356,7 @@ mod tests {
         doc.delete(crate::ROOT, "key2").unwrap();
         let saved = doc.save();
         let doc_chunk = load_document_chunk(&saved);
-        let opset = super::OpSet::new(&doc_chunk).unwrap();
+        let opset = super::OpSet::from_doc(&doc_chunk, TextEncoding::default()).unwrap();
         let ops = opset.iter().collect::<Vec<_>>();
         let actual_ops = doc.doc.ops().iter().collect::<Vec<_>>();
         if ops != actual_ops {

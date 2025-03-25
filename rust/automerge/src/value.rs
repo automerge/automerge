@@ -341,6 +341,12 @@ impl<'a> From<ScalarValue> for Value<'a> {
     }
 }
 
+impl<'a> From<&'a crate::op_set2::ScalarValue<'_>> for Value<'static> {
+    fn from(v: &'a crate::op_set2::ScalarValue<'_>) -> Self {
+        Value::Scalar(Cow::Owned(v.to_owned()))
+    }
+}
+
 impl<'a> From<&'a ScalarValue> for Value<'a> {
     fn from(v: &'a ScalarValue) -> Self {
         Value::Scalar(Cow::Borrowed(v))

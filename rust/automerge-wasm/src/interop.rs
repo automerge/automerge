@@ -16,7 +16,7 @@ use std::ops::Deref;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
+use am::{marks::ExpandMark, CursorPosition, MoveCursor, ObjId, Patch, PatchAction, Value};
 
 pub(crate) use crate::export_cache::ExportCache;
 
@@ -159,6 +159,49 @@ impl TryFrom<JS> for usize {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         value.as_f64().map(|n| n as usize).ok_or(error::BadNumber)
+    }
+}
+
+impl TryFrom<JS> for CursorPosition {
+    type Error = error::BadCursorPosition;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        match value.as_f64() {
+            Some(idx) => {
+                if idx < 0f64 {
+                    Ok(CursorPosition::Start)
+                } else {
+                    Ok(CursorPosition::Index(idx as usize))
+                }
+            }
+            None => value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "start" => Some(CursorPosition::Start),
+                    "end" => Some(CursorPosition::End),
+                    _ => None,
+                })
+                .ok_or(error::BadCursorPosition),
+        }
+    }
+}
+
+impl TryFrom<JS> for MoveCursor {
+    type Error = error::BadMoveCursor;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.is_undefined() {
+            Ok(MoveCursor::default())
+        } else {
+            value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "before" => Some(MoveCursor::Before),
+                    "after" => Some(MoveCursor::After),
+                    _ => None,
+                })
+                .ok_or(error::BadMoveCursor)
+        }
     }
 }
 
@@ -1068,7 +1111,7 @@ impl Automerge {
                 match self.text_rep {
                     TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
                     TextRepresentation::Array => {
-                        let val = String::from(value);
+                        let val = value.make_string();
                         let elems = val
                             .chars()
                             .map(|c| {
@@ -1203,7 +1246,7 @@ impl Automerge {
                 let length = string.length();
                 let before = string.slice(0, index);
                 let after = string.slice(index, length);
-                let result = before.concat(&String::from(value).into()).concat(&after);
+                let result = before.concat(&value.make_string().into()).concat(&after);
                 Ok(result.into())
             }
             _ => Ok(string.into()),
@@ -1618,7 +1661,7 @@ fn export_patch(
         } => {
             js_set(&result, "action", "splice")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
-            js_set(&result, "value", String::from(&value))?;
+            js_set(&result, "value", value.make_string())?;
             if let Some(m) = marks {
                 if m.num_marks() > 0 {
                     let marks = Object::new();
@@ -1732,7 +1775,13 @@ pub(super) fn js_val_to_hydrate(
                 let Some(obj) = js_obj.text() else {
                     return Err(error::JsValToHydrate::InvalidText);
                 };
-                Ok(am::hydrate::Value::Text(obj.into()))
+                // This code path is only used in `next`, which uses a string representation
+                // and we're targeting JS, which uses utf16 strings
+                let text_rep =
+                    am::patches::TextRepresentation::String(am::TextEncoding::Utf16CodeUnit);
+                Ok(am::hydrate::Value::Text(am::hydrate::Text::new(
+                    text_rep, obj,
+                )))
             }
         }
     } else if let Some(val) = doc.import_scalar(&value, datatype) {
@@ -2011,6 +2060,13 @@ pub(crate) mod error {
         #[error("path did not refer to an object")]
         NotAnObject,
     }
+    #[derive(Debug, thiserror::Error)]
+    #[error("cursor position must be an index (number), 'start' or 'end'")]
+    pub struct BadCursorPosition;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("move must be 'before' or 'after' - is 'after' by default")]
+    pub struct BadMoveCursor;
 
     #[derive(Debug, thiserror::Error)]
     #[error("expand must be 'left', 'right', 'both', or 'none' - is 'right' by default")]

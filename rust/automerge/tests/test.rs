@@ -2,6 +2,7 @@ use automerge::marks::{ExpandMark, Mark};
 //use automerge::op_tree::B;
 use automerge::patches::TextRepresentation;
 use automerge::transaction::{CommitOptions, Transactable};
+use automerge::TextEncoding;
 use automerge::{
     sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
     ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
@@ -1576,7 +1577,7 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active(TextRepresentation::String);
+    let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::default()));
     new_doc
         .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
@@ -1650,7 +1651,7 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut patch_log = PatchLog::active(TextRepresentation::String);
+    let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::default()));
     new_doc
         .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
@@ -2071,7 +2072,11 @@ fn large_patches_in_lists_are_correct() {
         .unwrap()
         .result;
     let heads_after = doc.get_heads();
-    let patches = doc.diff(&heads_before, &heads_after, TextRepresentation::String);
+    let patches = doc.diff(
+        &heads_before,
+        &heads_after,
+        TextRepresentation::String(TextEncoding::default()),
+    );
     let final_patch = patches.last().unwrap();
     assert_eq!(
         final_patch.path,
@@ -2347,4 +2352,3 @@ fn zero_length_data() {
         Value::from(vec![])
     );
 }
-

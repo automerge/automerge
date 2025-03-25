@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::automerge::{Automerge, Parents, ReadDoc};
+use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
@@ -222,14 +223,33 @@ impl<'a> ReadDoc for Transaction<'a> {
             .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
-    fn get_cursor<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
-        position: usize,
+        position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        self.doc
-            .get_cursor_for(obj.as_ref(), position, self.get_scope(at))
+        self.doc.get_cursor_for(
+            obj.as_ref(),
+            position.into(),
+            self.get_scope(at),
+            MoveCursor::After,
+        )
+    }
+
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor_for(
+            obj.as_ref(),
+            position.into(),
+            self.get_scope(at),
+            move_cursor,
+        )
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(
@@ -334,6 +354,10 @@ impl<'a> ReadDoc for Transaction<'a> {
 
     fn stats(&self) -> crate::read::Stats {
         self.doc.stats()
+    }
+
+    fn text_encoding(&self) -> crate::TextEncoding {
+        self.doc.text_encoding()
     }
 }
 

@@ -4,13 +4,15 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::change_graph::ChangeGraph;
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::exid::ExId;
 use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
 use crate::patches::{PatchLog, TextRepresentation};
-use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue};
+use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue, TextEncoding};
 use crate::Automerge;
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -26,6 +28,7 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
+    text_encoding: TextEncoding,
 }
 
 /// Arguments required to create a new transaction
@@ -43,6 +46,8 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
+    /// How text indices should be calculated
+    pub(crate) text_encoding: TextEncoding,
 }
 
 impl TransactionInner {
@@ -54,6 +59,7 @@ impl TransactionInner {
             checkpoint,
             deps,
             scope,
+            text_encoding,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -66,6 +72,7 @@ impl TransactionInner {
             deps,
             pending: vec![],
             scope,
+            text_encoding,
         }
     }
 
@@ -401,9 +408,10 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let query =
-            doc.ops()
-                .seek_ops_by_index(&obj.id, index, ListEncoding::List, self.scope.as_ref());
+        let encoding = patch_log.text_rep().encoding(obj.typ);
+        let query = doc
+            .ops()
+            .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
         let id = self.next_id();
         let eid = query
             .ops
@@ -532,7 +540,15 @@ impl TransactionInner {
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let values = text.chars().map(ScalarValue::from).collect();
+        let values = match doc.text_encoding() {
+            // Arguably we should do this for all text, rather than just the grapheme cluster encoding.
+            // However, at the time which I (Alex Good) am writing this code the existing implementation
+            // uses the unicode code points and the grapheme cluster text encoding is a new thing. I
+            // don't want to change the existing behaviour for the existing text encodings without a
+            // little more thought.
+            TextEncoding::GraphemeCluster => text.graphemes(true).map(ScalarValue::from).collect(),
+            _ => text.chars().map(ScalarValue::from).collect(),
+        };
         self.inner_splice(
             doc,
             patch_log,
@@ -568,7 +584,7 @@ impl TransactionInner {
         }
 
         //let ex_obj = doc.ops().id_to_exid(obj.0);
-        let encoding = splice_type.encoding();
+        let encoding = splice_type.encoding(self.text_encoding);
         // delete `del` items - performing the query for each one
         let mut deleted: usize = 0;
         while deleted < (del as usize) {
@@ -638,7 +654,7 @@ impl TransactionInner {
             if patch_log.is_active() {
                 match splice_type {
                     SpliceType::Text(text)
-                        if matches!(patch_log.text_rep(), TextRepresentation::String) =>
+                        if matches!(patch_log.text_rep(), TextRepresentation::String(_)) =>
                     {
                         patch_log.splice(obj.id, index, text, marks);
                     }
@@ -646,7 +662,9 @@ impl TransactionInner {
                         let mut opid = self.next_id().minus(values.len());
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
-                            patch_log.insert(obj.id, index + offset, v.clone().into(), opid, false);
+                            let hydrated =
+                                crate::hydrate::Value::new(v.clone(), patch_log.text_rep());
+                            patch_log.insert(obj.id, index + offset, hydrated, opid, false);
                         }
                     }
                 }
@@ -810,17 +828,30 @@ impl TransactionInner {
     fn finalize_op(&mut self, patch_log: &mut PatchLog, op: &TxOp, marks: Option<Arc<MarkSet>>) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
+        let text_rep = patch_log.text_rep();
         if patch_log.is_active() {
             if op.bld.insert {
                 if !op.is_mark() {
                     assert!(obj_typ.is_sequence());
                     match (obj_typ, op.prop()) {
                         (ObjType::List, PropRef::Seq(index)) => {
-                            patch_log.insert(obj, index, op.hydrate_value(), op.id(), false);
+                            patch_log.insert(
+                                obj,
+                                index,
+                                op.hydrate_value(text_rep),
+                                op.id(),
+                                false,
+                            );
                         }
                         (ObjType::Text, PropRef::Seq(index)) => {
                             if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                patch_log.insert(obj, index, op.hydrate_value(), op.id(), false);
+                                patch_log.insert(
+                                    obj,
+                                    index,
+                                    op.hydrate_value(text_rep),
+                                    op.id(),
+                                    false,
+                                );
                             } else {
                                 patch_log.splice(obj, index, op.as_str(), marks);
                             }
@@ -836,7 +867,14 @@ impl TransactionInner {
             } else if let Some(value) = op.get_increment_value() {
                 patch_log.increment2(obj, op.prop(), value, op.id());
             } else {
-                patch_log.put2(obj, op.prop(), op.hydrate_value(), op.id(), false, false);
+                patch_log.put2(
+                    obj,
+                    op.prop(),
+                    op.hydrate_value(text_rep),
+                    op.id(),
+                    false,
+                    false,
+                );
             }
         }
     }
@@ -1037,10 +1075,10 @@ enum SpliceType<'a> {
 }
 
 impl<'a> SpliceType<'a> {
-    fn encoding(&self) -> ListEncoding {
+    fn encoding(&self, text_encoding: TextEncoding) -> ListEncoding {
         match self {
             SpliceType::List => ListEncoding::List,
-            SpliceType::Text(_) => ListEncoding::Text,
+            SpliceType::Text(_) => ListEncoding::Text(text_encoding),
         }
     }
 }

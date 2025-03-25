@@ -74,10 +74,10 @@ impl SpanWeight<Slab> for MarkIndexSpanner {
 
     fn maybe_sub(&mut self, other: &Self) -> bool {
         if other.start.is_empty() && other.end.is_empty() {
-          self.pos -= other.pos;
-          true
+            self.pos -= other.pos;
+            true
         } else {
-          false
+            false
         }
         // FIXME - this worked when I put ops in one at a time but now it doesnt?
         /*

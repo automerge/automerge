@@ -1,16 +1,11 @@
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::Automerge;
+use crate::automerge::Automerge;
 use crate::{
     clock::Clock,
     iter::{SpanInternal, SpansInternal},
-    //op_tree::OpTreeOpIter,
-    text_value::TextValue,
     transaction::TransactionInner,
-    BlockOrText,
-    ObjId as ExId,
-    PatchLog,
-    ReadDoc,
+    BlockOrText, ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -23,10 +18,11 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
     text_obj: &ExId,
     new: S,
 ) -> Result<(), crate::AutomergeError> {
-    let old = doc.text(text_obj)?;
+    let old = doc.text_for(text_obj, tx.get_scope().clone())?;
     let new = new.as_ref();
     let old_graphemes = old.graphemes(true).collect::<Vec<&str>>();
     let new_graphemes = new.graphemes(true).collect::<Vec<&str>>();
+    let text_encoding = doc.text_encoding();
     let mut hook = TxHook {
         tx,
         doc,
@@ -35,6 +31,7 @@ pub(crate) fn myers_diff<'a, S: AsRef<str>>(
         idx: 0,
         old: &old_graphemes,
         new: &new_graphemes,
+        text_encoding,
     };
     myers::diff(
         &mut hook,
@@ -53,6 +50,7 @@ struct TxHook<'a> {
     new: &'a [&'a str],
     obj: &'a ExId,
     idx: usize,
+    text_encoding: TextEncoding,
 }
 
 impl<'a> myers::DiffHook for TxHook<'a> {
@@ -66,7 +64,7 @@ impl<'a> myers::DiffHook for TxHook<'a> {
     ) -> Result<(), Self::Error> {
         self.idx += self.old[old_index..old_index + len]
             .iter()
-            .map(|c| TextValue::width(c))
+            .map(|c| self.text_encoding.width(c))
             .sum::<usize>();
         Ok(())
     }
@@ -81,7 +79,7 @@ impl<'a> myers::DiffHook for TxHook<'a> {
         let new_chars = self.new[new_index..new_index + new_len].concat();
         let deleted = self.old[old_index..old_index + old_len]
             .iter()
-            .map(|s| TextValue::width(s))
+            .map(|s| self.text_encoding.width(s))
             .sum::<usize>();
         self.tx.splice_text(
             self.doc,
@@ -91,7 +89,7 @@ impl<'a> myers::DiffHook for TxHook<'a> {
             deleted as isize,
             &new_chars,
         )?;
-        self.idx += TextValue::width(&new_chars);
+        self.idx += self.text_encoding.width(&new_chars);
         Ok(())
     }
 
@@ -107,7 +105,7 @@ impl<'a> myers::DiffHook for TxHook<'a> {
     ) -> Result<(), Self::Error> {
         let deleted_len: usize = self.old[old_index..old_index + old_len]
             .iter()
-            .map(|s| TextValue::width(s))
+            .map(|s| self.text_encoding.width(s))
             .sum();
         self.tx.splice_text(
             self.doc,
@@ -129,7 +127,7 @@ impl<'a> myers::DiffHook for TxHook<'a> {
         let new_chars = self.new[new_index..new_index + new_len].concat();
         self.tx
             .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, &new_chars)?;
-        self.idx += TextValue::width(&new_chars);
+        self.idx += self.text_encoding.width(&new_chars);
         Ok(())
     }
 }
@@ -182,10 +180,10 @@ enum BlockOrGrapheme {
 }
 
 impl BlockOrGrapheme {
-    fn width(&self) -> usize {
+    fn width(&self, encoding: TextEncoding) -> usize {
         match self {
             BlockOrGrapheme::Block(_) => 1,
-            BlockOrGrapheme::Grapheme(g) => TextValue::width(g),
+            BlockOrGrapheme::Grapheme(g) => encoding.width(g),
         }
     }
 }
@@ -200,7 +198,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
         len: usize,
     ) -> Result<(), Self::Error> {
         for i in 0..len {
-            self.idx += self.old[old_index + i].width();
+            self.idx += self.old[old_index + i].width(self.doc.text_encoding());
         }
         Ok(())
     }
@@ -246,7 +244,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                             0,
                             &run,
                         )?;
-                        self.idx += TextValue::width(&run);
+                        self.idx += self.doc.text_encoding().width(&run);
                         run.clear();
                     }
                     split_block(self.doc, self.tx, self.patch_log, self.obj, self.idx, b)?;
@@ -260,7 +258,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
         if !run.is_empty() {
             self.tx
                 .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, &run)?;
-            self.idx += TextValue::width(&run);
+            self.idx += self.doc.text_encoding().width(&run);
         }
         Ok(())
     }
@@ -298,7 +296,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                     BlockOrGrapheme::Grapheme(g) => {
                         self.tx
                             .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g)?;
-                        self.idx += TextValue::width(g);
+                        self.idx += self.doc.text_encoding().width(g);
                         new_idx += 1;
                     }
                 },
@@ -328,7 +326,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                             .delete(self.doc, self.patch_log, self.obj, self.idx)?;
                         self.tx
                             .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
-                        self.idx += TextValue::width(g2);
+                        self.idx += self.doc.text_encoding().width(g2);
                         old_idx += 1;
                         new_idx += 1;
                     }
@@ -337,7 +335,7 @@ impl<'a> myers::DiffHook for BlockDiffHook<'a> {
                             .join_block(self.doc, self.patch_log, self.obj, self.idx)?;
                         self.tx
                             .splice_text(self.doc, self.patch_log, self.obj, self.idx, 0, g2)?;
-                        self.idx += TextValue::width(g2);
+                        self.idx += self.doc.text_encoding().width(g2);
                         old_idx += 1;
                         new_idx += 1;
                     }

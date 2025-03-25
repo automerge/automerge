@@ -15,8 +15,8 @@ pub(crate) use crate::op_set2::{
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
 use crate::change_graph::ChangeGraph;
+use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
-use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
@@ -25,7 +25,10 @@ use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 
-use crate::types::{ActorId, ChangeHash, Clock, ListEncoding, ObjId, ObjMeta, OpId, Value};
+use crate::hydrate;
+use crate::types::{
+    ActorId, ChangeHash, Clock, ListEncoding, ObjId, ObjMeta, OpId, TextEncoding, Value,
+};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -75,6 +78,7 @@ pub struct LoadOptions<'a> {
     verification_mode: VerificationMode,
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
+    text_encoding: TextEncoding,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -135,6 +139,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn text_encoding(self, text_encoding: TextEncoding) -> Self {
+        Self {
+            text_encoding,
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -144,6 +155,7 @@ impl std::default::Default for LoadOptions<'static> {
             verification_mode: VerificationMode::Check,
             patch_log: None,
             string_migration: StringMigration::NoMigration,
+            text_encoding: TextEncoding::default(),
         }
     }
 }
@@ -199,6 +211,17 @@ impl Automerge {
             queue: vec![],
             change_graph: ChangeGraph::new(0),
             ops: Default::default(),
+            deps: Default::default(),
+            actor: Actor::Unused(ActorId::random()),
+            max_op: 0,
+        }
+    }
+
+    pub fn new_with_encoding(encoding: TextEncoding) -> Self {
+        Automerge {
+            queue: vec![],
+            change_graph: ChangeGraph::new(0),
+            ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
@@ -281,7 +304,7 @@ impl Automerge {
         Transaction::new(
             self,
             args,
-            PatchLog::inactive(TextRepresentation::default()),
+            PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
         )
     }
 
@@ -334,6 +357,7 @@ impl Automerge {
             deps,
             checkpoint,
             scope,
+            text_encoding: self.text_encoding(),
         }
     }
 
@@ -523,21 +547,21 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn cursor_to_opid(
+    pub(crate) fn op_cursor_to_opid(
         &self,
-        cursor: &Cursor,
+        cursor: &OpCursor,
         clock: Option<&Clock>,
     ) -> Result<OpId, AutomergeError> {
-        if let Some(idx) = self.ops.lookup_actor(cursor.actor()) {
-            let opid = OpId::new(cursor.ctr(), idx);
+        if let Some(idx) = self.ops.lookup_actor(&cursor.actor) {
+            let opid = OpId::new(cursor.ctr, idx);
             match clock {
                 Some(clock) if !clock.covers(&opid) => {
-                    Err(AutomergeError::InvalidCursor(cursor.clone()))
+                    Err(AutomergeError::InvalidCursor(Cursor::Op(cursor.clone())))
                 }
                 _ => Ok(opid),
             }
         } else {
-            Err(AutomergeError::InvalidCursor(cursor.clone()))
+            Err(AutomergeError::InvalidCursor(Cursor::Op(cursor.clone())))
         }
     }
 
@@ -659,7 +683,7 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                reconstruct_document(&d, options.verification_mode)?
+                reconstruct_document(&d, options.verification_mode, options.text_encoding)?
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -682,7 +706,7 @@ impl Automerge {
             }
         };
         tracing::trace!("loading change chunks");
-        match load::load_changes(remaining.reset()) {
+        match load::load_changes(remaining.reset(), options.text_encoding) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(change.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
@@ -739,7 +763,7 @@ impl Automerge {
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.load_incremental_log_patches(
             data,
-            &mut PatchLog::inactive(TextRepresentation::default()),
+            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
         )
     }
 
@@ -764,13 +788,14 @@ impl Automerge {
             *self = doc;
             return Ok(self.ops.len());
         }
-        let changes = match load::load_changes(storage::parse::Input::new(data)) {
-            load::LoadedChanges::Complete(c) => c,
-            load::LoadedChanges::Partial { error, loaded, .. } => {
-                tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
-                loaded
-            }
-        };
+        let changes =
+            match load::load_changes(storage::parse::Input::new(data), self.text_encoding()) {
+                load::LoadedChanges::Complete(c) => c,
+                load::LoadedChanges::Partial { error, loaded, .. } => {
+                    tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
+                    loaded
+                }
+            };
         let start = self.ops.len();
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
@@ -798,7 +823,7 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         self.apply_changes_log_patches(
             changes,
-            &mut PatchLog::inactive(TextRepresentation::default()),
+            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
         )
     }
 
@@ -825,8 +850,10 @@ impl Automerge {
         &mut self,
         changes: I,
     ) -> Result<(), AutomergeError> {
-      self.apply_changes_iter_log_patches(changes,
-            &mut PatchLog::inactive(TextRepresentation::default()))
+        self.apply_changes_iter_log_patches(
+            changes,
+            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
+        )
     }
 
     pub fn apply_changes_iter_log_patches<I: IntoIterator<Item = Change> + Clone>(
@@ -932,7 +959,7 @@ impl Automerge {
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.merge_and_log_patches(
             other,
-            &mut PatchLog::inactive(TextRepresentation::default()),
+            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
         )
     }
 
@@ -1322,6 +1349,10 @@ impl Automerge {
         }
     }
 
+    pub(crate) fn text_rep(&self, obj_typ: ObjType) -> ListEncoding {
+        TextRepresentation::String(self.text_encoding()).encoding(obj_typ)
+    }
+
     fn calculate_marks(
         &self,
         obj: &ExId,
@@ -1335,7 +1366,6 @@ impl Automerge {
             .top_ops()
             .marks();
 
-        let text_rep = TextRepresentation::String.encoding(obj.typ);
         let mut index = 0;
         let mut acc = MarkAccumulator::default();
         let mut last_marks = None;
@@ -1343,7 +1373,7 @@ impl Automerge {
         let mut mark_index = 0;
         while let Some(o) = top_ops.next() {
             let marks = top_ops.get_marks();
-            let len = o.width(text_rep);
+            let len = o.width(self.text_rep(obj.typ));
             if last_marks.as_ref() != marks {
                 match last_marks.as_ref() {
                     Some(m) if mark_len > 0 => acc.add(mark_index, mark_len, m),
@@ -1389,9 +1419,11 @@ impl Automerge {
     ) -> Result<Parents<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         // FIXME - now that we have blocks a correct text_rep is relevent
-        Ok(self
-            .ops
-            .parents(obj.id, TextRepresentation::default(), clock))
+        Ok(self.ops.parents(
+            obj.id,
+            TextRepresentation::String(self.text_encoding()),
+            clock,
+        ))
     }
 
     pub(crate) fn keys_for(&self, obj: &ExId, clock: Option<Clock>) -> Keys<'_> {
@@ -1442,10 +1474,7 @@ impl Automerge {
     pub(crate) fn length_for(&self, obj: &ExId, clock: Option<Clock>) -> usize {
         // FIXME - is doc.length() for a text always the string length?
         self.exid_to_obj(obj)
-            .map(|obj| {
-                self.ops
-                    .seq_length(&obj.id, TextRepresentation::String.encoding(obj.typ), clock)
-            })
+            .map(|obj| self.ops.seq_length(&obj.id, self.text_rep(obj.typ), clock))
             .unwrap_or(0)
     }
 
@@ -1471,23 +1500,31 @@ impl Automerge {
     pub(crate) fn get_cursor_for(
         &self,
         obj: &ExId,
-        position: usize,
+        position: CursorPosition,
         clock: Option<Clock>,
+        move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         if !obj.typ.is_sequence() {
             Err(AutomergeError::InvalidOp(obj.typ))
         } else {
-            let found = self.ops.seek_ops_by_prop(
-                &obj.id,
-                position.into(),
-                TextRepresentation::String.encoding(obj.typ),
-                clock.as_ref(),
-            );
-            if let Some(op) = found.ops.last() {
-                Ok(self.ops.id_to_cursor(op.id))
-            } else {
-                Err(AutomergeError::InvalidIndex(position))
+            match position {
+                CursorPosition::Start => Ok(Cursor::Start),
+                CursorPosition::End => Ok(Cursor::End),
+                CursorPosition::Index(i) => {
+                    let found = self.ops.seek_ops_by_prop(
+                        &obj.id,
+                        i.into(),
+                        self.text_rep(obj.typ),
+                        clock.as_ref(),
+                    );
+
+                    if let Some(op) = found.ops.last() {
+                        Ok(Cursor::Op(OpCursor::new(op.id, &self.ops, move_cursor)))
+                    } else {
+                        Err(AutomergeError::InvalidIndex(i))
+                    }
+                }
             }
         }
     }
@@ -1498,18 +1535,95 @@ impl Automerge {
         cursor: &Cursor,
         clock: Option<Clock>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
-        let found = self
-            .ops
-            .seek_list_opid(
-                &obj.id,
-                opid,
-                TextRepresentation::String.encoding(obj.typ),
-                clock.as_ref(),
-            )
-            .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
-        Ok(found.index)
+        match cursor {
+            Cursor::Start => Ok(0),
+            Cursor::End => Ok(self.length_for(obj, clock)),
+            Cursor::Op(op) => {
+                let obj_meta = self.exid_to_obj(obj)?;
+
+                if !obj_meta.typ.is_sequence() {
+                    return Err(AutomergeError::InvalidCursor(cursor.clone()));
+                }
+
+                let opid = self.op_cursor_to_opid(op, clock.as_ref())?;
+
+                let found = self
+                    .ops
+                    .seek_list_opid(
+                        &obj_meta.id,
+                        opid,
+                        TextRepresentation::String(self.text_encoding()).encoding(obj_meta.typ),
+                        clock.as_ref(),
+                    )
+                    .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
+
+                match op.move_cursor {
+                    // `MoveCursor::After` mimics the original behavior of cursors.
+                    //
+                    // The original behavior was to just return the `FoundOpId::index` found by
+                    // `OpSetInternal::seek_list_opid()`.
+                    //
+                    // This index always corresponds to the:
+                    // - index of the item itself (if it's visible at `clock`)
+                    // - next index of visible item that **was also visible at the time of cursor creation**
+                    //   (if the item is not visible at `clock`).
+                    // - or `sequence.length` if none of the next items are visible at `clock`.
+                    MoveCursor::After => Ok(found.index),
+                    MoveCursor::Before => {
+                        // `MoveCursor::Before` behaves like `MoveCursor::After` but in the opposite direction:
+                        //
+                        // - if the item is visible at `clock`, just return its index
+                        // - if the item isn't visible at `clock`, find the index of the **previous** item
+                        //   that's visible at `clock` that was also visible at the time of cursor creation.
+                        // - if none of the previous items are visible (or the index of the original item is 0),
+                        //   our index is `0`.
+                        if found.visible || found.index == 0 {
+                            Ok(found.index)
+                        } else {
+                            // FIXME: this should probably be an `OpSet` query
+                            // also this implementation is likely very inefficient
+
+                            // current implementation walks upwards through `key` of op pointed to by cursor
+                            // and checks if `key` is visible by using `seek_list_opid()`.
+
+                            let mut key = found
+                                .op.key.elemid()
+                                .expect("failed to retrieve initial cursor op key for MoveCursor::Before")
+                                .0;
+
+                            loop {
+                                let f = self.ops.seek_list_opid(
+                                    &obj_meta.id,
+                                    key,
+                                    TextRepresentation::String(self.text_encoding())
+                                        .encoding(obj_meta.typ),
+                                    clock.as_ref(),
+                                );
+
+                                match f {
+                                    Some(f) => {
+                                        if f.visible {
+                                            return Ok(f.index);
+                                        }
+
+                                        key = f
+                                            .op
+                                            .key
+                                            .elemid()
+                                            .expect(
+                                                "failed to retrieve op key in MoveCursor::Before",
+                                            )
+                                            .0;
+                                    }
+                                    // reached when we've gone before the beginning of the sequence
+                                    None => break Ok(0),
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn marks_for(
@@ -1532,7 +1646,7 @@ impl Automerge {
             .seek_ops_by_prop(
                 &obj.id,
                 prop,
-                TextRepresentation::String.encoding(obj.typ),
+                TextRepresentation::String(self.text_encoding()).encoding(obj.typ),
                 clock.as_ref(),
             )
             .ops
@@ -1554,7 +1668,7 @@ impl Automerge {
             .seek_ops_by_prop(
                 &obj.id,
                 prop,
-                TextRepresentation::String.encoding(obj.typ),
+                TextRepresentation::String(self.text_encoding()).encoding(obj.typ),
                 clock.as_ref(),
             )
             .ops
@@ -1668,10 +1782,7 @@ impl Automerge {
                     let prop = match op.key {
                         KeyRef::Map(prop) => Prop::Map(prop.into()),
                         KeyRef::Seq(_) => {
-                            let encoding = match obj.typ {
-                                ObjType::Text => ListEncoding::Text,
-                                _ => ListEncoding::List,
-                            };
+                            let encoding = self.text_rep(obj.typ);
                             let found = self
                                 .ops
                                 .seek_list_opid(&obj.id, op.id, encoding, at.as_ref())
@@ -1683,7 +1794,6 @@ impl Automerge {
                     let obj_id = self.ops.id_to_exid(op.id);
                     paths.insert(obj_id, path);
                 }
-                //}
             }
         }
         paths
@@ -1696,6 +1806,10 @@ impl Automerge {
 
     fn has_change(&self, head: &ChangeHash) -> bool {
         self.change_graph.has_change(head)
+    }
+
+    pub fn text_encoding(&self) -> TextEncoding {
+        self.ops.text_encoding
     }
 }
 
@@ -1793,14 +1907,25 @@ impl ReadDoc for Automerge {
         self.spans_for(obj.as_ref(), Some(clock))
     }
 
-    fn get_cursor<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
-        position: usize,
+        position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
         let clock = at.map(|heads| self.clock_at(heads));
-        self.get_cursor_for(obj.as_ref(), position, clock)
+        self.get_cursor_for(obj.as_ref(), position.into(), clock, MoveCursor::After)
+    }
+
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
+        let clock = at.map(|heads| self.clock_at(heads));
+        self.get_cursor_for(obj.as_ref(), position.into(), clock, move_cursor)
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(
@@ -1948,6 +2073,10 @@ impl ReadDoc for Automerge {
             rustc_version,
         }
     }
+
+    fn text_encoding(&self) -> TextEncoding {
+        self.ops.text_encoding
+    }
 }
 
 impl ReadDocInternal for Automerge {
@@ -2000,6 +2129,7 @@ pub(crate) struct Isolation {
 pub(crate) fn reconstruct_document<'a>(
     doc: &'a storage::Document<'a>,
     mode: VerificationMode,
+    text_encoding: TextEncoding,
 ) -> Result<Automerge, AutomergeError> {
     let storage::load::ReconOpSet {
         op_set,
@@ -2007,7 +2137,7 @@ pub(crate) fn reconstruct_document<'a>(
         max_op,
         change_graph,
         ..
-    } = storage::load::reconstruct_opset(doc, mode)
+    } = storage::load::reconstruct_opset(doc, mode, text_encoding)
         .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
 
     let doc = Automerge {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::exid::ExId;
+use crate::patches::TextRepresentation;
 use crate::types::Prop;
 use crate::{PatchAction, ScalarValue, SequenceTree};
 
@@ -35,24 +36,28 @@ impl List {
         self.len() == 0
     }
 
-    pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
+    pub(crate) fn apply(
+        &mut self,
+        text_rep: TextRepresentation,
+        patch: PatchAction,
+    ) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {
                 index,
                 value,
                 conflict,
             } => {
+                let h_value = Value::new(value.0, text_rep);
                 *self
                     .0
                     .get_mut(index)
-                    .ok_or(HydrateError::InvalidIndex(index))? =
-                    ListValue::new(value.0.into(), conflict);
+                    .ok_or(HydrateError::InvalidIndex(index))? = ListValue::new(h_value, conflict);
                 Ok(())
             }
             PatchAction::Insert { index, values, .. } => {
                 for (n, value) in values.into_iter().enumerate() {
-                    self.0
-                        .insert(index + n, ListValue::new(value.0.clone().into(), value.2));
+                    let h_value = Value::new(value.0.clone(), text_rep);
+                    self.0.insert(index + n, ListValue::new(h_value, value.2));
                 }
                 Ok(())
             }

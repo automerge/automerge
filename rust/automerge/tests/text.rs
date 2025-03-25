@@ -4,8 +4,10 @@ use automerge::{
     hydrate_list, hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark},
+    patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ObjType, Patch, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
+    TextEncoding, ROOT,
 };
 const B: usize = 16;
 
@@ -157,9 +159,6 @@ fn mark_created_after_insertion() {
         automerge::marks::ExpandMark::Both,
     )
     .unwrap();
-
-    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
 }
 
 #[test]
@@ -215,7 +214,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 0,
-                value: "the ".into(),
+                value: ConcreteTextValue::new(
+                    "the ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -228,7 +230,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 4,
-                value: "quick ".into(),
+                value: ConcreteTextValue::new(
+                    "quick ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -244,7 +249,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 10,
-                value: "fox".into(),
+                value: ConcreteTextValue::new(
+                    "fox",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -264,7 +272,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 13,
-                value: " jumps".into(),
+                value: ConcreteTextValue::new(
+                    " jumps",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -280,7 +291,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 19,
-                value: " over the lazy dog".into(),
+                value: ConcreteTextValue::new(
+                    " over the lazy dog",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -314,7 +328,6 @@ fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
     .unwrap();
 
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
     assert!(marks_are_consolidated(&spans));
 }
 
@@ -394,15 +407,9 @@ fn insertions_after_noexpand_spans_are_not_marked() {
 
     doc.update_spans(&text, new_blocks).unwrap();
 
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
-
     let heads_before = doc.get_heads();
     doc.splice_text(&text, 11, 0, "a").unwrap();
     let heads_after = doc.get_heads();
-
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
 
     let patches = doc.diff(&heads_before, &heads_after);
     assert_eq!(patches.len(), 1);
@@ -530,9 +537,7 @@ fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following
 
     doc.update_diff_cursor();
     let heads_before = doc.get_heads();
-    println!("doing splice");
     doc.splice_text(&text, doc.length(&text), 0, "a").unwrap();
-    println!("done splice");
     let heads_after = doc.get_heads();
 
     let patches = doc.diff(&heads_before, &heads_after);
@@ -648,6 +653,20 @@ fn test_remote_patches_for_marks_with_expand_after() {
     let patches_b = doc_b.diff(&heads_before_b, &heads_after_b);
 
     assert_eq!(patches_a, patches_b);
+}
+
+#[test]
+fn update_text_change_at() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.update_text(&text, "a\n").unwrap();
+    let initial_heads = doc.get_heads();
+    doc.update_text(&text, "a\nb\n").unwrap();
+    doc.isolate(&initial_heads);
+    doc.update_text(&text, "a\nc\n").unwrap();
+    doc.integrate();
+
+    assert_eq!(doc.text(&text).unwrap(), "a\nc\nb\n");
 }
 
 proptest::proptest! {

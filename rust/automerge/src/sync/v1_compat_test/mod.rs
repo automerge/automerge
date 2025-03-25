@@ -6,6 +6,7 @@ use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    patches::PatchLog,
     storage::parse::Input,
     storage::{parse, Change as StoredChange, ReadChangeOpError},
     sync::SyncDoc,
@@ -119,6 +120,7 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
+        //let mut patch_log = PatchLog::inactive(self.text_encoding().into());
         self.receive_sync_message_inner_v1(sync_state, message)
     }
 

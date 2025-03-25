@@ -9,7 +9,7 @@ use crate::clock::Clock;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate;
-use crate::text_value::TextValue;
+use crate::patches::TextRepresentation;
 use crate::types;
 use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, ObjType, OpId};
 
@@ -91,8 +91,8 @@ impl ChangeOp {
         )
     }
 
-    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
-        self.bld.hydrate_value()
+    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+        self.bld.hydrate_value(text_rep)
     }
 
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
@@ -188,12 +188,10 @@ impl<'a> OpBuilder<'a> {
     }
 
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        if encoding == ListEncoding::List {
-            1
-        } else if self.is_mark() {
-            0
-        } else {
-            TextValue::width(self.as_str()) // FASTER
+        match encoding {
+            ListEncoding::List => 1,
+            ListEncoding::Text(_) if self.is_mark() => 0,
+            ListEncoding::Text(enc) => enc.width(self.as_str()),
         }
     }
 
@@ -237,14 +235,14 @@ impl<'a> OpBuilder<'a> {
         self.key.elemid().is_some()
     }
 
-    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
+    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
         match self.action {
-            Action::MakeMap => hydrate::Value::from(ObjType::Map),
-            Action::MakeList => hydrate::Value::from(ObjType::List),
-            Action::MakeText => hydrate::Value::from(ObjType::Text),
-            Action::MakeTable => hydrate::Value::from(ObjType::Table),
-            Action::Set => hydrate::Value::from(&self.value),
-            Action::Mark if self.mark_name.is_some() => hydrate::Value::from(&self.value),
+            Action::MakeMap => hydrate::Value::map(),
+            Action::MakeList => hydrate::Value::list(),
+            Action::MakeText => hydrate::Value::new(ObjType::Text, text_rep),
+            Action::MakeTable => hydrate::Value::new(ObjType::Table, text_rep),
+            Action::Set => hydrate::Value::new(&self.value, text_rep),
+            Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
             Action::Mark => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
@@ -428,8 +426,8 @@ impl TxOp {
         }
     }
 
-    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
-        self.bld.hydrate_value()
+    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+        self.bld.hydrate_value(text_rep)
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
@@ -456,8 +454,8 @@ impl OpLike for &TxOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self) -> u64 {
-        op.bld.width(ListEncoding::Text) as u64
+    fn width(op: &Self, encoding: ListEncoding) -> u64 {
+        op.bld.width(encoding) as u64
     }
 
     fn visible(op: &Self) -> bool {
@@ -535,8 +533,8 @@ impl OpLike for TxOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self) -> u64 {
-        op.bld.width(ListEncoding::Text) as u64
+    fn width(op: &Self, encoding: ListEncoding) -> u64 {
+        op.bld.width(encoding) as u64
     }
 
     fn visible(op: &Self) -> bool {
@@ -614,9 +612,9 @@ impl OpLike for ChangeOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self) -> u64 {
+    fn width(op: &Self, encoding: ListEncoding) -> u64 {
         if Self::visible(op) {
-            op.bld.width(ListEncoding::Text) as u64
+            op.bld.width(encoding) as u64
         } else {
             0
         }
@@ -716,8 +714,8 @@ impl<'a> OpLike for Op<'a> {
         op.mark_index()
     }
 
-    fn width(op: &Self) -> u64 {
-        op.width(ListEncoding::Text) as u64
+    fn width(op: &Self, encoding: ListEncoding) -> u64 {
+        op.width(encoding) as u64
     }
 
     fn visible(_op: &Self) -> bool {
@@ -1008,12 +1006,10 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        if encoding == ListEncoding::List {
-            1
-        } else if self.action == Action::Mark {
-            0
-        } else {
-            TextValue::width(self.as_str()) // FASTER
+        match encoding {
+            ListEncoding::List => 1,
+            ListEncoding::Text(_) if self.action == Action::Mark => 0,
+            ListEncoding::Text(enc) => enc.width(self.as_str()),
         }
     }
 
@@ -1087,11 +1083,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn hydrate_value(&self) -> hydrate::Value {
+    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
         match &self.action() {
-            OpType::Make(obj_type) => hydrate::Value::from(*obj_type),
-            OpType::Put(scalar) => hydrate::Value::from(scalar.to_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::from(&mark.value),
+            OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_rep),
+            OpType::Put(scalar) => hydrate::Value::new(scalar.to_owned(), text_rep),
+            OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_rep),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
@@ -1341,7 +1337,7 @@ pub(crate) trait OpLike: Debug {
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
     fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
     fn mark_index(op: &Self) -> Option<MarkIndexValue>;
-    fn width(op: &Self) -> u64;
+    fn width(op: &Self, encoding: ListEncoding) -> u64;
     fn visible(op: &Self) -> bool;
     fn obj_info(&self) -> Option<ObjInfo>;
 }

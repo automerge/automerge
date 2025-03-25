@@ -7,7 +7,7 @@ use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::read::ReadDocInternal;
-use crate::types::{ActorId, ObjId, ObjType, OpId, Prop};
+use crate::types::{ActorId, ObjId, ObjType, OpId, Prop, TextEncoding};
 use crate::{ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -32,11 +32,11 @@ use super::{PatchBuilder, TextRepresentation};
 ///
 /// ```no_run
 /// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
-/// SyncState, SyncDoc}, patches::TextRepresentation};
+/// SyncState, SyncDoc}, patches::TextRepresentation, TextEncoding};
 /// let doc = AutoCommit::new();
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
-/// let mut patch_log = PatchLog::active(TextRepresentation::String);
+/// let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::UnicodeCodePoint));
 /// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
@@ -189,7 +189,11 @@ impl PatchLog {
     }
 
     pub fn null() -> Self {
-        Self::new(false, TextRepresentation::default())
+        // Text encoding doesn't matter here as it will never be used
+        Self::new(
+            false,
+            TextRepresentation::String(TextEncoding::UnicodeCodePoint),
+        )
     }
 
     /// Create a new [`PatchLog`] which does record changes.
@@ -416,7 +420,7 @@ impl PatchLog {
         read_doc: &R,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new(read_doc, Some(events.len()));
+        let mut patch_builder = PatchBuilder::new(read_doc, Some(events.len()), text_rep);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
@@ -630,7 +634,7 @@ impl ExposeQueue {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
-            ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
+            ObjType::Text if matches!(text_rep, TextRepresentation::String(_)) => {
                 let text = read_doc.text(&exid).ok()?;
                 // TODO - need read_doc, text_spans()
                 patch_builder.splice_text(exid, 0, &text, None);

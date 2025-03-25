@@ -300,7 +300,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
             c.succ = v
         }
 
-        self.advance_doc_op(&c);
+        self.advance_doc_op(c);
 
         if c.prop2() != self.value.key {
             self.value.map_flush(self.log);
@@ -314,7 +314,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     fn advance_doc_op(&mut self, c: &ChangeOp) {
         while let Some(d) = self.doc_op.as_ref() {
             // FIXME - sometimes we can fast forward to the next property
-            match d.key.partial_cmp(&c.key()) {
+            match d.key.partial_cmp(c.key()) {
                 Some(Ordering::Greater) => break,
                 Some(Ordering::Equal) if d.id > c.id() => break,
                 _ => {
@@ -345,7 +345,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 }
 
 fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<SuccInsert>) -> bool {
-    if let Some(ref d) = doc_op {
+    if let Some(d) = doc_op {
         let mut deleted = false;
         if let Some(v) = pred.remove(&d.id) {
             for (id, inc) in v {
@@ -387,22 +387,16 @@ impl OpValueOption {
     }
 
     fn increment(&mut self, n: i64) {
-        match self {
-            Self(Some(ov)) => {
-                if let Value::Scalar(ScalarValue::Counter(c)) = &mut ov.value {
-                    c.increment(n);
-                }
+        if let Self(Some(ov)) = self {
+            if let Value::Scalar(ScalarValue::Counter(c)) = &mut ov.value {
+                c.increment(n);
             }
-            _ => {}
         }
     }
 
     fn expose(&mut self) {
-        match self {
-            Self(Some(ov)) => {
-                ov.expose = true;
-            }
-            _ => {}
+        if let Self(Some(ov)) = self {
+            ov.expose = true;
         }
     }
 
@@ -441,7 +435,7 @@ impl OpValueOption {
         Self(self.0.take())
     }
 
-    fn to_value(self) -> Option<OpValue> {
+    fn into_value(self) -> Option<OpValue> {
         self.0
     }
 }
@@ -467,7 +461,11 @@ impl<'a> ValueState<'a> {
             }
             _ => {
                 if doc_op.visible() {
-                    self.doc.set(doc_op.hydrate_value(), doc_op.id, deleted);
+                    self.doc.set(
+                        doc_op.hydrate_value(self.encoding.into()),
+                        doc_op.id,
+                        deleted,
+                    );
                 }
             }
         }
@@ -501,7 +499,8 @@ impl<'a> ValueState<'a> {
             }
             _ => {
                 if op.visible() {
-                    self.change.set(op.hydrate_value(), op.id(), false);
+                    self.change
+                        .set(op.hydrate_value(self.encoding.into()), op.id(), false);
                 }
             }
         }
@@ -533,7 +532,7 @@ impl<'a> ValueState<'a> {
         change: OpValueOption,
         log: &mut PatchLog,
     ) {
-        match (doc.to_value(), change.to_value()) {
+        match (doc.into_value(), change.into_value()) {
             (None, Some(c)) => {
                 log.put_map(obj, key, c.value, c.id, c.conflict, false);
             }
@@ -574,7 +573,7 @@ impl<'a> ValueState<'a> {
         log: &mut PatchLog,
     ) {
         if encoding == ListEncoding::List {
-            match (doc.to_value(), change.to_value()) {
+            match (doc.into_value(), change.into_value()) {
                 (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
                 (Some(d), Some(c)) if d.id == c.id => {
                     let n = c.value.as_i64() - d.value.as_i64();
@@ -670,7 +669,7 @@ impl BatchApply {
                 Some(otype) if otype.is_sequence() => {
                     walk_list(
                         os.obj,
-                        ListEncoding::from(Some(otype)),
+                        doc.text_rep(otype),
                         doc_ops,
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
@@ -791,7 +790,7 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         self.apply_changes_batch_log_patches(
             changes,
-            &mut PatchLog::inactive(TextRepresentation::default()),
+            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
         )
     }
 

@@ -239,6 +239,236 @@ fn test_cursors() -> Result<(), AutomergeError> {
         Err(AutomergeError::InvalidCursor(cursor3))
     );
 
+    // test start/before/after/end cursors
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    let text2 = tx.put_object(ROOT, "hi", ObjType::Text).unwrap();
+    tx.splice_text(&text2, 0, 0, "aaa@bbb").unwrap();
+    tx.commit();
+
+    let before_cursor = doc
+        .get_cursor_moving(&text2, 3, None, MoveCursor::Before)
+        .unwrap();
+    let after_cursor = doc
+        .get_cursor_moving(&text2, 3, None, MoveCursor::After)
+        .unwrap();
+    let start_cursor = doc.get_cursor(&text2, CursorPosition::Start, None).unwrap();
+    let end_cursor = doc.get_cursor(&text2, CursorPosition::End, None).unwrap();
+
+    // s, b, a, e denote the positions of the start/before/after/end cursors
+    // aaa@bbb
+    // ^  ^   ^
+    // s  ba  e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 3);
+    assert_eq!(pos_after, 3);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 7);
+
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 3, 1, "~~~").unwrap();
+    tx.commit();
+
+    // aaa~~~bbb
+    // ^ ^   ^  ^
+    // s b   a  e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 2);
+    assert_eq!(pos_after, 6);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 9);
+
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 0, 6, "").unwrap();
+    tx.commit();
+
+    // bbb
+    // ^  ^
+    // sba e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 0);
+    assert_eq!(pos_after, 0);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 3);
+
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 0, 0, "hello").unwrap();
+    tx.commit();
+
+    // hellobbb
+    // ^    ^  ^
+    // sb   a  e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 0);
+    assert_eq!(pos_after, 5);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 8);
+
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 0, 0, "hello").unwrap();
+    tx.commit();
+
+    // hellohellobbb
+    // ^         ^  ^
+    // sb        a  e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 0);
+    assert_eq!(pos_after, 10);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 13);
+
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 5, 8, "").unwrap();
+    tx.commit();
+
+    // hello
+    // ^    ^
+    // sb   ae
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 0);
+    assert_eq!(pos_after, 5);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 5);
+
+    // test for semantics of `MoveCursor::After`
+    // -----------------------------------------------------------------------------------------
+    let mut tx = doc.transaction();
+    let text2 = tx.put_object(ROOT, "hi", ObjType::Text).unwrap();
+    tx.splice_text(&text2, 0, 0, "aaa@bbb").unwrap();
+    tx.commit();
+
+    let before_cursor = doc
+        .get_cursor_moving(&text2, 3, None, MoveCursor::Before)
+        .unwrap();
+    let after_cursor = doc
+        .get_cursor_moving(&text2, 3, None, MoveCursor::After)
+        .unwrap();
+    let start_cursor = doc.get_cursor(&text2, CursorPosition::Start, None).unwrap();
+    let end_cursor = doc.get_cursor(&text2, CursorPosition::End, None).unwrap();
+
+    // setup:
+    // aaa@bbb
+    // ^  ^   ^
+    // s  ba  e
+
+    // beginning of test: ----------------------------------------------
+
+    // remove "@bb"
+
+    let mut tx = doc.transaction();
+    tx.splice_text(&text2, 3, 3, "!!!").unwrap();
+    tx.commit();
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&AutoSerde::from(&doc)).unwrap()
+    );
+
+    // aaa!!!b
+    // ^ ^   ^ ^
+    // s b   a e
+
+    let pos_before = doc
+        .get_cursor_position(&text2, &before_cursor, None)
+        .unwrap();
+    let pos_after = doc
+        .get_cursor_position(&text2, &after_cursor, None)
+        .unwrap();
+    let pos_start = doc
+        .get_cursor_position_for(&text2, &start_cursor, None)
+        .unwrap();
+    let pos_end = doc
+        .get_cursor_position_for(&text2, &end_cursor, None)
+        .unwrap();
+
+    assert_eq!(pos_before, 2);
+    assert_eq!(pos_after, 6);
+    assert_eq!(pos_start, 0);
+    assert_eq!(pos_end, 7);
+
     Ok(())
 }
 

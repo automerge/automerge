@@ -1,6 +1,6 @@
 use crate::op_set2::op_set::{MarkIndexColumn, MarkIndexValue};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
-use crate::types::{ListEncoding, ObjId, ObjType, OpId};
+use crate::types::{ObjId, ObjType, OpId, TextEncoding};
 use packer::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
 
@@ -14,6 +14,7 @@ pub(crate) struct IndexBuilder {
     incs: Vec<Option<i64>>,
     marks: Vec<Option<MarkIndexValue>>,
     obj_info: ObjIndex,
+    encoding: TextEncoding,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -86,7 +87,7 @@ pub(crate) struct Indexes {
 }
 
 impl IndexBuilder {
-    pub(crate) fn new(op_set: &OpSet) -> Self {
+    pub(crate) fn new(op_set: &OpSet, encoding: TextEncoding) -> Self {
         Self {
             counters: HashMap::new(),
             succ: Vec::with_capacity(op_set.len()),
@@ -94,6 +95,7 @@ impl IndexBuilder {
             incs: Vec::with_capacity(op_set.sub_len()),
             marks: Vec::with_capacity(op_set.len()),
             obj_info: ObjIndex::default(),
+            encoding,
         }
     }
 
@@ -104,7 +106,7 @@ impl IndexBuilder {
         self.succ.push(vis_num(op));
 
         if op.succ().len() == 0 {
-            self.widths.push(op.width(ListEncoding::Text) as u64);
+            self.widths.push(op.width(self.encoding.into()) as u64);
         } else {
             self.widths.push(0);
         }
