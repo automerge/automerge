@@ -81,16 +81,6 @@ impl ChangeOp {
         Some(MarkData { name, value })
     }
 
-    #[cfg(test)]
-    pub(crate) fn op_type(&self) -> OpType<'static> {
-        OpType::from_action_and_value(
-            self.bld.action,
-            &self.bld.value,
-            &self.bld.mark_name,
-            self.bld.expand,
-        )
-    }
-
     pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
         self.bld.hydrate_value(text_rep)
     }

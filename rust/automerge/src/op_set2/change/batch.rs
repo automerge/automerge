@@ -3,7 +3,7 @@ use crate::hydrate::Value;
 use crate::op_set2::types::{Action, KeyRef, PropRef2};
 use crate::op_set2::SuccInsert;
 use crate::patches::TextRepresentation;
-use crate::types::{ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue};
+use crate::types::{ActorId, ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue};
 use crate::AutomergeError;
 use crate::{Automerge, Change, ChangeHash, PatchLog};
 
@@ -21,6 +21,7 @@ type PredCache = HashMap<OpId, Vec<(OpId, Option<i64>)>>;
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
+    actor_seq: HashMap<ActorId, HashSet<u64>>,
     hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
@@ -634,6 +635,43 @@ fn walk_map(
 }
 
 impl BatchApply {
+    fn has_change(&self, doc: &Automerge, hash: ChangeHash) -> bool {
+        doc.change_graph.has_change(&hash)
+            || self.hashes.contains(&hash)
+            || doc.ready_q_has_hash(&hash)
+    }
+
+    fn push(&mut self, c: Change) {
+
+        assert!(!self.has_actor_seq(&c));
+        self.record_actor_seq(&c);
+
+        assert!(!self.hashes.contains(&c.hash()));
+        self.hashes.insert(c.hash());
+
+        self.changes.push(c);
+    }
+
+    fn record_actor_seq(&mut self, c: &Change) {
+        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
+            set.insert(c.seq());
+        } else {
+            self.actor_seq
+                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
+        }
+    }
+
+    fn has_actor_seq(&self, c: &Change) -> bool {
+        self.actor_seq
+            .get(c.actor_id())
+            .map(|set| set.contains(&c.seq()))
+            .unwrap_or(false)
+    }
+
+    fn duplicate_seq(&self, doc: &Automerge, c: &Change) -> bool {
+        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
+    }
+
     pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
             doc.put_actor_ref(c.actor_id());
@@ -802,8 +840,8 @@ impl Automerge {
         let mut chap = BatchApply::default();
         let mut result = Ok(());
         for c in changes {
-            if !self.change_graph.has_change(&c.hash()) {
-                if self.duplicate_seq(&c) {
+            if !chap.has_change(self, c.hash()) {
+                if chap.duplicate_seq(self, &c) {
                     result = Err(AutomergeError::DuplicateSeqNumber(
                         c.seq(),
                         c.actor_id().clone(),
@@ -811,8 +849,7 @@ impl Automerge {
                     break;
                 }
                 if self.is_causally_ready2(&c, &chap.hashes) {
-                    chap.hashes.insert(c.hash());
-                    chap.changes.push(c);
+                    chap.push(c);
                 } else {
                     self.queue.push(c);
                 }
@@ -820,14 +857,25 @@ impl Automerge {
         }
         if result.is_ok() {
             while let Some(c) = self.pop_next_causally_ready_change2(&chap.hashes) {
-                if !self.change_graph.has_change(&c.hash()) && !chap.hashes.contains(&c.hash()) {
-                    chap.hashes.insert(c.hash());
-                    chap.changes.push(c);
-                }
+                chap.push(c);
             }
         }
         chap.apply(self, log);
         result
+    }
+
+    fn ready_q_has_hash(&self, hash: &ChangeHash) -> bool {
+        // if the queue gets huge this could be slow - maybe add an index
+        self.queue.iter().any(|c| &c.hash() == hash)
+    }
+
+    fn ready_q_has_dupe(&self, change: &Change) -> bool {
+        // if the queue gets huge this could be slow - maybe add an index
+        self.queue.iter().any(|c| {
+            c.seq() == change.seq()
+                && c.actor_id() == change.actor_id()
+                && c.hash() != change.hash()
+        })
     }
 
     fn is_causally_ready2(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
@@ -863,6 +911,7 @@ impl Automerge {
             .actors()
             .map(|a| self.ops.lookup_actor(a).unwrap())
             .collect();
+
         change
             .iter_ops()
             .enumerate()

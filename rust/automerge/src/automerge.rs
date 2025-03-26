@@ -809,7 +809,7 @@ impl Automerge {
             .unwrap_or(0)
     }
 
-    pub(crate) fn duplicate_seq(&self, change: &Change) -> bool {
+    pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
         self.seq_for_actor(change.actor_id()) >= change.seq()
     }
 
@@ -870,7 +870,7 @@ impl Automerge {
                 if c.actor_id() == self.actor_id() {
                     return Err(AutomergeError::DuplicateActorId(c.actor_id().clone()));
                 }
-                if self.duplicate_seq(&c) {
+                if self.has_actor_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
                         c.seq(),
                         c.actor_id().clone(),
@@ -1236,7 +1236,6 @@ impl Automerge {
         patch_log: &mut PatchLog,
         change: &[u8],
     ) -> Result<(), AutomergeError> {
-        //log!("op_obj={:?}",op.obj);
         let obj = self.get_obj_meta(op.bld.obj)?;
         let encoding = patch_log.text_rep().encoding(obj.typ);
 
