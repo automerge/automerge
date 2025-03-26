@@ -706,7 +706,7 @@ impl Automerge {
             }
         };
         tracing::trace!("loading change chunks");
-        match load::load_changes(remaining.reset(), options.text_encoding) {
+        match load::load_changes(remaining.reset(), options.text_encoding, &am.change_graph) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(change.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
@@ -788,14 +788,17 @@ impl Automerge {
             *self = doc;
             return Ok(self.ops.len());
         }
-        let changes =
-            match load::load_changes(storage::parse::Input::new(data), self.text_encoding()) {
-                load::LoadedChanges::Complete(c) => c,
-                load::LoadedChanges::Partial { error, loaded, .. } => {
-                    tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
-                    loaded
-                }
-            };
+        let changes = match load::load_changes(
+            storage::parse::Input::new(data),
+            self.text_encoding(),
+            &self.change_graph,
+        ) {
+            load::LoadedChanges::Complete(c) => c,
+            load::LoadedChanges::Partial { error, loaded, .. } => {
+                tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
+                loaded
+            }
+        };
         let start = self.ops.len();
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;

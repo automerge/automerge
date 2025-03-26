@@ -642,7 +642,6 @@ impl BatchApply {
     }
 
     fn push(&mut self, c: Change) {
-
         assert!(!self.has_actor_seq(&c));
         self.record_actor_seq(&c);
 

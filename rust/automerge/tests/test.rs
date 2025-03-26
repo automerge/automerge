@@ -2352,3 +2352,38 @@ fn zero_length_data() {
         Value::from(vec![])
     );
 }
+
+#[test]
+fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
+    let mut doc1 = AutoCommit::new();
+    doc1.put(&ROOT, "string", "hello").unwrap();
+    let mut doc2 = doc1.fork();
+    let mut doc3 = doc1.fork();
+
+    assert!(doc1.get_heads().len() == 1);
+
+    doc1.put(&ROOT, "concurrent1", "123").unwrap();
+    assert!(doc1.get_heads().len() == 1);
+    let hash_b = doc1.get_heads()[0];
+
+    doc3.load_incremental(&doc1.save()).unwrap();
+    assert!(doc3.get_heads().len() == 1);
+    let hash_c = doc3.get_heads()[0];
+
+    assert_eq!(hash_b, hash_c);
+
+    doc2.put(&ROOT, "concurrent2", "abc").unwrap();
+    assert!(doc2.get_heads().len() == 1);
+    let hash_d = doc2.get_heads()[0];
+
+    doc2.merge(&mut doc1).unwrap();
+    let heads = doc2.get_heads();
+
+    assert!(heads.len() == 2);
+    assert!(heads.contains(&hash_d));
+    assert!(heads.contains(&hash_b));
+
+    doc3.load_incremental(&doc2.save()).unwrap();
+
+    assert!(doc3.get_heads() == doc2.get_heads());
+}
