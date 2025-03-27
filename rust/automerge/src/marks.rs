@@ -1,17 +1,15 @@
-use fxhash::FxBuildHasher;
 use smol_str::SmolStr;
-use std::collections::HashMap;
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use crate::op_set2;
 use crate::op_set2::{MarkData, Op, OpType};
-use crate::types::Clock;
-use crate::types::{ObjType, OpId};
+use crate::types::{Clock, SmallHashMap, ObjType, OpId};
 use crate::value::ScalarValue;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
 
 /// Marks let you store out-of-bound information about sequences.
 ///
@@ -382,7 +380,7 @@ impl ExpandMark {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct RichTextQueryState<'a> {
-    pub(crate) map: HashMap<OpId, MarkData<'a>, FxBuildHasher>,
+    pub(crate) map: SmallHashMap<OpId, MarkData<'a>>,
     pub(crate) block: Option<OpId>,
 }
 

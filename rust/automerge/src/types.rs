@@ -8,7 +8,13 @@ use std::cmp::{Eq, Ordering};
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+use std::collections::HashMap;
 use tinyvec::{ArrayVec, TinyVec};
+
+//use fnv::FnvBuildHasher;
+use fxhash::FxBuildHasher;
+pub(crate) type SmallHasher = FxBuildHasher;
+pub(crate) type SmallHashMap<A, B> = HashMap<A, B, SmallHasher>;
 
 // thanks to https://qrng.anu.edu.au/ for some random bytes
 pub(crate) const CONCURRENCY_MAGIC_BYTES: [u8; 4] = [0x13, 0xb2, 0x23, 0x09];

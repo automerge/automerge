@@ -16,6 +16,7 @@ utf16-indexing = []
 
 [dependencies]
 packer = { path = "../packer" }
+fnv = "1.0.3"
 hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "^0.11.0-pre.4"

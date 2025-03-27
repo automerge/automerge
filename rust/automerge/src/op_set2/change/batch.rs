@@ -3,7 +3,9 @@ use crate::hydrate::Value;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
 use crate::op_set2::SuccInsert;
 use crate::patches::TextRepresentation;
-use crate::types::{ActorId, ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue};
+use crate::types::{
+    ActorId, ElemId, SmallHashMap, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue,
+};
 use crate::AutomergeError;
 use crate::{Automerge, Change, ChangeHash, PatchLog};
 
@@ -15,7 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-type PredCache = HashMap<OpId, Vec<(OpId, Option<i64>)>>;
+type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 
 #[derive(Debug, Clone, Default)]
 struct BatchApply {
@@ -28,10 +30,10 @@ struct BatchApply {
 }
 
 struct Untangler<'a> {
-    gosub: HashMap<usize, Vec<usize>>,
+    gosub: SmallHashMap<usize, Vec<usize>>,
     stack: Vec<usize>,
-    entry: HashMap<OpId, Vec<usize>>,
-    updates: HashMap<ElemId, Vec<usize>>,
+    entry: SmallHashMap<OpId, Vec<usize>>,
+    updates: SmallHashMap<ElemId, Vec<usize>>,
     updates_stack: Vec<usize>,
     value: ValueState<'a>,
     encoding: ListEncoding,
@@ -42,12 +44,14 @@ struct Untangler<'a> {
 }
 
 impl<'a> Untangler<'a> {
+    #[inline(never)]
     fn flush(&mut self, log: &mut PatchLog) {
         self.value.list_flush(self.index, log);
         self.index += self.width;
         self.width = 0;
     }
 
+    #[inline(never)]
     fn handle_doc_op(
         &mut self,
         doc_op: &Op<'a>,
@@ -74,6 +78,7 @@ impl<'a> Untangler<'a> {
         self.value.process_doc_op(doc_op, deleted);
     }
 
+    #[inline(never)]
     fn element_update(&mut self, doc_op: &Op<'_>, change_ops: &mut [ChangeOp]) {
         while let Some(last) = self.updates_stack.last() {
             let change_op = &mut change_ops[*last];
@@ -92,7 +97,8 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    fn finish(mut self, ops: &mut [ChangeOp], log: &mut PatchLog) {
+    #[inline(never)]
+    fn finish_updates(&mut self, ops: &mut [ChangeOp]) {
         for i in self.updates_stack.iter().rev() {
             ops[*i].pos = Some(self.max);
             ops[*i].subsort = self.count;
@@ -103,16 +109,29 @@ impl<'a> Untangler<'a> {
             self.value.process_change_op(&ops[*i]);
             self.count += 1;
         }
+    }
+
+    #[inline(never)]
+    fn finish_inserts(&mut self, ops: &mut [ChangeOp], log: &mut PatchLog) {
+        while !self.stack.is_empty() {
+            self.untangle_inner(ops, self.max, log);
+        }
+    }
+
+    #[inline(never)]
+    fn finish(mut self, ops: &mut [ChangeOp], log: &mut PatchLog) {
+        self.finish_updates(ops);
+
+        self.flush(log);
 
         assert!(self.entry.is_empty());
 
-        while !self.stack.is_empty() {
-            self.flush(log);
-            self.untangle_inner(ops, self.max, log);
-        }
+        self.finish_inserts(ops, log);
+
         self.flush(log);
     }
 
+    #[inline(never)]
     fn untangle_inserts(
         &mut self,
         id: OpId,
@@ -135,6 +154,7 @@ impl<'a> Untangler<'a> {
         }
     }
 
+    #[inline(never)]
     fn untangle_inner(
         &mut self,
         ops: &mut [ChangeOp],
@@ -194,6 +214,7 @@ impl<'a> Untangler<'a> {
         Some(())
     }
 
+    #[inline(never)]
     fn new(
         obj: ObjId,
         encoding: ListEncoding,
@@ -201,11 +222,11 @@ impl<'a> Untangler<'a> {
         pred: &mut PredCache,
         max: usize,
     ) -> Self {
-        let mut e_to_i = HashMap::new();
-        let mut gosub: HashMap<usize, Vec<usize>> = HashMap::new();
-        let mut entry: HashMap<OpId, Vec<usize>> = HashMap::new();
-        let mut stack: Vec<usize> = Vec::new();
-        let mut updates: HashMap<ElemId, Vec<usize>> = HashMap::new();
+        let mut e_to_i = SmallHashMap::default();
+        let mut gosub: SmallHashMap<usize, Vec<usize>> = HashMap::default();
+        let mut entry: SmallHashMap<OpId, Vec<usize>> = HashMap::default();
+        let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
+        let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
         let mut last_e = None;
         let value = ValueState::new(obj, encoding);
         for (i, op) in change_ops.iter_mut().enumerate() {
@@ -237,7 +258,7 @@ impl<'a> Untangler<'a> {
             stack,
             updates,
             encoding,
-            updates_stack: vec![],
+            updates_stack: Vec::with_capacity(change_ops.len()),
             count: 0,
             index: 0,
             width: 0,
@@ -529,6 +550,7 @@ impl<'a> ValueState<'a> {
         }
     }
 
+    #[inline(never)]
     fn map_flush(&mut self, log: &mut PatchLog) {
         let obj = self.obj;
         let change = self.change.take();
@@ -538,16 +560,59 @@ impl<'a> ValueState<'a> {
         }
     }
 
+    #[inline(never)]
     fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
+        if self.key.take().is_none() {
+            return;
+        }
         let obj = self.obj;
-        let change = self.change.take();
-        let doc = self.doc.take();
-        if self.key.take().is_some() {
-            let marks = &mut self.marks;
-            Self::list_process(obj, self.encoding, index, doc, change, marks, log);
+        let encoding = self.encoding;
+        if encoding == ListEncoding::List {
+            match (self.doc.0.take(), self.change.0.take()) {
+                (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
+                (Some(d), Some(c)) if d.id == c.id => {
+                    let n = c.value.as_i64() - d.value.as_i64();
+                    if n != 0 {
+                        log.increment_seq(obj, index, n, c.id);
+                    }
+                }
+                (Some(d), Some(c)) if c.id < d.id => {
+                    log.flag_conflict(obj, &Prop::from(index));
+                }
+                (Some(d), Some(c)) => {
+                    let conflict = !d.deleted || c.conflict;
+                    log.put_seq(obj, index, c.value, c.id, conflict, false)
+                }
+                (Some(d), None) => {
+                    if d.expose {
+                        log.put_seq(obj, index, d.value, d.id, d.conflict, true);
+                    } else if d.deleted {
+                        log.delete_seq(obj, index, 1);
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            match (self.doc.0.take(), self.change.0.take()) {
+                (None, Some(c)) => {
+                    let marks = self.marks.after.current().cloned();
+                    log.splice(obj, index, c.value.as_str(), marks);
+                }
+                (Some(d), None) if d.deleted => {
+                    let w = d.value.width(encoding);
+                    log.delete_seq(obj, index, w);
+                }
+                (Some(d), None) => {
+                    if let Some(m) = self.marks.current() {
+                        log.mark(obj, index, d.value.width(encoding), &m);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
+    #[inline(never)]
     fn map_process(
         obj: ObjId,
         key: &str,
@@ -582,61 +647,6 @@ impl<'a> ValueState<'a> {
                 }
             }
             _ => {}
-        }
-        //}
-    }
-
-    fn list_process(
-        obj: ObjId,
-        encoding: ListEncoding,
-        index: usize,
-        doc: OpValueOption,
-        change: OpValueOption,
-        marks: &mut RichTextDiff<'_>,
-        log: &mut PatchLog,
-    ) {
-        if encoding == ListEncoding::List {
-            match (doc.into_value(), change.into_value()) {
-                (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
-                (Some(d), Some(c)) if d.id == c.id => {
-                    let n = c.value.as_i64() - d.value.as_i64();
-                    if n != 0 {
-                        log.increment_seq(obj, index, n, c.id);
-                    }
-                }
-                (Some(d), Some(c)) if c.id < d.id => {
-                    log.flag_conflict(obj, &Prop::from(index));
-                }
-                (Some(d), Some(c)) => {
-                    let conflict = !d.deleted || c.conflict;
-                    log.put_seq(obj, index, c.value, c.id, conflict, false)
-                }
-                (Some(d), None) => {
-                    if d.expose {
-                        log.put_seq(obj, index, d.value, d.id, d.conflict, true);
-                    } else if d.deleted {
-                        log.delete_seq(obj, index, 1);
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            match (doc.0, change.0) {
-                (None, Some(c)) => {
-                    let marks = marks.after.current().cloned();
-                    log.splice(obj, index, c.value.as_str(), marks);
-                }
-                (Some(d), None) if d.deleted => {
-                    let w = d.value.width(encoding);
-                    log.delete_seq(obj, index, w);
-                }
-                (Some(d), None) => {
-                    if let Some(m) = marks.current() {
-                        log.mark(obj, index, d.value.width(encoding), &m);
-                    }
-                }
-                _ => {}
-            }
         }
     }
 }

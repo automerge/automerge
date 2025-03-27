@@ -3,14 +3,13 @@ use crate::marks::OldMarkData;
 use crate::op_set::{Op, OpSetData};
 use crate::op_tree::{LastInsert, OpTreeNode};
 use crate::query::{Index, QueryResult};
-use crate::types::{Key, ListEncoding, OpId, OpType};
+use crate::types::{SmallHashMap, Key, ListEncoding, OpId, OpType};
 use crate::ObjType;
-use fxhash::FxBuildHasher;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct RichTextQueryState<'a> {
-    map: HashMap<OpId, &'a OldMarkData, FxBuildHasher>,
+    map: SmallHashMap<OpId, &'a OldMarkData>,
     block: Option<OpId>,
 }
 
