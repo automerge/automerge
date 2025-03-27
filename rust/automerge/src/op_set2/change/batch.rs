@@ -1,6 +1,6 @@
 use crate::automerge::diff::RichTextDiff;
 use crate::hydrate::Value;
-use crate::op_set2::types::{Action, KeyRef, PropRef2};
+use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
 use crate::op_set2::SuccInsert;
 use crate::patches::TextRepresentation;
 use crate::types::{ActorId, ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue};
@@ -42,6 +42,12 @@ struct Untangler<'a> {
 }
 
 impl<'a> Untangler<'a> {
+    fn flush(&mut self, log: &mut PatchLog) {
+        self.value.list_flush(self.index, log);
+        self.index += self.width;
+        self.width = 0;
+    }
+
     fn handle_doc_op(
         &mut self,
         doc_op: &Op<'a>,
@@ -58,10 +64,8 @@ impl<'a> Untangler<'a> {
         }
 
         if doc_op.insert {
-            self.value.list_flush(self.index, log);
+            self.flush(log);
             self.value.key = Some(PropRef2::Seq(self.index));
-            self.index += self.width;
-            self.width = 0;
         }
 
         if doc_op.visible() && !deleted {
@@ -103,10 +107,10 @@ impl<'a> Untangler<'a> {
         assert!(self.entry.is_empty());
 
         while !self.stack.is_empty() {
+            self.flush(log);
             self.untangle_inner(ops, self.max, log);
         }
-        self.value.list_flush(self.index, log);
-        self.index += self.width;
+        self.flush(log);
     }
 
     fn untangle_inserts(
@@ -116,6 +120,8 @@ impl<'a> Untangler<'a> {
         insert_pos: usize,
         log: &mut PatchLog,
     ) {
+        self.flush(log);
+
         if let Err(n) = self.stack.binary_search_by(|n| ops[*n].id().cmp(&id)) {
             while self.stack.len() > n {
                 self.untangle_inner(ops, insert_pos, log);
@@ -135,41 +141,54 @@ impl<'a> Untangler<'a> {
         insert_pos: usize,
         log: &mut PatchLog,
     ) -> Option<()> {
-        let pos = self.stack.pop()?;
+        let mut pos = self.stack.pop()?;
         let op = ops.get_mut(pos)?;
 
-        self.value.list_flush(self.index, log);
-        self.index += self.width;
-        self.width = 0;
-
-        if op.visible() {
-            self.width = op.width(self.encoding);
-        }
+        let mut conflict = false;
+        let mut vis = None;
 
         assert!(op.pos.is_none());
         op.pos = Some(insert_pos);
         op.subsort = self.count;
         self.count += 1;
 
-        self.value.key = Some(PropRef2::Seq(self.index));
-        self.value.process_change_op(op);
+        if op.is_set_or_make() && !op.has_succ() {
+            vis = Some(pos);
+        } else if op.action() == Action::Mark {
+            self.value.process_mark(op.id(), op.mark_data());
+        }
 
         if let Some(v) = self.gosub.get(&pos) {
             self.stack.extend(v);
         }
 
         for next_op in ops[pos + 1..].iter_mut() {
+            pos += 1;
             if next_op.insert() {
                 break;
             }
+
             next_op.pos = Some(insert_pos);
             next_op.subsort = self.count;
             self.count += 1;
-            if next_op.visible() {
-                self.width = next_op.width(self.encoding);
-            }
 
-            self.value.process_change_op(next_op);
+            if next_op.is_set_or_make() && !next_op.has_succ() {
+                conflict |= vis.is_some();
+                vis = Some(pos);
+            }
+        }
+
+        if let Some(p) = vis {
+            let op = &ops[p];
+            if self.encoding == ListEncoding::List {
+                let value = op.hydrate_value_and_fix_counters(self.encoding.into());
+                log.insert(op.bld.obj, self.index, value, op.id(), conflict);
+                self.index += 1;
+            } else {
+                let marks = self.value.marks.after.current().cloned();
+                log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
+                self.index += op.width(self.encoding);
+            }
         }
 
         Some(())
@@ -228,6 +247,7 @@ impl<'a> Untangler<'a> {
     }
 }
 
+#[inline(never)]
 fn walk_list(
     obj: ObjId,
     encoding: ListEncoding,
@@ -487,17 +507,19 @@ impl<'a> ValueState<'a> {
         }
     }
 
+    fn process_mark(&mut self, id: OpId, data: Option<MarkData<'static>>) {
+        if let Some(data) = data {
+            self.marks.after.mark_begin(id, data);
+        } else {
+            self.marks.after.mark_end(id);
+        }
+    }
+
     fn process_change_op(&mut self, op: &ChangeOp) {
         match op.action() {
             Action::Delete => {}
             Action::Increment => self.do_increment(op),
-            Action::Mark => {
-                if let Some(data) = op.mark_data() {
-                    self.marks.after.mark_begin(op.id(), data.to_owned());
-                } else {
-                    self.marks.after.mark_end(op.id());
-                }
-            }
+            Action::Mark => self.process_mark(op.id(), op.mark_data()),
             _ => {
                 if op.visible() {
                     self.change
@@ -619,6 +641,7 @@ impl<'a> ValueState<'a> {
     }
 }
 
+#[inline(never)]
 fn walk_map(
     obj: ObjId,
     doc_ops: OpIter<'_>,
@@ -671,17 +694,28 @@ impl BatchApply {
         doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
     }
 
-    pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
+    #[inline(never)]
+    fn insert_new_actors(&mut self, doc: &mut Automerge) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
             doc.put_actor_ref(c.actor_id());
         }
+    }
 
-        log.migrate_actors(&doc.ops().actors).unwrap();
-
+    #[inline(never)]
+    fn import_ops(&mut self, doc: &mut Automerge) {
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops).unwrap();
             doc.update_history(c, c.iter_ops().count());
         }
+    }
+
+    #[inline(never)]
+    pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
+        self.insert_new_actors(doc);
+
+        log.migrate_actors(&doc.ops().actors).unwrap();
+
+        self.import_ops(doc);
 
         let mut obj_info = doc.ops().obj_info.clone();
 
@@ -734,6 +768,11 @@ impl BatchApply {
 
         doc.ops.add_succ(&succ);
 
+        self.insert_runs_of_ops(doc);
+    }
+
+    #[inline(never)]
+    fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
         let mut last_pos = None;
         let mut start = 0;
         let mut shift = 0;
@@ -759,6 +798,7 @@ impl BatchApply {
         doc.ops().len() - start
     }
 
+    #[inline(never)]
     pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
         self.ops.sort_by(|a, b| {
             a.bld.obj.cmp(&b.bld.obj).then_with(|| {
@@ -1145,9 +1185,10 @@ mod tests {
     }
 
     fn make_rng() -> SmallRng {
-        let seed = rand::random::<u64>();
+        //let seed = rand::random::<u64>();
         //let seed = 9240111832561670936;
         //let seed = 3444599034856292219;
+        let seed = 12949120071260318562;
 
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
@@ -1423,12 +1464,17 @@ mod tests {
         let mut doc2_copy = doc1.fork();
 
         let mut changes = vec![];
-        for _ in 0..3 {
-            for _ in 0..10 {
+        //for _ in 0..3 {
+        for _ in 0..2 {
+            //for _ in 0..10 {
+            for _ in 0..2 {
                 let mut tmp = doc2.fork();
-                let num_updates = rng.gen::<usize>() % 10 + 1;
-                let num_inserts = rng.gen::<usize>() % 10 + 1;
-                let num_deletes = rng.gen::<usize>() % 2;
+                //let num_updates = rng.gen::<usize>() % 10 + 1;
+                let num_updates = 2;
+                //let num_inserts = rng.gen::<usize>() % 10 + 1;
+                let num_inserts = 2;
+                //let num_deletes = rng.gen::<usize>() % 2;
+                let num_deletes = 1;
                 for _ in 0..num_updates {
                     let len = tmp.length(&list1);
                     let index = rng.gen::<usize>() % len;

@@ -85,18 +85,43 @@ impl ChangeOp {
         self.bld.hydrate_value(text_rep)
     }
 
+    pub(crate) fn hydrate_value_and_fix_counters(
+        &self,
+        text_rep: TextRepresentation,
+    ) -> hydrate::Value {
+        if self.bld.action == Action::Set {
+            if let ScalarValue::Counter(c) = &self.bld.value {
+                let inc: i64 = self.succ.iter().filter_map(|(_, inc)| *inc).sum();
+                hydrate::Value::Scalar(types::ScalarValue::counter(c + inc))
+            } else {
+                hydrate::Value::Scalar(self.bld.value.to_owned())
+            }
+        } else {
+            self.bld.hydrate_value(text_rep)
+        }
+    }
+
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
         self.bld.width(encoding)
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.bld.is_inc()
-            || self.bld.is_delete()
-            || self.succ.iter().any(|(_, inc)| inc.is_none()))
+        !(self.bld.is_inc() || self.bld.is_delete() || self.has_succ())
+    }
+
+    pub(crate) fn has_succ(&self) -> bool {
+        self.succ.iter().any(|(_, inc)| inc.is_none())
     }
 
     pub(crate) fn insert(&self) -> bool {
         self.bld.insert
+    }
+
+    pub(crate) fn is_set_or_make(&self) -> bool {
+        matches!(
+            self.bld.action,
+            Action::Set | Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
+        )
     }
 
     pub(crate) fn action(&self) -> Action {
@@ -226,14 +251,15 @@ impl<'a> OpBuilder<'a> {
     }
 
     pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+        // FIXME
         match self.action {
+            Action::Set => hydrate::Value::Scalar(self.value.to_owned()),
             Action::MakeMap => hydrate::Value::map(),
             Action::MakeList => hydrate::Value::list(),
             Action::MakeText => hydrate::Value::new(ObjType::Text, text_rep),
             Action::MakeTable => hydrate::Value::new(ObjType::Table, text_rep),
-            Action::Set => hydrate::Value::new(&self.value, text_rep),
-            Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
-            Action::Mark => hydrate::Value::Scalar("markEnd".into()),
+            //Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
+            //Action::Mark => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
     }

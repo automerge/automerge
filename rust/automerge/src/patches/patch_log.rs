@@ -211,6 +211,7 @@ impl PatchLog {
         self.active
     }
 
+    #[inline(never)]
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
         self.events.push((obj, Event::DeleteSeq { index, num }))
     }
@@ -342,6 +343,7 @@ impl PatchLog {
         ))
     }
 
+    #[inline(never)]
     pub(crate) fn splice(
         &mut self,
         obj: ObjId,

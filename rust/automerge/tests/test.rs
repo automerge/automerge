@@ -1660,6 +1660,7 @@ fn big_list() {
         .unwrap();
 
     let patches = new_doc.make_patches(&mut patch_log);
+    println!("PATCH = {:?}", patches.last());
     let matches = match &patches.last().unwrap().action {
         PatchAction::PutSeq { index: N, .. } => true,
         PatchAction::Insert { index: 0, values } if values.len() == N + 1 => true,

@@ -150,6 +150,7 @@ impl OpSet {
         //self.len += ops.len();
     }
 
+    #[inline(never)]
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
         let mut succ_inc = 0;
         let mut last_pos = None;

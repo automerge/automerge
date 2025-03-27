@@ -423,7 +423,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let tree = self.slabs.span_tree()?;
         let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
         let new_acc = self.calculate_acc();
-        assert!(new_acc > starting_acc);
+        assert!(new_acc >= starting_acc);
         Some(new_acc - starting_acc)
     }
 }
@@ -686,8 +686,6 @@ impl<C: ColumnCursor> ColumnData<C> {
 
         #[cfg(debug_assertions)]
         if self.debug != self.to_vec() {
-            log!(":: debug={:?}", self.debug);
-            log!(":: col={:?}", self.to_vec());
             let col = self.to_vec();
             assert_eq!(self.debug.len(), col.len());
             for (i, dbg) in col.iter().enumerate() {
@@ -1591,7 +1589,6 @@ pub(crate) mod tests {
         rle_col.splice(0, 0, data_u64.clone());
 
         for (i, val) in data_u64.iter().enumerate() {
-            log!(" find i={} val={:?}", i, val);
             if let Some(val) = val {
                 assert!(rle_col.find_by_value(*val).contains(&i));
             }
