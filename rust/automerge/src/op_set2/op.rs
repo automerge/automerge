@@ -1001,16 +1001,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn as_str_cow(&self) -> Cow<'a, str> {
-        if self.action == Action::Mark {
-            Cow::Borrowed("")
-        } else if let ScalarValue::Str(s) = &self.value {
-            s.clone()
-        } else {
-            Cow::Borrowed("\u{fffc}")
-        }
-    }
-
     pub(crate) fn as_str(&self) -> &str {
         if self.action == Action::Mark {
             ""

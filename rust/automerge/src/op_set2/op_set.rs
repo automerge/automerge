@@ -47,7 +47,7 @@ pub(crate) use op_iter::{
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{DiffOp, DiffOpIter, VisibleOpIter};
+pub(crate) use visible::{DiffOp, DiffOpIter, SkipIter, VisIter, VisibleOpIter};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -680,12 +680,21 @@ impl OpSet {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        self.iter_obj(obj)
-            .no_marks()
-            .visible(clock)
-            .top_ops()
-            .map(|op| op.as_str_cow())
-            .collect()
+        // conflicting text values will show both
+        // need conflict index to fix
+        // cant happen unless the put() api is called on text - shouldnt be allowed
+        let range = self.scope_to_obj(obj);
+        let value = self.iter_value_range(&range);
+        let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
+        let vis = VisIter::new(self, clock.as_ref(), range);
+        let iter = std::iter::zip(action, value);
+        let skip = SkipIter::new(iter, vis);
+        skip.map(|item| match item {
+            (Action::Set, ScalarValue::Str(s)) => s,
+            (Action::Mark, _) => Cow::Borrowed(""),
+            (_, _) => Cow::Borrowed("\u{fffc}"),
+        })
+        .collect()
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
@@ -930,11 +939,15 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
+    pub(crate) fn iter_value_range(&self, range: &Range<usize>) -> ValueIter<'_> {
         let value_meta = self.cols.value_meta.iter_range(range.clone());
         let value_advance = value_meta.calculate_acc().as_usize();
         let value_raw = self.cols.value.raw_reader(value_advance);
-        let value = ValueIter::new(value_meta, value_raw);
+        ValueIter::new(value_meta, value_raw)
+    }
+
+    pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
+        let value = self.iter_value_range(range);
 
         let succ_count = self.cols.succ_count.iter_range(range.clone());
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;

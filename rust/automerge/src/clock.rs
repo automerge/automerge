@@ -1,4 +1,4 @@
-use crate::types::{SmallHasher, OpId};
+use crate::types::{OpId, SmallHasher};
 use std::cmp::Ordering;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]

@@ -4,7 +4,7 @@ use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
 use crate::op_set2::SuccInsert;
 use crate::patches::TextRepresentation;
 use crate::types::{
-    ActorId, ElemId, SmallHashMap, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue,
+    ActorId, ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue, SmallHashMap,
 };
 use crate::AutomergeError;
 use crate::{Automerge, Change, ChangeHash, PatchLog};

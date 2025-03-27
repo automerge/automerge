@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::op_set2;
 use crate::op_set2::{MarkData, Op, OpType};
-use crate::types::{Clock, SmallHashMap, ObjType, OpId};
+use crate::types::{Clock, ObjType, OpId, SmallHashMap};
 use crate::value::ScalarValue;
 
 /// Marks let you store out-of-bound information about sequences.

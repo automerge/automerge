@@ -5,10 +5,10 @@ use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::{Eq, Ordering};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-use std::collections::HashMap;
 use tinyvec::{ArrayVec, TinyVec};
 
 //use fnv::FnvBuildHasher;
