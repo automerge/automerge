@@ -713,7 +713,7 @@ impl ReadDoc for AutoCommit {
         &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'a, R> {
+    ) -> MapRange<'a> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(None))
     }
@@ -723,7 +723,7 @@ impl ReadDoc for AutoCommit {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'a, R> {
+    ) -> MapRange<'a> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }

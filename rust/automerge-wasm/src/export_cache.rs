@@ -26,7 +26,7 @@ enum Pending<'a> {
     Map(
         Object,
         MapRangeItem<'a>,
-        MapRange<'a, RangeFull>,
+        MapRange<'a>,
         ObjId,
         Datatype,
     ),
@@ -68,7 +68,7 @@ impl<'a> Pending<'a> {
 #[derive(Debug)]
 enum Task<'a> {
     New(ObjId, Datatype),
-    Map(Object, MapRange<'a, RangeFull>, ObjId, Datatype),
+    Map(Object, MapRange<'a>, ObjId, Datatype),
     List(Array, ListRange<'a, RangeFull>, ObjId, Datatype),
 }
 
@@ -107,7 +107,7 @@ impl<'a> Task<'a> {
     #[inline(never)]
     fn progress_map(
         js_obj: Object,
-        mut iter: MapRange<'a, RangeFull>,
+        mut iter: MapRange<'a>,
         obj: ObjId,
         datatype: Datatype,
         meta: &JsValue,
@@ -115,12 +115,12 @@ impl<'a> Task<'a> {
     ) -> Result<Progress<'a>, error::Export> {
         while let Some(map_item) = iter.next() {
             match map_item.value {
-                am::Value::Object(_) => {
+                am::ValueRef::Object(_) => {
                     let pending = Pending::Map(js_obj, map_item, iter, obj, datatype);
                     return Ok(Progress::Pending(pending));
                 }
-                am::Value::Scalar(s) => {
-                    export.set_prop(&js_obj, map_item.key.clone(), &export.export_scalar(&s)?)?
+                am::ValueRef::Scalar(s) => {
+                    export.set_prop(&js_obj, map_item.key.clone(), &export.export_scalar_ref(&s)?)?
                 }
             }
         }
@@ -246,6 +246,28 @@ impl<'a> ExportCache<'a> {
             error,
         })?;
         Ok(())
+    }
+
+    fn export_scalar_ref(&self, value: &am::ScalarValueRef<'_>) -> Result<JsValue, error::Export> {
+        let (datatype, js_value) = match value {
+            am::ScalarValueRef::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_ref()).into()),
+            am::ScalarValueRef::Str(v) => (Datatype::Str, v.to_string().into()),
+            am::ScalarValueRef::Int(v) => (Datatype::Int, (*v as f64).into()),
+            am::ScalarValueRef::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+            am::ScalarValueRef::F64(v) => (Datatype::F64, (*v).into()),
+            am::ScalarValueRef::Counter(v) => (Datatype::Counter, (*v as f64).into()),
+            am::ScalarValueRef::Timestamp(v) => (
+                Datatype::Timestamp,
+                js_sys::Date::new(&(*v as f64).into()).into(),
+            ),
+            am::ScalarValueRef::Boolean(v) => (Datatype::Boolean, (*v).into()),
+            am::ScalarValueRef::Null => (Datatype::Null, JsValue::null()),
+            am::ScalarValueRef::Unknown { bytes, type_code } => (
+                Datatype::Unknown(*type_code),
+                Uint8Array::from(bytes.as_ref()).into(),
+            ),
+        };
+        self.wrap_scalar(js_value, datatype)
     }
 
     #[inline(never)]

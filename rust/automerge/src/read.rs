@@ -64,7 +64,7 @@ pub trait ReadDoc {
         &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'a, R>;
+    ) -> MapRange<'a>;
 
     /// Iterate over the keys and values of the map `obj` in the given range as
     /// at `heads`
@@ -80,7 +80,7 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'a, R>;
+    ) -> MapRange<'a>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///

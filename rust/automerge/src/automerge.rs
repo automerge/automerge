@@ -1440,7 +1440,7 @@ impl Automerge {
         obj: &ExId,
         range: R,
         clock: Option<Clock>,
-    ) -> MapRange<'a, R> {
+    ) -> MapRange<'a> {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| self.ops.map_range(&obj.id, range, clock))
@@ -1842,7 +1842,7 @@ impl ReadDoc for Automerge {
         &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'a, R> {
+    ) -> MapRange<'a> {
         self.map_range_for(obj.as_ref(), range, None)
     }
 
@@ -1851,7 +1851,7 @@ impl ReadDoc for Automerge {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'a, R> {
+    ) -> MapRange<'a> {
         let clock = self.clock_at(heads);
         self.map_range_for(obj.as_ref(), range, Some(clock))
     }

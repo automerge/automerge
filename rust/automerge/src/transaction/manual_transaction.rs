@@ -142,7 +142,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         &'b self,
         obj: O,
         range: R,
-    ) -> MapRange<'b, R> {
+    ) -> MapRange<'b> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(None))
     }
@@ -152,7 +152,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'b, R> {
+    ) -> MapRange<'b> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }

@@ -238,8 +238,8 @@ impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
     }
 }
 
-impl<'a> From<Value<'a>> for types::Value<'static> {
-    fn from(v: Value<'a>) -> Self {
+impl<'a> From<ValueRef<'a>> for types::Value<'static> {
+    fn from(v: ValueRef<'a>) -> Self {
         v.into_owned()
     }
 }
@@ -694,12 +694,22 @@ impl<'a> types::Exportable for KeyRef<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value<'a> {
+pub enum ValueRef<'a> {
     Object(ObjType),
     Scalar(ScalarValue<'a>),
 }
 
-impl<'a> Value<'a> {
+impl<'a> ValueRef<'a> {
+    pub(crate) fn from_action_value(action: Action, value: ScalarValue<'a>) -> Self {
+        match action {
+            Action::MakeMap => ValueRef::Object(ObjType::Map),
+            Action::MakeList => ValueRef::Object(ObjType::List),
+            Action::MakeText => ValueRef::Object(ObjType::Text),
+            Action::MakeTable => ValueRef::Object(ObjType::Table),
+            _ => ValueRef::Scalar(value),
+        }
+    }
+
     pub(crate) fn into_owned(self) -> value::Value<'static> {
         match self {
             Self::Object(o) => value::Value::Object(o),

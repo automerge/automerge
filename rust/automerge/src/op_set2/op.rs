@@ -3,7 +3,7 @@ use super::packer::{ColumnDataIter, DeltaCursor, IntCursor};
 use super::types::{
     Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
 };
-use super::{Value, ValueMeta};
+use super::{ValueMeta, ValueRef};
 
 use crate::clock::Clock;
 use crate::error::AutomergeError;
@@ -1079,12 +1079,14 @@ impl<'a> Op<'a> {
         self.action == Action::Set
     }
 
-    pub(crate) fn value(&self) -> Value<'a> {
+    pub(crate) fn value(&self) -> ValueRef<'a> {
         match &self.action() {
-            OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
-            OpType::MarkBegin(_, _) => Value::Scalar(ScalarValue::Str(Cow::Borrowed("markBegin"))),
-            OpType::MarkEnd(_) => Value::Scalar(ScalarValue::Str(Cow::Borrowed("markEnd"))),
+            OpType::Make(obj_type) => ValueRef::Object(*obj_type),
+            OpType::Put(scalar) => ValueRef::Scalar(scalar.clone()),
+            OpType::MarkBegin(_, _) => {
+                ValueRef::Scalar(ScalarValue::Str(Cow::Borrowed("markBegin")))
+            }
+            OpType::MarkEnd(_) => ValueRef::Scalar(ScalarValue::Str(Cow::Borrowed("markEnd"))),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }

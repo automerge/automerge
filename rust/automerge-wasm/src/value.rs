@@ -1,4 +1,4 @@
-use automerge::{ObjType, ScalarValue, Value};
+use automerge::{ObjType, ScalarValueRef, ScalarValue, Value, ValueRef};
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
@@ -69,23 +69,37 @@ impl From<&ScalarValue> for Datatype {
     }
 }
 
+impl From<&ScalarValueRef<'_>> for Datatype {
+    fn from(s: &ScalarValueRef<'_>) -> Self {
+        match s {
+            ScalarValueRef::Bytes(_) => Self::Bytes,
+            ScalarValueRef::Str(_) => Self::Str,
+            ScalarValueRef::Int(_) => Self::Int,
+            ScalarValueRef::Uint(_) => Self::Uint,
+            ScalarValueRef::F64(_) => Self::F64,
+            ScalarValueRef::Counter(_) => Self::Counter,
+            ScalarValueRef::Timestamp(_) => Self::Timestamp,
+            ScalarValueRef::Boolean(_) => Self::Boolean,
+            ScalarValueRef::Null => Self::Null,
+            ScalarValueRef::Unknown { type_code, .. } => Self::Unknown(*type_code),
+        }
+    }
+}
+
 impl From<&Value<'_>> for Datatype {
     fn from(v: &Value<'_>) -> Self {
         match v {
             Value::Object(o) => o.into(),
             Value::Scalar(s) => s.as_ref().into(),
-            /*
-                            ScalarValue::Bytes(_) => Self::Bytes,
-                            ScalarValue::Str(_) => Self::Str,
-                            ScalarValue::Int(_) => Self::Int,
-                            ScalarValue::Uint(_) => Self::Uint,
-                            ScalarValue::F64(_) => Self::F64,
-                            ScalarValue::Counter(_) => Self::Counter,
-                            ScalarValue::Timestamp(_) => Self::Timestamp,
-                            ScalarValue::Boolean(_) => Self::Boolean,
-                            ScalarValue::Null => Self::Null,
-                            ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
-            */
+        }
+    }
+}
+
+impl From<&ValueRef<'_>> for Datatype {
+    fn from(v: &ValueRef<'_>) -> Self {
+        match v {
+            ValueRef::Object(o) => o.into(),
+            ValueRef::Scalar(s) => s.into(),
         }
     }
 }

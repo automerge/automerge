@@ -352,7 +352,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &'c self,
         obj: O,
         range: R,
-    ) -> MapRange<'c, R> {
+    ) -> MapRange<'c> {
         self.doc.map_range_at(obj, range, self.heads)
     }
 
@@ -361,7 +361,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'c, R> {
+    ) -> MapRange<'c> {
         self.doc.map_range_at(obj, range, heads)
     }
 

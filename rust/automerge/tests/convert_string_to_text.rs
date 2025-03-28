@@ -9,9 +9,8 @@ fn test_strings_in_maps_are_converted_to_text() {
     let mut doc = AutoCommit::new();
     doc.put(ROOT, "somestring", "hello").unwrap();
     let saved = doc.save();
-    let val = doc.get(ROOT, "somestring").unwrap();
 
-    let mut loaded = AutoCommit::load_with_options(
+    let loaded = AutoCommit::load_with_options(
         &saved,
         LoadOptions::new().migrate_strings(StringMigration::ConvertToText),
     )

@@ -1197,7 +1197,7 @@ impl Automerge {
         &self,
         obj: &am::ObjId,
         heads: Option<&Vec<am::ChangeHash>>,
-    ) -> am::iter::MapRange<'_, std::ops::RangeFull> {
+    ) -> am::iter::MapRange<'_> {
         if let Some(heads) = heads {
             self.doc.map_range_at(obj, .., heads)
         } else {

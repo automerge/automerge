@@ -12,7 +12,7 @@ use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
 use super::op::{Op, OpBuilder, OpLike, SuccInsert, TxOp};
-use super::packer::{ColumnDataIter, PackError, Run, UIntCursor};
+use super::packer::{ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
 
 use super::columns::Columns;
 
@@ -54,12 +54,7 @@ pub(crate) type ActionValueIter<'a> =
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
-    //len: usize,
     pub(crate) actors: Vec<ActorId>,
-    //text_index: ColumnData<UIntCursor>,
-    //visible_index: ColumnData<BooleanCursor>,
-    //inc_index: ColumnData<IntCursor>,
-    //mark_index: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
     cols: Columns,
     pub(crate) text_encoding: TextEncoding,
@@ -222,13 +217,45 @@ impl OpSet {
         obj: &ObjId,
         range: R,
         clock: Option<Clock>,
-    ) -> MapRange<'_, R> {
-        let iter = self.iter_obj(obj).visible(clock).top_ops();
-        MapRange::new(self, iter, range)
+    ) -> MapRange<'_> {
+        let obj_range = self.scope_to_obj(obj);
+
+        let start = match range.start_bound() {
+            std::ops::Bound::Unbounded => obj_range.start,
+            std::ops::Bound::Included(s) => {
+                self.cols
+                    .key_str
+                    .scope_to_value(Some(s.as_str()), obj_range.clone())
+                    .start
+            }
+            std::ops::Bound::Excluded(s) => {
+                self.cols
+                    .key_str
+                    .scope_to_value(Some(s.as_str()), obj_range.clone())
+                    .end
+            }
+        };
+
+        let end = match range.end_bound() {
+            std::ops::Bound::Unbounded => obj_range.end,
+            std::ops::Bound::Included(s) => {
+                self.cols
+                    .key_str
+                    .scope_to_value(Some(s.as_str()), obj_range)
+                    .end
+            }
+            std::ops::Bound::Excluded(s) => {
+                self.cols
+                    .key_str
+                    .scope_to_value(Some(s.as_str()), obj_range)
+                    .start
+            }
+        };
+
+        MapRange::new(self, start..end, clock)
     }
 
     pub(crate) fn len(&self) -> usize {
-        //self.len
         self.cols.len()
     }
 
@@ -682,6 +709,14 @@ impl OpSet {
         None
     }
 
+    pub(crate) fn action_iter_range(&self, range: &Range<usize>) -> ActionIter<'_> {
+        ActionIter::new(self.cols.action.iter_range(range.clone()))
+    }
+
+    pub(crate) fn key_str_iter_range(&self, range: &Range<usize>) -> ColumnDataIter<'_, StrCursor> {
+        self.cols.key_str.iter_range(range.clone())
+    }
+
     pub(crate) fn action_value_iter(
         &self,
         range: Range<usize>,
@@ -691,8 +726,9 @@ impl OpSet {
         // need conflict index to fix
         // cant happen unless the put() api is called on text - shouldnt be allowed
         let start = range.start;
-        let value = self.iter_value_range(&range);
-        let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
+        let value = self.value_iter_range(&range);
+        //let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
+        let action = self.action_iter_range(&range);
         let vis = VisIter::new(self, clock, range);
         let iter = std::iter::zip(action, value);
         SkipIter::new_with_offset(iter, vis, start)
@@ -778,6 +814,21 @@ impl OpSet {
             }
         }
         None
+    }
+
+    pub(crate) fn get_increment_at_pos(&self, pos: usize) -> i64 {
+        if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
+            let start = val.acc.as_usize();
+            let end = start + *val.item.unwrap_or_default() as usize;
+            self.cols
+                .index
+                .inc
+                .iter_range(start..end)
+                .map(|v| *v.unwrap_or_default())
+                .sum()
+        } else {
+            0
+        }
     }
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
@@ -950,7 +1001,7 @@ impl OpSet {
         self.iter_range(&range)
     }
 
-    pub(crate) fn iter_value_range(&self, range: &Range<usize>) -> ValueIter<'_> {
+    pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
         let value_meta = self.cols.value_meta.iter_range(range.clone());
         let value_advance = value_meta.calculate_acc().as_usize();
         let value_raw = self.cols.value.raw_reader(value_advance);
@@ -972,7 +1023,7 @@ impl OpSet {
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value = self.iter_value_range(range);
+        let value = self.value_iter_range(range);
 
         let succ_count = self.cols.succ_count.iter_range(range.clone());
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
