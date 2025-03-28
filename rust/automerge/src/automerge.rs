@@ -1495,8 +1495,8 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Spans<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let iter = self.ops.iter_obj(&obj.id);
-        Ok(Spans::new(Some(iter), self, clock))
+        let range = self.ops.scope_to_obj(&obj.id);
+        Ok(Spans::new(self, range, clock, self.text_encoding()))
     }
 
     pub(crate) fn get_cursor_for(

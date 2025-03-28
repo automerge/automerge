@@ -1092,7 +1092,7 @@ impl<'a> Op<'a> {
     pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
         match &self.action() {
             OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_rep),
-            OpType::Put(scalar) => hydrate::Value::new(scalar.to_owned(), text_rep),
+            OpType::Put(scalar) => hydrate::Value::Scalar(scalar.to_owned()),
             OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_rep),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),

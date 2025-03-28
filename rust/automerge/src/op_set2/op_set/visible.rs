@@ -10,26 +10,39 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-pub(crate) struct SkipIter<I: Iterator, S: Iterator<Item = usize>> {
+#[derive(Clone, Debug)]
+pub(crate) struct SkipIter<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> {
+    pos: usize,
     iter: I,
     skip: S,
 }
 
-impl<I: Iterator, S: Iterator<Item = usize>> SkipIter<I, S> {
+impl<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> SkipIter<I, S> {
     pub(crate) fn new(iter: I, skip: S) -> Self {
-        Self { iter, skip }
+        Self { iter, skip, pos: 0 }
+    }
+    pub(crate) fn new_with_offset(iter: I, skip: S, pos: usize) -> Self {
+        Self { iter, skip, pos }
+    }
+
+    pub(crate) fn pos(&self) -> usize {
+        self.pos
     }
 }
 
-impl<I: Iterator, S: Iterator<Item = usize>> Iterator for SkipIter<I, S> {
+impl<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> Iterator
+    for SkipIter<I, S>
+{
     type Item = I::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         let skip = self.skip.next()?;
+        self.pos += skip + 1;
         self.iter.nth(skip)
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) enum VisIter<'a> {
     Indexed(IndexedVisIter<'a>),
     Scan(ScanVisIter<'a>),
@@ -58,6 +71,7 @@ impl<'a> Iterator for VisIter<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
     iter: ColumnDataIter<'a, BooleanCursor>,
     vis: usize,
@@ -94,6 +108,7 @@ impl<'a> Iterator for IndexedVisIter<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ScanVisIter<'a> {
     id_actor: ColumnDataIter<'a, ActorCursor>,
     id_ctr: ColumnDataIter<'a, DeltaCursor>,

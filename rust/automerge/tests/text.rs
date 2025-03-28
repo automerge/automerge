@@ -728,10 +728,8 @@ fn marks_are_consolidated(spans: &Vec<Span>) -> bool {
     for span in spans {
         match span {
             Span::Text(_, marks) => {
-                if let Some(last_marks) = last_marks {
-                    if marks == last_marks {
-                        return false;
-                    }
+                if Some(marks) == last_marks {
+                    return false;
                 }
                 last_marks = Some(marks);
             }

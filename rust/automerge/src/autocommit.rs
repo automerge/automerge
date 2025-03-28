@@ -489,6 +489,10 @@ impl AutoCommit {
         bytes
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.doc.is_empty()
+    }
+
     /// Save everything which is not a (transitive) dependency of `heads`
     pub fn save_after(&mut self, heads: &[ChangeHash]) -> Vec<u8> {
         self.ensure_transaction_closed();

@@ -1,9 +1,11 @@
 use crate::automerge::Automerge;
 use crate::iter::{SpanInternal, SpansInternal};
-use crate::op_set2::{OpIter, OpQuery};
+use crate::op_set2::OpQuery;
 use crate::patches::{PatchLog, TextRepresentation};
-use crate::types::ObjMeta;
 use crate::types::ObjType;
+use crate::types::{ObjId, TextEncoding};
+
+use std::ops::Range;
 
 /// Traverse the "current" state of the document, logging patches to `patch_log`.
 ///
@@ -22,47 +24,51 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
-    for (obj, ops) in doc.ops().iter_objs() {
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String(_))
-        {
-            log_text_patches(doc, patch_log, &obj, ops)
-        } else if obj.typ.is_sequence() {
-            log_list_patches(doc, patch_log, &obj, ops);
-        } else {
-            log_map_patches(doc, patch_log, &obj, ops);
+
+    for (obj, range) in doc.ops.iter_obj_ids() {
+        let typ = doc.ops.object_type(&obj);
+        let text_rep = patch_log.text_rep();
+        match (typ, text_rep) {
+            (Some(ObjType::Text), TextRepresentation::String(enc)) => {
+                log_text_patches(doc, patch_log, obj, range, enc)
+            }
+            (Some(ObjType::Text), _) | (Some(ObjType::List), _) => {
+                log_list_patches(doc, patch_log, obj, range);
+            }
+            (Some(ObjType::Map), _) => {
+                log_map_patches(doc, patch_log, obj, range);
+            }
+            _ => {}
         }
     }
 }
 
-fn log_text_patches<'a>(
-    doc: &'a Automerge,
+fn log_text_patches(
+    doc: &Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: OpIter<'a>,
+    obj: ObjId,
+    range: Range<usize>,
+    encoding: TextEncoding,
 ) {
-    let spans = SpansInternal::new(ops, doc, None);
+    let spans = SpansInternal::new(doc, range, None, encoding);
     for span in spans {
         match span {
             SpanInternal::Text(text, index, marks) => {
-                patch_log.splice(obj.id, index, &text, marks);
+                patch_log.splice(obj, index, &text, marks);
             }
             SpanInternal::Obj(id, index) => {
                 let value = crate::hydrate::Value::Map(crate::hydrate::Map::new());
-                patch_log.insert(obj.id, index, value, id, false);
+                patch_log.insert(obj, index, value, id, false);
             }
         }
     }
 }
 
-fn log_list_patches<'a, I: OpQuery<'a>>(
-    _doc: &'a Automerge,
-    patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: I,
-) {
+fn log_list_patches(doc: &Automerge, patch_log: &mut PatchLog, obj: ObjId, range: Range<usize>) {
+    let ops = doc.ops.iter_range(&range);
     for (index, op) in ops.visible(None).top_ops().enumerate() {
         patch_log.insert(
-            obj.id,
+            obj,
             index,
             op.hydrate_value(TextRepresentation::Array),
             op.id,
@@ -71,16 +77,12 @@ fn log_list_patches<'a, I: OpQuery<'a>>(
     }
 }
 
-fn log_map_patches<'a, I: OpQuery<'a>>(
-    _doc: &'a Automerge,
-    patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: I,
-) {
+fn log_map_patches(doc: &Automerge, patch_log: &mut PatchLog, obj: ObjId, range: Range<usize>) {
+    let ops = doc.ops.iter_range(&range);
     for op in ops.visible(None).top_ops() {
         if let Some(key) = op.key.key_str() {
             patch_log.put_map(
-                obj.id,
+                obj,
                 &key,
                 op.hydrate_value(TextRepresentation::Array),
                 op.id,

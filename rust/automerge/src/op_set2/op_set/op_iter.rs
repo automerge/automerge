@@ -245,6 +245,10 @@ impl<'a> OpIdIter<'a> {
         Self { actor, ctr }
     }
 
+    pub(crate) fn pos(&self) -> usize {
+        self.actor.pos()
+    }
+
     pub(crate) fn maybe_try_next(&mut self) -> Result<Option<OpId>, ReadOpError> {
         let actor = self.actor.next();
         let ctr = self.ctr.next();
@@ -481,6 +485,10 @@ impl<'a> MarkInfoIter<'a> {
         expand: ColumnDataIter<'a, BooleanCursor>,
     ) -> Self {
         Self { name, expand }
+    }
+
+    pub(crate) fn pos(&self) -> usize {
+        self.expand.pos()
     }
 
     pub(crate) fn try_next(&mut self) -> Result<(Option<Cow<'a, str>>, bool), ReadOpError> {

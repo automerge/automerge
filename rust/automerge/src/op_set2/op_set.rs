@@ -49,6 +49,9 @@ pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{DiffOp, DiffOpIter, SkipIter, VisIter, VisibleOpIter};
 
+pub(crate) type ActionValueIter<'a> =
+    SkipIter<std::iter::Zip<ActionIter<'a>, ValueIter<'a>>, VisIter<'a>>;
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
     //len: usize,
@@ -679,16 +682,25 @@ impl OpSet {
         None
     }
 
-    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
+    pub(crate) fn action_value_iter(
+        &self,
+        range: Range<usize>,
+        clock: Option<&Clock>,
+    ) -> ActionValueIter<'_> {
         // conflicting text values will show both
         // need conflict index to fix
         // cant happen unless the put() api is called on text - shouldnt be allowed
-        let range = self.scope_to_obj(obj);
+        let start = range.start;
         let value = self.iter_value_range(&range);
         let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
-        let vis = VisIter::new(self, clock.as_ref(), range);
+        let vis = VisIter::new(self, clock, range);
         let iter = std::iter::zip(action, value);
-        let skip = SkipIter::new(iter, vis);
+        SkipIter::new_with_offset(iter, vis, start)
+    }
+
+    pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
+        let range = self.scope_to_obj(obj);
+        let skip = self.action_value_iter(range, clock.as_ref());
         skip.map(|item| match item {
             (Action::Set, ScalarValue::Str(s)) => s,
             (Action::Mark, _) => Cow::Borrowed(""),
@@ -705,7 +717,7 @@ impl OpSet {
         }
     }
 
-    fn iter_obj_ids(&self) -> IterObjIds<'_> {
+    pub(crate) fn iter_obj_ids(&self) -> IterObjIds<'_> {
         let mut ctr = self.cols.obj_ctr.iter();
         let mut actor = self.cols.obj_actor.iter();
         let next_ctr = ctr.next_run();
@@ -922,8 +934,7 @@ impl OpSet {
         self.cols.export()
     }
 
-    #[inline(never)]
-    fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
+    pub(crate) fn scope_to_obj(&self, obj: &ObjId) -> Range<usize> {
         let range = self.cols.obj_ctr.scope_to_value(obj.counter(), ..);
         self.cols.obj_actor.scope_to_value(obj.actor(), range)
     }
@@ -946,6 +957,20 @@ impl OpSet {
         ValueIter::new(value_meta, value_raw)
     }
 
+    pub(crate) fn id_iter_range(&self, range: &Range<usize>) -> OpIdIter<'_> {
+        OpIdIter::new(
+            self.cols.id_actor.iter_range(range.clone()),
+            self.cols.id_ctr.iter_range(range.clone()),
+        )
+    }
+
+    pub(crate) fn mark_info_iter_range(&self, range: &Range<usize>) -> MarkInfoIter<'_> {
+        MarkInfoIter::new(
+            self.cols.mark_name.iter_range(range.clone()),
+            self.cols.expand.iter_range(range.clone()),
+        )
+    }
+
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
         let value = self.iter_value_range(range);
 
@@ -958,10 +983,7 @@ impl OpSet {
 
         OpIter {
             pos: range.start,
-            id: OpIdIter::new(
-                self.cols.id_actor.iter_range(range.clone()),
-                self.cols.id_ctr.iter_range(range.clone()),
-            ),
+            id: self.id_iter_range(range),
             obj: ObjIdIter::new(
                 self.cols.obj_actor.iter_range(range.clone()),
                 self.cols.obj_ctr.iter_range(range.clone()),
@@ -975,10 +997,7 @@ impl OpSet {
             insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
             value,
-            marks: MarkInfoIter::new(
-                self.cols.mark_name.iter_range(range.clone()),
-                self.cols.expand.iter_range(range.clone()),
-            ),
+            marks: self.mark_info_iter_range(range),
             op_set: self,
         }
     }
@@ -1294,7 +1313,7 @@ impl<'a> OpsFound<'a> {
     }
 }
 
-struct IterObjIds<'a> {
+pub(crate) struct IterObjIds<'a> {
     ctr: ColumnDataIter<'a, UIntCursor>,
     actor: ColumnDataIter<'a, ActorCursor>,
     next_ctr: Option<Run<'a, u64>>,

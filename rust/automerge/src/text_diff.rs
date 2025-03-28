@@ -364,7 +364,8 @@ fn spans_as_grapheme(
     text: &crate::types::ObjId,
     clock: Option<Clock>,
 ) -> Result<Vec<BlockOrGrapheme>, crate::AutomergeError> {
-    let spans_internal = SpansInternal::new(doc.ops().iter_obj(text), doc, clock.clone());
+    let range = doc.ops.scope_to_obj(text);
+    let spans_internal = SpansInternal::new(doc, range, clock.clone(), doc.text_encoding());
     let mut result = Vec::with_capacity(spans_internal.size_hint().0);
     for span in spans_internal {
         match span {

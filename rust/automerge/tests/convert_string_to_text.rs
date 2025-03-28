@@ -10,9 +10,6 @@ fn test_strings_in_maps_are_converted_to_text() {
     doc.put(ROOT, "somestring", "hello").unwrap();
     let saved = doc.save();
     let val = doc.get(ROOT, "somestring").unwrap();
-    println!(" --- VAL={:?}", val);
-
-    doc.dump();
 
     let mut loaded = AutoCommit::load_with_options(
         &saved,
@@ -20,11 +17,7 @@ fn test_strings_in_maps_are_converted_to_text() {
     )
     .unwrap();
 
-    println!(" --- LOADED ----");
-    loaded.dump();
-
     let val = loaded.get(ROOT, "somestring").unwrap();
-    println!(" --- VAL={:?}", val);
     let Some((val, obj_id)) = val else {
         panic!("no value found for key 'somestring'");
     };
