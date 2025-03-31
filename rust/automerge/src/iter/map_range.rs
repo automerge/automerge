@@ -21,6 +21,7 @@ pub struct MapRangeItem<'a> {
 #[derive(Debug)]
 struct MapRangeInner<'a> {
     iter: Peekable<SkipIter<MapIter<'a>, VisIter<'a>>>,
+    clock: Option<Clock>,
     op_set: &'a OpSet,
 }
 
@@ -45,7 +46,7 @@ impl<'a> Iterator for MapRange<'a> {
             }
             let id = inner.op_set.id_to_exid(id);
             let value = if let ScalarValue::Counter(c) = &value {
-                let inc = inner.op_set.get_increment_at_pos(pos);
+                let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
                 ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
             } else {
                 ValueRef::from_action_value(action, value)
@@ -112,7 +113,11 @@ impl<'a> MapRange<'a> {
         let iter = skip.peekable();
 
         Self {
-            inner: Some(MapRangeInner { iter, op_set }),
+            inner: Some(MapRangeInner {
+                iter,
+                op_set,
+                clock,
+            }),
         }
     }
 }

@@ -1,7 +1,7 @@
-use automerge::{ObjType, ScalarValueRef, ScalarValue, Value, ValueRef};
+use automerge::{ObjType, ScalarValue, ScalarValueRef, Value, ValueRef};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, PartialOrd, Ord, Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Datatype {
     Map,
     Table,

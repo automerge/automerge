@@ -61,10 +61,11 @@ macro_rules! log {
 }
 
 /// How text is represented in materialized objects on the JS side
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
 #[wasm_bindgen]
 pub enum TextRepresentation {
     /// As an array of characters and objects
+    #[default]
     Array,
     /// As a single JS string
     String,
@@ -73,12 +74,6 @@ pub enum TextRepresentation {
 impl TextRepresentation {
     pub(crate) fn is_string(&self) -> bool {
         matches!(self, Self::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::Array
     }
 }
 

@@ -816,7 +816,8 @@ impl OpSet {
         None
     }
 
-    pub(crate) fn get_increment_at_pos(&self, pos: usize) -> i64 {
+    pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {
+        // FIXME - make sure this works at clock
         if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
             let start = val.acc.as_usize();
             let end = start + *val.item.unwrap_or_default() as usize;

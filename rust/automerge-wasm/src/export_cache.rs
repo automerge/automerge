@@ -7,158 +7,19 @@ use automerge::ChangeHash;
 use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::{Borrow, Cow};
+use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::ops::RangeFull;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use am::ObjId;
 
-use am::iter::{ListRange, ListRangeItem, MapRange, MapRangeItem};
+use am::iter::{ListRangeItem, MapRangeItem};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
 const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
 const META_SYMBOL: &str = "_am_meta";
-
-#[derive(Debug)]
-enum Pending<'a> {
-    Map(
-        Object,
-        MapRangeItem<'a>,
-        MapRange<'a>,
-        ObjId,
-        Datatype,
-    ),
-    List(
-        Array,
-        ListRangeItem<'a>,
-        ListRange<'a, RangeFull>,
-        ObjId,
-        Datatype,
-    ),
-}
-
-impl<'a> Pending<'a> {
-    fn next_task(&self) -> Task<'a> {
-        match self {
-            Self::Map(_, item, ..) => Task::New(item.id.clone(), Datatype::from(&item.value)),
-            Self::List(_, item, ..) => Task::New(item.id.clone(), Datatype::from(&item.value)),
-        }
-    }
-
-    fn complete(
-        self,
-        value: JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Task<'a>, error::Export> {
-        match self {
-            Self::Map(js_obj, map_item, iter, obj, datatype) => {
-                export.set_prop(&js_obj, map_item.key.clone(), &value)?;
-                Ok(Task::Map(js_obj, iter, obj, datatype))
-            }
-            Self::List(js_array, _list_item, iter, obj, datatype) => {
-                js_array.push(&value);
-                Ok(Task::List(js_array, iter, obj, datatype))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Task<'a> {
-    New(ObjId, Datatype),
-    Map(Object, MapRange<'a>, ObjId, Datatype),
-    List(Array, ListRange<'a, RangeFull>, ObjId, Datatype),
-}
-
-impl<'a> Task<'a> {
-    #[inline(never)]
-    fn progress(
-        self,
-        export: &mut ExportCache<'a>,
-        heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
-    ) -> Result<Progress<'a>, error::Export> {
-        match self {
-            Self::New(obj, Datatype::Text) if export.doc.text_rep.is_string() => {
-                let text = export.doc.text_at(&obj, heads)?;
-                Ok(Progress::Done(JsValue::from(text)))
-            }
-            Self::New(obj, datatype) if datatype.is_seq() => {
-                let iter = export.doc.list_range_at(&obj, heads);
-                let array = Array::new();
-                Ok(Progress::Task(Task::List(array, iter, obj, datatype)))
-            }
-            Self::New(obj, datatype) => {
-                let iter = export.doc.map_range_at(&obj, heads);
-                let js_obj = Object::new();
-                Ok(Progress::Task(Task::Map(js_obj, iter, obj, datatype)))
-            }
-            Self::Map(js_obj, iter, obj, datatype) => {
-                Self::progress_map(js_obj, iter, obj, datatype, meta, export)
-            }
-            Self::List(js_array, iter, obj, datatype) => {
-                Self::progress_list(js_array, iter, obj, datatype, meta, export)
-            }
-        }
-    }
-
-    #[inline(never)]
-    fn progress_map(
-        js_obj: Object,
-        mut iter: MapRange<'a>,
-        obj: ObjId,
-        datatype: Datatype,
-        meta: &JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Progress<'a>, error::Export> {
-        while let Some(map_item) = iter.next() {
-            match map_item.value {
-                am::ValueRef::Object(_) => {
-                    let pending = Pending::Map(js_obj, map_item, iter, obj, datatype);
-                    return Ok(Progress::Pending(pending));
-                }
-                am::ValueRef::Scalar(s) => {
-                    export.set_prop(&js_obj, map_item.key.clone(), &export.export_scalar_ref(&s)?)?
-                }
-            }
-        }
-        let wrapped = export.wrap_object(js_obj, &obj, datatype, meta)?;
-        Ok(Progress::Done(JsValue::from(wrapped)))
-    }
-
-    #[inline(never)]
-    fn progress_list(
-        js_array: Array,
-        mut iter: ListRange<'a, RangeFull>,
-        obj: ObjId,
-        datatype: Datatype,
-        meta: &JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Progress<'a>, error::Export> {
-        while let Some(list_item) = iter.next() {
-            match list_item.value {
-                am::Value::Object(_) => {
-                    let pending = Pending::List(js_array, list_item, iter, obj, datatype);
-                    return Ok(Progress::Pending(pending));
-                }
-                am::Value::Scalar(s) => {
-                    js_array.push(&export.export_scalar(&s)?);
-                }
-            }
-        }
-        let wrapped = export.wrap_object(Object::from(js_array), &obj, datatype, meta)?;
-        Ok(Progress::Done(JsValue::from(wrapped)))
-    }
-}
-
-#[derive(Debug)]
-enum Progress<'a> {
-    Done(JsValue),
-    Task(Task<'a>),
-    Pending(Pending<'a>),
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct ExportCache<'a> {
@@ -204,6 +65,53 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
+    fn zip_objects(
+        &mut self,
+        obj: ObjId,
+        meta: &JsValue,
+        stack: Vec<StackItem<'a>>,
+        mut objects: HashMap<ObjId, JsValue>,
+    ) -> Result<JsValue, error::Export> {
+        for item in stack.into_iter().rev() {
+            match item {
+                StackItem::Map { obj, values } => {
+                    let js_obj = Object::new();
+                    for v in values {
+                        let x = match &v.value {
+                            am::ValueRef::Object(_) => {
+                                objects.remove(&v.id).ok_or(error::Export::MissingChild)?
+                            }
+                            am::ValueRef::Scalar(s) => self.export_scalar_ref(s)?,
+                        };
+                        self.set_prop(&js_obj, v.key, &x)?;
+                    }
+                    let wrapped = self.wrap_object(js_obj, &obj, Datatype::Map, meta)?;
+                    objects.insert(obj, JsValue::from(wrapped));
+                }
+                StackItem::Seq {
+                    obj,
+                    values,
+                    datatype,
+                } => {
+                    let js_array: Result<Array, _> = values
+                        .iter()
+                        .map(|v| match &v.value {
+                            am::Value::Object(_) => {
+                                objects.remove(&v.id).ok_or(error::Export::MissingChild)
+                            }
+                            am::Value::Scalar(s) => self.export_scalar(s),
+                        })
+                        .collect();
+                    let wrapped =
+                        self.wrap_object(Object::from(js_array?), &obj, datatype, meta)?;
+                    objects.insert(obj, JsValue::from(wrapped));
+                }
+            }
+        }
+        objects.remove(&obj).ok_or(error::Export::InvalidRoot)
+    }
+
+    #[inline(never)]
     pub(crate) fn materialize(
         &mut self,
         obj: ObjId,
@@ -211,25 +119,43 @@ impl<'a> ExportCache<'a> {
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
-        let mut task = Task::New(obj, datatype);
-        let mut stack: Vec<Pending<'_>> = Vec::new();
-        loop {
-            match task.progress(self, heads, meta)? {
-                Progress::Task(t) => {
-                    task = t;
-                }
-                Progress::Done(value) => match stack.pop() {
-                    Some(pending) => {
-                        task = pending.complete(value, self)?;
+        let mut to_do = BTreeSet::from([(obj.clone(), datatype)]);
+        let mut stack = vec![];
+        let mut objects = HashMap::new();
+        while let Some((obj, datatype)) = to_do.pop_first() {
+            match datatype {
+                Datatype::Map => {
+                    let mut values = vec![];
+                    for v in self.doc.map_range_at(&obj, heads) {
+                        if let am::ValueRef::Object(obj_type) = v.value {
+                            to_do.insert((v.id.clone(), obj_type.into()));
+                        }
+                        values.push(v);
                     }
-                    None => return Ok(value),
-                },
-                Progress::Pending(p) => {
-                    task = p.next_task();
-                    stack.push(p);
+                    stack.push(StackItem::Map { obj, values });
                 }
+                Datatype::Text if self.doc.text_rep.is_string() => {
+                    let text = self.doc.text_at(&obj, heads)?;
+                    objects.insert(obj, JsValue::from(JsString::from(text)));
+                }
+                datatype if datatype.is_seq() => {
+                    let mut values = vec![];
+                    for v in self.doc.list_range_at(&obj, heads) {
+                        if let am::Value::Object(obj_type) = v.value {
+                            to_do.insert((v.id.clone(), obj_type.into()));
+                        }
+                        values.push(v);
+                    }
+                    stack.push(StackItem::Seq {
+                        obj,
+                        values,
+                        datatype,
+                    });
+                }
+                _ => {}
             }
         }
+        self.zip_objects(obj, meta, stack, objects)
     }
 
     #[inline(never)]
@@ -427,6 +353,18 @@ impl<'a> ExportCache<'a> {
         self.set_value(obj, &self.datatype_sym, datatype)?;
         self.set_value(obj, &self.meta_sym, meta)
     }
+}
+
+enum StackItem<'a> {
+    Map {
+        obj: ObjId,
+        values: Vec<MapRangeItem<'a>>,
+    },
+    Seq {
+        obj: ObjId,
+        values: Vec<ListRangeItem<'a>>,
+        datatype: Datatype,
+    },
 }
 
 #[derive(Debug, Clone)]
