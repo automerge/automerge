@@ -1,25 +1,24 @@
-use crate::marks::{MarkSet, MarkStateMachine};
-use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter};
-use crate::op_set2::types::{Action, MarkData, ScalarValue};
-
 use crate::hydrate::Value;
+use crate::iter::tools::{Shiftable, SkipIter};
+use crate::marks::{MarkSet, MarkStateMachine};
+use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, VisIter};
+use crate::op_set2::types::{Action, MarkData, ScalarValue};
 use crate::types::OpId;
 use crate::types::{Clock, TextEncoding};
-use crate::Automerge;
 
 use std::borrow::Cow;
 use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct SpansInternal<'a> {
-    action_value: ActionValueIter<'a>,
+    action_value: SkipIter<ActionValueIter<'a>, VisIter<'a>>,
     mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
     marks: MarkStateMachine<'a>,
-    doc: &'a Automerge,
-    clock: Option<Clock>,
+    op_set: Option<&'a OpSet>,
+    pub(super) clock: Option<Clock>,
     state: SpanState,
 }
 
@@ -30,13 +29,13 @@ pub struct Spans<'a> {
     internal: SpansInternal<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum SpanInternal {
     Text(String, usize, Option<Arc<MarkSet>>),
     Obj(OpId, usize),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Span {
     /// A span of text and the marks that were active for that span
     Text(String, Option<Arc<MarkSet>>),
@@ -44,25 +43,43 @@ pub enum Span {
     Block(crate::hydrate::Map),
 }
 
+impl Span {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Text(s, _) => s,
+            Self::Block(_) => PLACEHOLDER,
+        }
+    }
+}
+
 impl<'a> SpansInternal<'a> {
+    pub(crate) fn shift_range(&mut self, range: Range<usize>) {
+        self.action_value.shift_range(range.clone());
+        self.mark_info.shift_range(range.clone()); // TODO - this is very stateful - will this work?
+        self.op_id.shift_range(range);
+        self.marks = MarkStateMachine::default();
+        self.state = SpanState::default();
+    }
+
     pub(crate) fn new(
-        doc: &'a Automerge,
+        op_set: &'a OpSet,
         range: Range<usize>,
         clock: Option<Clock>,
         encoding: TextEncoding,
     ) -> Self {
-        let op_id = doc.ops.id_iter_range(&range);
-        let mark_info = doc.ops.mark_info_iter_range(&range);
-        let action_value = doc.ops.action_value_iter(range, clock.as_ref());
+        let op_id = op_set.id_iter_range(&range);
+        let mark_info = op_set.mark_info_iter_range(&range);
+        let action_value = op_set.action_value_iter(range, clock.as_ref());
         let marks = MarkStateMachine::default();
         let state = SpanState::new(encoding);
+        let op_set = Some(op_set);
 
         Self {
             state,
             action_value,
             mark_info,
             op_id,
-            doc,
+            op_set,
             clock,
             marks,
         }
@@ -110,7 +127,7 @@ impl<'a> SpansInternal<'a> {
 
 const PLACEHOLDER: &str = "\u{fffc}";
 
-#[derive(Debug)]
+#[derive(Clone, Default, Debug)]
 struct SpanState {
     buff: String,
     len: usize,
@@ -203,7 +220,7 @@ impl SpanState {
     }
 }
 
-impl<'a> Iterator for SpansInternal<'a> {
+impl Iterator for SpansInternal<'_> {
     type Item = SpanInternal;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -219,37 +236,48 @@ impl<'a> Iterator for SpansInternal<'a> {
     }
 }
 
+impl SpanInternal {
+    pub(crate) fn export(
+        self,
+        op_set: &OpSet,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Span {
+        match self {
+            SpanInternal::Text(txt, _, marks) => Span::Text(txt, marks),
+            SpanInternal::Obj(opid, _) => {
+                let value = op_set.hydrate_map(&opid.into(), clock, encoding);
+                let Value::Map(value) = value else {
+                    tracing::warn!("unexpected non map object in text");
+                    return Span::Block(crate::hydrate::Map::new());
+                };
+                Span::Block(value)
+            }
+        }
+    }
+}
+
 impl<'a> Spans<'a> {
     pub(crate) fn new(
-        doc: &'a Automerge,
+        op_set: &'a OpSet,
         range: Range<usize>,
         clock: Option<Clock>,
         encoding: TextEncoding,
     ) -> Self {
         Spans {
-            internal: SpansInternal::new(doc, range, clock, encoding),
+            internal: SpansInternal::new(op_set, range, clock, encoding),
         }
     }
 }
 
-impl<'a> Iterator for Spans<'a> {
+impl Iterator for Spans<'_> {
     type Item = Span;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.internal.next() {
-            Some(SpanInternal::Text(txt, _, marks)) => Some(Span::Text(txt, marks)),
-            Some(SpanInternal::Obj(opid, _)) => {
-                let value = self
-                    .internal
-                    .doc
-                    .hydrate_map(&opid.into(), self.internal.clock.as_ref());
-                let Value::Map(value) = value else {
-                    tracing::warn!("unexpected non map object in text");
-                    return None;
-                };
-                Some(Span::Block(value))
-            }
-            None => None,
-        }
+        Some(self.internal.next()?.export(
+            self.internal.op_set?,
+            self.internal.clock.as_ref(),
+            self.internal.state.encoding,
+        ))
     }
 }

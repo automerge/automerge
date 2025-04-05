@@ -324,7 +324,7 @@ impl<'a> MarkStateMachine<'a> {
             state[0..index]
                 .iter_mut()
                 .filter(|(_, m)| m.name == mark.name)
-                .last()?
+                .next_back()?
                 .1
                 .clone(),
         )
@@ -337,7 +337,7 @@ pub struct OldMarkData {
     pub value: ScalarValue,
 }
 
-impl<'a> Display for MarkData<'a> {
+impl Display for MarkData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "name={} value={}", self.name, self.value)
     }

@@ -123,7 +123,7 @@ pub(crate) struct Input<'a> {
     original: &'a [u8],
 }
 
-impl<'a> std::fmt::Debug for Input<'a> {
+impl std::fmt::Debug for Input<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

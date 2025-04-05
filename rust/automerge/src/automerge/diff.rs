@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::automerge::{Automerge, Parents, ReadDoc, ReadDocInternal};
 use crate::cursor::CursorPosition;
 use crate::hydrate;
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::Mark;
 use crate::patches::TextRepresentation;
 use crate::types::ObjMeta;
@@ -15,7 +15,7 @@ use crate::{
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
     types::{Clock, ListEncoding, Prop, Value},
-    AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType,
+    AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, ROOT,
 };
 
 #[derive(Clone, Debug)]
@@ -28,7 +28,7 @@ struct Winner<'a> {
     conflict: bool,
 }
 
-impl<'a> Winner<'a> {
+impl Winner<'_> {
     fn value(&self, text_rep: TextRepresentation) -> hydrate::Value {
         if let Some(v) = &self.value_at {
             hydrate::Value::new(v, text_rep)
@@ -333,13 +333,13 @@ pub(crate) struct ReadDocAt<'a, 'b> {
     pub(crate) heads: &'b [ChangeHash],
 }
 
-impl<'a, 'b> AsRef<Automerge> for ReadDocAt<'a, 'b> {
+impl AsRef<Automerge> for ReadDocAt<'_, '_> {
     fn as_ref(&self) -> &Automerge {
         self.doc
     }
 }
 
-impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
+impl ReadDoc for ReadDocAt<'_, '_> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys_at(obj, self.heads)
     }
@@ -365,11 +365,22 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.map_range_at(obj, range, heads)
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+    fn iter(&self) -> DocIter<'_> {
+        let text_rep = TextRepresentation::String(self.doc.text_encoding());
+        self.doc
+            .iter_at(ROOT, Some(&self.doc.get_heads()), text_rep)
+    }
+
+    fn iter_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        range: R,
-    ) -> ListRange<'_, R> {
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        self.doc.iter_at(obj, heads, text_rep)
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
         self.doc.list_range_at(obj, range, self.heads)
     }
 
@@ -378,7 +389,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         self.doc.list_range_at(obj, range, heads)
     }
 
@@ -547,7 +558,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     }
 }
 
-impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
+impl ReadDocInternal for ReadDocAt<'_, '_> {
     fn live_obj_paths(&self) -> std::collections::HashMap<ExId, Vec<(ExId, Prop)>> {
         self.doc.visible_obj_paths(Some(self.heads))
     }

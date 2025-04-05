@@ -20,10 +20,6 @@ pub(crate) enum Datatype {
 }
 
 impl Datatype {
-    pub(crate) fn is_seq(&self) -> bool {
-        matches!(self, Self::List | Self::Text)
-    }
-
     pub(crate) fn is_scalar(&self) -> bool {
         !matches!(self, Self::Map | Self::Table | Self::List | Self::Text)
     }
@@ -159,6 +155,17 @@ impl TryFrom<JsValue> for Datatype {
 impl From<Datatype> for JsValue {
     fn from(d: Datatype) -> Self {
         String::from(d).into()
+    }
+}
+
+impl From<Datatype> for Option<Value<'_>> {
+    fn from(d: Datatype) -> Self {
+        match d {
+            Datatype::Map => Some(Value::Object(ObjType::Map)),
+            Datatype::List => Some(Value::Object(ObjType::List)),
+            Datatype::Text => Some(Value::Object(ObjType::Text)),
+            _ => None,
+        }
     }
 }
 

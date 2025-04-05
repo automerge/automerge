@@ -371,7 +371,7 @@ where
     _phantom: PhantomData<C>,
 }
 
-impl<'a, C: ColumnCursor> Default for Encoder<'a, C> {
+impl<C: ColumnCursor> Default for Encoder<'_, C> {
     fn default() -> Self {
         Self {
             len: 0,
@@ -382,7 +382,7 @@ impl<'a, C: ColumnCursor> Default for Encoder<'a, C> {
     }
 }
 
-impl<'a, C: ColumnCursor> Clone for Encoder<'a, C> {
+impl<C: ColumnCursor> Clone for Encoder<'_, C> {
     fn clone(&self) -> Self {
         Self {
             len: self.len,

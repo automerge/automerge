@@ -43,7 +43,7 @@ impl<'a, R: ReadDocInternal> PatchBuilder<'a, R> {
     }
 }
 
-impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
+impl<R: ReadDoc> PatchBuilder<'_, R> {
     pub(crate) fn get_path(&mut self, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
         if let Some(visible_paths) = &self.visible_paths {
             visible_paths.get(obj).cloned()

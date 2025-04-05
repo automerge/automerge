@@ -21,7 +21,7 @@ pub struct DeltaCursorInternal<const B: usize> {
 
 pub type DeltaCursor = DeltaCursorInternal<64>;
 
-impl<'a> DeltaState<'a> {
+impl DeltaState<'_> {
     fn pending_delta(&self) -> i64 {
         match &self.rle {
             RleState::LoneValue(Some(n)) => **n,

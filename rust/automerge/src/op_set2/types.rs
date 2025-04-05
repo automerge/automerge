@@ -209,7 +209,7 @@ pub enum ScalarValue<'a> {
     Null,
 }
 
-impl<'a> fmt::Display for ScalarValue<'a> {
+impl fmt::Display for ScalarValue<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ScalarValue::Bytes(b) => write!(f, "\"{:?}\"", b),
@@ -511,7 +511,7 @@ fn parse_leb128(input: &[u8]) -> Result<i64, ReadScalarError> {
         .map_err(|_| ReadScalarError::Leb)
 }
 
-impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
+impl PartialEq<types::ScalarValue> for ScalarValue<'_> {
     fn eq(&self, other: &types::ScalarValue) -> bool {
         match (self, other) {
             (ScalarValue::Bytes(a), types::ScalarValue::Bytes(b)) => a == &b.as_slice(),
@@ -538,13 +538,13 @@ impl<'a> PartialEq<types::ScalarValue> for ScalarValue<'a> {
     }
 }
 
-impl<'a> PartialEq<types::OldMarkData> for MarkData<'a> {
+impl PartialEq<types::OldMarkData> for MarkData<'_> {
     fn eq(&self, other: &types::OldMarkData) -> bool {
         *self.name == *other.name && self.value == other.value
     }
 }
 
-impl<'a> PartialEq<types::OpType> for OpType<'a> {
+impl PartialEq<types::OpType> for OpType<'_> {
     fn eq(&self, other: &types::OpType) -> bool {
         match (self, other) {
             (OpType::Make(a), types::OpType::Make(b)) => a == b,
@@ -564,15 +564,21 @@ impl<'a> PartialEq<OpType<'a>> for types::OpType {
     }
 }
 
-impl<'a> From<u64> for ScalarValue<'a> {
+impl From<u64> for ScalarValue<'_> {
     fn from(n: u64) -> Self {
         ScalarValue::Uint(n)
     }
 }
 
-impl<'a> From<i64> for ScalarValue<'a> {
+impl From<i64> for ScalarValue<'_> {
     fn from(n: i64) -> Self {
         ScalarValue::Int(n)
+    }
+}
+
+impl<'a> From<&'a str> for ScalarValue<'a> {
+    fn from(s: &'a str) -> Self {
+        ScalarValue::Str(Cow::Borrowed(s))
     }
 }
 
@@ -594,7 +600,7 @@ pub(crate) enum KeyRef<'a> {
     Seq(ElemId),
 }
 
-impl<'a> PartialOrd for KeyRef<'a> {
+impl PartialOrd for KeyRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             (Self::Map(s1), Self::Map(s2)) => Some(s1.cmp(s2)),
@@ -684,7 +690,7 @@ impl<'a> KeyRef<'a> {
     }
 }
 
-impl<'a> types::Exportable for KeyRef<'a> {
+impl types::Exportable for KeyRef<'_> {
     fn export(&self) -> types::Export {
         match self {
             KeyRef::Map(p) => types::Export::Special(p.to_string()),
@@ -697,6 +703,12 @@ impl<'a> types::Exportable for KeyRef<'a> {
 pub enum ValueRef<'a> {
     Object(ObjType),
     Scalar(ScalarValue<'a>),
+}
+
+impl<'a, A: Into<ScalarValue<'a>>> From<A> for ValueRef<'a> {
+    fn from(a: A) -> Self {
+        ValueRef::Scalar(a.into())
+    }
 }
 
 impl<'a> ValueRef<'a> {
@@ -775,7 +787,7 @@ pub struct ChangeMetadata<'a> {
     pub extra: Cow<'a, [u8]>,
 }
 
-impl<'a> ChangeMetadata<'a> {
+impl ChangeMetadata<'_> {
     pub fn into_owned(self) -> ChangeMetadata<'static> {
         ChangeMetadata {
             actor: Cow::Owned(self.actor.into_owned()),

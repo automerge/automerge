@@ -47,7 +47,7 @@ pub struct SubCursor<'a, T: Clone + Debug + Default, W: SpanWeight<T>> {
     pub element: &'a T,
 }
 
-impl<'a, T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SubCursor<'a, T, W> {}
+impl<T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SubCursor<'_, T, W> {}
 
 impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SubCursor<'a, T, W> {
     fn new(index: usize, weight: W, element: &'a T) -> Self {
@@ -60,13 +60,6 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SubCursor<'a, T, W> {
 }
 
 impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
-    /// Construct a new, empty, sequence.
-    /*
-        pub fn new() -> SpanTree<T, ()> {
-            Default::default()
-        }
-    */
-
     pub fn new2(element: T) -> Self {
         let mut t = Self::default();
         t.push(element);
@@ -246,6 +239,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         results.into_iter()
     }
 
+    #[inline(never)]
     pub fn get_where<F>(&self, f: F) -> Option<SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,
@@ -264,6 +258,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         }
     }
 
+    #[inline(never)]
     pub fn get_where_or_last<F>(&self, f: F) -> SubCursor<'_, T, W>
     where
         F: Fn(&W, &W) -> bool,
@@ -575,7 +570,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                 && self
                     .children
                     .get(child_index - 1)
-                    .map_or(false, |c| c.elements.len() >= B)
+                    .is_some_and(|c| c.elements.len() >= B)
             {
                 let last_element = self.children[child_index - 1].elements.pop().unwrap();
                 assert!(!self.children[child_index - 1].elements.is_empty());
@@ -603,7 +598,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
             } else if self
                 .children
                 .get(child_index + 1)
-                .map_or(false, |c| c.elements.len() >= B)
+                .is_some_and(|c| c.elements.len() >= B)
             {
                 let first_element = self.children[child_index + 1].elements.remove(0);
                 self.children[child_index + 1].length -= 1;
@@ -807,6 +802,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         }
     }
 
+    #[inline(never)]
     fn get_where<F>(&self, mut index: usize, mut acc: W, f: F) -> Option<SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,
@@ -846,7 +842,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
 
     fn last(&self) -> Option<&T> {
         if self.is_leaf() {
-            return self.elements.last();
+            self.elements.last()
         } else {
             self.children.last().and_then(|c| c.last())
         }
@@ -964,9 +960,13 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
     pub(crate) fn span_tree(&self) -> Option<&'a SpanTree<T, W>> {
         self.inner
     }
+
+    pub(crate) fn peek(&self) -> Option<&'a T> {
+        self.inner?.get(self.index + 1)
+    }
 }
 
-impl<'a, T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SpanTreeIter<'a, T, W> {}
+impl<T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SpanTreeIter<'_, T, W> {}
 
 impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> Iterator for SpanTreeIter<'a, T, W> {
     type Item = &'a T;

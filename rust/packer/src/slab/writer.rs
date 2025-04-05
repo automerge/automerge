@@ -16,7 +16,7 @@ pub enum WriteOp<'a, P: Packable + ?Sized> {
     Cpy(&'a [u8], Range<usize>, Acc, Option<bool>),
 }
 
-impl<'a, P: Packable + ?Sized> Clone for WriteOp<'a, P> {
+impl<P: Packable + ?Sized> Clone for WriteOp<'_, P> {
     fn clone(&self) -> Self {
         match self {
             Self::Value(c) => Self::Value(c.clone()),
@@ -25,7 +25,7 @@ impl<'a, P: Packable + ?Sized> Clone for WriteOp<'a, P> {
     }
 }
 
-impl<'a, P: Packable + ?Sized> Debug for WriteOp<'a, P> {
+impl<P: Packable + ?Sized> Debug for WriteOp<'_, P> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut s = fmt.debug_struct("WriteOp");
         match self {
@@ -48,7 +48,7 @@ pub enum WriteAction<'a, P: Packable + ?Sized> {
     SlabHead,
 }
 
-impl<'a, P: Packable + ?Sized> Clone for WriteAction<'a, P> {
+impl<P: Packable + ?Sized> Clone for WriteAction<'_, P> {
     fn clone(&self) -> Self {
         match self {
             Self::Op(op) => Self::Op(op.clone()),
@@ -63,7 +63,7 @@ impl<'a, P: Packable + ?Sized> Clone for WriteAction<'a, P> {
     }
 }
 
-impl<'a, P: Packable + ?Sized> WriteOp<'a, P> {
+impl<P: Packable + ?Sized> WriteOp<'_, P> {
     fn acc(&self) -> Acc {
         match self {
             Self::Value(v) => P::agg(v) * 1,
@@ -129,7 +129,7 @@ impl<'a, P: Packable + ?Sized> WriteOp<'a, P> {
     }
 }
 
-impl<'a, P: Packable + ?Sized> WriteAction<'a, P> {
+impl<P: Packable + ?Sized> WriteAction<'_, P> {
     fn acc(&self) -> Acc {
         match self {
             Self::Op(op) => op.acc(),
@@ -229,7 +229,7 @@ pub struct SlabWriter<'a, P: Packable + ?Sized> {
     locked: bool,
 }
 
-impl<'a, P: Packable + ?Sized> Clone for SlabWriter<'a, P> {
+impl<P: Packable + ?Sized> Clone for SlabWriter<'_, P> {
     fn clone(&self) -> Self {
         Self {
             actions: self.actions.clone(),

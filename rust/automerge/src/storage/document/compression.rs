@@ -343,7 +343,7 @@ impl<'a> Compression<'a, Decompressing, Finished<Decompressing>> {
     }
 }
 
-impl<'a> Compression<'a, Compressing, Finished<Compressing>> {
+impl Compression<'_, Compressing, Finished<Compressing>> {
     fn finish(self) -> Vec<u8> {
         let Finished { out, .. } = self.state;
         let headerless = &out[self.direction.header_len..];

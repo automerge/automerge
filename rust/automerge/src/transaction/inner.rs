@@ -789,7 +789,7 @@ impl TransactionInner {
             .seek_ops_by_index(&text_obj.id, index, encoding, self.scope.as_ref())
             .ops
             .into_iter()
-            .last()
+            .next_back()
             .ok_or(AutomergeError::InvalidIndex(index))?;
         let block_id = target.id;
 
@@ -1074,7 +1074,7 @@ enum SpliceType<'a> {
     Text(&'a str),
 }
 
-impl<'a> SpliceType<'a> {
+impl SpliceType<'_> {
     fn encoding(&self, text_encoding: TextEncoding) -> ListEncoding {
         match self {
             SpliceType::List => ListEncoding::List,

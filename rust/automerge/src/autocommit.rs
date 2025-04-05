@@ -4,7 +4,7 @@ use crate::automerge::SaveOptions;
 use crate::automerge::{current_state, diff};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -12,7 +12,7 @@ use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
 use crate::{hydrate, OnPartialLoad, TextEncoding};
-use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue};
+use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
     Prop, Value,
@@ -709,6 +709,21 @@ impl ReadDoc for AutoCommit {
         self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        self.doc
+            .iter_for(obj.as_ref(), self.get_scope(heads), text_rep)
+    }
+
+    fn iter(&self) -> DocIter<'_> {
+        self.doc
+            .iter_for(&ROOT, self.get_scope(None), self.patch_log.text_rep())
+    }
+
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
@@ -728,11 +743,7 @@ impl ReadDoc for AutoCommit {
             .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-    ) -> ListRange<'_, R> {
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
         self.doc
             .list_range_for(obj.as_ref(), range, self.get_scope(None))
     }
@@ -742,7 +753,7 @@ impl ReadDoc for AutoCommit {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         self.doc
             .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
@@ -1120,7 +1131,7 @@ struct SyncWrapper<'a> {
     inner: &'a mut AutoCommit,
 }
 
-impl<'a> SyncDoc for SyncWrapper<'a> {
+impl SyncDoc for SyncWrapper<'_> {
     fn generate_sync_message(&self, sync_state: &mut sync::State) -> Option<sync::Message> {
         self.inner.doc.generate_sync_message(sync_state)
     }

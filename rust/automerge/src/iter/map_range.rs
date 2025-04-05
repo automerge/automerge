@@ -1,31 +1,34 @@
+use super::tools::{Peek, Shiftable, SkipIter};
 use crate::clock::Clock;
 use crate::exid::ExId;
-use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, SkipIter, ValueIter, VisIter};
+use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter, VisIter};
 use crate::op_set2::packer::{ColumnDataIter, StrCursor};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::types::OpId;
+use crate::value::Value;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::iter::Peekable;
 use std::ops::Range;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MapRangeItem<'a> {
     pub key: Cow<'a, str>,
-    pub value: ValueRef<'a>,
+    pub value: Value<'a>,
     pub id: ExId,
     pub conflict: bool,
+    pub(crate) pos: usize,
+    pub(crate) _id: OpId,
 }
 
-#[derive(Debug)]
-struct MapRangeInner<'a> {
-    iter: Peekable<SkipIter<MapIter<'a>, VisIter<'a>>>,
+#[derive(Clone, Debug)]
+pub(crate) struct MapRangeInner<'a> {
+    iter: Peek<SkipIter<MapIter<'a>, VisIter<'a>>>,
     clock: Option<Clock>,
     op_set: &'a OpSet,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MapRange<'a> {
     inner: Option<MapRangeInner<'a>>,
 }
@@ -37,14 +40,14 @@ impl<'a> Iterator for MapRange<'a> {
         let mut conflict = false;
         let inner = self.inner.as_mut()?;
 
-        while let Some((key, action, value, id, pos)) = inner.iter.next() {
+        while let Some((key, action, value, _id, pos)) = inner.iter.next() {
             if let Some((next_key, _, _, _, _)) = inner.iter.peek() {
                 if next_key == &key {
                     conflict = true;
                     continue;
                 }
             }
-            let id = inner.op_set.id_to_exid(id);
+            let id = inner.op_set.id_to_exid(_id);
             let value = if let ScalarValue::Counter(c) = &value {
                 let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
                 ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
@@ -53,9 +56,11 @@ impl<'a> Iterator for MapRange<'a> {
             };
             return Some(MapRangeItem {
                 key,
-                value,
+                value: value.into_owned(),
                 id,
                 conflict,
+                _id,
+                pos,
             });
         }
         None
@@ -68,6 +73,15 @@ struct MapIter<'a> {
     key_str: ColumnDataIter<'a, StrCursor>,
     action: ActionIter<'a>,
     value: ValueIter<'a>,
+}
+
+impl Shiftable for MapIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.id.shift_range(range.clone());
+        self.key_str.shift_range(range.clone());
+        self.action.shift_range(range.clone());
+        self.value.shift_range(range);
+    }
 }
 
 impl<'a> Iterator for MapIter<'a> {
@@ -110,7 +124,7 @@ impl<'a> MapRange<'a> {
 
         let vis = VisIter::new(op_set, clock.as_ref(), range);
         let skip = SkipIter::new_with_offset(map_iter, vis, start);
-        let iter = skip.peekable();
+        let iter = Peek::new(skip);
 
         Self {
             inner: Some(MapRangeInner {
@@ -118,6 +132,12 @@ impl<'a> MapRange<'a> {
                 op_set,
                 clock,
             }),
+        }
+    }
+
+    pub(crate) fn shift_range(&mut self, range: Range<usize>) {
+        if let Some(inner) = self.inner.as_mut() {
+            inner.iter.shift_range(range)
         }
     }
 }

@@ -101,8 +101,7 @@ pub trait SyncDoc {
     ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
     /// * `message` - The [`Message`] to receive
-    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
-    ///                 current state of the document due to the received sync message
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the current state of the document due to the received sync message
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
 
     /// Apply a received sync message to this document and `sync_state`
@@ -123,8 +122,7 @@ pub trait SyncDoc {
     ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
     /// * `message` - The [`Message`] to receive
-    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
-    ///                 current state of the document due to the received sync message
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the current state of the document due to the received sync message
     fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut State,

@@ -62,7 +62,7 @@ impl From<&crate::ScalarValue> for ValueMeta {
             crate::ScalarValue::Timestamp(i) => Self((lebsize(*i) << 4) | 9),
             crate::ScalarValue::F64(_) => Self((8 << 4) | 5),
             crate::ScalarValue::Counter(i) => Self((lebsize(i.start) << 4) | 8),
-            crate::ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
+            crate::ScalarValue::Str(s) => Self(((s.len() as u64) << 4) | 6),
             crate::ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
             crate::ScalarValue::Unknown { type_code, bytes } => {
                 Self(((bytes.len() as u64) << 4) | (*type_code as u64))
@@ -84,7 +84,7 @@ impl<'a> From<&'a ScalarValue<'a>> for ValueMeta {
             ScalarValue::Timestamp(i) => Self((lebsize(*i) << 4) | 9),
             ScalarValue::F64(_) => Self((8 << 4) | 5),
             ScalarValue::Counter(i) => Self((lebsize(*i) << 4) | 8),
-            ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
+            ScalarValue::Str(s) => Self(((s.len() as u64) << 4) | 6),
             ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
             ScalarValue::Unknown { type_code, bytes } => {
                 Self(((bytes.len() as u64) << 4) | (*type_code as u64))

@@ -1,5 +1,6 @@
 use super::parents::Parents;
 use crate::exid::ExId;
+use crate::iter::tools::SkipIter;
 use crate::marks::{MarkSet, MarkStateMachine, RichTextQueryState};
 use crate::patches::TextRepresentation;
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
@@ -12,7 +13,7 @@ use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
 use super::op::{Op, OpBuilder, OpLike, SuccInsert, TxOp};
-use super::packer::{ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
+use super::packer::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
 
 use super::columns::Columns;
 
@@ -42,15 +43,19 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIndexColumn, MarkIndexValue};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter, OpIter, ReadOpError,
-    SuccIterIter, ValueIter,
+    ActionIter, ActionValueIter, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter, OpIter,
+    ReadOpError, SuccIterIter, ValueIter,
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{DiffOp, DiffOpIter, SkipIter, VisIter, VisibleOpIter};
+pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
 
+pub(crate) type InsertAcc<'a> = super::packer::ColAccIter<'a, BooleanCursor>;
+
+/*
 pub(crate) type ActionValueIter<'a> =
     SkipIter<std::iter::Zip<ActionIter<'a>, ValueIter<'a>>, VisIter<'a>>;
+*/
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -205,11 +210,10 @@ impl OpSet {
         &self,
         obj: &ObjId,
         range: R,
-        encoding: ListEncoding,
         clock: Option<Clock>,
-    ) -> ListRange<'_, R> {
-        let iter = self.iter_obj(obj).visible(clock).top_ops().marks();
-        ListRange::new(self, iter, range, encoding)
+    ) -> ListRange<'_> {
+        let obj_range = self.scope_to_obj(obj);
+        ListRange::new(self, obj_range, clock, range)
     }
 
     pub(crate) fn map_range<R: RangeBounds<String>>(
@@ -713,6 +717,10 @@ impl OpSet {
         ActionIter::new(self.cols.action.iter_range(range.clone()))
     }
 
+    pub(crate) fn insert_acc_range(&self, range: &Range<usize>) -> InsertAcc<'_> {
+        self.cols.insert.iter_range(range.clone()).as_acc()
+    }
+
     pub(crate) fn key_str_iter_range(&self, range: &Range<usize>) -> ColumnDataIter<'_, StrCursor> {
         self.cols.key_str.iter_range(range.clone())
     }
@@ -721,7 +729,7 @@ impl OpSet {
         &self,
         range: Range<usize>,
         clock: Option<&Clock>,
-    ) -> ActionValueIter<'_> {
+    ) -> SkipIter<ActionValueIter<'_>, VisIter<'_>> {
         // conflicting text values will show both
         // need conflict index to fix
         // cant happen unless the put() api is called on text - shouldnt be allowed
@@ -730,7 +738,8 @@ impl OpSet {
         //let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
         let action = self.action_iter_range(&range);
         let vis = VisIter::new(self, clock, range);
-        let iter = std::iter::zip(action, value);
+        //let iter = std::iter::zip(action, value);
+        let iter = ActionValueIter::new(action, value);
         SkipIter::new_with_offset(iter, vis, start)
     }
 
@@ -1191,7 +1200,7 @@ pub(crate) struct FoundOpWithPatchLog<'a> {
     pub(crate) marks: Option<Arc<MarkSet>>,
 }
 
-impl<'a> FoundOpWithPatchLog<'a> {
+impl FoundOpWithPatchLog<'_> {
     pub(crate) fn log_patches(
         &self,
         obj: &ObjMeta,
@@ -1355,7 +1364,7 @@ pub(crate) struct OpsFound<'a> {
     pub(crate) end_pos: usize,
 }
 
-impl<'a> OpsFound<'a> {
+impl OpsFound<'_> {
     fn width(&self, encoding: ListEncoding) -> usize {
         self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
     }
@@ -1373,7 +1382,7 @@ pub(crate) struct IterObjIds<'a> {
     pos: usize,
 }
 
-impl<'a> Iterator for IterObjIds<'a> {
+impl Iterator for IterObjIds<'_> {
     type Item = (ObjId, Range<usize>);
 
     fn next(&mut self) -> Option<Self::Item> {

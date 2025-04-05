@@ -10,35 +10,34 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[derive(Clone, Debug)]
-pub(crate) struct SkipIter<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> {
-    pos: usize,
-    iter: I,
-    skip: S,
-}
+use crate::iter::tools::{Shiftable, Skipper};
 
-impl<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> SkipIter<I, S> {
-    pub(crate) fn new(iter: I, skip: S) -> Self {
-        Self { iter, skip, pos: 0 }
-    }
-    pub(crate) fn new_with_offset(iter: I, skip: S, pos: usize) -> Self {
-        Self { iter, skip, pos }
-    }
-
-    pub(crate) fn pos(&self) -> usize {
-        self.pos
+impl Shiftable for VisIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        match self {
+            Self::Indexed(index) => index.shift_range(range),
+            Self::Scan(scan) => scan.shift_range(range),
+        }
     }
 }
 
-impl<I: Iterator + Debug + Clone, S: Iterator<Item = usize> + Debug + Clone> Iterator
-    for SkipIter<I, S>
-{
-    type Item = I::Item;
+impl Shiftable for ScanVisIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.id_actor.shift_range(range.clone());
+        self.id_ctr.shift_range(range.clone());
+        self.action.shift_range(range.clone());
+        self.succ_count.shift_range(range.clone());
+        let succ_range = self.succ_count.calculate_acc().as_usize()..usize::MAX;
+        self.succ_actor.shift_range(succ_range.clone());
+        self.succ_ctr.shift_range(succ_range.clone());
+        self.succ_inc.shift_range(succ_range);
+    }
+}
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let skip = self.skip.next()?;
-        self.pos += skip + 1;
-        self.iter.nth(skip)
+impl Shiftable for IndexedVisIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.iter.shift_range(range);
+        self.vis = 0;
     }
 }
 
@@ -47,6 +46,14 @@ pub(crate) enum VisIter<'a> {
     Indexed(IndexedVisIter<'a>),
     Scan(ScanVisIter<'a>),
 }
+
+impl Default for VisIter<'_> {
+    fn default() -> Self {
+        Self::Indexed(IndexedVisIter::default())
+    }
+}
+
+impl Skipper for VisIter<'_> {}
 
 impl<'a> VisIter<'a> {
     pub(crate) fn new(op_set: &'a OpSet, clock: Option<&Clock>, range: Range<usize>) -> Self {
@@ -60,7 +67,7 @@ impl<'a> VisIter<'a> {
     }
 }
 
-impl<'a> Iterator for VisIter<'a> {
+impl Iterator for VisIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -71,7 +78,7 @@ impl<'a> Iterator for VisIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct IndexedVisIter<'a> {
     iter: ColumnDataIter<'a, BooleanCursor>,
     vis: usize,
@@ -84,7 +91,7 @@ impl<'a> IndexedVisIter<'a> {
     }
 }
 
-impl<'a> Iterator for IndexedVisIter<'a> {
+impl Iterator for IndexedVisIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -163,7 +170,7 @@ impl<'a> ScanVisIter<'a> {
     }
 }
 
-impl<'a> Iterator for ScanVisIter<'a> {
+impl Iterator for ScanVisIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -273,7 +280,7 @@ struct Visibility<'a> {
     value: Option<ScalarValue<'a>>,
 }
 
-impl<'a> Visibility<'a> {
+impl Visibility<'_> {
     fn visible(&self) -> bool {
         self.predates && !self.deleted
     }
@@ -316,7 +323,7 @@ pub(crate) struct DiffOp<'a> {
     pub(crate) value_after: Option<ScalarValue<'a>>,
 }
 
-impl<'a, 'b, I: OpQueryTerm<'a> + Clone> Iterator for DiffOpIter<'a, 'b, I> {
+impl<'a, I: OpQueryTerm<'a> + Clone> Iterator for DiffOpIter<'a, '_, I> {
     type Item = DiffOp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {

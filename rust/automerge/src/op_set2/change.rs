@@ -107,13 +107,13 @@ where
     }
 }
 
-impl<'a> PartialOrd for OpBuilder<'a> {
-    fn partial_cmp(&self, other: &OpBuilder<'a>) -> Option<Ordering> {
+impl PartialOrd for OpBuilder<'_> {
+    fn partial_cmp(&self, other: &OpBuilder<'_>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a> Ord for OpBuilder<'a> {
+impl Ord for OpBuilder<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.id.cmp(&other.id)
     }
@@ -153,7 +153,7 @@ impl<'a> PartialEq for OpBuilder<'a> {
     }
 }
 
-impl<'a> Eq for OpBuilder<'a> {}
+impl Eq for OpBuilder<'_> {}
 
 #[inline(never)]
 fn write_change_ops<T>(

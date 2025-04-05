@@ -50,7 +50,7 @@ fn log_text_patches(
     range: Range<usize>,
     encoding: TextEncoding,
 ) {
-    let spans = SpansInternal::new(doc, range, None, encoding);
+    let spans = SpansInternal::new(doc.ops(), range, None, encoding);
     for span in spans {
         match span {
             SpanInternal::Text(text, index, marks) => {

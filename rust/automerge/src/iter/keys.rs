@@ -9,7 +9,7 @@ pub struct Keys<'a> {
     pub(crate) iter: Option<(&'a OpSet, TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>>)>,
 }
 
-impl<'a> Iterator for Keys<'a> {
+impl Iterator for Keys<'_> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -199,7 +199,7 @@ impl<'a> Iterator for DocChangeColumnIter<'a> {
     }
 }
 
-impl<'a> DocChangeColumnIter<'a> {
+impl DocChangeColumnIter<'_> {
     fn check_done(&mut self) -> bool {
         let other_cols = [
             self.seq.next().is_none(),

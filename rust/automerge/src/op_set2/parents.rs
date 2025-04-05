@@ -19,7 +19,7 @@ pub struct Parents<'a> {
     pub(crate) clock: Option<Clock>,
 }
 
-impl<'a> Parents<'a> {
+impl Parents<'_> {
     /// Return the path this `Parents` represents
     ///
     /// This is _not_ in reverse order.
@@ -48,7 +48,7 @@ impl<'a> Parents<'a> {
     }
 }
 
-impl<'a> Iterator for Parents<'a> {
+impl Iterator for Parents<'_> {
     type Item = Parent;
 
     fn next(&mut self) -> Option<Self::Item> {

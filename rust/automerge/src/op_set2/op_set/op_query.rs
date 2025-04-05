@@ -1,8 +1,8 @@
+use super::visible::VisIter;
+use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
+use crate::iter::tools::SkipIter;
 use crate::marks::MarkSet;
 use crate::types::Clock;
-
-use super::visible::{SkipIter, VisIter};
-use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
 
 #[cfg(test)]
 use crate::iter::KeyOpIter;

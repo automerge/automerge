@@ -60,7 +60,7 @@ pub(crate) struct Change<'a, O: OpReadState> {
     pub(crate) _phantom: PhantomData<O>,
 }
 
-impl<'a, O: OpReadState> PartialEq for Change<'a, O> {
+impl<O: OpReadState> PartialEq for Change<'_, O> {
     fn eq(&self, other: &Self) -> bool {
         self.bytes == other.bytes
     }
@@ -219,7 +219,7 @@ impl<'a> Change<'a, Verified> {
     }
 }
 
-impl<'a, O: OpReadState> Change<'a, O> {
+impl<O: OpReadState> Change<'_, O> {
     pub(crate) fn checksum(&self) -> CheckSum {
         self.header.checksum()
     }

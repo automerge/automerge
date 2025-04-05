@@ -141,7 +141,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ColumnDataIter<'a, C: ColumnCursor> {
     pos: usize,
     max: usize,
@@ -150,7 +150,19 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
     run: Option<Run<'a, C::Item>>,
 }
 
-impl<'a, C: ColumnCursor> Clone for ColumnDataIter<'a, C> {
+impl<C: ColumnCursor> Default for ColumnDataIter<'_, C> {
+    fn default() -> Self {
+        Self {
+            pos: 0,
+            max: 0,
+            slabs: slab::SpanTreeIter::default(),
+            slab: RunIter::default(),
+            run: None,
+        }
+    }
+}
+
+impl<C: ColumnCursor> Clone for ColumnDataIter<'_, C> {
     fn clone(&self) -> Self {
         Self {
             pos: self.pos,
@@ -258,9 +270,17 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let mut run = self.run.take().or_else(|| self.pop_run())?;
         let count = run.count;
         if self.pos + run.count > self.max {
-            run.count = self.max - self.pos;
+            let remainder = self.max - self.pos;
+            let overflow = run.count - remainder;
+            run.count = remainder;
+            self.run = Some(Run {
+                value: run.value.clone(),
+                count: overflow,
+            });
+            self.pos += remainder;
+        } else {
+            self.pos += count;
         }
-        self.pos += count;
         self.check_pos();
         Some(run)
     }
@@ -279,6 +299,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.check_pos();
     }
 
+    #[inline(never)]
     pub fn advance_to(&mut self, target: usize) {
         assert!(target >= self.pos());
         if target > self.pos() {
@@ -296,28 +317,43 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     // we only read the first element of each node and never
     // from the first node as we arent always including its first element
 
+    #[inline(never)]
     fn binary_search_for<B>(&self, target: Option<B>, max: usize) -> Option<usize>
     where
-        B: Borrow<C::Item> + Copy,
+        B: Borrow<C::Item> + Debug + Copy,
+        C::Item: Ord,
     {
-        let slabs = self.slabs.span_tree()?;
         let original_start = self.slab_index();
         let mut start = original_start;
+
+        let next_slab_value = self.slabs.peek()?.first_value::<C>();
+        match _cmp(next_slab_value.clone(), &target) {
+            Ordering::Greater => {
+                return None;
+            }
+            Ordering::Less => {
+                // not in current slab
+                //start += 1;
+            }
+            Ordering::Equal => (), // could still be in current slab
+        }
+
+        let slabs = self.slabs.span_tree()?;
         let mut end = slabs
             .get_where_or_last(|a, next| max < a.pos() + next.pos())
             .index;
-        let mut mid = (start + end + 1) / 2;
+        let mut mid = (start + end).div_ceil(2);
         while start < mid && mid < end {
-            let slab = slabs.get(mid)?;
-            let value = slab.first_value::<C>();
-            match (value, target.as_ref()) {
-                (None, Some(_)) => start = mid,
-                (Some(a), Some(b)) if a.as_ref() < b.borrow() => start = mid,
-                _ => end = mid,
+            let value = slabs.get(mid)?.first_value::<C>();
+            if _cmp(value, &target) == Ordering::Less {
+                start = mid;
+            } else {
+                end = mid;
             }
-            mid = (start + end + 1) / 2;
+            mid = (start + end).div_ceil(2);
         }
         if start != original_start {
+            assert!(start <= end);
             Some(start)
         } else {
             None
@@ -326,6 +362,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     // this function assumes all values within its range are ordered
     // will give undefined results otherwise
+    #[inline(never)]
     pub fn seek_to_value<B, R>(&mut self, value: Option<B>, range: R) -> Range<usize>
     where
         B: Borrow<C::Item> + Copy + Debug,
@@ -334,6 +371,8 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     {
         let (min, max) = normalize_range(range);
         let max = std::cmp::min(max, self.max);
+
+        // FIXME - wasteful if we're gonna re-set
         if min > self.pos() {
             self.advance_to(min);
         }
@@ -400,10 +439,15 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         ColGroupIter { iter: self }
     }
 
+    pub fn as_acc(self) -> ColAccIter<'a, C> {
+        ColAccIter { iter: self }
+    }
+
     pub fn calculate_acc(&self) -> Acc {
         self.slabs.weight().acc() - self.slab.acc_left() - self.run_acc()
     }
 
+    #[inline(never)]
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let pos = std::cmp::min(pos, self.max);
@@ -411,6 +455,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(())
     }
 
+    #[inline(never)]
     fn reset_iter_to_slab_index(&mut self, index: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let _ = std::mem::replace(self, Self::new_at_index(tree, index, self.max));
@@ -426,13 +471,49 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         assert!(new_acc >= starting_acc);
         Some(new_acc - starting_acc)
     }
+
+    pub fn shift_range(&mut self, range: Range<usize>) {
+        assert!(range.start >= self.pos);
+        self.max = range.end;
+        if range.start > self.pos {
+            self.nth(range.start - self.pos - 1);
+        }
+    }
 }
 
+#[derive(Debug, Clone)]
+pub struct ColAccIter<'a, C: ColumnCursor> {
+    iter: ColumnDataIter<'a, C>,
+}
+
+impl<C: ColumnCursor> ColAccIter<'_, C> {
+    pub fn shift_range(&mut self, range: Range<usize>) {
+        self.iter.shift_range(range)
+    }
+}
+
+impl<C: ColumnCursor> Iterator for ColAccIter<'_, C> {
+    type Item = Acc;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let _ = self.iter.next()?;
+        let acc = self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc();
+        Some(acc)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let _ = self.iter.nth(n)?;
+        let acc = self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc();
+        Some(acc)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ColGroupIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
 }
 
-impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
+impl<C: ColumnCursor> ColGroupIter<'_, C> {
     pub fn advance_by(&mut self, amount: usize) {
         self.iter.advance_by(amount)
     }
@@ -504,6 +585,7 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
 impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     type Item = Option<Cow<'a, C::Item>>;
 
+    #[inline(never)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.max {
             return None;
@@ -516,6 +598,7 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
         Some(result)
     }
 
+    #[inline(never)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n == 0 {
             return self.next();
@@ -1657,5 +1740,31 @@ pub(crate) mod tests {
         assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
         assert_eq!(iter.seek_to_value(Some(1), ..), 3..6);
         assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
+    }
+
+    #[test]
+    fn shift_range() {
+        let col: ColumnData<UIntCursor> = [
+            0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+        ]
+        .iter()
+        .collect();
+        let mut iter = col.iter_range(1..4);
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(0))));
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(0))));
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(1))));
+        assert_eq!(iter.next(), None);
+
+        iter.shift_range(5..7);
+
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(1))));
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(6))));
+        assert_eq!(iter.next(), None);
+
+        iter.shift_range(8..10);
+
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(6))));
+        assert_eq!(iter.next(), Some(Some(Cow::Owned(7))));
+        assert_eq!(iter.next(), None);
     }
 }

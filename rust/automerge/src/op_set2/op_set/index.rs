@@ -56,7 +56,7 @@ impl ObjInfo {
     }
 }
 
-impl<'a> Op<'a> {
+impl Op<'_> {
     pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
         let obj_type = ObjType::try_from(self.action).ok()?;
         let parent = self.obj;
@@ -70,7 +70,7 @@ impl ChangeOp {
     }
 }
 
-impl<'a> OpBuilder<'a> {
+impl OpBuilder<'_> {
     pub(crate) fn obj_info(&self) -> Option<ObjInfo> {
         let obj_type = ObjType::try_from(self.action).ok()?;
         let parent = self.obj;

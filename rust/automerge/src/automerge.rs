@@ -17,7 +17,7 @@ pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 use crate::change_graph::ChangeGraph;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog, TextRepresentation};
 use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
@@ -1435,6 +1435,18 @@ impl Automerge {
             .unwrap_or_default()
     }
 
+    pub(crate) fn iter_for(
+        &self,
+        obj: &ExId,
+        clock: Option<Clock>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        self.exid_to_obj(obj)
+            .ok()
+            .map(|obj| DocIter::new(self, obj, clock, text_rep))
+            .unwrap_or_default()
+    }
+
     pub(crate) fn map_range_for<'a, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: &ExId,
@@ -1452,17 +1464,10 @@ impl Automerge {
         obj: &ExId,
         range: R,
         clock: Option<Clock>,
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         self.exid_to_obj(obj)
             .ok()
-            .map(|obj| {
-                self.ops.list_range(
-                    &obj.id,
-                    range,
-                    TextRepresentation::Array.encoding(obj.typ),
-                    clock,
-                )
-            })
+            .map(|obj| self.ops.list_range(&obj.id, range, clock))
             .unwrap_or_default()
     }
 
@@ -1496,7 +1501,7 @@ impl Automerge {
     ) -> Result<Spans<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let range = self.ops.scope_to_obj(&obj.id);
-        Ok(Spans::new(self, range, clock, self.text_encoding()))
+        Ok(Spans::new(self.ops(), range, clock, self.text_encoding()))
     }
 
     pub(crate) fn get_cursor_for(
@@ -1653,7 +1658,7 @@ impl Automerge {
             )
             .ops
             .into_iter()
-            .last()
+            .next_back()
             .map(|op| op.tagged_value(self.ops())))
     }
 
@@ -1838,6 +1843,17 @@ impl ReadDoc for Automerge {
         self.keys_for(obj.as_ref(), Some(clock))
     }
 
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        //let obj = self.exid_to_obj(obj.as_ref()).unwrap();
+        let clock = heads.map(|heads| self.clock_at(heads));
+        self.iter_for(obj.as_ref(), clock, text_rep)
+    }
+
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
@@ -1856,11 +1872,7 @@ impl ReadDoc for Automerge {
         self.map_range_for(obj.as_ref(), range, Some(clock))
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-    ) -> ListRange<'_, R> {
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
         self.list_range_for(obj.as_ref(), range, None)
     }
 
@@ -1869,7 +1881,7 @@ impl ReadDoc for Automerge {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         let clock = self.clock_at(heads);
         self.list_range_for(obj.as_ref(), range, Some(clock))
     }

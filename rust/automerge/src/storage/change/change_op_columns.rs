@@ -391,7 +391,7 @@ pub(crate) struct ChangeOpsIter<'a> {
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
 }
 
-impl<'a> ChangeOpsIter<'a> {
+impl ChangeOpsIter<'_> {
     fn done(&self) -> bool {
         self.action.done()
     }
@@ -431,7 +431,7 @@ impl<'a> ChangeOpsIter<'a> {
     }
 }
 
-impl<'a> Iterator for ChangeOpsIter<'a> {
+impl Iterator for ChangeOpsIter<'_> {
     type Item = Result<ChangeOp, ReadChangeOpError>;
 
     fn next(&mut self) -> Option<Self::Item> {

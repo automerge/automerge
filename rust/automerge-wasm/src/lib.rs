@@ -1022,7 +1022,7 @@ impl Automerge {
         let heads = get_heads(heads)?;
         self.doc.update_diff_cursor();
         let mut cache = interop::ExportCache::new(self)?;
-        Ok(cache.materialize(obj, obj_type.into(), heads.as_ref(), &meta)?)
+        Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
     }
 
     #[wasm_bindgen(js_name = getCursor)]
@@ -1188,34 +1188,10 @@ impl Automerge {
         Ok(result)
     }
 
-    pub(crate) fn map_range_at(
-        &self,
-        obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
-    ) -> am::iter::MapRange<'_> {
-        if let Some(heads) = heads {
-            self.doc.map_range_at(obj, .., heads)
-        } else {
-            self.doc.map_range(obj, ..)
-        }
-    }
-
-    pub(crate) fn list_range_at(
-        &self,
-        obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
-    ) -> am::iter::ListRange<'_, std::ops::RangeFull> {
-        if let Some(heads) = heads {
-            self.doc.list_range_at(obj, .., heads)
-        } else {
-            self.doc.list_range(obj, ..)
-        }
-    }
-
     pub(crate) fn text_at(
         &self,
         obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
+        heads: Option<&[am::ChangeHash]>,
     ) -> Result<String, am::AutomergeError> {
         if let Some(heads) = heads {
             Ok(self.doc.text_at(obj, heads)?)

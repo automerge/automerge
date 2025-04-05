@@ -1947,6 +1947,8 @@ pub(crate) mod error {
         CallSplice(JsValue),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error("reflect set failed")]
+        ReflectSet(JsValue),
         #[error("invalid root processed")]
         InvalidRoot,
         #[error("missing child in export")]

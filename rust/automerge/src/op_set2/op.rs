@@ -193,7 +193,7 @@ pub(crate) struct OpBuilder<'a> {
     pub(crate) pred: Vec<OpId>,
 }
 
-impl<'a> OpBuilder<'a> {
+impl OpBuilder<'_> {
     pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
         match (self.action, &self.mark_name) {
             (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
@@ -464,7 +464,10 @@ impl TxOp {
 }
 
 impl OpLike for &TxOp {
-    type SuccIter<'b> = std::array::IntoIter<OpId, 0> where Self: 'b;
+    type SuccIter<'b>
+        = std::array::IntoIter<OpId, 0>
+    where
+        Self: 'b;
 
     fn mark_index(op: &Self) -> Option<MarkIndexValue> {
         op.bld.mark_index()
@@ -724,7 +727,10 @@ impl Ord for TxOp {
 }
 
 impl<'a> OpLike for Op<'a> {
-    type SuccIter<'b> = SuccCursors<'a> where Self: 'b;
+    type SuccIter<'b>
+        = SuccCursors<'a>
+    where
+        Self: 'b;
 
     fn mark_index(op: &Self) -> Option<MarkIndexValue> {
         op.mark_index()
@@ -827,13 +833,13 @@ pub(crate) struct SuccCursors<'a> {
     pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
 }
 
-impl<'a> SuccCursors<'a> {
+impl SuccCursors<'_> {
     pub(crate) fn pos(&self) -> usize {
         self.succ_actor.pos()
     }
 }
 
-impl<'a> std::fmt::Debug for SuccCursors<'a> {
+impl std::fmt::Debug for SuccCursors<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SuccCursors")
             .field("len", &self.len)
@@ -844,7 +850,7 @@ impl<'a> std::fmt::Debug for SuccCursors<'a> {
 struct SuccIncCursors<'a>(SuccCursors<'a>);
 struct IncCursors<'a>(SuccCursors<'a>);
 
-impl<'a> Iterator for SuccCursors<'a> {
+impl Iterator for SuccCursors<'_> {
     type Item = OpId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -859,13 +865,13 @@ impl<'a> Iterator for SuccCursors<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for SuccCursors<'a> {
+impl ExactSizeIterator for SuccCursors<'_> {
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'a> Iterator for SuccIncCursors<'a> {
+impl Iterator for SuccIncCursors<'_> {
     type Item = (OpId, Option<i64>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -882,7 +888,7 @@ impl<'a> Iterator for SuccIncCursors<'a> {
     }
 }
 
-impl<'a> Iterator for IncCursors<'a> {
+impl Iterator for IncCursors<'_> {
     type Item = Option<i64>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -896,7 +902,7 @@ impl<'a> Iterator for IncCursors<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for SuccIncCursors<'a> {
+impl ExactSizeIterator for SuccIncCursors<'_> {
     fn len(&self) -> usize {
         self.0.len()
     }
@@ -918,7 +924,7 @@ pub(crate) struct OpStepper<'a> {
     id: OpId,
 }
 
-impl<'a> Default for OpStepper<'a> {
+impl Default for OpStepper<'_> {
     fn default() -> Self {
         OpStepper {
             obj: ObjId::root(),
@@ -1161,31 +1167,31 @@ impl<'a> Op<'a> {
     }
 }
 
-impl<'a> PartialEq<Op<'_>> for Op<'a> {
+impl PartialEq<Op<'_>> for Op<'_> {
     fn eq(&self, other: &Op<'_>) -> bool {
         self.id == other.id
     }
 }
 
-impl<'a> PartialOrd for Op<'a> {
+impl PartialOrd for Op<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a> Ord for Op<'a> {
+impl Ord for Op<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.id.cmp(&other.id)
     }
 }
 
-impl<'a> std::hash::Hash for Op<'a> {
+impl std::hash::Hash for Op<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state)
     }
 }
 
-impl<'a> Eq for Op<'a> {}
+impl Eq for Op<'_> {}
 
 // TODO - AS ChangeOp and OpLike fill almost the exact same function
 

@@ -242,7 +242,7 @@ impl<'a> Value<'a> {
     }
 }
 
-impl<'a> fmt::Display for Value<'a> {
+impl fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Object(o) => write!(f, "{}", o),
@@ -257,85 +257,85 @@ impl From<&str> for Value<'static> {
     }
 }
 
-impl<'a> From<&String> for Value<'a> {
+impl From<&String> for Value<'_> {
     fn from(s: &String) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 }
 
-impl<'a> From<String> for Value<'a> {
+impl From<String> for Value<'_> {
     fn from(s: String) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 }
 
-impl<'a> From<SmolStr> for Value<'a> {
+impl From<SmolStr> for Value<'_> {
     fn from(s: SmolStr) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(s)))
     }
 }
 
-impl<'a> From<char> for Value<'a> {
+impl From<char> for Value<'_> {
     fn from(c: char) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(SmolStr::new(c.to_string()))))
     }
 }
 
-impl<'a> From<Vec<u8>> for Value<'a> {
+impl From<Vec<u8>> for Value<'_> {
     fn from(v: Vec<u8>) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Bytes(v)))
     }
 }
 
-impl<'a> From<f64> for Value<'a> {
+impl From<f64> for Value<'_> {
     fn from(n: f64) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::F64(n)))
     }
 }
 
-impl<'a> From<i64> for Value<'a> {
+impl From<i64> for Value<'_> {
     fn from(n: i64) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Int(n)))
     }
 }
 
-impl<'a> From<i32> for Value<'a> {
+impl From<i32> for Value<'_> {
     fn from(n: i32) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Int(n.into())))
     }
 }
 
-impl<'a> From<u32> for Value<'a> {
+impl From<u32> for Value<'_> {
     fn from(n: u32) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Uint(n.into())))
     }
 }
 
-impl<'a> From<u64> for Value<'a> {
+impl From<u64> for Value<'_> {
     fn from(n: u64) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Uint(n)))
     }
 }
 
-impl<'a> From<bool> for Value<'a> {
+impl From<bool> for Value<'_> {
     fn from(v: bool) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Boolean(v)))
     }
 }
 
-impl<'a> From<()> for Value<'a> {
+impl From<()> for Value<'_> {
     fn from(_: ()) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Null))
     }
 }
 
-impl<'a> From<ObjType> for Value<'a> {
+impl From<ObjType> for Value<'_> {
     fn from(o: ObjType) -> Self {
         Value::Object(o)
     }
 }
 
-impl<'a> From<ScalarValue> for Value<'a> {
+impl From<ScalarValue> for Value<'_> {
     fn from(v: ScalarValue) -> Self {
         Value::Scalar(Cow::Owned(v))
     }

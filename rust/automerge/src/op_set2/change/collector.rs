@@ -36,7 +36,7 @@ pub(crate) struct BuildChangeMetadata<'a> {
     pub(crate) builder: usize,
 }
 
-impl<'a> BuildChangeMetadata<'a> {
+impl BuildChangeMetadata<'_> {
     fn num_ops(&self) -> usize {
         (1 + self.max_op - self.start_op) as usize
     }

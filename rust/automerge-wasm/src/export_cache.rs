@@ -7,14 +7,13 @@ use automerge::ChangeHash;
 use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::{Borrow, Cow};
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::ObjId;
+use am::{ObjId, ObjType, ReadDoc};
 
-use am::iter::{ListRangeItem, MapRangeItem};
+use am::iter::{DocItem, ObjItem};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
@@ -24,6 +23,8 @@ const META_SYMBOL: &str = "_am_meta";
 #[derive(Debug, Clone)]
 pub(crate) struct ExportCache<'a> {
     pub(crate) objs: HashMap<ObjId, CachedObject, FxBuildHasher>,
+    obj_cache: HashMap<ObjId, (Object, JsValue)>,
+    to_freeze: Vec<Object>,
     datatypes: HashMap<Datatype, JsString, FxBuildHasher>,
     keys: HashMap<Cow<'a, str>, JsString>,
     definition: Object,
@@ -52,6 +53,8 @@ impl<'a> ExportCache<'a> {
         let value_key = "value".into();
         Ok(Self {
             objs: HashMap::default(),
+            obj_cache: HashMap::default(),
+            to_freeze: Vec::new(),
             datatypes: HashMap::default(),
             keys: HashMap::default(),
             definition,
@@ -64,51 +67,56 @@ impl<'a> ExportCache<'a> {
         })
     }
 
-    #[inline(never)]
-    fn zip_objects(
+    fn make_value(
+        &mut self,
+        parent: &Object,
+        prop: &JsValue,
+        obj: ObjId,
+        value: am::Value<'a>,
+        meta: &JsValue,
+    ) -> Result<JsValue, error::Export> {
+        Ok(match value {
+            am::Value::Object(ObjType::Map) => self.make_map(obj, meta)?.into(),
+            am::Value::Object(ObjType::Text) if self.doc.text_rep.is_string() => {
+                self.obj_cache
+                    .insert(obj.clone(), (parent.clone(), prop.clone()));
+                JsValue::from_str("")
+            }
+            am::Value::Scalar(s) => self.export_scalar(&s)?,
+            am::Value::Object(obj_type) => self.make_list(obj, obj_type.into(), meta)?.into(),
+        })
+    }
+
+    fn make_object(
+        &mut self,
+        obj: &ObjId,
+        d: Datatype,
+        meta: &JsValue,
+    ) -> Result<Option<Object>, error::Export> {
+        match d {
+            Datatype::Map => Ok(Some(self.make_map(obj.clone(), meta)?)),
+            Datatype::List => Ok(Some(self.make_list(obj.clone(), d, meta)?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn make_list(
         &mut self,
         obj: ObjId,
+        datatype: Datatype,
         meta: &JsValue,
-        stack: Vec<StackItem<'a>>,
-        mut objects: HashMap<ObjId, JsValue>,
-    ) -> Result<JsValue, error::Export> {
-        for item in stack.into_iter().rev() {
-            match item {
-                StackItem::Map { obj, values } => {
-                    let js_obj = Object::new();
-                    for v in values {
-                        let x = match &v.value {
-                            am::ValueRef::Object(_) => {
-                                objects.remove(&v.id).ok_or(error::Export::MissingChild)?
-                            }
-                            am::ValueRef::Scalar(s) => self.export_scalar_ref(s)?,
-                        };
-                        self.set_prop(&js_obj, v.key, &x)?;
-                    }
-                    let wrapped = self.wrap_object(js_obj, &obj, Datatype::Map, meta)?;
-                    objects.insert(obj, JsValue::from(wrapped));
-                }
-                StackItem::Seq {
-                    obj,
-                    values,
-                    datatype,
-                } => {
-                    let js_array: Result<Array, _> = values
-                        .iter()
-                        .map(|v| match &v.value {
-                            am::Value::Object(_) => {
-                                objects.remove(&v.id).ok_or(error::Export::MissingChild)
-                            }
-                            am::Value::Scalar(s) => self.export_scalar(s),
-                        })
-                        .collect();
-                    let wrapped =
-                        self.wrap_object(Object::from(js_array?), &obj, datatype, meta)?;
-                    objects.insert(obj, JsValue::from(wrapped));
-                }
-            }
-        }
-        objects.remove(&obj).ok_or(error::Export::InvalidRoot)
+    ) -> Result<Object, error::Export> {
+        let child = Array::new();
+        self.obj_cache
+            .insert(obj.clone(), (child.clone().into(), JsValue::null()));
+        self.wrap_object(child.into(), &obj, datatype, meta)
+    }
+
+    fn make_map(&mut self, obj: ObjId, meta: &JsValue) -> Result<Object, error::Export> {
+        let child = Object::new();
+        self.obj_cache
+            .insert(obj.clone(), (child.clone(), JsValue::null()));
+        self.wrap_object(child, &obj, Datatype::Map, meta)
     }
 
     #[inline(never)]
@@ -116,84 +124,58 @@ impl<'a> ExportCache<'a> {
         &mut self,
         obj: ObjId,
         datatype: Datatype,
-        heads: Option<&Vec<ChangeHash>>,
+        heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
-        let mut to_do = BTreeSet::from([(obj.clone(), datatype)]);
-        let mut stack = vec![];
-        let mut objects = HashMap::new();
-        while let Some((obj, datatype)) = to_do.pop_first() {
-            match datatype {
-                Datatype::Map => {
-                    let mut values = vec![];
-                    for v in self.doc.map_range_at(&obj, heads) {
-                        if let am::ValueRef::Object(obj_type) = v.value {
-                            to_do.insert((v.id.clone(), obj_type.into()));
-                        }
-                        values.push(v);
-                    }
-                    stack.push(StackItem::Map { obj, values });
+        if datatype == Datatype::Text && self.doc.text_rep.is_string() {
+            return Ok(self.doc.text_at(&obj, heads)?.into());
+        }
+        let mut current_obj_id = obj.clone();
+        let mut o = self
+            .make_object(&current_obj_id, datatype, meta)?
+            .ok_or(error::Export::InvalidRoot)?;
+        let mut index = 0;
+        let mut buffer = String::new();
+        let mut parent_prop = JsValue::null();
+        let result = JsValue::from(&o);
+        let iter = self.doc.doc.iter_at(obj, heads, self.doc.text_rep.into());
+        for ObjItem { obj, item } in iter {
+            if obj != current_obj_id {
+                if !buffer.is_empty() {
+                    _set(&o, &parent_prop, &JsValue::from_str(&buffer))?;
+                    buffer.truncate(0);
                 }
-                Datatype::Text if self.doc.text_rep.is_string() => {
-                    let text = self.doc.text_at(&obj, heads)?;
-                    objects.insert(obj, JsValue::from(JsString::from(text)));
+                if let Some((new_o, new_p)) = self.obj_cache.get(&obj) {
+                    o = new_o.clone();
+                    parent_prop = new_p.clone();
                 }
-                datatype if datatype.is_seq() => {
-                    let mut values = vec![];
-                    for v in self.doc.list_range_at(&obj, heads) {
-                        if let am::Value::Object(obj_type) = v.value {
-                            to_do.insert((v.id.clone(), obj_type.into()));
-                        }
-                        values.push(v);
-                    }
-                    stack.push(StackItem::Seq {
-                        obj,
-                        values,
-                        datatype,
-                    });
+                current_obj_id = obj;
+                index = 0;
+            }
+            match item {
+                DocItem::Text(span) => {
+                    buffer.push_str(span.as_str());
                 }
-                _ => {}
+                DocItem::Map(map) => {
+                    let prop = self.ensure_key(map.key.clone());
+                    let value = self.make_value(&o, &prop, map.id, map.value.into(), meta)?;
+                    _set(&o, &prop, &value)?;
+                }
+                DocItem::List(list) => {
+                    let prop = JsValue::from_f64(index as f64);
+                    let value = self.make_value(&o, &prop, list.id, list.value, meta)?;
+                    _set(&o, &prop, &value)?;
+                    index += 1;
+                }
             }
         }
-        self.zip_objects(obj, meta, stack, objects)
-    }
-
-    #[inline(never)]
-    pub(crate) fn set_prop(
-        &mut self,
-        obj: &Object,
-        key: Cow<'a, str>,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.ensure_key(key.clone());
-        let key = self.keys.get(&key).unwrap(); // save - ensure above
-        Reflect::set(obj, key, value).map_err(|error| error::SetProp {
-            property: JsValue::from(key),
-            error,
-        })?;
-        Ok(())
-    }
-
-    fn export_scalar_ref(&self, value: &am::ScalarValueRef<'_>) -> Result<JsValue, error::Export> {
-        let (datatype, js_value) = match value {
-            am::ScalarValueRef::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_ref()).into()),
-            am::ScalarValueRef::Str(v) => (Datatype::Str, v.to_string().into()),
-            am::ScalarValueRef::Int(v) => (Datatype::Int, (*v as f64).into()),
-            am::ScalarValueRef::Uint(v) => (Datatype::Uint, (*v as f64).into()),
-            am::ScalarValueRef::F64(v) => (Datatype::F64, (*v).into()),
-            am::ScalarValueRef::Counter(v) => (Datatype::Counter, (*v as f64).into()),
-            am::ScalarValueRef::Timestamp(v) => (
-                Datatype::Timestamp,
-                js_sys::Date::new(&(*v as f64).into()).into(),
-            ),
-            am::ScalarValueRef::Boolean(v) => (Datatype::Boolean, (*v).into()),
-            am::ScalarValueRef::Null => (Datatype::Null, JsValue::null()),
-            am::ScalarValueRef::Unknown { bytes, type_code } => (
-                Datatype::Unknown(*type_code),
-                Uint8Array::from(bytes.as_ref()).into(),
-            ),
-        };
-        self.wrap_scalar(js_value, datatype)
+        if !buffer.is_empty() {
+            _set(&o, &parent_prop, &JsValue::from_str(&buffer))?;
+        }
+        for o in &self.to_freeze {
+            Object::freeze(o);
+        }
+        Ok(result)
     }
 
     #[inline(never)]
@@ -242,10 +224,14 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn ensure_key(&mut self, key: Cow<'a, str>) {
-        self.keys
-            .entry(key.clone())
-            .or_insert_with(|| JsString::from(key.borrow()));
+    fn ensure_key(&mut self, key: Cow<'a, str>) -> JsValue {
+        if let Some(v) = self.keys.get(&key) {
+            v.into()
+        } else {
+            let v = JsString::from(key.borrow());
+            self.keys.insert(key, v.clone());
+            v.into()
+        }
     }
 
     #[inline(never)]
@@ -271,8 +257,9 @@ impl<'a> ExportCache<'a> {
         self.set_hidden(&value, &js_objid, js_datatype, meta)?;
 
         if self.doc.freeze {
-            Object::freeze(&value);
+            self.to_freeze.push(value.clone());
         }
+
         Ok(value)
     }
 
@@ -355,16 +342,8 @@ impl<'a> ExportCache<'a> {
     }
 }
 
-enum StackItem<'a> {
-    Map {
-        obj: ObjId,
-        values: Vec<MapRangeItem<'a>>,
-    },
-    Seq {
-        obj: ObjId,
-        values: Vec<ListRangeItem<'a>>,
-        datatype: Datatype,
-    },
+fn _set(obj: &JsValue, property: &JsValue, value: &JsValue) -> Result<bool, error::Export> {
+    Reflect::set(obj, property, value).map_err(error::Export::ReflectSet)
 }
 
 #[derive(Debug, Clone)]

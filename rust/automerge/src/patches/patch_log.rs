@@ -162,8 +162,7 @@ impl PatchLog {
     ///
     /// # Arguments
     ///
-    /// * `active`   - If `true` the log will record all changes made to the document. If [`false`]
-    ///                then no changes will be recorded.
+    /// * `active`   - If `true` the log will record all changes made to the document. If [`false`] then no changes will be recorded.
     /// * `text_rep` - How text will be represented in the generated patches
     ///
     /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
@@ -663,6 +662,7 @@ impl ExposeQueue {
                     value,
                     id,
                     conflict,
+                    ..
                 } in read_doc.map_range(&exid, ..)
                 {
                     let value = value.into_owned();

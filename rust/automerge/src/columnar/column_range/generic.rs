@@ -67,7 +67,7 @@ pub(crate) enum GenericColIter<'a> {
     Group(GroupIter<'a>),
 }
 
-impl<'a> GenericColIter<'a> {
+impl GenericColIter<'_> {
     fn try_next(&mut self) -> Result<Option<CellValue>, DecodeColumnError> {
         match self {
             Self::Simple(s) => s
@@ -84,7 +84,7 @@ impl<'a> GenericColIter<'a> {
     }
 }
 
-impl<'a> Iterator for GenericColIter<'a> {
+impl Iterator for GenericColIter<'_> {
     type Item = Result<CellValue, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {

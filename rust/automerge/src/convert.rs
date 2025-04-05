@@ -101,7 +101,7 @@ impl OpId<usize> for crate::types::OpId {
     }
 }
 
-impl<'a> OpId<usize> for &'a crate::types::OpId {
+impl OpId<usize> for &crate::types::OpId {
     fn counter(&self) -> u64 {
         crate::types::OpId::counter(self)
     }

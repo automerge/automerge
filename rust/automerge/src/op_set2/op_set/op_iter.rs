@@ -1,3 +1,4 @@
+use crate::iter::tools::Shiftable;
 use crate::op_set2::packer::{
     BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, SlabWeight, StrCursor,
     UIntCursor,
@@ -49,7 +50,7 @@ pub(crate) enum ReadOpError {
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }
 
-impl<'a> ExactSizeIterator for OpIter<'a> {
+impl ExactSizeIterator for OpIter<'_> {
     fn len(&self) -> usize {
         self.end_pos() - self.pos()
     }
@@ -231,7 +232,7 @@ impl<'a> KeyRef<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct OpIdIter<'a> {
     actor: ColumnDataIter<'a, ActorCursor>,
     ctr: ColumnDataIter<'a, DeltaCursor>,
@@ -270,7 +271,14 @@ impl<'a> OpIdIter<'a> {
     }
 }
 
-impl<'a> Iterator for OpIdIter<'a> {
+impl Shiftable for OpIdIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.actor.shift_range(range.clone());
+        self.ctr.shift_range(range.clone());
+    }
+}
+
+impl Iterator for OpIdIter<'_> {
     type Item = OpId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -311,7 +319,7 @@ impl<'a> InsertIter<'a> {
     }
 }
 
-impl<'a> Iterator for InsertIter<'a> {
+impl Iterator for InsertIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -403,7 +411,7 @@ impl<'a> Iterator for KeyIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct ObjIdIter<'a> {
     actor: ColumnDataIter<'a, ActorCursor>,
     ctr: ColumnDataIter<'a, UIntCursor>,
@@ -422,12 +430,6 @@ impl<'a> ObjIdIter<'a> {
         debug_assert!(self.actor.pos() == self.ctr.pos());
         self.actor.pos()
     }
-
-    /*
-        pub(crate) fn run_count(&self) -> usize {
-            std::cmp::min(self.actor.run_count(), self.ctr.run_count())
-        }
-    */
 
     pub(crate) fn seek_to_value(&mut self, obj: ObjId) -> Range<usize> {
         let cr = self.ctr.seek_to_value(obj.counter(), ..);
@@ -461,7 +463,7 @@ impl<'a> ObjIdIter<'a> {
     }
 }
 
-impl<'a> Iterator for ObjIdIter<'a> {
+impl Iterator for ObjIdIter<'_> {
     type Item = ObjId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -473,10 +475,17 @@ impl<'a> Iterator for ObjIdIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct MarkInfoIter<'a> {
     name: ColumnDataIter<'a, StrCursor>,
     expand: ColumnDataIter<'a, BooleanCursor>,
+}
+
+impl Shiftable for MarkInfoIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.name.shift_range(range.clone());
+        self.expand.shift_range(range.clone());
+    }
 }
 
 impl<'a> MarkInfoIter<'a> {
@@ -537,9 +546,50 @@ impl<'a> Iterator for MarkInfoIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ActionValueIter<'a> {
+    action: ActionIter<'a>,
+    value: ValueIter<'a>,
+}
+
+impl<'a> ActionValueIter<'a> {
+    pub(crate) fn new(action: ActionIter<'a>, value: ValueIter<'a>) -> Self {
+        Self { action, value }
+    }
+}
+
+impl<'a> Iterator for ActionValueIter<'a> {
+    type Item = (Action, ScalarValue<'a>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let action = self.action.next();
+        let value = self.value.next();
+        Some((action?, value?))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let action = self.action.nth(n);
+        let value = self.value.nth(n);
+        Some((action?, value?))
+    }
+}
+
+impl Shiftable for ActionValueIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.action.shift_range(range.clone());
+        self.value.shift_range(range)
+    }
+}
+
+#[derive(Clone, Default, Debug)]
 pub(crate) struct ActionIter<'a> {
     iter: ColumnDataIter<'a, ActionCursor>,
+}
+
+impl Shiftable for ActionIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.iter.shift_range(range)
+    }
 }
 
 impl<'a> ActionIter<'a> {
@@ -566,7 +616,7 @@ impl<'a> ActionIter<'a> {
     }
 }
 
-impl<'a> Iterator for ActionIter<'a> {
+impl Iterator for ActionIter<'_> {
     type Item = Action;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -578,10 +628,18 @@ impl<'a> Iterator for ActionIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct ValueIter<'a> {
     meta: ColumnDataIter<'a, MetaCursor>,
     raw: RawReader<'a, SlabWeight>,
+}
+
+impl Shiftable for ValueIter<'_> {
+    fn shift_range(&mut self, range: Range<usize>) {
+        self.meta.shift_range(range);
+        let value_advance = self.meta.calculate_acc().as_usize();
+        self.raw.seek_to(value_advance);
+    }
 }
 
 impl<'a> ValueIter<'a> {

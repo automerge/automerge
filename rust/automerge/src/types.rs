@@ -159,10 +159,11 @@ impl fmt::Display for ActorId {
 }
 
 /// The type of an object
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash, Default)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     /// A map
+    #[default]
     Map,
     /// Retained for backwards compatibility, tables are identical to maps
     Table,
@@ -728,7 +729,7 @@ impl TextEncoding {
     pub(crate) fn width(&self, s: &str) -> usize {
         match self {
             Self::UnicodeCodePoint => s.chars().count(),
-            Self::Utf8CodeUnit => s.bytes().len(),
+            Self::Utf8CodeUnit => s.len(), // bytes
             Self::Utf16CodeUnit => s.encode_utf16().count(),
             Self::GraphemeCluster => {
                 unicode_segmentation::UnicodeSegmentation::graphemes(s, true).count()

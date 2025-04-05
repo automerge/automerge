@@ -5,10 +5,11 @@ use crate::{
     hydrate,
     marks::{Mark, MarkSet},
     op_set2::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value,
+    patches::TextRepresentation,
+    Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value, ROOT,
 };
 
-use crate::iter::{Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 
 use std::{collections::HashMap, ops::RangeBounds};
 
@@ -54,6 +55,21 @@ pub trait ReadDoc {
     /// See [`Self::keys()`]
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_>;
+
+    fn iter(&self) -> DocIter<'_> {
+        self.iter_at(
+            &ROOT,
+            None,
+            TextRepresentation::String(self.text_encoding()),
+        )
+    }
+
     /// Iterate over the keys and values of the map `obj` in the given range.
     ///
     /// If the object correspoding to `obj` is a list then this will return an empty iterator
@@ -86,11 +102,7 @@ pub trait ReadDoc {
     ///
     /// The reuturned iterator yields `(index, value, exid)` tuples, where the third
     /// element is the ID of the operation which created the value.
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-    ) -> ListRange<'_, R>;
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range as at `heads`
     ///
@@ -103,7 +115,7 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R>;
+    ) -> ListRange<'_>;
 
     /// Iterate over the values in a map, list, or text object
     ///

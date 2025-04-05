@@ -35,7 +35,7 @@ pub(crate) struct DepsIter<'a> {
     deps: DeltaDecoder<'a>,
 }
 
-impl<'a> DepsIter<'a> {
+impl DepsIter<'_> {
     fn try_next(&mut self) -> Result<Option<Vec<u64>>, DecodeColumnError> {
         let num = match self
             .num
@@ -81,7 +81,7 @@ impl<'a> DepsIter<'a> {
     }
 }
 
-impl<'a> Iterator for DepsIter<'a> {
+impl Iterator for DepsIter<'_> {
     type Item = Result<Vec<u64>, DecodeColumnError>;
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()

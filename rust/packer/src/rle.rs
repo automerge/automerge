@@ -236,8 +236,14 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
     for RleCursor<B, P, X>
 {
     type Item = P;
-    type State<'a> = RleState<'a, P> where P: 'a;
-    type PostState<'a> = Option<Run<'a, Self::Item>> where Self::Item: 'a;
+    type State<'a>
+        = RleState<'a, P>
+    where
+        P: 'a;
+    type PostState<'a>
+        = Option<Run<'a, Self::Item>>
+    where
+        Self::Item: 'a;
     type Export = Option<P::Owned>;
     type SlabIndex = X;
 
@@ -521,7 +527,7 @@ where
     },
 }
 
-impl<'a, P: Packable + ?Sized> Clone for RleState<'a, P> {
+impl<P: Packable + ?Sized> Clone for RleState<'_, P> {
     fn clone(&self) -> Self {
         match self {
             Self::Empty => Self::Empty,

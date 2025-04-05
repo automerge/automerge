@@ -64,7 +64,7 @@ pub struct Run<'a, P: Packable + ?Sized> {
 
 impl<'a, P: Packable + ?Sized> Copy for Run<'a, P> where Cow<'a, P>: Copy {}
 
-impl<'a, P: Packable + ?Sized> Clone for Run<'a, P> {
+impl<P: Packable + ?Sized> Clone for Run<'_, P> {
     fn clone(&self) -> Self {
         Run {
             count: self.count,
@@ -119,7 +119,7 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 }
 
-impl<'a, T: Packable<Owned = T>> Run<'a, T> {
+impl<T: Packable<Owned = T>> Run<'_, T> {
     pub fn init(count: usize, value: T) -> Self {
         Self {
             count,
@@ -128,7 +128,7 @@ impl<'a, T: Packable<Owned = T>> Run<'a, T> {
     }
 }
 
-impl<'a> Run<'a, i64> {
+impl Run<'_, i64> {
     pub fn delta(&self) -> i64 {
         self.count as i64 * self.value.as_deref().cloned().unwrap_or(0)
     }
@@ -145,7 +145,7 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 }
 
-pub trait ColumnCursor: Debug + Clone + Copy + PartialEq {
+pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
     type Item: Packable + ?Sized;
     type State<'a>: EncoderState<'a, Self::Item>
     where
@@ -443,7 +443,7 @@ pub struct CursorIter<'a, C: ColumnCursor> {
     pub(crate) run: Option<Run<'a, C::Item>>,
 }
 
-impl<'a, C: ColumnCursor> Clone for CursorIter<'a, C> {
+impl<C: ColumnCursor> Clone for CursorIter<'_, C> {
     fn clone(&self) -> Self {
         CursorIter {
             slab: self.slab,

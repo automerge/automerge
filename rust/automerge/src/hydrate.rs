@@ -1,6 +1,7 @@
-use crate::op_set2::{Op, OpType};
+use crate::op_set2::{Op, OpSet, OpType};
 use crate::patches::TextRepresentation;
 use crate::types::{Clock, ListEncoding, ObjId, ScalarValue};
+use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -274,41 +275,72 @@ impl From<ScalarValue> for Value {
 
 impl Automerge {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_map(obj, clock, self.text_encoding())
+    }
+    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_list(obj, clock, self.text_encoding())
+    }
+    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_text(obj, clock, self.text_encoding())
+    }
+}
+
+impl OpSet {
+    pub(crate) fn hydrate_map(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         let mut map = Map::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
-            let key = self.ops().to_string(top.elemid_or_key());
-            //let id = top.op.exid();
-            let id = self.ops().id_to_exid(top.id);
+        for top in self.top_ops(obj, clock.cloned()) {
+            let key = self.to_string(top.elemid_or_key());
+            let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
-            let value = self.hydrate_op(top, clock);
+            let value = self.hydrate_op(top, clock, encoding);
             map.insert(key, MapValue::new(value, id, conflict));
         }
         Value::Map(map)
     }
 
-    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+    pub(crate) fn hydrate_list(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         let mut list = List::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
+        for top in self.top_ops(obj, clock.cloned()) {
             //let id = top.exid();
-            let id = self.ops().id_to_exid(top.id);
+            let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
-            let value = self.hydrate_op(top, clock);
+            let value = self.hydrate_op(top, clock, encoding);
             list.push(value, id, conflict);
         }
         Value::List(list)
     }
 
-    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        let text = self.ops().text(obj, clock.cloned());
-        Value::Text(Text::new(self.text_encoding().into(), text))
+    pub(crate) fn hydrate_text(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
+        let text = self.text(obj, clock.cloned());
+        Value::Text(Text::new(encoding.into(), text))
     }
 
-    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
+    pub(crate) fn hydrate_op(
+        &self,
+        op: Op<'_>,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         match op.action() {
-            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id.into(), clock),
-            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock),
-            OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock),
+            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock, encoding),
             OpType::Put(scalar) => Value::Scalar(scalar.into()),
             _ => panic!("invalid op to hydrate"),
         }
