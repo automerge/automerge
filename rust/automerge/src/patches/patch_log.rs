@@ -3,7 +3,6 @@ use crate::automerge::Automerge;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate::Value;
-use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
 use crate::read::ReadDocInternal;
@@ -210,7 +209,6 @@ impl PatchLog {
         self.active
     }
 
-    #[inline(never)]
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
         self.events.push((obj, Event::DeleteSeq { index, num }))
     }
@@ -342,7 +340,6 @@ impl PatchLog {
         ))
     }
 
-    #[inline(never)]
     pub(crate) fn splice(
         &mut self,
         obj: ObjId,
@@ -641,15 +638,11 @@ impl ExposeQueue {
                 patch_builder.splice_text(exid, 0, &text, None);
             }
             ObjType::List | ObjType::Text => {
-                for ListRangeItem {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                    ..
-                } in read_doc.list_range(&exid, ..)
-                {
-                    let value = value.into_owned();
+                for item in read_doc.list_range(&exid, ..) {
+                    let value = item.value.to_value();
+                    let id = item.id();
+                    let conflict = item.conflict;
+                    let index = item.index;
                     if value.is_object() {
                         self.insert(id.clone());
                     }
@@ -657,19 +650,13 @@ impl ExposeQueue {
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for MapRangeItem {
-                    key,
-                    value,
-                    id,
-                    conflict,
-                    ..
-                } in read_doc.map_range(&exid, ..)
-                {
-                    let value = value.into_owned();
+                for m in read_doc.map_range(&exid, ..) {
+                    let value = m.value.to_value();
+                    let id = m.id();
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.put(exid.clone(), key.into(), (value, id), conflict);
+                    patch_builder.put(exid.clone(), m.key.into(), (value, id), m.conflict);
                 }
             }
         }

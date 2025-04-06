@@ -44,14 +44,12 @@ struct Untangler<'a> {
 }
 
 impl<'a> Untangler<'a> {
-    #[inline(never)]
     fn flush(&mut self, log: &mut PatchLog) {
         self.value.list_flush(self.index, log);
         self.index += self.width;
         self.width = 0;
     }
 
-    #[inline(never)]
     fn handle_doc_op(
         &mut self,
         doc_op: &Op<'a>,
@@ -78,7 +76,6 @@ impl<'a> Untangler<'a> {
         self.value.process_doc_op(doc_op, deleted);
     }
 
-    #[inline(never)]
     fn element_update(&mut self, doc_op: &Op<'_>, change_ops: &mut [ChangeOp]) {
         while let Some(last) = self.updates_stack.last() {
             let change_op = &mut change_ops[*last];
@@ -97,7 +94,6 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    #[inline(never)]
     fn finish_updates(&mut self, ops: &mut [ChangeOp]) {
         for i in self.updates_stack.iter().rev() {
             ops[*i].pos = Some(self.max);
@@ -111,14 +107,12 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    #[inline(never)]
     fn finish_inserts(&mut self, ops: &mut [ChangeOp], log: &mut PatchLog) {
         while !self.stack.is_empty() {
             self.untangle_inner(ops, self.max, log);
         }
     }
 
-    #[inline(never)]
     fn finish(mut self, ops: &mut [ChangeOp], log: &mut PatchLog) {
         self.finish_updates(ops);
 
@@ -131,7 +125,6 @@ impl<'a> Untangler<'a> {
         self.flush(log);
     }
 
-    #[inline(never)]
     fn untangle_inserts(
         &mut self,
         id: OpId,
@@ -154,7 +147,6 @@ impl<'a> Untangler<'a> {
         }
     }
 
-    #[inline(never)]
     fn untangle_inner(
         &mut self,
         ops: &mut [ChangeOp],
@@ -214,7 +206,6 @@ impl<'a> Untangler<'a> {
         Some(())
     }
 
-    #[inline(never)]
     fn new(
         obj: ObjId,
         encoding: ListEncoding,
@@ -268,7 +259,6 @@ impl<'a> Untangler<'a> {
     }
 }
 
-#[inline(never)]
 fn walk_list(
     obj: ObjId,
     encoding: ListEncoding,
@@ -550,7 +540,6 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    #[inline(never)]
     fn map_flush(&mut self, log: &mut PatchLog) {
         let obj = self.obj;
         let change = self.change.take();
@@ -560,7 +549,6 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    #[inline(never)]
     fn list_flush(&mut self, index: usize, log: &mut PatchLog) {
         if self.key.take().is_none() {
             return;
@@ -612,7 +600,6 @@ impl<'a> ValueState<'a> {
         }
     }
 
-    #[inline(never)]
     fn map_process(
         obj: ObjId,
         key: &str,
@@ -651,7 +638,6 @@ impl<'a> ValueState<'a> {
     }
 }
 
-#[inline(never)]
 fn walk_map(
     obj: ObjId,
     doc_ops: OpIter<'_>,
@@ -704,14 +690,12 @@ impl BatchApply {
         doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
     }
 
-    #[inline(never)]
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
         for c in self.changes.iter().filter(|c| c.seq() == 1) {
             doc.put_actor_ref(c.actor_id());
         }
     }
 
-    #[inline(never)]
     fn import_ops(&mut self, doc: &mut Automerge) {
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops).unwrap();
@@ -719,7 +703,6 @@ impl BatchApply {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
         self.insert_new_actors(doc);
 
@@ -781,7 +764,6 @@ impl BatchApply {
         self.insert_runs_of_ops(doc);
     }
 
-    #[inline(never)]
     fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {
         let mut last_pos = None;
         let mut start = 0;
@@ -808,7 +790,6 @@ impl BatchApply {
         doc.ops().len() - start
     }
 
-    #[inline(never)]
     pub(crate) fn order_ops_for_doc(&mut self, obj_info: &mut ObjIndex) {
         self.ops.sort_by(|a, b| {
             a.bld.obj.cmp(&b.bld.obj).then_with(|| {

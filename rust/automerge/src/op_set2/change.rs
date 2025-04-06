@@ -18,7 +18,6 @@ pub(crate) mod collector;
 
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
-#[inline(never)]
 pub(crate) fn build_change<T>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -155,7 +154,6 @@ impl<'a> PartialEq for OpBuilder<'a> {
 
 impl Eq for OpBuilder<'_> {}
 
-#[inline(never)]
 fn write_change_ops<T>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -213,7 +211,6 @@ where
     (cols.into(), actors)
 }
 
-#[inline(never)]
 fn remap_actors<C>(
     ops: &[C],
     meta: &BuildChangeMetadata<'_>,

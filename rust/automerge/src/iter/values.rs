@@ -29,7 +29,7 @@ impl<'a> Iterator for Values<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (op_set, iter) = self.iter.as_mut()?;
         let op = iter.next()?;
-        let value = op.value().into_owned();
+        let value = op.value().to_value();
         let id = op_set.id_to_exid(op.id);
         Some((value, id))
     }

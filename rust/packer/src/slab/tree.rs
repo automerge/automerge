@@ -226,7 +226,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         self.root_node.as_ref().and_then(|n| n.last())
     }
 
-    #[inline(never)]
     pub fn get_each<F>(&self, f: F) -> impl Iterator<Item = SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,
@@ -239,7 +238,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         results.into_iter()
     }
 
-    #[inline(never)]
     pub fn get_where<F>(&self, f: F) -> Option<SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,
@@ -258,7 +256,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         }
     }
 
-    #[inline(never)]
     pub fn get_where_or_last<F>(&self, f: F) -> SubCursor<'_, T, W>
     where
         F: Fn(&W, &W) -> bool,
@@ -370,7 +367,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         self.length
     }
 
-    #[inline(never)]
     fn recompute_weight(&mut self) {
         let acc = W::default();
         let acc = self
@@ -640,7 +636,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         }
     }
 
-    #[inline(never)]
     fn check_weight(&self) -> W {
         let m = W::default();
         let m = self.elements.iter().fold(m, |acc, e| acc.and(&W::alloc(e)));
@@ -760,7 +755,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         assert!(self.is_full());
     }
 
-    #[inline(never)]
     fn get_each<'a, F>(
         &'a self,
         mut index: usize,
@@ -802,7 +796,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         }
     }
 
-    #[inline(never)]
     fn get_where<F>(&self, mut index: usize, mut acc: W, f: F) -> Option<SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,

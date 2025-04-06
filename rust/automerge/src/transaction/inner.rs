@@ -7,7 +7,6 @@ use crate::change_graph::ChangeGraph;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::exid::ExId;
-use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
@@ -157,7 +156,6 @@ impl TransactionInner {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn export(mut self, op_set: &OpSet, change_graph: &ChangeGraph) -> Change {
         self.deps.sort_unstable();
         let deps_index = self
@@ -919,7 +917,7 @@ impl TransactionInner {
         let current_vals = doc
             .ops()
             .map_range(&obj.id, .., self.scope.clone())
-            .map(|MapRangeItem { key, value, id, .. }| (String::from(key), value.into_owned(), id))
+            .map(|m| (m.key.to_string(), m.value.to_value(), m.id()))
             .collect::<Vec<_>>();
 
         let mut present_keys = HashSet::new();
@@ -959,7 +957,7 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let old_items = doc
             .list_range(list, ..)
-            .map(|ListRangeItem { value, id, .. }| Some((value.into_owned(), id)))
+            .map(|item| Some((item.value.to_value(), item.id())))
             .collect::<Vec<_>>()
             .into_iter()
             .chain(std::iter::repeat_with(|| None));

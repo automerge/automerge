@@ -1,11 +1,10 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
-use crate::iter::tools::{Peek, Shiftable, SkipIter};
+use crate::iter::tools::{ExIdPromise, Shiftable, SkipIter, Unshift};
 use crate::op_set2::op_set::{ActionIter, InsertAcc, OpIdIter, ValueIter, VisIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::op_set2::OpSet;
 use crate::types::OpId;
-use crate::Value;
 
 use std::fmt::Debug;
 use std::ops::{Bound, Range, RangeBounds};
@@ -13,10 +12,23 @@ use std::ops::{Bound, Range, RangeBounds};
 #[derive(Clone, Debug)]
 pub struct ListRangeItem<'a> {
     pub index: usize,
-    pub value: Value<'a>,
-    pub id: ExId,
+    pub value: ValueRef<'a>,
     pub conflict: bool,
-    pub(crate) _id: OpId,
+    pub(crate) maybe_exid: ExIdPromise<'a>,
+}
+
+impl ListRangeItem<'_> {
+    pub fn id(&self) -> ExId {
+        self.maybe_exid.exid()
+    }
+    pub fn into_owned(self) -> ListRangeItem<'static> {
+        ListRangeItem {
+            index: self.index,
+            value: self.value.into_owned(),
+            conflict: self.conflict,
+            maybe_exid: self.maybe_exid.into_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -33,11 +45,13 @@ struct ListIter<'a> {
 }
 
 impl Shiftable for ListIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.id.shift_range(range.clone());
-        self.inserts.shift_range(range.clone());
-        self.action.shift_range(range.clone());
-        self.value.shift_range(range);
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let id = self.id.shift_next(range.clone())?;
+        let inserts = self.inserts.shift_next(range.clone())?.as_usize();
+        let action = self.action.shift_next(range.clone())?;
+        let value = self.value.shift_next(range)?;
+        let pos = self.id.pos() - 1;
+        Some((inserts, action, value, id, pos))
     }
 }
 
@@ -66,7 +80,7 @@ impl<'a> Iterator for ListIter<'a> {
 #[derive(Clone, Debug)]
 struct ListRangeInner<'a> {
     op_set: &'a OpSet,
-    iter: Peek<SkipIter<ListIter<'a>, VisIter<'a>>>,
+    iter: Unshift<SkipIter<ListIter<'a>, VisIter<'a>>>,
     clock: Option<Clock>,
     range: Range<usize>,
     state: usize,
@@ -94,10 +108,9 @@ impl<'a> ListRange<'a> {
             id,
         };
 
-        let start = obj_range.start;
         let vis = VisIter::new(op_set, clock.as_ref(), obj_range);
-        let skip = SkipIter::new_with_offset(list_iter, vis, start);
-        let iter = Peek::new(skip);
+        let skip = SkipIter::new(list_iter, vis);
+        let iter = Unshift::new(skip);
 
         let inner = ListRangeInner {
             op_set,
@@ -109,11 +122,11 @@ impl<'a> ListRange<'a> {
         Self { inner: Some(inner) }
     }
 
-    pub(crate) fn shift_range(&mut self, range: Range<usize>) {
-        if let Some(inner) = self.inner.as_mut() {
-            inner.iter.shift_range(range);
-            inner.state = 0;
-        }
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let inner = self.inner.as_mut()?;
+        inner.iter.shift(range);
+        inner.state = 0;
+        self.next()
     }
 }
 
@@ -133,19 +146,19 @@ impl<'a> Iterator for ListRange<'a> {
             if !inner.range.contains(&index) {
                 continue;
             }
-            let id = inner.op_set.id_to_exid(_id);
+            //let id = inner.op_set.id_to_exid(_id);
             let value = if let ScalarValue::Counter(c) = &value {
                 let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
                 ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
             } else {
                 ValueRef::from_action_value(action, value)
             };
+            let maybe_exid = ExIdPromise::new(inner.op_set, _id);
             return Some(ListRangeItem {
                 index,
-                value: value.into_owned(),
-                id,
-                _id,
+                value,
                 conflict,
+                maybe_exid,
             });
         }
         None
@@ -185,7 +198,7 @@ mod tests {
             .collect::<Vec<_>>();
         tx.splice(&list, 0, 0, values.clone()).unwrap();
         tx.commit();
-        let values = values.into_iter().map(Value::from).collect::<Vec<_>>();
+        let values = values.into_iter().map(ValueRef::from).collect::<Vec<_>>();
         let v: Vec<_> = doc.list_range(&list, ..).map(|v| v.value).collect();
         assert_eq!(&v, &values[..]);
         let v: Vec<_> = doc.list_range(&list, 2..).map(|v| v.value).collect();

@@ -70,7 +70,6 @@ impl Slab {
         run.value
     }
 
-    #[inline(never)]
     pub fn run_iter<C: ColumnCursor>(&self) -> RunIter<'_, C> {
         let weight = <C::SlabIndex>::alloc(self);
         RunIter {

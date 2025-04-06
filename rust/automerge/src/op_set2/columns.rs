@@ -290,7 +290,6 @@ impl Columns {
         });
     }
 
-    #[inline(never)]
     pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], encoding: TextEncoding)
     where
         O: OpLike,

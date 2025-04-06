@@ -1,10 +1,11 @@
 use crate::{marks::MarkSet, types::Clock};
 
-use super::{Op, OpId, OpQueryTerm};
-use crate::op_set2::types::{Action, ActionCursor, ActorCursor, ScalarValue};
+use super::{ActionIter, Op, OpId, OpIdIter, OpQueryTerm, SuccIterIter};
+use crate::op_set2::op::SuccCursors;
+use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
-use packer::{BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, UIntCursor};
+use packer::{BooleanCursor, ColumnDataIter};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -13,31 +14,38 @@ use std::sync::Arc;
 use crate::iter::tools::{Shiftable, Skipper};
 
 impl Shiftable for VisIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
         match self {
-            Self::Indexed(index) => index.shift_range(range),
-            Self::Scan(scan) => scan.shift_range(range),
+            Self::Indexed(index) => index.shift_next(range),
+            Self::Scan(scan) => scan.shift_next(range),
         }
     }
 }
 
 impl Shiftable for ScanVisIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.id_actor.shift_range(range.clone());
-        self.id_ctr.shift_range(range.clone());
-        self.action.shift_range(range.clone());
-        self.succ_count.shift_range(range.clone());
-        let succ_range = self.succ_count.calculate_acc().as_usize()..usize::MAX;
-        self.succ_actor.shift_range(succ_range.clone());
-        self.succ_ctr.shift_range(succ_range.clone());
-        self.succ_inc.shift_range(succ_range);
+    fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
+        let id = self.id.shift_next(range.clone());
+        let action = self.action.shift_next(range.clone());
+        let succ = self.succ.shift_next(range);
+        let vis = Self::is_visible(id?, action?, succ?, &self.clock);
+        if vis {
+            Some(0)
+        } else {
+            let skip = self.next().unwrap_or(0);
+            Some(skip + 1)
+        }
     }
 }
 
 impl Shiftable for IndexedVisIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.iter.shift_range(range);
+    fn shift_next(&mut self, range: Range<usize>) -> Option<usize> {
+        let val = self.iter.shift_next(range)?;
         self.vis = 0;
+        if val.as_deref() == Some(&true) {
+            Some(0)
+        } else {
+            Some(1 + self.next().unwrap_or(0))
+        }
     }
 }
 
@@ -117,56 +125,41 @@ impl Iterator for IndexedVisIter<'_> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScanVisIter<'a> {
-    id_actor: ColumnDataIter<'a, ActorCursor>,
-    id_ctr: ColumnDataIter<'a, DeltaCursor>,
-    action: ColumnDataIter<'a, ActionCursor>,
-    succ_count: ColumnDataIter<'a, UIntCursor>,
-    succ_actor: ColumnDataIter<'a, ActorCursor>,
-    succ_ctr: ColumnDataIter<'a, DeltaCursor>,
-    succ_inc: ColumnDataIter<'a, IntCursor>,
+    id: OpIdIter<'a>,
+    action: ActionIter<'a>,
+    succ: SuccIterIter<'a>,
     clock: Clock,
 }
 
 impl<'a> ScanVisIter<'a> {
     fn new(op_set: &'a OpSet, range: Range<usize>, clock: Clock) -> Self {
-        let id_actor = op_set.cols.id_actor.iter_range(range.clone());
-        let id_ctr = op_set.cols.id_ctr.iter_range(range.clone());
-        let action = op_set.cols.action.iter_range(range.clone());
-        let succ_count = op_set.cols.succ_count.iter_range(range);
-        let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
-        let succ_actor = op_set.cols.succ_actor.iter_range(succ_range.clone());
-        let succ_ctr = op_set.cols.succ_ctr.iter_range(succ_range.clone());
-        let succ_inc = op_set.cols.index.inc.iter_range(succ_range);
+        let id = op_set.id_iter_range(&range);
+        let action = op_set.action_iter_range(&range);
+        let succ = op_set.succ_iter_range(&range);
         Self {
-            id_actor,
-            id_ctr,
+            id,
+            succ,
             action,
-            succ_count,
-            succ_actor,
-            succ_ctr,
-            succ_inc,
             clock,
         }
     }
 
-    fn next_visible(&mut self) -> Option<bool> {
-        let id = OpId::load(self.id_actor.next(), self.id_ctr.next())?;
-        let action = self.action.next()?;
-        let is_inc = action.as_deref() == Some(&Action::Increment);
-        let succ_count = self.succ_count.next()?.unwrap_or_default();
+    fn is_visible(id: OpId, action: Action, succ: SuccCursors<'_>, clock: &Clock) -> bool {
+        let is_inc = action == Action::Increment;
         let mut deleted = false;
-        for _ in 0..*succ_count {
-            let succ_id = OpId::load(self.succ_actor.next(), self.succ_ctr.next())?;
-            let inc = self.succ_inc.next()?;
-            if inc.is_none() && self.clock.covers(&succ_id) {
+        for (id, inc) in succ.with_inc() {
+            if inc.is_none() && clock.covers(&id) {
                 deleted = true;
             }
         }
-        if deleted || !self.clock.covers(&id) || is_inc {
-            Some(false)
-        } else {
-            Some(true)
-        }
+        !(deleted || !clock.covers(&id) || is_inc)
+    }
+
+    fn next_visible(&mut self) -> Option<bool> {
+        let id = self.id.next()?;
+        let action = self.action.next()?;
+        let succ = self.succ.next()?;
+        Some(Self::is_visible(id, action, succ, &self.clock))
     }
 }
 

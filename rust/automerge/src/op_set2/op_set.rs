@@ -137,7 +137,6 @@ impl OpSet {
         self.obj_info = indexes.obj_info;
     }
 
-    #[inline(never)]
     pub(crate) fn splice_objects<O: OpLike>(&mut self, ops: &[O]) {
         for op in ops {
             if let Some(obj_info) = op.obj_info() {
@@ -146,14 +145,12 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) {
         self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
         //self.len += ops.len();
     }
 
-    #[inline(never)]
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
         let mut succ_inc = 0;
         let mut last_pos = None;
@@ -276,7 +273,6 @@ impl OpSet {
         self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
     }
 
-    #[inline(never)]
     pub(crate) fn query_insert_at_text(
         &self,
         obj: &ObjId,
@@ -301,7 +297,6 @@ impl OpSet {
         query.resolve(index - 1).ok()
     }
 
-    #[inline(never)]
     pub(crate) fn query_insert_at(
         &self,
         obj: &ObjId,
@@ -348,7 +343,6 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn seek_ops_by_map_key<'a>(
         &'a self,
         obj: &ObjId,
@@ -365,7 +359,6 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn seek_ops_by_index<'a>(
         &'a self,
         obj: &ObjId,
@@ -384,7 +377,6 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn seek_ops_by_index_slow<'a>(
         &'a self,
         obj: &ObjId,
@@ -431,7 +423,6 @@ impl OpSet {
         self.cols.mark_name.get(pos).flatten()
     }
 
-    #[inline(never)]
     fn get_rich_text_at(&self, pos: usize, clock: Option<&Clock>) -> RichTextQueryState<'_> {
         let mut marks = RichTextQueryState::default();
         for id in self.cols.index.mark.marks_at(pos, clock) {
@@ -454,7 +445,6 @@ impl OpSet {
         marks
     }
 
-    #[inline(never)]
     pub(crate) fn seek_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
@@ -495,7 +485,6 @@ impl OpSet {
         })
     }
 
-    #[inline(never)]
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         let counters = &self.cols.id_ctr;
         let actors = &self.cols.id_actor;
@@ -505,7 +494,6 @@ impl OpSet {
             .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(id.actoridx()))))
     }
 
-    #[inline(never)]
     fn seek_list_op_fast(
         &self,
         obj: &ObjId,
@@ -614,7 +602,6 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     fn seek_list_op_slow(
         &self,
         obj: &ObjId,
@@ -730,26 +717,20 @@ impl OpSet {
         range: Range<usize>,
         clock: Option<&Clock>,
     ) -> SkipIter<ActionValueIter<'_>, VisIter<'_>> {
-        // conflicting text values will show both
-        // need conflict index to fix
-        // cant happen unless the put() api is called on text - shouldnt be allowed
-        let start = range.start;
         let value = self.value_iter_range(&range);
-        //let action = ActionIter::new(self.cols.action.iter_range(range.clone()));
         let action = self.action_iter_range(&range);
         let vis = VisIter::new(self, clock, range);
-        //let iter = std::iter::zip(action, value);
         let iter = ActionValueIter::new(action, value);
-        SkipIter::new_with_offset(iter, vis, start)
+        SkipIter::new(iter, vis)
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
         let range = self.scope_to_obj(obj);
         let skip = self.action_value_iter(range, clock.as_ref());
         skip.map(|item| match item {
-            (Action::Set, ScalarValue::Str(s)) => s,
-            (Action::Mark, _) => Cow::Borrowed(""),
-            (_, _) => Cow::Borrowed("\u{fffc}"),
+            (Action::Set, ScalarValue::Str(s), _) => s,
+            (Action::Mark, _, _) => Cow::Borrowed(""),
+            (_, _, _) => Cow::Borrowed("\u{fffc}"),
         })
         .collect()
     }
@@ -826,7 +807,7 @@ impl OpSet {
     }
 
     pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {
-        // FIXME - make sure this works at clock
+        // FIXME clock is ignored
         if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
             let start = val.acc.as_usize();
             let end = start + *val.item.unwrap_or_default() as usize;
@@ -944,7 +925,6 @@ impl OpSet {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn from_doc(
         doc: &Document<'_>,
         text_encoding: TextEncoding,
@@ -1032,15 +1012,18 @@ impl OpSet {
         )
     }
 
-    pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value = self.value_iter_range(range);
-
+    pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
         let succ_count = self.cols.succ_count.iter_range(range.clone());
         let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
         let succ_actor = self.cols.succ_actor.iter_range(succ_range.clone());
         let succ_counter = self.cols.succ_ctr.iter_range(succ_range.clone());
         let inc_values = self.cols.index.inc.iter_range(succ_range);
-        let succ = SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values);
+        SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
+    }
+
+    pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
+        let value = self.value_iter_range(range);
+        let succ = self.succ_iter_range(range);
 
         OpIter {
             pos: range.start,

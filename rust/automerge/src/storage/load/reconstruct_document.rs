@@ -103,7 +103,6 @@ pub(crate) fn reconstruct_opset<'a>(
 // create all binary changes
 // look for mismatched heads
 
-#[inline(never)]
 fn flush_changes(
     change_collector: ChangeCollector<'_>,
     doc: &Document<'_>,

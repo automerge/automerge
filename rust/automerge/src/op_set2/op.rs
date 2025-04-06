@@ -833,9 +833,12 @@ pub(crate) struct SuccCursors<'a> {
     pub(super) inc_values: ColumnDataIter<'a, IntCursor>,
 }
 
-impl SuccCursors<'_> {
+impl<'a> SuccCursors<'a> {
     pub(crate) fn pos(&self) -> usize {
         self.succ_actor.pos()
+    }
+    pub(crate) fn with_inc(self) -> SuccIncCursors<'a> {
+        SuccIncCursors(self)
     }
 }
 
@@ -847,7 +850,7 @@ impl std::fmt::Debug for SuccCursors<'_> {
     }
 }
 
-struct SuccIncCursors<'a>(SuccCursors<'a>);
+pub(crate) struct SuccIncCursors<'a>(SuccCursors<'a>);
 struct IncCursors<'a>(SuccCursors<'a>);
 
 impl Iterator for SuccCursors<'_> {
@@ -1070,7 +1073,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn tagged_value(&self, op_set: &'a OpSet) -> (types::Value<'static>, ExId) {
-        (self.value().into_owned(), self.exid(op_set))
+        (self.value().into_value(), self.exid(op_set))
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {

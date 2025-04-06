@@ -253,13 +253,11 @@ impl<'a> ChangeCollector<'a> {
         collector.finish(change_graph, &op_set.actors).unwrap()
     }
 
-    #[inline(never)]
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
         self.preds.entry(succ_id).or_default().push(op_id);
     }
 
-    #[inline(never)]
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
 
@@ -279,7 +277,6 @@ impl<'a> ChangeCollector<'a> {
         }
     }
 
-    #[inline(never)]
     fn builders_index(&self, id: OpId) -> Option<usize> {
         self.builders
             .binary_search_by(|builder| {
@@ -295,7 +292,6 @@ impl<'a> ChangeCollector<'a> {
             .ok()
     }
 
-    #[inline(never)]
     pub(crate) fn flush_deletes(&mut self) {
         if let Some((obj, key)) = self.last.take() {
             for (id, pred) in &self.preds {
@@ -309,7 +305,6 @@ impl<'a> ChangeCollector<'a> {
         }
     }
 
-    #[inline(never)]
     pub(crate) fn finish(
         mut self,
         change_graph: &ChangeGraph,
@@ -340,7 +335,6 @@ impl<'a> ChangeCollector<'a> {
         Ok(changes)
     }
 
-    #[inline(never)]
     pub(crate) fn build_changegraph(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
         self.flush_deletes();
 

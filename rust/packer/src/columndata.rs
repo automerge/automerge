@@ -299,7 +299,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.check_pos();
     }
 
-    #[inline(never)]
     pub fn advance_to(&mut self, target: usize) {
         assert!(target >= self.pos());
         if target > self.pos() {
@@ -317,7 +316,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     // we only read the first element of each node and never
     // from the first node as we arent always including its first element
 
-    #[inline(never)]
     fn binary_search_for<B>(&self, target: Option<B>, max: usize) -> Option<usize>
     where
         B: Borrow<C::Item> + Debug + Copy,
@@ -362,7 +360,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     // this function assumes all values within its range are ordered
     // will give undefined results otherwise
-    #[inline(never)]
     pub fn seek_to_value<B, R>(&mut self, value: Option<B>, range: R) -> Range<usize>
     where
         B: Borrow<C::Item> + Copy + Debug,
@@ -447,7 +444,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.slabs.weight().acc() - self.slab.acc_left() - self.run_acc()
     }
 
-    #[inline(never)]
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let pos = std::cmp::min(pos, self.max);
@@ -455,7 +451,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(())
     }
 
-    #[inline(never)]
     fn reset_iter_to_slab_index(&mut self, index: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let _ = std::mem::replace(self, Self::new_at_index(tree, index, self.max));
@@ -472,12 +467,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(new_acc - starting_acc)
     }
 
-    pub fn shift_range(&mut self, range: Range<usize>) {
+    pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         assert!(range.start >= self.pos);
         self.max = range.end;
-        if range.start > self.pos {
-            self.nth(range.start - self.pos - 1);
-        }
+        self.nth(range.start - self.pos)
     }
 }
 
@@ -487,8 +480,14 @@ pub struct ColAccIter<'a, C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColAccIter<'_, C> {
-    pub fn shift_range(&mut self, range: Range<usize>) {
-        self.iter.shift_range(range)
+    pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let _ = self.iter.shift_next(range);
+        let acc = self.acc();
+        Some(acc)
+    }
+
+    fn acc(&self) -> Acc {
+        self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc()
     }
 }
 
@@ -497,13 +496,13 @@ impl<C: ColumnCursor> Iterator for ColAccIter<'_, C> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let _ = self.iter.next()?;
-        let acc = self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc();
+        let acc = self.acc();
         Some(acc)
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let _ = self.iter.nth(n)?;
-        let acc = self.iter.slabs.weight().acc() - self.iter.slab.acc_left() - self.iter.run_acc();
+        let acc = self.acc();
         Some(acc)
     }
 }
@@ -585,7 +584,6 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
 impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
     type Item = Option<Cow<'a, C::Item>>;
 
-    #[inline(never)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.max {
             return None;
@@ -598,23 +596,32 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
         Some(result)
     }
 
-    #[inline(never)]
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+    fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
+        if self.pos >= self.max {
+          return None;
+        }
         if n == 0 {
             return self.next();
         }
+        let mut overflow = false;
+        if self.pos + n + 1 > self.max {
+          n = self.max - self.pos - 1;
+          overflow = true;
+        }
+
         let target = self.pos() + n + 1;
-        if self.slabs.weight().pos() < target {
+        let result = if self.slabs.weight().pos() < target {
             self.reset_iter_to_pos(target - 1)?;
             self.next()
         } else if self.run_count() > n {
             self.pos += n + 1;
             let result = self.slab.cursor.pop_n(self.run.as_mut()?, n + 1);
-            if self.pos > self.max {
-                None
-            } else {
+            //if self.pos > self.max {
+            //if overflow {
+            //    None
+            //} else {
                 result
-            }
+            //}
         } else {
             self.pos += self.run_count();
             let n = n - self.run_count();
@@ -625,12 +632,16 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
                 self.run = None;
             }
             self.next()
+        };
+        if !overflow {
+          result
+        } else {
+          None
         }
     }
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
-    #[inline(never)]
     pub fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
         self.slabs.iter().flat_map(|s| s.run_iter::<C>())
     }
@@ -826,7 +837,6 @@ impl<C: ColumnCursor> ColumnData<C>
 where
     C::SlabIndex: HasMinMax,
 {
-    #[inline(never)]
     pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> Vec<usize> {
         // This should be C::Item but right now min/max is Agg
         // this will break for negative values
@@ -1743,7 +1753,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn shift_range() {
+    fn shift_next() {
         let col: ColumnData<UIntCursor> = [
             0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
         ]
@@ -1755,15 +1765,15 @@ pub(crate) mod tests {
         assert_eq!(iter.next(), Some(Some(Cow::Owned(1))));
         assert_eq!(iter.next(), None);
 
-        iter.shift_range(5..7);
+        let next = iter.shift_next(5..7);
 
-        assert_eq!(iter.next(), Some(Some(Cow::Owned(1))));
+        assert_eq!(next, Some(Some(Cow::Owned(1))));
         assert_eq!(iter.next(), Some(Some(Cow::Owned(6))));
         assert_eq!(iter.next(), None);
 
-        iter.shift_range(8..10);
+        let next = iter.shift_next(8..10);
 
-        assert_eq!(iter.next(), Some(Some(Cow::Owned(6))));
+        assert_eq!(next, Some(Some(Cow::Owned(6))));
         assert_eq!(iter.next(), Some(Some(Cow::Owned(7))));
         assert_eq!(iter.next(), None);
     }

@@ -232,6 +232,12 @@ impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
     }
 }
 
+impl From<types::ScalarValue> for ScalarValue<'_> {
+    fn from(s: types::ScalarValue) -> Self {
+        s.into_ref()
+    }
+}
+
 impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
     fn from(s: &ScalarValue<'a>) -> Self {
         s.to_owned()
@@ -240,7 +246,7 @@ impl<'a> From<&ScalarValue<'a>> for types::ScalarValue {
 
 impl<'a> From<ValueRef<'a>> for types::Value<'static> {
     fn from(v: ValueRef<'a>) -> Self {
-        v.into_owned()
+        v.into_value()
     }
 }
 
@@ -291,6 +297,24 @@ impl<'a> ScalarValue<'a> {
                 bytes: bytes.to_vec(),
             },
             Self::Null => types::ScalarValue::Null,
+        }
+    }
+
+    pub(crate) fn into_owned2(self) -> ScalarValue<'static> {
+        match self {
+            Self::Bytes(b) => ScalarValue::Bytes(Cow::Owned(b.into_owned())),
+            Self::Str(s) => ScalarValue::Str(Cow::Owned(s.into_owned())),
+            Self::Int(n) => ScalarValue::Int(n),
+            Self::Uint(n) => ScalarValue::Uint(n),
+            Self::F64(n) => ScalarValue::F64(n),
+            Self::Counter(n) => ScalarValue::Counter(n),
+            Self::Timestamp(n) => ScalarValue::Timestamp(n),
+            Self::Boolean(b) => ScalarValue::Boolean(b),
+            Self::Unknown { type_code, bytes } => ScalarValue::Unknown {
+                type_code,
+                bytes: Cow::Owned(bytes.into_owned()),
+            },
+            Self::Null => ScalarValue::Null,
         }
     }
 
@@ -511,6 +535,30 @@ fn parse_leb128(input: &[u8]) -> Result<i64, ReadScalarError> {
         .map_err(|_| ReadScalarError::Leb)
 }
 
+/*
+impl PartialEq<ValueRef<'_>> for types::Value<'_> {
+    fn eq(&self, other: &ValueRef<'_>) -> bool {
+      other.eq(self)
+    }
+}
+
+impl PartialEq<types::Value<'_>> for ValueRef<'_> {
+    fn eq(&self, other: &types::Value<'_>) -> bool {
+        match (self, other) {
+            (ValueRef::Object(a), types::Value::Object(b)) => *a == *b,
+            (ValueRef::Scalar(a), types::Value::Scalar(b)) => *a == **b,
+            _ => false,
+        }
+    }
+}
+*/
+
+impl PartialEq<ScalarValue<'_>> for types::ScalarValue {
+    fn eq(&self, other: &ScalarValue<'_>) -> bool {
+        other.eq(self)
+    }
+}
+
 impl PartialEq<types::ScalarValue> for ScalarValue<'_> {
     fn eq(&self, other: &types::ScalarValue) -> bool {
         match (self, other) {
@@ -570,9 +618,21 @@ impl From<u64> for ScalarValue<'_> {
     }
 }
 
+impl From<u32> for ScalarValue<'_> {
+    fn from(n: u32) -> Self {
+        ScalarValue::Uint(n as u64)
+    }
+}
+
 impl From<i64> for ScalarValue<'_> {
     fn from(n: i64) -> Self {
         ScalarValue::Int(n)
+    }
+}
+
+impl From<i32> for ScalarValue<'_> {
+    fn from(n: i32) -> Self {
+        ScalarValue::Int(n as i64)
     }
 }
 
@@ -673,15 +733,6 @@ impl<'a> KeyRef<'a> {
         }
     }
 
-    /*
-        pub(crate) fn into_owned(self) -> KeyRef<'static> {
-            match self {
-                KeyRef::Map(s) => KeyRef::Map(Cow::Owned(s.to_string())),
-                KeyRef::Seq(e) => KeyRef::Seq(e),
-            }
-        }
-    */
-
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
             KeyRef::Map(_) => None,
@@ -722,11 +773,29 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub(crate) fn into_owned(self) -> value::Value<'static> {
+    pub(crate) fn into_owned(self) -> ValueRef<'static> {
+        match self {
+            Self::Object(o) => ValueRef::Object(o),
+            Self::Scalar(s) => ValueRef::Scalar(s.into_owned2()),
+        }
+    }
+
+    pub(crate) fn into_value(self) -> value::Value<'static> {
         match self {
             Self::Object(o) => value::Value::Object(o),
             Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
         }
+    }
+
+    pub(crate) fn to_value(&self) -> value::Value<'static> {
+        match self {
+            Self::Object(o) => value::Value::Object(*o),
+            Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into())),
+        }
+    }
+
+    pub(crate) fn str(s: &'a str) -> ValueRef<'a> {
+        Self::Scalar(ScalarValue::str(s))
     }
 }
 

@@ -98,7 +98,6 @@ impl<'a> OpIter<'a> {
         }))
     }
 
-    #[inline(never)]
     pub(crate) fn try_nth(&mut self, n: usize) -> Result<Option<Op<'a>>, ReadOpError> {
         let Some(id) = self.id.maybe_try_nth(n)? else {
             return Ok(None);
@@ -168,13 +167,6 @@ impl OpId {
                 "missing actor or counter".to_string(),
             )),
         }
-    }
-
-    pub(crate) fn load<'a>(
-        id_actor: Option<Option<Cow<'a, ActorIdx>>>,
-        id_counter: Option<Option<Cow<'a, i64>>>,
-    ) -> Option<OpId> {
-        Self::try_load(id_actor?, id_counter?).ok()
     }
 }
 
@@ -269,12 +261,18 @@ impl<'a> OpIdIter<'a> {
             (Some(_), None) => Err(ReadOpError::MissingValue("id_counter")),
         }
     }
+
+    pub(crate) fn set_max(&mut self, pos: usize) {
+        self.actor.set_max(pos);
+        self.ctr.set_max(pos);
+    }
 }
 
 impl Shiftable for OpIdIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.actor.shift_range(range.clone());
-        self.ctr.shift_range(range.clone());
+    fn shift_next(&mut self, range: Range<usize>) -> Option<OpId> {
+        let actor = self.actor.shift_next(range.clone());
+        let ctr = self.ctr.shift_next(range.clone());
+        OpId::try_load(actor?, ctr?).ok()
     }
 }
 
@@ -482,9 +480,11 @@ pub(crate) struct MarkInfoIter<'a> {
 }
 
 impl Shiftable for MarkInfoIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.name.shift_range(range.clone());
-        self.expand.shift_range(range.clone());
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let mark_name = self.name.shift_next(range.clone());
+        let expand = self.expand.shift_next(range)?;
+        let expand = expand.as_deref().cloned().unwrap_or(false);
+        Some((mark_name?, expand))
     }
 }
 
@@ -494,6 +494,11 @@ impl<'a> MarkInfoIter<'a> {
         expand: ColumnDataIter<'a, BooleanCursor>,
     ) -> Self {
         Self { name, expand }
+    }
+
+    pub(crate) fn set_max(&mut self, pos: usize) {
+        self.name.set_max(pos);
+        self.expand.set_max(pos);
     }
 
     pub(crate) fn pos(&self) -> usize {
@@ -559,25 +564,29 @@ impl<'a> ActionValueIter<'a> {
 }
 
 impl<'a> Iterator for ActionValueIter<'a> {
-    type Item = (Action, ScalarValue<'a>);
+    type Item = (Action, ScalarValue<'a>, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         let action = self.action.next();
         let value = self.value.next();
-        Some((action?, value?))
+        let pos = self.action.iter.pos();
+        Some((action?, value?, pos - 1))
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         let action = self.action.nth(n);
         let value = self.value.nth(n);
-        Some((action?, value?))
+        let pos = self.action.iter.pos();
+        Some((action?, value?, pos - 1))
     }
 }
 
 impl Shiftable for ActionValueIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.action.shift_range(range.clone());
-        self.value.shift_range(range)
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let action = self.action.shift_next(range.clone());
+        let value = self.value.shift_next(range);
+        let pos = self.action.iter.pos();
+        Some((action?, value?, pos - 1))
     }
 }
 
@@ -587,8 +596,8 @@ pub(crate) struct ActionIter<'a> {
 }
 
 impl Shiftable for ActionIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.iter.shift_range(range)
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.iter.shift_next(range).flatten().as_deref().copied()
     }
 }
 
@@ -635,10 +644,15 @@ pub(crate) struct ValueIter<'a> {
 }
 
 impl Shiftable for ValueIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.meta.shift_range(range);
-        let value_advance = self.meta.calculate_acc().as_usize();
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let meta = self.meta.shift_next(range).flatten()?;
+        let length = meta.length();
+
+        let value_advance = self.meta.calculate_acc().as_usize() - length;
         self.raw.seek_to(value_advance);
+        let raw = self.raw.read_next(length).ok()?;
+
+        ScalarValue::from_raw(*meta, raw).ok()
     }
 }
 
@@ -694,6 +708,27 @@ pub(crate) struct SuccIterIter<'a> {
 }
 
 impl<'a> SuccIterIter<'a> {
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let num_succ = *self.count.shift_next(range.clone()).flatten()? as usize;
+        let sub_pos = self.count.calculate_acc().as_usize();
+
+        self.actor.set_max(range.end);
+        self.actor.advance_to(sub_pos - num_succ);
+
+        self.ctr.set_max(range.end);
+        self.ctr.advance_to(sub_pos - num_succ);
+
+        self.incs.set_max(range.end);
+        self.incs.advance_to(sub_pos - num_succ);
+
+        Some(SuccCursors {
+            len: num_succ,
+            succ_actor: self.actor.clone(),
+            succ_counter: self.ctr.clone(),
+            inc_values: self.incs.clone(),
+        })
+    }
+
     pub(crate) fn new(
         count: ColumnDataIter<'a, UIntCursor>,
         actor: ColumnDataIter<'a, ActorCursor>,

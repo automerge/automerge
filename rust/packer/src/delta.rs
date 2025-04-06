@@ -105,7 +105,6 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    #[inline(never)]
     fn contains(&self, run: &Run<'_, i64>, target: Agg) -> Option<Range<usize>> {
         if target.is_none() && run.value.is_none() {
             return Some(0..run.count);
@@ -207,7 +206,6 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         data.splice(range, values.map(|i| i.as_deref().cloned()));
     }
 
-    #[inline(never)]
     fn try_next<'a>(&mut self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
         if let Some(run) = self.rle.try_next(slab)? {
             let delta = run.delta();

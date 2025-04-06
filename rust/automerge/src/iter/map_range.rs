@@ -1,11 +1,10 @@
-use super::tools::{Peek, Shiftable, SkipIter};
+use super::tools::{ExIdPromise, Shiftable, SkipIter, Unshift};
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter, VisIter};
 use crate::op_set2::packer::{ColumnDataIter, StrCursor};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::types::OpId;
-use crate::value::Value;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -14,16 +13,31 @@ use std::ops::Range;
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapRangeItem<'a> {
     pub key: Cow<'a, str>,
-    pub value: Value<'a>,
-    pub id: ExId,
+    pub value: ValueRef<'a>,
     pub conflict: bool,
     pub(crate) pos: usize,
-    pub(crate) _id: OpId,
+    pub(crate) maybe_exid: ExIdPromise<'a>,
+}
+
+impl MapRangeItem<'_> {
+    pub fn id(&self) -> ExId {
+        self.maybe_exid.exid()
+    }
+
+    pub fn into_owned(self) -> MapRangeItem<'static> {
+        MapRangeItem {
+            key: Cow::Owned(self.key.into_owned()),
+            value: self.value.into_owned(),
+            conflict: self.conflict,
+            pos: self.pos,
+            maybe_exid: self.maybe_exid.into_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct MapRangeInner<'a> {
-    iter: Peek<SkipIter<MapIter<'a>, VisIter<'a>>>,
+    iter: Unshift<SkipIter<MapIter<'a>, VisIter<'a>>>,
     clock: Option<Clock>,
     op_set: &'a OpSet,
 }
@@ -47,19 +61,18 @@ impl<'a> Iterator for MapRange<'a> {
                     continue;
                 }
             }
-            let id = inner.op_set.id_to_exid(_id);
             let value = if let ScalarValue::Counter(c) = &value {
                 let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
                 ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
             } else {
                 ValueRef::from_action_value(action, value)
             };
+            let maybe_exid = ExIdPromise::new(inner.op_set, _id);
             return Some(MapRangeItem {
                 key,
-                value: value.into_owned(),
-                id,
+                value,
                 conflict,
-                _id,
+                maybe_exid,
                 pos,
             });
         }
@@ -76,11 +89,13 @@ struct MapIter<'a> {
 }
 
 impl Shiftable for MapIter<'_> {
-    fn shift_range(&mut self, range: Range<usize>) {
-        self.id.shift_range(range.clone());
-        self.key_str.shift_range(range.clone());
-        self.action.shift_range(range.clone());
-        self.value.shift_range(range);
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let id = self.id.shift_next(range.clone())?;
+        let key_str = self.key_str.shift_next(range.clone())??;
+        let action = self.action.shift_next(range.clone())?;
+        let value = self.value.shift_next(range)?;
+        let pos = self.id.pos() - 1;
+        Some((key_str, action, value, id, pos))
     }
 }
 
@@ -108,8 +123,6 @@ impl<'a> Iterator for MapIter<'a> {
 
 impl<'a> MapRange<'a> {
     pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: Option<Clock>) -> Self {
-        let start = range.start;
-
         let key_str = op_set.key_str_iter_range(&range);
         let action = op_set.action_iter_range(&range);
         let value = op_set.value_iter_range(&range);
@@ -123,8 +136,8 @@ impl<'a> MapRange<'a> {
         };
 
         let vis = VisIter::new(op_set, clock.as_ref(), range);
-        let skip = SkipIter::new_with_offset(map_iter, vis, start);
-        let iter = Peek::new(skip);
+        let skip = SkipIter::new(map_iter, vis);
+        let iter = Unshift::new(skip);
 
         Self {
             inner: Some(MapRangeInner {
@@ -135,9 +148,9 @@ impl<'a> MapRange<'a> {
         }
     }
 
-    pub(crate) fn shift_range(&mut self, range: Range<usize>) {
-        if let Some(inner) = self.inner.as_mut() {
-            inner.iter.shift_range(range)
-        }
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let inner = self.inner.as_mut()?;
+        inner.iter.shift(range);
+        self.next()
     }
 }

@@ -7,7 +7,7 @@ mod values;
 
 pub(crate) mod tools;
 
-pub use doc::{DocItem, DocIter, ObjItem};
+pub use doc::{DocItem, DocIter, DocObjItem};
 pub use keys::Keys;
 pub use list_range::{ListRange, ListRangeItem};
 pub use map_range::{MapRange, MapRangeItem};

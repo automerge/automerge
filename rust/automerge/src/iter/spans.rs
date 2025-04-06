@@ -1,5 +1,6 @@
 use crate::hydrate::Value;
-use crate::iter::tools::{Shiftable, SkipIter};
+use crate::iter::tools::SkipIter;
+use crate::iter::tools::Unshift;
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, VisIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
@@ -13,18 +14,19 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SpansInternal<'a> {
-    action_value: SkipIter<ActionValueIter<'a>, VisIter<'a>>,
+    action_value: Unshift<SkipIter<ActionValueIter<'a>, VisIter<'a>>>,
     mark_info: MarkInfoIter<'a>,
     op_id: OpIdIter<'a>,
     marks: MarkStateMachine<'a>,
     op_set: Option<&'a OpSet>,
     pub(super) clock: Option<Clock>,
     state: SpanState,
+    pos: usize,
 }
 
 /// A sequence of block markers and text spans. Returned by [`crate::ReadDoc::spans`] and
 /// [`crate::ReadDoc::spans_at`]
-#[derive(Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Spans<'a> {
     internal: SpansInternal<'a>,
 }
@@ -53,12 +55,14 @@ impl Span {
 }
 
 impl<'a> SpansInternal<'a> {
-    pub(crate) fn shift_range(&mut self, range: Range<usize>) {
-        self.action_value.shift_range(range.clone());
-        self.mark_info.shift_range(range.clone()); // TODO - this is very stateful - will this work?
-        self.op_id.shift_range(range);
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        self.mark_info.set_max(range.end);
+        self.op_id.set_max(range.end);
+        self.action_value.shift(range);
+
         self.marks = MarkStateMachine::default();
         self.state = SpanState::default();
+        self.next()
     }
 
     pub(crate) fn new(
@@ -67,9 +71,10 @@ impl<'a> SpansInternal<'a> {
         clock: Option<Clock>,
         encoding: TextEncoding,
     ) -> Self {
+        let pos = range.start;
         let op_id = op_set.id_iter_range(&range);
         let mark_info = op_set.mark_info_iter_range(&range);
-        let action_value = op_set.action_value_iter(range, clock.as_ref());
+        let action_value = Unshift::new(op_set.action_value_iter(range, clock.as_ref()));
         let marks = MarkStateMachine::default();
         let state = SpanState::new(encoding);
         let op_set = Some(op_set);
@@ -82,6 +87,7 @@ impl<'a> SpansInternal<'a> {
             op_set,
             clock,
             marks,
+            pos,
         }
     }
 
@@ -91,15 +97,15 @@ impl<'a> SpansInternal<'a> {
     }
 
     fn next_opid(&mut self) -> Option<OpId> {
-        let pos = self.action_value.pos() - 1;
+        //let pos = self.action_value.pos() - 1;
         let id_pos = self.op_id.pos();
-        self.op_id.nth(pos - id_pos)
+        self.op_id.nth(self.pos - id_pos)
     }
 
     fn next_mark_name(&mut self) -> Option<Cow<'a, str>> {
-        let pos = self.action_value.pos() - 1;
+        //let pos = self.action_value.pos() - 1;
         let mark_pos = self.mark_info.pos();
-        let (mark_name, _expand) = self.mark_info.nth(pos - mark_pos)?;
+        let (mark_name, _expand) = self.mark_info.nth(self.pos - mark_pos)?;
         mark_name
     }
 
@@ -114,12 +120,13 @@ impl<'a> SpansInternal<'a> {
         None
     }
 
-    fn process_action_val(&mut self, av: (Action, ScalarValue<'a>)) -> Option<SpanInternal> {
+    fn process_action_val(&mut self, av: (Action, ScalarValue<'a>, usize)) -> Option<SpanInternal> {
+        self.pos = av.2;
         match av {
-            (Action::Set, ScalarValue::Str(s)) => self.state.push_str(&s),
-            (Action::MakeMap, _) => self.push_block(),
-            (Action::Mark, value) => self.process_mark(value),
-            (Action::Delete, _) | (Action::Increment, _) => None,
+            (Action::Set, ScalarValue::Str(s), _) => self.state.push_str(&s),
+            (Action::MakeMap, _, _) => self.push_block(),
+            (Action::Mark, value, _) => self.process_mark(value),
+            (Action::Delete, _, _) | (Action::Increment, _, _) => None,
             _ => self.state.push_str(PLACEHOLDER),
         }
     }
@@ -267,6 +274,13 @@ impl<'a> Spans<'a> {
         Spans {
             internal: SpansInternal::new(op_set, range, clock, encoding),
         }
+    }
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        Some(self.internal.shift_next(range)?.export(
+            self.internal.op_set?,
+            self.internal.clock.as_ref(),
+            self.internal.state.encoding,
+        ))
     }
 }
 

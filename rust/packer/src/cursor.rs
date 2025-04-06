@@ -567,7 +567,6 @@ where
 {
     type Item = Run<'a, C::Item>;
 
-    #[inline(never)]
     fn next(&mut self) -> Option<Self::Item> {
         let run = self.cursor.next(self.slab)?;
         self.pos_left -= run.count;

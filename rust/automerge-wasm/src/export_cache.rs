@@ -8,12 +8,14 @@ use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use am::{ObjId, ObjType, ReadDoc};
 
-use am::iter::{DocItem, ObjItem};
+use am::iter::{DocItem, DocObjItem};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
@@ -67,23 +69,23 @@ impl<'a> ExportCache<'a> {
         })
     }
 
-    fn make_value(
+    fn make_value_ref(
         &mut self,
         parent: &Object,
         prop: &JsValue,
         obj: ObjId,
-        value: am::Value<'a>,
+        value: am::ValueRef<'a>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         Ok(match value {
-            am::Value::Object(ObjType::Map) => self.make_map(obj, meta)?.into(),
-            am::Value::Object(ObjType::Text) if self.doc.text_rep.is_string() => {
+            am::ValueRef::Object(ObjType::Map) => self.make_map(obj, meta)?.into(),
+            am::ValueRef::Object(ObjType::Text) if self.doc.text_rep.is_string() => {
                 self.obj_cache
                     .insert(obj.clone(), (parent.clone(), prop.clone()));
                 JsValue::from_str("")
             }
-            am::Value::Scalar(s) => self.export_scalar(&s)?,
-            am::Value::Object(obj_type) => self.make_list(obj, obj_type.into(), meta)?.into(),
+            am::ValueRef::Scalar(s) => self.export_scalar_ref(&s)?,
+            am::ValueRef::Object(obj_type) => self.make_list(obj, obj_type.into(), meta)?.into(),
         })
     }
 
@@ -130,7 +132,7 @@ impl<'a> ExportCache<'a> {
         if datatype == Datatype::Text && self.doc.text_rep.is_string() {
             return Ok(self.doc.text_at(&obj, heads)?.into());
         }
-        let mut current_obj_id = obj.clone();
+        let mut current_obj_id = Arc::new(obj.clone());
         let mut o = self
             .make_object(&current_obj_id, datatype, meta)?
             .ok_or(error::Export::InvalidRoot)?;
@@ -139,7 +141,7 @@ impl<'a> ExportCache<'a> {
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
         let iter = self.doc.doc.iter_at(obj, heads, self.doc.text_rep.into());
-        for ObjItem { obj, item } in iter {
+        for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {
                     _set(&o, &parent_prop, &JsValue::from_str(&buffer))?;
@@ -158,12 +160,12 @@ impl<'a> ExportCache<'a> {
                 }
                 DocItem::Map(map) => {
                     let prop = self.ensure_key(map.key.clone());
-                    let value = self.make_value(&o, &prop, map.id, map.value.into(), meta)?;
+                    let value = self.make_value_ref(&o, &prop, map.id(), map.value, meta)?;
                     _set(&o, &prop, &value)?;
                 }
                 DocItem::List(list) => {
                     let prop = JsValue::from_f64(index as f64);
-                    let value = self.make_value(&o, &prop, list.id, list.value, meta)?;
+                    let value = self.make_value_ref(&o, &prop, list.id(), list.value, meta)?;
                     _set(&o, &prop, &value)?;
                     index += 1;
                 }
@@ -179,23 +181,23 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn export_scalar(&self, value: &am::ScalarValue) -> Result<JsValue, error::Export> {
+    fn export_scalar_ref(&self, value: &am::ScalarValueRef<'_>) -> Result<JsValue, error::Export> {
         let (datatype, js_value) = match value {
-            am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
-            am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
-            am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
-            am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
-            am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
-            am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
-            am::ScalarValue::Timestamp(v) => (
+            am::ScalarValueRef::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.deref()).into()),
+            am::ScalarValueRef::Str(v) => (Datatype::Str, v.to_string().into()),
+            am::ScalarValueRef::Int(v) => (Datatype::Int, (*v as f64).into()),
+            am::ScalarValueRef::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+            am::ScalarValueRef::F64(v) => (Datatype::F64, (*v).into()),
+            am::ScalarValueRef::Counter(v) => (Datatype::Counter, (*v as f64).into()),
+            am::ScalarValueRef::Timestamp(v) => (
                 Datatype::Timestamp,
                 js_sys::Date::new(&(*v as f64).into()).into(),
             ),
-            am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
-            am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
-            am::ScalarValue::Unknown { bytes, type_code } => (
+            am::ScalarValueRef::Boolean(v) => (Datatype::Boolean, (*v).into()),
+            am::ScalarValueRef::Null => (Datatype::Null, JsValue::null()),
+            am::ScalarValueRef::Unknown { bytes, type_code } => (
                 Datatype::Unknown(*type_code),
-                Uint8Array::from(bytes.as_slice()).into(),
+                Uint8Array::from(bytes.deref()).into(),
             ),
         };
         self.wrap_scalar(js_value, datatype)
