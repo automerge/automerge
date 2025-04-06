@@ -454,6 +454,6 @@ pub(crate) mod tests {
     #[test]
     fn load_empty_bool_data() {
         let col = BooleanCursor::load(&[]).unwrap();
-        assert!(col.len() == 0);
+        assert!(col.is_empty());
     }
 }

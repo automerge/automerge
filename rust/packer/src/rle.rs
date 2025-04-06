@@ -854,6 +854,6 @@ pub(crate) mod tests {
     #[test]
     fn load_empty_rle_data() {
         let col = IntCursor::load(&[]).unwrap();
-        assert!(col.len() == 0);
+        assert!(col.is_empty());
     }
 }

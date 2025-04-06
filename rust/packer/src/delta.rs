@@ -641,8 +641,11 @@ pub(crate) mod tests {
 
     #[test]
     fn delta_contains() {
-        let mut cursor = DeltaCursor::default();
-        cursor.abs = 100;
+        let cursor = DeltaCursor {
+            abs: 100,
+            ..Default::default()
+        };
+
         assert_eq!(cursor.contains(&Run::init(1, 3), 100.into()), Some(0..1));
 
         assert_eq!(cursor.contains(&Run::init(10, 3), 100.into()), Some(9..10));

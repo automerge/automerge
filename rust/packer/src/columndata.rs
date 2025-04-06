@@ -598,15 +598,15 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 
     fn nth(&mut self, mut n: usize) -> Option<Self::Item> {
         if self.pos >= self.max {
-          return None;
+            return None;
         }
         if n == 0 {
             return self.next();
         }
         let mut overflow = false;
         if self.pos + n + 1 > self.max {
-          n = self.max - self.pos - 1;
-          overflow = true;
+            n = self.max - self.pos - 1;
+            overflow = true;
         }
 
         let target = self.pos() + n + 1;
@@ -620,7 +620,7 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
             //if overflow {
             //    None
             //} else {
-                result
+            result
             //}
         } else {
             self.pos += self.run_count();
@@ -634,9 +634,9 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
             self.next()
         };
         if !overflow {
-          result
+            result
         } else {
-          None
+            None
         }
     }
 }
