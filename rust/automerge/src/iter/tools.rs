@@ -82,8 +82,8 @@ impl<I: Iterator + Debug + Clone, S: Skipper> SkipIter<I, S> {
 
 impl<I: Iterator + Debug + Clone + Shiftable, S: Skipper + Shiftable> Shiftable for SkipIter<I, S> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let skip = self.skip.shift_next(range.clone())?;
-        let start = range.start + skip;
+        let skip = self.skip.shift_next(range.clone());
+        let start = range.start + skip.unwrap_or(0);
         let end = range.end;
         self.iter.shift_next(start..end)
     }

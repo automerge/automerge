@@ -90,12 +90,12 @@ struct MapIter<'a> {
 
 impl Shiftable for MapIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let id = self.id.shift_next(range.clone())?;
-        let key_str = self.key_str.shift_next(range.clone())??;
-        let action = self.action.shift_next(range.clone())?;
-        let value = self.value.shift_next(range)?;
+        let id = self.id.shift_next(range.clone());
+        let key_str = self.key_str.shift_next(range.clone());
+        let action = self.action.shift_next(range.clone());
+        let value = self.value.shift_next(range);
         let pos = self.id.pos() - 1;
-        Some((key_str, action, value, id, pos))
+        Some((key_str??, action?, value?, id?, pos))
     }
 }
 

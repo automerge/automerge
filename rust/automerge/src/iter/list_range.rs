@@ -46,12 +46,14 @@ struct ListIter<'a> {
 
 impl Shiftable for ListIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let id = self.id.shift_next(range.clone())?;
-        let inserts = self.inserts.shift_next(range.clone())?.as_usize();
-        let action = self.action.shift_next(range.clone())?;
-        let value = self.value.shift_next(range)?;
+        let id = self.id.shift_next(range.clone());
+        let action = self.action.shift_next(range.clone());
+        let value = self.value.shift_next(range.clone());
+        let inserts = self.inserts.shift_next(range);
+
+        let inserts = inserts?.as_usize();
         let pos = self.id.pos() - 1;
-        Some((inserts, action, value, id, pos))
+        Some((inserts, action?, value?, id?, pos))
     }
 }
 
@@ -136,7 +138,7 @@ impl<'a> Iterator for ListRange<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let inner = self.inner.as_mut()?;
         let mut conflict = false;
-        while let Some((insert, action, value, _id, pos)) = inner.iter.next() {
+        while let Some((insert, action, value, id, pos)) = inner.iter.next() {
             if inner.iter.peek().map(|next| next.0) == Some(insert) {
                 conflict = true;
                 continue;
@@ -146,14 +148,13 @@ impl<'a> Iterator for ListRange<'a> {
             if !inner.range.contains(&index) {
                 continue;
             }
-            //let id = inner.op_set.id_to_exid(_id);
             let value = if let ScalarValue::Counter(c) = &value {
                 let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
                 ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
             } else {
                 ValueRef::from_action_value(action, value)
             };
-            let maybe_exid = ExIdPromise::new(inner.op_set, _id);
+            let maybe_exid = ExIdPromise::new(inner.op_set, id);
             return Some(ListRangeItem {
                 index,
                 value,

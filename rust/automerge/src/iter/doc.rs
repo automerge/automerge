@@ -98,14 +98,17 @@ impl<'a> DocIter<'a> {
     fn next_object(&mut self) -> Option<Option<DocObjItem<'a>>> {
         let (next, next_type) = self.next_objs.pop_first()?;
         let next_range = self.obj_id_iter.seek_to_value(next);
-        let item = self.shift(next_type, next_range);
-        self.obj = next;
-        self.obj_export = Arc::new(self.op_set?.id_to_exid(next.0));
-        self.iter_type = next_type;
-        if let Some(item) = item {
-            Some(self.process_item(item))
-        } else {
+        if next_range.is_empty() {
             Some(None)
+        } else {
+            if let Some(item) = self.shift(next_type, next_range) {
+                self.obj = next;
+                self.obj_export = Arc::new(self.op_set?.id_to_exid(next.0));
+                self.iter_type = next_type;
+                Some(self.process_item(item))
+            } else {
+                Some(None)
+            }
         }
     }
 
@@ -148,10 +151,12 @@ impl<'a> Iterator for DocIter<'a> {
     type Item = DocObjItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(item) = self.next_prop() {
+            return Some(item);
+        }
+        // could rewrite this as an iterator
         loop {
-            if let Some(item) = self.next_prop() {
-                return Some(item);
-            } else if let Some(item) = self.next_object()? {
+            if let Some(item) = self.next_object()? {
                 return Some(item);
             }
         }
