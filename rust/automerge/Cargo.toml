@@ -16,14 +16,13 @@ utf16-indexing = []
 
 [dependencies]
 packer = { path = "../packer" }
-fnv = "1.0.3"
 hex = "^0.4.3"
 leb128 = "^0.2.5"
-sha2 = "^0.11.0-pre.4"
+sha2 = "0.11.0-pre.5"
 thiserror = "^1.0.16"
 itertools = "0.13.0"
 flate2 = "^1.0.22"
-uuid = { version = "^1.2.1", features = ["v4", "serde"] }
+uuid = { version = "1.2.2", features = ["v4", "serde"] }
 smol_str = { version = "0.2", features = ["serde"] }
 tracing = { version = "^0.1.29" }
 fxhash = "^0.2.1"
