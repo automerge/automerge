@@ -3,6 +3,10 @@ name = "hexane"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/automerge/automerge"
+rust-version = "1.70.0"
+description = "A columnar compression library used by automerge"
+readme = "./README.md"
 
 [lib]
 bench = false
