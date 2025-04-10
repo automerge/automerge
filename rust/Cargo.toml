@@ -6,7 +6,7 @@ members = [
     "automerge-test",
     "automerge-wasm",
     "edit-trace",
-    "packer",
+    "hexane",
 ]
 resolver = "2"
 

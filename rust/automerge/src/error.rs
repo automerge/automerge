@@ -2,7 +2,7 @@ use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
-use packer::PackError;
+use hexane::PackError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

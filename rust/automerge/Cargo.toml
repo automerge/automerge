@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "1.0.0-pre.13"
+version = "1.0.0-alpha.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -10,12 +10,12 @@ readme = "./README.md"
 
 [features]
 optree-visualisation = ["dot"]
-wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js", "packer/wasm"]
+wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js", "hexane/wasm"]
 utf8-indexing = []
 utf16-indexing = []
 
 [dependencies]
-packer = { path = "../packer" }
+hexane = { path = "../hexane" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "0.11.0-pre.5"

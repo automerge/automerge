@@ -197,6 +197,12 @@ impl From<am::Value<'static>> for Value {
     }
 }
 
+impl From<am::ValueRef<'_>> for Value {
+    fn from(value: am::ValueRef<'_>) -> Self {
+        Self::Value(value.into())
+    }
+}
+
 impl From<Mark> for Value {
     fn from(mark: Mark) -> Self {
         Self::Mark(AMmark::new(mark))

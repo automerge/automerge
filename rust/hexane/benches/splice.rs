@@ -1,5 +1,5 @@
 use divan::Bencher;
-use packer::*;
+use hexane::*;
 use std::time::Duration;
 
 use rand::{thread_rng, RngCore};

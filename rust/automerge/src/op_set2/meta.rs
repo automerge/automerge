@@ -1,4 +1,4 @@
-use super::packer::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
+use super::hexane::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
 use super::types::ScalarValue;
 use std::borrow::Cow;
 
@@ -107,7 +107,7 @@ impl Packable for ValueMeta {
     }
 
     fn width(item: &ValueMeta) -> usize {
-        packer::ulebsize(item.0) as usize
+        hexane::ulebsize(item.0) as usize
     }
 
     fn pack(item: &ValueMeta, out: &mut Vec<u8>) {
@@ -125,7 +125,7 @@ pub(crate) type MetaCursor = RleCursor<64, ValueMeta>;
 
 #[cfg(test)]
 mod tests {
-    use super::super::packer::ColumnData;
+    use super::super::hexane::ColumnData;
     use super::*;
 
     #[test]

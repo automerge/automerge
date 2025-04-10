@@ -93,7 +93,7 @@ impl Clock {
     }
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {
-        self.0[id.actor() as usize].max_op as u64 >= id.counter()
+        self.0[id.actor()].max_op as u64 >= id.counter()
     }
 
     pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<&ClockData> {

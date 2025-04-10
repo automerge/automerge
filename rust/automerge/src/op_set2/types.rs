@@ -8,8 +8,8 @@ use crate::value;
 use std::cmp::Ordering;
 use std::fmt;
 
+use super::hexane::{PackError, Packable, RleCursor, ScanMeta};
 use super::meta::ValueType;
-use super::packer::{PackError, Packable, RleCursor, ScanMeta};
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -801,7 +801,7 @@ impl<'a> ValueRef<'a> {
 
 impl Packable for Action {
     fn width(item: &Action) -> usize {
-        packer::ulebsize(u64::from(*item)) as usize
+        hexane::ulebsize(u64::from(*item)) as usize
     }
 
     fn pack(item: &Action, out: &mut Vec<u8>) {
@@ -817,7 +817,7 @@ impl Packable for Action {
 
 impl Packable for ActorIdx {
     fn width(item: &ActorIdx) -> usize {
-        packer::ulebsize(u64::from(*item)) as usize
+        hexane::ulebsize(u64::from(*item)) as usize
     }
 
     fn pack(item: &ActorIdx, out: &mut Vec<u8>) {

@@ -1,5 +1,5 @@
 use crate::iter::tools::Shiftable;
-use crate::op_set2::packer::{
+use crate::op_set2::hexane::{
     BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, SlabWeight, StrCursor,
     UIntCursor,
 };
@@ -45,7 +45,7 @@ pub(crate) enum ReadOpError {
     #[error("missing value: {0}")]
     MissingValue(&'static str),
     #[error("error reading value column: {0}")]
-    ReadValue(#[from] op_set2::packer::ReadRawError),
+    ReadValue(#[from] op_set2::hexane::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }
@@ -805,7 +805,7 @@ impl<'a> Iterator for SuccIterIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packer::ColumnData;
+    use hexane::ColumnData;
 
     #[test]
     fn obj_id_iter_seek() {

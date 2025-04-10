@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
 
-use packer::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
+use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 
 use crate::{
     clock::{Clock, ClockData},
@@ -135,7 +135,7 @@ impl ChangeGraph {
                 }
             }
         }
-        for (_, clock) in &mut self.clock_cache {
+        for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
         self.seq_index.insert(idx, vec![]);
@@ -151,7 +151,7 @@ impl ChangeGraph {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
         }
-        for (_, clock) in &mut self.clock_cache {
+        for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
         }
     }
@@ -246,7 +246,7 @@ impl ChangeGraph {
                 let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
                 let max_op = self.max_ops[i];
                 let start = max_op as u64 - num_ops + 1;
-                if counter < start as u64 {
+                if counter < start {
                     Ordering::Greater
                 } else if max_op as u64 <= counter {
                     Ordering::Less
@@ -536,7 +536,7 @@ impl ChangeGraph {
 
             if let Some(cached) = self.clock_cache.get(&idx) {
                 Clock::merge(clock, cached);
-            } else if visited.len() <= limit as usize {
+            } else if visited.len() <= limit {
                 to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
             } else {
                 break;

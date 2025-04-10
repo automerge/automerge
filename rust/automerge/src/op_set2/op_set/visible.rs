@@ -5,7 +5,7 @@ use crate::op_set2::op::SuccCursors;
 use crate::op_set2::types::{Action, ScalarValue};
 use crate::op_set2::OpSet;
 
-use packer::{BooleanCursor, ColumnDataIter};
+use hexane::{BooleanCursor, ColumnDataIter};
 
 use std::fmt::Debug;
 use std::ops::Range;
@@ -52,7 +52,7 @@ impl Shiftable for IndexedVisIter<'_> {
 #[derive(Clone, Debug)]
 pub(crate) enum VisIter<'a> {
     Indexed(IndexedVisIter<'a>),
-    Scan(ScanVisIter<'a>),
+    Scan(Box<ScanVisIter<'a>>),
 }
 
 impl Default for VisIter<'_> {
@@ -67,7 +67,7 @@ impl<'a> VisIter<'a> {
     pub(crate) fn new(op_set: &'a OpSet, clock: Option<&Clock>, range: Range<usize>) -> Self {
         if let Some(clock) = clock {
             let scan = ScanVisIter::new(op_set, range, clock.clone());
-            Self::Scan(scan)
+            Self::Scan(Box::new(scan))
         } else {
             let indexed = IndexedVisIter::new(op_set, range);
             Self::Indexed(indexed)

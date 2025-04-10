@@ -1,5 +1,5 @@
 use divan::Bencher;
-use packer::*;
+use hexane::*;
 use std::time::Duration;
 
 use rand::{thread_rng, RngCore};
@@ -28,55 +28,50 @@ fn rand_usize() -> usize {
 
 #[inline(never)]
 #[divan::bench(max_time = Duration::from_secs(3))]
-fn insert_raw(bencher: Bencher) {
-    let mut col: ColumnData<RawCursor> = (0..N).map(|_| vec![0, 1, 2, 3, 4]).collect();
+fn seek_bool(bencher: Bencher) {
+    let col: ColumnData<BooleanCursor> = (0..N).map(|_| rand_bool()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        col.get(pos);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn seek_int(bencher: Bencher) {
+    let col: ColumnData<IntCursor> = (0..N).map(|_| rand_i64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        col.get(pos);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn seek_unt(bencher: Bencher) {
+    let col: ColumnData<UIntCursor> = (0..N).map(|_| rand_u64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        col.get(pos);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn seek_delta(bencher: Bencher) {
+    let col: ColumnData<DeltaCursor> = (0..N).map(|_| rand_i64()).collect();
+    bencher.bench_local(|| {
+        let pos = rand_usize() % col.len();
+        col.get(pos);
+    });
+}
+
+#[inline(never)]
+#[divan::bench(max_time = Duration::from_secs(3))]
+fn seek_raw(bencher: Bencher) {
+    let col: ColumnData<RawCursor> = (0..N).map(|_| vec![0, 1, 2, 3, 4]).collect();
     bencher.bench_local(|| {
         let pos = rand_usize() % (col.len() / 5) * 5;
-        let value = vec![0, 1, 2, 3, 4];
-        col.splice(pos, 0, [value]);
-    });
-}
-
-#[inline(never)]
-#[divan::bench(max_time = Duration::from_secs(3))]
-fn insert_uint(bencher: Bencher) {
-    let mut col: ColumnData<UIntCursor> = (0..N).map(|_| rand_u64()).collect();
-    bencher.bench_local(|| {
-        let pos = rand_usize() % col.len();
-        let value = rand_u64();
-        col.splice(pos, 0, [value]);
-    });
-}
-
-#[inline(never)]
-#[divan::bench(max_time = Duration::from_secs(3))]
-fn insert_int(bencher: Bencher) {
-    let mut col: ColumnData<IntCursor> = (0..N).map(|_| rand_i64()).collect();
-    bencher.bench_local(|| {
-        let pos = rand_usize() % col.len();
-        let value = rand_i64();
-        col.splice(pos, 0, [value]);
-    });
-}
-
-#[inline(never)]
-#[divan::bench(max_time = Duration::from_secs(3))]
-fn insert_delta(bencher: Bencher) {
-    let mut col: ColumnData<DeltaCursor> = (0..N).map(|_| rand_i64().abs()).collect();
-    bencher.bench_local(|| {
-        let pos = rand_usize() % col.len();
-        let value = rand_i64().abs();
-        col.splice(pos, 0, [value]);
-    });
-}
-
-#[inline(never)]
-#[divan::bench(max_time = Duration::from_secs(3))]
-fn insert_bool(bencher: Bencher) {
-    let mut col: ColumnData<BooleanCursor> = (0..N).map(|_| rand_bool()).collect();
-    bencher.bench_local(|| {
-        let pos = rand_usize() % col.len();
-        let value = rand_bool();
-        col.splice(pos, 0, [value]);
+        col.get(pos);
     });
 }

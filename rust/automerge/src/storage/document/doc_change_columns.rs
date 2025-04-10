@@ -1,6 +1,6 @@
 use std::{borrow::Cow, convert::TryFrom};
 
-use packer::{ColumnCursor, CursorIter, StrCursor};
+use hexane::{ColumnCursor, CursorIter, StrCursor};
 
 use crate::{
     columnar::{
@@ -64,7 +64,7 @@ impl DocChangeColumns {
                             Some(self.message.decoder(data))
                         },
             */
-            message: packer::StrCursor::iter(&data[self.message.as_ref().clone()]),
+            message: hexane::StrCursor::iter(&data[self.message.as_ref().clone()]),
             deps: self.deps.iter(data),
             extra: ExtraDecoder {
                 val: self.extra.iter(data),
@@ -132,7 +132,7 @@ pub(crate) enum ReadChangeError {
     #[error(transparent)]
     ReadColumn(#[from] DecodeColumnError),
     #[error(transparent)]
-    PackError(#[from] packer::PackError),
+    PackError(#[from] hexane::PackError),
 }
 
 impl From<MismatchingColumn> for ReadChangeError {

@@ -12,8 +12,8 @@ use crate::types::{
 use crate::AutomergeError;
 use crate::{Automerge, PatchLog};
 
+use super::hexane::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
 use super::op::{Op, OpBuilder, OpLike, SuccInsert, TxOp};
-use super::packer::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
 
 use super::columns::Columns;
 
@@ -50,7 +50,7 @@ pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
 
-pub(crate) type InsertAcc<'a> = super::packer::ColAccIter<'a, BooleanCursor>;
+pub(crate) type InsertAcc<'a> = super::hexane::ColAccIter<'a, BooleanCursor>;
 
 /*
 pub(crate) type ActionValueIter<'a> =
@@ -1410,8 +1410,8 @@ mod tests {
 
     use crate::{
         op_set2::{
+            hexane::{ColumnData, DeltaCursor, IntCursor},
             op::SuccCursors,
-            packer::{ColumnData, DeltaCursor, IntCursor},
             types::{Action, ActorCursor, ScalarValue},
             KeyRef,
         },

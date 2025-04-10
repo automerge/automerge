@@ -7,8 +7,8 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
-pub(crate) use crate::op_set2;
 pub(crate) use crate::op_set2::change::ChangeCollector;
+pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
     ChangeMetadata, ChangeOp, KeyRef, OpBuilder, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
@@ -1719,7 +1719,7 @@ impl Automerge {
                         //if !op.visible() {
                         //    continue;
                         //}
-                        if let OpType::Put(op_set2::ScalarValue::Str(s)) = op.op_type() {
+                        if let OpType::Put(ScalarValue::Str(s)) = op.op_type() {
                             let prop = match op.key {
                                 KeyRef::Map(prop) => Prop::Map(prop.into()),
                                 KeyRef::Seq(_) => {

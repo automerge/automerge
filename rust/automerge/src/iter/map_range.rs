@@ -1,8 +1,8 @@
 use super::tools::{ExIdPromise, Shiftable, SkipIter, Unshift};
 use crate::clock::Clock;
 use crate::exid::ExId;
+use crate::op_set2::hexane::{ColumnDataIter, StrCursor};
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter, VisIter};
-use crate::op_set2::packer::{ColumnDataIter, StrCursor};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::types::OpId;
 

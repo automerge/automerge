@@ -1,5 +1,5 @@
-pub(crate) use packer;
-pub(crate) use packer::PackError;
+pub(crate) use hexane;
+pub(crate) use hexane::PackError;
 
 pub(crate) mod change;
 pub(crate) mod columns;

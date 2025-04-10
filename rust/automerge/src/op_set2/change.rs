@@ -1,6 +1,6 @@
+use super::hexane::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use super::meta::MetaCursor;
 use super::op::{AsChangeOp, OpBuilder};
-use super::packer::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use super::types::{ActionCursor, ActorCursor, ActorIdx};
 use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};

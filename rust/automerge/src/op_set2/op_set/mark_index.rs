@@ -1,5 +1,5 @@
 use crate::types::{Clock, OpId};
-use packer::{
+use hexane::{
     Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
     Slab, SpanWeight,
 };
@@ -217,7 +217,7 @@ impl From<MarkIndexValue> for i64 {
 
 impl Packable for MarkIndexValue {
     fn width(item: &MarkIndexValue) -> usize {
-        packer::lebsize(i64::from(*item)) as usize
+        hexane::lebsize(i64::from(*item)) as usize
     }
 
     fn pack(item: &MarkIndexValue, out: &mut Vec<u8>) {

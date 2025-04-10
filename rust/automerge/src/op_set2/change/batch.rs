@@ -1239,7 +1239,7 @@ mod tests {
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
-        let maps = vec![map1, map2, map3];
+        let maps = [map1, map2, map3];
         let mut value = 0;
         let mut val = move || {
             value += 1;
@@ -1282,7 +1282,7 @@ mod tests {
         let map1 = doc1.put_object(&ROOT, "map1", ObjType::Map).unwrap();
         let map2 = doc1.put_object(&map1, "map2", ObjType::Map).unwrap();
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
-        let maps = vec![map1, map2, map3];
+        let maps = [map1, map2, map3];
         let mut value = 0;
         let mut val = move || {
             value += 1;
@@ -1362,7 +1362,7 @@ mod tests {
         let map3 = doc1.put_object(&map2, "map3", ObjType::Map).unwrap();
         doc1.put(&map3, "key1", ScalarValue::counter(1000)).unwrap();
         doc1.increment(&map3, "key1", 30).unwrap();
-        let maps = vec![map1, map2, map3];
+        let maps = [map1, map2, map3];
         let mut value = 0;
         let mut val = move || {
             value += 1;
@@ -1629,16 +1629,16 @@ mod tests {
         merge_and_diff(&mut doc1, &mut doc1_copy, &changes);
     }
 
-    fn merge_and_diff(a: &mut AutoCommit, a_copy: &mut AutoCommit, changes: &Vec<Change>) {
+    fn merge_and_diff(a: &mut AutoCommit, a_copy: &mut AutoCommit, changes: &[Change]) {
         let heads = a.get_heads();
 
         a.update_diff_cursor();
-        a.apply_changes_batch(changes.clone()).unwrap();
+        a.apply_changes_batch(changes.to_owned()).unwrap();
         let pa = a.diff_incremental();
         let final_heads = a.get_heads();
         a.dump();
 
-        a_copy.apply_changes_iter(changes.clone()).unwrap();
+        a_copy.apply_changes_iter(changes.to_owned()).unwrap();
         let pb = a_copy.diff(&heads, &final_heads);
 
         let len = std::cmp::max(pa.len(), pb.len());

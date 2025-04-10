@@ -1,11 +1,11 @@
 use crate::op_set2::op_set::{MarkIndexColumn, MarkIndexValue};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, TextEncoding};
-use packer::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
+use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
 
 // TODO : this could be faster and use less memory if
-// packer::Encoder was used here instead of Vec<>
+// hexane::Encoder was used here instead of Vec<>
 
 pub(crate) struct IndexBuilder {
     counters: HashMap<OpId, Vec<(usize, usize)>>,

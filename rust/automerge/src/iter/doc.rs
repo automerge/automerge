@@ -100,15 +100,13 @@ impl<'a> DocIter<'a> {
         let next_range = self.obj_id_iter.seek_to_value(next);
         if next_range.is_empty() {
             Some(None)
+        } else if let Some(item) = self.shift(next_type, next_range) {
+            self.obj = next;
+            self.obj_export = Arc::new(self.op_set?.id_to_exid(next.0));
+            self.iter_type = next_type;
+            Some(self.process_item(item))
         } else {
-            if let Some(item) = self.shift(next_type, next_range) {
-                self.obj = next;
-                self.obj_export = Arc::new(self.op_set?.id_to_exid(next.0));
-                self.iter_type = next_type;
-                Some(self.process_item(item))
-            } else {
-                Some(None)
-            }
+            Some(None)
         }
     }
 

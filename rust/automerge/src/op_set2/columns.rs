@@ -1,10 +1,10 @@
-use super::meta::MetaCursor;
-use super::op::OpLike;
-use super::op_set::MarkIndexColumn;
-use super::packer::{
+use super::hexane::{
     BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor,
     ScanMeta, StrCursor, UIntCursor,
 };
+use super::meta::MetaCursor;
+use super::op::OpLike;
+use super::op_set::MarkIndexColumn;
 use super::types::{Action, ActionCursor, ActorCursor, ActorIdx, ScalarValue};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::ColumnId;
@@ -424,7 +424,7 @@ impl Columns {
 
 const NONE: &str = ".";
 
-fn fmt<T: std::fmt::Display + packer::Packable + ?Sized>(t: Option<Option<Cow<'_, T>>>) -> String {
+fn fmt<T: std::fmt::Display + hexane::Packable + ?Sized>(t: Option<Option<Cow<'_, T>>>) -> String {
     match t {
         None => NONE.to_owned(),
         Some(None) => "-".to_owned(),
