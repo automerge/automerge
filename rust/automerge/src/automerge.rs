@@ -2076,12 +2076,14 @@ impl ReadDoc for Automerge {
     fn stats(&self) -> crate::read::Stats {
         let num_changes = self.change_graph.len() as u64;
         let num_ops = self.ops.len() as u64;
+        let num_actors = self.ops.actors.len() as u64;
         let cargo_package_name = env!("CARGO_PKG_NAME");
         let cargo_package_version = env!("CARGO_PKG_VERSION");
         let rustc_version = env!("CARGO_PKG_RUST_VERSION");
         crate::read::Stats {
             num_changes,
             num_ops,
+            num_actors,
             cargo_package_name,
             cargo_package_version,
             rustc_version,

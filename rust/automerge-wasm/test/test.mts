@@ -2398,6 +2398,7 @@ describe('Automerge', () => {
       const stats = doc.stats()
       assert.equal(stats.numChanges, 2);
       assert.equal(stats.numOps, 2);
+      assert.equal(stats.numActors, 1);
       assert.equal(typeof stats.rustcVersion, "string");
       assert.equal(typeof stats.cargoPackageName, "string");
       assert.equal(typeof stats.cargoPackageVersion, "string");

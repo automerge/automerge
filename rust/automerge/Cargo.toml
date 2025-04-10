@@ -35,7 +35,6 @@ dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
-im = "15.1.0"
 
 unicode-segmentation = "1.10.1"
 

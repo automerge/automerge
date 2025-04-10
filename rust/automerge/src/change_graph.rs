@@ -27,23 +27,22 @@ pub(crate) struct ChangeGraph {
     hashes: Vec<ChangeHash>,
     actors: Vec<ActorIdx>,
     parents: Vec<Option<EdgeIdx>>,
-    seq: Vec<u64>,
-    max_ops: Vec<u64>,
+    seq: Vec<u32>,
+    max_ops: Vec<u32>,
     num_ops: ColumnData<UIntCursor>,
     timestamps: ColumnData<DeltaCursor>,
     messages: ColumnData<StrCursor>,
-    messages2: Vec<Option<String>>,
     extra_bytes_meta: ColumnData<MetaCursor>,
     extra_bytes_raw: Vec<u8>,
     heads: BTreeSet<ChangeHash>,
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
-    clock_cache: Vec<Clock>,
+    clock_cache: HashMap<NodeIdx, Clock>,
     seq_index: Vec<Vec<NodeIdx>>,
 }
 
-const CACHE_STEP: u32 = 32;
+const CACHE_STEP: u32 = 16;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeIdx(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -78,12 +77,11 @@ impl ChangeGraph {
             seq: Vec::new(),
             parents: Vec::new(),
             messages: ColumnData::new(),
-            messages2: Vec::new(),
             timestamps: ColumnData::new(),
             extra_bytes_meta: ColumnData::new(),
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
-            clock_cache: Vec::new(),
+            clock_cache: HashMap::new(),
             seq_index: vec![vec![]; num_actors],
         }
     }
@@ -99,12 +97,11 @@ impl ChangeGraph {
             seq: Vec::with_capacity(changes),
             parents: Vec::with_capacity(changes),
             messages: ColumnData::new(),
-            messages2: Vec::new(),
             timestamps: ColumnData::new(),
             extra_bytes_meta: ColumnData::new(),
             extra_bytes_raw: Vec::new(),
             heads: BTreeSet::new(),
-            clock_cache: Vec::with_capacity(changes / CACHE_STEP as usize + 1),
+            clock_cache: HashMap::new(),
             seq_index: vec![vec![]; num_actors],
         }
     }
@@ -126,6 +123,10 @@ impl ChangeGraph {
             .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
     }
 
+    fn num_actors(&self) -> usize {
+        self.seq_index.len()
+    }
+
     pub(crate) fn insert_actor(&mut self, idx: usize) {
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
@@ -133,10 +134,9 @@ impl ChangeGraph {
                     actor_index.0 += 1;
                 }
             }
-            // FIXME - this could get expensive - lookout
-            for clock in &mut self.clock_cache {
-                clock.rewrite_with_new_actor(idx)
-            }
+        }
+        for (_, clock) in &mut self.clock_cache {
+            clock.rewrite_with_new_actor(idx)
         }
         self.seq_index.insert(idx, vec![]);
     }
@@ -151,7 +151,7 @@ impl ChangeGraph {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
         }
-        for clock in &mut self.clock_cache {
+        for (_, clock) in &mut self.clock_cache {
             clock.remove_actor(idx)
         }
     }
@@ -177,7 +177,7 @@ impl ChangeGraph {
             .get(actor_index)
             .and_then(|s| s.last())
             .and_then(|index| self.max_ops.get(index.0 as usize).cloned())
-            .unwrap_or(0)
+            .unwrap_or(0) as u64
     }
 
     pub(crate) fn seq_for_actor(&self, actor: usize) -> u64 {
@@ -245,10 +245,10 @@ impl ChangeGraph {
                 let i = n.0 as usize;
                 let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
                 let max_op = self.max_ops[i];
-                let start = max_op - num_ops + 1;
-                if counter < start {
+                let start = max_op as u64 - num_ops + 1;
+                if counter < start as u64 {
                     Ordering::Greater
-                } else if max_op <= counter {
+                } else if max_op as u64 <= counter {
                     Ordering::Less
                 } else {
                     Ordering::Equal
@@ -306,7 +306,7 @@ impl ChangeGraph {
                 let i = index.0 as usize;
                 let actor = self.actors[i].into();
                 let timestamp = *self.timestamps.get(i).flatten().unwrap_or_default();
-                let max_op = self.max_ops[i];
+                let max_op = self.max_ops[i] as u64;
                 let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
                 let message = self.messages.get(i).flatten();
 
@@ -319,7 +319,7 @@ impl ChangeGraph {
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
                 num_deps += deps.len();
                 let start_op = max_op - num_ops + 1;
-                let seq = self.seq[i];
+                let seq = self.seq[i] as u64;
                 BuildChangeMetadata {
                     actor,
                     seq,
@@ -393,25 +393,44 @@ impl ChangeGraph {
         if self.nodes_by_hash.contains_key(&hash) {
             return Ok(());
         }
+
         let parent_indices = change
             .deps()
             .iter()
             .map(|h| self.nodes_by_hash.get(h).copied().ok_or(MissingDep(*h)))
             .collect::<Result<Vec<_>, _>>()?;
+
         let change_seq = change.seq();
         self.update_heads(change);
         let node_idx = self.add_node(actor_idx, change);
         self.index_by_seq(actor_idx, node_idx, change_seq);
         self.nodes_by_hash.insert(hash, node_idx);
+
         for parent_idx in parent_indices {
             self.add_parent(node_idx, parent_idx);
         }
-        if let Some(cached_idx) = Self::node_to_cache(&node_idx, CACHE_STEP) {
-            assert_eq!(cached_idx, self.clock_cache.len());
-            let clock = self.calculate_clock(vec![node_idx]);
-            self.clock_cache.push(clock)
+
+        if (node_idx.0 + 1) % CACHE_STEP == 0 {
+            self.cache_clock(node_idx);
         }
+
         Ok(())
+    }
+
+    fn cache_clock(&mut self, node_idx: NodeIdx) -> Clock {
+        let mut clock = Clock::new(self.num_actors());
+        let mut to_visit = BTreeSet::from([node_idx]);
+
+        self.calculate_clock_inner(&mut clock, &mut to_visit, CACHE_STEP as usize * 2);
+
+        for n in to_visit {
+            let sub = self.cache_clock(n);
+            Clock::merge(&mut clock, &sub);
+        }
+
+        self.clock_cache.insert(node_idx, clock.clone());
+
+        clock
     }
 
     fn index_by_seq(&mut self, actor_index: ActorIdx, node_idx: NodeIdx, seq: u64) {
@@ -425,12 +444,11 @@ impl ChangeGraph {
         let idx = NodeIdx(self.hashes.len() as u32);
         self.hashes.push(change.hash());
         self.actors.push(actor_index);
-        self.seq.push(change.seq());
-        self.max_ops.push(change.max_op());
+        self.seq.push(change.seq() as u32);
+        self.max_ops.push(change.max_op() as u32);
         self.num_ops.push(change.len() as u64);
         self.timestamps.push(change.timestamp());
         self.messages.push(change.message().cloned());
-        self.messages2.push(change.message().cloned());
         self.extra_bytes_meta
             .push(ValueMeta::from(change.extra_bytes()));
         self.extra_bytes_raw.extend(change.extra_bytes());
@@ -478,44 +496,52 @@ impl ChangeGraph {
 
     pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
         let nodes = self.heads_to_nodes(heads);
-        assert_eq!(
-            self.clock_cache.len(),
-            self.hashes.len() / CACHE_STEP as usize
-        );
         self.calculate_clock(nodes)
     }
 
-    fn node_to_cache(idx: &NodeIdx, step: u32) -> Option<usize> {
-        assert!(step > 2);
-        if (idx.0 + 1) % step == 0 {
-            Some(((idx.0 + 1) / step - 1) as usize)
-        } else {
-            None
+    fn clock_data_for(&self, idx: NodeIdx) -> ClockData {
+        ClockData {
+            max_op: self.max_ops[idx.0 as usize],
+            seq: self.seq[idx.0 as usize],
         }
     }
 
     fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> Clock {
-        let mut clock = Clock::new();
+        let mut clock = Clock::new(self.num_actors());
+        let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
 
-        self.traverse_ancestors(nodes, |idx| {
-            clock.include(
-                self.actors[idx.0 as usize].into(),
-                ClockData {
-                    max_op: self.max_ops[idx.0 as usize],
-                    seq: self.seq[idx.0 as usize],
-                },
-            );
-            if let Some(cached_idx) = Self::node_to_cache(&idx, CACHE_STEP) {
-                if cached_idx < self.clock_cache.len() {
-                    let ancestor_clock = &self.clock_cache[cached_idx];
-                    clock = Clock::merge(&clock, ancestor_clock);
-                    return false; // dont look at ancestors
-                }
-            }
-            true // do look at ancestors
-        });
+        self.calculate_clock_inner(&mut clock, &mut to_visit, usize::MAX);
+
+        assert!(to_visit.is_empty());
 
         clock
+    }
+
+    fn calculate_clock_inner(
+        &self,
+        clock: &mut Clock,
+        to_visit: &mut BTreeSet<NodeIdx>,
+        limit: usize,
+    ) {
+        let mut visited = BTreeSet::new();
+
+        while let Some(idx) = to_visit.pop_last() {
+            assert!(!visited.contains(&idx));
+            assert!(visited.len() <= self.hashes.len());
+            visited.insert(idx);
+
+            let actor = self.actors[idx.0 as usize];
+            let data = self.clock_data_for(idx);
+            clock.include(actor.into(), data);
+
+            if let Some(cached) = self.clock_cache.get(&idx) {
+                Clock::merge(clock, cached);
+            } else if visited.len() <= limit as usize {
+                to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
+            } else {
+                break;
+            }
+        }
     }
 
     pub(crate) fn remove_ancestors(
@@ -531,10 +557,6 @@ impl ChangeGraph {
         });
     }
 
-    /// Call `f` for each (node, hash) in the graph, starting from the given heads
-    ///
-    /// No guarantees are made about the order of traversal but each node will only be visited
-    /// once.
     fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(&self, mut to_visit: Vec<NodeIdx>, mut f: F) {
         let mut visited = BTreeSet::new();
 
@@ -555,7 +577,7 @@ fn as_num_deps(num: usize) -> Option<Cow<'static, u64>> {
     Some(Cow::Owned(num as u64))
 }
 
-fn as_seq(seq: &u64) -> Option<Cow<'_, i64>> {
+fn as_seq(seq: &u32) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(*seq as i64))
 }
 
@@ -563,7 +585,7 @@ fn as_actor(actor_index: &ActorIdx) -> Option<Cow<'_, ActorIdx>> {
     Some(Cow::Borrowed(actor_index))
 }
 
-fn as_max_op(m: &u64) -> Option<Cow<'_, i64>> {
+fn as_max_op(m: &u32) -> Option<Cow<'_, i64>> {
     Some(Cow::Owned(*m as i64))
 }
 
@@ -603,7 +625,8 @@ mod tests {
         let change4 = builder.change(&actor1, 10, &[change2, change3]);
         let graph = builder.build();
 
-        let mut expected_clock = Clock::new();
+        // todo - why 4?
+        let mut expected_clock = Clock::new(3);
         expected_clock.include(builder.index(&actor1), ClockData { max_op: 50, seq: 2 });
         expected_clock.include(builder.index(&actor2), ClockData { max_op: 30, seq: 1 });
         expected_clock.include(builder.index(&actor3), ClockData { max_op: 40, seq: 1 });
@@ -737,17 +760,5 @@ mod tests {
             }
             graph
         }
-    }
-
-    #[test]
-    fn node_to_cache() {
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(0), 4));
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(1), 4));
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(2), 4));
-        assert_eq!(Some(0), ChangeGraph::node_to_cache(&NodeIdx(3), 4));
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(4), 4));
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(5), 4));
-        assert_eq!(None, ChangeGraph::node_to_cache(&NodeIdx(6), 4));
-        assert_eq!(Some(1), ChangeGraph::node_to_cache(&NodeIdx(7), 4));
     }
 }

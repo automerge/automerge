@@ -315,6 +315,8 @@ pub struct Stats {
     pub num_ops: u64,
     /// The number of changes in the change graph for the document
     pub num_changes: u64,
+    /// The number of actors in the document
+    pub num_actors: u64,
     /// package name from cargo.toml ("automerge");
     pub cargo_package_name: &'static str,
     /// package version from cargo.toml

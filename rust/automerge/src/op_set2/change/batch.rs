@@ -1177,7 +1177,7 @@ mod tests {
 
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
-        //let seed = 12949120071260318562;
+        //let seed = 11083352401816887809;
 
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
