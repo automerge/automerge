@@ -701,7 +701,7 @@ impl BatchApply {
             doc.import_ops_to(c, &mut self.ops).unwrap();
             doc.update_history(c, c.iter_ops().count());
         }
-        assert_eq!(doc.ops.actors.len(), doc.change_graph.actor_ids().count());
+        doc.validate_actor_ids();
     }
 
     pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {
@@ -879,7 +879,7 @@ impl Automerge {
                     ));
                     break;
                 }
-                if self.is_causally_ready2(&c, &chap.hashes) {
+                if self.is_causally_ready(&c, &chap.hashes) {
                     chap.push(c);
                 } else {
                     self.queue.push(c);
@@ -887,7 +887,7 @@ impl Automerge {
             }
         }
         if result.is_ok() {
-            while let Some(c) = self.pop_next_causally_ready_change2(&chap.hashes) {
+            while let Some(c) = self.pop_next_causally_ready_change(&chap.hashes) {
                 chap.push(c);
             }
         }
@@ -909,17 +909,17 @@ impl Automerge {
         })
     }
 
-    fn is_causally_ready2(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
+    fn is_causally_ready(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
         change
             .deps()
             .iter()
             .all(|d| self.change_graph.has_change(d) || ready.contains(d))
     }
 
-    fn pop_next_causally_ready_change2(&mut self, ready: &HashSet<ChangeHash>) -> Option<Change> {
+    fn pop_next_causally_ready_change(&mut self, ready: &HashSet<ChangeHash>) -> Option<Change> {
         let mut index = 0;
         while index < self.queue.len() {
-            if self.is_causally_ready2(&self.queue[index], ready) {
+            if self.is_causally_ready(&self.queue[index], ready) {
                 return Some(self.queue.swap_remove(index));
             }
             index += 1;
@@ -932,12 +932,12 @@ impl Automerge {
         change: &Change,
         ops: &mut Vec<ChangeOp>,
     ) -> Result<(), AutomergeError> {
-        let new_ops = self.import_ops2(change)?;
+        let new_ops = self.import_ops(change)?;
         ops.extend(new_ops);
         Ok(())
     }
 
-    fn import_ops2(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
+    fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
         let actors: Vec<_> = change
             .actors()
             .map(|a| self.ops.lookup_actor(a).unwrap())
@@ -986,6 +986,19 @@ mod tests {
     use crate::types;
     use crate::{ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
+
+    impl AutoCommit {
+        fn apply_changes_iter(
+            &mut self,
+            changes: impl IntoIterator<Item = Change> + Clone,
+        ) -> Result<(), AutomergeError> {
+            let changes = changes.into_iter().collect::<Vec<_>>();
+            for c in changes {
+                self.apply_changes([c])?;
+            }
+            Ok(())
+        }
+    }
 
     #[test]
     fn map_batch_apply() {

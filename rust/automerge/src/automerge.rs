@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
@@ -10,7 +9,7 @@ use itertools::Itertools;
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
-    ChangeMetadata, ChangeOp, KeyRef, OpBuilder, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
+    ChangeMetadata, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
 pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
 
@@ -282,7 +281,25 @@ impl Automerge {
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
 
-        assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
+        self.validate_actor_ids();
+    }
+
+    pub(crate) fn validate_actor_ids(&self) {
+        //assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
+        if self.ops.actors.len() != self.change_graph.actor_ids().count() {
+            log!("op_set/change_graph actors out of sync");
+            log!("op_set.actors.len()={}", self.ops.actors.len());
+            log!(
+                "change_graph.all_actor_ids().count()={}",
+                self.change_graph.all_actor_ids().count()
+            );
+            log!(
+                "change_graph.actor_ids().count()={}",
+                self.change_graph.actor_ids().count()
+            );
+            log!("actors={:?}", self.ops.actors);
+            panic!();
+        }
     }
 
     fn get_or_create_actor_index(&mut self) -> usize {
@@ -845,115 +862,6 @@ impl Automerge {
         self.apply_changes_batch_log_patches(changes, patch_log)
     }
 
-    pub fn apply_changes_iter<I: IntoIterator<Item = Change> + Clone>(
-        &mut self,
-        changes: I,
-    ) -> Result<(), AutomergeError> {
-        self.apply_changes_iter_log_patches(
-            changes,
-            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
-        )
-    }
-
-    pub fn apply_changes_iter_log_patches<I: IntoIterator<Item = Change> + Clone>(
-        &mut self,
-        changes: I,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        // Record this so we can avoid observing each individual change and instead just observe
-        // the final state after all the changes have been applied. We can only do this for an
-        // empty document right now, once we have logic to produce the diffs between arbitrary
-        // states of the OpSet we can make this cleaner.
-        for c in changes {
-            if !self.has_change(&c.hash()) {
-                if c.actor_id() == self.actor_id() {
-                    return Err(AutomergeError::DuplicateActorId(c.actor_id().clone()));
-                }
-                if self.has_actor_seq(&c) {
-                    return Err(AutomergeError::DuplicateSeqNumber(
-                        c.seq(),
-                        c.actor_id().clone(),
-                    ));
-                }
-                if self.is_causally_ready(&c) {
-                    self.apply_change(c, patch_log)?;
-                } else {
-                    self.queue.push(c);
-                }
-            }
-        }
-        while let Some(c) = self.pop_next_causally_ready_change() {
-            if !self.has_change(&c.hash()) {
-                self.apply_change(c, patch_log)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn apply_change(
-        &mut self,
-        change: Change,
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
-        let ops = self.import_ops(&change)?;
-        self.update_history(&change, ops.len());
-        patch_log.migrate_actors(&self.ops().actors)?;
-        for op in ops {
-            self.insert_op(op, patch_log, change.raw_bytes())?;
-        }
-        Ok(())
-    }
-
-    fn is_causally_ready(&self, change: &Change) -> bool {
-        change.deps().iter().all(|d| self.has_change(d))
-    }
-
-    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            if self.is_causally_ready(&self.queue[index]) {
-                return Some(self.queue.swap_remove(index));
-            }
-            index += 1;
-        }
-        None
-    }
-
-    fn import_ops(&mut self, change: &Change) -> Result<Vec<ChangeOp>, AutomergeError> {
-        let actors: Vec<_> = change.actors().map(|a| self.put_actor_ref(a)).collect();
-        change
-            .iter_ops()
-            .enumerate()
-            .map(|(i, c)| {
-                let id = OpId::new(change.start_op().get() + i as u64, 0).map(&actors)?;
-                let key = c.key.map(&actors)?;
-                let obj = c.obj.map(&actors)?;
-                let pred = c
-                    .pred
-                    .into_iter()
-                    .map(|id| id.map(&actors))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let change = ChangeOp {
-                    pos: None,
-                    subsort: 0,
-                    succ: vec![],
-                    bld: OpBuilder {
-                        id,
-                        obj,
-                        key,
-                        action: c.action.try_into()?,
-                        value: c.val.into_ref(),
-                        mark_name: c.mark_name.map(String::from).map(Cow::Owned),
-                        expand: c.expand,
-                        insert: c.insert,
-                        pred,
-                    },
-                };
-                Ok(change)
-            })
-            .collect()
-    }
-
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.merge_and_log_patches(
@@ -979,7 +887,7 @@ impl Automerge {
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
         // make sure we dont have un-used actors
-        assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
+        self.validate_actor_ids();
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
@@ -1228,48 +1136,6 @@ impl Automerge {
                     );
                 }
         */
-    }
-
-    pub(crate) fn insert_op(
-        &mut self,
-        op: ChangeOp,
-        patch_log: &mut PatchLog,
-        change: &[u8],
-    ) -> Result<(), AutomergeError> {
-        let obj = self.get_obj_meta(op.bld.obj)?;
-        let encoding = patch_log.text_rep().encoding(obj.typ);
-
-        let found = self.ops.find_op_with_patch_log(&op.bld, encoding);
-
-        if op.pred().len() != found.succ.len() {
-            log!("Error: did not find all pred ops");
-            log!("op={:?}", op);
-            log!("found={:?}", found);
-            log!("heads={:?}", self.get_heads());
-            log!("change={:?}", change);
-            panic!()
-        }
-
-        let op = op.build(found.pos, obj);
-
-        if patch_log.is_active() {
-            found.log_patches(&obj, &op, &op.bld.pred, self, patch_log);
-        }
-
-        let inc_amount = op.get_increment_value();
-        let succ: Vec<_> = found
-            .succ
-            .iter()
-            .map(|o| o.add_succ(op.id(), inc_amount))
-            .collect();
-
-        if !op.is_delete() {
-            self.ops.splice(op.pos, &[op]);
-        }
-
-        self.ops.add_succ(&succ);
-
-        Ok(())
     }
 
     /// Create patches representing the change in the current state of the document between the

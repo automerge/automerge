@@ -154,15 +154,6 @@ impl ChangeOp {
         }
     }
 
-    pub(crate) fn build(self, pos: usize, obj: ObjMeta) -> TxOp {
-        TxOp {
-            obj_type: obj.typ,
-            pos,
-            index: 0,
-            bld: self.bld,
-        }
-    }
-
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
         match (self.bld.action, &self.bld.value) {
             (Action::Increment, ScalarValue::Int(i)) => Some(*i),
@@ -218,20 +209,12 @@ impl OpBuilder<'_> {
         self.action == Action::Mark
     }
 
-    pub(crate) fn is_mark_end(&self) -> bool {
-        self.action == Action::Mark && self.mark_name.is_none()
-    }
-
     pub(crate) fn as_str(&self) -> &str {
         match (self.action, &self.value) {
             (Action::Set, ScalarValue::Str(s)) => s,
             (Action::Mark, _) => "",
             _ => "\u{fffc}",
         }
-    }
-
-    pub(crate) fn is_block(&self) -> bool {
-        self.action == Action::MakeMap
     }
 
     pub(crate) fn is_delete(&self) -> bool {
@@ -244,10 +227,6 @@ impl OpBuilder<'_> {
             (Action::Increment, ScalarValue::Uint(i)) => Some(*i as i64),
             _ => None,
         }
-    }
-
-    pub(crate) fn is_list_op(&self) -> bool {
-        self.key.elemid().is_some()
     }
 
     pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {

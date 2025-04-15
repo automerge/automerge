@@ -106,6 +106,10 @@ impl ChangeGraph {
         }
     }
 
+    pub(crate) fn all_actor_ids(&self) -> impl Iterator<Item = usize> + '_ {
+        self.seq_index.iter().enumerate().map(|(i, _)| i)
+    }
+
     pub(crate) fn actor_ids(&self) -> impl Iterator<Item = usize> + '_ {
         self.seq_index
             .iter()
