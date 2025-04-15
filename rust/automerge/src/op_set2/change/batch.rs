@@ -701,6 +701,7 @@ impl BatchApply {
             doc.import_ops_to(c, &mut self.ops).unwrap();
             doc.update_history(c, c.iter_ops().count());
         }
+        assert_eq!(doc.ops.actors.len(), doc.change_graph.actor_ids().count());
     }
 
     pub(crate) fn apply(&mut self, doc: &mut Automerge, log: &mut PatchLog) {

@@ -254,13 +254,16 @@ impl Automerge {
 
     /// Set the actor id for this document.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
-        self.actor = Actor::Unused(actor);
+        self.set_actor(actor);
         self
     }
 
     /// Set the actor id for this document.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
-        self.actor = Actor::Unused(actor);
+        match self.ops.actors.binary_search(&actor) {
+            Ok(idx) => self.actor = Actor::Cached(idx),
+            Err(_) => self.actor = Actor::Unused(actor),
+        }
         self
     }
 
@@ -278,9 +281,11 @@ impl Automerge {
         }
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
+
+        assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
     }
 
-    pub(crate) fn get_actor_index(&mut self) -> usize {
+    fn get_or_create_actor_index(&mut self) -> usize {
         match &self.actor {
             Actor::Unused(actor) => {
                 let index = self.put_actor(actor.clone());
@@ -291,7 +296,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn get_actor_index2(&self) -> Option<usize> {
+    fn get_actor_index(&self) -> Option<usize> {
         match &self.actor {
             Actor::Unused(_) => None,
             Actor::Cached(index) => Some(*index),
@@ -334,7 +339,7 @@ impl Automerge {
                 scope = Some(isolation.clock);
             }
             None => {
-                actor_index = self.get_actor_index();
+                actor_index = self.get_or_create_actor_index();
                 seq = self.change_graph.seq_for_actor(actor_index) + 1;
                 deps = self.get_heads();
                 scope = None;
@@ -837,16 +842,7 @@ impl Automerge {
         changes: I,
         patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        /*
-                let mut tmp = self.clone();
-                let mut tmp_patch_log = patch_log.clone();
-                let heads1 = tmp.get_heads();
-                tmp.apply_changes_iter_log_patches(changes.clone(), &mut tmp_patch_log)?;
-                let heads2 = tmp.get_heads();
-                tmp.diff(&heads1, &heads2, TextRepresentation::default());
-        */
         self.apply_changes_batch_log_patches(changes, patch_log)
-        //self.apply_changes_iter_log_patches(changes, patch_log)
     }
 
     pub fn apply_changes_iter<I: IntoIterator<Item = Change> + Clone>(
@@ -1057,8 +1053,7 @@ impl Automerge {
 
     /// Get the last change this actor made to the document.
     pub fn get_last_local_change(&self) -> Option<Change> {
-        // TODO - i'd like tests for this
-        let actor = self.get_actor_index2()?;
+        let actor = self.get_actor_index()?;
         let seq = self.change_graph.seq_for_actor(actor);
         let hash = self.change_graph.get_hash_for_actor_seq(actor, seq).ok()?;
         self.get_change_by_hash(&hash)
@@ -1070,7 +1065,7 @@ impl Automerge {
 
     fn get_isolated_actor_index(&mut self, level: usize) -> usize {
         if level == 0 {
-            self.get_actor_index()
+            self.get_or_create_actor_index()
         } else {
             let base_actor = self.get_actor();
             let new_actor = base_actor.with_concurrency(level);
@@ -1110,7 +1105,11 @@ impl Automerge {
 
         self.update_deps(change);
 
-        let actor_index = self.put_actor_ref(change.actor_id());
+        let actor_index = self
+            .ops
+            .actors
+            .binary_search(change.actor_id())
+            .expect("Change's actor not already in the document");
 
         self.change_graph
             .add_change(change, actor_index)
@@ -1123,8 +1122,6 @@ impl Automerge {
         self.actor.rewrite_with_new_actor(index);
         index
     }
-
-    // redo this with COW?
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,

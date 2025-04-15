@@ -135,7 +135,7 @@ impl TransactionInner {
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
         doc.update_history(&change, num_ops);
-        //debug_assert_eq!(doc.get_heads(), vec![hash]);
+        assert_eq!(doc.ops.actors.len(), doc.change_graph.actor_ids().count());
         hash
     }
 
