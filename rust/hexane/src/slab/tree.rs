@@ -1290,3 +1290,109 @@ pub(crate) mod tests {
         test_splice(&mut tree, &mut base, 2..5, vec![50, 60, 70]);
     }
 }
+
+struct NodeWalker<'a, T, W>
+where
+    T: Clone + Debug + Default,
+    W: SpanWeight<T>,
+{
+    children: std::slice::Iter<'a, TreeNode<T, W>>,
+    elements: std::slice::Iter<'a, T>,
+    index: usize,
+    acc: W,
+}
+
+impl<'a, T, W> NodeWalker<'a, T, W>
+where
+    T: Clone + Debug + Default,
+    W: SpanWeight<T>,
+{
+    fn new(node: &'a TreeNode<T, W>, index: usize, acc: W) -> Self {
+        let elements = node.elements.iter();
+        let children = if node.is_leaf() {
+            [].iter()
+        } else {
+            node.children.iter()
+        };
+        NodeWalker {
+            children,
+            elements,
+            index,
+            acc,
+        }
+    }
+
+    fn next_walker<F>(&mut self, f: &F) -> Option<NodeWalker<'a, T, W>>
+    where
+        F: Fn(&W, &W) -> bool,
+    {
+        let mut result = None;
+        let child = self.children.next()?;
+        let next = child.weight();
+        if f(&self.acc, next) {
+            result = Some(NodeWalker::new(child, self.index, self.acc.clone()));
+        }
+        self.index += child.len();
+        self.acc.union(next);
+        result
+    }
+
+    fn next_cursor<F>(&mut self, f: &F) -> Option<SubCursor<'a, T, W>>
+    where
+        F: Fn(&W, &W) -> bool,
+    {
+        let mut result = None;
+        let e = self.elements.next()?;
+        let next = W::alloc(e);
+        if f(&self.acc, &next) {
+            result = Some(SubCursor::new(self.index, self.acc.clone(), e));
+        }
+        self.index += 1;
+        self.acc.union(&next);
+        result
+    }
+}
+
+struct FnIter<'a, T, W, F>
+where
+    T: Clone + Debug + Default,
+    W: SpanWeight<T>,
+    F: Fn(&W, &W) -> bool,
+{
+    stack: Vec<NodeWalker<'a, T, W>>,
+    func: F,
+}
+
+impl<'a, T, W, F> FnIter<'a, T, W, F>
+where
+    T: Clone + Debug + Default,
+    W: SpanWeight<T>,
+    F: Fn(&W, &W) -> bool,
+{
+    fn pop_cursor(&mut self) -> Option<SubCursor<'a, T, W>> {
+        if let Some(value) = self.stack.last_mut()?.next_cursor(&self.func) {
+            Some(value)
+        } else {
+            self.stack.pop();
+            self.pop_cursor()
+        }
+    }
+}
+
+impl<'a, T, W, F> Iterator for FnIter<'a, T, W, F>
+where
+    T: Clone + Debug + Default,
+    W: SpanWeight<T>,
+    F: Fn(&W, &W) -> bool,
+{
+    type Item = SubCursor<'a, T, W>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(walker) = self.stack.last_mut()?.next_walker(&self.func) {
+            self.stack.push(walker);
+            self.next()
+        } else {
+            self.pop_cursor()
+        }
+    }
+}

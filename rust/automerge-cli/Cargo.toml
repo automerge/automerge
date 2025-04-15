@@ -2,9 +2,9 @@
 name = "automerge-cli"
 version = "0.1.0"
 authors = ["Alex Good <alex@memoryandthought.me>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
-rust-version = "1.70"
+rust-version = "1.73.0"
 
 [[bin]]
 name = "automerge"
