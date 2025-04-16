@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -45,10 +45,14 @@ optional = true
 [dev-dependencies]
 pretty_assertions = "1.0.0"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
-serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features = true }
+serde_json = { version = "^1.0.73", features = [
+    "float_roundtrip",
+], default-features = true }
 maplit = { version = "^1.0" }
 criterion = "0.5"
-test-log = { version = "0.2.10", features = ["trace"], default-features = false}
+test-log = { version = "0.2.10", features = [
+    "trace",
+], default-features = false }
 tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"

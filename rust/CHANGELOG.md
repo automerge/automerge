@@ -1,3 +1,8 @@
+# 0.6.1
+
+* Fix a bug where `{Automerge, AutoCommit}::get_marks` would return removed marks
+  as mark with value `ScalarValue::Null` rather than not returning them at all.
+
 # 0.6.0
 
 * Add the ability to set the text encoding used when calculating the indices
