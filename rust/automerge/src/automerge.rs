@@ -1727,6 +1727,7 @@ impl Automerge {
             .marks()
             .as_deref()
             .cloned()
+            .map(|m| m.without_unmarks())
             .unwrap_or_default();
         Ok(result)
     }
