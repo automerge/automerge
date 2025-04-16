@@ -117,6 +117,13 @@ impl ChangeGraph {
             .filter_map(|(i, v)| if !v.is_empty() { Some(i) } else { None })
     }
 
+    pub(crate) fn unused_actors(&self) -> impl Iterator<Item = usize> + '_ {
+        self.seq_index
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| if v.is_empty() { Some(i) } else { None })
+    }
+
     pub(crate) fn heads(&self) -> impl Iterator<Item = ChangeHash> + '_ {
         self.heads.iter().cloned()
     }

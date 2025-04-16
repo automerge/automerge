@@ -114,6 +114,11 @@ impl Change {
         self.stored.bytes()
     }
 
+    pub(crate) fn num_ops(&self) -> usize {
+        debug_assert_eq!(self.stored.num_ops, self.iter_ops().count());
+        self.stored.num_ops
+    }
+
     pub(crate) fn iter_ops(&self) -> impl Iterator<Item = ChangeOp> + '_ {
         self.stored.iter_ops()
     }

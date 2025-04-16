@@ -658,8 +658,7 @@ impl OpSet {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
-        let op_set = Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)?;
-        Ok(op_set)
+        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
     }
 
     #[cfg(test)]

@@ -103,8 +103,9 @@ impl TransactionInner {
         if self.pending_ops() == 0 {
             if self.seq == 1 {
                 // we added an actor for this tx - now roll it back
-                doc.rollback_actor(self.actor);
+                doc.remove_actor(self.actor);
             }
+            doc.remove_unused_actors(true);
             return None;
         }
         Some(self.commit_impl(doc, message, time))
@@ -135,7 +136,7 @@ impl TransactionInner {
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
         doc.update_history(&change, num_ops);
-        doc.validate_actor_ids();
+        doc.remove_unused_actors(true);
         hash
     }
 
@@ -174,8 +175,9 @@ impl TransactionInner {
         let num = self.pending.len();
         doc.ops_mut().load_checkpoint(self.checkpoint);
         if self.seq == 1 {
-            doc.rollback_actor(self.actor);
+            doc.remove_actor(self.actor);
         }
+        doc.remove_unused_actors(true);
         num
     }
 

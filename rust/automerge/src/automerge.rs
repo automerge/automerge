@@ -274,31 +274,34 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn rollback_actor(&mut self, actor: usize) {
+    pub(crate) fn remove_actor(&mut self, actor: usize) {
         if self.actor == Actor::Cached(actor) {
             self.actor = Actor::Unused(self.ops.get_actor(actor).clone())
         }
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
-
-        self.validate_actor_ids();
     }
 
-    pub(crate) fn validate_actor_ids(&self) {
-        //assert_eq!(self.ops.actors.len(), self.change_graph.actor_ids().count());
+    pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
         if self.ops.actors.len() != self.change_graph.actor_ids().count() {
-            log!("op_set/change_graph actors out of sync");
-            log!("op_set.actors.len()={}", self.ops.actors.len());
-            log!(
-                "change_graph.all_actor_ids().count()={}",
-                self.change_graph.all_actor_ids().count()
-            );
-            log!(
-                "change_graph.actor_ids().count()={}",
-                self.change_graph.actor_ids().count()
-            );
-            log!("actors={:?}", self.ops.actors);
-            panic!();
+            let unused = self.change_graph.unused_actors().collect::<Vec<_>>();
+            log!("AUTOMERGE :: unused actor found when none expected");
+            log!(" :: ops={}", self.ops.actors.len());
+            log!(" :: graph={}", self.change_graph.all_actor_ids().count());
+            log!(" :: unused={:?}", unused);
+            log!(" :: actors={:?}", self.ops.actors);
+            assert!(!panic);
+        }
+    }
+
+    pub(crate) fn remove_unused_actors(&mut self, panic: bool) {
+        if panic {
+            self.assert_no_unused_actors(cfg!(debug_assertions));
+        }
+
+        // remove the offending actors
+        while let Some(idx) = self.change_graph.unused_actors().last() {
+            self.remove_actor(idx);
         }
     }
 
@@ -886,8 +889,7 @@ impl Automerge {
 
     /// Save the entirety of this document in a compact form.
     pub fn save_with_options(&self, options: SaveOptions) -> Vec<u8> {
-        // make sure we dont have un-used actors
-        self.validate_actor_ids();
+        self.assert_no_unused_actors(true);
 
         let doc = Document::new(&self.ops, &self.change_graph, options.compress());
         let mut bytes = doc.into_bytes();
@@ -2019,7 +2021,7 @@ pub(crate) fn reconstruct_document<'a>(
     } = storage::load::reconstruct_opset(doc, mode, text_encoding)
         .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
 
-    let doc = Automerge {
+    let mut doc = Automerge {
         queue: vec![],
         change_graph,
         ops: op_set,
@@ -2027,6 +2029,8 @@ pub(crate) fn reconstruct_document<'a>(
         actor: Actor::Unused(ActorId::random()),
         max_op,
     };
+
+    doc.remove_unused_actors(false);
 
     Ok(doc)
 }

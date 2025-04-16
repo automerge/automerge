@@ -433,6 +433,7 @@ impl AutoCommit {
 
     pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         self.ensure_transaction_closed();
+        self.doc.remove_unused_actors(true);
         let bytes = self.doc.save_with_options(options);
         if !bytes.is_empty() {
             self.save_cursor = self.doc.get_heads()
