@@ -829,3 +829,36 @@ fn arb_scenario() -> impl proptest::strategy::Strategy<Value = Vec<Action>> {
     (0_usize..10)
         .prop_flat_map(move |max_actions| pump(String::new(), Vec::new(), max_actions).boxed())
 }
+
+#[test]
+fn removed_marks_should_not_appear_in_get_marks() {
+    // Reproduces an issue
+    // (https://github.com/automerge/automerge-swift/issues/214) where marks
+    // removed by setting their value to null appear as marks in the `get_marks`
+    // call with null values
+    let mut doc = AutoCommit::new();
+
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "abcdefg").unwrap();
+
+    doc.mark(
+        &text,
+        Mark::new("name1".into(), ScalarValue::Int(1), 0, 1),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Now remove the mark at location 0
+    doc.mark(
+        &text,
+        Mark::new("name1".into(), ScalarValue::Null, 0, 1),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Get the marks at location 0 (which we just removed by setting it Null) and check they are empty
+    let marks = doc.get_marks(&text, 0, None).unwrap();
+    assert_eq!(marks.iter().collect::<Vec<_>>(), vec![]);
+    assert_eq!(marks.len(), 0);
+    assert_eq!(marks.num_marks(), 0);
+}
