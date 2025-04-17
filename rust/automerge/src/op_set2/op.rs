@@ -1191,7 +1191,6 @@ pub(crate) trait AsChangeOp {
     fn expand(op: &Self) -> Option<Cow<'_, bool>>;
     fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
     fn op_id_ctr(op: &Self) -> u64;
-    fn size_estimate(op: &Self) -> usize;
     fn pred(op: &Self) -> &[OpId];
 
     fn id_actor(id: &OpId) -> Option<Cow<'_, ActorIdx>> {
@@ -1246,9 +1245,6 @@ impl<T: AsChangeOp> AsChangeOp for Option<T> {
     fn pred(op: &Self) -> &[OpId] {
         op.as_ref().map(T::pred).unwrap_or(&[])
     }
-    fn size_estimate(op: &Self) -> usize {
-        op.as_ref().map(|o| T::size_estimate(o)).unwrap_or(0)
-    }
 }
 
 impl<B: AsBuilder> AsChangeOp for B {
@@ -1295,10 +1291,6 @@ impl<B: AsBuilder> AsChangeOp for B {
     }
     fn pred(op: &Self) -> &[OpId] {
         op.as_builder().pred.as_slice()
-    }
-    fn size_estimate(op: &Self) -> usize {
-        // largest in our bestiary was 23
-        op.as_builder().value.to_raw().map(|s| s.len()).unwrap_or(0) + 25
     }
 }
 

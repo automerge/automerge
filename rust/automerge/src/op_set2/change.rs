@@ -18,6 +18,7 @@ pub(crate) mod collector;
 
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
+#[inline(never)]
 pub(crate) fn build_change<T>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -27,12 +28,8 @@ pub(crate) fn build_change<T>(
 where
     T: AsChangeOp,
 {
-    let value_size: usize = ops.iter().map(T::size_estimate).sum();
-
-    let size_estimate = value_size + 25 * ops.len(); // highest in our beasiary is 23;
-
     let num_ops = ops.len();
-    let mut col_data = Vec::with_capacity(size_estimate);
+    let mut col_data = Vec::new();
 
     let start_op = ops.first().map(T::op_id_ctr).unwrap_or(meta.max_op + 1);
 
@@ -154,6 +151,7 @@ impl<'a> PartialEq for OpBuilder<'a> {
 
 impl Eq for OpBuilder<'_> {}
 
+#[inline(never)]
 fn write_change_ops<T>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
