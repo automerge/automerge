@@ -1565,7 +1565,7 @@ impl Automerge {
         let mut iter = self.ops.iter_obj(&obj.id).visible(clock).top_ops().marks();
         iter.nth(index);
         match iter.get_marks() {
-            Some(arc) => Ok((**arc).clone()),
+            Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
             None => Ok(MarkSet::default()),
         }
     }

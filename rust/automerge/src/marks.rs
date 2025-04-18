@@ -168,6 +168,14 @@ impl MarkSet {
         }
         marks.current().cloned()
     }
+
+    /// Return this MarkSet without any marks which have a value of Null, i.e.
+    /// marks which have been removed.
+    pub(crate) fn without_unmarks(self) -> Self {
+        let mut marks = self.marks.clone();
+        marks.retain(|_, value| !matches!(value, ScalarValue::Null));
+        MarkSet { marks }
+    }
 }
 
 // FromIterator implementation for an iterator of (String, ScalarValue) tuples
