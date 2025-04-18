@@ -68,7 +68,7 @@ pub(crate) struct GroupIter<'a> {
     values: Vec<GroupedColIter<'a>>,
 }
 
-impl<'a> GroupIter<'a> {
+impl GroupIter<'_> {
     fn try_next(&mut self) -> Result<Option<CellValue>, DecodeColumnError> {
         let num = self
             .num
@@ -103,7 +103,7 @@ impl<'a> GroupIter<'a> {
     }
 }
 
-impl<'a> Iterator for GroupIter<'a> {
+impl Iterator for GroupIter<'_> {
     type Item = Result<CellValue, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -117,7 +117,7 @@ enum GroupedColIter<'a> {
     Simple(SimpleColIter<'a>),
 }
 
-impl<'a> GroupedColIter<'a> {
+impl GroupedColIter<'_> {
     fn try_next(&mut self) -> Result<Option<SimpleValue>, DecodeColumnError> {
         match self {
             Self::Value(viter) => Ok(viter.next().transpose()?.map(SimpleValue::Value)),
@@ -129,7 +129,7 @@ impl<'a> GroupedColIter<'a> {
     }
 }
 
-impl<'a> Iterator for GroupedColIter<'a> {
+impl Iterator for GroupedColIter<'_> {
     type Item = Result<SimpleValue, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {

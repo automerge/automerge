@@ -1,6 +1,8 @@
+use crate::op_set2::{Op, OpSet, OpType};
 use crate::patches::TextRepresentation;
-use crate::types::{Clock, ObjId, Op, OpType};
-use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
+use crate::types::{Clock, ListEncoding, ObjId, ScalarValue};
+use crate::TextEncoding;
+use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -25,6 +27,41 @@ pub enum Value {
     Text(Text),
 }
 
+/*
+#[derive(PartialEq, Debug, Clone)]
+pub enum ScalarValue {
+    Bytes(Vec<u8>),
+    Str(String),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Unknown { type_code: u8, bytes: Vec<u8> },
+    Null,
+}
+*/
+
+/*
+impl<'a> From<op_set2::ScalarValue<'a>> for ScalarValue {
+  fn from(s: op_set2::ScalarValue<'a>) -> Self {
+    match s {
+      op_set2::ScalarValue::Bytes(b) => ScalarValue::Bytes(b.to_vec()),
+      op_set2::ScalarValue::Str(s) => ScalarValue::Str(s.to_string()),
+      op_set2::ScalarValue::Int(i) => ScalarValue::Int(i),
+      op_set2::ScalarValue::Uint(u) => ScalarValue::Uint(u),
+      op_set2::ScalarValue::F64(f) => ScalarValue::F64(f),
+      op_set2::ScalarValue::Counter(c) => ScalarValue::Counter(c),
+      op_set2::ScalarValue::Timestamp(t) => ScalarValue::Timestamp(t),
+      op_set2::ScalarValue::Boolean(b) => ScalarValue::Boolean(b),
+      op_set2::ScalarValue::Unknown { type_code, bytes } =. ScalarValue::Unknown { type_code, bytes: bytes.to_vec() },
+      op_set2::ScalarValue::Null =. ScalarValue::Null,
+    }
+  }
+}
+*/
+
 impl Value {
     pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_rep: TextRepresentation) -> Self {
         match value.into() {
@@ -36,12 +73,42 @@ impl Value {
         }
     }
 
+    pub fn map() -> Self {
+        Value::Map(Map::default())
+    }
+
+    pub fn list() -> Self {
+        Value::List(List::default())
+    }
+
+    pub fn text(text_rep: TextRepresentation, s: &str) -> Self {
+        Value::Text(Text::new(text_rep, s))
+    }
+
+    pub fn scalar<V: Into<ScalarValue>>(val: V) -> Self {
+        Value::Scalar(val.into())
+    }
+
     pub fn is_scalar(&self) -> bool {
         matches!(self, Value::Scalar(_))
     }
 
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        match encoding {
+            ListEncoding::List => 1,
+            ListEncoding::Text(enc) => enc.width(self.as_str()),
+        }
+    }
+
     pub fn is_object(&self) -> bool {
         !self.is_scalar()
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        match &self {
+            Self::Scalar(ScalarValue::Str(s)) => s,
+            _ => "\u{fffc}",
+        }
     }
 
     pub fn apply_patches<P: IntoIterator<Item = Patch>>(
@@ -90,6 +157,13 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_i64(&self) -> i64 {
+        match self {
+            Value::Scalar(s) => s.as_i64(),
+            _ => 0,
+        }
+    }
 }
 
 impl From<Value> for value::Value<'_> {
@@ -102,6 +176,19 @@ impl From<Value> for value::Value<'_> {
         }
     }
 }
+
+/*
+impl From<ObjType> for Value {
+    fn from(o: ObjType) -> Self {
+        match o {
+            ObjType::Map => Value::Map(Map::default()),
+            ObjType::Table => Value::Map(Map::default()),
+            ObjType::List => Value::List(List::default()),
+            ObjType::Text => Value::Text(Text::default()),
+        }
+    }
+}
+*/
 
 impl From<Map> for Value {
     fn from(value: Map) -> Self {
@@ -188,40 +275,73 @@ impl From<ScalarValue> for Value {
 
 impl Automerge {
     pub(crate) fn hydrate_map(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_map(obj, clock, self.text_encoding())
+    }
+    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_list(obj, clock, self.text_encoding())
+    }
+    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+        self.ops().hydrate_text(obj, clock, self.text_encoding())
+    }
+}
+
+impl OpSet {
+    pub(crate) fn hydrate_map(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         let mut map = Map::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
-            let key = self.ops().to_string(top.op.elemid_or_key());
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
+        for top in self.top_ops(obj, clock.cloned()) {
+            let key = self.to_string(top.elemid_or_key());
+            let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
+            let value = self.hydrate_op(top, clock, encoding);
             map.insert(key, MapValue::new(value, id, conflict));
         }
         Value::Map(map)
     }
 
-    pub(crate) fn hydrate_list(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
+    pub(crate) fn hydrate_list(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         let mut list = List::new();
-        for top in self.ops().top_ops(obj, clock.cloned()) {
-            let value = self.hydrate_op(top.op, clock);
-            let id = top.op.exid();
+        for top in self.top_ops(obj, clock.cloned()) {
+            //let id = top.exid();
+            let id = self.id_to_exid(top.id);
             let conflict = top.conflict;
+            let value = self.hydrate_op(top, clock, encoding);
             list.push(value, id, conflict);
         }
         Value::List(list)
     }
 
-    pub(crate) fn hydrate_text(&self, obj: &ObjId, clock: Option<&Clock>) -> Value {
-        let text = self.ops().text(obj, clock.cloned());
-        Value::Text(Text::new(self.text_encoding().into(), text))
+    pub(crate) fn hydrate_text(
+        &self,
+        obj: &ObjId,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
+        let text = self.text(obj, clock.cloned());
+        Value::Text(Text::new(encoding.into(), text))
     }
 
-    pub(crate) fn hydrate_op(&self, op: Op<'_>, clock: Option<&Clock>) -> Value {
+    pub(crate) fn hydrate_op(
+        &self,
+        op: Op<'_>,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> Value {
         match op.action() {
-            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id().into(), clock),
-            OpType::Make(ObjType::List) => self.hydrate_list(&op.id().into(), clock),
-            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id().into(), clock),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
+            OpType::Make(ObjType::Map) => self.hydrate_map(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::Table) => self.hydrate_map(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::List) => self.hydrate_list(&op.id.into(), clock, encoding),
+            OpType::Make(ObjType::Text) => self.hydrate_text(&op.id.into(), clock, encoding),
+            OpType::Put(scalar) => Value::Scalar(scalar.into()),
             _ => panic!("invalid op to hydrate"),
         }
     }

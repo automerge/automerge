@@ -139,8 +139,8 @@ pub(crate) struct WithChangeActorsOpIter<'actors, 'aschangeop, A, I, O, C> {
     inner: I,
 }
 
-impl<'actors, 'aschangeop, A: 'aschangeop, I, O, C> Clone
-    for WithChangeActorsOpIter<'actors, 'aschangeop, A, I, O, C>
+impl<'aschangeop, A: 'aschangeop, I, O, C> Clone
+    for WithChangeActorsOpIter<'_, 'aschangeop, A, I, O, C>
 where
     I: Clone,
 {
@@ -169,8 +169,8 @@ where
     }
 }
 
-impl<'actors, 'aschangeop, A: 'aschangeop, I, O, C> ExactSizeIterator
-    for WithChangeActorsOpIter<'actors, 'aschangeop, A, I, O, C>
+impl<'aschangeop, A: 'aschangeop, I, O, C> ExactSizeIterator
+    for WithChangeActorsOpIter<'_, 'aschangeop, A, I, O, C>
 where
     C: AsChangeOp<'aschangeop, OpId = O>,
     O: convert::OpId<&'aschangeop A>,
@@ -259,8 +259,8 @@ pub(crate) struct WithChangeActorsPredIter<'actors, 'aschangeop, A, I, O, C, P> 
     _phantom: std::marker::PhantomData<O>,
 }
 
-impl<'actors, 'aschangeop, A, I, O, C, P> ExactSizeIterator
-    for WithChangeActorsPredIter<'actors, 'aschangeop, A, I, O, C, P>
+impl<'aschangeop, A, I, O, C, P> ExactSizeIterator
+    for WithChangeActorsPredIter<'_, 'aschangeop, A, I, O, C, P>
 where
     A: PartialEq + Ord + Clone + std::hash::Hash + 'static,
     O: convert::OpId<&'aschangeop A>,
@@ -273,8 +273,8 @@ where
     }
 }
 
-impl<'actors, 'aschangeop, A, I, O, C, P> Iterator
-    for WithChangeActorsPredIter<'actors, 'aschangeop, A, I, O, C, P>
+impl<'aschangeop, A, I, O, C, P> Iterator
+    for WithChangeActorsPredIter<'_, 'aschangeop, A, I, O, C, P>
 where
     A: PartialEq + Ord + Clone + std::hash::Hash + 'static,
     O: convert::OpId<&'aschangeop A>,

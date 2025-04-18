@@ -1,6 +1,6 @@
 use crate::{
     columnar::{
-        column_range::{DepsIter, KeyIter, ObjIdIter, OpIdIter, OpIdListIter, ValueIter},
+        column_range::{DepsIter, KeyIter, ObjIdIter, OpIdListIter, ValueIter},
         encoding, Key,
     },
     types::{ObjId, OpId},
@@ -50,7 +50,7 @@ pub(crate) trait ColumnDecoder<T>: Iterator<Item = Result<T, Self::Error>> {
     }
 }
 
-impl<'a> ColumnDecoder<bool> for encoding::BooleanDecoder<'a> {
+impl ColumnDecoder<bool> for encoding::BooleanDecoder<'_> {
     type Error = encoding::raw::Error;
     type Value = bool;
 
@@ -84,7 +84,7 @@ where
     }
 }
 
-impl<'a> ColumnDecoder<Vec<OpId>> for OpIdListIter<'a> {
+impl ColumnDecoder<Vec<OpId>> for OpIdListIter<'_> {
     type Error = encoding::DecodeColumnError;
     type Value = Vec<OpId>;
 
@@ -96,7 +96,7 @@ impl<'a> ColumnDecoder<Vec<OpId>> for OpIdListIter<'a> {
     }
 }
 
-impl<'a> ColumnDecoder<ScalarValue> for ValueIter<'a> {
+impl ColumnDecoder<ScalarValue> for ValueIter<'_> {
     type Error = encoding::DecodeColumnError;
     type Value = ScalarValue;
 
@@ -108,7 +108,7 @@ impl<'a> ColumnDecoder<ScalarValue> for ValueIter<'a> {
     }
 }
 
-impl<'a> ColumnDecoder<Key> for KeyIter<'a> {
+impl ColumnDecoder<Key> for KeyIter<'_> {
     type Error = encoding::DecodeColumnError;
     type Value = Key;
 
@@ -120,7 +120,7 @@ impl<'a> ColumnDecoder<Key> for KeyIter<'a> {
     }
 }
 
-impl<'a> ColumnDecoder<ObjId> for ObjIdIter<'a> {
+impl ColumnDecoder<ObjId> for ObjIdIter<'_> {
     type Value = ObjId;
     type Error = encoding::DecodeColumnError;
 
@@ -132,19 +132,7 @@ impl<'a> ColumnDecoder<ObjId> for ObjIdIter<'a> {
     }
 }
 
-impl<'a> ColumnDecoder<OpId> for OpIdIter<'a> {
-    type Value = OpId;
-    type Error = encoding::DecodeColumnError;
-
-    fn maybe_next_in_col<S: AsRef<str>>(
-        &mut self,
-        col_name: S,
-    ) -> Result<Option<Self::Value>, encoding::DecodeColumnError> {
-        self.next().transpose().map_err(|e| e.in_column(col_name))
-    }
-}
-
-impl<'a> ColumnDecoder<Vec<u64>> for DepsIter<'a> {
+impl ColumnDecoder<Vec<u64>> for DepsIter<'_> {
     type Value = Vec<u64>;
     type Error = encoding::DecodeColumnError;
 

@@ -177,7 +177,7 @@ pub(crate) struct OpIdListIter<'a> {
     counter: DeltaDecoder<'a>,
 }
 
-impl<'a> OpIdListIter<'a> {
+impl OpIdListIter<'_> {
     fn try_next(&mut self) -> Result<Option<Vec<OpId>>, DecodeColumnError> {
         let num = match self
             .num
@@ -226,7 +226,7 @@ impl<'a> OpIdListIter<'a> {
     }
 }
 
-impl<'a> Iterator for OpIdListIter<'a> {
+impl Iterator for OpIdListIter<'_> {
     type Item = Result<Vec<OpId>, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {

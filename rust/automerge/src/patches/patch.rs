@@ -79,7 +79,7 @@ pub enum PatchAction {
     /// One or more indices were removed from a sequence
     DeleteSeq { index: usize, length: usize },
     /// Some marks within a text object were added or removed
-    Mark { marks: Vec<Mark<'static>> },
+    Mark { marks: Vec<Mark> },
 }
 
 impl fmt::Display for PatchAction {

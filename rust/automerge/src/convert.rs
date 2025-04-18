@@ -33,6 +33,16 @@ pub(crate) enum ObjId<O> {
     Op(O),
 }
 
+impl From<crate::types::ObjId> for ObjId<crate::types::OpId> {
+    fn from(obj: crate::types::ObjId) -> ObjId<crate::types::OpId> {
+        if obj.is_root() {
+            ObjId::Root
+        } else {
+            ObjId::Op(obj.0)
+        }
+    }
+}
+
 impl<O> ObjId<O> {
     pub(crate) fn map<F, P>(self, f: F) -> ObjId<P>
     where
@@ -91,7 +101,7 @@ impl OpId<usize> for crate::types::OpId {
     }
 }
 
-impl<'a> OpId<usize> for &'a crate::types::OpId {
+impl OpId<usize> for &crate::types::OpId {
     fn counter(&self) -> u64 {
         crate::types::OpId::counter(self)
     }

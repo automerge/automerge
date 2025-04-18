@@ -599,12 +599,12 @@ describe('Automerge', () => {
       let patches3 = doc3.diffIncremental();
       assert.deepEqual(patches3, [
         { action: 'put', path: [ 'text' ], value: '' },
-        { action: 'splice', path: [ 'text', 0 ], value: 'aaaaabbbbbcccccdddddeeeeeffff' },
-        { action: 'mark', path: ['text'], marks: [
-          { end: 25, name: 'mark1', start: 5, value: 'A' },
-          { end: 25, name: 'mark2', start: 10, value: 'B' },
-          { end: 20, name: 'mark2', start: 15, value: 'C' },
-        ]}
+        { action: 'splice', path: [ 'text', 0 ], value: 'aaaaa' },
+        { action: 'splice', path: [ 'text', 5 ], value: 'bbbbb', marks: { mark1: 'A' } },
+        { action: 'splice', path: [ 'text', 10 ], value: 'ccccc', marks: { mark1: 'A', mark2: 'B' } },
+        { action: 'splice', path: [ 'text', 15 ], value: 'ddddd', marks: { mark1: 'A', mark2: 'C' } },
+        { action: 'splice', path: [ 'text', 20 ], value: 'eeeee', marks: { mark1: 'A', mark2: 'B' } },
+        { action: 'splice', path: [ 'text', 25 ], value: 'ffff' }
       ]);
 
       let headsABPlusTextObj = [ ... heads0, ... headsLocal ];

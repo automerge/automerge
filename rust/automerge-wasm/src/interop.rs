@@ -3,13 +3,11 @@ use crate::export_cache::CachedObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
+use automerge as am;
+use automerge::iter::{Span, Spans};
 use automerge::ReadDoc;
 use automerge::ROOT;
-use automerge::{self as am};
-use automerge::{
-    iter::{Span, Spans},
-    Change, ChangeHash, ObjType, Prop,
-};
+use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -48,6 +46,32 @@ impl From<AR> for Array {
 impl From<JS> for JsValue {
     fn from(js: JS) -> Self {
         js.0
+    }
+}
+
+impl AsRef<JsValue> for JS {
+    fn as_ref(&self) -> &JsValue {
+        &self.0
+    }
+}
+
+impl<'a> From<&am::ChangeMetadata<'a>> for JS {
+    fn from(c: &am::ChangeMetadata<'a>) -> Self {
+        let change = Object::new();
+        let message = c
+            .message
+            .as_deref()
+            .map(JsValue::from)
+            .unwrap_or(JsValue::NULL);
+        js_set(&change, "actor", c.actor.to_string()).unwrap();
+        js_set(&change, "seq", c.seq as f64).unwrap();
+        js_set(&change, "startOp", c.start_op as f64).unwrap();
+        js_set(&change, "maxOp", c.max_op as f64).unwrap();
+        js_set(&change, "time", c.timestamp as f64).unwrap();
+        js_set(&change, "message", message).unwrap();
+        js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
+        js_set(&change, "hash", c.hash.to_string()).unwrap();
+        JS(change.into())
     }
 }
 
@@ -1923,6 +1947,8 @@ pub(crate) mod error {
         CallSplice(JsValue),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error("reflect set failed")]
+        ReflectSet(JsValue),
         #[error("invalid root processed")]
         InvalidRoot,
         #[error("missing child in export")]

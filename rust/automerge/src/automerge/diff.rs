@@ -2,67 +2,83 @@ use itertools::Itertools;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use crate::automerge::{Automerge, Parents, ReadDoc, ReadDocInternal};
 use crate::cursor::CursorPosition;
-use crate::iter::Keys;
-use crate::iter::ListRange;
-use crate::iter::MapRange;
-use crate::iter::Values;
+use crate::hydrate;
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::Mark;
 use crate::patches::TextRepresentation;
-use crate::read::ReadDocInternal;
 use crate::types::ObjMeta;
 use crate::types::TextEncoding;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
+    op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ListEncoding, Op, Prop},
-    value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, OpType, ReadDoc,
+    types::{Clock, ListEncoding, Prop, Value},
+    AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, ROOT,
 };
 
 #[derive(Clone, Debug)]
 struct Winner<'a> {
     op: Op<'a>,
-    clock: &'a Clock,
+    value_at: Option<ScalarValue<'a>>,
+    // clock: &'a Clock,
     // Whether the op was in the history of the other clock
     cross_visible: bool,
     conflict: bool,
 }
 
-fn process<'a, T: Iterator<Item = Op<'a>>>(
+impl Winner<'_> {
+    fn value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+        if let Some(v) = &self.value_at {
+            hydrate::Value::new(v, text_rep)
+        } else {
+            self.op.hydrate_value(text_rep)
+        }
+    }
+}
+
+fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
     ops: T,
-    before: &'a Clock,
-    after: &'a Clock,
+    _before: &'a Clock,
+    _after: &'a Clock,
     diff: &mut RichTextDiff<'a>,
 ) -> Option<Patch<'a>> {
     let mut before_op = None;
     let mut after_op = None;
 
-    for op in ops {
-        let predates_before = op.predates(before);
-        let predates_after = op.predates(after);
+    for dop in ops {
+        let predates_before = dop.predates_before;
+        let predates_after = dop.predates_after;
 
-        if predates_before && !op.was_deleted_before(before) {
-            push_top(&mut before_op, op, predates_after, before);
+        if predates_before && !dop.was_deleted_before {
+            push_top(&mut before_op, &dop.op, predates_after, dop.value_before);
         }
 
-        if predates_after && !op.was_deleted_before(after) {
-            push_top(&mut after_op, op, predates_before, after);
+        if predates_after && !dop.was_deleted_after {
+            push_top(&mut after_op, &dop.op, predates_before, dop.value_after);
         }
     }
     resolve(before_op, after_op, diff)
 }
 
-fn push_top<'a>(top: &mut Option<Winner<'a>>, op: Op<'a>, cross_visible: bool, clock: &'a Clock) {
+fn push_top<'a>(
+    top: &mut Option<Winner<'a>>,
+    op: &Op<'a>,
+    cross_visible: bool,
+    value_at: Option<ScalarValue<'a>>,
+) {
     match op.action() {
         OpType::Increment(_) => {} // can ignore - info captured inside Counter
         _ => {
-            top.replace(Winner {
-                op,
-                clock,
+            let conflict = top.is_some();
+            let winner = Winner {
+                op: op.clone(),
+                value_at,
                 cross_visible,
-                conflict: top.is_some(),
-            });
+                conflict,
+            };
+            top.replace(winner);
         }
     }
 }
@@ -78,12 +94,12 @@ fn resolve<'a>(
         (Some(before), _) if before.op.is_mark() => None,
         (None, Some(after)) => Some(Patch::New(after, diff.after.current().cloned())),
         (Some(before), None) => Some(Patch::Delete(before)),
-        (Some(before), Some(after)) if before.op.id() == after.op.id() => Some(Patch::Old {
+        (Some(before), Some(after)) if before.op.id == after.op.id => Some(Patch::Old {
             before,
             after,
             marks: diff.current(),
         }),
-        (Some(before), Some(after)) if before.op.id() != after.op.id() => Some(Patch::Update {
+        (Some(before), Some(after)) if before.op.id != after.op.id => Some(Patch::Update {
             before,
             after,
             marks: diff.after.current().cloned(),
@@ -109,35 +125,29 @@ enum Patch<'a> {
 }
 
 impl<'a> Patch<'a> {
-    fn op(&self) -> Op<'a> {
+    fn op(&self) -> &Op<'a> {
         match self {
-            Patch::New(winner, _) => winner.op,
-            Patch::Update { after, .. } => after.op,
-            Patch::Old { after, .. } => after.op,
-            Patch::Delete(winner) => winner.op,
+            Patch::New(winner, _) => &winner.op,
+            Patch::Update { after, .. } => &after.op,
+            Patch::Old { after, .. } => &after.op,
+            Patch::Delete(winner) => &winner.op,
         }
     }
 }
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, ops) in doc.ops().iter_objs() {
-        let mut diff = RichTextDiff::new(doc);
-        let ops_by_key = ops.chunk_by(|o| o.as_op(doc.osd()).elemid_or_key());
-        let diffs = ops_by_key.into_iter().filter_map(|(_key, key_ops)| {
-            process(
-                key_ops.map(|i| i.as_op(doc.osd())),
-                before,
-                after,
-                &mut diff,
-            )
-        });
-
+        let mut diff = RichTextDiff::default();
+        let ops_by_key = ops.diff(before, after).chunk_by(|d| d.op.elemid_or_key());
+        let diffs = ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
         match (obj.typ, patch_log.text_rep()) {
             (ObjType::Text, TextRepresentation::String(encoding)) => {
-                log_text_diff(patch_log, &obj, encoding, diffs)
+                log_text_diff(patch_log, &obj, encoding, diffs);
             }
             (ObjType::Text, TextRepresentation::Array) | (ObjType::List, _) => {
-                log_list_diff(patch_log, &obj, diffs)
+                log_list_diff(patch_log, &obj, diffs);
             }
             (ObjType::Map | ObjType::Table, _) => log_map_diff(doc, patch_log, &obj, diffs),
         }
@@ -151,23 +161,18 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
-            let value = crate::hydrate::Value::new(
-                winner.op.value_at(Some(winner.clock)),
-                patch_log.text_rep(),
-            );
-            let id = *winner.op.id();
+            let value = winner.value(patch_log.text_rep());
+            let id = winner.op.id;
+
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
             patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             index + 1
         }
-        Patch::Update { before, after, .. } => {
-            let conflict = !before.conflict && after.conflict;
-            let value = crate::hydrate::Value::new(
-                after.op.value_at(Some(after.clock)),
-                patch_log.text_rep(),
-            );
-            let id = *after.op.id();
+        Patch::Update { after, .. } => {
+            let conflict = after.conflict;
+            let value = after.value(patch_log.text_rep());
+            let id = after.op.id;
             let expose = after.cross_visible;
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);
             index + 1
@@ -181,7 +186,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.flag_conflict_seq(obj.id, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                patch_log.increment_seq(obj.id, index, n, *after.op.id());
+                patch_log.increment_seq(obj.id, index, n, after.op.id);
             }
             if let Some(marks) = &marks {
                 patch_log.mark(obj.id, index, 1, marks)
@@ -208,11 +213,8 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = crate::hydrate::Value::new(
-                    winner.op.value_at(Some(winner.clock)),
-                    patch_log.text_rep(),
-                );
-                let id = *winner.op.id();
+                let value = winner.value(patch_log.text_rep());
+                let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
                 patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
@@ -243,54 +245,52 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    doc: &'a Automerge,
+    _doc: &'a Automerge,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     diffs: I,
 ) {
     diffs
-        .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
+        .filter_map(|patch| Some((patch.op().key.key_str()?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
-                let value = crate::hydrate::Value::new(
-                    winner.op.value_at(Some(winner.clock)),
-                    patch_log.text_rep(),
-                );
-                let id = *winner.op.id();
+                let value = winner.value(patch_log.text_rep());
+                let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
-                patch_log.put_map(obj.id, key, value, id, conflict, expose)
+                patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
-            Patch::Update { before, after, .. } => {
-                let conflict = !before.conflict && after.conflict;
-                let value = crate::hydrate::Value::new(
-                    after.op.value_at(Some(after.clock)),
-                    patch_log.text_rep(),
-                );
-                let id = *after.op.id();
+            Patch::Update { after, .. } => {
+                let conflict = after.conflict;
+                let value = after.value(patch_log.text_rep());
+                let id = after.op.id;
                 let expose = after.cross_visible;
-                patch_log.put_map(obj.id, key, value, id, conflict, expose)
+                patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
             Patch::Old { before, after, .. } => {
                 if !before.conflict && after.conflict {
-                    patch_log.flag_conflict_map(obj.id, key);
+                    patch_log.flag_conflict_map(obj.id, &key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    patch_log.increment_map(obj.id, key, n, *after.op.id());
+                    patch_log.increment_map(obj.id, &key, n, after.op.id);
                 }
             }
-            Patch::Delete(_) => patch_log.delete_map(obj.id, key),
+            Patch::Delete(_) => patch_log.delete_map(obj.id, &key),
         });
 }
 
-// FIXME
-fn get_prop<'a>(doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
-    Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
+/*
+fn get_prop<'a>(_doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
+    op.key.map_key()
+    //Some(doc.ops().osd.props.safe_get(op.key().prop_index()?)?)
 }
+*/
 
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if before.op.is_counter() && after.op.is_counter() {
-        let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
+        //let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
+        let rep = TextRepresentation::Array;
+        let n = after.value(rep).as_i64() - before.value(rep).as_i64();
         if n != 0 {
             return Some(n);
         }
@@ -298,23 +298,14 @@ fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     None
 }
 
-#[derive(Debug, Clone)]
-struct RichTextDiff<'a> {
-    doc: &'a Automerge,
-    before: MarkStateMachine<'a>,
-    after: MarkStateMachine<'a>,
+#[derive(Debug, Default, Clone)]
+pub(crate) struct RichTextDiff<'a> {
+    pub(crate) before: MarkStateMachine<'a>,
+    pub(crate) after: MarkStateMachine<'a>,
 }
 
 impl<'a> RichTextDiff<'a> {
-    fn new(doc: &'a Automerge) -> Self {
-        RichTextDiff {
-            doc,
-            before: MarkStateMachine::default(),
-            after: MarkStateMachine::default(),
-        }
-    }
-
-    fn current(&self) -> Option<Arc<MarkSet>> {
+    pub(crate) fn current(&self) -> Option<Arc<MarkSet>> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();
@@ -328,12 +319,10 @@ impl<'a> RichTextDiff<'a> {
 
     fn process(&mut self, before: &Option<Winner<'a>>, after: &Option<Winner<'a>>) {
         if let Some(w) = &before {
-            self.before
-                .process(*w.op.id(), w.op.action(), self.doc.osd());
+            self.before.process(w.op.id, w.op.action());
         }
         if let Some(w) = &after {
-            self.after
-                .process(*w.op.id(), w.op.action(), self.doc.osd());
+            self.after.process(w.op.id, w.op.action());
         }
     }
 }
@@ -344,13 +333,13 @@ pub(crate) struct ReadDocAt<'a, 'b> {
     pub(crate) heads: &'b [ChangeHash],
 }
 
-impl<'a, 'b> AsRef<Automerge> for ReadDocAt<'a, 'b> {
+impl AsRef<Automerge> for ReadDocAt<'_, '_> {
     fn as_ref(&self) -> &Automerge {
         self.doc
     }
 }
 
-impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
+impl ReadDoc for ReadDocAt<'_, '_> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys_at(obj, self.heads)
     }
@@ -363,7 +352,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &'c self,
         obj: O,
         range: R,
-    ) -> MapRange<'c, R> {
+    ) -> MapRange<'c> {
         self.doc.map_range_at(obj, range, self.heads)
     }
 
@@ -372,15 +361,26 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'c, R> {
+    ) -> MapRange<'c> {
         self.doc.map_range_at(obj, range, heads)
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+    fn iter(&self) -> DocIter<'_> {
+        let text_rep = TextRepresentation::String(self.doc.text_encoding());
+        self.doc
+            .iter_at(ROOT, Some(&self.doc.get_heads()), text_rep)
+    }
+
+    fn iter_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        range: R,
-    ) -> ListRange<'_, R> {
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        self.doc.iter_at(obj, heads, text_rep)
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
         self.doc.list_range_at(obj, range, self.heads)
     }
 
@@ -389,7 +389,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         self.doc.list_range_at(obj, range, heads)
     }
 
@@ -425,7 +425,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.text_at(obj, heads)
     }
 
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
         self.doc.marks_at(obj, self.heads)
     }
 
@@ -433,7 +433,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc.marks_at(obj, heads)
     }
 
@@ -509,7 +509,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
-    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, self.heads)
     }
 
@@ -517,7 +517,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<crate::Parents<'_>, AutomergeError> {
+    ) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, heads)
     }
 
@@ -525,14 +525,11 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
 
-    fn spans<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, crate::AutomergeError> {
         self.doc.spans(obj)
     }
 
@@ -540,7 +537,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<crate::iter::Spans<'_>, crate::AutomergeError> {
+    ) -> Result<Spans<'_>, crate::AutomergeError> {
         self.doc.spans_at(obj, heads)
     }
 
@@ -561,7 +558,7 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
     }
 }
 
-impl<'a, 'b> ReadDocInternal for ReadDocAt<'a, 'b> {
+impl ReadDocInternal for ReadDocAt<'_, '_> {
     fn live_obj_paths(&self) -> std::collections::HashMap<ExId, Vec<(ExId, Prop)>> {
         self.doc.visible_obj_paths(Some(self.heads))
     }
@@ -574,8 +571,8 @@ mod tests {
 
     use crate::{
         hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
-        transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch, PatchAction, Prop,
-        ScalarValue, TextEncoding, Value, ROOT,
+        transaction::Transactable, AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue,
+        TextEncoding, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -672,15 +669,22 @@ mod tests {
                     action: ObservedAction::Mark(
                         marks
                             .into_iter()
-                            .map(|Mark { start, end, data }| {
-                                let MarkData { name, value } = data.as_ref();
-                                ObservedMark {
-                                    start,
-                                    end,
-                                    name: name.to_string(),
-                                    value: value.clone(),
-                                }
-                            })
+                            .map(
+                                |Mark {
+                                     start,
+                                     end,
+                                     name,
+                                     value,
+                                 }| {
+                                    //let MarkData { name, value } = data.as_ref();
+                                    ObservedMark {
+                                        start,
+                                        end,
+                                        name: name.to_string(),
+                                        value: value.clone(),
+                                    }
+                                },
+                            )
                             .collect(),
                     ),
                     path: format!("/{}", path.clone().join("/")),

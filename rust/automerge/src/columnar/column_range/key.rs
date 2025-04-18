@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::{convert::Infallible, ops::Range};
 
 use super::{DeltaRange, RleRange};
@@ -10,12 +11,25 @@ use crate::{
     },
     convert,
     types::{ElemId, OpId},
+    AutomergeError,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Key {
     Prop(smol_str::SmolStr),
     Elem(ElemId),
+}
+
+impl Key {
+    pub(crate) fn map(
+        self,
+        actor_map: &[usize],
+    ) -> Result<crate::op_set2::KeyRef<'static>, AutomergeError> {
+        Ok(match self {
+            Self::Prop(s) => crate::op_set2::KeyRef::Map(Cow::Owned(String::from(s))),
+            Self::Elem(e) => crate::op_set2::KeyRef::Seq(e.map(actor_map)?),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -142,7 +156,7 @@ pub(crate) struct KeyIter<'a> {
     string: RleDecoder<'a, smol_str::SmolStr>,
 }
 
-impl<'a> KeyIter<'a> {
+impl KeyIter<'_> {
     fn try_next(&mut self) -> Result<Option<Key>, DecodeColumnError> {
         let actor = self
             .actor
@@ -187,7 +201,7 @@ impl<'a> KeyIter<'a> {
     }
 }
 
-impl<'a> Iterator for KeyIter<'a> {
+impl Iterator for KeyIter<'_> {
     type Item = Result<Key, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {

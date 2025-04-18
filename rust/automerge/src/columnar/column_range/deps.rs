@@ -21,19 +21,6 @@ impl DepsRange {
         &self.deps
     }
 
-    pub(crate) fn encode<I, II>(deps: I, out: &mut Vec<u8>) -> DepsRange
-    where
-        I: Iterator<Item = II> + Clone,
-        II: IntoIterator<Item = u64> + ExactSizeIterator,
-    {
-        let num = RleRange::encode(deps.clone().map(|d| Some(d.len() as u64)), out);
-        let deps = DeltaRange::encode(
-            deps.flat_map(|d| d.into_iter().map(|d| Some(d as i64))),
-            out,
-        );
-        DepsRange { num, deps }
-    }
-
     pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> DepsIter<'a> {
         DepsIter {
             num: self.num.decoder(data),
@@ -48,7 +35,7 @@ pub(crate) struct DepsIter<'a> {
     deps: DeltaDecoder<'a>,
 }
 
-impl<'a> DepsIter<'a> {
+impl DepsIter<'_> {
     fn try_next(&mut self) -> Result<Option<Vec<u64>>, DecodeColumnError> {
         let num = match self
             .num
@@ -94,30 +81,9 @@ impl<'a> DepsIter<'a> {
     }
 }
 
-impl<'a> Iterator for DepsIter<'a> {
+impl Iterator for DepsIter<'_> {
     type Item = Result<Vec<u64>, DecodeColumnError>;
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::collection::vec as propvec;
-    use proptest::prelude::*;
-
-    fn encodable_u64() -> impl Strategy<Value = u64> + Clone {
-        0_u64..((i64::MAX / 2) as u64)
-    }
-
-    proptest! {
-        #[test]
-        fn encode_decode_deps(deps in propvec(propvec(encodable_u64(), 0..100), 0..100)) {
-            let mut out = Vec::new();
-            let range = DepsRange::encode(deps.iter().cloned().map(|d| d.into_iter()), &mut out);
-            let decoded = range.iter(&out).collect::<Result<Vec<_>, _>>().unwrap();
-            assert_eq!(deps, decoded);
-        }
     }
 }

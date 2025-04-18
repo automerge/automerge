@@ -4,3 +4,4 @@ node_modules
 yarn.lock
 flamegraph.svg
 /prof
+*.0x

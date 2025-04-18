@@ -207,6 +207,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.materialize("_root"), { key1: "val1", key2: "val2", key3: "val3" })
       assert.deepEqual(doc2.materialize("_root"), { key1: "val1", key3: "val3" })
     })
+
     it('Saving And Loading (1)', () => {
       const doc1 = create()
 

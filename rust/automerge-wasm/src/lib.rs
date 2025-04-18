@@ -61,10 +61,11 @@ macro_rules! log {
 }
 
 /// How text is represented in materialized objects on the JS side
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
 #[wasm_bindgen]
 pub enum TextRepresentation {
     /// As an array of characters and objects
+    #[default]
     Array,
     /// As a single JS string
     String,
@@ -73,12 +74,6 @@ pub enum TextRepresentation {
 impl TextRepresentation {
     pub(crate) fn is_string(&self) -> bool {
         matches!(self, Self::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::Array
     }
 }
 
@@ -861,13 +856,18 @@ impl Automerge {
     #[wasm_bindgen(js_name = loadIncremental)]
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, error::Load> {
         let data = data.to_vec();
+        //am::log!("load_incremental: {:?}", data.as_slice());
         let len = self.doc.load_incremental(&data)?;
         Ok(len as f64)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), error::ApplyChangesError> {
-        let changes: Vec<_> = JS(changes).try_into()?;
+        let changes: Vec<Change> = JS(changes).try_into()?;
+
+        //for c in &changes {
+        //am::log!("apply change: {:?}", c.raw_bytes());
+        //}
         self.doc.apply_changes(changes)?;
         Ok(())
     }
@@ -883,6 +883,14 @@ impl Automerge {
         Ok(changes)
     }
 
+    #[wasm_bindgen(js_name = getChangesMeta)]
+    pub fn get_changes_meta(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
+        let deps: Vec<_> = JS(have_deps).try_into()?;
+        let changes = self.doc.get_changes_meta(&deps);
+        let changes: Array = changes.iter().map(JS::from).collect();
+        Ok(changes)
+    }
+
     #[wasm_bindgen(js_name = getChangeByHash)]
     pub fn get_change_by_hash(
         &mut self,
@@ -892,6 +900,20 @@ impl Automerge {
         let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
+    #[wasm_bindgen(js_name = getChangeMetaByHash)]
+    pub fn get_change_meta_by_hash(
+        &mut self,
+        hash: JsValue,
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
+        let hash = JS(hash).try_into()?;
+        let change_meta = self.doc.get_change_meta_by_hash(&hash);
+        if let Some(c) = change_meta {
+            Ok(JS::from(&c).0)
         } else {
             Ok(JsValue::null())
         }
@@ -965,6 +987,7 @@ impl Automerge {
         message: Uint8Array,
     ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
+        //am::log!("receive sync message: {:?}", message.as_slice());
         let message = am::sync::Message::decode(message.as_slice())?;
         self.doc
             .sync()
@@ -975,7 +998,9 @@ impl Automerge {
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
         if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
-            Uint8Array::from(message.encode().as_slice()).into()
+            let message = message.encode();
+            //am::log!("generate sync message: {:?}", message.as_slice());
+            Uint8Array::from(message.as_slice()).into()
         } else {
             JsValue::null()
         }
@@ -997,7 +1022,7 @@ impl Automerge {
         let heads = get_heads(heads)?;
         self.doc.update_diff_cursor();
         let mut cache = interop::ExportCache::new(self)?;
-        Ok(cache.materialize(obj, obj_type.into(), heads.as_ref(), &meta)?)
+        Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
     }
 
     #[wasm_bindgen(js_name = getCursor)]
@@ -1163,34 +1188,10 @@ impl Automerge {
         Ok(result)
     }
 
-    pub(crate) fn map_range_at(
-        &self,
-        obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
-    ) -> am::iter::MapRange<'_, std::ops::RangeFull> {
-        if let Some(heads) = heads {
-            self.doc.map_range_at(obj, .., heads)
-        } else {
-            self.doc.map_range(obj, ..)
-        }
-    }
-
-    pub(crate) fn list_range_at(
-        &self,
-        obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
-    ) -> am::iter::ListRange<'_, std::ops::RangeFull> {
-        if let Some(heads) = heads {
-            self.doc.list_range_at(obj, .., heads)
-        } else {
-            self.doc.list_range(obj, ..)
-        }
-    }
-
     pub(crate) fn text_at(
         &self,
         obj: &am::ObjId,
-        heads: Option<&Vec<am::ChangeHash>>,
+        heads: Option<&[am::ChangeHash]>,
     ) -> Result<String, am::AutomergeError> {
         if let Some(heads) = heads {
             Ok(self.doc.text_at(obj, heads)?)
@@ -1219,13 +1220,18 @@ impl Automerge {
     pub fn stats(&mut self) -> JsValue {
         let stats = self.doc.stats();
         let result = Object::new();
-        js_set(
-            &result,
-            "numChanges",
-            JsValue::from(stats.num_changes as usize),
-        )
-        .unwrap();
-        js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
+        let num_changes = JsValue::from(stats.num_changes as usize);
+        let num_ops = JsValue::from(stats.num_ops as usize);
+        let num_actors = JsValue::from(stats.num_actors as usize);
+        let cargo_package_name = JsValue::from(stats.cargo_package_name);
+        let cargo_package_version = JsValue::from(stats.cargo_package_version);
+        let rustc_version = JsValue::from(stats.rustc_version);
+        js_set(&result, "numChanges", num_changes).unwrap();
+        js_set(&result, "numOps", num_ops).unwrap();
+        js_set(&result, "numActors", num_actors).unwrap();
+        js_set(&result, "cargoPackageName", cargo_package_name).unwrap();
+        js_set(&result, "cargoPackageVersion", cargo_package_version).unwrap();
+        js_set(&result, "rustcVersion", rustc_version).unwrap();
         result.into()
     }
 }
@@ -1249,6 +1255,7 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 #[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
+    //am::log!("load: {:?}", data.as_slice());
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     let text_v1 = js_get(&options, "text_v1")
         .ok()

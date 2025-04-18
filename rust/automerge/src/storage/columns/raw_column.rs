@@ -90,7 +90,7 @@ impl<T: compression::ColumnCompression> RawColumn<T> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct RawColumns<T: compression::ColumnCompression>(Vec<RawColumn<T>>);
+pub(crate) struct RawColumns<T: compression::ColumnCompression>(pub(crate) Vec<RawColumn<T>>);
 
 impl<T: compression::ColumnCompression> RawColumns<T> {
     /// Returns `Some` if no column in this set of columns is marked as compressed

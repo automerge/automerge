@@ -1,19 +1,11 @@
-use std::borrow::Cow;
-
-use itertools::Itertools;
-
+use crate::automerge::Automerge;
 use crate::iter::{SpanInternal, SpansInternal};
-use crate::{
-    patches::{PatchLog, TextRepresentation},
-    types::{Key, ObjMeta, Op, OpId},
-    Automerge, ObjType, OpType, Value,
-};
+use crate::op_set2::OpQuery;
+use crate::patches::{PatchLog, TextRepresentation};
+use crate::types::ObjType;
+use crate::types::{ObjId, TextEncoding};
 
-struct Put<'a> {
-    value: Value<'a>,
-    key: Key,
-    id: OpId,
-}
+use std::ops::Range;
 
 /// Traverse the "current" state of the document, logging patches to `patch_log`.
 ///
@@ -32,119 +24,73 @@ pub(crate) fn log_current_state_patches(doc: &Automerge, patch_log: &mut PatchLo
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
-    for (obj, ops) in doc.ops().iter_objs() {
-        let ops = ops.map(|i| i.as_op(doc.osd()));
-        if obj.typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String(_))
-        {
-            log_text_patches(doc, patch_log, &obj, ops)
-        } else if obj.typ.is_sequence() {
-            log_list_patches(doc, patch_log, &obj, ops);
-        } else {
-            log_map_patches(doc, patch_log, &obj, ops);
+
+    for (obj, range) in doc.ops.iter_obj_ids() {
+        let typ = doc.ops.object_type(&obj);
+        let text_rep = patch_log.text_rep();
+        match (typ, text_rep) {
+            (Some(ObjType::Text), TextRepresentation::String(enc)) => {
+                log_text_patches(doc, patch_log, obj, range, enc)
+            }
+            (Some(ObjType::Text), _) | (Some(ObjType::List), _) => {
+                log_list_patches(doc, patch_log, obj, range);
+            }
+            (Some(ObjType::Map), _) => {
+                log_map_patches(doc, patch_log, obj, range);
+            }
+            _ => {}
         }
     }
 }
 
-fn log_text_patches<'a, I: Iterator<Item = Op<'a>>>(
-    doc: &'a Automerge,
+fn log_text_patches(
+    doc: &Automerge,
     patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: I,
+    obj: ObjId,
+    range: Range<usize>,
+    encoding: TextEncoding,
 ) {
-    let spans = SpansInternal::new(ops, doc, None);
+    let spans = SpansInternal::new(doc.ops(), range, None, encoding);
     for span in spans {
         match span {
             SpanInternal::Text(text, index, marks) => {
-                patch_log.splice(obj.id, index, &text, marks);
+                patch_log.splice(obj, index, &text, marks);
             }
             SpanInternal::Obj(id, index) => {
                 let value = crate::hydrate::Value::Map(crate::hydrate::Map::new());
-                patch_log.insert(obj.id, index, value, id, false);
+                patch_log.insert(obj, index, value, id, false);
             }
         }
     }
 }
 
-fn log_list_patches<'a, I: Iterator<Item = Op<'a>>>(
-    _doc: &'a Automerge,
-    patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: I,
-) {
-    let ops_by_key = ops.chunk_by(|o| o.elemid_or_key());
-    let mut len = 0;
-    ops_by_key
-        .into_iter()
-        .filter_map(|(_key, key_ops)| {
-            key_ops
-                .filter(|o| o.visible_or_mark(None))
-                .filter_map(|o| match o.action() {
-                    OpType::Make(obj_type) => Some((Value::Object(*obj_type), *o.id())),
-                    OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), *o.id())),
-                    _ => None,
-                })
-                .enumerate()
-                .last()
-                .map(|value| {
-                    let pos = len;
-                    len += 1; // increment - side effect
-                    (pos, value)
-                })
-        })
-        .for_each(|(index, (val_enum, (value, opid)))| {
-            let conflict = val_enum > 0;
-            let value = crate::hydrate::Value::new(value, patch_log.text_rep());
-            patch_log.insert(obj.id, index, value, opid, conflict);
-        });
+fn log_list_patches(doc: &Automerge, patch_log: &mut PatchLog, obj: ObjId, range: Range<usize>) {
+    let ops = doc.ops.iter_range(&range);
+    for (index, op) in ops.visible(None).top_ops().enumerate() {
+        patch_log.insert(
+            obj,
+            index,
+            op.hydrate_value(TextRepresentation::Array),
+            op.id,
+            op.conflict,
+        );
+    }
 }
 
-fn log_map_key_patches<'a, I: Iterator<Item = Op<'a>>>(
-    (key, key_ops): (Key, I),
-) -> Option<(usize, Put<'a>)> {
-    key_ops
-        .filter(|o| o.visible())
-        .filter_map(|o| match o.action() {
-            OpType::Make(obj_type) => {
-                let value = Value::Object(*obj_type);
-                Some(Put {
-                    value,
-                    key,
-                    id: *o.id(),
-                })
-            }
-            OpType::Put(value) => {
-                let value = Value::Scalar(Cow::Borrowed(value));
-                Some(Put {
-                    value,
-                    key,
-                    id: *o.id(),
-                })
-            }
-            _ => None,
-        })
-        .enumerate()
-        .last()
-}
-
-fn log_map_patches<'a, I: Iterator<Item = Op<'a>>>(
-    doc: &'a Automerge,
-    patch_log: &mut PatchLog,
-    obj: &ObjMeta,
-    ops: I,
-) {
-    let ops_by_key = ops.chunk_by(|o| *o.key());
-    ops_by_key
-        .into_iter()
-        .filter_map(log_map_key_patches)
-        .for_each(|(i, put)| {
-            if let Some(prop_index) = put.key.prop_index() {
-                if let Some(key) = doc.ops().osd.props.safe_get(prop_index) {
-                    let conflict = i > 0;
-                    let value = crate::hydrate::Value::new(put.value, patch_log.text_rep());
-                    patch_log.put_map(obj.id, key, value, put.id, conflict, false);
-                }
-            }
-        });
+fn log_map_patches(doc: &Automerge, patch_log: &mut PatchLog, obj: ObjId, range: Range<usize>) {
+    let ops = doc.ops.iter_range(&range);
+    for op in ops.visible(None).top_ops() {
+        if let Some(key) = op.key.key_str() {
+            patch_log.put_map(
+                obj,
+                &key,
+                op.hydrate_value(TextRepresentation::Array),
+                op.id,
+                op.conflict,
+                false,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -153,6 +99,7 @@ mod tests {
 
     use crate::{
         patches::{PatchLog, TextRepresentation},
+        read::ReadDoc,
         transaction::Transactable,
         Automerge, ObjType, Patch, PatchAction, Prop, TextEncoding, Value,
     };
@@ -362,51 +309,50 @@ mod tests {
             .document()
             .current_state(TextRepresentation::String(TextEncoding::default()));
 
-        assert_eq!(
-            Patches::from(p),
-            Patches(vec![
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "key".into(),
-                    value: PatchValue::Untagged("value".into()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "list".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "map".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: crate::ROOT,
-                    prop: "text".into(),
-                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
-                    conflict: false,
-                },
-                ObservedPatch::Put {
-                    obj: map.clone(),
-                    prop: "nested_key".into(),
-                    value: PatchValue::Untagged("value".into()),
-                    conflict: false,
-                },
-                ObservedPatch::Insert {
-                    obj: list,
-                    index: 0,
-                    value: PatchValue::Untagged("value".into()),
-                },
-                ObservedPatch::SpliceText {
-                    obj: text,
-                    index: 0,
-                    chars: "a".into(),
-                },
-            ])
-        );
+        let doc_patches = Patches::from(p);
+        let test_patches = Patches(vec![
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "key".into(),
+                value: PatchValue::Untagged("value".into()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "list".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "map".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: crate::ROOT,
+                prop: "text".into(),
+                value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                conflict: false,
+            },
+            ObservedPatch::Put {
+                obj: map.clone(),
+                prop: "nested_key".into(),
+                value: PatchValue::Untagged("value".into()),
+                conflict: false,
+            },
+            ObservedPatch::Insert {
+                obj: list,
+                index: 0,
+                value: PatchValue::Untagged("value".into()),
+            },
+            ObservedPatch::SpliceText {
+                obj: text,
+                index: 0,
+                chars: "a".into(),
+            },
+        ]);
+        assert_eq!(doc_patches, test_patches);
     }
 
     #[test]
@@ -574,7 +520,15 @@ mod tests {
 
         doc.insert(&list, 0, 1).unwrap();
         doc2.insert(&list, 0, 2).unwrap();
+
         doc.merge(&mut doc2).unwrap();
+
+        doc2.merge(&mut doc).unwrap();
+
+        assert_eq!(
+            doc.hydrate(&crate::ROOT, None),
+            doc2.hydrate(&crate::ROOT, None)
+        );
 
         doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
         let p = doc

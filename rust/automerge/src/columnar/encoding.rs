@@ -21,7 +21,7 @@ pub(crate) trait Sink {
     fn append(&mut self, bytes: &[u8]);
 }
 
-impl<'a> Sink for &'a mut Vec<u8> {
+impl Sink for &mut Vec<u8> {
     fn append(&mut self, bytes: &[u8]) {
         self.extend(bytes)
     }

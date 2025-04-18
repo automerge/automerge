@@ -1,19 +1,64 @@
 /// An implementation of column specifications as specified in [1]
 ///
 /// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, Hash, PartialEq, Clone, Copy)]
 pub(crate) struct ColumnSpec(u32);
 
+impl PartialOrd for ColumnSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        //self.normalize().partial_cmp(&other.normalize())
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ColumnSpec {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.normalize().cmp(&other.normalize())
+    }
+}
+
 impl ColumnSpec {
-    pub(crate) fn new(id: ColumnId, col_type: ColumnType, deflate: bool) -> Self {
+    pub(crate) const fn new(id: ColumnId, col_type: ColumnType, deflate: bool) -> Self {
         let mut raw = id.0 << 4;
-        raw |= u8::from(col_type) as u32;
+        raw |= col_type.as_u8() as u32;
         if deflate {
             raw |= 0b00001000;
         } else {
             raw &= 0b11110111;
         }
         ColumnSpec(raw)
+    }
+
+    pub(crate) const fn new_delta(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::DeltaInteger, false)
+    }
+
+    pub(crate) const fn new_integer(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::Integer, false)
+    }
+
+    pub(crate) const fn new_string(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::String, false)
+    }
+
+    pub(crate) const fn new_value(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::Value, false)
+    }
+
+    pub(crate) const fn new_value_metadata(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::ValueMetadata, false)
+    }
+
+    pub(crate) const fn new_actor(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::Actor, false)
+    }
+
+    pub(crate) const fn new_group(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::Group, false)
+    }
+
+    pub(crate) const fn new_boolean(id: ColumnId) -> Self {
+        Self::new(id, ColumnType::Boolean, false)
     }
 
     pub(crate) fn col_type(&self) -> ColumnType {
@@ -41,7 +86,7 @@ impl ColumnSpec {
     }
 }
 
-#[derive(PartialEq, PartialOrd)]
+#[derive(PartialEq, PartialOrd, Ord, Eq)]
 pub(crate) struct Normalized(u32);
 
 impl std::fmt::Debug for ColumnSpec {
@@ -56,7 +101,7 @@ impl std::fmt::Debug for ColumnSpec {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone, Copy, PartialOrd, Ord)]
 pub(crate) struct ColumnId(u32);
 
 impl ColumnId {
@@ -92,6 +137,36 @@ pub(crate) enum ColumnType {
     Value,
 }
 
+impl ColumnType {
+    const fn from_u8(val: u8) -> Self {
+        let type_bits = val & 0b00000111;
+        match type_bits {
+            0 => Self::Group,
+            1 => Self::Actor,
+            2 => Self::Integer,
+            3 => Self::DeltaInteger,
+            4 => Self::Boolean,
+            5 => Self::String,
+            6 => Self::ValueMetadata,
+            7 => Self::Value,
+            _ => unreachable!(),
+        }
+    }
+
+    const fn as_u8(&self) -> u8 {
+        match self {
+            ColumnType::Group => 0,
+            ColumnType::Actor => 1,
+            ColumnType::Integer => 2,
+            ColumnType::DeltaInteger => 3,
+            ColumnType::Boolean => 4,
+            ColumnType::String => 5,
+            ColumnType::ValueMetadata => 6,
+            ColumnType::Value => 7,
+        }
+    }
+}
+
 impl std::fmt::Display for ColumnType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -109,33 +184,13 @@ impl std::fmt::Display for ColumnType {
 
 impl From<u8> for ColumnType {
     fn from(v: u8) -> Self {
-        let type_bits = v & 0b00000111;
-        match type_bits {
-            0 => Self::Group,
-            1 => Self::Actor,
-            2 => Self::Integer,
-            3 => Self::DeltaInteger,
-            4 => Self::Boolean,
-            5 => Self::String,
-            6 => Self::ValueMetadata,
-            7 => Self::Value,
-            _ => unreachable!(),
-        }
+        Self::from_u8(v)
     }
 }
 
 impl From<ColumnType> for u8 {
     fn from(ct: ColumnType) -> Self {
-        match ct {
-            ColumnType::Group => 0,
-            ColumnType::Actor => 1,
-            ColumnType::Integer => 2,
-            ColumnType::DeltaInteger => 3,
-            ColumnType::Boolean => 4,
-            ColumnType::String => 5,
-            ColumnType::ValueMetadata => 6,
-            ColumnType::Value => 7,
-        }
+        ct.as_u8()
     }
 }
 

@@ -1,91 +1,156 @@
-use std::fmt;
-use std::ops::RangeBounds;
-
+use super::tools::{ExIdPromise, Shiftable, SkipIter, Unshift};
+use crate::clock::Clock;
 use crate::exid::ExId;
-use crate::op_set::OpSet;
-use crate::types::{Clock, Key};
-use crate::value::Value;
+use crate::op_set2::hexane::{ColumnDataIter, StrCursor};
+use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter, VisIter};
+use crate::op_set2::types::{Action, ScalarValue, ValueRef};
+use crate::types::OpId;
 
-use super::TopOps;
+use std::borrow::Cow;
+use std::fmt::Debug;
+use std::ops::Range;
 
-/// Iterator created by the [`crate::ReadDoc::map_range()`] and [`crate::ReadDoc::map_range_at()`] methods
-#[derive(Clone)]
-pub struct MapRange<'a, R: RangeBounds<String>> {
-    iter: Option<MapRangeInner<'a, R>>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapRangeItem<'a> {
+    pub key: Cow<'a, str>,
+    pub value: ValueRef<'a>,
+    pub conflict: bool,
+    pub(crate) pos: usize,
+    pub(crate) maybe_exid: ExIdPromise<'a>,
 }
 
-#[derive(Clone)]
-struct MapRangeInner<'a, R: RangeBounds<String>> {
-    iter: TopOps<'a>,
-    op_set: &'a OpSet,
-    range: R,
+impl MapRangeItem<'_> {
+    pub fn id(&self) -> ExId {
+        self.maybe_exid.exid()
+    }
+
+    pub fn into_owned(self) -> MapRangeItem<'static> {
+        MapRangeItem {
+            key: Cow::Owned(self.key.into_owned()),
+            value: self.value.into_owned(),
+            conflict: self.conflict,
+            pos: self.pos,
+            maybe_exid: self.maybe_exid.into_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MapRangeInner<'a> {
+    iter: Unshift<SkipIter<MapIter<'a>, VisIter<'a>>>,
     clock: Option<Clock>,
+    op_set: &'a OpSet,
 }
 
-impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new(iter: TopOps<'a>, op_set: &'a OpSet, range: R, clock: Option<Clock>) -> Self {
-        MapRange {
-            iter: Some(MapRangeInner {
+#[derive(Debug, Clone, Default)]
+pub struct MapRange<'a> {
+    inner: Option<MapRangeInner<'a>>,
+}
+
+impl<'a> Iterator for MapRange<'a> {
+    type Item = MapRangeItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut conflict = false;
+        let inner = self.inner.as_mut()?;
+
+        while let Some((key, action, value, _id, pos)) = inner.iter.next() {
+            if let Some((next_key, _, _, _, _)) = inner.iter.peek() {
+                if next_key == &key {
+                    conflict = true;
+                    continue;
+                }
+            }
+            let value = if let ScalarValue::Counter(c) = &value {
+                let inc = inner.op_set.get_increment_at_pos(pos, inner.clock.as_ref());
+                ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
+            } else {
+                ValueRef::from_action_value(action, value)
+            };
+            let maybe_exid = ExIdPromise::new(inner.op_set, _id);
+            return Some(MapRangeItem {
+                key,
+                value,
+                conflict,
+                maybe_exid,
+                pos,
+            });
+        }
+        None
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MapIter<'a> {
+    id: OpIdIter<'a>,
+    key_str: ColumnDataIter<'a, StrCursor>,
+    action: ActionIter<'a>,
+    value: ValueIter<'a>,
+}
+
+impl Shiftable for MapIter<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let id = self.id.shift_next(range.clone());
+        let key_str = self.key_str.shift_next(range.clone());
+        let action = self.action.shift_next(range.clone());
+        let value = self.value.shift_next(range);
+        let pos = self.id.pos() - 1;
+        Some((key_str??, action?, value?, id?, pos))
+    }
+}
+
+impl<'a> Iterator for MapIter<'a> {
+    type Item = (Cow<'a, str>, Action, ScalarValue<'a>, OpId, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let id = self.id.next()?;
+        let key_str = self.key_str.next()??;
+        let action = self.action.next()?;
+        let value = self.value.next()?;
+        let pos = self.id.pos() - 1;
+        Some((key_str, action, value, id, pos))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let id = self.id.nth(n)?;
+        let key_str = self.key_str.nth(n)??;
+        let action = self.action.nth(n)?;
+        let value = self.value.nth(n)?;
+        let pos = self.id.pos() - 1;
+        Some((key_str, action, value, id, pos))
+    }
+}
+
+impl<'a> MapRange<'a> {
+    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>, clock: Option<Clock>) -> Self {
+        let key_str = op_set.key_str_iter_range(&range);
+        let action = op_set.action_iter_range(&range);
+        let value = op_set.value_iter_range(&range);
+        let id = op_set.id_iter_range(&range);
+
+        let map_iter = MapIter {
+            id,
+            key_str,
+            value,
+            action,
+        };
+
+        let vis = VisIter::new(op_set, clock.as_ref(), range);
+        let skip = SkipIter::new(map_iter, vis);
+        let iter = Unshift::new(skip);
+
+        Self {
+            inner: Some(MapRangeInner {
                 iter,
                 op_set,
-                range,
                 clock,
             }),
         }
     }
-}
 
-impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {
-    fn default() -> Self {
-        MapRange { iter: None }
-    }
-}
-
-impl<'a, R: RangeBounds<String>> fmt::Debug for MapRange<'a, R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MapRange").finish()
-    }
-}
-
-impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
-    type Item = MapRangeItem<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.as_mut().and_then(|inner| {
-            for top in inner.iter.by_ref() {
-                if let Key::Map(n) = top.op.key() {
-                    if let Some(prop) = inner.op_set.osd.props.safe_get(*n) {
-                        if inner.range.contains(prop) {
-                            return Some(MapRangeItem {
-                                key: prop.as_str(),
-                                value: top.op.value_at(inner.clock.as_ref()),
-                                id: top.op.exid(),
-                                conflict: top.conflict,
-                            });
-                        }
-                    }
-                }
-            }
-            None
-        })
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MapRangeItem<'a> {
-    pub key: &'a str,
-    pub value: Value<'a>,
-    pub id: ExId,
-    pub conflict: bool,
-}
-
-impl<'a> MapRangeItem<'a> {
-    pub fn new(key: &'a str, value: Value<'a>, id: ExId, conflict: bool) -> MapRangeItem<'a> {
-        MapRangeItem {
-            key,
-            value,
-            id,
-            conflict,
-        }
+    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let inner = self.inner.as_mut()?;
+        inner.iter.shift(range);
+        self.next()
     }
 }

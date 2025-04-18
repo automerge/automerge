@@ -1,5 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
+use hexane::{ColumnCursor, CursorIter, StrCursor};
+
 use crate::{
     columnar::{
         column_range::{
@@ -23,46 +25,29 @@ const MESSAGE_COL_ID: ColumnId = ColumnId::new(3);
 const DEPS_COL_ID: ColumnId = ColumnId::new(4);
 const EXTRA_COL_ID: ColumnId = ColumnId::new(5);
 
-#[derive(Debug)]
-pub(crate) struct ChangeMetadata<'a> {
+#[derive(Debug, Clone)]
+pub(crate) struct DocChangeMetadata<'a> {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) max_op: u64,
     pub(crate) timestamp: i64,
-    pub(crate) message: Option<smol_str::SmolStr>,
+    //pub(crate) message: Option<smol_str::SmolStr>,
+    pub(crate) message: Option<Cow<'a, str>>,
     pub(crate) deps: Vec<u64>,
     pub(crate) extra: Cow<'a, [u8]>,
 }
 
-/// A row to be encoded as change metadata in the document format
-///
-/// The lifetime `'a` is the lifetime of the extra bytes Cow. For types which cannot
-/// provide a reference (e.g. because they are decoding from some columnar storage on each
-/// iteration) this should be `'static`.
-pub(crate) trait AsChangeMeta<'a> {
-    /// The type of the iterator over dependency indices
-    type DepsIter: Iterator<Item = u64> + ExactSizeIterator;
-
-    fn actor(&self) -> u64;
-    fn seq(&self) -> u64;
-    fn max_op(&self) -> u64;
-    fn timestamp(&self) -> i64;
-    fn message(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
-    fn deps(&self) -> Self::DepsIter;
-    fn extra(&self) -> Cow<'a, [u8]>;
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct DocChangeColumns {
-    actor: RleRange<u64>,
-    seq: DeltaRange,
-    max_op: DeltaRange,
-    time: DeltaRange,
-    message: RleRange<smol_str::SmolStr>,
-    deps: DepsRange,
-    extra: ValueRange,
+    pub(crate) actor: RleRange<u64>,
+    pub(crate) seq: DeltaRange,
+    pub(crate) max_op: DeltaRange,
+    pub(crate) time: DeltaRange,
+    pub(crate) message: RleRange<smol_str::SmolStr>,
+    pub(crate) deps: DepsRange,
+    pub(crate) extra: ValueRange,
     #[allow(dead_code)]
-    other: Columns,
+    pub(crate) other: Columns,
 }
 
 impl DocChangeColumns {
@@ -72,46 +57,18 @@ impl DocChangeColumns {
             seq: self.seq.decoder(data),
             max_op: self.max_op.decoder(data),
             time: self.time.decoder(data),
-            message: if self.message.is_empty() {
-                None
-            } else {
-                Some(self.message.decoder(data))
-            },
+            /*
+                        message: if self.message.is_empty() {
+                            None
+                        } else {
+                            Some(self.message.decoder(data))
+                        },
+            */
+            message: hexane::StrCursor::iter(&data[self.message.as_ref().clone()]),
             deps: self.deps.iter(data),
             extra: ExtraDecoder {
                 val: self.extra.iter(data),
             },
-        }
-    }
-
-    pub(crate) fn encode<'a, I, C>(changes: I, out: &mut Vec<u8>) -> DocChangeColumns
-    where
-        C: AsChangeMeta<'a>,
-        I: Iterator<Item = C> + Clone,
-    {
-        let actor = RleRange::<u64>::encode(
-            // TODO: make this fallible once iterators have a try_splice
-            changes.clone().map(|c| Some(c.actor())),
-            out,
-        );
-        let seq = DeltaRange::encode(changes.clone().map(|c| Some(c.seq() as i64)), out);
-        let max_op = DeltaRange::encode(changes.clone().map(|c| Some(c.max_op() as i64)), out);
-        let time = DeltaRange::encode(changes.clone().map(|c| Some(c.timestamp())), out);
-        let message = RleRange::encode(changes.clone().map(|c| c.message()), out);
-        let deps = DepsRange::encode(changes.clone().map(|c| c.deps()), out);
-        let extra = ValueRange::encode(
-            changes.map(|c| Cow::Owned(ScalarValue::Bytes(c.extra().to_vec()))),
-            out,
-        );
-        DocChangeColumns {
-            actor,
-            seq,
-            max_op,
-            time,
-            message,
-            deps,
-            extra,
-            other: Columns::empty(),
         }
     }
 
@@ -170,8 +127,12 @@ pub(crate) enum ReadChangeError {
     MismatchingColumn { index: usize },
     #[error("incorrect value in extra bytes column")]
     InvalidExtraBytes,
+    #[error("max_op is lower than start_op")]
+    InvalidMaxOp,
     #[error(transparent)]
     ReadColumn(#[from] DecodeColumnError),
+    #[error(transparent)]
+    PackError(#[from] hexane::PackError),
 }
 
 impl From<MismatchingColumn> for ReadChangeError {
@@ -186,13 +147,14 @@ pub(crate) struct DocChangeColumnIter<'a> {
     seq: DeltaDecoder<'a>,
     max_op: DeltaDecoder<'a>,
     time: DeltaDecoder<'a>,
-    message: Option<RleDecoder<'a, smol_str::SmolStr>>,
+    //message: Option<RleDecoder<'a, smol_str::SmolStr>>,
+    message: CursorIter<'a, StrCursor>,
     deps: DepsIter<'a>,
     extra: ExtraDecoder<'a>,
 }
 
 impl<'a> DocChangeColumnIter<'a> {
-    fn try_next(&mut self) -> Result<Option<ChangeMetadata<'a>>, ReadChangeError> {
+    fn try_next(&mut self) -> Result<Option<DocChangeMetadata<'a>>, ReadChangeError> {
         let actor = match self.actors.maybe_next_in_col("actor")? {
             Some(actor) => actor as usize,
             None => {
@@ -213,14 +175,11 @@ impl<'a> DocChangeColumnIter<'a> {
             u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value("seq", e.to_string()))
         })?;
         let time = self.time.next_in_col("time")?;
-        let message = if let Some(ref mut message) = self.message {
-            message.maybe_next_in_col("message")?
-        } else {
-            None
-        };
+        // would be nice if this had per column error handling too
+        let message = self.message.next().transpose()?.flatten();
         let deps = self.deps.next_in_col("deps")?;
         let extra = self.extra.next().transpose()?.unwrap_or(Cow::Borrowed(&[]));
-        Ok(Some(ChangeMetadata {
+        Ok(Some(DocChangeMetadata {
             actor,
             seq,
             max_op,
@@ -233,14 +192,14 @@ impl<'a> DocChangeColumnIter<'a> {
 }
 
 impl<'a> Iterator for DocChangeColumnIter<'a> {
-    type Item = Result<ChangeMetadata<'a>, ReadChangeError>;
+    type Item = Result<DocChangeMetadata<'a>, ReadChangeError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()
     }
 }
 
-impl<'a> DocChangeColumnIter<'a> {
+impl DocChangeColumnIter<'_> {
     fn check_done(&mut self) -> bool {
         let other_cols = [
             self.seq.next().is_none(),

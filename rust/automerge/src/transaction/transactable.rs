@@ -98,7 +98,7 @@ pub trait Transactable: ReadDoc {
     fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: Mark<'_>,
+        mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 

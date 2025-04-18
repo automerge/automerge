@@ -1,0 +1,20 @@
+
+
+### Run 1 - zero optimizations 9/13/24
+
+test insert_1000_large  ... bench:  18,305,708.30 ns/iter (+/- 517,430.79)
+test insert_1000_small  ... bench:  15,014,266.60 ns/iter (+/- 184,359.62)
+test insert_100_large   ... bench:     358,804.20 ns/iter (+/- 6,484.01)
+test insert_100_small   ... bench:     315,770.80 ns/iter (+/- 5,799.79)
+test insert_10_large    ... bench:      12,119.78 ns/iter (+/- 273.44)
+test insert_10_small    ... bench:      10,512.50 ns/iter (+/- 234.29)
+
+### Run 2 - iterate per chunk on seek by, set <B> to 64, MAX=4 - 9/13/24
+
+test insert_1000_large ... bench:     927,366.60 ns/iter (+/- 6,176.25)
+test insert_1000_small ... bench:   1,104,345.90 ns/iter (+/- 12,258.75)
+test insert_100_large  ... bench:      91,020.38 ns/iter (+/- 1,097.83)
+test insert_100_small  ... bench:     103,733.32 ns/iter (+/- 1,630.76)
+test insert_10_large   ... bench:       7,547.11 ns/iter (+/- 66.32)
+test insert_10_small   ... bench:       6,354.34 ns/iter (+/- 65.45)
+

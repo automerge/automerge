@@ -1,37 +1,36 @@
-use std::fmt;
+use crate::{exid::ExId, types, types::Clock};
 
-use crate::exid::ExId;
-use crate::types::Clock;
-use crate::value::Value;
+use crate::op_set2::op_set::OpQueryTerm;
+use crate::op_set2::OpSet;
 
-use super::TopOps;
+use std::fmt::Debug;
 
-/// Iterator created by the [`crate::ReadDoc::values()`] and [`crate::ReadDoc::values_at()`] methods
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Values<'a> {
-    iter: Option<(TopOps<'a>, Option<Clock>)>,
+    iter: Option<(&'a OpSet, Box<dyn OpQueryTerm<'a> + 'a>)>,
 }
 
 impl<'a> Values<'a> {
-    pub(crate) fn new(iter: TopOps<'a>, clock: Option<Clock>) -> Self {
+    // FIXME - ignore clock?
+    pub(crate) fn new<I: OpQueryTerm<'a> + 'a>(
+        op_set: &'a OpSet,
+        iter: I,
+        _clock: Option<Clock>,
+    ) -> Self {
         Self {
-            iter: Some((iter, clock)),
+            iter: Some((op_set, Box::new(iter))),
         }
     }
 }
 
-impl<'a> fmt::Debug for Values<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Values").finish()
-    }
-}
-
 impl<'a> Iterator for Values<'a> {
-    type Item = (Value<'a>, ExId);
+    type Item = (types::Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .as_mut()
-            .and_then(|(i, clock)| i.next().map(|top| top.op.tagged_value(clock.as_ref())))
+        let (op_set, iter) = self.iter.as_mut()?;
+        let op = iter.next()?;
+        let value = op.value().to_value();
+        let id = op_set.id_to_exid(op.id);
+        Some((value, id))
     }
 }

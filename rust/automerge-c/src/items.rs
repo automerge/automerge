@@ -131,7 +131,7 @@ pub struct AMitems<'a> {
     phantom: PhantomData<&'a mut AMresult>,
 }
 
-impl<'a> AMitems<'a> {
+impl AMitems<'_> {
     pub fn new(items: &[AMitem]) -> Self {
         Self {
             detail: Detail::new(items, 0).into(),
@@ -176,14 +176,14 @@ impl<'a> AMitems<'a> {
     }
 }
 
-impl<'a> AsRef<[AMitem]> for AMitems<'a> {
+impl AsRef<[AMitem]> for AMitems<'_> {
     fn as_ref(&self) -> &[AMitem] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         unsafe { std::slice::from_raw_parts(detail.ptr as *const AMitem, detail.len) }
     }
 }
 
-impl<'a> Default for AMitems<'a> {
+impl Default for AMitems<'_> {
     fn default() -> Self {
         Self {
             detail: [0; USIZE_USIZE_USIZE_],

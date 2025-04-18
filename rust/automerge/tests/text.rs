@@ -4,12 +4,13 @@ use automerge::{
     hydrate_list, hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark},
-    op_tree::B,
     patches::TextRepresentation,
     transaction::Transactable,
     ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
     TextEncoding, ROOT,
 };
+const B: usize = 16;
+
 use proptest::strategy::Strategy;
 use test_log::test;
 
@@ -645,9 +646,7 @@ fn test_remote_patches_for_marks_with_expand_after() {
 
     doc_b.update_diff_cursor();
     let heads_before_b = doc_b.get_heads();
-    println!("doing merge");
     doc_b.merge(&mut doc_a).unwrap();
-    println!("done merge");
     let heads_after_b = doc_b.get_heads();
 
     let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);
@@ -729,10 +728,8 @@ fn marks_are_consolidated(spans: &Vec<Span>) -> bool {
     for span in spans {
         match span {
             Span::Text(_, marks) => {
-                if let Some(last_marks) = last_marks {
-                    if marks == last_marks {
-                        return false;
-                    }
+                if Some(marks) == last_marks {
+                    return false;
                 }
                 last_marks = Some(marks);
             }

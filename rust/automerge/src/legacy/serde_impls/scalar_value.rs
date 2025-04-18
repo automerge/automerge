@@ -9,7 +9,7 @@ impl<'de> Deserialize<'de> for ScalarValue {
         D: Deserializer<'de>,
     {
         struct ValueVisitor;
-        impl<'de> de::Visitor<'de> for ValueVisitor {
+        impl de::Visitor<'_> for ValueVisitor {
             type Value = ScalarValue;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

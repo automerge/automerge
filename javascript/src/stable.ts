@@ -1297,6 +1297,9 @@ export function inspectChange(
 export function stats(doc: Doc<unknown>): {
   numChanges: number
   numOps: number
+  cargoPackageName: string
+  cargoPackageVersion: string
+  rustcVersion: string
 } {
   const state = _state(doc)
   return state.handle.stats()

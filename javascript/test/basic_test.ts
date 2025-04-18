@@ -6,6 +6,11 @@ import { PatchSource } from "../src/types.js"
 import { RAW_STRING } from "../src/constants.js"
 import { RawString } from "../src/next.js"
 
+import { readFile } from "fs/promises";
+import { join } from "path";
+import { fileURLToPath } from "url";
+
+
 describe("Automerge", () => {
   describe("basics", () => {
     it("should init clone and free", () => {
@@ -306,6 +311,24 @@ describe("Automerge", () => {
       assert.deepEqual(doc.list.indexOf(5), 5)
       assert.deepEqual(doc.text.indexOf("world"), 6)
     })
+    it("get change metadata", () => {
+      let doc = Automerge.from<any>({ text: "hello world" })
+      let heads = Automerge.getHeads(doc);
+      doc = Automerge.change(doc, d => { d.foo = "bar" })
+      doc = Automerge.change(doc, d => { d.zip = "zop" })
+      let changes = Automerge.getChangesSince(doc, heads).map(Automerge.decodeChange);
+      let meta = Automerge.getChangesMetaSince(doc, heads);
+      assert.equal(changes.length, 2);
+      assert.equal(meta.length, 2);
+      for (let i = 0; i < 2; i++) {
+        assert.equal(changes[i].actor, meta[i].actor);
+        assert.equal(changes[i].hash, meta[i].hash);
+        assert.equal(changes[i].message, meta[i].message);
+        assert.equal(changes[i].time, meta[i].time);
+        assert.deepEqual(changes[i].deps, meta[i].deps);
+        assert.deepEqual(changes[i].startOp, meta[i].startOp);
+      }
+    })
   })
 
   describe("explicitly allowing missing dependencies when loading", () => {
@@ -374,6 +397,7 @@ describe("Automerge", () => {
       let docL = Automerge.load<DocShape>(Automerge.save(docM))
 
       assert.deepEqual(docM.sub.x, docL.sub.x)
+      assert.deepEqual(docM.sub.y, docL.sub.y)
     })
   })
 
@@ -764,10 +788,11 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => (d.a = 1))
       doc = Automerge.change(doc, d => (d.a = 2))
       const stats = Automerge.stats(doc)
-      assert.deepStrictEqual(stats, {
-        numChanges: 2,
-        numOps: 2,
-      })
+      assert.equal(stats.numChanges, 2);
+      assert.equal(stats.numOps, 2);
+      assert.equal(typeof stats.cargoPackageName, "string");
+      assert.equal(typeof stats.cargoPackageVersion, "string");
+      assert.equal(typeof stats.rustcVersion, "string");
     })
   }),
 
@@ -823,5 +848,25 @@ describe("Automerge", () => {
       assert.strictEqual(Automerge.isRawString(d.foo), true)
       assert.strictEqual(Automerge.isRawString(d.bar), false)
     })
+  })
+  it("rust preview number should match js preview number", async () => {
+    // this test can be removed after the alpha/preview peroid
+    const pkg = JSON.parse(await readFile("./package.json", "utf8"));
+    let doc = Automerge.init();
+    let stats = Automerge.stats(doc)
+    assert.strictEqual(stats.cargoPackageName, "automerge");
+    assert.strictEqual(stats.cargoPackageVersion.split(".").pop(), pkg.version.split(".").pop());
+  })
+  it("it should be able to roll back a transaction", () => {
+    let doc1 = Automerge.from<any>({ foo: "bar" });
+    let save1 = Automerge.save(doc1);
+    assert.throws(() => {
+      let doc2 = Automerge.change(doc1, d => {
+        d.key = "value";
+        throw new RangeError("no")
+      });
+    })
+    let save2 = Automerge.save(doc1);
+    assert.deepEqual(save1, save2);
   })
 })

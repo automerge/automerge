@@ -1,11 +1,11 @@
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::automerge::Automerge;
 use crate::{
     clock::Clock,
     iter::{SpanInternal, SpansInternal},
-    op_tree::OpTreeOpIter,
     transaction::TransactionInner,
-    Automerge, BlockOrText, ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
+    BlockOrText, ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -53,7 +53,7 @@ struct TxHook<'a> {
     text_encoding: TextEncoding,
 }
 
-impl<'a> myers::DiffHook for TxHook<'a> {
+impl myers::DiffHook for TxHook<'_> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -188,7 +188,7 @@ impl BlockOrGrapheme {
     }
 }
 
-impl<'a> myers::DiffHook for BlockDiffHook<'a> {
+impl myers::DiffHook for BlockDiffHook<'_> {
     type Error = crate::AutomergeError;
 
     fn equal(
@@ -364,11 +364,8 @@ fn spans_as_grapheme(
     text: &crate::types::ObjId,
     clock: Option<Clock>,
 ) -> Result<Vec<BlockOrGrapheme>, crate::AutomergeError> {
-    let spans_internal = SpansInternal::new(
-        OpTreeOpIter::new(doc.ops().iter_obj(text).unwrap(), doc.osd()),
-        doc,
-        clock.clone(),
-    );
+    let range = doc.ops.scope_to_obj(text);
+    let spans_internal = SpansInternal::new(doc.ops(), range, clock.clone(), doc.text_encoding());
     let mut result = Vec::with_capacity(spans_internal.size_hint().0);
     for span in spans_internal {
         match span {

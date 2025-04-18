@@ -119,7 +119,7 @@ pub(crate) struct ObjIdIter<'a> {
     counter: RleDecoder<'a, u64>,
 }
 
-impl<'a> ObjIdIter<'a> {
+impl ObjIdIter<'_> {
     fn try_next(&mut self) -> Result<Option<ObjId>, DecodeColumnError> {
         let actor = self
             .actor
@@ -141,7 +141,7 @@ impl<'a> ObjIdIter<'a> {
     }
 }
 
-impl<'a> Iterator for ObjIdIter<'a> {
+impl Iterator for ObjIdIter<'_> {
     type Item = Result<ObjId, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {
