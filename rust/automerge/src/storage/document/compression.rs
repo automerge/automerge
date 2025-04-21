@@ -102,6 +102,12 @@ pub(super) struct Cols<T: compression::ColumnCompression> {
     pub(super) data: Range<usize>,
 }
 
+impl<T: compression::ColumnCompression> Cols<T> {
+    pub(super) fn new(data: Range<usize>, raw_columns: RawColumns<T>) -> Self {
+        Self { data, raw_columns }
+    }
+}
+
 // Compression and decompression involve almost the same steps in either direction. This trait
 // encapsulates that.
 trait Direction: std::fmt::Debug {

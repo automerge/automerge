@@ -33,8 +33,6 @@ pub(crate) struct Document<'a> {
     op_bytes: Range<usize>,
     change_metadata: DocChangeColumns,
     change_bytes: Range<usize>,
-    #[allow(dead_code)]
-    head_indices: Vec<u64>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -113,13 +111,7 @@ impl<'a> Document<'a> {
         // document to disk or network straightforward.
 
         // parse everything in the prefix
-        let (
-            i,
-            parse::RangeOf {
-                range: prefix,
-                value: (actors, heads, change_meta, ops_meta),
-            },
-        ) = parse::range_of(
+        let (i, r) = parse::range_of(
             |i| -> parse::ParseResult<'_, _, ParseError> {
                 let (i, actors) = parse::length_prefixed(parse::actor_id)(i)?;
                 let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
@@ -129,32 +121,23 @@ impl<'a> Document<'a> {
             },
             i,
         )?;
+        let prefix = r.range.start;
+        let (actors, heads, change_meta, ops_meta) = r.value;
 
         // parse the change data
-        let (i, parse::RangeOf { range: changes, .. }) =
-            parse::range_of(|i| parse::take_n(change_meta.total_column_len(), i), i)?;
+        let change_len = change_meta.total_column_len();
+        let (i, changes) = parse::range_only(|i| parse::take_n(change_len, i), i)?;
 
         // parse the ops data
-        let (i, parse::RangeOf { range: ops, .. }) =
-            parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)?;
+        let ops_len = ops_meta.total_column_len();
+        let (i, ops) = parse::range_only(|i| parse::take_n(ops_len, i), i)?;
 
         // parse the suffix, which may be empty if this document was produced by an older version
         // of the JS automerge implementation
-        let (i, suffix, head_indices) = if i.is_empty() {
-            (i, 0..0, Vec::new())
-        } else {
-            let (
-                i,
-                parse::RangeOf {
-                    range: suffix,
-                    value: head_indices,
-                },
-            ) = parse::range_of(
-                |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
-                i,
-            )?;
-            (i, suffix, head_indices)
-        };
+        let (i, Range { start: suffix, .. }) = parse::range_only_unless_empty(
+            |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
+            i,
+        )?;
 
         let compression::Decompressed {
             change_bytes,
@@ -164,22 +147,16 @@ impl<'a> Document<'a> {
             changes,
             ops,
         } = compression::decompress(compression::Args {
-            prefix: prefix.start,
-            suffix: suffix.start,
+            prefix,
+            suffix,
             original: Cow::Borrowed(input.bytes()),
-            changes: compression::Cols {
-                data: changes,
-                raw_columns: change_meta,
-            },
-            ops: compression::Cols {
-                data: ops,
-                raw_columns: ops_meta,
-            },
+            changes: compression::Cols::new(changes, change_meta),
+            ops: compression::Cols::new(ops, ops_meta),
             extra_args: (),
         })
         .map_err(|e| parse::ParseError::Error(ParseError::RawColumns(e)))?;
 
-        let ops_layout = Columns::parse(op_bytes.len(), ops.iter()).map_err(|e| {
+        let ops_layout = Columns::parse2(op_bytes.len(), ops.iter()).map_err(|e| {
             parse::ParseError::Error(ParseError::BadColumnLayout {
                 column_type: "ops",
                 error: e,
@@ -188,7 +165,7 @@ impl<'a> Document<'a> {
         let ops_cols =
             DocOpColumns::try_from(ops_layout).map_err(|e| parse::ParseError::Error(e.into()))?;
 
-        let change_layout = Columns::parse(change_bytes.len(), changes.iter()).map_err(|e| {
+        let change_layout = Columns::parse2(change_bytes.len(), changes.iter()).map_err(|e| {
             parse::ParseError::Error(ParseError::BadColumnLayout {
                 column_type: "changes",
                 error: e,
@@ -209,7 +186,6 @@ impl<'a> Document<'a> {
                 op_bytes,
                 change_metadata: change_cols,
                 change_bytes,
-                head_indices,
             },
         ))
     }
@@ -299,7 +275,6 @@ impl<'a> Document<'a> {
             op_bytes,
             change_metadata: change_meta,
             change_bytes,
-            head_indices,
         }
     }
 

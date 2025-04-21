@@ -127,7 +127,8 @@ impl<'a> Change<'a, Unverified> {
         let ops_meta = ops_meta
             .uncompressed()
             .ok_or(parse::ParseError::Error(ParseError::CompressedChangeCols))?;
-        let col_layout = Columns::parse(ops_data.len(), ops_meta.iter())
+
+        let col_layout = Columns::parse2(ops_data.len(), ops_meta.iter())
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
         let ops_meta = ChangeOpsColumns::try_from(col_layout)
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;

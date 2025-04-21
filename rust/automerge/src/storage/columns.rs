@@ -74,7 +74,7 @@ impl Columns {
         self.columns.push(col)
     }
 
-    pub(crate) fn parse<'a, I: Iterator<Item = &'a RawColumn<compression::Uncompressed>>>(
+    pub(crate) fn parse2<'a, I: Iterator<Item = &'a RawColumn<compression::Uncompressed>>>(
         data_size: usize,
         cols: I,
     ) -> Result<Columns, BadColumnLayout> {

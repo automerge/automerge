@@ -589,6 +589,30 @@ where
     input.range_of(parser)
 }
 
+pub(crate) fn range_only_unless_empty<'a, P, R, E>(
+    parser: P,
+    input: Input<'a>,
+) -> ParseResult<'a, std::ops::Range<usize>, E>
+where
+    P: Parser<'a, R, E>,
+{
+    if input.is_empty() {
+        Ok((input, 0..0))
+    } else {
+        range_only(parser, input)
+    }
+}
+
+pub(crate) fn range_only<'a, P, R, E>(
+    parser: P,
+    input: Input<'a>,
+) -> ParseResult<'a, std::ops::Range<usize>, E>
+where
+    P: Parser<'a, R, E>,
+{
+    input.range_of(parser).map(|(i, r)| (i, r.range))
+}
+
 /// Parse all the remaining input from the parser. This can never fail
 pub(crate) fn take_rest<E>(input: Input<'_>) -> ParseResult<'_, &'_ [u8], E> {
     input.rest()

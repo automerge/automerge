@@ -16,7 +16,7 @@ pub(crate) fn ulebsize(val: u64) -> u64 {
 }
 
 fn leb_bytes(bits: u64) -> u64 {
-    (bits + 6) / 7
+    bits.div_ceil(7)
 }
 
 #[cfg(test)]
