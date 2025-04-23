@@ -79,7 +79,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
 
     pub fn weight(&self) -> Option<&W> {
         self.root_node.as_ref().map(|n| n.weight())
-        //.unwrap_or_default()
     }
 
     pub fn last_weight(&self) -> W {
@@ -226,50 +225,41 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         self.root_node.as_ref().and_then(|n| n.last())
     }
 
-    pub fn get_each<F>(&self, f: F) -> impl Iterator<Item = SubCursor<'_, T, W>>
+    pub fn iter_where<F>(&self, f: F) -> SpanTreeFnIter<'_, T, W, F>
     where
         F: Fn(&W, &W) -> bool,
     {
-        let acc = Default::default();
-        let mut results = vec![];
+        let mut iter = SpanTreeFnIter::new(f);
         if let Some(node) = self.root_node.as_ref() {
-            node.get_each(0, acc, &f, &mut results);
+            iter.stack.push(NodeWalker::new(node, 0, W::default()))
         }
-        results.into_iter()
+        iter
     }
 
     pub fn get_where<F>(&self, f: F) -> Option<SubCursor<'_, T, W>>
     where
         F: Fn(&W, &W) -> bool,
     {
-        let acc = Default::default();
-        self.root_node.as_ref().and_then(|n| n.get_where(0, acc, f))
+        self.iter_where(f).next()
     }
 
     pub fn get_last_cursor(&self) -> SubCursor<'_, T, W> {
         assert!(!self.is_empty());
+
         let element = self.last().unwrap();
-        SubCursor {
-            index: self.len() - 1,
-            weight: self.last_weight(),
-            element,
-        }
+        let weight = self.last_weight();
+        let index = self.len() - 1;
+
+        SubCursor { index, weight, element }
     }
 
     pub fn get_where_or_last<F>(&self, f: F) -> SubCursor<'_, T, W>
     where
         F: Fn(&W, &W) -> bool,
     {
-        assert!(!self.is_empty());
-        let acc = Default::default();
-        if f(&acc, self.weight().unwrap_or(&acc)) {
-            if let Some(root) = self.root_node.as_ref() {
-                if let Some(result) = root.get_where(0, acc, f) {
-                    return result;
-                }
-            }
-        }
-        self.get_last_cursor()
+        self.iter_where(f)
+            .next()
+            .unwrap_or_else(|| self.get_last_cursor())
     }
 
     /// Removes the element at `index` from the sequence.
@@ -369,11 +359,8 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
 
     fn recompute_weight(&mut self) {
         let acc = W::default();
-        let acc = self
-            .elements
-            .iter()
-            .fold(acc, |acc, e| acc.and(&W::alloc(e)));
-        let acc = self.children.iter().fold(acc, |acc, c| acc.and(c.weight()));
+        let acc = self.elements.iter().fold(acc, |a, e| a.and(&W::alloc(e)));
+        let acc = self.children.iter().fold(acc, |a, c| a.and(c.weight()));
 
         self.weight = acc;
 
@@ -755,84 +742,6 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         assert!(self.is_full());
     }
 
-    fn get_each<'a, F>(
-        &'a self,
-        mut index: usize,
-        mut acc: W,
-        f: &F,
-        results: &mut Vec<SubCursor<'a, T, W>>,
-    ) where
-        F: Fn(&W, &W) -> bool,
-    {
-        if self.is_leaf() {
-            let iter = self.elements.iter();
-            for e in iter {
-                let next = W::alloc(e);
-                if f(&acc, &next) {
-                    results.push(SubCursor::new(index, acc.clone(), e));
-                }
-                index += 1;
-                acc.union(&next);
-            }
-        } else {
-            for i in 0..self.children.len() {
-                if let Some(child) = self.children.get(i) {
-                    let next = child.weight();
-                    if f(&acc, next) {
-                        child.get_each(index, acc.clone(), f, results);
-                    }
-                    index += child.len();
-                    acc.union(next);
-                }
-                if let Some(e) = self.elements.get(i) {
-                    let next = W::alloc(e);
-                    if f(&acc, &next) {
-                        results.push(SubCursor::new(index, acc.clone(), e));
-                    }
-                    index += 1;
-                    acc.union(&next);
-                }
-            }
-        }
-    }
-
-    fn get_where<F>(&self, mut index: usize, mut acc: W, f: F) -> Option<SubCursor<'_, T, W>>
-    where
-        F: Fn(&W, &W) -> bool,
-    {
-        if self.is_leaf() {
-            let iter = self.elements.iter();
-            for e in iter {
-                let next = W::alloc(e);
-                if f(&acc, &next) {
-                    return Some(SubCursor::new(index, acc, e));
-                }
-                index += 1;
-                acc.union(&next);
-            }
-        } else {
-            for i in 0..self.children.len() {
-                if let Some(child) = self.children.get(i) {
-                    let next = child.weight();
-                    if f(&acc, next) {
-                        return child.get_where(index, acc, f);
-                    }
-                    index += child.len();
-                    acc.union(next);
-                }
-                if let Some(e) = self.elements.get(i) {
-                    let next = W::alloc(e);
-                    if f(&acc, &next) {
-                        return Some(SubCursor::new(index, acc, e));
-                    }
-                    index += 1;
-                    acc.union(&next);
-                }
-            }
-        }
-        None
-    }
-
     fn last(&self) -> Option<&T> {
         if self.is_leaf() {
             self.elements.last()
@@ -1112,6 +1021,7 @@ mod legacy_tests {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::{ColumnData, UIntCursor};
     use std::ops::Range;
 
     #[derive(Default, Clone, Debug, PartialEq)]
@@ -1215,6 +1125,15 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn really_big_fn_iter_test() {
+        // make sure the iter doesnt break the stack with very long very deep search
+        // FIXME - this is way way to slow
+        let col : ColumnData<UIntCursor> = (10..2_000_010).collect();
+        let found = col.find_by_value(2_000_009);
+        assert_eq!(found, vec![1999999]);
+    }
+
+    #[test]
     fn test_advanced_get_where() {
         let mut tree = SpanTree::<TestWidth, usize>::default();
         const MAX: usize = 1000;
@@ -1291,6 +1210,7 @@ pub(crate) mod tests {
     }
 }
 
+#[derive(Clone, Debug)]
 struct NodeWalker<'a, T, W>
 where
     T: Clone + Debug + Default,
@@ -1308,15 +1228,9 @@ where
     W: SpanWeight<T>,
 {
     fn new(node: &'a TreeNode<T, W>, index: usize, acc: W) -> Self {
-        let elements = node.elements.iter();
-        let children = if node.is_leaf() {
-            [].iter()
-        } else {
-            node.children.iter()
-        };
         NodeWalker {
-            children,
-            elements,
+            children: node.children.iter(),
+            elements: node.elements.iter(),
             index,
             acc,
         }
@@ -1326,34 +1240,43 @@ where
     where
         F: Fn(&W, &W) -> bool,
     {
-        let mut result = None;
         let child = self.children.next()?;
         let next = child.weight();
-        if f(&self.acc, next) {
-            result = Some(NodeWalker::new(child, self.index, self.acc.clone()));
-        }
+        let index = self.index;
+        let acc = self.acc.clone();
+
         self.index += child.len();
         self.acc.union(next);
-        result
+
+        if f(&acc, next) {
+            Some(NodeWalker::new(child, index, acc))
+        } else {
+            None
+        }
     }
 
-    fn next_cursor<F>(&mut self, f: &F) -> Option<SubCursor<'a, T, W>>
+    fn next_cursor<F>(&mut self, f: &F) -> Option<Option<SubCursor<'a, T, W>>>
     where
         F: Fn(&W, &W) -> bool,
     {
-        let mut result = None;
         let e = self.elements.next()?;
         let next = W::alloc(e);
-        if f(&self.acc, &next) {
-            result = Some(SubCursor::new(self.index, self.acc.clone(), e));
-        }
+        let index = self.index;
+        let acc = self.acc.clone();
+
         self.index += 1;
         self.acc.union(&next);
-        result
+
+        if f(&acc, &next) {
+            Some(Some(SubCursor::new(index, acc, e)))
+        } else {
+            Some(None)
+        }
     }
 }
 
-struct FnIter<'a, T, W, F>
+#[derive(Clone, Debug)]
+pub struct SpanTreeFnIter<'a, T, W, F>
 where
     T: Clone + Debug + Default,
     W: SpanWeight<T>,
@@ -1363,23 +1286,31 @@ where
     func: F,
 }
 
-impl<'a, T, W, F> FnIter<'a, T, W, F>
+impl<'a, T, W, F> SpanTreeFnIter<'a, T, W, F>
 where
     T: Clone + Debug + Default,
     W: SpanWeight<T>,
     F: Fn(&W, &W) -> bool,
 {
+    fn new(func: F) -> Self {
+        Self {
+            stack: vec![],
+            func,
+        }
+    }
+
     fn pop_cursor(&mut self) -> Option<SubCursor<'a, T, W>> {
-        if let Some(value) = self.stack.last_mut()?.next_cursor(&self.func) {
-            Some(value)
+        if let Some(result) = self.stack.last_mut()?.next_cursor(&self.func) {
+            result
         } else {
             self.stack.pop();
+            // recursion here is safe b/c max depth is max tree depth
             self.pop_cursor()
         }
     }
 }
 
-impl<'a, T, W, F> Iterator for FnIter<'a, T, W, F>
+impl<'a, T, W, F> Iterator for SpanTreeFnIter<'a, T, W, F>
 where
     T: Clone + Debug + Default,
     W: SpanWeight<T>,
@@ -1390,9 +1321,13 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(walker) = self.stack.last_mut()?.next_walker(&self.func) {
             self.stack.push(walker);
+            // recursion here is safe b/c max depth is max tree depth
             self.next()
+        } else if let Some(result) = self.pop_cursor() {
+            Some(result)
         } else {
-            self.pop_cursor()
+            // this could get as large as N - should be fine
+            self.next()
         }
     }
 }

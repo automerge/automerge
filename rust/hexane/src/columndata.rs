@@ -847,7 +847,7 @@ where
         }
         for cursor in self
             .slabs
-            .get_each(|_, slab| agg >= slab.min() && agg <= slab.max())
+            .iter_where(|_, slab| agg >= slab.min() && agg <= slab.max())
         {
             let mut pos = cursor.weight.pos();
             let mut iter = cursor.element.run_iter::<C>();
