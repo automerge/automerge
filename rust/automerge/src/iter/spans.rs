@@ -161,7 +161,7 @@ where
             return Some(block);
         }
         for op in &mut self.iter {
-            if !(op.is_mark() || op.visible_at(self.clock.as_ref())) {
+            if !op.visible_or_mark(self.clock.as_ref()) {
                 continue;
             }
             let key = op.elemid_or_key();

@@ -251,4 +251,22 @@ describe("Automerge", () => {
       })
     })
   })
+
+  describe("when using Automerge.view", () => {
+    it("should show historical marks", () => {
+      let doc = Automerge.from({ text: "hello world" })
+      doc = Automerge.change(doc, d => {
+        Automerge.mark(d, ["text"], { start: 0, end: 5 }, "bold", true)
+      })
+      const headsBefore = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        Automerge.mark(d, ["text"], { start: 5, end: 11 }, "italic", true)
+      })
+      const spans = Automerge.spans(Automerge.view(doc, headsBefore), ["text"])
+      assert.deepStrictEqual(spans, [
+        { type: "text", value: "hello", marks: { bold: true } },
+        { type: "text", value: " world" },
+      ])
+    })
+  })
 })
