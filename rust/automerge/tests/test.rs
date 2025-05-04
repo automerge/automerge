@@ -2388,3 +2388,24 @@ fn make_sure_load_incremental_doesnt_skip_a_load_with_a_common_head() {
 
     assert!(doc3.get_heads() == doc2.get_heads());
 }
+
+#[test]
+fn test_get_last_local_change_generation() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+    confirm_last_change(&mut doc);
+    doc.splice_text(&text, 5, 1, "X").unwrap();
+    confirm_last_change(&mut doc);
+    doc.splice_text(&text, 6, 1, "").unwrap();
+    confirm_last_change(&mut doc);
+    doc.splice_text(&text, 0, 0, "ten thousand and five hundred")
+        .unwrap();
+    confirm_last_change(&mut doc);
+}
+
+fn confirm_last_change(doc: &mut AutoCommit) {
+    let heads = doc.get_heads();
+    let change = doc.get_last_local_change().unwrap();
+    assert_eq!(vec![change.hash()], heads);
+}

@@ -17,6 +17,10 @@ pub struct ScanMeta {
 pub trait HasMinMax {
     fn min(&self) -> Agg;
     fn max(&self) -> Agg;
+    fn intersects(&self, a: Range<usize>) -> bool {
+        let b = self.min().as_usize()..self.max().as_usize();
+        a.start <= b.end && b.start <= a.end
+    }
 }
 
 pub trait HasPos {
@@ -203,7 +207,29 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
         v.is_none()
     }
 
-    fn contains(&self, run: &Run<'_, Self::Item>, agg: Agg) -> Option<Range<usize>> {
+    fn contains_range(
+        &self,
+        run: &Run<'_, Self::Item>,
+        range: &Range<usize>,
+    ) -> Option<Range<usize>> {
+        let runval = <Self::Item>::maybe_agg(&run.value).as_usize();
+        if range.contains(&runval) {
+            Some(0..run.count)
+        } else {
+            None
+        }
+    }
+
+    fn contains(&self, run: &Run<'_, Self::Item>, target: Agg) -> Option<Range<usize>> {
+        let start = target.as_usize();
+        let range = start..(start + 1);
+        let old = self.contains_agg(run, target);
+        let new = self.contains_range(run, &range);
+        assert_eq!(old, new);
+        old
+    }
+
+    fn contains_agg(&self, run: &Run<'_, Self::Item>, agg: Agg) -> Option<Range<usize>> {
         if agg == <Self::Item>::maybe_agg(&run.value) {
             Some(0..run.count)
         } else {
@@ -273,6 +299,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
     fn min(&self) -> Agg {
         Agg::default()
     }
+
     fn max(&self) -> Agg {
         Agg::default()
     }
@@ -499,6 +526,60 @@ pub struct RunIter<'a, C: ColumnCursor> {
     pub(crate) acc_left: Acc,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RunIterContaining1<'a, C: ColumnCursor>
+where
+    C::Item: 'a,
+{
+    pub(crate) iter: RunIter<'a, C>,
+    pub(crate) pos: usize,
+    pub(crate) target: Agg,
+    pub(crate) range: Range<usize>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RunIterContaining2<'a, C: ColumnCursor>
+where
+    C::Item: 'a,
+{
+    pub(crate) iter: RunIter<'a, C>,
+    pub(crate) pos: usize,
+    pub(crate) target: Range<usize>,
+    pub(crate) range: Range<usize>,
+}
+
+impl<C: ColumnCursor> Iterator for RunIterContaining1<'_, C> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.range.is_empty() {
+            let run = self.iter.next()?; // return None
+            if let Some(range) = self.iter.cursor.contains(&run, self.target) {
+                self.range.start = range.start + self.pos;
+                self.range.end = range.end + self.pos;
+            }
+            self.pos += run.count;
+        }
+        self.range.next()
+    }
+}
+
+impl<C: ColumnCursor> Iterator for RunIterContaining2<'_, C> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        while self.range.is_empty() {
+            let run = self.iter.next()?; // return None
+            if let Some(range) = self.iter.cursor.contains_range(&run, &self.target) {
+                self.range.start = range.start + self.pos;
+                self.range.end = range.end + self.pos;
+            }
+            self.pos += run.count;
+        }
+        self.range.next()
+    }
+}
+
 impl<'a, C: ColumnCursor> RunIter<'a, C> {
     pub fn empty() -> Self {
         RunIter {
@@ -558,6 +639,28 @@ impl<'a, C: ColumnCursor> RunIter<'a, C> {
 
     pub(crate) fn with_cursor(self) -> RunIterWithCursor<'a, C> {
         RunIterWithCursor(self)
+    }
+
+    pub(crate) fn containing_agg(self, pos: usize, target: Agg) -> RunIterContaining1<'a, C> {
+        RunIterContaining1 {
+            iter: self,
+            pos,
+            target,
+            range: 0..0,
+        }
+    }
+
+    pub(crate) fn containing_range(
+        self,
+        pos: usize,
+        target: Range<usize>,
+    ) -> RunIterContaining2<'a, C> {
+        RunIterContaining2 {
+            iter: self,
+            pos,
+            target,
+            range: 0..0,
+        }
     }
 }
 

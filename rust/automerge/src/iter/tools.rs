@@ -3,6 +3,7 @@ use crate::op_set2::OpSet;
 use crate::types::OpId;
 
 use std::fmt::Debug;
+use std::iter::Peekable;
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -53,10 +54,34 @@ impl<T: Iterator> Iterator for Unshift<T> {
     }
 }
 
-pub(crate) trait Skipper: Iterator<Item = usize> + Debug + Clone {}
+pub(crate) trait Skipper: Iterator<Item = usize> {}
 
 pub(crate) trait Shiftable: Iterator {
     fn shift_next(&mut self, _range: Range<usize>) -> Option<<Self as Iterator>::Item>;
+}
+
+pub(crate) struct SkipWrap<I: Iterator<Item = usize>> {
+    pub(crate) pos: usize,
+    iter: I,
+}
+
+impl<I: Iterator<Item = usize>> Skipper for SkipWrap<I> {}
+
+impl<I: Iterator<Item = usize>> SkipWrap<I> {
+    pub(crate) fn new(pos: usize, iter: I) -> Self {
+        Self { pos, iter }
+    }
+}
+
+impl<I: Iterator<Item = usize>> Iterator for SkipWrap<I> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let pos = self.iter.next()?;
+        let delta = pos - self.pos;
+        self.pos = pos + 1;
+        Some(delta)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -145,6 +170,66 @@ impl<'a> ExIdPromise<'a> {
         ExIdPromise {
             id: self.id,
             promise: self.promise.into_owned(self.id),
+        }
+    }
+}
+
+// merges two iterators of only increasing usize and throw out dedupes
+
+pub(crate) struct MergeIter<I, J>
+where
+    I: Iterator<Item = usize>,
+    J: Iterator<Item = usize>,
+{
+    left: Peekable<I>,
+    right: Peekable<J>,
+    last_yielded: Option<usize>,
+}
+
+impl<I, J> MergeIter<I, J>
+where
+    I: Iterator<Item = usize>,
+    J: Iterator<Item = usize>,
+{
+    pub(crate) fn new(left: I, right: J) -> Self {
+        Self {
+            left: left.peekable(),
+            right: right.peekable(),
+            last_yielded: None,
+        }
+    }
+
+    pub(crate) fn skip(self) -> SkipWrap<Self> {
+        let pos = self.last_yielded.map(|n| n + 1).unwrap_or(0);
+        SkipWrap::new(pos, self)
+    }
+}
+
+impl<I, J> Iterator for MergeIter<I, J>
+where
+    I: Iterator<Item = usize>,
+    J: Iterator<Item = usize>,
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let next_val = match (self.left.peek(), self.right.peek()) {
+                (Some(&l), Some(&r)) if l < r => self.left.next()?,
+                (Some(&l), Some(&r)) if r < l => self.right.next()?,
+                (Some(_), Some(_)) => {
+                    self.left.next();
+                    self.right.next()?
+                }
+                (Some(_), None) => self.left.next()?,
+                (None, Some(_)) => self.right.next()?,
+                (None, None) => return None,
+            };
+
+            if Some(next_val) != self.last_yielded {
+                self.last_yielded = Some(next_val);
+                return Some(next_val);
+            }
         }
     }
 }

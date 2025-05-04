@@ -1032,6 +1032,7 @@ mod tests {
 
         let mut doc1_test = doc1.fork();
         let mut changes2 = doc2.get_changes(&heads1);
+
         let changes3 = doc3.get_changes(&heads1);
         changes2.extend(changes3);
 

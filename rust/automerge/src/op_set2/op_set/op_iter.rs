@@ -1,7 +1,7 @@
 use crate::iter::tools::Shiftable;
 use crate::op_set2::hexane::{
-    BooleanCursor, ColumnDataIter, DeltaCursor, IntCursor, RawReader, SlabWeight, StrCursor,
-    UIntCursor,
+    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
+    SlabWeight, StrCursor, UIntCursor,
 };
 use crate::{
     op_set2,
@@ -18,6 +18,7 @@ use super::Op;
 
 use std::borrow::Cow;
 use std::fmt::Debug;
+use std::iter::Peekable;
 use std::ops::Range;
 
 #[derive(Clone, Debug)]
@@ -228,6 +229,54 @@ impl<'a> KeyRef<'a> {
 pub(crate) struct OpIdIter<'a> {
     actor: ColumnDataIter<'a, ActorCursor>,
     ctr: ColumnDataIter<'a, DeltaCursor>,
+}
+
+pub(crate) struct CtrWalker<'a> {
+    ctr: Box<dyn Iterator<Item = usize> + 'a>,
+}
+
+impl<'a> CtrWalker<'a> {
+    pub(crate) fn new(col: &'a ColumnData<DeltaCursor>, range: Range<usize>) -> Self {
+        let ctr = Box::new(col.find_by_range(range));
+        Self { ctr }
+    }
+}
+
+impl Iterator for CtrWalker<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        self.ctr.next()
+    }
+    fn nth(&mut self, n: usize) -> Option<usize> {
+        self.ctr.nth(n)
+    }
+}
+
+pub(crate) struct SuccWalker<'a> {
+    acc: usize,
+    count: ColGroupIter<'a, UIntCursor>,
+    ctr: Peekable<CtrWalker<'a>>,
+}
+
+impl<'a> SuccWalker<'a> {
+    pub(crate) fn new(op_set: &'a OpSet, range: Range<usize>) -> Self {
+        let ctr = CtrWalker::new(&op_set.cols.succ_ctr, range).peekable();
+        let count = op_set.cols.succ_count.iter().with_acc();
+        Self { acc: 0, count, ctr }
+    }
+}
+
+impl Iterator for SuccWalker<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        while self.ctr.peek()? < &self.acc {
+            self.ctr.next();
+        }
+        let delta = self.ctr.peek()? - self.acc;
+        let c = self.count.nth(delta)?;
+        self.acc = c.next_acc().as_usize();
+        Some(c.pos)
+    }
 }
 
 impl<'a> OpIdIter<'a> {
@@ -805,7 +854,125 @@ impl<'a> Iterator for SuccIterIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::iter::tools::{SkipIter, SkipWrap};
+    use crate::transaction::Transactable;
+    use crate::types::{ActorId, OpId};
+    use crate::{Automerge, ROOT};
     use hexane::ColumnData;
+
+    #[test]
+    fn skip_op_ids() {
+        let actor1 = ActorId::try_from("aaaaaaaa").unwrap();
+        let actor2 = ActorId::try_from("bbbbbbbb").unwrap();
+        let actor3 = ActorId::try_from("cccccccc").unwrap();
+        let actor4 = ActorId::try_from("dddddddd").unwrap();
+
+        let mut doc = Automerge::new().with_actor(actor1);
+        let mut tx = doc.transaction();
+        tx.put(&ROOT, "key1", "val1").unwrap();
+        tx.put(&ROOT, "key2", "val2").unwrap();
+        tx.put(&ROOT, "key3", "val3").unwrap();
+        tx.put(&ROOT, "key4", "val4").unwrap();
+        tx.put(&ROOT, "key5", "val5").unwrap();
+        tx.put(&ROOT, "key6", "val6").unwrap();
+        tx.put(&ROOT, "key7", "val7").unwrap();
+        tx.put(&ROOT, "key8", "val8").unwrap();
+        tx.put(&ROOT, "key9", "val9").unwrap();
+        tx.commit();
+
+        let mut doc2 = doc.fork().with_actor(actor2);
+        let mut tx = doc2.transaction();
+        tx.put(&ROOT, "key5", "val10B").unwrap(); // 10
+        tx.commit();
+
+        let mut doc3 = doc.fork().with_actor(actor3);
+        let mut tx = doc3.transaction();
+        tx.delete(&ROOT, "key5").unwrap(); // 10
+        tx.commit();
+
+        let mut doc4 = doc.fork().with_actor(actor4);
+        let mut tx = doc4.transaction();
+        tx.put(&ROOT, "key5", "val10D").unwrap(); // 10
+        tx.commit();
+
+        let mut tx = doc.transaction();
+        tx.delete(&ROOT, "key5").unwrap(); // 10
+        tx.delete(&ROOT, "key7").unwrap(); // 11
+        tx.put(&ROOT, "key3", "val12").unwrap(); // 12
+        tx.put(&ROOT, "key3", "val13").unwrap(); // 13
+        tx.commit();
+
+        doc.merge(&mut doc2).unwrap();
+        doc.merge(&mut doc3).unwrap();
+        doc.merge(&mut doc4).unwrap();
+
+        doc.dump();
+
+        let id_ctr = &doc.ops.cols.id_ctr;
+        let ids = doc.ops.iter().map(|op| op.id);
+
+        let i1 = SkipIter::new(ids.clone(), SkipWrap::new(0, CtrWalker::new(id_ctr, 3..5)));
+        assert!(i1.eq([OpId::new(3, 0), OpId::new(4, 0)]));
+
+        let i2 = SkipIter::new(ids.clone(), SkipWrap::new(0, CtrWalker::new(id_ctr, 0..4)));
+        assert!(i2.eq([OpId::new(1, 0), OpId::new(2, 0), OpId::new(3, 0)]));
+
+        let i3 = SkipIter::new(ids.clone(), SkipWrap::new(0, CtrWalker::new(id_ctr, 9..20)));
+        assert!(i3.eq([
+            OpId::new(12, 0),
+            OpId::new(13, 0),
+            OpId::new(10, 1),
+            OpId::new(10, 3),
+            OpId::new(9, 0)
+        ]));
+
+        let s1 = SkipIter::new(
+            ids.clone(),
+            SkipWrap::new(0, SuccWalker::new(doc.ops(), 10..12)),
+        );
+        assert!(s1.eq([OpId::new(5, 0), OpId::new(7, 0)]));
+
+        let s2 = SkipIter::new(
+            ids.clone(),
+            SkipWrap::new(0, SuccWalker::new(doc.ops(), 10..99)),
+        );
+        assert!(s2.eq([
+            OpId::new(3, 0),
+            OpId::new(12, 0),
+            OpId::new(5, 0),
+            OpId::new(7, 0)
+        ]));
+
+        let s3 = SkipIter::new(
+            ids.clone(),
+            SkipWrap::new(0, SuccWalker::new(doc.ops(), 10..13)),
+        );
+        assert!(s3.eq([OpId::new(3, 0), OpId::new(5, 0), OpId::new(7, 0)]));
+
+        let s4 = SkipIter::new(
+            ids.clone(),
+            SkipWrap::new(0, SuccWalker::new(doc.ops(), 0..99)),
+        );
+        assert!(s4.eq([
+            OpId::new(3, 0),
+            OpId::new(12, 0),
+            OpId::new(5, 0),
+            OpId::new(7, 0)
+        ]));
+
+        let u1 = doc.ops().iter_ctr_range(9..99).map(|op| op.id);
+
+        assert!(u1.eq([
+            OpId::new(3, 0),
+            OpId::new(12, 0),
+            OpId::new(13, 0),
+            OpId::new(5, 0),
+            OpId::new(10, 1),
+            OpId::new(10, 3),
+            OpId::new(7, 0),
+            OpId::new(9, 0)
+        ]));
+    }
 
     #[test]
     fn obj_id_iter_seek() {

@@ -1,6 +1,6 @@
 [package]
 name = "automerge"
-version = "1.0.0-alpha.3"
+version = "1.0.0-alpha.4"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
@@ -16,7 +16,7 @@ utf16-indexing = []
 
 [dependencies]
 #hexane = { path = "../hexane" }
-hexane = "0.1.0"
+hexane = "0.1.1"
 hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "0.11.0-pre.5"

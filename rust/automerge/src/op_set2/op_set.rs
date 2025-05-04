@@ -1,6 +1,6 @@
 use super::parents::Parents;
 use crate::exid::ExId;
-use crate::iter::tools::SkipIter;
+use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::patches::TextRepresentation;
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
@@ -42,19 +42,14 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIndexColumn, MarkIndexValue};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter, OpIter,
-    ReadOpError, SuccIterIter, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
+    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
 pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = super::hexane::ColAccIter<'a, BooleanCursor>;
-
-/*
-pub(crate) type ActionValueIter<'a> =
-    SkipIter<std::iter::Zip<ActionIter<'a>, ValueIter<'a>>, VisIter<'a>>;
-*/
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct OpSet {
@@ -478,7 +473,6 @@ impl OpSet {
         let actors = &self.cols.id_actor;
         counters
             .find_by_value(id.counter())
-            .into_iter()
             .find(|&pos| actors.get(pos) == Some(Some(Cow::Owned(id.actoridx()))))
     }
 
@@ -705,7 +699,21 @@ impl OpSet {
         self.cols.obj_actor.scope_to_value(obj.actor(), range)
     }
 
-    pub(crate) fn iter_prop<'a>(&'a self, obj: &ObjId, prop: &str) -> OpIter<'a> {
+    pub(crate) fn iter_ctr_range(
+        &self,
+        range: Range<usize>,
+    ) -> SkipIter<OpIter<'_>, SkipWrap<MergeIter<CtrWalker<'_>, SuccWalker<'_>>>> {
+        SkipIter::new(
+            self.iter(),
+            MergeIter::new(
+                CtrWalker::new(&self.cols.id_ctr, range.clone()),
+                SuccWalker::new(self, range),
+            )
+            .skip(),
+        )
+    }
+
+    pub(crate) fn iter_prop(&self, obj: &ObjId, prop: &str) -> OpIter<'_> {
         let range = self.scope_to_obj(obj);
         let range = self.cols.key_str.scope_to_value(Some(prop), range);
         self.iter_range(&range)

@@ -250,7 +250,11 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         let weight = self.last_weight();
         let index = self.len() - 1;
 
-        SubCursor { index, weight, element }
+        SubCursor {
+            index,
+            weight,
+            element,
+        }
     }
 
     pub fn get_where_or_last<F>(&self, f: F) -> SubCursor<'_, T, W>
@@ -1128,8 +1132,8 @@ pub(crate) mod tests {
     fn really_big_fn_iter_test() {
         // make sure the iter doesnt break the stack with very long very deep search
         // FIXME - this is way way to slow
-        let col : ColumnData<UIntCursor> = (10..2_000_010).collect();
-        let found = col.find_by_value(2_000_009);
+        let col: ColumnData<UIntCursor> = (10..2_000_010).collect();
+        let found = col.find_by_value(2_000_009).collect::<Vec<_>>();
         assert_eq!(found, vec![1999999]);
     }
 

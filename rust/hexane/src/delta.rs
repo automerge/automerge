@@ -105,7 +105,21 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
-    fn contains(&self, run: &Run<'_, i64>, target: Agg) -> Option<Range<usize>> {
+    fn contains_range(&self, run: &Run<'_, i64>, target: &Range<usize>) -> Option<Range<usize>> {
+        let step = run.value.as_deref().cloned()?;
+        let count = run.count as i64;
+        let valid = (target.start as i64)..(target.end as i64);
+        let start = self.abs - step * (count - 1);
+
+        let result = _contains_range(start, step, count, valid);
+        if result.is_empty() {
+            None
+        } else {
+            Some((result.start.max(0) as usize)..(result.end.min(count) as usize))
+        }
+    }
+
+    fn contains_agg(&self, run: &Run<'_, i64>, target: Agg) -> Option<Range<usize>> {
         if target.is_none() && run.value.is_none() {
             return Some(0..run.count);
         }
@@ -226,6 +240,8 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
+    // FIXME - this only saves min/max >= 1
+    // you will get strange results in searches if looking for zero or negative
     fn compute_min_max(slabs: &mut [Slab]) {
         for s in slabs {
             let (_run, c) = Self::seek(s.len(), s);
@@ -301,11 +317,65 @@ impl<const B: usize> DeltaCursorInternal<B> {
     }
 }
 
+fn _contains_range(start: i64, step: i64, count: i64, valid: Range<i64>) -> Range<i64> {
+    if count == 0 || valid.is_empty() {
+        return 0..0;
+    }
+
+    if step < 0 {
+        let neg_valid = -(valid.end - 1)..-(valid.start - 1);
+        return _contains_range(-start, -step, count, neg_valid);
+    }
+
+    let end = start + step * (count - 1);
+
+    if valid.contains(&start) && valid.contains(&end) {
+        0..count
+    } else if valid.end <= start || valid.start > end || step == 0 {
+        0..0
+    } else {
+        let a = (valid.start - start + (step - 1)) / step;
+        let b = (valid.end - start - 1) / step + 1;
+        if a >= b {
+            0..0
+        } else {
+            a.max(0)..b.min(count)
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::columndata::ColumnData;
     use super::super::test::ColExport;
     use super::*;
+
+    #[test]
+    fn test_contains_range() {
+        assert_eq!(0..3, _contains_range(10, 5, 3, 0..1000));
+        assert_eq!(0..1, _contains_range(10, 5, 3, 10..11));
+        assert_eq!(0..2, _contains_range(10, 5, 3, 10..16));
+        assert_eq!(0..3, _contains_range(10, 5, 3, 10..21));
+        assert_eq!(0..2, _contains_range(10, 5, 3, 10..20));
+
+        assert_eq!(0..3, _contains_range(10, -5, 3, 0..1000));
+        assert_eq!(0..1, _contains_range(10, -5, 3, 10..11));
+        assert_eq!(1..2, _contains_range(10, -5, 3, 5..6));
+        assert_eq!(2..3, _contains_range(10, -5, 3, 0..1));
+        assert_eq!(1..3, _contains_range(10, -5, 3, 0..6));
+        assert_eq!(0..3, _contains_range(10, -5, 3, 0..11));
+
+        assert_eq!(0..2, _contains_range(-10, -5, 3, -15..0));
+        assert_eq!(1..3, _contains_range(-10, -5, 3, -20..-14));
+        assert_eq!(2..3, _contains_range(-10, -5, 3, -20..-19));
+
+        assert_eq!(0..5, _contains_range(10, -5, 5, -20..20));
+        assert_eq!(2..5, _contains_range(10, -5, 5, -20..1));
+        assert_eq!(3..5, _contains_range(10, -5, 5, -20..0));
+        assert_eq!(0..3, _contains_range(10, -5, 5, 0..11));
+        assert_eq!(0..2, _contains_range(10, -5, 5, 1..11));
+        assert_eq!(1..3, _contains_range(10, -5, 5, 0..10));
+    }
 
     #[test]
     fn column_data_delta_simple() {

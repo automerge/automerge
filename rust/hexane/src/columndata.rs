@@ -507,6 +507,16 @@ impl<C: ColumnCursor> Iterator for ColAccIter<'_, C> {
     }
 }
 
+// This iterator has a strange dual purpose implementation
+// the next() method just grabs the next item on the underlying
+// iterator but includes the ACC value where as the nth()
+// seeks forward not n steps but an increase of n in in acc
+// this is extremely useful but its confusing b/c it breaks the abstraction
+// probably the best move is to split this into two different interfaces
+// rather than overload this iterator with both
+// something that could force the change would be to make ColGroupItem::item
+// not an Option because the acc cant go up if that is None
+
 #[derive(Debug, Clone)]
 pub struct ColGroupIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
@@ -529,7 +539,11 @@ pub struct ColGroupItem<'a, P: Packable + ?Sized> {
     pub item: Option<Cow<'a, P>>,
 }
 
-//impl<'a, P: Packable + ?Sized + ToOwned<Owned: Copy>> Copy for ColGroupItem<'a, P> { }
+impl<P: Packable + ?Sized> ColGroupItem<'_, P> {
+    pub fn next_acc(&self) -> Acc {
+        self.acc + P::maybe_agg(&self.item)
+    }
+}
 
 impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     type Item = ColGroupItem<'a, C::Item>;
@@ -554,7 +568,7 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
         {
             return None;
         }
-        if self.iter.slabs.weight().acc() <= target {
+        if self.iter.slabs.weight().acc() < target {
             let delta = self.iter.reset_iter_to_acc(target)?;
             self.iter.check_pos();
             n -= delta;
@@ -837,32 +851,29 @@ impl<C: ColumnCursor> ColumnData<C>
 where
     C::SlabIndex: HasMinMax,
 {
-    pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> Vec<usize> {
-        // This should be C::Item but right now min/max is Agg
-        // this will break for negative values
+    pub fn find_by_range(&self, range: Range<usize>) -> impl Iterator<Item = usize> + '_ {
+        let start = range.start;
+        let end = range.end;
+        self.slabs
+            .iter_where(move |_, s| s.intersects(start..end))
+            .flat_map(move |cursor| {
+                let pos = cursor.weight.pos();
+                cursor
+                    .element
+                    .run_iter::<C>()
+                    .containing_range(pos, start..end)
+            })
+    }
+
+    pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> impl Iterator<Item = usize> + '_ {
         let agg = agg.into();
-        let mut results = vec![];
-        if agg.is_none() {
-            return results;
-        }
-        for cursor in self
-            .slabs
-            .iter_where(|_, slab| agg >= slab.min() && agg <= slab.max())
-        {
-            let mut pos = cursor.weight.pos();
-            let mut iter = cursor.element.run_iter::<C>();
-            assert!(cursor.element.min() <= agg);
-            assert!(cursor.element.max() >= agg);
-            while let Some(run) = iter.next() {
-                if let Some(range) = iter.cursor.contains(&run, agg) {
-                    for i in range {
-                        results.push(pos + i)
-                    }
-                }
-                pos += run.count;
-            }
-        }
-        results
+
+        self.slabs
+            .iter_where(move |_, s| agg.is_some() && agg >= s.min() && agg <= s.max())
+            .flat_map(move |cursor| {
+                let pos = cursor.weight.pos();
+                cursor.element.run_iter::<C>().containing_agg(pos, agg)
+            })
     }
 }
 
@@ -1366,8 +1377,8 @@ pub(crate) mod tests {
 
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
-        //let seed = 11016946475517489012;
-        //let seed = 14014931343046114918;
+        //let seed = 16821371807298729682;
+        //let seed = 15806113931944186106;
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -1622,8 +1633,8 @@ pub(crate) mod tests {
 
     #[test]
     fn iter_range_with_acc() {
-        let seed = rand::random::<u64>();
-        //let seed = 1829446311097720029;
+        //let seed = rand::random::<u64>();
+        let seed = 16821371807298729682;
         log!("SEED={:?}", seed);
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
@@ -1683,7 +1694,7 @@ pub(crate) mod tests {
 
         for (i, val) in data_u64.iter().enumerate() {
             if let Some(val) = val {
-                assert!(rle_col.find_by_value(*val).contains(&i));
+                assert!(rle_col.find_by_value(*val).any(|j| j == i));
             }
         }
 
@@ -1692,7 +1703,7 @@ pub(crate) mod tests {
 
         for (i, val) in data_i64.iter().enumerate() {
             if let Some(val) = val {
-                assert!(delta_col.find_by_value(*val).contains(&i));
+                assert!(delta_col.find_by_value(*val).any(|j| j == i));
             }
         }
     }
@@ -1735,24 +1746,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn iter_scope_to_value() {
-        let col: ColumnData<UIntCursor> = [
-            0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
-        ]
-        .iter()
-        .collect();
-        let mut iter = col.iter();
-        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
-        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
-        assert_eq!(iter.seek_to_value(Some(8), ..), 12..15);
-
-        let mut iter = col.iter();
-        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
-        assert_eq!(iter.seek_to_value(Some(1), ..), 3..6);
-        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
-    }
-
-    #[test]
     fn shift_next() {
         let col: ColumnData<UIntCursor> = [
             0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
@@ -1776,5 +1769,59 @@ pub(crate) mod tests {
         assert_eq!(next, Some(Some(Cow::Owned(6))));
         assert_eq!(iter.next(), Some(Some(Cow::Owned(7))));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn fuzz_find_by_range() {
+        const N: usize = 8;
+        const STEP: u64 = 4;
+        let mut rng = make_rng();
+        for _ in 0..FUZZ_SIZE {
+            let data = (0..N)
+                .map(|_| rng.gen::<u64>() % STEP + 1)
+                .collect::<Vec<_>>();
+            let col1: ColumnData<UIntCursor> = data.clone().into_iter().collect();
+            let col2: ColumnData<DeltaCursor> =
+                data.clone().into_iter().map(|i| i as i64).collect();
+
+            let a = rng.gen::<usize>() % (STEP as usize) + 1;
+            let b = rng.gen::<usize>() % (STEP as usize) + 1;
+            let range = a.min(b)..a.max(b);
+
+            let result1 = col1.find_by_range(range.clone()).collect::<Vec<_>>();
+            let result2 = col2.find_by_range(range.clone()).collect::<Vec<_>>();
+            let answer = data
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| {
+                    if range.contains(&(*v as usize)) {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            assert_eq!(result1, answer);
+            assert_eq!(result2, answer);
+        }
+    }
+
+    #[test]
+    fn iter_scope_to_value() {
+        let col: ColumnData<UIntCursor> = [
+            0, 0, 0, 1, 1, 1, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10,
+        ]
+        .iter()
+        .collect();
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
+        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
+        assert_eq!(iter.seek_to_value(Some(8), ..), 12..15);
+
+        let mut iter = col.iter();
+        assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
+        assert_eq!(iter.seek_to_value(Some(1), ..), 3..6);
+        assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
     }
 }

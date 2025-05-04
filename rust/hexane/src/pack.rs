@@ -71,6 +71,12 @@ impl Packable for i64 {
 
     //    fn own(item: i64) -> i64 { item }
 
+    /*
+        fn agg(item: &i64) -> Agg {
+            Agg::from(*item)
+        }
+    */
+
     fn maybe_agg(item: &Option<Cow<'_, i64>>) -> Agg {
         Agg::from(item.as_deref().cloned().unwrap_or(0))
     }

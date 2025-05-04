@@ -237,6 +237,49 @@ impl<'a> ChangeCollector<'a> {
         changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
     ) -> Vec<Change> {
+        let r1 = Self::from_build_meta1(op_set, change_graph, changes.clone(), num_deps);
+        #[cfg(debug_assertions)]
+        let r2 = Self::from_build_meta2(op_set, change_graph, changes, num_deps);
+        #[cfg(debug_assertions)]
+        assert_eq!(r1, r2);
+        r1
+    }
+
+    fn from_build_meta1(
+        op_set: &OpSet,
+        change_graph: &'a ChangeGraph,
+        changes: Vec<BuildChangeMetadata<'a>>,
+        num_deps: usize,
+    ) -> Vec<Change> {
+        let min = changes
+            .iter()
+            .map(|c| c.start_op as usize)
+            .min()
+            .unwrap_or(0);
+        let max = changes.iter().map(|c| c.max_op as usize).max().unwrap_or(0) + 1;
+
+        let mut collector = Self::from_change_meta(changes, num_deps);
+
+        for op in op_set.iter_ctr_range(min..max) {
+            let op_id = op.id;
+            let op_succ = op.succ();
+            collector.process_op(op);
+
+            for id in op_succ {
+                collector.process_succ(op_id, id);
+            }
+        }
+
+        // this can error on load but should never on a live document
+        collector.finish(change_graph, &op_set.actors).unwrap()
+    }
+
+    fn from_build_meta2(
+        op_set: &OpSet,
+        change_graph: &'a ChangeGraph,
+        changes: Vec<BuildChangeMetadata<'a>>,
+        num_deps: usize,
+    ) -> Vec<Change> {
         let mut collector = Self::from_change_meta(changes, num_deps);
 
         for op in op_set.iter() {
