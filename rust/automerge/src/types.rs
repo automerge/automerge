@@ -1,22 +1,26 @@
 use crate::error;
+use crate::error::AutomergeError;
 use crate::legacy as amp;
+use crate::op_set2::ActorIdx;
 use serde::{Deserialize, Serialize};
-use std::cmp::Eq;
-use std::cmp::Ordering;
+use std::borrow::Cow;
+use std::cmp::{Eq, Ordering};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
+//use fnv::FnvBuildHasher;
+use fxhash::FxBuildHasher;
+pub(crate) type SmallHasher = FxBuildHasher;
+pub(crate) type SmallHashMap<A, B> = HashMap<A, B, SmallHasher>;
+
 // thanks to https://qrng.anu.edu.au/ for some random bytes
 pub(crate) const CONCURRENCY_MAGIC_BYTES: [u8; 4] = [0x13, 0xb2, 0x23, 0x09];
 
-mod opids;
-pub(crate) use opids::OpIds;
-
 pub(crate) use crate::clock::Clock;
-pub(crate) use crate::marks::MarkData;
-pub(crate) use crate::op_set::{Op, OpBuilder};
+pub(crate) use crate::marks::OldMarkData;
 pub(crate) use crate::value::{ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -47,7 +51,12 @@ impl fmt::Debug for ActorId {
 
 impl ActorId {
     pub fn random() -> ActorId {
-        ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
+        let mut buf = [0u8; 16];
+        // getrandom 0.3 breaks node v18
+        // keep using 0.2 until we stop supporting v18
+        //getrandom::fill(&mut buf).expect("random number generator failed"); // 0.3 interface
+        getrandom::getrandom(&mut buf).expect("random number generator failed"); // 0.2 interface
+        ActorId(TinyVec::from(buf))
     }
 
     pub fn to_bytes(&self) -> &[u8] {
@@ -91,12 +100,6 @@ impl TryFrom<String> for ActorId {
 impl AsRef<[u8]> for ActorId {
     fn as_ref(&self) -> &[u8] {
         &self.0
-    }
-}
-
-impl From<uuid::Uuid> for ActorId {
-    fn from(u: uuid::Uuid) -> Self {
-        ActorId(TinyVec::from(*u.as_bytes()))
     }
 }
 
@@ -155,10 +158,11 @@ impl fmt::Display for ActorId {
 }
 
 /// The type of an object
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash, Default)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     /// A map
+    #[default]
     Map,
     /// Retained for backwards compatibility, tables are identical to maps
     Table,
@@ -209,26 +213,41 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
-    MarkBegin(bool, MarkData),
+    MarkBegin(bool, OldMarkData),
     MarkEnd(bool),
 }
 
 impl OpType {
-    /// The index into the action array as specified in [1]
-    ///
-    /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
-    pub(crate) fn action_index(&self) -> u64 {
+    /*
+        /// The index into the action array as specified in [1]
+        ///
+        /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
+        pub(crate) fn action_index(&self) -> u64 {
+            match self {
+                Self::Make(ObjType::Map) => 0,
+                Self::Put(_) => 1,
+                Self::Make(ObjType::List) => 2,
+                Self::Delete => 3,
+                Self::Make(ObjType::Text) => 4,
+                Self::Increment(_) => 5,
+                Self::Make(ObjType::Table) => 6,
+                Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            }
+        }
+
+    pub(crate) fn expand(&self) -> bool {
+        matches!(self, OpType::MarkBegin(true, _) | OpType::MarkEnd(true))
+    }
+
+    pub(crate) fn value(&self) -> Cow<'_, ScalarValue> {
         match self {
-            Self::Make(ObjType::Map) => 0,
-            Self::Put(_) => 1,
-            Self::Make(ObjType::List) => 2,
-            Self::Delete => 3,
-            Self::Make(ObjType::Text) => 4,
-            Self::Increment(_) => 5,
-            Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            OpType::Put(v) => Cow::Borrowed(v),
+            OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
+            OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Borrowed(value),
+            _ => Cow::Owned(ScalarValue::Null),
         }
     }
+    */
 
     pub(crate) fn validate_action_and_value(
         action: u64,
@@ -265,30 +284,40 @@ impl OpType {
             },
             6 => Self::Make(ObjType::Table),
             7 => match mark_name {
-                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
+                Some(name) => Self::MarkBegin(expand, OldMarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
             _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
 
-    pub(crate) fn to_str(&self) -> &str {
-        if let OpType::Put(ScalarValue::Str(s)) = &self {
-            s
-        } else if self.is_mark() {
-            ""
-        } else {
-            "\u{fffc}"
+    /*
+        pub(crate) fn to_str(&self) -> &str {
+            if let OpType::Put(ScalarValue::Str(s)) = &self {
+                s
+            } else if self.is_mark() {
+                ""
+            } else {
+                "\u{fffc}"
+            }
         }
-    }
 
-    pub(crate) fn is_mark(&self) -> bool {
-        matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
-    }
+        pub(crate) fn mark_name(&self) -> Option<&str> {
+            if let OpType::MarkBegin(_, data) = self {
+                Some(&data.name)
+            } else {
+                None
+            }
+        }
 
-    pub(crate) fn is_block(&self) -> bool {
-        &OpType::Make(ObjType::Map) == self
-    }
+        pub(crate) fn is_mark(&self) -> bool {
+            matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+        }
+
+        pub(crate) fn is_block(&self) -> bool {
+            &OpType::Make(ObjType::Map) == self
+        }
+    */
 }
 
 impl From<ObjType> for OpType {
@@ -307,7 +336,6 @@ impl From<ScalarValue> for OpType {
 pub(crate) enum Export {
     Id(OpId),
     Special(String),
-    Prop(usize),
 }
 
 pub(crate) trait Exportable {
@@ -350,6 +378,7 @@ impl Exportable for OpId {
     }
 }
 
+/*
 impl Exportable for Key {
     fn export(&self) -> Export {
         match self {
@@ -358,6 +387,7 @@ impl Exportable for Key {
         }
     }
 }
+*/
 
 impl From<ObjId> for OpId {
     fn from(o: ObjId) -> Self {
@@ -395,6 +425,12 @@ impl From<&String> for Prop {
     }
 }
 
+impl<'a> From<Cow<'a, str>> for Prop {
+    fn from(p: Cow<'a, str>) -> Self {
+        Prop::Map(p.into_owned())
+    }
+}
+
 impl From<&str> for Prop {
     fn from(p: &str) -> Self {
         Prop::Map(p.to_owned())
@@ -419,17 +455,21 @@ impl From<f64> for Prop {
     }
 }
 
+/*
 impl From<OpId> for Key {
     fn from(id: OpId) -> Self {
         Key::Seq(ElemId(id))
     }
 }
+*/
 
+/*
 impl From<ElemId> for Key {
     fn from(e: ElemId) -> Self {
         Key::Seq(e)
     }
 }
+*/
 
 impl From<Option<ElemId>> for ElemId {
     fn from(e: Option<ElemId>) -> Self {
@@ -437,17 +477,21 @@ impl From<Option<ElemId>> for ElemId {
     }
 }
 
+/*
 impl From<Option<ElemId>> for Key {
     fn from(e: Option<ElemId>) -> Self {
         Key::Seq(e.into())
     }
 }
+*/
 
+/*
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
 pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
 }
+*/
 
 /// A property of an object
 ///
@@ -486,6 +530,7 @@ impl Display for Prop {
     }
 }
 
+/*
 impl Key {
     pub(crate) fn prop_index(&self) -> Option<usize> {
         match self {
@@ -501,31 +546,53 @@ impl Key {
         }
     }
 }
+*/
 
 // FIXME - isn't having ord and partial ord here dangerous?
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(u32, u32);
 
 impl OpId {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        if self.actor() >= idx {
+            OpId(self.0, self.1 + 1)
+        } else {
+            self
+        }
+    }
+
+    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+        match self.actor().cmp(&idx) {
+            Ordering::Greater => Some(OpId(self.0, self.1 - 1)),
+            Ordering::Equal => None,
+            Ordering::Less => Some(self),
+        }
+    }
+
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
         Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
 
-    #[inline]
+    pub(crate) fn map(&self, actor_map: &[usize]) -> Result<OpId, AutomergeError> {
+        let actor = actor_map.get(self.actor()).cloned();
+        let actor = actor.ok_or(AutomergeError::InvalidActorIndex(self.actor()))?;
+        Ok(Self(self.0, actor as u32))
+    }
+
     pub(crate) fn counter(&self) -> u64 {
         self.0.into()
     }
 
-    #[inline]
-    pub(crate) fn actor(&self) -> usize {
-        self.1.try_into().unwrap()
+    pub(crate) fn icounter(&self) -> i64 {
+        self.0.into()
     }
 
-    #[inline]
-    pub(crate) fn lamport_cmp(&self, other: &OpId, actors: &[ActorId]) -> Ordering {
-        self.0
-            .cmp(&other.0)
-            .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
+    pub(crate) fn actor(&self) -> usize {
+        self.1 as usize
+    }
+
+    pub(crate) fn actoridx(&self) -> crate::op_set2::ActorIdx {
+        crate::op_set2::ActorIdx(self.1)
     }
 
     #[inline]
@@ -560,6 +627,38 @@ impl AsRef<OpId> for ObjId {
 pub(crate) struct ObjId(pub(crate) OpId);
 
 impl ObjId {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        if self.is_root() {
+            self
+        } else {
+            ObjId(self.0.with_new_actor(idx))
+        }
+    }
+
+    pub(crate) fn without_actor(self, idx: usize) -> Option<Self> {
+        if self.is_root() {
+            Some(self)
+        } else {
+            self.0.without_actor(idx).map(ObjId)
+        }
+    }
+
+    pub(crate) fn load(counter: Option<u64>, actor: Option<ActorIdx>) -> Option<ObjId> {
+        match (counter, actor) {
+            (Some(c), Some(a)) => Some(ObjId(OpId::new(c, a.into()))),
+            (None, None) => Some(ObjId::root()),
+            _ => None, // panic? memory corruption here
+        }
+    }
+
+    pub(crate) fn map(self, actor_map: &[usize]) -> Result<ObjId, AutomergeError> {
+        if self.is_root() {
+            Ok(self)
+        } else {
+            Ok(ObjId(self.0.map(actor_map)?))
+        }
+    }
+
     pub(crate) const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
@@ -568,22 +667,47 @@ impl ObjId {
         self.0.counter() == 0
     }
 
-    pub(crate) fn opid(&self) -> &OpId {
-        &self.0
+    pub(crate) fn id(&self) -> Option<&OpId> {
+        if self.is_root() {
+            None
+        } else {
+            Some(&self.0)
+        }
+    }
+
+    pub(crate) fn counter(&self) -> Option<u64> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.0.counter())
+        }
+    }
+
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.0.actoridx())
+        }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct ObjMeta {
     pub(crate) id: ObjId,
     pub(crate) typ: ObjType,
 }
 
-impl ObjMeta {
-    pub(crate) fn new(id: ObjId, typ: ObjType) -> Self {
-        ObjMeta { id, typ }
+impl From<ObjId> for ObjMeta {
+    fn from(id: ObjId) -> Self {
+        ObjMeta {
+            id,
+            typ: ObjType::Map,
+        }
     }
+}
 
+impl ObjMeta {
     pub(crate) fn root() -> Self {
         Self {
             id: ObjId::root(),
@@ -604,7 +728,7 @@ impl TextEncoding {
     pub(crate) fn width(&self, s: &str) -> usize {
         match self {
             Self::UnicodeCodePoint => s.chars().count(),
-            Self::Utf8CodeUnit => s.bytes().len(),
+            Self::Utf8CodeUnit => s.len(), // bytes
             Self::Utf16CodeUnit => s.encode_utf16().count(),
             Self::GraphemeCluster => {
                 unicode_segmentation::UnicodeSegmentation::graphemes(s, true).count()
@@ -620,10 +744,36 @@ pub(crate) enum ListEncoding {
     Text(TextEncoding),
 }
 
+impl From<TextEncoding> for ListEncoding {
+    fn from(enc: TextEncoding) -> Self {
+        Self::Text(enc)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ElemId(pub(crate) OpId);
 
 impl ElemId {
+    pub(crate) fn map(self, actor_map: &[usize]) -> Result<ElemId, AutomergeError> {
+        if self.is_head() {
+            Ok(self)
+        } else {
+            Ok(ElemId(self.0.map(actor_map)?))
+        }
+    }
+
+    pub(crate) fn icounter(&self) -> i64 {
+        self.0.icounter()
+    }
+
+    pub(crate) fn actor(&self) -> Option<ActorIdx> {
+        if self.is_head() {
+            None
+        } else {
+            Some(self.0.actoridx())
+        }
+    }
+
     pub(crate) fn is_head(&self) -> bool {
         *self == HEAD
     }
@@ -722,77 +872,81 @@ impl From<Prop> for wasm_bindgen::JsValue {
 
 #[cfg(test)]
 pub(crate) mod gen {
-    use super::{
-        ChangeHash, ElemId, Key, ObjType, OpBuilder, OpId, OpType, ScalarValue, HASH_SIZE,
-    };
-    use crate::value::Counter;
+    //use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
+    //use crate::value::Counter;
 
-    use proptest::prelude::*;
+    //use proptest::prelude::*;
 
-    pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
-        proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
-            .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
-    }
+    /*
+        pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
+            proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
+                .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
+        }
 
-    pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
-        prop_oneof![
-            proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
-            "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
-            any::<i64>().prop_map(ScalarValue::Int),
-            any::<u64>().prop_map(ScalarValue::Uint),
-            any::<f64>().prop_map(ScalarValue::F64),
-            any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
-            any::<i64>().prop_map(ScalarValue::Timestamp),
-            any::<bool>().prop_map(ScalarValue::Boolean),
-            Just(ScalarValue::Null),
-        ]
-    }
+        pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
+            prop_oneof![
+                proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
+                "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
+                any::<i64>().prop_map(ScalarValue::Int),
+                any::<u64>().prop_map(ScalarValue::Uint),
+                any::<f64>().prop_map(ScalarValue::F64),
+                any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
+                any::<i64>().prop_map(ScalarValue::Timestamp),
+                any::<bool>().prop_map(ScalarValue::Boolean),
+                Just(ScalarValue::Null),
+            ]
+        }
 
-    pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
-        prop_oneof![
-            Just(ObjType::Map),
-            Just(ObjType::Table),
-            Just(ObjType::List),
-            Just(ObjType::Text),
-        ]
-    }
+        pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
+            prop_oneof![
+                Just(ObjType::Map),
+                Just(ObjType::Table),
+                Just(ObjType::List),
+                Just(ObjType::Text),
+            ]
+        }
 
-    pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
-        prop_oneof![
-            Just(OpType::Delete),
-            any::<i64>().prop_map(OpType::Increment),
-            gen_scalar_value().prop_map(OpType::Put),
-            gen_objtype().prop_map(OpType::Make)
-        ]
-    }
+        pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
+            prop_oneof![
+                Just(OpType::Delete),
+                any::<i64>().prop_map(OpType::Increment),
+                gen_scalar_value().prop_map(OpType::Put),
+                gen_objtype().prop_map(OpType::Make)
+            ]
+        }
+    */
 
-    pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
-        prop_oneof![
-            proptest::sample::select(key_indices).prop_map(Key::Map),
-            Just(Key::Seq(ElemId(OpId::new(0, 0)))),
-        ]
-    }
+    /*
+        pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
+            prop_oneof![
+                proptest::sample::select(key_indices).prop_map(Key::Map),
+                Just(Key::Seq(ElemId(OpId::new(0, 0)))),
+            ]
+        }
+    */
 
-    /// Generate an arbitrary op
-    ///
-    /// The generated op will have no preds or succs
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - the OpId this op will be given
-    /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
-    ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
-    pub(crate) fn gen_op(
-        id: OpId,
-        key_prop_indices: Vec<usize>,
-    ) -> impl Strategy<Value = OpBuilder> {
-        (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
-            move |(key, insert, action)| OpBuilder {
-                id,
-                key,
-                insert,
-                action,
-            },
-        )
-    }
+    /*
+        /// Generate an arbitrary op
+        ///
+        /// The generated op will have no preds or succs
+        ///
+        /// # Arguments
+        ///
+        /// * `id` - the OpId this op will be given
+        /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
+        ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
+        pub(crate) fn gen_op(
+            id: OpId,
+            key_prop_indices: Vec<usize>,
+        ) -> impl Strategy<Value = OpBuilder> {
+            (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
+                move |(key, insert, action)| OpBuilder {
+                    id,
+                    key,
+                    insert,
+                    action,
+                },
+            )
+        }
+    */
 }

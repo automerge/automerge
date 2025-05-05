@@ -92,6 +92,17 @@ export type DecodedChange = {
   ops: Op[]
 }
 
+export type ChangeMetadata = {
+  actor: Actor,
+  seq: number
+  startOp: number,
+  maxOp: number,
+  time: number,
+  message: string | null,
+  deps: Heads,
+  hash: Hash,
+}
+
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 export type ChangeToEncode = PartialBy<DecodedChange, 'hash'>
 
@@ -283,7 +294,9 @@ export class Automerge {
   // low level change functions
   applyChanges(changes: Change[]): void;
   getChanges(have_deps: Heads): Change[];
+  getChangesMeta(have_deps: Heads): ChangeMetadata[];
   getChangeByHash(hash: Hash): Change | null;
+  getChangeMetaByHash(hash: Hash): ChangeMetadata | null;
   getDecodedChangeByHash(hash: Hash): DecodedChange | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
@@ -304,7 +317,7 @@ export class Automerge {
 
   topoHistoryTraversal(): Hash[];
 
-  stats(): {numChanges: number, numOps: number};
+  stats(): {numChanges: number, numOps: number, numActors: number, cargoPackageName: string, cargoPackageVersion: string, rustcVersion: string };
 }
 
 export interface JsSyncState {

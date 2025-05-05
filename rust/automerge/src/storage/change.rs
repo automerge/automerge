@@ -5,7 +5,7 @@ use crate::{convert, ActorId, ChangeHash, ScalarValue};
 use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
 
 mod change_op_columns;
-use change_op_columns::ChangeOpsColumns;
+pub(crate) use change_op_columns::ChangeOpsColumns;
 pub(crate) use change_op_columns::{ChangeOp, ReadChangeOpError};
 
 mod change_actors;
@@ -43,24 +43,24 @@ impl OpReadState for Unverified {}
 #[derive(Clone, Debug)]
 pub(crate) struct Change<'a, O: OpReadState> {
     /// The raw bytes of the entire chunk containing this change, including the header.
-    bytes: Cow<'a, [u8]>,
-    header: Header,
-    dependencies: Vec<ChangeHash>,
-    actor: ActorId,
-    other_actors: Vec<ActorId>,
-    seq: u64,
-    start_op: NonZeroU64,
-    timestamp: i64,
-    message: Option<String>,
-    ops_meta: ChangeOpsColumns,
+    pub(crate) bytes: Cow<'a, [u8]>,
+    pub(crate) header: Header,
+    pub(crate) dependencies: Vec<ChangeHash>,
+    pub(crate) actor: ActorId,
+    pub(crate) other_actors: Vec<ActorId>,
+    pub(crate) seq: u64,
+    pub(crate) start_op: NonZeroU64,
+    pub(crate) timestamp: i64,
+    pub(crate) message: Option<String>,
+    pub(crate) ops_meta: ChangeOpsColumns,
     /// The range in `Self::bytes` where the ops column data is
-    ops_data: Range<usize>,
-    extra_bytes: Range<usize>,
-    num_ops: usize,
-    _phantom: PhantomData<O>,
+    pub(crate) ops_data: Range<usize>,
+    pub(crate) extra_bytes: Range<usize>,
+    pub(crate) num_ops: usize,
+    pub(crate) _phantom: PhantomData<O>,
 }
 
-impl<'a, O: OpReadState> PartialEq for Change<'a, O> {
+impl<O: OpReadState> PartialEq for Change<'_, O> {
     fn eq(&self, other: &Self) -> bool {
         self.bytes == other.bytes
     }
@@ -100,7 +100,7 @@ impl<'a> Change<'a, Unverified> {
     pub(crate) fn parse_following_header(
         input: parse::Input<'a>,
         header: Header,
-    ) -> parse::ParseResult<'_, Change<'a, Unverified>, ParseError> {
+    ) -> parse::ParseResult<'a, Change<'a, Unverified>, ParseError> {
         let (i, deps) = parse::length_prefixed(parse::change_hash)(input)?;
         let (i, actor) = parse::actor_id(i)?;
         let (i, seq) = parse::leb128_u64(i)?;
@@ -127,7 +127,8 @@ impl<'a> Change<'a, Unverified> {
         let ops_meta = ops_meta
             .uncompressed()
             .ok_or(parse::ParseError::Error(ParseError::CompressedChangeCols))?;
-        let col_layout = Columns::parse(ops_data.len(), ops_meta.iter())
+
+        let col_layout = Columns::parse2(ops_data.len(), ops_meta.iter())
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
         let ops_meta = ChangeOpsColumns::try_from(col_layout)
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
@@ -219,7 +220,7 @@ impl<'a> Change<'a, Verified> {
     }
 }
 
-impl<'a, O: OpReadState> Change<'a, O> {
+impl<O: OpReadState> Change<'_, O> {
     pub(crate) fn checksum(&self) -> CheckSum {
         self.header.checksum()
     }
@@ -452,12 +453,12 @@ pub(crate) trait AsChangeOp<'a> {
 }
 
 impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
-    pub(crate) fn build<'a, A, I, O>(
+    pub(crate) fn build<'a, 'b, A, I, O>(
         self,
         ops: I,
     ) -> Result<Change<'static, Verified>, PredOutOfOrder>
     where
-        A: AsChangeOp<'a, OpId = O> + 'a,
+        A: AsChangeOp<'a, OpId = O> + 'a + std::fmt::Debug,
         O: convert::OpId<&'a ActorId> + 'a,
         I: Iterator<Item = A> + Clone + 'a + ExactSizeIterator,
     {

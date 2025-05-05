@@ -1,5 +1,4 @@
-use crate::op_set;
-use crate::op_set::OpSet;
+use crate::op_set2::OpSet;
 use crate::patches::TextRepresentation;
 use crate::types::{ObjId, ObjType};
 use crate::{clock::Clock, exid::ExId, Prop};
@@ -20,7 +19,7 @@ pub struct Parents<'a> {
     pub(crate) clock: Option<Clock>,
 }
 
-impl<'a> Parents<'a> {
+impl Parents<'_> {
     /// Return the path this `Parents` represents
     ///
     /// This is _not_ in reverse order.
@@ -49,14 +48,14 @@ impl<'a> Parents<'a> {
     }
 }
 
-impl<'a> Iterator for Parents<'a> {
+impl Iterator for Parents<'_> {
     type Item = Parent;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.obj.is_root() {
             return None;
         }
-        let op_set::Parent {
+        let super::op_set::Parent {
             obj,
             typ,
             prop,
@@ -64,7 +63,8 @@ impl<'a> Iterator for Parents<'a> {
             ..
         } = self
             .ops
-            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())?;
+            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())
+            .unwrap();
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);
         Some(Parent {

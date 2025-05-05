@@ -43,7 +43,7 @@ impl<'a, R: ReadDocInternal> PatchBuilder<'a, R> {
     }
 }
 
-impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
+impl<R: ReadDoc> PatchBuilder<'_, R> {
     pub(crate) fn get_path(&mut self, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
         if let Some(visible_paths) = &self.visible_paths {
             visible_paths.get(obj).cloned()
@@ -220,15 +220,15 @@ impl<'a, R: ReadDoc> PatchBuilder<'a, R> {
         }
     }
 
-    pub(crate) fn mark<'b, 'c, M: Iterator<Item = Mark<'c>>>(&mut self, obj: ObjId, mark: M) {
+    pub(crate) fn mark<M: Iterator<Item = Mark>>(&mut self, obj: ObjId, mark: M) {
         if let Some(PatchAction::Mark { marks, .. }) = maybe_append(&mut self.patches, &obj) {
             for m in mark {
-                marks.push(m.into_owned())
+                marks.push(m)
             }
             return;
         }
         if let Some(path) = self.get_path(&obj) {
-            let marks: Vec<_> = mark.map(|m| m.into_owned()).collect();
+            let marks: Vec<_> = mark./*map(|m| m.into_owned()).*/collect();
             if !marks.is_empty() {
                 let action = PatchAction::Mark { marks };
                 self.push(Patch { obj, path, action });

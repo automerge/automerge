@@ -9,6 +9,7 @@ automerge = { path = "../automerge" }
 criterion = "^0.5"
 jzon = "^0.12.5"
 rand = "^0.8"
+serde_json = "1.0.128"
 
 
 [[bin]]

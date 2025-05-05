@@ -555,15 +555,15 @@ describe('Automerge', () => {
       const doc1 = create({ actor: 'aaaa'}), doc2 = create({ actor: 'bbbb'})
       doc1.putObject('_root', 'birds', [])
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.insertObject('1@aaaa', 0, { species: 'Goldfinch', count: 3 })
+      doc1.insertObject('1@aaaa', 0, { count: 3, species: 'Goldfinch' })
       assert.deepEqual(doc2.diffIncremental(), [
         { action: 'put', path: [ 'birds' ], value: [] }
       ])
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.diffIncremental(), [
         { action: 'insert', path: [ 'birds', 0 ], values: [{}] },
-        { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch' },
         { action: 'put', path: [ 'birds', 0, 'count', ], value: 3 },
+        { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch' },
       ])
     })
 
@@ -2396,7 +2396,33 @@ describe('Automerge', () => {
       doc.put("/", "baz", "qux")
       doc.commit()
       const stats = doc.stats()
-      assert.deepStrictEqual(stats, { numChanges: 2, numOps: 2 })
+      assert.equal(stats.numChanges, 2);
+      assert.equal(stats.numOps, 2);
+      assert.equal(stats.numActors, 1);
+      assert.equal(typeof stats.rustcVersion, "string");
+      assert.equal(typeof stats.cargoPackageName, "string");
+      assert.equal(typeof stats.cargoPackageVersion, "string");
+    })
+  })
+  describe("change metadata", () => {
+    it("mirrors decoded changes", () => {
+      const doc = create()
+      doc.put("/", "foo", "bar")
+      doc.commit()
+      doc.put("/", "baz", "qux")
+      doc.commit()
+      let changes = doc.getChanges([]).map(decodeChange);
+      let meta = doc.getChangesMeta([]);
+      assert.equal(changes.length, 2);
+      assert.equal(meta.length, 2);
+      for (let i = 0; i < 2; i++) {
+        assert.equal(changes[i].actor, meta[i].actor);
+        assert.equal(changes[i].hash, meta[i].hash);
+        assert.equal(changes[i].message, meta[i].message);
+        assert.equal(changes[i].time, meta[i].time);
+        assert.deepEqual(changes[i].deps, meta[i].deps);
+        assert.deepEqual(changes[i].startOp, meta[i].startOp);
+      }
     })
   })
 })

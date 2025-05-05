@@ -94,7 +94,7 @@ impl<T: Clone + Decodable + Encodable + PartialEq + Eq + Debug> RleRange<T> {
     }
 }
 
-impl<'a, T: Encodable + Clone + PartialEq + 'a> RleRange<T> {
+impl<T: Encodable + Clone + PartialEq> RleRange<T> {
     pub(crate) fn encoder<S: Sink>(&self, output: S) -> RleEncoder<S, T> {
         RleEncoder::from(output)
     }

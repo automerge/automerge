@@ -1,18 +1,19 @@
 use automerge::ObjType;
-use automerge::ReadDoc;
-use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, AutomergeError, ReadDoc, ROOT};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
     let contents = include_str!("../edits.json");
     let edits = jzon::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
+    //for edit in &edits {
     for i in 0..edits.len() {
-        let pos: usize = edits[i][0].as_usize().unwrap();
-        let del: isize = edits[i][1].as_isize().unwrap();
+        let edit = &edits[i];
+        let pos: usize = edit.as_array().unwrap()[0].as_u64().unwrap() as usize;
+        let del: isize = edit.as_array().unwrap()[1].as_i64().unwrap() as isize;
         let mut vals = String::new();
-        for j in 2..edits[i].len() {
-            let v = edits[i][j].as_str().unwrap();
+        for j in 2..edit.as_array().unwrap().len() {
+            let v = edit.as_array().unwrap()[j].as_str().unwrap();
             vals.push_str(v);
         }
         commands.push((pos, del, vals));
@@ -32,6 +33,7 @@ fn main() -> Result<(), AutomergeError> {
     println!("Done in {} ms", now.elapsed().as_millis());
     let commit = Instant::now();
     doc.commit();
+
     println!("Commit in {} ms", commit.elapsed().as_millis());
     let observe = Instant::now();
     let _patches = doc.diff_incremental();
