@@ -81,7 +81,7 @@ impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
 }
 
 // this is an endless iterator that returns false after input is exhausted
-impl<'a> Iterator for BooleanDecoder<'a> {
+impl Iterator for BooleanDecoder<'_> {
     type Item = Result<bool, raw::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -154,7 +154,7 @@ impl<'a> From<&'a [u8]> for MaybeBooleanDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for MaybeBooleanDecoder<'a> {
+impl Iterator for MaybeBooleanDecoder<'_> {
     type Item = Result<Option<bool>, raw::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

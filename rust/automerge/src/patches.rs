@@ -5,10 +5,7 @@ pub use patch::{Patch, PatchAction};
 pub(crate) use patch_builder::PatchBuilder;
 pub use patch_log::PatchLog;
 
-use crate::{
-    types::{ListEncoding, TextEncoding},
-    ObjType,
-};
+use crate::types::{ListEncoding, ObjType, TextEncoding};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {

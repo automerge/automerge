@@ -70,6 +70,7 @@ import { unstableConflictAt } from "./conflicts.js"
 import type { InternalState } from "./internal_state.js"
 
 export type {
+  ChangeMetadata,
   PutPatch,
   DelPatch,
   SpliceTextPatch,
@@ -82,7 +83,7 @@ export type {
   Span,
 } from "./wasm_types.js"
 
-import type { Span, MaterializeValue } from "./wasm_types.js"
+import type { Change, ChangeMetadata, Heads, Span, MaterializeValue } from "./wasm_types.js"
 
 export type {
   ActorId,
@@ -276,6 +277,16 @@ function importOpts<T>(
   } else {
     return { actor: _actor }
   }
+}
+
+export function getChangesSince<T>(state: Doc<T>, heads: Heads) : Change[] {
+  const n = _state(state)
+  return n.handle.getChanges(heads)
+}
+
+export function getChangesMetaSince<T>(state: Doc<T>, heads: Heads) : ChangeMetadata[] {
+  const n = _state(state)
+  return n.handle.getChangesMeta(heads)
 }
 
 function cursorToIndex<T>(

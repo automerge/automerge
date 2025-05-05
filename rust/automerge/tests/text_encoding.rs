@@ -417,6 +417,7 @@ fn patch_put_seq() {
                 Encoding::GraphemeCluster => 3,
             };
             doc.update_diff_cursor();
+            println!(" ENCODING = {:?}", encoding);
             doc.put(text, index, "L").unwrap();
             let indexes = doc
                 .diff_incremental()

@@ -1,4 +1,4 @@
-use crate::op_set::OpSetData;
+use crate::op_set2::OpSet;
 use crate::storage::parse;
 use crate::types::OpId;
 #[cfg(doc)]
@@ -37,10 +37,10 @@ pub struct OpCursor {
 }
 
 impl OpCursor {
-    pub(crate) fn new(id: OpId, osd: &OpSetData, move_cursor: MoveCursor) -> Self {
+    pub(crate) fn new(id: OpId, op_set: &OpSet, move_cursor: MoveCursor) -> Self {
         OpCursor {
             ctr: id.counter(),
-            actor: osd.actors.cache[id.actor()].clone(),
+            actor: op_set.actors[id.actor()].clone(),
             move_cursor,
         }
     }

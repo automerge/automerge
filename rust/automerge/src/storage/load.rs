@@ -2,6 +2,7 @@ use tracing::instrument;
 
 use crate::{
     change::Change,
+    change_graph::ChangeGraph,
     storage::{self, parse},
     types::TextEncoding,
 };
@@ -55,10 +56,11 @@ pub(crate) enum LoadedChanges<'a> {
 pub(crate) fn load_changes<'a>(
     mut data: parse::Input<'a>,
     text_encoding: TextEncoding,
+    current: &ChangeGraph,
 ) -> LoadedChanges<'a> {
     let mut changes = Vec::new();
     while !data.is_empty() {
-        let remaining = match load_next_change(data, &mut changes, text_encoding) {
+        let remaining = match load_next_change(data, &mut changes, text_encoding, current) {
             Ok(d) => d,
             Err(e) => {
                 return LoadedChanges::Partial {
@@ -77,6 +79,7 @@ fn load_next_change<'a>(
     data: parse::Input<'a>,
     changes: &mut Vec<Change>,
     text_encoding: TextEncoding,
+    current: &ChangeGraph,
 ) -> Result<parse::Input<'a>, Error> {
     let (remaining, chunk) = storage::Chunk::parse(data).map_err(|e| Error::Parse(Box::new(e)))?;
     if !chunk.checksum_valid() {
@@ -85,10 +88,12 @@ fn load_next_change<'a>(
     match chunk {
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
-            let new_changes = reconstruct_opset(&d, VerificationMode::DontCheck, text_encoding)
-                .map_err(|e| Error::InflateDocument(Box::new(e)))?
-                .changes;
-            changes.extend(new_changes);
+            if !d.heads().iter().all(|h| current.has_change(h)) {
+                let new_changes = reconstruct_opset(&d, VerificationMode::DontCheck, text_encoding)
+                    .map_err(|e| Error::InflateDocument(Box::new(e)))?
+                    .changes;
+                changes.extend(new_changes);
+            }
         }
         storage::Chunk::Change(change) => {
             tracing::trace!("loading change chunk");

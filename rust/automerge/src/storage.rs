@@ -2,19 +2,17 @@ use std::ops::Range;
 
 pub(crate) mod change;
 mod chunk;
-mod columns;
-pub(crate) mod convert;
-mod document;
+pub(crate) mod columns;
+pub(crate) mod document;
 pub(crate) mod load;
 pub(crate) mod parse;
-pub(crate) mod save;
 
 pub use load::VerificationMode;
 pub(crate) use {
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
-    columns::{Columns, MismatchingColumn, RawColumn, RawColumns},
-    document::{AsChangeMeta, AsDocOp, ChangeMetadata, CompressConfig, DocOp, Document},
+    columns::{ColumnSpec, Columns, MismatchingColumn, RawColumn, RawColumns},
+    document::{CompressConfig, DocChangeColumns, DocChangeMetadata, Document},
 };
 
 fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {

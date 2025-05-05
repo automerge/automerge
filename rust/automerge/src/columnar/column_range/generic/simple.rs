@@ -48,7 +48,7 @@ pub(crate) enum SimpleColIter<'a> {
     Boolean(BooleanDecoder<'a>),
 }
 
-impl<'a> SimpleColIter<'a> {
+impl SimpleColIter<'_> {
     fn try_next(&mut self) -> Result<Option<SimpleValue>, raw::Error> {
         match self {
             Self::RleInt(d) => read_col(d, SimpleValue::Uint),
@@ -67,7 +67,7 @@ where
     col.next().transpose().map(|v| v.map(f))
 }
 
-impl<'a> Iterator for SimpleColIter<'a> {
+impl Iterator for SimpleColIter<'_> {
     type Item = Result<SimpleValue, raw::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

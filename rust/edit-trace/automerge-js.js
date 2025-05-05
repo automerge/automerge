@@ -1,6 +1,7 @@
 // Apply the paper editing trace to an Automerge.Text object, one char at a time
 const { edits, finalText } = require('./editing-trace')
-const Automerge = require('../../javascript').unstable;
+const Automerge = require('../../javascript').next;
+//const Automerge = require('../../javascript')
 
 let start = new Date()
 let state = Automerge.from({text: ""})
@@ -11,7 +12,7 @@ state = Automerge.change(state, doc => {
       console.log(`Processed ${i} edits in ${new Date() - start} ms`)
     }
     let edit = edits[i]
-    Automerge.splice(doc, 'text', ... edit)
+    Automerge.splice(doc, ['text'], ... edit)
   }
 })
 console.log(`Done in ${new Date() - start} ms`)

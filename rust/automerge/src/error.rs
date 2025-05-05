@@ -2,6 +2,7 @@ use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
+use hexane::PackError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -12,10 +13,14 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate actor {0}: possible document clone")]
+    DuplicateActorId(ActorId),
     #[error("general failure")]
     Fail,
     #[error("invalid actor ID `{0}`")]
     InvalidActorId(String),
+    #[error("invalid actor index `{0}`")]
+    InvalidActorIndex(usize),
     #[error(transparent)]
     InvalidChangeHashBytes(#[from] InvalidChangeHashSlice),
     #[error("invalid UTF-8 character at {0}")]
@@ -34,6 +39,8 @@ pub enum AutomergeError {
     InvalidSeq(u64),
     #[error("cursor {0} is invalid")]
     InvalidCursor(Cursor),
+    #[error("op has no valid cursor")] // this error sucks
+    InvalidCursorOp,
     #[error("cursor format is invalid")]
     InvalidCursorFormat,
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
@@ -57,6 +64,10 @@ pub enum AutomergeError {
     NotAnObject,
     #[error(transparent)]
     HydrateError(#[from] HydrateError),
+    #[error("patch logs cannot be shared between documents")]
+    PatchLogMismatch,
+    #[error(transparent)]
+    EncodingError(#[from] PackError),
 }
 
 impl PartialEq for AutomergeError {

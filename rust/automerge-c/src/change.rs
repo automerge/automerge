@@ -219,7 +219,7 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
     to_result::<Result<Vec<am::Change>, _>>(
-        am::Automerge::load(data).map(|d| d.get_changes(&[]).into_iter().cloned().collect()),
+        am::Automerge::load(data).map(|d| d.get_changes(&[]).into_iter().collect()),
     )
 }
 
