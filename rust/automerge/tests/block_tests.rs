@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use automerge::{
-    hydrate_list, hydrate_map, hydrate_text, transaction::Transactable, BlockOrText, ObjType,
-    ReadDoc, ROOT,
+    hydrate_list, hydrate_map, hydrate_text,
+    iter::Span,
+    marks::{ExpandMark, Mark},
+    transaction::Transactable,
+    BlockOrText, ObjType, ReadDoc, ScalarValue, ROOT,
 };
 use test_log::test;
 
@@ -287,5 +292,44 @@ fn update_spans_delete_attribute() {
             "type" => "ordered-list-item",
             "parents" => hydrate_list![],
         })]
+    );
+}
+
+#[test]
+fn marks_on_spans_respect_heads() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 5),
+        ExpandMark::After,
+    )
+    .unwrap();
+
+    let heads = doc.get_heads();
+
+    doc.mark(
+        &text,
+        Mark::new("italic".to_string(), true, 5, 11),
+        ExpandMark::After,
+    )
+    .unwrap();
+
+    let spans = doc.spans_at(&text, &heads).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text(
+                "hello".to_string(),
+                Some(Arc::new(
+                    vec![("bold".to_string(), ScalarValue::Boolean(true))]
+                        .into_iter()
+                        .collect()
+                ))
+            ),
+            Span::Text(" world".to_string(), None,)
+        ]
     );
 }
