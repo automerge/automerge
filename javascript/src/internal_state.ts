@@ -14,7 +14,6 @@ export interface InternalState<T> {
     patches: Patch[]
   }
   patchCallback?: PatchCallback<T>
-  textV2: boolean
 }
 
 export function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {

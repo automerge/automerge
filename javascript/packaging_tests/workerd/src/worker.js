@@ -8,7 +8,7 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { next as Automerge } from "@automerge/automerge"
+import  * as Automerge  from "@automerge/automerge"
 
 // NOTE: Attempting to create a document at the top level will cause an
 // obscure error about being unable to generate random values. This is because

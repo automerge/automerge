@@ -1,4 +1,4 @@
-import {next as am} from "@automerge/automerge"
+import * as am from "@automerge/automerge"
 
 const doc = am.from({message: "hello webpack"})
 console.log(doc.message)

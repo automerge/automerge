@@ -32,6 +32,7 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
+use automerge::patches::TextRepresentation;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -60,50 +61,19 @@ macro_rules! log {
     };
 }
 
-/// How text is represented in materialized objects on the JS side
-#[derive(Default, Debug, Eq, PartialEq, Clone, Copy)]
-#[wasm_bindgen]
-pub enum TextRepresentation {
-    /// As an array of characters and objects
-    #[default]
-    Array,
-    /// As a single JS string
-    String,
-}
-
-impl TextRepresentation {
-    pub(crate) fn is_string(&self) -> bool {
-        matches!(self, Self::String)
-    }
-}
-
-impl From<TextRepresentation> for am::patches::TextRepresentation {
-    fn from(tr: TextRepresentation) -> Self {
-        match tr {
-            TextRepresentation::Array => am::patches::TextRepresentation::Array,
-            TextRepresentation::String => {
-                am::patches::TextRepresentation::String(TextEncoding::Utf16CodeUnit)
-            }
-        }
-    }
-}
-
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge {
     doc: AutoCommit,
     freeze: bool,
     external_types: HashMap<Datatype, interop::ExternalTypeConstructor>,
-    text_rep: TextRepresentation,
 }
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new(
-        actor: Option<String>,
-        text_rep: TextRepresentation,
-    ) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::default().with_text_rep(text_rep.into());
+    pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+        let mut doc = AutoCommit::default()
+            .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -112,7 +82,6 @@ impl Automerge {
             doc,
             freeze: false,
             external_types: HashMap::default(),
-            text_rep,
         })
     }
 
@@ -122,7 +91,6 @@ impl Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
-            text_rep: self.text_rep,
         };
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
@@ -146,7 +114,6 @@ impl Automerge {
             doc,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
-            text_rep: self.text_rep,
         };
         if let Some(s) = actor {
             let actor =
@@ -233,7 +200,7 @@ impl Automerge {
         let start = start as usize;
         let delete_count = delete_count as isize;
         let vals = if let Some(t) = text.as_string() {
-            if obj_type == am::ObjType::Text && self.text_rep == TextRepresentation::String {
+            if obj_type == am::ObjType::Text {
                 self.doc.splice_text(&obj, start, delete_count, &t)?;
                 return Ok(());
             } else {
@@ -262,14 +229,9 @@ impl Automerge {
                 am::ObjType::List => {
                     self.doc.splice(&obj, start, delete_count, vals)?;
                 }
-                am::ObjType::Text => match self.text_rep {
-                    TextRepresentation::String => {
-                        self.doc.splice_text(&obj, start, delete_count, "")?;
-                    }
-                    TextRepresentation::Array => {
-                        self.doc.splice(&obj, start, delete_count, vals)?;
-                    }
-                },
+                am::ObjType::Text => {
+                    self.doc.splice_text(&obj, start, delete_count, "")?;
+                }
                 _ => {}
             }
         }
@@ -286,9 +248,6 @@ impl Automerge {
         if !matches!(obj_type, am::ObjType::Text) {
             return Err(error::UpdateText::ObjectNotText);
         }
-        if self.text_rep != TextRepresentation::String {
-            return Err(error::UpdateText::TextRepNotString);
-        }
         if let Some(t) = new_text.as_string() {
             self.doc.update_text(&obj, t)?;
             Ok(())
@@ -302,9 +261,6 @@ impl Automerge {
         let (obj, obj_type) = self.import(obj)?;
         if !matches!(obj_type, am::ObjType::Text) {
             return Err(error::UpdateSpans::ObjectNotText);
-        }
-        if self.text_rep != TextRepresentation::String {
-            return Err(error::UpdateSpans::TextRepNotString);
         }
         let args = interop::import_update_spans_args(self, JS(args))?;
         self.doc.update_spans(&obj, args.0)?;
@@ -340,14 +296,7 @@ impl Automerge {
             .doc
             .insert_object(&obj, index, imported_obj.objtype())?;
         if let Some(s) = imported_obj.text() {
-            match self.text_rep {
-                TextRepresentation::String => {
-                    self.doc.splice_text(&opid, 0, 0, s)?;
-                }
-                TextRepresentation::Array => {
-                    self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
-                }
-            }
+            self.doc.splice_text(&opid, 0, 0, s)?;
         } else {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
@@ -451,14 +400,7 @@ impl Automerge {
             .doc
             .insert_object(&obj, index as usize, imported_obj.objtype())?;
         if let Some(s) = imported_obj.text() {
-            match self.text_rep {
-                TextRepresentation::String => {
-                    self.doc.splice_text(&opid, 0, 0, s)?;
-                }
-                TextRepresentation::Array => {
-                    self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
-                }
-            }
+            self.doc.splice_text(&opid, 0, 0, s)?;
         } else {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
@@ -494,14 +436,7 @@ impl Automerge {
         let imported_obj = import_obj(&value, None)?;
         let opid = self.doc.put_object(&obj, prop, imported_obj.objtype())?;
         if let Some(s) = imported_obj.text() {
-            match self.text_rep {
-                TextRepresentation::String => {
-                    self.doc.splice_text(&opid, 0, 0, s)?;
-                }
-                TextRepresentation::Array => {
-                    self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
-                }
-            }
+            self.doc.splice_text(&opid, 0, 0, s)?;
         } else {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
@@ -571,7 +506,7 @@ impl Automerge {
                 self.doc.get(&obj, prop)?
             };
             if let Some((value, id)) = value {
-                match alloc(&value, self.text_rep) {
+                match alloc(&value) {
                     (datatype, js_value) if datatype.is_scalar() => Ok(js_value),
                     _ => Ok(id.to_string().into()),
                 }
@@ -609,7 +544,7 @@ impl Automerge {
                     }
                     (Value::Scalar(_), _) => {
                         let result = Array::new();
-                        let (datatype, value) = alloc(&value.0, self.text_rep);
+                        let (datatype, value) = alloc(&value.0);
                         result.push(&datatype.into());
                         result.push(&value);
                         Ok(result.into())
@@ -661,7 +596,7 @@ impl Automerge {
             }?;
             for (value, id) in values {
                 let sub = Array::new();
-                let (datatype, js_value) = alloc(&value, self.text_rep);
+                let (datatype, js_value) = alloc(&value);
                 sub.push(&datatype.into());
                 if value.is_scalar() {
                     sub.push(&js_value);
@@ -1157,7 +1092,7 @@ impl Automerge {
         let result = Array::new();
         for m in marks {
             let mark = Object::new();
-            let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
+            let (_datatype, value) = alloc(&m.value().clone().into());
             js_set(&mark, "name", m.name())?;
             js_set(&mark, "value", value)?;
             js_set(&mark, "start", m.start as i32)?;
@@ -1182,7 +1117,7 @@ impl Automerge {
             .map_err(to_js_err)?;
         let result = Object::new();
         for (mark, value) in marks.iter() {
-            let (_datatype, value) = alloc(&value.into(), self.text_rep);
+            let (_datatype, value) = alloc(&value.into());
             js_set(&result, mark, value)?;
         }
         Ok(result)
@@ -1240,16 +1175,7 @@ impl Automerge {
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
     console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let text_v1 = js_get(&options, "text_v1")
-        .ok()
-        .and_then(|v1| v1.as_bool())
-        .unwrap_or(false);
-    let text_rep = if text_v1 {
-        TextRepresentation::Array
-    } else {
-        TextRepresentation::String
-    };
-    Automerge::new(actor, text_rep)
+    Automerge::new(actor)
 }
 
 #[wasm_bindgen(js_name = load)]
@@ -1257,15 +1183,6 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     let data = data.to_vec();
     //am::log!("load: {:?}", data.as_slice());
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
-    let text_v1 = js_get(&options, "text_v1")
-        .ok()
-        .and_then(|v1| v1.as_bool())
-        .unwrap_or(false);
-    let text_rep = if text_v1 {
-        TextRepresentation::Array
-    } else {
-        TextRepresentation::String
-    };
     let unchecked = js_get(&options, "unchecked")
         .ok()
         .and_then(|v1| v1.as_bool())
@@ -1300,7 +1217,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
             .verification_mode(verification_mode)
             .migrate_strings(string_migration),
     )?
-    .with_text_rep(text_rep.into());
+    .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
@@ -1310,7 +1227,6 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         doc,
         freeze: false,
         external_types: HashMap::default(),
-        text_rep,
     })
 }
 

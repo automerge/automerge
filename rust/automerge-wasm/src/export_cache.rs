@@ -3,7 +3,9 @@ use crate::interop::ExternalTypeConstructor;
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
+use automerge::patches::TextRepresentation;
 use automerge::ChangeHash;
+use automerge::TextEncoding;
 use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::{Borrow, Cow};
@@ -79,7 +81,7 @@ impl<'a> ExportCache<'a> {
     ) -> Result<JsValue, error::Export> {
         Ok(match value {
             am::ValueRef::Object(ObjType::Map) => self.make_map(obj, meta)?.into(),
-            am::ValueRef::Object(ObjType::Text) if self.doc.text_rep.is_string() => {
+            am::ValueRef::Object(ObjType::Text) => {
                 self.obj_cache
                     .insert(obj.clone(), (parent.clone(), prop.clone()));
                 JsValue::from_str("")
@@ -129,7 +131,7 @@ impl<'a> ExportCache<'a> {
         heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
-        if datatype == Datatype::Text && self.doc.text_rep.is_string() {
+        if datatype == Datatype::Text {
             return Ok(self.doc.text_at(&obj, heads)?.into());
         }
         let mut current_obj_id = Arc::new(obj.clone());
@@ -140,7 +142,11 @@ impl<'a> ExportCache<'a> {
         let mut buffer = String::new();
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
-        let iter = self.doc.doc.iter_at(obj, heads, self.doc.text_rep.into());
+        let iter = self.doc.doc.iter_at(
+            obj,
+            heads,
+            TextRepresentation::String(TextEncoding::Utf16CodeUnit),
+        );
         for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {

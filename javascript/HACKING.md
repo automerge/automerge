@@ -124,14 +124,6 @@ a `/slim` subpath export. This export only includes the javascript code and
 allows the user to figure out how to load the WebAssembly themselves. This is
 also the path which libraries should depend on.
 
-We also expose a `/next` subpath export which only exposes the "next" API
-and it's types (this is mainly for convenience when importing types in
-typescript). This subpath export also needs to be conditional.
-
-In order to allow choosing initialization on the `/next` subpath we
-also expose a `/slim/next` subpath. Altogether then we have the following
-subpaths:
-
 Finally, we also want to make it easy for the user to obtain the WebAssembly
 file from this package, so we expose two subpath exports, one which provides
 the WebAssembly file directly and another which exposes a base64 encoded
@@ -141,9 +133,6 @@ Altogether then we have the following exports:
 
 - `/`: The full package with WebAssembly initialization
 - `/slim`: Only the JavaScript code, no WebAssembly initialization
-- `/next`: Only the "next" API and it's types, performs WebAssembly
-  initialization
-- `/slim/next`: Only the "next" API, no WebAssembly initialization
 - `/automerge.wasm`: The WebAssembly file
 - `/automerge.wasm.base64.js`: The WebAssembly file as a module with a single
   export which is a base64 encoded string

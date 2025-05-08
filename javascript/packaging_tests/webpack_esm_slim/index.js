@@ -1,4 +1,4 @@
-import { next as am } from "@automerge/automerge/slim"
+import  * as am  from "@automerge/automerge/slim"
 import wasmBlob from "@automerge/automerge/automerge.wasm"
 
 function component() {
@@ -27,4 +27,3 @@ function component() {
 }
 
 component()
-

@@ -8,7 +8,7 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import { next as Automerge } from "@automerge/automerge/slim"
+import  * as Automerge  from "@automerge/automerge/slim"
 import wasm from "@automerge/automerge/automerge.wasm"
 
 Automerge.initializeWasm(wasm)

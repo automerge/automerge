@@ -1,4 +1,4 @@
-import {next as am} from "@automerge/automerge/slim"
+import * as am from "@automerge/automerge/slim"
 import fs from "fs"
 
 let initialized = false
@@ -18,4 +18,3 @@ setTimeout(() => {
     process.exit(1)
   }
 }, 100)
-
