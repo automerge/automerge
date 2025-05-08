@@ -45,23 +45,6 @@
       "import": "./dist/mjs/entrypoints/fullfat_base64.js",
       "require": "./dist/cjs/fullfat_base64.cjs"
     },
-    "./next": {
-      "types": "./dist/next.d.ts",
-      "workerd": {
-        "import": "./dist/mjs/entrypoints/fullfat_workerd_next.js",
-        "require": "./dist/cjs/fullfat_next_base64.cjs"
-      },
-      "node": {
-        "import": "./dist/mjs/entrypoints/fullfat_node_next.js",
-        "require": "./dist/cjs/fullfat_node_next.cjs"
-      },
-      "browser": {
-        "import": "./dist/mjs/entrypoints/fullfat_bundler_next.js",
-        "require": "./dist/cjs/fullfat_next_base64.cjs"
-      },
-      "import": "./dist/mjs/entrypoints/fullfat_next_base64.js",
-      "require": "./dist/cjs/fullfat_next_base64.cjs"
-    },
     "./slim": {
       "types": "./dist/index.d.ts",
       "node": {
@@ -74,11 +57,6 @@
       },
       "import": "./dist/mjs/entrypoints/slim.js",
       "require": "./dist/cjs/slim.cjs"
-    },
-    "./slim/next": {
-      "types": "./dist/next.d.ts",
-      "import": "./dist/mjs/entrypoints/slim_next.js",
-      "require": "./dist/cjs/slim_next.cjs"
     },
     "./automerge.wasm": "./dist/automerge.wasm",
     "./automerge.wasm.base64.js": "./dist/mjs/wasm_bindgen_output/web/automerge_wasm_bg_base64.js"
@@ -98,8 +76,8 @@
     "@types/mocha": "^10.0.1",
     "@types/node": "^20.5.7",
     "@types/uuid": "^9.0.0",
-    "@typescript-eslint/eslint-plugin": "^5.46.0",
-    "@typescript-eslint/parser": "^5.46.0",
+    "@typescript-eslint/eslint-plugin": "^8.32.0",
+    "@typescript-eslint/parser": "^8.32.0",
     "consola": "^3.2.3",
     "esbuild": "^0.19.2",
     "eslint": "^8.29.0",

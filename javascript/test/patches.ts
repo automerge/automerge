@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src/index.js"
+import * as Automerge from "../src/index.js"
 import { type List } from "../src/index.js"
 
 describe("patches", () => {

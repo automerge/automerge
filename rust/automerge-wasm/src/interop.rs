@@ -1,7 +1,7 @@
 use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
-use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
+use crate::{Automerge, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
 use automerge::iter::{Span, Spans};
@@ -1051,9 +1051,7 @@ impl Automerge {
         } else {
             value.clone()
         };
-        if matches!(datatype, Datatype::Map | Datatype::List)
-            || (datatype == Datatype::Text && self.text_rep == TextRepresentation::Array)
-        {
+        if matches!(datatype, Datatype::Map | Datatype::List) {
             cache.set_raw_object(&value, &JsValue::from(&id.to_string()))?;
         }
         cache.set_datatype(&value, &datatype.into())?;
@@ -1073,8 +1071,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutSeq { index, value, .. } => {
-                let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, cache)?;
                 js_set(array, *index as f64, &sub_val)?;
                 Ok(())
             }
@@ -1092,11 +1089,7 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(
-                            array,
-                            index,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
-                        )?;
+                        js_set(array, index, &self.export_value(alloc(&new_value), cache)?)?;
                         Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -1107,28 +1100,7 @@ impl Automerge {
             }
             PatchAction::DeleteMap { .. } => Err(error::ApplyPatch::DeleteKeyFromSeq),
             PatchAction::PutMap { .. } => Err(error::ApplyPatch::PutKeyInSeq),
-            PatchAction::SpliceText { index, value, .. } => {
-                match self.text_rep {
-                    TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
-                    TextRepresentation::Array => {
-                        let val = value.make_string();
-                        let elems = val
-                            .chars()
-                            .map(|c| {
-                                (
-                                    Value::Scalar(std::borrow::Cow::Owned(am::ScalarValue::Str(
-                                        c.to_string().into(),
-                                    ))),
-                                    ObjId::Root, // Using ROOT is okay because this ID is never used as
-                                    // we're producing ScalarValue::Str
-                                    false,
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        self.sub_splice(array, *index, 0, &elems, meta, cache)
-                    }
-                }
-            }
+            PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInSeq),
             PatchAction::Mark { .. } => Ok(()),
             PatchAction::Conflict { .. } => Ok(()),
         }
@@ -1143,8 +1115,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutMap { key, value, .. } => {
-                let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, cache)?;
                 js_set(map, key, &sub_val)?;
                 Ok(())
             }
@@ -1162,11 +1133,7 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(
-                            map,
-                            key,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
-                        )?;
+                        js_set(map, key, &self.export_value(alloc(&new_value), cache)?)?;
                         Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -1264,7 +1231,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         let args: Array = values
             .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0, self.text_rep), &v.1, meta, cache))
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
         args.unshift(&(index as u32).into());
@@ -1426,16 +1393,13 @@ impl Automerge {
     }
 }
 
-pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatype, JsValue) {
+pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
     match value {
         am::Value::Object(o) => match o {
             ObjType::Map => (Datatype::Map, Object::new().into()),
             ObjType::Table => (Datatype::Table, Object::new().into()),
             ObjType::List => (Datatype::List, Array::new().into()),
-            ObjType::Text => match text_rep {
-                TextRepresentation::String => (Datatype::Text, "".into()),
-                TextRepresentation::Array => (Datatype::Text, Array::new().into()),
-            },
+            ObjType::Text => (Datatype::Text, "".into()),
         },
         am::Value::Scalar(s) => alloc_scalar(s.as_ref()),
     }
@@ -1502,11 +1466,7 @@ pub(crate) fn export_span(
                 if m.num_marks() > 0 {
                     let marks = Object::new();
                     for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
+                        js_set(&marks, name, alloc(&value.into()).1)?;
                     }
                     js_set(&result, "marks", marks)?;
                 }
@@ -1548,16 +1508,7 @@ pub(super) fn export_hydrate(
             }
             list.into()
         }
-        am::hydrate::Value::Text(text) => match doc.text_rep {
-            TextRepresentation::String => text.to_string().into(),
-            TextRepresentation::Array => {
-                let list = Array::new();
-                for c in text.to_string().chars() {
-                    list.push(&c.to_string().into());
-                }
-                list.into()
-            }
-        },
+        am::hydrate::Value::Text(text) => text.to_string().into(),
     }
 }
 
@@ -1591,7 +1542,7 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
 
-            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let (datatype, value) = alloc(&value.0);
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1612,7 +1563,7 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
 
-            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let (datatype, value) = alloc(&value.0);
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1629,7 +1580,7 @@ fn export_patch(
             let values = values
                 .iter()
                 .map(|v| {
-                    let (datatype, js_val) = alloc(&v.0, TextRepresentation::String);
+                    let (datatype, js_val) = alloc(&v.0);
                     let exported_val = if let Some(external_type) = externals.get(&datatype) {
                         external_type.construct(&js_val, datatype)
                     } else {
@@ -1666,11 +1617,7 @@ fn export_patch(
                 if m.num_marks() > 0 {
                     let marks = Object::new();
                     for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
+                        js_set(&marks, name, alloc(&value.into()).1)?;
                     }
                     js_set(&result, "marks", marks)?;
                 }
@@ -1703,11 +1650,7 @@ fn export_patch(
             for m in marks.iter() {
                 let mark = Object::new();
                 js_set(&mark, "name", m.name())?;
-                js_set(
-                    &mark,
-                    "value",
-                    &alloc(&m.value().into(), TextRepresentation::String).1,
-                )?;
+                js_set(&mark, "value", &alloc(&m.value().into()).1)?;
                 js_set(&mark, "start", m.start as i32)?;
                 js_set(&mark, "end", m.end as i32)?;
                 marks_array.push(&mark);

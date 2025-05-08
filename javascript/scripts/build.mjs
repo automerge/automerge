@@ -273,9 +273,7 @@ async function transpileCjs() {
     absWorkingDir: distDir,
     entryPoints: [
       `${inDir}/entrypoints/fullfat_node.js`,
-      `${inDir}/entrypoints/fullfat_node_next.js`,
       `${inDir}/entrypoints/slim.js`,
-      `${inDir}/entrypoints/slim_next.js`,
       `${inDir}/entrypoints/iife.js`,
     ],
     outdir: outDir,
@@ -300,10 +298,7 @@ async function transpileCjs() {
   console.log("building bundler CommonJS modules")
   await build({
     absWorkingDir: distDir,
-    entryPoints: [
-      `${inDir}/entrypoints/fullfat_base64.js`,
-      `${inDir}/entrypoints/fullfat_next_base64.js`,
-    ],
+    entryPoints: [`${inDir}/entrypoints/fullfat_base64.js`],
     outdir: outDir,
     bundle: true,
     packages: "external",

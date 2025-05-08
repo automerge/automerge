@@ -1,4 +1,4 @@
-const { next: am } = require("@automerge/automerge");
+const am = require("@automerge/automerge");
 
 const doc = am.from({message: "hello webpack"})
 console.log(doc.message)

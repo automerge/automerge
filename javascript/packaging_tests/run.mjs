@@ -347,40 +347,23 @@ async function run() {
 
   let testCases = [
     { dir: "webpack_cjs_fullfat", scenarios:[{ run: runWebpackTest}] },
-    { dir: "webpack_cjs_fullfat_next", scenarios:[{ run: runWebpackTest}] },
     { dir: "webpack_cjs_slim", scenarios:[{ run: runWebpackTest}] },
-    { dir: "webpack_cjs_slim_next", scenarios:[{ run: runWebpackTest}] },
     { dir: "webpack_esm_fullfat", scenarios:[{ run: runWebpackTest}] },
-    { dir: "webpack_esm_fullfat_next", scenarios:[{ run: runWebpackTest}] },
     { dir: "webpack_esm_slim", scenarios:[{ run: runWebpackTest}] },
-    { dir: "webpack_esm_slim_next", scenarios:[{ run: runWebpackTest}] },
     { dir: "node_cjs_fullfat", scenarios:[{ run: runNodeTest}] },
-    { dir: "node_cjs_fullfat_next", scenarios:[{ run: runNodeTest}] },
     { dir: "node_cjs_slim", scenarios:[{ run: runNodeTest}] },
-    { dir: "node_cjs_slim_next", scenarios:[{ run: runNodeTest}] },
     { dir: "node_esm_fullfat", scenarios:[{ run: runNodeTest}] },
-    { dir: "node_esm_fullfat_next", scenarios:[{ run: runNodeTest}] },
     { dir: "node_esm_slim", scenarios:[{ run: runNodeTest}] },
-    { dir: "node_esm_slim_next", scenarios:[{ run: runNodeTest}] },
     { dir: "vite_fullfat", scenarios:[
       { run: runViteDevServerTest, name: "vite_dev_server_fullfat"},
       { run: runViteBuildTest, name: "vite_build_fullfat"}
-    ] },
-    { dir: "vite_fullfat_next", scenarios:[
-      { run: runViteDevServerTest, name: "vite_dev_server_fullfat_next"},
-      { run: runViteBuildTest, name: "vite_build_fullfat_next"}
     ] },
     { dir: "vite_slim", scenarios:[
       { run: runViteDevServerTest, name: "vite_dev_server_slim"},
       { run: runViteBuildTest, name: "vite_build_slim"}
     ] },
-    { dir: "vite_slim_next", scenarios:[
-      { run: runViteDevServerTest, name: "vite_dev_server_slim_next"},
-      { run: runViteBuildTest, name: "vite_build_slim_next"}
-    ] },
     { dir: "vite_iife_fullfat", scenarios: [{ run: runViteBuildTest}] },
     { dir: "workerd", scenarios: [{run: runWorkerdTest}] },
-    { dir: "workerd_next", scenarios: [{run: runWorkerdTest}] },
     { dir: "workerd_slim", scenarios: [{run: runWorkerdTest}] },
     { dir: "iife", scenarios: [{run: runIifeTest}] },
   ]
