@@ -52,8 +52,8 @@ export type PatchCallback<T> = (
   info: PatchInfo<T>,
 ) => void
 
-import { RawString } from "./raw_string.js"
-export { RawString } from "./raw_string.js"
+import { ImmutableString } from "./immutable_string.js"
+export { ImmutableString } from "./immutable_string.js"
 
 export type AutomergeValue =
   | ScalarValue
@@ -69,4 +69,4 @@ export type ScalarValue =
   | Date
   | Counter
   | Uint8Array
-  | RawString
+  | ImmutableString

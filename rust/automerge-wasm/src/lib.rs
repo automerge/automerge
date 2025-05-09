@@ -1201,7 +1201,7 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     } else {
         OnPartialLoad::Error
     };
-    let string_migration = if js_get(&options, "convertRawStringsToText")
+    let string_migration = if js_get(&options, "convertImmutableStringsToText")
         .ok()
         .and_then(|v| v.as_bool())
         .unwrap_or(false)

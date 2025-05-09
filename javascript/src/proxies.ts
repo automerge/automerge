@@ -18,10 +18,10 @@ import {
   INT,
   UINT,
   F64,
-  RAW_STRING,
+  IMMUTABLE_STRING,
   TEXT,
 } from "./constants.js"
-import { RawString } from "./raw_string.js"
+import { ImmutableString } from "./immutable_string.js"
 
 type Target = {
   context: Automerge
@@ -60,7 +60,7 @@ function valueAt(target: Target, prop: Prop): AutomergeValue | undefined {
     case "text":
       return context.text(val as ObjID) as AutomergeValue
     case "str":
-      return new RawString(val as string) as AutomergeValue
+      return new ImmutableString(val as string) as AutomergeValue
     case "uint":
       return val as AutomergeValue
     case "int":
@@ -124,7 +124,7 @@ function import_value(
         return [value.value, "counter"]
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
-      } else if (isRawString(value)) {
+      } else if (isImmutableString(value)) {
         return [value.toString(), "str"]
       } else if (value instanceof Uint8Array) {
         return [value, "bytes"]
@@ -910,17 +910,17 @@ function printPath(path: Prop[]): string {
 }
 
 /*
- * Check if an object is a {@link RawString}
+ * Check if an object is a {@link ImmutableString}
  */
-export function isRawString(obj: any): obj is RawString {
-  // We used to determine whether something was a RawString by doing an instanceof check, but
+export function isImmutableString(obj: any): obj is ImmutableString {
+  // We used to determine whether something was a ImmutableString by doing an instanceof check, but
   // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
-  // of a symbol to determine if something is a RawString
+  // of a symbol to determine if something is a ImmutableString
 
   return (
     typeof obj === "object" &&
     obj !== null &&
-    Object.prototype.hasOwnProperty.call(obj, RAW_STRING)
+    Object.prototype.hasOwnProperty.call(obj, IMMUTABLE_STRING)
   )
 }
 

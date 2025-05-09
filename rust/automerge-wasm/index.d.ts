@@ -402,7 +402,7 @@ export type LoadOptions = {
   actor?: Actor;
   unchecked?: boolean;
   allowMissingDeps?: boolean;
-  convertRawStringsToText?: boolean;
+  convertImmutableStringsToText?: boolean;
 };
 
 export type InitOptions = {

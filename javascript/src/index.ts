@@ -227,8 +227,8 @@
  * ```
  */
 
-import { isRawString, rootProxy } from "./proxies.js"
-export { isRawString } from "./proxies.js"
+import { isImmutableString, rootProxy } from "./proxies.js"
+export { isImmutableString } from "./proxies.js"
 import { STATE } from "./constants.js"
 
 import {
@@ -314,8 +314,8 @@ export {
   isWasmInitialized,
 } from "./low_level.js"
 
-import { RawString } from "./raw_string.js"
-export { RawString } from "./raw_string.js"
+import { ImmutableString } from "./immutable_string.js"
+export { ImmutableString } from "./immutable_string.js"
 
 import {
   type InternalState,
@@ -419,7 +419,7 @@ export type InitOptions<T> = {
   /** Allow loading a document with missing changes */
   allowMissingChanges?: boolean
   /** @hidden */
-  convertRawStringsToText?: boolean
+  convertImmutableStringsToText?: boolean
 }
 
 /** @hidden */
@@ -908,12 +908,13 @@ export function load<T>(
   const patchCallback = opts.patchCallback
   const unchecked = opts.unchecked || false
   const allowMissingDeps = opts.allowMissingChanges || false
-  const convertRawStringsToText = opts.convertRawStringsToText || false
+  const convertImmutableStringsToText =
+    opts.convertImmutableStringsToText || false
   const handle = ApiHandler.load(data, {
     actor,
     unchecked,
     allowMissingDeps,
-    convertRawStringsToText,
+    convertImmutableStringsToText,
   })
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
@@ -1511,10 +1512,10 @@ function registerDatatypes(handle: Automerge) {
   handle.registerDatatype(
     "str",
     (n: string) => {
-      return new RawString(n)
+      return new ImmutableString(n)
     },
     s => {
-      if (isRawString(s)) {
+      if (isImmutableString(s)) {
         return s.val
       }
     },
