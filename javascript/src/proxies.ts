@@ -1,5 +1,4 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
-import { Text } from "./text.js"
 import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 
 import type {
