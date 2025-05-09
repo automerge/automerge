@@ -2,8 +2,7 @@ import { default as assert } from "assert"
 import * as Automerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
-import { RAW_STRING } from "../src/constants.js"
-
+import { IMMUTABLE_STRING } from "../src/constants.js"
 import { readFile } from "fs/promises"
 import { join } from "path"
 import { fileURLToPath } from "url"
@@ -789,43 +788,48 @@ describe("Automerge", () => {
       })
     })
 
-  describe("When handling RawString", () => {
-    it("should treat any class which has the correct symbol as a RawString", () => {
-      // Exactly the same as `RawString`
-      class FakeRawString {
+  describe("When handling ImmutableString", () => {
+    it("should treat any class which has the correct symbol as a ImmutableString", () => {
+      // Exactly the same as `ImmutableString`
+      class FakeImmutableString {
         val: string;
-        [RAW_STRING] = true
+        [IMMUTABLE_STRING] = true
         constructor(val: string) {
           this.val = val
         }
 
         /**
-         * Returns the content of the RawString object as a simple string
+         * Returns the content of the ImmutableString object as a simple string
          */
         toString(): string {
           return this.val
         }
       }
 
-      let doc = Automerge.from<{ foo: FakeRawString | null }>({ foo: null })
-      doc = Automerge.change(doc, d => {
-        d.foo = new FakeRawString("something")
+      let doc = Automerge.from<{ foo: FakeImmutableString | null }>({
+        foo: null,
       })
-      assert.deepStrictEqual(doc.foo, new Automerge.RawString("something"))
+      doc = Automerge.change(doc, d => {
+        d.foo = new FakeImmutableString("something")
+      })
+      assert.deepStrictEqual(
+        doc.foo,
+        new Automerge.ImmutableString("something"),
+      )
     })
   })
 
-  it("should export a predicate to check if something is a rawstring", () => {
+  it("shoIMMUTABLE_STRING a predicate to check if something is an immutablestring", () => {
     let doc = Automerge.from({
-      foo: new Automerge.RawString("someval2"),
-      bar: "notarawstring",
+      foo: new Automerge.ImmutableString("someval2"),
+      bar: "notanimmutablestring",
     })
-    assert.strictEqual(Automerge.isRawString(doc.foo), true)
-    assert.strictEqual(Automerge.isRawString(doc.bar), false)
+    assert.strictEqual(Automerge.isImmutableString(doc.foo), true)
+    assert.strictEqual(Automerge.isImmutableString(doc.bar), false)
 
     doc = Automerge.change(doc, d => {
-      assert.strictEqual(Automerge.isRawString(d.foo), true)
-      assert.strictEqual(Automerge.isRawString(d.bar), false)
+      assert.strictEqual(Automerge.isImmutableString(d.foo), true)
+      assert.strictEqual(Automerge.isImmutableString(d.bar), false)
     })
   })
   it("rust preview number should match js preview number", async () => {
