@@ -134,7 +134,7 @@ Altogether then we have the following exports:
 - `/`: The full package with WebAssembly initialization
 - `/slim`: Only the JavaScript code, no WebAssembly initialization
 - `/automerge.wasm`: The WebAssembly file
-- `/automerge.wasm.base64.js`: The WebAssembly file as a module with a single
+- `/automerge.wasm.base64`: The WebAssembly file as a module with a single
   export which is a base64 encoded string
 
 These subpath exports are then mapped - using conditional exports - to platform

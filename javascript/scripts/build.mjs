@@ -183,7 +183,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
   const webWasmPath = path.join(webOutputPath, "automerge_wasm_bg.wasm")
   const wasmBlob = fs.readFileSync(webWasmPath)
   const wasmBlobBase64 = wasmBlob.toString("base64")
-  const wasmBlobBase64Path = path.join(
+  const wasmBlobBase64EsmPath = path.join(
     jsProjectDir,
     "src",
     "wasm_bindgen_output",
@@ -191,7 +191,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
     "automerge_wasm_bg_base64.js",
   )
   fs.writeFileSync(
-    wasmBlobBase64Path,
+    wasmBlobBase64EsmPath,
     `export const automergeWasmBase64 = "${wasmBlobBase64}"`,
   )
 
@@ -261,6 +261,12 @@ function compileTypescript() {
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
     path.join(jsProjectDir, "dist", "wasm_types.d.ts"),
   )
+
+  console.log("writing a declaration for the base64 encoded wasm")
+  fs.writeFileSync(
+    path.join(jsProjectDir, "dist", "automerge_wasm_bg_base64.d.ts"),
+    `export declare const automergeWasmBase64: string;`
+  );
 }
 
 async function transpileCjs() {
@@ -339,6 +345,17 @@ if (step === "all" || step === "transpile-cjs") {
   )
   const cjsDir = path.join(jsProjectDir, "/dist/cjs")
   fs.copyFileSync(wasmBindgenSrc, path.join(cjsDir, "automerge_wasm_bg.wasm"))
+
+  const wasmBlob = fs.readFileSync(wasmBindgenSrc)
+  const wasmBlobBase64 = wasmBlob.toString("base64")
+  const wasmBlobBase64CjsPath = path.join(
+    cjsDir,
+    "automerge_wasm_bg_base64.js",
+  )
+  fs.writeFileSync(
+    wasmBlobBase64CjsPath,
+    `module.exports = { automergeWasmBase64: "${wasmBlobBase64}" };`
+  );
 
   fs.copyFileSync(
     path.join(jsProjectDir, "/src/wasm_types.d.ts"),
