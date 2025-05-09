@@ -226,8 +226,6 @@
  * let doc2 = automerge.change(automerge.clone(doc1), d => (d.key = "value"))
  * ```
  */
-/** @hidden **/
-export { /** @hidden */ uuid } from "./uuid.js"
 
 import { isRawString, rootProxy } from "./proxies.js"
 export { isRawString } from "./proxies.js"
