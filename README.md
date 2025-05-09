@@ -6,7 +6,6 @@
 [![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge/automerge/)
 [![latest docs](https://img.shields.io/badge/docs-latest-informational)](https://docs.rs/automerge/latest/automerge)
 [![ci](https://github.com/automerge/automerge/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/ci.yaml)
-[![docs](https://github.com/automerge/automerge/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/docs.yaml)
 
 Automerge is a library which provides fast implementations of several different
 CRDTs, a compact compression format for these CRDTs, and a sync protocol for
