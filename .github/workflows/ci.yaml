@@ -14,7 +14,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.86
           default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -28,7 +28,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.86
           default: true
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -42,7 +42,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.86
           default: true
       - uses: Swatinem/rust-cache@v2
       - name: Build rust docs
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          manifest-path: './rust/Cargo.toml'
+          manifest-path: "./rust/Cargo.toml"
           command: check ${{ matrix.checks }}
 
   build_wasm:
@@ -74,7 +74,7 @@ jobs:
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: '0.2.100'
+          version: "0.2.100"
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
@@ -83,18 +83,18 @@ jobs:
 
   js_tests:
     runs-on: ubuntu-latest
-    needs: 
+    needs:
       - build_wasm
 
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-node@v2
         with:
-          node-version: '22'
+          node-version: "22"
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: '0.2.100'
+          version: "0.2.100"
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
@@ -106,7 +106,7 @@ jobs:
     strategy:
       matrix:
         toolchain:
-          - stable
+          - 1.86
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -125,7 +125,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.86
           default: true
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/ci/build-test
@@ -138,7 +138,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.86
           default: true
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/ci/build-test
