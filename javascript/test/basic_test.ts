@@ -817,9 +817,16 @@ describe("Automerge", () => {
         new Automerge.ImmutableString("something"),
       )
     })
+
+    it("should export RawString and isRawString for backwards compatibility", () => {
+      // Check the predicate is the same
+      assert.equal(Automerge.isImmutableString, Automerge.isRawString)
+      // Check the types are the same
+      const _dummy: Automerge.ImmutableString = new Automerge.RawString("xyz")
+    })
   })
 
-  it("shoIMMUTABLE_STRING a predicate to check if something is an immutablestring", () => {
+  it("should export a predicate to check if something is an immutablestring", () => {
     let doc = Automerge.from({
       foo: new Automerge.ImmutableString("someval2"),
       bar: "notanimmutablestring",
