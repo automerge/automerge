@@ -47,6 +47,33 @@ A stable release of the javascript package is currently available as
 `@automerge/automerge@2.0.0` where. pre-release verisions of the `2.0.1` are
 available as `2.0.1-alpha.n`.
 
+#### 3.0 Beta
+
+There is a beta version of Automerge 3.0 available as
+`@automerge/automerge@3.0.0-beta.<n>`, where `n` is the latest version - look at
+[npm](https://www.npmjs.com/package/@automerge/automerge?activeTab=versions) for
+the latest version.
+
+The biggest difference from 2.0 with this release is that it uses enormously less
+memory (up to 100x less) than 2.0. There are also some incompatible differences
+from 2.0. The concrete changes you will need to make to migrate to the beta depend
+on if you were using the [next API](https://automerge.org/docs/the_js_packages/#the-next-api)
+
+If you are using `next` (i.e. you use `string` for collaborative text):
+
+* replace any `import .. from "@automerge/automerge/next"` with
+  `import .. from "@automerge/automerge"`
+* replace any `import .. from "@automerge/automerge/slim/next"` with
+  `import .. from "@automerge/automerge/slim"`
+* replace any mention of `RawString` with `ImmutableString` and `isRawString`
+  with `isImmutableString`
+
+If you are not using `next` (i.e you use `Text` for collaborative text)
+
+* update any code which uses `Text` to use `string` and `Automerge.splice`
+* update any code which uses `string` to use `ImmutableString`
+
+
 ### Rust
 
 The rust codebase is currently oriented around producing a performant backend
