@@ -39,7 +39,7 @@ pub(crate) use crate::iter::{Keys, ListRange, MapRange};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
-pub(crate) use mark_index::{MarkIndexColumn, MarkIndexValue};
+pub(crate) use mark_index::{MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
     ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
@@ -319,7 +319,7 @@ impl OpSet {
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
         let tx = iter.nth(index - 1)?;
         let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.get_rich_text_at(tx.pos, clock);
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, clock);
         let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
         query.resolve(index - 1).ok()
     }
@@ -429,36 +429,6 @@ impl OpSet {
             ops: vec![],
             end_pos,
         }
-    }
-
-    fn get_value(&self, pos: usize) -> Option<ScalarValue<'_>> {
-        let meta = self.cols.value_meta.get_with_acc(pos)?;
-        let length = meta.item.as_ref()?.length();
-        let raw = if length > 0 {
-            self.cols
-                .value
-                .raw_reader(meta.acc.as_usize())
-                .read_next(length)
-                .ok()?
-        } else {
-            &[]
-        };
-        ScalarValue::from_raw(*meta.item?, raw).ok()
-    }
-
-    fn get_mark_name(&self, pos: usize) -> Option<Cow<'_, str>> {
-        self.cols.mark_name.get(pos).flatten()
-    }
-
-    fn get_rich_text_at(&self, pos: usize, clock: Option<&Clock>) -> RichTextQueryState<'_> {
-        let mut marks = RichTextQueryState::default();
-        for id in self.cols.index.mark.marks_at(pos, clock) {
-            let pos = self.get_op_id_pos(id).unwrap();
-            let name = self.get_mark_name(pos).unwrap();
-            let value = self.get_value(pos).unwrap();
-            marks.map.insert(id, MarkData { name, value });
-        }
-        marks
     }
 
     pub(crate) fn seek_ops_by_index_fast<'a>(

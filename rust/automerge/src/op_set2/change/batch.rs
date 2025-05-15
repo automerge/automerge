@@ -1191,11 +1191,13 @@ mod tests {
     }
 
     fn make_rng() -> SmallRng {
-        let seed = rand::random::<u64>();
-        // let seed = 3727965917273105553; // FIXME
-        // let seed = 15102432554960960582; // FIXME
-        // SEED: 7766005994852412174 FIXME
-
+        let seed = std::env::var("AUTOMERGE_TEST_SEED")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or_else(rand::random::<u64>);
+        // problem seed -> 3727965917273105553 - FIXME
+        // problem seed -> 15102432554960960582 - FIXME
+        // problem seed -> 7766005994852412174 - FIXME
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }

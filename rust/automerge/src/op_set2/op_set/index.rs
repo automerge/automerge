@@ -1,4 +1,4 @@
-use crate::op_set2::op_set::{MarkIndexColumn, MarkIndexValue};
+use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, TextEncoding};
 use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
@@ -12,7 +12,7 @@ pub(crate) struct IndexBuilder {
     succ: Vec<u32>,
     widths: Vec<u64>,
     incs: Vec<Option<i64>>,
-    marks: Vec<Option<MarkIndexValue>>,
+    marks: Vec<Option<MarkIndexBuilder>>,
     obj_info: ObjIndex,
     encoding: TextEncoding,
 }
