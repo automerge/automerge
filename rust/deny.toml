@@ -140,7 +140,7 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "heck", version = "0.5.0" },
-    { crate = "hexane@0.1.1", reason = "local and remote packages conflict" },
+    #{ crate = "hexane@0.1.1", reason = "local and remote packages conflict" },
     { crate = "regex-syntax@0.6.29", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
     { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
     { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },

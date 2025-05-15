@@ -264,7 +264,40 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> usize {
-        self.top_ops(obj, clock).map(|op| op.width(encoding)).sum()
+        let range = self.scope_to_obj(obj);
+        let vis = VisIter::new(self, clock.as_ref(), range.clone());
+        let typ = self.object_type(obj).unwrap_or(ObjType::Map);
+        if typ == ObjType::Text && encoding != ListEncoding::List {
+            if clock.is_none() {
+                let text = self.cols.index.text.iter_range(range.clone());
+                let iter = SkipIter::new(text.clone(), vis.clone());
+                iter.filter_map(|n| n.as_deref().copied()).sum::<u64>() as usize
+            } else {
+                self.action_value_iter(range.clone(), clock.as_ref())
+                    .map(|(action, value, _)| match (action, &value) {
+                        (Action::Set, ScalarValue::Str(s)) => encoding.width(s),
+                        (Action::Mark, _) => 0,
+                        _ => encoding.width("\u{fffc}"),
+                    })
+                    .sum()
+            }
+        } else if typ == ObjType::List {
+            let insert = self.cols.insert.iter_range(range.clone()).as_acc();
+            SkipIter::new(insert, vis)
+                .fold((hexane::Acc::default(), 0), |(prev, count), curr| {
+                    let inc = if prev != curr { 1 } else { 0 };
+                    (curr, count + inc)
+                })
+                .1
+        } else {
+            let key = self.cols.key_str.iter_range(range.clone());
+            SkipIter::new(key, vis)
+                .fold((None, 0), |(prev, count), curr| {
+                    let inc = if prev.as_ref() != Some(&curr) { 1 } else { 0 };
+                    (Some(curr), count + inc)
+                })
+                .1
+        }
     }
 
     pub(crate) fn query_insert_at_text(

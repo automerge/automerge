@@ -750,6 +750,15 @@ impl From<TextEncoding> for ListEncoding {
     }
 }
 
+impl ListEncoding {
+    pub(crate) fn width(&self, s: &str) -> usize {
+        match self {
+            ListEncoding::List => 1,
+            ListEncoding::Text(enc) => enc.width(s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ElemId(pub(crate) OpId);
 

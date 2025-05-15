@@ -274,6 +274,7 @@ impl<'a> ChangeCollector<'a> {
         collector.finish(change_graph, &op_set.actors).unwrap()
     }
 
+    #[cfg(debug_assertions)]
     fn from_build_meta2(
         op_set: &OpSet,
         change_graph: &'a ChangeGraph,

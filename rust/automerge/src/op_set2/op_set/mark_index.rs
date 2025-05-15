@@ -15,6 +15,35 @@ pub(crate) enum MarkIndexValue {
 }
 
 impl MarkIndexValue {
+    fn as_i64(&self) -> i64 {
+        match self {
+            MarkIndexValue::Start(id) => {
+                let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
+                debug_assert_eq!(self, &MarkIndexValue::load(tmp));
+                tmp
+            }
+            MarkIndexValue::End(id) => {
+                let tmp = -(((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
+                debug_assert_eq!(self, &MarkIndexValue::load(tmp));
+                tmp
+            }
+        }
+    }
+
+    fn load(v: i64) -> Self {
+        if v < 0 {
+            let v = -v as u64;
+            let actor = (v >> 32) as usize;
+            let ctr = v & 0xffffffff;
+            Self::End(OpId::new(ctr, actor))
+        } else {
+            let v = v as u64;
+            let actor = (v >> 32) as usize;
+            let ctr = v & 0xffffffff;
+            Self::Start(OpId::new(ctr, actor))
+        }
+    }
+
     fn with_new_actor(self, idx: usize) -> Self {
         match self {
             Self::Start(id) => Self::Start(id.with_new_actor(idx)),
@@ -182,6 +211,7 @@ impl MarkIndexColumn {
     }
 }
 
+/*
 impl From<i64> for MarkIndexValue {
     fn from(v: i64) -> Self {
         if v < 0 {
@@ -203,34 +233,35 @@ impl From<MarkIndexValue> for i64 {
         match v {
             MarkIndexValue::Start(id) => {
                 let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
-                assert_eq!(v, MarkIndexValue::from(tmp));
+                assert_eq!(v, MarkIndexValue::load(tmp));
                 tmp
             }
             MarkIndexValue::End(id) => {
                 let tmp = -(((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
-                assert_eq!(v, MarkIndexValue::from(tmp));
+                assert_eq!(v, MarkIndexValue::load(tmp));
                 tmp
             }
         }
     }
 }
+*/
 
 impl Packable for MarkIndexValue {
     fn width(item: &MarkIndexValue) -> usize {
-        hexane::lebsize(i64::from(*item)) as usize
+        hexane::lebsize(item.as_i64()) as usize
     }
 
     fn pack(item: &MarkIndexValue, out: &mut Vec<u8>) {
-        leb128::write::signed(out, i64::from(*item)).unwrap();
+        leb128::write::signed(out, item.as_i64()).unwrap();
     }
 
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, MarkIndexValue>), PackError> {
         let start_len = buff.len();
         let val = leb128::read::signed(&mut buff)?;
-        assert_eq!(i64::from(MarkIndexValue::from(val)), val);
+        assert_eq!(MarkIndexValue::load(val).as_i64(), val);
         Ok((
             start_len - buff.len(),
-            Cow::Owned(MarkIndexValue::from(val)),
+            Cow::Owned(MarkIndexValue::load(val)),
         ))
     }
 }
