@@ -1,5 +1,5 @@
 use super::hexane::{ColumnDataIter, DeltaCursor, IntCursor};
-use super::op_set::{MarkIndexValue, ObjInfo, OpSet};
+use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet};
 use super::types::{
     Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
 };
@@ -185,10 +185,15 @@ pub(crate) struct OpBuilder<'a> {
 }
 
 impl OpBuilder<'_> {
-    pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
+    pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (self.action, &self.mark_name) {
-            (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
-            (Action::Mark, None) => Some(MarkIndexValue::End(self.id.prev())),
+            (Action::Mark, Some(name)) => {
+                let name = Cow::Owned(name.to_string());
+                let value = self.value.clone().into_owned2();
+                let data = MarkData { name, value };
+                Some(MarkIndexBuilder::Start(self.id, data))
+            }
+            (Action::Mark, None) => Some(MarkIndexBuilder::End(self.id.prev())),
             _ => None,
         }
     }
@@ -448,7 +453,7 @@ impl OpLike for &TxOp {
     where
         Self: 'b;
 
-    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
         op.bld.mark_index()
     }
 
@@ -527,7 +532,7 @@ impl OpLike for &TxOp {
 impl OpLike for TxOp {
     type SuccIter<'b> = std::array::IntoIter<OpId, 0>;
 
-    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
         op.bld.mark_index()
     }
 
@@ -606,7 +611,7 @@ impl OpLike for TxOp {
 impl OpLike for ChangeOp {
     type SuccIter<'b> = Box<dyn ExactSizeIterator<Item = OpId> + 'b>;
 
-    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
         op.bld.mark_index()
     }
 
@@ -711,7 +716,7 @@ impl<'a> OpLike for Op<'a> {
     where
         Self: 'b;
 
-    fn mark_index(op: &Self) -> Option<MarkIndexValue> {
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder> {
         op.mark_index()
     }
 
@@ -941,13 +946,19 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn mark_index(&self) -> Option<MarkIndexValue> {
+    pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (&self.action, &self.mark_name) {
-            (Action::Mark, Some(_)) => Some(MarkIndexValue::Start(self.id)),
-            (Action::Mark, None) => Some(MarkIndexValue::End(self.id.prev())),
+            (Action::Mark, Some(name)) => {
+                let name = Cow::Owned(name.to_string());
+                let value = self.value.clone().into_owned2();
+                let data = MarkData { name, value };
+                Some(MarkIndexBuilder::Start(self.id, data))
+            }
+            (Action::Mark, None) => Some(MarkIndexBuilder::End(self.id.prev())),
             _ => None,
         }
     }
+
     pub(crate) fn add_succ(&self, id: OpId, mut inc: Option<i64>) -> SuccInsert {
         let pos = self.pos;
         let mut succ = self.succ_cursors.clone();
@@ -1324,7 +1335,7 @@ pub(crate) trait OpLike: Debug {
     fn succ(&self) -> Self::SuccIter<'_>;
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
     fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
-    fn mark_index(op: &Self) -> Option<MarkIndexValue>;
+    fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, encoding: ListEncoding) -> u64;
     fn visible(op: &Self) -> bool;
     fn obj_info(&self) -> Option<ObjInfo>;

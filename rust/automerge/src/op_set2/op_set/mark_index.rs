@@ -1,16 +1,23 @@
+use crate::op_set2::op_set::RichTextQueryState;
+use crate::op_set2::MarkData;
 use crate::types::{Clock, OpId};
 use hexane::{
-    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, MaybePackable, PackError, Packable, RleCursor,
-    Slab, SpanWeight,
+    Acc, ColumnCursor, ColumnData, HasAcc, HasPos, PackError, Packable, RleCursor, Slab, SpanWeight,
 };
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub(crate) enum MarkIndexValue {
     Start(OpId),
+    End(OpId),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum MarkIndexBuilder {
+    Start(OpId, MarkData<'static>),
     End(OpId),
 }
 
@@ -143,35 +150,80 @@ impl HasPos for MarkIndexSpanner {
 }
 
 pub(crate) type MarkIndexInternal<const B: usize> = RleCursor<B, MarkIndexValue, MarkIndexSpanner>;
+
 pub(crate) type MarkIndex = MarkIndexInternal<64>;
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct MarkIndexColumn(ColumnData<MarkIndex>);
+pub(crate) struct MarkIndexColumn {
+    data: ColumnData<MarkIndex>,
+    cache: HashMap<OpId, MarkData<'static>>,
+}
 
 impl MarkIndexColumn {
     pub(crate) fn len(&self) -> usize {
-        self.0.len()
+        self.data.len()
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
         // FIXME - would be much better to do this by run instead of by value
-        let new_col = self
-            .0
+        let new_data = self
+            .data
             .iter()
             .map(|m| m.map(|n| n.with_new_actor(idx)))
             .collect();
-        self.0 = new_col
+        let new_cache = self
+            .cache
+            .iter()
+            .map(|(key, val)| (key.with_new_actor(idx), val.clone()))
+            .collect();
+        self.data = new_data;
+        self.cache = new_cache;
     }
 
     pub(crate) fn new() -> Self {
-        Self(ColumnData::new())
+        Self {
+            data: ColumnData::new(),
+            cache: HashMap::new(),
+        }
     }
 
-    pub(crate) fn splice<'a, E>(&mut self, index: usize, del: usize, values: Vec<E>)
-    where
-        E: MaybePackable<'a, MarkIndexValue> + Debug + Clone,
-    {
-        self.0.splice(index, del, values);
+    pub(crate) fn splice(
+        &mut self,
+        index: usize,
+        del: usize,
+        values: Vec<Option<MarkIndexBuilder>>,
+    ) {
+        if del > 0 {
+            // actually remove values from self.cache
+            // will be needed for proper rollback
+            // currently no way to test if code here would work
+            // or trigger this panic with public api
+            todo!()
+        }
+        let values = values
+            .into_iter()
+            .map(|v| match v? {
+                MarkIndexBuilder::Start(id, mark) => {
+                    self.cache.insert(id, mark);
+                    Some(MarkIndexValue::Start(id))
+                }
+                MarkIndexBuilder::End(id) => Some(MarkIndexValue::End(id)),
+            })
+            .collect::<Vec<_>>();
+        self.data.splice(index, del, values);
+    }
+
+    pub(crate) fn rich_text_at(
+        &self,
+        target: usize,
+        clock: Option<&Clock>,
+    ) -> RichTextQueryState<'static> {
+        let mut marks = RichTextQueryState::default();
+        for id in self.marks_at(target, clock) {
+            let data = self.cache.get(&id).unwrap();
+            marks.map.insert(id, data.clone());
+        }
+        marks
     }
 
     pub(crate) fn marks_at<'a>(
@@ -180,7 +232,7 @@ impl MarkIndexColumn {
         clock: Option<&'a Clock>,
     ) -> impl Iterator<Item = OpId> + 'a {
         let sub = self
-            .0
+            .data
             .slabs
             .get_where_or_last(|acc, next| target < acc.pos() + next.pos());
         let mut start = sub.weight.start.into_iter().collect::<BTreeSet<_>>();
@@ -210,41 +262,6 @@ impl MarkIndexColumn {
             .filter(move |id| clock.map(|c| c.covers(id)).unwrap_or(true))
     }
 }
-
-/*
-impl From<i64> for MarkIndexValue {
-    fn from(v: i64) -> Self {
-        if v < 0 {
-            let v = -v as u64;
-            let actor = (v >> 32) as usize;
-            let ctr = v & 0xffffffff;
-            Self::End(OpId::new(ctr, actor))
-        } else {
-            let v = v as u64;
-            let actor = (v >> 32) as usize;
-            let ctr = v & 0xffffffff;
-            Self::Start(OpId::new(ctr, actor))
-        }
-    }
-}
-
-impl From<MarkIndexValue> for i64 {
-    fn from(v: MarkIndexValue) -> Self {
-        match v {
-            MarkIndexValue::Start(id) => {
-                let tmp = ((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff);
-                assert_eq!(v, MarkIndexValue::load(tmp));
-                tmp
-            }
-            MarkIndexValue::End(id) => {
-                let tmp = -(((id.actor() as i64) << 32) + ((id.counter() as i64) & 0xffffffff));
-                assert_eq!(v, MarkIndexValue::load(tmp));
-                tmp
-            }
-        }
-    }
-}
-*/
 
 impl Packable for MarkIndexValue {
     fn width(item: &MarkIndexValue) -> usize {
