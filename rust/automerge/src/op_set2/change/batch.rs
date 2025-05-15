@@ -1192,7 +1192,9 @@ mod tests {
 
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
-        //let seed = 3727965917273105553;
+        // let seed = 3727965917273105553; // FIXME
+        // let seed = 15102432554960960582; // FIXME
+        // SEED: 7766005994852412174 FIXME
 
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
