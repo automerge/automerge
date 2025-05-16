@@ -1195,9 +1195,6 @@ mod tests {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or_else(rand::random::<u64>);
-        // problem seed -> 3727965917273105553 - FIXME
-        // problem seed -> 15102432554960960582 - FIXME
-        // problem seed -> 7766005994852412174 - FIXME
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
