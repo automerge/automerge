@@ -453,12 +453,15 @@ impl OpSet {
         if let Some(tx) = iter.nth(index) {
             assert!(tx.acc >= obj_start);
             index = (tx.acc - obj_start).as_usize();
+            // TODO
+            // could use a SkipIter here
+            // could grab only needed fields and not all ops
             for op in self.iter_range(&(tx.pos..range.end)) {
                 if op.insert && !ops.is_empty() {
                     break;
                 }
                 end_pos = op.pos + 1;
-                if op.succ().len() == 0 {
+                if op.succ().len() == 0 && op.action != Action::Mark {
                     ops.push(op);
                 }
             }

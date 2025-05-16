@@ -2,6 +2,10 @@ use crate::error;
 use crate::error::AutomergeError;
 use crate::legacy as amp;
 use crate::op_set2::ActorIdx;
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::{Eq, Ordering};
@@ -46,6 +50,14 @@ impl fmt::Debug for ActorId {
         f.debug_tuple("ActorID")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl Distribution<ActorId> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ActorId {
+        let mut bytes = [0u8; 16];
+        rng.fill(&mut bytes);
+        ActorId(TinyVec::from(bytes))
     }
 }
 
