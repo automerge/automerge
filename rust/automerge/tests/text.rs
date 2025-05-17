@@ -6,8 +6,8 @@ use automerge::{
     marks::{ExpandMark, Mark},
     patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
-    TextEncoding, ROOT,
+    ActorId, AutoCommit, Change, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc,
+    ScalarValue, TextEncoding, ROOT,
 };
 const B: usize = 16;
 
@@ -858,4 +858,244 @@ fn removed_marks_should_not_appear_in_get_marks() {
     assert_eq!(marks.iter().collect::<Vec<_>>(), vec![]);
     assert_eq!(marks.len(), 0);
     assert_eq!(marks.num_marks(), 0);
+}
+
+#[test]
+fn opset2_marks_fast_path() {
+    #[rustfmt::skip]
+    mod bad_ops {
+        #[derive(Debug)]
+        pub(super) enum TestOp {
+            Splice {
+                value: &'static str,
+                index: usize,
+                del: isize,
+            },
+            Mark {
+                start: usize,
+                end: usize,
+            },
+        }
+        pub(super) fn make_ops() -> Vec<Vec<Vec<TestOp>>> {
+            vec![
+                vec![
+                    vec![
+                        TestOp::Splice{value: "[1]", index: 14, del: 1},
+                        TestOp::Splice{value: "[2]", index: 12, del: 1},
+                        TestOp::Splice{value: "[3]", index: 4, del: 1},
+                        TestOp::Splice{value: "[4]", index: 24, del: 0},
+                        TestOp::Splice{value: "[5]", index: 2, del: 0},
+                        TestOp::Splice{value: "[6]", index: 30, del: 1},
+                        TestOp::Splice{value: "[7]", index: 20, del: 1},
+                        TestOp::Mark{start: 7, end: 15},
+                        TestOp::Mark{start: 5, end: 11},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[10]", index: 19, del: 0},
+                        TestOp::Splice{value: "[11]", index: 19, del: 1},
+                        TestOp::Splice{value: "[12]", index: 4, del: 1},
+                        TestOp::Splice{value: "[13]", index: 1, del: 0},
+                        TestOp::Splice{value: "[14]", index: 25, del: 0},
+                        TestOp::Splice{value: "[15]", index: 16, del: 1},
+                        TestOp::Splice{value: "[16]", index: 10, del: 0},
+                        TestOp::Splice{value: "[17]", index: 12, del: 0},
+                        TestOp::Splice{value: "[18]", index: 25, del: 0},
+                        TestOp::Mark{start: 2, end: 17},
+                        TestOp::Mark{start: 14, end: 50},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[21]", index: 1, del: 1},
+                        TestOp::Splice{value: "[22]", index: 4, del: 0},
+                        TestOp::Splice{value: "[23]", index: 18, del: 0},
+                        TestOp::Splice{value: "[24]", index: 10, del: 1},
+                        TestOp::Mark{start: 2, end: 11},
+                        TestOp::Mark{start: 7, end: 9},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[27]", index: 3, del: 1},
+                        TestOp::Splice{value: "[28]", index: 4, del: 0},
+                        TestOp::Splice{value: "[29]", index: 3, del: 1},
+                        TestOp::Mark{start: 7, end: 27},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[31]", index: 17, del: 1},
+                        TestOp::Splice{value: "[32]", index: 6, del: 1},
+                        TestOp::Splice{value: "[33]", index: 21, del: 0},
+                        TestOp::Splice{value: "[34]", index: 28, del: 0},
+                        TestOp::Splice{value: "[35]", index: 33, del: 1},
+                        TestOp::Splice{value: "[36]", index: 19, del: 1},
+                        TestOp::Mark{start: 33, end: 36},
+                        TestOp::Mark{start: 17, end: 31},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[39]", index: 9, del: 1},
+                        TestOp::Splice{value: "[40]", index: 23, del: 0},
+                        TestOp::Splice{value: "[41]", index: 1, del: 1},
+                        TestOp::Mark{start: 22, end: 30},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[43]", index: 12, del: 1},
+                        TestOp::Splice{value: "[44]", index: 22, del: 0},
+                        TestOp::Mark{start: 9, end: 24},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[46]", index: 11, del: 0},
+                        TestOp::Splice{value: "[47]", index: 22, del: 1},
+                        TestOp::Splice{value: "[48]", index: 9, del: 0},
+                        TestOp::Splice{value: "[49]", index: 22, del: 1},
+                        TestOp::Mark{start: 20, end: 34},
+                        TestOp::Mark{start: 27, end: 29},
+                        TestOp::Mark{start: 11, end: 20},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[53]", index: 14, del: 0},
+                        TestOp::Splice{value: "[54]", index: 8, del: 1},
+                        TestOp::Mark{start: 4, end: 24},
+                        TestOp::Mark{start: 5, end: 23},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[57]", index: 10, del: 0},
+                        TestOp::Splice{value: "[58]", index: 24, del: 1},
+                        TestOp::Splice{value: "[59]", index: 24, del: 0},
+                        TestOp::Splice{value: "[60]", index: 3, del: 1},
+                        TestOp::Mark{start: 22, end: 24},
+                    ],
+                ],
+                vec![
+                    vec![
+                        TestOp::Splice{value: "[62]", index: 21, del: 1},
+                        TestOp::Splice{value: "[63]", index: 167, del: 1},
+                        TestOp::Splice{value: "[64]", index: 170, del: 0},
+                        TestOp::Splice{value: "[65]", index: 111, del: 1},
+                        TestOp::Mark{start: 64, end: 185},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[67]", index: 111, del: 1},
+                        TestOp::Splice{value: "[68]", index: 121, del: 1},
+                        TestOp::Splice{value: "[69]", index: 103, del: 1},
+                        TestOp::Splice{value: "[70]", index: 168, del: 0},
+                        TestOp::Mark{start: 91, end: 108},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[72]", index: 58, del: 0},
+                        TestOp::Splice{value: "[73]", index: 165, del: 0},
+                        TestOp::Splice{value: "[74]", index: 0, del: 0},
+                        TestOp::Mark{start: 70, end: 81},
+                        TestOp::Mark{start: 138, end: 182},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[77]", index: 122, del: 0},
+                        TestOp::Splice{value: "[78]", index: 68, del: 0},
+                        TestOp::Splice{value: "[79]", index: 180, del: 1},
+                        TestOp::Splice{value: "[80]", index: 161, del: 0},
+                        TestOp::Splice{value: "[81]", index: 65, del: 1},
+                        TestOp::Splice{value: "[82]", index: 3, del: 0},
+                        TestOp::Splice{value: "[83]", index: 138, del: 0},
+                        TestOp::Splice{value: "[84]", index: 155, del: 0},
+                        TestOp::Splice{value: "[85]", index: 192, del: 0},
+                        TestOp::Mark{start: 70, end: 148},
+                        TestOp::Mark{start: 33, end: 36},
+                        TestOp::Mark{start: 31, end: 151},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[89]", index: 137, del: 0},
+                        TestOp::Splice{value: "[90]", index: 62, del: 1},
+                        TestOp::Splice{value: "[91]", index: 153, del: 0},
+                        TestOp::Splice{value: "[92]", index: 145, del: 1},
+                        TestOp::Splice{value: "[93]", index: 125, del: 0},
+                        TestOp::Splice{value: "[94]", index: 55, del: 1},
+                        TestOp::Splice{value: "[95]", index: 29, del: 1},
+                        TestOp::Splice{value: "[96]", index: 128, del: 1},
+                        TestOp::Mark{start: 25, end: 153},
+                        TestOp::Mark{start: 26, end: 90},
+                        TestOp::Mark{start: 62, end: 126},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[100]", index: 117, del: 0},
+                        TestOp::Splice{value: "[101]", index: 111, del: 1},
+                        TestOp::Splice{value: "[102]", index: 147, del: 1},
+                        TestOp::Splice{value: "[103]", index: 147, del: 0},
+                        TestOp::Splice{value: "[104]", index: 156, del: 1},
+                        TestOp::Splice{value: "[105]", index: 53, del: 1},
+                        TestOp::Mark{start: 68, end: 113},
+                        TestOp::Mark{start: 44, end: 158},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[108]", index: 93, del: 1},
+                        TestOp::Splice{value: "[109]", index: 26, del: 1},
+                        TestOp::Splice{value: "[110]", index: 37, del: 0},
+                        TestOp::Splice{value: "[111]", index: 145, del: 0},
+                        TestOp::Splice{value: "[112]", index: 139, del: 1},
+                        TestOp::Mark{start: 116, end: 138},
+                        TestOp::Mark{start: 44, end: 61},
+                        TestOp::Mark{start: 1, end: 89},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[116]", index: 166, del: 1},
+                        TestOp::Splice{value: "[117]", index: 98, del: 0},
+                        TestOp::Splice{value: "[118]", index: 143, del: 0},
+                        TestOp::Splice{value: "[119]", index: 72, del: 1},
+                        TestOp::Splice{value: "[120]", index: 49, del: 1},
+                        TestOp::Splice{value: "[121]", index: 125, del: 0},
+                        TestOp::Splice{value: "[122]", index: 118, del: 1},
+                        TestOp::Splice{value: "[123]", index: 70, del: 1},
+                        TestOp::Splice{value: "[124]", index: 76, del: 0},
+                        TestOp::Splice{value: "[125]", index: 37, del: 0},
+                        TestOp::Mark{start: 59, end: 144},
+                        TestOp::Mark{start: 74, end: 198},
+                        TestOp::Mark{start: 35, end: 141},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[129]", index: 3, del: 1},
+                        TestOp::Splice{value: "[130]", index: 172, del: 0},
+                        TestOp::Splice{value: "[131]", index: 65, del: 1},
+                        TestOp::Mark{start: 113, end: 186},
+                    ],
+                    vec![
+                        TestOp::Splice{value: "[133]", index: 81, del: 1},
+                    ]
+                ]
+            ]
+        }
+    }
+
+    let ops = bad_ops::make_ops();
+
+    let mut doc1 = AutoCommit::new();
+    let text1 = doc1.put_object(&ROOT, "text1", ObjType::Text).unwrap();
+    doc1.splice_text(&text1, 0, 0, "---------------------")
+        .unwrap();
+
+    let mut doc2 = doc1.fork();
+
+    let mut changes = Vec::new();
+    for (batch_no, batch) in ops.into_iter().enumerate() {
+        for (inner_batch_no, inner_batch) in batch.into_iter().enumerate() {
+            let mut tmp = doc2.fork();
+            for (op_no, op) in inner_batch.into_iter().enumerate() {
+                println!(
+                    "Applying batch: {}, change: {}, op: {}: {:?}",
+                    batch_no, inner_batch_no, op_no, op
+                );
+                match op {
+                    bad_ops::TestOp::Splice { value, index, del } => {
+                        tmp.splice_text(&text1, index, del, value).unwrap();
+                    }
+                    bad_ops::TestOp::Mark { start, end } => {
+                        let mark = Mark {
+                            start,
+                            end,
+                            name: "bold".into(),
+                            value: false.into(),
+                        };
+                        tmp.mark(&text1, mark, ExpandMark::After).unwrap()
+                    }
+                }
+            }
+            let change = tmp.get_last_local_change().unwrap();
+            changes.push(change);
+        }
+        doc2.apply_changes_batch(changes.clone()).unwrap();
+    }
+    doc1.apply_changes_batch(changes.clone()).unwrap();
 }
