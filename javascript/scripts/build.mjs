@@ -93,8 +93,9 @@ function buildWasm(outputDir) {
    * "src/wasm_bindgen_output/bundler/"
    *
    * @param {string} target
+   * @param {string[]=} vitePatchFiles
    */
-  function runWasmBindgen(target) {
+  function runWasmBindgen(target, vitePatchFiles) {
     console.log(`running wasm-bindgen for '${target}' target`)
     const outputPath = path.join(outputDir, target)
     fs.mkdirSync(outputPath, { recursive: true })
@@ -104,10 +105,28 @@ function buildWasm(outputDir) {
         cwd: __dirname,
       },
     )
+
+    // add /* @vite-ignore */ comment to URL imports for wasm
+    // prevents vite from bundling multiple wasm files
+    // see https://github.com/automerge/automerge/issues/1037
+    if (vitePatchFiles) {
+      for (const filename of vitePatchFiles) {
+        const filePath = path.join(outputPath, filename)
+
+        let content = fs.readFileSync(filePath, "utf8")
+
+        content = content.replace(
+          /new URL\('automerge_wasm_bg\.wasm', import\.meta\.url\)/g,
+          "new /* @vite-ignore */ URL('automerge_wasm_bg.wasm', import.meta.url)",
+        )
+
+        fs.writeFileSync(filePath, content)
+      }
+    }
   }
 
   runWasmBindgen("bundler")
-  runWasmBindgen("web")
+  runWasmBindgen("web", ["automerge_wasm.js"])
   runWasmBindgen("nodejs")
 }
 
@@ -265,8 +284,8 @@ function compileTypescript() {
   console.log("writing a declaration for the base64 encoded wasm")
   fs.writeFileSync(
     path.join(jsProjectDir, "dist", "automerge_wasm_bg_base64.d.ts"),
-    `export declare const automergeWasmBase64: string;`
-  );
+    `export declare const automergeWasmBase64: string;`,
+  )
 }
 
 async function transpileCjs() {
@@ -348,14 +367,11 @@ if (step === "all" || step === "transpile-cjs") {
 
   const wasmBlob = fs.readFileSync(wasmBindgenSrc)
   const wasmBlobBase64 = wasmBlob.toString("base64")
-  const wasmBlobBase64CjsPath = path.join(
-    cjsDir,
-    "automerge_wasm_bg_base64.js",
-  )
+  const wasmBlobBase64CjsPath = path.join(cjsDir, "automerge_wasm_bg_base64.js")
   fs.writeFileSync(
     wasmBlobBase64CjsPath,
-    `module.exports = { automergeWasmBase64: "${wasmBlobBase64}" };`
-  );
+    `module.exports = { automergeWasmBase64: "${wasmBlobBase64}" };`,
+  )
 
   fs.copyFileSync(
     path.join(jsProjectDir, "/src/wasm_types.d.ts"),
