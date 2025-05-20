@@ -50,7 +50,7 @@ version = "0.3.22"
 features = ["console"]
 
 [dev-dependencies]
-futures = "^0.1"
+futures = "^0.3"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 wasm-bindgen-futures = "^0.4"
 wasm-bindgen-test = "^0.3"
