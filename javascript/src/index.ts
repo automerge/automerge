@@ -186,7 +186,7 @@
  * let conflicts = automerge.getConflicts(doc3.pets[0], "name")
  *
  * // The two conflicting values are the keys of the conflicts object
- * assert.deepEqual(Object.values(conflicts), ["Babe", Beethoven"])
+ * assert.deepEqual(Object.values(conflicts), ["Babe", "Beethoven"])
  * ```
  *
  * ## Actor IDs
