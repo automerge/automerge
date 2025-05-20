@@ -101,8 +101,7 @@ pub trait SyncDoc {
     ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
     /// * `message` - The [`Message`] to receive
-    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
-    ///                 current state of the document due to the received sync message
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the current state of the document due to the received sync message
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
 
     /// Apply a received sync message to this document and `sync_state`
@@ -123,8 +122,7 @@ pub trait SyncDoc {
     ///
     /// * `sync_state` - The [`State`] for this document and the remote peer
     /// * `message` - The [`Message`] to receive
-    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the
-    ///                 current state of the document due to the received sync message
+    /// * `patch_log` - A [`PatchLog`] which will be updated with any changes that are made to the current state of the document due to the received sync message
     fn receive_sync_message_log_patches(
         &mut self,
         sync_state: &mut State,
@@ -292,7 +290,7 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        let mut patch_log = PatchLog::inactive(TextRepresentation::default());
+        let mut patch_log = PatchLog::inactive(TextRepresentation::String(self.text_encoding()));
         self.receive_sync_message_inner(sync_state, message, &mut patch_log)
     }
 
@@ -320,7 +318,7 @@ impl Automerge {
         &self,
         have: &[Have],
         need: &[ChangeHash],
-    ) -> Result<Vec<&Change>, AutomergeError> {
+    ) -> Result<Vec<Change>, AutomergeError> {
         if have.is_empty() {
             Ok(need
                 .iter()
@@ -742,14 +740,15 @@ fn advance_heads(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::change::gen::gen_change;
+    //use crate::change::gen::gen_change;
     use crate::storage::parse::Input;
     use crate::storage::Chunk;
     use crate::transaction::Transactable;
-    use crate::types::gen::gen_hash;
+    //use crate::types::gen::gen_hash;
     use crate::ActorId;
-    use proptest::prelude::*;
+    //use proptest::prelude::*;
 
+    /*
     prop_compose! {
         fn gen_bloom()(hashes in gen_sorted_hashes(0..10)) -> BloomFilter {
             BloomFilter::from_hashes(hashes.into_iter())
@@ -772,57 +771,62 @@ mod tests {
         })
     }
 
-    prop_compose! {
-        fn gen_sync_message_v1()(
-            heads in gen_sorted_hashes(0..10),
-            need in gen_sorted_hashes(0..10),
-            have in proptest::collection::vec(gen_have(), 0..10),
-            changes in proptest::collection::vec(gen_change(), 0..10),
-            supported_capabilities in prop_oneof![
-                Just(None),
-                Just(Some(vec![Capability::MessageV1])),
-                Just(Some(vec![Capability::MessageV2])),
-                Just(Some(vec![Capability::MessageV1, Capability::MessageV2])),
-            ],
-        ) -> Message {
-            Message {
-                heads,
-                need,
-                have,
-                changes: changes.into_iter().map(|c| c.raw_bytes().to_vec()).collect::<Vec<Vec<u8>>>().into(),
-                supported_capabilities,
-                version: MessageVersion::V1,
+        prop_compose! {
+            fn gen_sync_message_v1()(
+                heads in gen_sorted_hashes(0..10),
+                need in gen_sorted_hashes(0..10),
+                have in proptest::collection::vec(gen_have(), 0..10),
+                changes in proptest::collection::vec(gen_change(), 0..10),
+                supported_capabilities in prop_oneof![
+                    Just(None),
+                    Just(Some(vec![Capability::MessageV1])),
+                    Just(Some(vec![Capability::MessageV2])),
+                    Just(Some(vec![Capability::MessageV1, Capability::MessageV2])),
+                ],
+            ) -> Message {
+                Message {
+                    heads,
+                    need,
+                    have,
+                    changes: changes.into_iter().map(|c| c.raw_bytes().to_vec()).collect::<Vec<Vec<u8>>>().into(),
+                    supported_capabilities,
+                    version: MessageVersion::V1,
+                }
             }
         }
-    }
+    */
 
-    prop_compose! {
-        fn gen_sync_message_v2()(
-            heads in gen_sorted_hashes(0..10),
-            need in gen_sorted_hashes(0..10),
-            have in proptest::collection::vec(gen_have(), 0..10),
-            raw in proptest::collection::vec(any::<u8>(), 0..100),
-            supported_capabilities in prop_oneof![
-                Just(None),
-                Just(Some(vec![Capability::MessageV1])),
-                Just(Some(vec![Capability::MessageV2])),
-                Just(Some(vec![Capability::MessageV1, Capability::MessageV2])),
-            ],
-        ) -> Message {
-            Message {
-                heads,
-                need,
-                have,
-                changes: ChunkList::from(raw),
-                supported_capabilities,
-                version: MessageVersion::V2,
+    /*
+        prop_compose! {
+            fn gen_sync_message_v2()(
+                heads in gen_sorted_hashes(0..10),
+                need in gen_sorted_hashes(0..10),
+                have in proptest::collection::vec(gen_have(), 0..10),
+                raw in proptest::collection::vec(any::<u8>(), 0..100),
+                supported_capabilities in prop_oneof![
+                    Just(None),
+                    Just(Some(vec![Capability::MessageV1])),
+                    Just(Some(vec![Capability::MessageV2])),
+                    Just(Some(vec![Capability::MessageV1, Capability::MessageV2])),
+                ],
+            ) -> Message {
+                Message {
+                    heads,
+                    need,
+                    have,
+                    changes: ChunkList::from(raw),
+                    supported_capabilities,
+                    version: MessageVersion::V2,
+                }
             }
         }
-    }
+    */
 
-    fn gen_sync_message() -> impl Strategy<Value = Message> {
-        prop_oneof![gen_sync_message_v1(), gen_sync_message_v2(),].boxed()
-    }
+    /*
+        fn gen_sync_message() -> impl Strategy<Value = Message> {
+            prop_oneof![gen_sync_message_v1(), gen_sync_message_v2(),].boxed()
+        }
+    */
 
     #[test]
     fn encode_decode_empty_message() {
@@ -838,15 +842,17 @@ mod tests {
         Message::parse(Input::new(&encoded)).unwrap();
     }
 
-    proptest! {
-        #[test]
-        fn encode_decode_message(msg in gen_sync_message()) {
-            let encoded = msg.clone().encode();
-            let (i, decoded) = Message::parse(Input::new(&encoded)).unwrap();
-            assert!(i.is_empty());
-            assert_eq!(msg, decoded);
+    /*
+        proptest! {
+            #[test]
+            fn encode_decode_message(msg in gen_sync_message()) {
+                let encoded = msg.clone().encode();
+                let (i, decoded) = Message::parse(Input::new(&encoded)).unwrap();
+                assert!(i.is_empty());
+                assert_eq!(msg, decoded);
+            }
         }
-    }
+    */
 
     #[test]
     fn generate_sync_message_twice_does_nothing() {

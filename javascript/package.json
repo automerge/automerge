@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "2.2.9-alpha.2",
+  "version": "3.0.0-beta.0",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge/tree/main/javascript",
   "repository": "github:automerge/automerge",
@@ -45,23 +45,6 @@
       "import": "./dist/mjs/entrypoints/fullfat_base64.js",
       "require": "./dist/cjs/fullfat_base64.cjs"
     },
-    "./next": {
-      "types": "./dist/next.d.ts",
-      "workerd": {
-        "import": "./dist/mjs/entrypoints/fullfat_workerd_next.js",
-        "require": "./dist/cjs/fullfat_next_base64.cjs"
-      },
-      "node": {
-        "import": "./dist/mjs/entrypoints/fullfat_node_next.js",
-        "require": "./dist/cjs/fullfat_node_next.cjs"
-      },
-      "browser": {
-        "import": "./dist/mjs/entrypoints/fullfat_bundler_next.js",
-        "require": "./dist/cjs/fullfat_next_base64.cjs"
-      },
-      "import": "./dist/mjs/entrypoints/fullfat_next_base64.js",
-      "require": "./dist/cjs/fullfat_next_base64.cjs"
-    },
     "./slim": {
       "types": "./dist/index.d.ts",
       "node": {
@@ -75,13 +58,12 @@
       "import": "./dist/mjs/entrypoints/slim.js",
       "require": "./dist/cjs/slim.cjs"
     },
-    "./slim/next": {
-      "types": "./dist/next.d.ts",
-      "import": "./dist/mjs/entrypoints/slim_next.js",
-      "require": "./dist/cjs/slim_next.cjs"
-    },
     "./automerge.wasm": "./dist/automerge.wasm",
-    "./automerge.wasm.base64.js": "./dist/mjs/wasm_bindgen_output/web/automerge_wasm_bg_base64.js"
+    "./automerge.wasm.base64": {
+      "types": "./dist/automerge_wasm_bg_base64.d.ts",
+      "import": "./dist/mjs/wasm_bindgen_output/web/automerge_wasm_bg_base64.js",
+      "require": "./dist/cjs/automerge_wasm_bg_base64.js"
+    }
   },
   "license": "MIT",
   "scripts": {
@@ -97,9 +79,8 @@
     "@types/expect": "^24.3.0",
     "@types/mocha": "^10.0.1",
     "@types/node": "^20.5.7",
-    "@types/uuid": "^9.0.0",
-    "@typescript-eslint/eslint-plugin": "^5.46.0",
-    "@typescript-eslint/parser": "^5.46.0",
+    "@typescript-eslint/eslint-plugin": "^8.32.0",
+    "@typescript-eslint/parser": "^8.32.0",
     "consola": "^3.2.3",
     "esbuild": "^0.19.2",
     "eslint": "^8.29.0",
@@ -109,13 +90,10 @@
     "prettier": "3.1.0",
     "puppeteer": "^22.11.1",
     "serve-handler": "^6.1.5",
-    "ts-mocha": "^10.0.0",
+    "ts-mocha": "^11.1.0",
     "ts-node": "^10.9.1",
     "typedoc": "^0.23.22",
     "typescript": "^4.9.4"
-  },
-  "dependencies": {
-    "uuid": "^9.0.0"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

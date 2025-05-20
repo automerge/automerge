@@ -1,7 +1,7 @@
-use automerge::{ObjType, ScalarValue, Value};
+use automerge::{ObjType, ScalarValue, ScalarValueRef, Value, ValueRef};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, PartialOrd, Ord, Copy, Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Datatype {
     Map,
     Table,
@@ -20,10 +20,6 @@ pub(crate) enum Datatype {
 }
 
 impl Datatype {
-    pub(crate) fn is_seq(&self) -> bool {
-        matches!(self, Self::List | Self::Text)
-    }
-
     pub(crate) fn is_scalar(&self) -> bool {
         !matches!(self, Self::Map | Self::Table | Self::List | Self::Text)
     }
@@ -69,23 +65,37 @@ impl From<&ScalarValue> for Datatype {
     }
 }
 
+impl From<&ScalarValueRef<'_>> for Datatype {
+    fn from(s: &ScalarValueRef<'_>) -> Self {
+        match s {
+            ScalarValueRef::Bytes(_) => Self::Bytes,
+            ScalarValueRef::Str(_) => Self::Str,
+            ScalarValueRef::Int(_) => Self::Int,
+            ScalarValueRef::Uint(_) => Self::Uint,
+            ScalarValueRef::F64(_) => Self::F64,
+            ScalarValueRef::Counter(_) => Self::Counter,
+            ScalarValueRef::Timestamp(_) => Self::Timestamp,
+            ScalarValueRef::Boolean(_) => Self::Boolean,
+            ScalarValueRef::Null => Self::Null,
+            ScalarValueRef::Unknown { type_code, .. } => Self::Unknown(*type_code),
+        }
+    }
+}
+
 impl From<&Value<'_>> for Datatype {
     fn from(v: &Value<'_>) -> Self {
         match v {
             Value::Object(o) => o.into(),
             Value::Scalar(s) => s.as_ref().into(),
-            /*
-                            ScalarValue::Bytes(_) => Self::Bytes,
-                            ScalarValue::Str(_) => Self::Str,
-                            ScalarValue::Int(_) => Self::Int,
-                            ScalarValue::Uint(_) => Self::Uint,
-                            ScalarValue::F64(_) => Self::F64,
-                            ScalarValue::Counter(_) => Self::Counter,
-                            ScalarValue::Timestamp(_) => Self::Timestamp,
-                            ScalarValue::Boolean(_) => Self::Boolean,
-                            ScalarValue::Null => Self::Null,
-                            ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
-            */
+        }
+    }
+}
+
+impl From<&ValueRef<'_>> for Datatype {
+    fn from(v: &ValueRef<'_>) -> Self {
+        match v {
+            ValueRef::Object(o) => o.into(),
+            ValueRef::Scalar(s) => s.into(),
         }
     }
 }
@@ -145,6 +155,17 @@ impl TryFrom<JsValue> for Datatype {
 impl From<Datatype> for JsValue {
     fn from(d: Datatype) -> Self {
         String::from(d).into()
+    }
+}
+
+impl From<Datatype> for Option<Value<'_>> {
+    fn from(d: Datatype) -> Self {
+        match d {
+            Datatype::Map => Some(Value::Object(ObjType::Map)),
+            Datatype::List => Some(Value::Object(ObjType::List)),
+            Datatype::Text => Some(Value::Object(ObjType::Text)),
+            _ => None,
+        }
     }
 }
 

@@ -1,6 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src/index.js"
-import { deleteAt, insertAt } from "../src/next.js"
+import * as Automerge from "../src/index.js"
 
 describe("Unstable change tests", () => {
   it("should be able to make simple changes to a document", () => {
@@ -18,7 +17,7 @@ describe("Unstable change tests", () => {
   it("should be able to insert into a list", () => {
     let doc = Automerge.from<{ list: string[] }>({ list: [] })
     doc = Automerge.change(doc, doc => {
-      insertAt(doc.list, 0, "a")
+      Automerge.insertAt(doc.list, 0, "a")
     })
     assert.deepEqual(doc.list, ["a"])
   })
@@ -26,7 +25,7 @@ describe("Unstable change tests", () => {
   it("should be able to delete from a list", () => {
     let doc = Automerge.from<{ list: string[] }>({ list: ["a", "b", "c"] })
     doc = Automerge.change(doc, doc => {
-      deleteAt(doc.list, 0)
+      Automerge.deleteAt(doc.list, 0)
     })
     assert.deepEqual(doc.list, ["b", "c"])
   })

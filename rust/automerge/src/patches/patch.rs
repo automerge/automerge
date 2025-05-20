@@ -1,12 +1,12 @@
 use crate::{
     marks::{Mark, MarkSet},
+    text_value::ConcreteTextValue,
     ObjId, Prop, Value,
 };
 use core::fmt::Debug;
 use std::fmt;
 
 use crate::sequence_tree::SequenceTree;
-use crate::text_value::TextValue;
 
 /// A change to the current state of the document
 ///
@@ -58,7 +58,7 @@ pub enum PatchAction {
     SpliceText {
         index: usize,
         /// The text that was inserted
-        value: TextValue,
+        value: ConcreteTextValue,
         /// All marks currently active for this span of text
         marks: Option<MarkSet>,
     },
@@ -79,7 +79,7 @@ pub enum PatchAction {
     /// One or more indices were removed from a sequence
     DeleteSeq { index: usize, length: usize },
     /// Some marks within a text object were added or removed
-    Mark { marks: Vec<Mark<'static>> },
+    Mark { marks: Vec<Mark> },
 }
 
 impl fmt::Display for PatchAction {

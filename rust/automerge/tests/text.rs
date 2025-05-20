@@ -4,10 +4,13 @@ use automerge::{
     hydrate_list, hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark},
-    op_tree::B,
+    patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ObjType, Patch, PatchAction, ReadDoc, ScalarValue, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
+    TextEncoding, ROOT,
 };
+const B: usize = 16;
+
 use proptest::strategy::Strategy;
 use test_log::test;
 
@@ -156,9 +159,6 @@ fn mark_created_after_insertion() {
         automerge::marks::ExpandMark::Both,
     )
     .unwrap();
-
-    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
 }
 
 #[test]
@@ -214,7 +214,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 0,
-                value: "the ".into(),
+                value: ConcreteTextValue::new(
+                    "the ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -227,7 +230,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 4,
-                value: "quick ".into(),
+                value: ConcreteTextValue::new(
+                    "quick ",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -243,7 +249,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 10,
-                value: "fox".into(),
+                value: ConcreteTextValue::new(
+                    "fox",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -263,7 +272,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 13,
-                value: " jumps".into(),
+                value: ConcreteTextValue::new(
+                    " jumps",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -279,7 +291,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 19,
-                value: " over the lazy dog".into(),
+                value: ConcreteTextValue::new(
+                    " over the lazy dog",
+                    TextRepresentation::String(TextEncoding::default()),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -313,7 +328,6 @@ fn spans_are_consolidated_in_the_presence_of_zero_length_spans() {
     .unwrap();
 
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    println!("{:?}", spans);
     assert!(marks_are_consolidated(&spans));
 }
 
@@ -393,15 +407,9 @@ fn insertions_after_noexpand_spans_are_not_marked() {
 
     doc.update_spans(&text, new_blocks).unwrap();
 
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
-
     let heads_before = doc.get_heads();
     doc.splice_text(&text, 11, 0, "a").unwrap();
     let heads_after = doc.get_heads();
-
-    let marks = doc.marks(&text).unwrap();
-    println!("marks: {:?}", marks);
 
     let patches = doc.diff(&heads_before, &heads_after);
     assert_eq!(patches.len(), 1);
@@ -529,9 +537,7 @@ fn noexpand_marks_at_the_end_of_text_should_not_emit_marked_patches_on_following
 
     doc.update_diff_cursor();
     let heads_before = doc.get_heads();
-    println!("doing splice");
     doc.splice_text(&text, doc.length(&text), 0, "a").unwrap();
-    println!("done splice");
     let heads_after = doc.get_heads();
 
     let patches = doc.diff(&heads_before, &heads_after);
@@ -640,25 +646,27 @@ fn test_remote_patches_for_marks_with_expand_after() {
 
     doc_b.update_diff_cursor();
     let heads_before_b = doc_b.get_heads();
-    println!("doing merge");
     doc_b.merge(&mut doc_a).unwrap();
-    println!("done merge");
     let heads_after_b = doc_b.get_heads();
 
     let patches_a = doc_a.diff(&heads_before_a, &heads_after_a);
     let patches_b = doc_b.diff(&heads_before_b, &heads_after_b);
 
-    #[cfg(feature = "optree-visualisation")]
-    {
-        println!("--------------------------------");
-        println!("Doc A");
-        println!("{}", doc_a.visualise_optree(None));
-        println!("--------------------------------");
-        println!("Doc B");
-        println!("{}", doc_b.visualise_optree(None));
-    }
-
     assert_eq!(patches_a, patches_b);
+}
+
+#[test]
+fn update_text_change_at() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.update_text(&text, "a\n").unwrap();
+    let initial_heads = doc.get_heads();
+    doc.update_text(&text, "a\nb\n").unwrap();
+    doc.isolate(&initial_heads);
+    doc.update_text(&text, "a\nc\n").unwrap();
+    doc.integrate();
+
+    assert_eq!(doc.text(&text).unwrap(), "a\nc\nb\n");
 }
 
 proptest::proptest! {
@@ -720,10 +728,8 @@ fn marks_are_consolidated(spans: &Vec<Span>) -> bool {
     for span in spans {
         match span {
             Span::Text(_, marks) => {
-                if let Some(last_marks) = last_marks {
-                    if marks == last_marks {
-                        return false;
-                    }
+                if Some(marks) == last_marks {
+                    return false;
                 }
                 last_marks = Some(marks);
             }
@@ -819,4 +825,37 @@ fn arb_scenario() -> impl proptest::strategy::Strategy<Value = Vec<Action>> {
     }
     (0_usize..10)
         .prop_flat_map(move |max_actions| pump(String::new(), Vec::new(), max_actions).boxed())
+}
+
+#[test]
+fn removed_marks_should_not_appear_in_get_marks() {
+    // Reproduces an issue
+    // (https://github.com/automerge/automerge-swift/issues/214) where marks
+    // removed by setting their value to null appear as marks in the `get_marks`
+    // call with null values
+    let mut doc = AutoCommit::new();
+
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "abcdefg").unwrap();
+
+    doc.mark(
+        &text,
+        Mark::new("name1".into(), ScalarValue::Int(1), 0, 1),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Now remove the mark at location 0
+    doc.mark(
+        &text,
+        Mark::new("name1".into(), ScalarValue::Null, 0, 1),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Get the marks at location 0 (which we just removed by setting it Null) and check they are empty
+    let marks = doc.get_marks(&text, 0, None).unwrap();
+    assert_eq!(marks.iter().collect::<Vec<_>>(), vec![]);
+    assert_eq!(marks.len(), 0);
+    assert_eq!(marks.num_marks(), 0);
 }

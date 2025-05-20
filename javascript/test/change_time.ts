@@ -1,9 +1,6 @@
 import * as assert from "assert"
-import {
-  next as Automerge,
-  decodeChange,
-  getLastLocalChange,
-} from "../src/index.js"
+import * as Automerge from "../src/index.js"
+import { decodeChange, getLastLocalChange } from "../src/index.js"
 
 describe("Automerge", () => {
   describe("change", () => {

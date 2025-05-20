@@ -80,16 +80,16 @@ impl TryFrom<&AMmarkExpand> for ExpandMark {
 /// \installed_headerfile
 /// \brief An association of out-of-bound information with a list object or text
 ///        object.
-pub struct AMmark<'a>(Mark<'a>);
+pub struct AMmark(Mark);
 
-impl<'a> AMmark<'a> {
-    pub fn new(mark: Mark<'a>) -> Self {
+impl AMmark {
+    pub fn new(mark: Mark) -> Self {
         Self(mark)
     }
 }
 
-impl<'a> AsRef<Mark<'a>> for AMmark<'a> {
-    fn as_ref(&self) -> &Mark<'a> {
+impl AsRef<Mark> for AMmark {
+    fn as_ref(&self) -> &Mark {
         &self.0
     }
 }

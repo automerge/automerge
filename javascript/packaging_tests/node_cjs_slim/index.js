@@ -1,4 +1,4 @@
-const { next: am } = require("@automerge/automerge");
+const am = require("@automerge/automerge");
 const fs = require("fs")
 
 let initialized = false
@@ -18,4 +18,3 @@ setTimeout(() => {
     process.exit(1)
   }
 }, 100)
-

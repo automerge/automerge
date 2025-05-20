@@ -147,6 +147,15 @@ describe("Proxies", () => {
         }, /list\/0/)
       })
     })
+
+    it("should support .at() to access values", () => {
+      const doc = from<{ list: string[] }>({ list: ["a", "b"] })
+      change(doc, d => {
+        assert.doesNotThrow(() => {
+          assert.equal(typeof d.list.at(0), "string")
+        })
+      })
+    })
   })
 
   describe("structuredClone support", () => {

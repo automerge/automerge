@@ -1,4 +1,4 @@
-import { next as am} from "@automerge/automerge"
+import  * as am from "@automerge/automerge"
 
 function component() {
   const element = document.createElement('div');

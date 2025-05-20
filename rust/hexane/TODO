@@ -1,0 +1,18 @@
+
+Cleanup
+* ScanMeta should be a lambda
+
+* Delta needs a different primitive `Delta { abs: i64, step: i64 }`
+  * this will allow for cleanup/removal of all the special case abs code in writer etc
+
+* Need to have distinct cursors for Rle<u64>, Rle<Option<u64>>, Rle<String>, Rle<Vec<u8>>
+  * maybe get_ref(), iter_ref() for things that implement Borrow()
+  * would be nice to get rid of all the Cow's
+
+* need more methods to make these behave like Vec such as col[a..b] as a stand-in for
+  col.iter_range(a..b)
+
+* need to normalize all the min/max stuff - not needed for all slabs and taking up space
+
+* would be nice to have a stat_collector for iter()/get()
+

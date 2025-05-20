@@ -1,9 +1,9 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src/index.js"
+import * as Automerge from "../src/index.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
 import { inspect } from "util"
-import { RawString } from "../src/raw_string.js"
+import { ImmutableString } from "../src/immutable_string.js"
 
 function pathsEqual(a: Automerge.Prop[], b: Automerge.Prop[]) {
   if (a.length !== b.length) return false
@@ -127,7 +127,7 @@ describe("Automerge", () => {
       ])
     })
 
-    it("emits insert patches with RawString for attribute updatese", () => {
+    it("emits insert patches with ImmutableString for attribute updatese", () => {
       let doc = Automerge.from({ text: "" })
       doc = Automerge.change(doc, d => {
         Automerge.splitBlock(d, ["text"], 0, {
@@ -153,7 +153,7 @@ describe("Automerge", () => {
                 type: "block",
                 value: {
                   type: "paragraph",
-                  parents: [new Automerge.RawString("someparent")],
+                  parents: [new Automerge.ImmutableString("someparent")],
                   attrs: {},
                 },
               },
@@ -166,7 +166,7 @@ describe("Automerge", () => {
         {
           action: "insert",
           path: ["text", 0, "parents", 0],
-          values: [new Automerge.RawString("someparent")],
+          values: [new Automerge.ImmutableString("someparent")],
         },
       ])
     })
@@ -178,15 +178,15 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => {
         Automerge.splitBlock(d, ["text"], 0, {
           parents: [],
-          type: new RawString("ordered-list-item"),
-          attrs: { "data-foo": new RawString("someval") },
+          type: new ImmutableString("ordered-list-item"),
+          attrs: { "data-foo": new ImmutableString("someval") },
         })
         Automerge.splice(d, ["text"], 1, 0, "first thing")
       })
       const block = Automerge.block(doc, ["text"], 0)
       if (!block) throw new Error("block not found")
       assert.deepStrictEqual(block.attrs, {
-        "data-foo": new RawString("someval"),
+        "data-foo": new ImmutableString("someval"),
       })
     })
 
@@ -194,22 +194,22 @@ describe("Automerge", () => {
       let doc = Automerge.from({ text: "" })
       doc = Automerge.change(doc, d => {
         Automerge.splitBlock(d, ["text"], 0, {
-          parents: [new RawString("div")],
-          type: new RawString("ordered-list-item"),
-          attrs: { "data-foo": new RawString("someval") },
+          parents: [new ImmutableString("div")],
+          type: new ImmutableString("ordered-list-item"),
+          attrs: { "data-foo": new ImmutableString("someval") },
         })
         Automerge.splice(d, ["text"], 1, 0, "first thing")
       })
       const spans = Automerge.spans(doc, ["text"])
       const block = spans[0]
       if (!(block.type === "block")) throw new Error("block not found")
-      assert.deepStrictEqual(block.value.parents, [new RawString("div")])
+      assert.deepStrictEqual(block.value.parents, [new ImmutableString("div")])
       assert.deepStrictEqual(block.value.attrs, {
-        "data-foo": new RawString("someval"),
+        "data-foo": new ImmutableString("someval"),
       })
       assert.deepStrictEqual(
         block.value.type,
-        new RawString("ordered-list-item"),
+        new ImmutableString("ordered-list-item"),
       )
     })
 
@@ -249,6 +249,24 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => {
         Automerge.splice(d, ["text"], 0, 1, "A")
       })
+    })
+  })
+
+  describe("when using Automerge.view", () => {
+    it("should show historical marks", () => {
+      let doc = Automerge.from({ text: "hello world" })
+      doc = Automerge.change(doc, d => {
+        Automerge.mark(d, ["text"], { start: 0, end: 5 }, "bold", true)
+      })
+      const headsBefore = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        Automerge.mark(d, ["text"], { start: 5, end: 11 }, "italic", true)
+      })
+      const spans = Automerge.spans(Automerge.view(doc, headsBefore), ["text"])
+      assert.deepStrictEqual(spans, [
+        { type: "text", value: "hello", marks: { bold: true } },
+        { type: "text", value: " world" },
+      ])
     })
   })
 })

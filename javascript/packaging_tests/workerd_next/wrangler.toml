@@ -1,4 +1,0 @@
-name = "throbbing-bush-277a"
-main = "src/worker.js"
-compatibility_date = "2024-06-23"
-workers_dev = true

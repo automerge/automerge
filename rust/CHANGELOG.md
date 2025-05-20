@@ -1,3 +1,32 @@
+# 0.6.1
+
+* Fix a bug where `{Automerge, AutoCommit}::get_marks` would return removed marks
+  as mark with value `ScalarValue::Null` rather than not returning them at all.
+
+# 0.6.0
+
+* Add the ability to set the text encoding used when calculating the indices
+  into text objects via the Automerge::new_with_encoding constructor.
+* Update the cursor API to allow creating cursors which point at the beginning
+  or end of the text and to allow configuring how the cursor position is
+  resolved when the original character which the cursor referenced has been
+  deleted.
+
+# 0.5.12
+
+* Allow empty keys in maps
+* Add `SyncState::has_our_changes` to indicate whether we think the other end
+  has everything we have.
+* Add `ReadDoc::stats` to obtain basic statistics about a document (number of 
+  operations and changes)
+* Allow configuring the character widths used for the wasm32 target by
+  introducing the utf-16 indexing feature flag
+
+# 0.5.11
+
+* Fixed a bug where actor IDs were written incorrectly to the save document
+  format rendering it impossible to load the document
+
 # 0.5.10
 
 The primary feature of this release is a set of methods for managing block 

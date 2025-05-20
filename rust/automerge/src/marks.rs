@@ -1,14 +1,14 @@
 use smol_str::SmolStr;
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::op_tree::OpSetData;
-use crate::query::RichTextQueryState;
-use crate::types::{OpId, OpType};
+use crate::op_set2::{MarkData, Op, OpType};
+use crate::types::{Clock, ObjType, OpId, SmallHashMap};
 use crate::value::ScalarValue;
-use std::borrow::Cow;
-use std::collections::BTreeMap;
 
 /// Marks let you store out-of-bound information about sequences.
 ///
@@ -18,20 +18,38 @@ use std::collections::BTreeMap;
 /// in overlapping ranges, automerge will chose a consistent (but arbitrary) value
 /// when reading marks from the doc.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Mark<'a> {
+pub struct Mark {
     pub start: usize,
     pub end: usize,
-    pub(crate) data: Cow<'a, MarkData>,
+    pub name: SmolStr,
+    pub value: ScalarValue,
 }
 
-impl<'a> Mark<'a> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct OldMark<'a> {
+    pub start: usize,
+    pub end: usize,
+    pub(crate) data: Cow<'a, OldMarkData>,
+}
+
+impl Mark {
+    pub(crate) fn old_data(&self) -> OldMarkData {
+        OldMarkData {
+            name: SmolStr::from(self.name.as_str()),
+            value: self.value.clone(),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.end - self.start
     }
+
     pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
-        let data = self.data.into_owned();
-        m.insert(data.name, data.value);
+        //let data = self.data.into_owned();
+        //let name = self.name;
+        //m.insert(data.name, data.value);
+        m.insert(self.name, self.value);
         Arc::new(m)
     }
 }
@@ -49,7 +67,7 @@ pub(crate) struct MarkAccumulator {
 }
 
 impl MarkAccumulator {
-    pub(crate) fn into_iter(self) -> impl Iterator<Item = Mark<'static>> {
+    pub(crate) fn into_iter(self) -> impl Iterator<Item = Mark> {
         self.marks.into_iter().flat_map(|(name, items)| {
             items.into_iter().map(move |i| {
                 Mark::new(name.to_string(), i.value.clone(), i.index, i.index + i.len)
@@ -57,7 +75,7 @@ impl MarkAccumulator {
         })
     }
 
-    pub(crate) fn into_iter_no_unmark(self) -> impl Iterator<Item = Mark<'static>> {
+    pub(crate) fn into_iter_no_unmark(self) -> impl Iterator<Item = Mark> {
         self.marks.into_iter().flat_map(|(name, items)| {
             items
                 .into_iter()
@@ -110,7 +128,7 @@ impl MarkSet {
         self.marks.len()
     }
 
-    fn insert(&mut self, name: SmolStr, value: ScalarValue) {
+    pub(crate) fn insert(&mut self, name: SmolStr, value: ScalarValue) {
         self.marks.insert(name, value);
     }
 
@@ -143,15 +161,20 @@ impl MarkSet {
         MarkSet { marks: diff }
     }
 
-    pub(crate) fn from_query_state(
-        q: &RichTextQueryState<'_>,
-        osd: &OpSetData,
-    ) -> Option<Arc<Self>> {
+    pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Arc<Self>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in q.iter() {
-            marks.mark_begin(*id, mark_data, osd);
+            marks.mark_begin(*id, mark_data.clone());
         }
         marks.current().cloned()
+    }
+
+    /// Return this MarkSet without any marks which have a value of Null, i.e.
+    /// marks which have been removed.
+    pub(crate) fn without_unmarks(self) -> Self {
+        let mut marks = self.marks.clone();
+        marks.retain(|_, value| !matches!(value, ScalarValue::Null));
+        MarkSet { marks }
     }
 }
 
@@ -166,51 +189,29 @@ impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
     }
 }
 
-impl<'a> Mark<'a> {
-    pub fn new<V: Into<ScalarValue>>(
-        name: String,
-        value: V,
-        start: usize,
-        end: usize,
-    ) -> Mark<'static> {
+impl Mark {
+    pub fn new<V: Into<ScalarValue>>(name: String, value: V, start: usize, end: usize) -> Mark {
         Mark {
-            data: Cow::Owned(MarkData {
-                name: name.into(),
-                value: value.into(),
-            }),
+            name: SmolStr::from(&name),
+            value: value.into(),
             start,
             end,
-        }
-    }
-
-    pub(crate) fn from_data(start: usize, end: usize, data: &MarkData) -> Mark<'_> {
-        Mark {
-            data: Cow::Borrowed(data),
-            start,
-            end,
-        }
-    }
-
-    pub fn into_owned(self) -> Mark<'static> {
-        Mark {
-            data: Cow::Owned(self.data.into_owned()),
-            start: self.start,
-            end: self.end,
         }
     }
 
     pub fn name(&self) -> &str {
-        self.data.name.as_str()
+        &self.name //.as_str()
     }
 
     pub fn value(&self) -> &ScalarValue {
-        &self.data.value
+        &self.value
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct MarkStateMachine<'a> {
-    state: Vec<(OpId, &'a MarkData)>,
+    // would this make more sense as a BTree<OpId, MarkData<'a>>?
+    state: Vec<(OpId, MarkData<'a>)>,
     current: Arc<MarkSet>,
 }
 
@@ -223,31 +224,33 @@ impl<'a> MarkStateMachine<'a> {
         }
     }
 
-    pub(crate) fn process(&mut self, opid: OpId, action: &'a OpType, osd: &OpSetData) -> bool {
+    pub(crate) fn process(&mut self, opid: OpId, action: OpType<'a>) -> bool {
         match action {
-            OpType::MarkBegin(_, data) => self.mark_begin(opid, data, osd),
-            OpType::MarkEnd(_) => self.mark_end(opid, osd),
+            OpType::MarkBegin(_, data) => self.mark_begin(opid, data),
+            OpType::MarkEnd(_) => self.mark_end(opid),
             _ => false,
         }
     }
 
-    pub(crate) fn mark_begin(&mut self, id: OpId, mark: &'a MarkData, osd: &OpSetData) -> bool {
+    pub(crate) fn mark_begin(&mut self, id: OpId, mark: MarkData<'a>) -> bool {
         let mut result = false;
 
-        let index = match self.find(id, osd).err() {
+        let index = match self.find(id).err() {
             Some(index) => index,
             None => return false,
         };
 
-        if Self::mark_above(&self.state, index, mark).is_none() {
-            if let Some(below) = Self::mark_below(&mut self.state, index, mark) {
+        if Self::mark_above(&self.state, index, mark.clone()).is_none() {
+            if let Some(below) = Self::mark_below(&mut self.state, index, mark.clone()) {
                 if below.value != mark.value {
-                    Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                    Arc::make_mut(&mut self.current)
+                        .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                     result = true
                 }
             } else {
                 // nothing above or below
-                Arc::make_mut(&mut self.current).insert(mark.name.clone(), mark.value.clone());
+                Arc::make_mut(&mut self.current)
+                    .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                 result = true
             }
         }
@@ -257,25 +260,25 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    pub(crate) fn mark_end(&mut self, id: OpId, osd: &OpSetData) -> bool {
+    pub(crate) fn mark_end(&mut self, id: OpId) -> bool {
         let mut result = false;
-        let index = match self.find(id.prev(), osd).ok() {
+        let index = match self.find(id.prev()).ok() {
             Some(index) => index,
             None => return false,
         };
 
         let mark = self.state.remove(index).1;
 
-        if Self::mark_above(&self.state, index, mark).is_none() {
-            match Self::mark_below(&mut self.state, index, mark) {
+        if Self::mark_above(&self.state, index, mark.clone()).is_none() {
+            match Self::mark_below(&mut self.state, index, mark.clone()) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
                     Arc::make_mut(&mut self.current)
-                        .insert(below.name.clone(), below.value.clone());
+                        .insert(SmolStr::from(below.name), below.value.into());
                     result = true;
                 }
                 None => {
-                    Arc::make_mut(&mut self.current).remove(&mark.name);
+                    Arc::make_mut(&mut self.current).remove(&SmolStr::from(mark.name.as_ref()));
                     result = true;
                 }
             }
@@ -284,41 +287,47 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    fn find(&self, target: OpId, osd: &OpSetData) -> Result<usize, usize> {
-        self.state
-            .binary_search_by(|probe| osd.lamport_cmp(probe.0, target))
+    fn find(&self, target: OpId) -> Result<usize, usize> {
+        self.state.binary_search_by(|probe| probe.0.cmp(&target))
     }
 
-    fn mark_above<'b>(
-        state: &'b [(OpId, &'a MarkData)],
+    fn mark_above(
+        state: &[(OpId, MarkData<'a>)],
         index: usize,
-        mark: &MarkData,
-    ) -> Option<&'b MarkData> {
-        Some(state[index..].iter().find(|(_, m)| m.name == mark.name)?.1)
+        mark: MarkData<'a>,
+    ) -> Option<MarkData<'a>> {
+        Some(
+            state[index..]
+                .iter()
+                .find(|(_, m)| m.name == mark.name)?
+                .1
+                .clone(),
+        )
     }
 
-    fn mark_below<'b>(
-        state: &'b mut [(OpId, &'a MarkData)],
+    fn mark_below(
+        state: &mut [(OpId, MarkData<'a>)],
         index: usize,
-        mark: &MarkData,
-    ) -> Option<&'b MarkData> {
+        mark: MarkData<'a>,
+    ) -> Option<MarkData<'a>> {
         Some(
             state[0..index]
                 .iter_mut()
                 .filter(|(_, m)| m.name == mark.name)
-                .last()?
-                .1,
+                .next_back()?
+                .1
+                .clone(),
         )
     }
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct MarkData {
+pub struct OldMarkData {
     pub name: SmolStr,
     pub value: ScalarValue,
 }
 
-impl Display for MarkData {
+impl Display for MarkData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "name={} value={}", self.name, self.value)
     }
@@ -357,4 +366,46 @@ impl ExpandMark {
     pub fn after(&self) -> bool {
         matches!(self, Self::After | Self::Both)
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct RichTextQueryState<'a> {
+    pub(crate) map: SmallHashMap<OpId, MarkData<'a>>,
+    pub(crate) block: Option<OpId>,
+}
+
+impl<'a> RichTextQueryState<'a> {
+    pub(crate) fn process(&mut self, op: Op<'a>, clock: Option<&Clock>) {
+        if !(clock.map(|c| c.covers(&op.id)).unwrap_or(true)) {
+            // if the op is not visible in the current clock
+            // we can ignore it
+            return;
+        }
+        match op.action() {
+            OpType::MarkBegin(_, data) => {
+                self.map.insert(op.id, data);
+            }
+            OpType::MarkEnd(_) => {
+                self.map.remove(&op.id.prev());
+            }
+            OpType::Make(ObjType::Map) => {
+                self.block = Some(op.id);
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &MarkData<'a>)> {
+        self.map.iter()
+    }
+
+    /*
+        pub(crate) fn insert(&mut self, op: OpId, data: MarkData<'a>) {
+            self.map.insert(op, data);
+        }
+
+        pub(crate) fn remove(&mut self, op: &OpId) {
+            self.map.remove(op);
+        }
+    */
 }

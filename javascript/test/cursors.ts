@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge, PatchSource } from "../src/index.js"
+import * as Automerge from "../src/index.js"
 
 describe("cursors", () => {
   it("can use cursors in splice calls", () => {
@@ -81,7 +81,7 @@ describe("cursors", () => {
       x?: string
       n?: string
     }
-    let callbacks: Array<PatchSource> = []
+    let callbacks: Array<Automerge.PatchSource> = []
     let patchCallback = (_p, meta) => callbacks.push(meta.source)
     let doc1 = Automerge.from<DocShape>({ hello: "world" }, { patchCallback })
     let heads1 = Automerge.getHeads(doc1)
@@ -145,34 +145,89 @@ describe("cursors", () => {
     })
 
     it("getCursor should respect heads", () => {
-      let doc = Automerge.from({ text: "abc" })
+      let doc = Automerge.from({ text: "aaa@bbb" })
       let heads = Automerge.getHeads(doc)
 
       doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["text"], 1, 0, "x")
-      })
-      const cursor = Automerge.getCursor(doc, ["text"], 3)
-      assert.notEqual(cursor, undefined)
-
-      // First check that trying to get a cursor from a view where the sequence is shorter then the
-      // attempted index throws an error
-      assert.throws(() => {
-        const oldCursor = Automerge.getCursor(
-          Automerge.view(doc, heads),
-          ["text"],
-          3,
-        )
-      }, /index 3 is out of bounds/)
-
-      // Now check that if we delete characters, the getCursor call will still work when viewing
-      // the document with heads that have the deleted characters
-      doc = Automerge.change(doc, d => {
-        Automerge.splice(d, ["text"], 0, 4, "")
+        // aaa~~~bbb
+        Automerge.splice(d, ["text"], 3, 1, "~~~")
       })
       const view = Automerge.view(doc, heads)
-      const cursor2 = Automerge.getCursor(view, ["text"], 2)
-      assert.equal(cursor, cursor2)
+      const before = Automerge.getCursor(view, ["text"], 3, "before")
+      const after = Automerge.getCursor(view, ["text"], 3, "after")
+      const start = Automerge.getCursor(view, ["text"], "start")
+      const end = Automerge.getCursor(view, ["text"], "end")
+
+      // aaa~~~bbb
+      // ^ ^   ^  ^
+      // s b   a  e
+
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], start), 0)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], before), 2)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], after), 6)
+      assert.equal(Automerge.getCursorPosition(doc, ["text"], end), 9)
     })
   })
 
+  it("should allow for usage of start/end cursors", () => {
+    let doc = Automerge.from({ text: "abc" })
+
+    const end = Automerge.getCursor(doc, ["text"], "end")
+    const start = Automerge.getCursor(doc, ["text"], "start")
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], end, 0, "def")
+    })
+
+    assert.equal(doc.text, "abcdef")
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], start, 0, "hello")
+    })
+
+    assert.equal(doc.text, "helloabcdef")
+  })
+
+  it("should allow for usage of move before/after", () => {
+    let doc = Automerge.from({ text: "aaa@bbb" })
+
+    const before = Automerge.getCursor(doc, ["text"], 3, "before")
+    const after = Automerge.getCursor(doc, ["text"], 3, "after")
+
+    doc = Automerge.change(doc, d => {
+      // aaa~~~bbb
+      Automerge.splice(d, ["text"], 3, 1, "~~~")
+    })
+
+    assert.equal(Automerge.getCursorPosition(doc, ["text"], before), 2)
+    assert.equal(Automerge.getCursorPosition(doc, ["text"], after), 6)
+  })
+
+  it("should convert negative indices into a start cursor", () => {
+    let doc = Automerge.from({ text: "is awesome" })
+    const cursor = Automerge.getCursor(doc, ["text"], -1)
+
+    doc = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], cursor, 0, "Automerge ")
+    })
+
+    assert.equal(doc.text, "Automerge is awesome")
+  })
+
+  it("should convert indices >= string length into an end cursor", () => {
+    const doc = Automerge.from({ text: "Alex" })
+    const cursor1 = Automerge.getCursor(doc, ["text"], 1337)
+    const cursor2 = Automerge.getCursor(doc, ["text"], 4)
+
+    const doc1 = Automerge.change(doc, d => {
+      Automerge.splice(d, ["text"], cursor1, 0, " Good")
+    })
+
+    const doc2 = Automerge.change(Automerge.clone(doc), d => {
+      Automerge.splice(d, ["text"], cursor2, 0, " Good")
+    })
+
+    assert.equal(doc1.text, "Alex Good")
+    assert.equal(doc2.text, "Alex Good")
+  })
 })

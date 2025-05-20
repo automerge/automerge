@@ -1,13 +1,15 @@
 use crate::{
+    cursor::{CursorPosition, MoveCursor},
     error::AutomergeError,
     exid::ExId,
     hydrate,
-    iter::Spans,
-    iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkSet},
-    parents::Parents,
-    Change, ChangeHash, Cursor, ObjType, Prop, Value,
+    op_set2::Parents,
+    patches::TextRepresentation,
+    Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value, ROOT,
 };
+
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 
 use std::{collections::HashMap, ops::RangeBounds};
 
@@ -53,6 +55,21 @@ pub trait ReadDoc {
     /// See [`Self::keys()`]
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_>;
+
+    fn iter(&self) -> DocIter<'_> {
+        self.iter_at(
+            &ROOT,
+            None,
+            TextRepresentation::String(self.text_encoding()),
+        )
+    }
+
     /// Iterate over the keys and values of the map `obj` in the given range.
     ///
     /// If the object correspoding to `obj` is a list then this will return an empty iterator
@@ -63,7 +80,7 @@ pub trait ReadDoc {
         &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'a, R>;
+    ) -> MapRange<'a>;
 
     /// Iterate over the keys and values of the map `obj` in the given range as
     /// at `heads`
@@ -79,17 +96,13 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'a, R>;
+    ) -> MapRange<'a>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
     /// The reuturned iterator yields `(index, value, exid)` tuples, where the third
     /// element is the ID of the operation which created the value.
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-    ) -> ListRange<'_, R>;
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range as at `heads`
     ///
@@ -102,7 +115,7 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R>;
+    ) -> ListRange<'_>;
 
     /// Iterate over the values in a map, list, or text object
     ///
@@ -134,14 +147,14 @@ pub trait ReadDoc {
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
 
     /// Get all marks on a current sequence
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError>;
 
     /// Get all marks on a sequence at a given heads
     fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError>;
+    ) -> Result<Vec<Mark>, AutomergeError>;
 
     fn get_marks<O: AsRef<ExId>>(
         &self,
@@ -173,16 +186,38 @@ pub trait ReadDoc {
 
     /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
     ///
-    /// Example use cases:
-    /// 1. User cursor tracking, to maintain contextual position while merging remote changes.
-    /// 2. Indexing sentences in a text field.
-    ///
-    /// To reverse the operation, see [`Self::get_cursor_position()`].
-    fn get_cursor<O: AsRef<ExId>>(
+    /// **This is equivalent to [`Self::get_cursor_moving()`] with `move_cursor` = `MoveCursor::After`.**
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
         &self,
         obj: O,
-        position: usize,
+        position: I,
         at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError>;
+
+    /// Obtain the stable address (Cursor) for a [`usize`] position in a Sequence (either [`ObjType::List`] or [`ObjType::Text`]).
+    ///
+    /// # Use cases
+    /// - User cursor tracking, to maintain contextual position while merging remote changes.
+    /// - Indexing sentences in a text field.
+    ///
+    /// # Cursor movement
+    ///
+    /// `move_cursor` determines how the cursor resolves its position if the item originally referenced at the given position is **removed** in later versions of the document. See [`MoveCursor`] for more details.
+    ///
+    /// # Start/end cursors
+    /// If you'd like a cursor which follows the start (`position = 0`) or end (`position = sequence.length`) of the sequence, pass `CursorPosition::Start` or `CursorPosition::End` respectively.
+    ///
+    /// Conceptually, start cursors behaves like a cursor pointed an index of `-1`. End cursors behave like a cursor pointed at `sequence.length`.
+    ///
+    /// Note that `move_cursor` does not affect start/end cursors, as the start/end positions can never be removed.
+    ///
+    /// To translate a cursor into a position, see [`Self::get_cursor_position()`].
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: MoveCursor,
     ) -> Result<Cursor, AutomergeError>;
 
     /// Translate Cursor in a Sequence into an absolute position of type [`usize`].
@@ -258,10 +293,12 @@ pub trait ReadDoc {
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash>;
 
     /// Get a change by its hash.
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<Change>;
 
     /// Return some statistics about the document
     fn stats(&self) -> Stats;
+
+    fn text_encoding(&self) -> TextEncoding;
 }
 
 pub(crate) trait ReadDocInternal: ReadDoc {
@@ -272,10 +309,18 @@ pub(crate) trait ReadDocInternal: ReadDoc {
 /// Statistics about the document
 ///
 /// This is returned by [`ReadDoc::stats()`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stats {
     /// The number of operations in the document
     pub num_ops: u64,
     /// The number of changes in the change graph for the document
     pub num_changes: u64,
+    /// The number of actors in the document
+    pub num_actors: u64,
+    /// package name from cargo.toml ("automerge");
+    pub cargo_package_name: &'static str,
+    /// package version from cargo.toml
+    pub cargo_package_version: &'static str,
+    /// version of rustc used to compile this
+    pub rustc_version: &'static str,
 }

@@ -19,7 +19,7 @@ impl<'a> From<Cow<'a, [u8]>> for RawBytes<'a> {
     }
 }
 
-impl<'a> Encodable for RawBytes<'a> {
+impl Encodable for RawBytes<'_> {
     fn encode<S: Sink>(&self, out: &mut S) -> usize {
         out.append(&self.0);
         self.0.len()
@@ -35,7 +35,7 @@ impl Encodable for SmolStr {
     }
 }
 
-impl<'a> Encodable for Cow<'a, SmolStr> {
+impl Encodable for Cow<'_, SmolStr> {
     fn encode<S: Sink>(&self, buf: &mut S) -> usize {
         self.as_ref().encode(buf)
     }
@@ -60,7 +60,7 @@ impl Encodable for Option<String> {
     }
 }
 
-impl<'a> Encodable for Option<Cow<'a, SmolStr>> {
+impl Encodable for Option<Cow<'_, SmolStr>> {
     fn encode<S: Sink>(&self, out: &mut S) -> usize {
         if let Some(s) = self {
             SmolStr::encode(s, out)
@@ -118,7 +118,7 @@ impl Encodable for &[u8] {
     }
 }
 
-impl<'a> Encodable for Cow<'a, [u8]> {
+impl Encodable for Cow<'_, [u8]> {
     fn encode<S: Sink>(&self, out: &mut S) -> usize {
         out.append(self);
         self.len()

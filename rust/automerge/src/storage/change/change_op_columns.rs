@@ -6,7 +6,7 @@ use crate::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
             BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, MaybeBooleanRange,
             ObjIdEncoder, ObjIdIter, ObjIdRange, OpIdListEncoder, OpIdListIter, OpIdListRange,
-            RleRange, ValueEncoder, ValueIter, ValueRange,
+            RawRange, RleRange, ValueEncoder, ValueIter, ValueRange,
         },
         encoding::{
             BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, MaybeBooleanDecoder,
@@ -75,10 +75,10 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
     type PredIter = std::slice::Iter<'a, crate::types::OpId>;
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
-        if self.obj.is_root() {
-            convert::ObjId::Root
+        if let Some(id) = self.obj.id() {
+            convert::ObjId::Op(id)
         } else {
-            convert::ObjId::Op(self.obj.opid())
+            convert::ObjId::Root
         }
     }
 
@@ -125,6 +125,44 @@ pub(crate) struct ChangeOpsColumns {
     pred: OpIdListRange,
     expand: MaybeBooleanRange,
     mark_name: RleRange<smol_str::SmolStr>,
+}
+
+use crate::op_set2::change;
+impl From<change::ChangeOpsColumns> for ChangeOpsColumns {
+    fn from(other: change::ChangeOpsColumns) -> Self {
+        let obj = ObjIdRange::new(
+            RleRange::from(other.obj_actor),
+            RleRange::from(other.obj_ctr),
+        );
+        let key = KeyRange::new(
+            RleRange::from(other.key_actor),
+            DeltaRange::from(other.key_ctr),
+            RleRange::from(other.key_str),
+        );
+        let insert = BooleanRange::from(other.insert);
+        let action = RleRange::from(other.action);
+        let val = ValueRange::new(
+            RleRange::from(other.value_meta),
+            RawRange::from(other.value),
+        );
+        let pred = OpIdListRange::new(
+            RleRange::from(other.pred_count),
+            RleRange::from(other.pred_actor),
+            DeltaRange::from(other.pred_ctr),
+        );
+        let expand = MaybeBooleanRange::from(other.expand);
+        let mark_name = RleRange::from(other.mark_name);
+        Self {
+            obj,
+            key,
+            insert,
+            action,
+            val,
+            pred,
+            expand,
+            mark_name,
+        }
+    }
 }
 
 impl ChangeOpsColumns {
@@ -353,7 +391,7 @@ pub(crate) struct ChangeOpsIter<'a> {
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
 }
 
-impl<'a> ChangeOpsIter<'a> {
+impl ChangeOpsIter<'_> {
     fn done(&self) -> bool {
         self.action.done()
     }
@@ -393,7 +431,7 @@ impl<'a> ChangeOpsIter<'a> {
     }
 }
 
-impl<'a> Iterator for ChangeOpsIter<'a> {
+impl Iterator for ChangeOpsIter<'_> {
     type Item = Result<ChangeOp, ReadChangeOpError>;
 
     fn next(&mut self) -> Option<Self::Item> {

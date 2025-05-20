@@ -20,7 +20,7 @@ let _initializeListeners: (() => void)[] = []
 
 export function UseApi(api: API) {
   for (const k in api) {
-    // eslint-disable-next-line @typescript-eslint/no-extra-semi,@typescript-eslint/no-explicit-any
+    // eslint-disable-next-line no-extra-semi
     ;(ApiHandler as any)[k] = (api as any)[k]
   }
   _initialized = true

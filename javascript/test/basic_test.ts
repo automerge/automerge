@@ -1,8 +1,11 @@
 import { default as assert } from "assert"
-import { next as Automerge } from "../src/entrypoints/fullfat_node.js"
-import * as oldAutomerge from "../src/entrypoints/fullfat_node.js"
+import * as Automerge from "../src/entrypoints/fullfat_node.js"
 import { mismatched_heads } from "./helpers.js"
 import { PatchSource } from "../src/types.js"
+import { IMMUTABLE_STRING } from "../src/constants.js"
+import { readFile } from "fs/promises"
+import { join } from "path"
+import { fileURLToPath } from "url"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -254,16 +257,6 @@ describe("Automerge", () => {
       assert.deepEqual(docB2, doc2)
     })
 
-    it("handle non-text strings", () => {
-      let doc1 = oldAutomerge.from({ text: "hello world" })
-      let doc2 = Automerge.load<any>(oldAutomerge.save(doc1))
-      assert.throws(() => {
-        Automerge.change(doc2, d => {
-          Automerge.splice(d, ["text"], 1, 0, "Z")
-        })
-      }, /Cannot splice/)
-    })
-
     it("have many list methods", () => {
       let doc1 = Automerge.from({ list: [1, 2, 3] })
       assert.deepEqual(doc1, { list: [1, 2, 3] })
@@ -304,6 +297,30 @@ describe("Automerge", () => {
       assert.deepEqual(doc.list.indexOf(5), 5)
       assert.deepEqual(doc.text.indexOf("world"), 6)
     })
+    it("get change metadata", () => {
+      let doc = Automerge.from<any>({ text: "hello world" })
+      let heads = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.foo = "bar"
+      })
+      doc = Automerge.change(doc, d => {
+        d.zip = "zop"
+      })
+      let changes = Automerge.getChangesSince(doc, heads).map(
+        Automerge.decodeChange,
+      )
+      let meta = Automerge.getChangesMetaSince(doc, heads)
+      assert.equal(changes.length, 2)
+      assert.equal(meta.length, 2)
+      for (let i = 0; i < 2; i++) {
+        assert.equal(changes[i].actor, meta[i].actor)
+        assert.equal(changes[i].hash, meta[i].hash)
+        assert.equal(changes[i].message, meta[i].message)
+        assert.equal(changes[i].time, meta[i].time)
+        assert.deepEqual(changes[i].deps, meta[i].deps)
+        assert.deepEqual(changes[i].startOp, meta[i].startOp)
+      }
+    })
   })
 
   describe("explicitly allowing missing dependencies when loading", () => {
@@ -318,19 +335,6 @@ describe("Automerge", () => {
       const changes = Automerge.getChanges(doc2, doc3)
       assert.equal(changes.length, 1)
       Automerge.load(changes[0], { allowMissingChanges: true })
-    })
-
-    it("should work in stable", () => {
-      const doc1 = oldAutomerge.init<any>()
-      const doc2 = oldAutomerge.change(doc1, d => {
-        d.list = [1, 2, 3]
-      })
-      const doc3 = oldAutomerge.change(doc2, d => {
-        d.list.push(4)
-      })
-      const changes = oldAutomerge.getChanges(doc2, doc3)
-      assert.equal(changes.length, 1)
-      oldAutomerge.load(changes[0], { allowMissingChanges: true })
     })
   })
 
@@ -372,6 +376,7 @@ describe("Automerge", () => {
       let docL = Automerge.load<DocShape>(Automerge.save(docM))
 
       assert.deepEqual(docM.sub.x, docL.sub.x)
+      assert.deepEqual(docM.sub.y, docL.sub.y)
     })
   })
 
@@ -762,10 +767,88 @@ describe("Automerge", () => {
       doc = Automerge.change(doc, d => (d.a = 1))
       doc = Automerge.change(doc, d => (d.a = 2))
       const stats = Automerge.stats(doc)
-      assert.deepStrictEqual(stats, {
-        numChanges: 2,
-        numOps: 2,
+      assert.equal(stats.numChanges, 2)
+      assert.equal(stats.numOps, 2)
+      assert.equal(typeof stats.cargoPackageName, "string")
+      assert.equal(typeof stats.cargoPackageVersion, "string")
+      assert.equal(typeof stats.rustcVersion, "string")
+    })
+  }),
+    describe("the toJS function", () => {
+      it("should return the document at its correct heads", () => {
+        const doc = Automerge.from<any>({ x: 1 })
+
+        const doc1 = Automerge.change(doc, doc => {
+          doc.a = 123
+          doc.b = 456
+        })
+
+        assert.deepStrictEqual(Automerge.toJS(doc), { x: 1 })
+        assert.deepStrictEqual(Automerge.toJS(doc1), { a: 123, b: 456, x: 1 })
       })
     })
+
+  describe("When handling ImmutableString", () => {
+    it("should treat any class which has the correct symbol as a ImmutableString", () => {
+      // Exactly the same as `ImmutableString`
+      class FakeImmutableString {
+        val: string;
+        [IMMUTABLE_STRING] = true
+        constructor(val: string) {
+          this.val = val
+        }
+
+        /**
+         * Returns the content of the ImmutableString object as a simple string
+         */
+        toString(): string {
+          return this.val
+        }
+      }
+
+      let doc = Automerge.from<{ foo: FakeImmutableString | null }>({
+        foo: null,
+      })
+      doc = Automerge.change(doc, d => {
+        d.foo = new FakeImmutableString("something")
+      })
+      assert.deepStrictEqual(
+        doc.foo,
+        new Automerge.ImmutableString("something"),
+      )
+    })
+
+    it("should export RawString and isRawString for backwards compatibility", () => {
+      // Check the predicate is the same
+      assert.equal(Automerge.isImmutableString, Automerge.isRawString)
+      // Check the types are the same
+      const _dummy: Automerge.ImmutableString = new Automerge.RawString("xyz")
+    })
+  })
+
+  it("should export a predicate to check if something is an immutablestring", () => {
+    let doc = Automerge.from({
+      foo: new Automerge.ImmutableString("someval2"),
+      bar: "notanimmutablestring",
+    })
+    assert.strictEqual(Automerge.isImmutableString(doc.foo), true)
+    assert.strictEqual(Automerge.isImmutableString(doc.bar), false)
+
+    doc = Automerge.change(doc, d => {
+      assert.strictEqual(Automerge.isImmutableString(d.foo), true)
+      assert.strictEqual(Automerge.isImmutableString(d.bar), false)
+    })
+  })
+  it("it should be able to roll back a transaction", () => {
+    let doc1 = Automerge.from<any>({ foo: "bar" })
+    let save1 = Automerge.save(doc1)
+    assert.throws(() => {
+      let doc2 = Automerge.change(doc1, d => {
+        d.key = "value"
+        throw new RangeError("no")
+      })
+    })
+    let save2 = Automerge.save(doc1)
+    assert.deepEqual(save1, save2)
   })
 })

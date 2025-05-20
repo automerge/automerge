@@ -45,7 +45,7 @@ pub(crate) struct MismatchingColumn {
 pub(crate) mod compression {
     #[derive(Clone, Debug)]
     pub(crate) struct Unknown;
-    #[derive(Clone, Debug)]
+    #[derive(Clone, PartialEq, Debug)]
     pub(crate) struct Uncompressed;
 
     /// A witness for what we know about whether or not a column is compressed
@@ -74,7 +74,7 @@ impl Columns {
         self.columns.push(col)
     }
 
-    pub(crate) fn parse<'a, I: Iterator<Item = &'a RawColumn<compression::Uncompressed>>>(
+    pub(crate) fn parse2<'a, I: Iterator<Item = &'a RawColumn<compression::Uncompressed>>>(
         data_size: usize,
         cols: I,
     ) -> Result<Columns, BadColumnLayout> {

@@ -7,7 +7,7 @@ pub(crate) use boolean::{BooleanRange, MaybeBooleanRange};
 mod raw;
 pub(crate) use raw::RawRange;
 mod opid;
-pub(crate) use opid::{OpIdEncoder, OpIdIter, OpIdRange};
+pub(crate) use opid::OpIdRange;
 mod opid_list;
 pub(crate) use opid_list::{OpIdListEncoder, OpIdListIter, OpIdListRange};
 mod deps;

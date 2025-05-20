@@ -69,7 +69,8 @@ function buildWasm(outputDir) {
   const automergeWasmPath = path.join(rustProjectDir, "automerge-wasm")
   console.log("building automerge-wasm")
   execSync(
-    "cargo build --release --target wasm32-unknown-unknown --profile release",
+    //"cargo build --target wasm32-unknown-unknown --profile dev",
+    "cargo build --target wasm32-unknown-unknown --release",
     {
       cwd: automergeWasmPath,
     },
@@ -80,6 +81,7 @@ function buildWasm(outputDir) {
     "target",
     "wasm32-unknown-unknown",
     "release",
+    //"debug",
     "automerge_wasm.wasm",
   )
 
@@ -181,7 +183,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
   const webWasmPath = path.join(webOutputPath, "automerge_wasm_bg.wasm")
   const wasmBlob = fs.readFileSync(webWasmPath)
   const wasmBlobBase64 = wasmBlob.toString("base64")
-  const wasmBlobBase64Path = path.join(
+  const wasmBlobBase64EsmPath = path.join(
     jsProjectDir,
     "src",
     "wasm_bindgen_output",
@@ -189,7 +191,7 @@ function copyAndFixupWasm(wasmBuildTarball) {
     "automerge_wasm_bg_base64.js",
   )
   fs.writeFileSync(
-    wasmBlobBase64Path,
+    wasmBlobBase64EsmPath,
     `export const automergeWasmBase64 = "${wasmBlobBase64}"`,
   )
 
@@ -259,6 +261,12 @@ function compileTypescript() {
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
     path.join(jsProjectDir, "dist", "wasm_types.d.ts"),
   )
+
+  console.log("writing a declaration for the base64 encoded wasm")
+  fs.writeFileSync(
+    path.join(jsProjectDir, "dist", "automerge_wasm_bg_base64.d.ts"),
+    `export declare const automergeWasmBase64: string;`
+  );
 }
 
 async function transpileCjs() {
@@ -271,9 +279,7 @@ async function transpileCjs() {
     absWorkingDir: distDir,
     entryPoints: [
       `${inDir}/entrypoints/fullfat_node.js`,
-      `${inDir}/entrypoints/fullfat_node_next.js`,
       `${inDir}/entrypoints/slim.js`,
-      `${inDir}/entrypoints/slim_next.js`,
       `${inDir}/entrypoints/iife.js`,
     ],
     outdir: outDir,
@@ -298,10 +304,7 @@ async function transpileCjs() {
   console.log("building bundler CommonJS modules")
   await build({
     absWorkingDir: distDir,
-    entryPoints: [
-      `${inDir}/entrypoints/fullfat_base64.js`,
-      `${inDir}/entrypoints/fullfat_next_base64.js`,
-    ],
+    entryPoints: [`${inDir}/entrypoints/fullfat_base64.js`],
     outdir: outDir,
     bundle: true,
     packages: "external",
@@ -342,6 +345,17 @@ if (step === "all" || step === "transpile-cjs") {
   )
   const cjsDir = path.join(jsProjectDir, "/dist/cjs")
   fs.copyFileSync(wasmBindgenSrc, path.join(cjsDir, "automerge_wasm_bg.wasm"))
+
+  const wasmBlob = fs.readFileSync(wasmBindgenSrc)
+  const wasmBlobBase64 = wasmBlob.toString("base64")
+  const wasmBlobBase64CjsPath = path.join(
+    cjsDir,
+    "automerge_wasm_bg_base64.js",
+  )
+  fs.writeFileSync(
+    wasmBlobBase64CjsPath,
+    `module.exports = { automergeWasmBase64: "${wasmBlobBase64}" };`
+  );
 
   fs.copyFileSync(
     path.join(jsProjectDir, "/src/wasm_types.d.ts"),
