@@ -353,6 +353,7 @@ impl AutoCommit {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
             let inner = TransactionInner::new(args);
+            self.patch_log.migrate_actors(&self.doc.ops().actors).unwrap(); // we forked and m
             self.transaction = Some((self.patch_log.branch(), inner))
         }
     }
