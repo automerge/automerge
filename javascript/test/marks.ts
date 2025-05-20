@@ -1,6 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src/index.js"
-import * as WASM from "@automerge/automerge-wasm"
+import * as Automerge from "../src/index.js"
 
 describe("Automerge", () => {
   describe("marks", () => {

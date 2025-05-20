@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 find_package(cmocka CONFIG REQUIRED)
 
@@ -8,6 +8,7 @@ add_executable(
         base_state.c
         byte_span_tests.c
         cmocka_utils.c
+        cursor_tests.c
         enum_string_tests.c
         doc_state.c
         doc_tests.c
@@ -19,6 +20,7 @@ add_executable(
         mark_tests.c
         str_utils.c
         ported_wasm/basic_tests.c
+        ported_wasm/cursor_tests.c
         ported_wasm/suite.c
         ported_wasm/sync_tests.c
 )

@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import { next as Automerge } from "../src/index.js"
+import * as Automerge from "../src/index.js"
 import { assertEqualsOneOf } from "./helpers.js"
 import { decodeChange } from "./legacy/columnar.js"
 
@@ -491,7 +491,11 @@ describe("Automerge", () => {
       })
 
       it("should not error on empty string keys", () => {
-        s2 = Automerge.change(s1, "set empty string key", doc => (doc[""] = "x"))
+        s2 = Automerge.change(
+          s1,
+          "set empty string key",
+          doc => (doc[""] = "x"),
+        )
         assert.strictEqual(s2[""], "x")
       })
 
@@ -499,16 +503,16 @@ describe("Automerge", () => {
         Automerge.change(s1, doc => {
           assert.throws(() => {
             doc.foo = undefined
-          }, /Unsupported type undefined for path \/foo/)
+          }, /Cannot assign undefined value at \/foo/)
           assert.throws(() => {
             doc.foo = { prop: undefined }
-          }, /Unsupported type undefined for path \/foo\/prop/)
+          }, /Cannot assign undefined value at \/foo\/prop/)
           assert.throws(() => {
             doc.foo = () => {}
-          }, /Unsupported type function for path \/foo/)
+          }, /Cannot assign function value at \/foo/)
           assert.throws(() => {
             doc.foo = Symbol("foo")
-          }, /Unsupported type symbol for path \/foo/)
+          }, /Cannot assign symbol value at \/foo/)
         })
       })
     })

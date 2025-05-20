@@ -1,15 +1,13 @@
 use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
-use crate::{Automerge, TextRepresentation, UpdateSpansArgs};
+use crate::{Automerge, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
+use automerge::iter::{Span, Spans};
 use automerge::ReadDoc;
 use automerge::ROOT;
-use automerge::{
-    iter::{Span, Spans},
-    Change, ChangeHash, ObjType, Prop,
-};
+use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -18,7 +16,7 @@ use std::ops::Deref;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
+use am::{marks::ExpandMark, CursorPosition, MoveCursor, ObjId, Patch, PatchAction, Value};
 
 pub(crate) use crate::export_cache::ExportCache;
 
@@ -48,6 +46,32 @@ impl From<AR> for Array {
 impl From<JS> for JsValue {
     fn from(js: JS) -> Self {
         js.0
+    }
+}
+
+impl AsRef<JsValue> for JS {
+    fn as_ref(&self) -> &JsValue {
+        &self.0
+    }
+}
+
+impl<'a> From<&am::ChangeMetadata<'a>> for JS {
+    fn from(c: &am::ChangeMetadata<'a>) -> Self {
+        let change = Object::new();
+        let message = c
+            .message
+            .as_deref()
+            .map(JsValue::from)
+            .unwrap_or(JsValue::NULL);
+        js_set(&change, "actor", c.actor.to_string()).unwrap();
+        js_set(&change, "seq", c.seq as f64).unwrap();
+        js_set(&change, "startOp", c.start_op as f64).unwrap();
+        js_set(&change, "maxOp", c.max_op as f64).unwrap();
+        js_set(&change, "time", c.timestamp as f64).unwrap();
+        js_set(&change, "message", message).unwrap();
+        js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
+        js_set(&change, "hash", c.hash.to_string()).unwrap();
+        JS(change.into())
     }
 }
 
@@ -135,6 +159,49 @@ impl TryFrom<JS> for usize {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         value.as_f64().map(|n| n as usize).ok_or(error::BadNumber)
+    }
+}
+
+impl TryFrom<JS> for CursorPosition {
+    type Error = error::BadCursorPosition;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        match value.as_f64() {
+            Some(idx) => {
+                if idx < 0f64 {
+                    Ok(CursorPosition::Start)
+                } else {
+                    Ok(CursorPosition::Index(idx as usize))
+                }
+            }
+            None => value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "start" => Some(CursorPosition::Start),
+                    "end" => Some(CursorPosition::End),
+                    _ => None,
+                })
+                .ok_or(error::BadCursorPosition),
+        }
+    }
+}
+
+impl TryFrom<JS> for MoveCursor {
+    type Error = error::BadMoveCursor;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.is_undefined() {
+            Ok(MoveCursor::default())
+        } else {
+            value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "before" => Some(MoveCursor::Before),
+                    "after" => Some(MoveCursor::After),
+                    _ => None,
+                })
+                .ok_or(error::BadMoveCursor)
+        }
     }
 }
 
@@ -984,9 +1051,7 @@ impl Automerge {
         } else {
             value.clone()
         };
-        if matches!(datatype, Datatype::Map | Datatype::List)
-            || (datatype == Datatype::Text && self.text_rep == TextRepresentation::Array)
-        {
+        if matches!(datatype, Datatype::Map | Datatype::List) {
             cache.set_raw_object(&value, &JsValue::from(&id.to_string()))?;
         }
         cache.set_datatype(&value, &datatype.into())?;
@@ -1006,8 +1071,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutSeq { index, value, .. } => {
-                let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, cache)?;
                 js_set(array, *index as f64, &sub_val)?;
                 Ok(())
             }
@@ -1025,11 +1089,7 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(
-                            array,
-                            index,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
-                        )?;
+                        js_set(array, index, &self.export_value(alloc(&new_value), cache)?)?;
                         Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -1040,28 +1100,7 @@ impl Automerge {
             }
             PatchAction::DeleteMap { .. } => Err(error::ApplyPatch::DeleteKeyFromSeq),
             PatchAction::PutMap { .. } => Err(error::ApplyPatch::PutKeyInSeq),
-            PatchAction::SpliceText { index, value, .. } => {
-                match self.text_rep {
-                    TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
-                    TextRepresentation::Array => {
-                        let val = String::from(value);
-                        let elems = val
-                            .chars()
-                            .map(|c| {
-                                (
-                                    Value::Scalar(std::borrow::Cow::Owned(am::ScalarValue::Str(
-                                        c.to_string().into(),
-                                    ))),
-                                    ObjId::Root, // Using ROOT is okay because this ID is never used as
-                                    // we're producing ScalarValue::Str
-                                    false,
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        self.sub_splice(array, *index, 0, &elems, meta, cache)
-                    }
-                }
-            }
+            PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInSeq),
             PatchAction::Mark { .. } => Ok(()),
             PatchAction::Conflict { .. } => Ok(()),
         }
@@ -1076,8 +1115,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         match &patch.action {
             PatchAction::PutMap { key, value, .. } => {
-                let sub_val =
-                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta, cache)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, cache)?;
                 js_set(map, key, &sub_val)?;
                 Ok(())
             }
@@ -1095,11 +1133,7 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(
-                            map,
-                            key,
-                            &self.export_value(alloc(&new_value, self.text_rep), cache)?,
-                        )?;
+                        js_set(map, key, &self.export_value(alloc(&new_value), cache)?)?;
                         Ok(())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -1179,7 +1213,7 @@ impl Automerge {
                 let length = string.length();
                 let before = string.slice(0, index);
                 let after = string.slice(index, length);
-                let result = before.concat(&String::from(value).into()).concat(&after);
+                let result = before.concat(&value.make_string().into()).concat(&after);
                 Ok(result.into())
             }
             _ => Ok(string.into()),
@@ -1197,7 +1231,7 @@ impl Automerge {
     ) -> Result<(), error::ApplyPatch> {
         let args: Array = values
             .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0, self.text_rep), &v.1, meta, cache))
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, cache))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
         args.unshift(&(index as u32).into());
@@ -1359,16 +1393,13 @@ impl Automerge {
     }
 }
 
-pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatype, JsValue) {
+pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
     match value {
         am::Value::Object(o) => match o {
             ObjType::Map => (Datatype::Map, Object::new().into()),
             ObjType::Table => (Datatype::Table, Object::new().into()),
             ObjType::List => (Datatype::List, Array::new().into()),
-            ObjType::Text => match text_rep {
-                TextRepresentation::String => (Datatype::Text, "".into()),
-                TextRepresentation::Array => (Datatype::Text, Array::new().into()),
-            },
+            ObjType::Text => (Datatype::Text, "".into()),
         },
         am::Value::Scalar(s) => alloc_scalar(s.as_ref()),
     }
@@ -1435,11 +1466,7 @@ pub(crate) fn export_span(
                 if m.num_marks() > 0 {
                     let marks = Object::new();
                     for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
+                        js_set(&marks, name, alloc(&value.into()).1)?;
                     }
                     js_set(&result, "marks", marks)?;
                 }
@@ -1481,16 +1508,7 @@ pub(super) fn export_hydrate(
             }
             list.into()
         }
-        am::hydrate::Value::Text(text) => match doc.text_rep {
-            TextRepresentation::String => text.to_string().into(),
-            TextRepresentation::Array => {
-                let list = Array::new();
-                for c in text.to_string().chars() {
-                    list.push(&c.to_string().into());
-                }
-                list.into()
-            }
-        },
+        am::hydrate::Value::Text(text) => text.to_string().into(),
     }
 }
 
@@ -1524,7 +1542,7 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Map(key)))?;
 
-            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let (datatype, value) = alloc(&value.0);
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1545,7 +1563,7 @@ fn export_patch(
             js_set(&result, "action", "put")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
 
-            let (datatype, value) = alloc(&value.0, TextRepresentation::String);
+            let (datatype, value) = alloc(&value.0);
             let exported_val = if let Some(external_type) = externals.get(&datatype) {
                 external_type.construct(&value, datatype)?
             } else {
@@ -1562,7 +1580,7 @@ fn export_patch(
             let values = values
                 .iter()
                 .map(|v| {
-                    let (datatype, js_val) = alloc(&v.0, TextRepresentation::String);
+                    let (datatype, js_val) = alloc(&v.0);
                     let exported_val = if let Some(external_type) = externals.get(&datatype) {
                         external_type.construct(&js_val, datatype)
                     } else {
@@ -1594,16 +1612,12 @@ fn export_patch(
         } => {
             js_set(&result, "action", "splice")?;
             js_set(&result, "path", export_path(path, &Prop::Seq(index)))?;
-            js_set(&result, "value", String::from(&value))?;
+            js_set(&result, "value", value.make_string())?;
             if let Some(m) = marks {
                 if m.num_marks() > 0 {
                     let marks = Object::new();
                     for (name, value) in m.iter() {
-                        js_set(
-                            &marks,
-                            name,
-                            alloc(&value.into(), TextRepresentation::String).1,
-                        )?;
+                        js_set(&marks, name, alloc(&value.into()).1)?;
                     }
                     js_set(&result, "marks", marks)?;
                 }
@@ -1613,7 +1627,7 @@ fn export_patch(
         PatchAction::Increment { prop, value, .. } => {
             js_set(&result, "action", "inc")?;
             js_set(&result, "path", export_path(path, &prop))?;
-            js_set(&result, "value", &JsValue::from_f64(value as f64))?;
+            js_set(&result, "value", JsValue::from_f64(value as f64))?;
             Ok(result.into())
         }
         PatchAction::DeleteMap { key, .. } => {
@@ -1636,11 +1650,7 @@ fn export_patch(
             for m in marks.iter() {
                 let mark = Object::new();
                 js_set(&mark, "name", m.name())?;
-                js_set(
-                    &mark,
-                    "value",
-                    &alloc(&m.value().into(), TextRepresentation::String).1,
-                )?;
+                js_set(&mark, "value", &alloc(&m.value().into()).1)?;
                 js_set(&mark, "start", m.start as i32)?;
                 js_set(&mark, "end", m.end as i32)?;
                 marks_array.push(&mark);
@@ -1708,7 +1718,13 @@ pub(super) fn js_val_to_hydrate(
                 let Some(obj) = js_obj.text() else {
                     return Err(error::JsValToHydrate::InvalidText);
                 };
-                Ok(am::hydrate::Value::Text(obj.into()))
+                // This code path is only used in `next`, which uses a string representation
+                // and we're targeting JS, which uses utf16 strings
+                let text_rep =
+                    am::patches::TextRepresentation::String(am::TextEncoding::Utf16CodeUnit);
+                Ok(am::hydrate::Value::Text(am::hydrate::Text::new(
+                    text_rep, obj,
+                )))
             }
         }
     } else if let Some(val) = doc.import_scalar(&value, datatype) {
@@ -1874,6 +1890,8 @@ pub(crate) mod error {
         CallSplice(JsValue),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error("reflect set failed")]
+        ReflectSet(JsValue),
         #[error("invalid root processed")]
         InvalidRoot,
         #[error("missing child in export")]
@@ -1987,6 +2005,13 @@ pub(crate) mod error {
         #[error("path did not refer to an object")]
         NotAnObject,
     }
+    #[derive(Debug, thiserror::Error)]
+    #[error("cursor position must be an index (number), 'start' or 'end'")]
+    pub struct BadCursorPosition;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("move must be 'before' or 'after' - is 'after' by default")]
+    pub struct BadMoveCursor;
 
     #[derive(Debug, thiserror::Error)]
     #[error("expand must be 'left', 'right', 'both', or 'none' - is 'right' by default")]

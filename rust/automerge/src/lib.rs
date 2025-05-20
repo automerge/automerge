@@ -83,7 +83,8 @@
 //!
 //! ### Text Encoding
 //!
-//! Text is encoded in UTF-8 by default but uses UTF-16 when using the wasm target.
+//! Text is encoded in UTF-8 by default but uses UTF-16 when using the wasm target,
+//! you can configure it with the feature `utf16-indexing`.
 //!
 //! ## Sync Protocol
 //!
@@ -272,11 +273,8 @@ mod indexed_cache;
 pub mod iter;
 mod legacy;
 pub mod marks;
-mod op_set;
-pub mod op_tree;
-mod parents;
+pub mod op_set2;
 pub mod patches;
-mod query;
 mod read;
 mod sequence_tree;
 mod storage;
@@ -286,26 +284,25 @@ mod text_value;
 pub mod transaction;
 mod types;
 mod value;
-#[cfg(feature = "optree-visualisation")]
-mod visualisation;
 
 pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
-pub use cursor::Cursor;
+pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
-pub use parents::{Parent, Parents};
+pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
+pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 
 /// The object ID for the root map of a document

@@ -1,4 +1,3 @@
-#![cfg(test)]
 //! This entire module is a copy of the sync module before we introduced the v2 message type and
 //! only exists in order to be able to write tests against that old implementation.
 
@@ -7,7 +6,6 @@ use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    patches::{PatchLog, TextRepresentation},
     storage::parse::Input,
     storage::{parse, Change as StoredChange, ReadChangeOpError},
     sync::SyncDoc,
@@ -121,8 +119,7 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        let mut patch_log = PatchLog::inactive(TextRepresentation::default());
-        self.receive_sync_message_inner_v1(sync_state, message, &mut patch_log)
+        self.receive_sync_message_inner_v1(sync_state, message)
     }
 
     fn make_bloom_filter_v1(&self, last_sync: Vec<ChangeHash>) -> Have {
@@ -138,7 +135,7 @@ impl Automerge {
         &self,
         have: &[Have],
         need: &[ChangeHash],
-    ) -> Result<Vec<&Change>, AutomergeError> {
+    ) -> Result<Vec<Change>, AutomergeError> {
         if have.is_empty() {
             Ok(need
                 .iter()
@@ -209,7 +206,6 @@ impl Automerge {
         &mut self,
         sync_state: &mut State,
         message: Message,
-        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         sync_state.in_flight = false;
         let before_heads = self.get_heads();
@@ -223,7 +219,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_log_patches(message_changes, patch_log)?;
+            self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

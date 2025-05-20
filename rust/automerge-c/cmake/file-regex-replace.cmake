@@ -1,6 +1,6 @@
 # This CMake script is used to perform string substitutions within a generated
 # file.
-cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 if(NOT DEFINED MATCH_REGEX)
     message(FATAL_ERROR "Variable \"MATCH_REGEX\" is not defined.")

@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum MapType {
     Map,
@@ -25,7 +24,6 @@ pub(crate) enum SequenceType {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OpId(pub u64, pub ActorId);
 
 impl OpId {
@@ -53,7 +51,6 @@ impl OpId {
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ObjectId {
     Id(OpId),
     Root,

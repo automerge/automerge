@@ -207,15 +207,6 @@ pub fn mk_counter(value: i64) -> automerge::ScalarValue {
     automerge::ScalarValue::counter(value)
 }
 
-#[derive(Eq, Hash, PartialEq, Debug)]
-pub struct ExportedOpId(String);
-
-impl std::fmt::Display for ExportedOpId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 /// A `RealizedObject` is a representation of all the current values in a document - including
 /// conflicts.
 #[derive(PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]

@@ -1,22 +1,31 @@
-import {
-  type API,
+import type {
+  API,
   Automerge,
-  type Change,
-  type DecodedChange,
+  Change,
+  DecodedChange,
+  SyncMessage,
   SyncState,
-  type SyncMessage,
-  type JsSyncState,
-  type DecodedSyncMessage,
-  type ChangeToEncode,
-  type LoadOptions,
-  type InitOptions,
-} from "@automerge/automerge-wasm"
-export type { ChangeToEncode } from "@automerge/automerge-wasm"
+  JsSyncState,
+  DecodedSyncMessage,
+  ChangeToEncode,
+  LoadOptions,
+  InitOptions,
+} from "./wasm_types.js"
+export type { ChangeToEncode } from "./wasm_types.js"
+import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js"
+import * as WasmApi from "./wasm_bindgen_output/web/automerge_wasm.js"
+
+let _initialized = false
+let _initializeListeners: (() => void)[] = []
 
 export function UseApi(api: API) {
   for (const k in api) {
-    // eslint-disable-next-line @typescript-eslint/no-extra-semi,@typescript-eslint/no-explicit-any
+    // eslint-disable-next-line no-extra-semi
     ;(ApiHandler as any)[k] = (api as any)[k]
+  }
+  _initialized = true
+  for (const listener of _initializeListeners) {
+    listener()
   }
 }
 
@@ -57,3 +66,50 @@ export const ApiHandler: API = {
   },
 }
 /* eslint-enable */
+
+/**
+ * Initialize the wasm module
+ *
+ * @param wasmBlob - The wasm module as a Uint8Array, Request, Promise<Uint8Array> or string. If this argument is a string then it is assumed to be a URL and the library will attempt to fetch the wasm module from that URL.
+ *
+ * @remarks
+ * If you are using the `/slim` subpath export then this function must be
+ * called before any other functions in the library. If you are using any of
+ * the other subpath exports then it will have already been called for you.
+ */
+export function initializeWasm(
+  wasmBlob: Uint8Array | Request | Promise<Uint8Array> | string,
+): Promise<void> {
+  return initWasm({ module_or_path: wasmBlob }).then(_ => {
+    UseApi(WasmApi)
+  })
+}
+
+/**
+ * Initialize the wasm module from a base64 encoded string
+ *
+ * @param wasmBase64 - The bytes of the wasm file as a base64 encoded string
+ */
+export function initializeBase64Wasm(wasmBase64: string): Promise<void> {
+  return initializeWasm(Uint8Array.from(atob(wasmBase64), c => c.charCodeAt(0)))
+}
+
+/**
+ * A promise which resolves when the web assembly module has been initialized
+ * (or immediately if it has already been initialized)
+ */
+export function wasmInitialized(): Promise<void> {
+  if (_initialized) return Promise.resolve()
+  return new Promise(resolve => {
+    _initializeListeners.push(resolve)
+  })
+}
+
+/**
+ * Check if the wasm module has been initialized
+ *
+ * @returns true if the wasm module has been initialized
+ */
+export function isWasmInitialized(): boolean {
+  return _initialized
+}

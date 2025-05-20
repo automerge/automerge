@@ -102,6 +102,12 @@ pub(super) struct Cols<T: compression::ColumnCompression> {
     pub(super) data: Range<usize>,
 }
 
+impl<T: compression::ColumnCompression> Cols<T> {
+    pub(super) fn new(data: Range<usize>, raw_columns: RawColumns<T>) -> Self {
+        Self { data, raw_columns }
+    }
+}
+
 // Compression and decompression involve almost the same steps in either direction. This trait
 // encapsulates that.
 trait Direction: std::fmt::Debug {
@@ -343,7 +349,7 @@ impl<'a> Compression<'a, Decompressing, Finished<Decompressing>> {
     }
 }
 
-impl<'a> Compression<'a, Compressing, Finished<Compressing>> {
+impl Compression<'_, Compressing, Finished<Compressing>> {
     fn finish(self) -> Vec<u8> {
         let Finished { out, .. } = self.state;
         let headerless = &out[self.direction.header_len..];

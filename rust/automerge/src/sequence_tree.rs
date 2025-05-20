@@ -312,7 +312,7 @@ where
                 && self
                     .children
                     .get(child_index - 1)
-                    .map_or(false, |c| c.elements.len() >= B)
+                    .is_some_and(|c| c.elements.len() >= B)
             {
                 let last_element = self.children[child_index - 1].elements.pop().unwrap();
                 assert!(!self.children[child_index - 1].elements.is_empty());
@@ -334,7 +334,7 @@ where
             } else if self
                 .children
                 .get(child_index + 1)
-                .map_or(false, |c| c.elements.len() >= B)
+                .is_some_and(|c| c.elements.len() >= B)
             {
                 let first_element = self.children[child_index + 1].elements.remove(0);
                 self.children[child_index + 1].length -= 1;

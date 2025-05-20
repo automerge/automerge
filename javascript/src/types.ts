@@ -1,35 +1,19 @@
-export { Text } from "./text.js"
-import { Text } from "./text.js"
 export { Counter } from "./counter.js"
 export { Int, Uint, Float64 } from "./numbers.js"
 
 import { Counter } from "./counter.js"
-import type { Patch } from "@automerge/automerge-wasm"
+import type { Patch } from "./wasm_types.js"
 export type {
   Cursor,
+  CursorPosition,
+  MoveCursor,
   MapObjType,
   MarkSet,
   Mark,
   MarkRange,
   MarkPatch,
   Patch,
-} from "@automerge/automerge-wasm"
-
-export type AutomergeValue =
-  | ScalarValue
-  | { [key: string]: AutomergeValue }
-  | Array<AutomergeValue>
-  | Text
-export type MapValue = { [key: string]: AutomergeValue }
-export type ListValue = Array<AutomergeValue>
-export type ScalarValue =
-  | string
-  | number
-  | null
-  | boolean
-  | Date
-  | Counter
-  | Uint8Array
+} from "./wasm_types.js"
 
 export type MarkValue = string | number | null | boolean | Date | Uint8Array
 
@@ -67,3 +51,22 @@ export type PatchCallback<T> = (
   patches: Array<Patch>,
   info: PatchInfo<T>,
 ) => void
+
+import { ImmutableString } from "./immutable_string.js"
+export { ImmutableString } from "./immutable_string.js"
+
+export type AutomergeValue =
+  | ScalarValue
+  | { [key: string]: AutomergeValue }
+  | Array<AutomergeValue>
+export type MapValue = { [key: string]: AutomergeValue }
+export type ListValue = Array<AutomergeValue>
+export type ScalarValue =
+  | string
+  | number
+  | null
+  | boolean
+  | Date
+  | Counter
+  | Uint8Array
+  | ImmutableString

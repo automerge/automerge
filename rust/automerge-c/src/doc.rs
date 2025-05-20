@@ -6,6 +6,7 @@ use std::ops::{Deref, DerefMut};
 
 use crate::actor_id::{to_actor_id, AMactorId};
 use crate::byte_span::{to_str, AMbyteSpan};
+use crate::cursor::{to_cursor, AMcursor};
 use crate::items::AMitems;
 use crate::obj::{to_obj_id, AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
@@ -39,7 +40,7 @@ impl AMdoc {
         Self(auto_commit)
     }
 
-    pub fn is_equal_to(&mut self, other: &mut Self) -> bool {
+    fn is_equal_to(&mut self, other: &mut Self) -> bool {
         self.document().get_heads() == other.document().get_heads()
     }
 }
@@ -384,6 +385,91 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
     let doc1 = to_doc_mut!(doc1);
     let doc2 = to_doc_mut!(doc2);
     to_result(doc1.get_changes_added(doc2))
+}
+
+/// \memberof AMdoc
+/// \brief Gets an `AMcursor` i.e. a stable address for a position within a list
+///        object or text object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] position The absolute position of the cursor.
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+///                  items to select a historical object or `NULL` to select the
+///                  current object.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CURSOR` item.
+/// \pre \p doc `!= NULL`
+/// \pre \p position `< AMobjSize(`\p doc, \p obj_id, \p heads `)`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
+/// \internal
+///
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMitems or std::ptr::null()
+#[no_mangle]
+pub unsafe extern "C" fn AMgetCursor(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    position: usize,
+    heads: *const AMitems,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    match heads.as_ref() {
+        None => to_result(doc.get_cursor(obj_id, position, None)),
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+            Ok(heads) => to_result(doc.get_cursor(obj_id, position, Some(heads.as_slice()))),
+            Err(e) => AMresult::error(&e.to_string()).into(),
+        },
+    }
+}
+
+/// \memberof AMdoc
+/// \brief Gets the absolute position of an `AMcursor` within a list object or
+///        text object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] cursor A pointer to an `AMcursor` struct.
+/// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
+///                  items to select a historical object or `NULL` to select the
+///                  current object.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_UINT` item.
+///         For an `AM_OBJ_TYPE_TEXT` object, if `AUTOMERGE_C_UTF8` is defined
+///         then the item's value is in bytes but if `AUTOMERGE_C_UTF32` is
+///         defined then the item's value is in Unicode code points.
+/// \pre \p doc `!= NULL`
+/// \pre \p cursor `!= NULL`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
+/// \internal
+///
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// cursor must be a valid pointer to an AMcursor
+/// heads must be a valid pointer to an AMitems or std::ptr::null()
+#[no_mangle]
+pub unsafe extern "C" fn AMgetCursorPosition(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    cursor: *const AMcursor,
+    heads: *const AMitems,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    let cursor = to_cursor!(cursor);
+    match heads.as_ref() {
+        None => to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), None)),
+        Some(heads) => match <Vec<am::ChangeHash>>::try_from(heads) {
+            Ok(heads) => {
+                to_result(doc.get_cursor_position(obj_id, cursor.as_ref(), Some(heads.as_slice())))
+            }
+            Err(e) => AMresult::error(&e.to_string()).into(),
+        },
+    }
 }
 
 /// \memberof AMdoc
