@@ -95,12 +95,18 @@ describe("cursors", () => {
     let s1 = Automerge.initSyncState()
     let s2 = Automerge.initSyncState()
     let message
-    ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
-    ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
-    ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
-    ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message, {
-      patchCallback,
-    })
+    do { // sometimes sync takes more than one cycle
+      ;[s2, message] = Automerge.generateSyncMessage(doc1, s2)
+      if (message) {
+        ;[doc2, s1] = Automerge.receiveSyncMessage(doc2, s1, message)
+      }
+      ;[s1, message] = Automerge.generateSyncMessage(doc2, s1)
+      if (message) {
+        ;[doc1, s2] = Automerge.receiveSyncMessage(doc1, s2, message, {
+          patchCallback,
+        })
+      }
+    } while(message != null)
     assert.deepEqual(callbacks, [
       "from",
       "change",
