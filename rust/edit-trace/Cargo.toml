@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 automerge = { path = "../automerge" }
-criterion = "^0.5"
+criterion = "^0.6"
 jzon = "^0.12.5"
 rand = "^0.8"
 serde_json = "1.0.128"
@@ -21,4 +21,3 @@ bench = false
 debug = true
 name = "main"
 harness = false
-

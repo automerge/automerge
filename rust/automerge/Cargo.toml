@@ -34,7 +34,7 @@ getrandom = "0.2.16"
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
-rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
+rand = { version = "^0.8.4", optional = false, features = ["small_rng"] }
 
 unicode-segmentation = "1.10.1"
 
@@ -50,7 +50,7 @@ serde_json = { version = "^1.0.73", features = [
     "float_roundtrip",
 ], default-features = true }
 maplit = { version = "^1.0" }
-criterion = "0.5"
+criterion = "0.6"
 test-log = { version = "0.2.10", features = [
     "trace",
 ], default-features = false }
