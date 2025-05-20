@@ -12,7 +12,7 @@ pub(super) struct MessageBuilder {
 }
 
 impl MessageBuilder {
-    pub(super) fn new_v1<'a, I: Iterator<Item = &'a Change>>(changes: I) -> Self {
+    pub(super) fn new_v1<I: Iterator<Item = Change>>(changes: I) -> Self {
         MessageBuilder {
             heads: Vec::new(),
             need: Vec::new(),

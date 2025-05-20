@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
-project(automerge-c VERSION 0.2.2
+project(automerge-c VERSION 0.3.0
                     LANGUAGES C
                     DESCRIPTION "C bindings for the Automerge Rust library.")
 
@@ -12,19 +12,33 @@ include(GNUInstallDirs)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+set(DEFAULT_LIBRARY_NAME "automerge")
 
-set(${PROJECT_NAME}-DEFAULT_LIBRARY_NAME "automerge")
+if(NOT DEFINED LIBRARY_NAME)
+    set(LIBRARY_NAME "${DEFAULT_LIBRARY_NAME}")
+endif()
 
-set(${PROJECT_NAME}-LIBRARY_NAME "${${PROJECT_NAME}-DEFAULT_LIBRARY_NAME}" CACHE STRING "The library's name.")
+set(DEFAULT_BINDINGS_NAME "${DEFAULT_LIBRARY_NAME}_core")
 
-set(DEFAULT_BINDINGS_NAME "${${PROJECT_NAME}-DEFAULT_LIBRARY_NAME}_core")
+if(NOT DEFINED BINDINGS_NAME)
+    set(BINDINGS_NAME "${DEFAULT_BINDINGS_NAME}")
+endif()
 
-set(BINDINGS_NAME "${DEFAULT_BINDINGS_NAME}" CACHE STRING "The bindings' name.")
+if(NOT DEFINED STATIC_LIBRARY_PREFIX)
+    set(STATIC_LIBRARY_PREFIX "${CMAKE_STATIC_LIBRARY_PREFIX}")
+endif()
 
-set(${PROJECT_NAME}-LIBRARY_PREFIX "${CMAKE_STATIC_LIBRARY_PREFIX}" CACHE STRING "An output library's prefix.")
+if(NOT DEFINED STATIC_LIBRARY_SUFFIX)
+    set(STATIC_LIBRARY_SUFFIX "${CMAKE_STATIC_LIBRARY_SUFFIX}")
+endif()
 
-set(${PROJECT_NAME}-LIBRARY_SUFFIX "${CMAKE_STATIC_LIBRARY_SUFFIX}" CACHE STRING "An output library's suffix.")
+IF(NOT DEFINED SHARED_LIBRARY_PREFIX)
+    set(SHARED_LIBRARY_PREFIX "${CMAKE_SHARED_LIBRARY_PREFIX}")
+endif()
+
+if(NOT DEFINED SHARED_LIBRARY_SUFFIX)
+    set(SHARED_LIBRARY_SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
 
@@ -120,7 +134,7 @@ configure_file(
 )
 
 set(CARGO_OUTPUT
-    ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h
+    ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     ${CARGO_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${BINDINGS_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
 
@@ -131,21 +145,22 @@ add_custom_command(
         ${CARGO_OUTPUT}
     COMMAND
         # Force cbindgen to regenerate the header file by updating its configuration file; removing the header won't.
-        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${PROJECT_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h ${PROJECT_SOURCE_DIR}/cbindgen.toml
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${PROJECT_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${PROJECT_SOURCE_DIR}/cbindgen.toml
     COMMAND
         ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN} RUSTFLAGS=${RUSTFLAGS} ${CARGO_CMD} build ${CARGO_FLAGS} ${CARGO_FEATURES}
     COMMAND
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
-        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
         # Compensate for cbindgen ignoring `std::mem::size_of<usize>()` calls.
-        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${PROJECT_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     MAIN_DEPENDENCY
         src/lib.rs
     DEPENDS
         src/actor_id.rs
         src/byte_span.rs
         src/change.rs
+        src/cursor.rs
         src/doc.rs
         src/doc/list.rs
         src/doc/map.rs
@@ -174,26 +189,6 @@ add_custom_target(${BINDINGS_NAME}_artifacts ALL
     DEPENDS ${CARGO_OUTPUT}
 )
 
-# Enable an external build tool to find the bindings in the root of the
-# out-of-source build directory when it has overridden an aspect of its name.
-if(NOT (("${${PROJECT_NAME}-LIBRARY_PREFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_PREFIX}") AND
-        ("${BINDINGS_NAME}" STREQUAL "${DEFAULT_BINDINGS_NAME}") AND
-        ("${${PROJECT_NAME}-LIBRARY_SUFFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_SUFFIX}")))
-    add_custom_command(
-        TARGET ${BINDINGS_NAME}_artifacts
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "Copying \"${CARGO_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${BINDINGS_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}\" to \"${PROJECT_BINARY_DIR}/${${PROJECT_NAME}-LIBRARY_PREFIX}${BINDINGS_NAME}${${PROJECT_NAME}-LIBRARY_SUFFIX}\"..."
-        COMMAND
-            ${CMAKE_COMMAND} -E copy ${CARGO_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${BINDINGS_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX} ${PROJECT_BINARY_DIR}/${${PROJECT_NAME}-LIBRARY_PREFIX}${BINDINGS_NAME}${${PROJECT_NAME}-LIBRARY_SUFFIX}
-        WORKING_DIRECTORY
-            ${PROJECT_SOURCE_DIR}
-        COMMENT
-            "Aliasing the bindings for the external build tool..."
-        VERBATIM
-    )
-endif()
-
 add_library(${BINDINGS_NAME} STATIC IMPORTED GLOBAL)
 
 target_include_directories(${BINDINGS_NAME} INTERFACE "${CBINDGEN_INCLUDEDIR}")
@@ -210,7 +205,7 @@ set_target_properties(
         IMPORTED_NO_SONAME "TRUE"
         IMPORTED_SONAME ""
         LINKER_LANGUAGE C
-        PUBLIC_HEADER "${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h"
+        PUBLIC_HEADER "${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h"
         SOVERSION "${PROJECT_VERSION_MAJOR}"
         VERSION "${PROJECT_VERSION}"
         # \note Cargo exports all of the symbols automatically.
@@ -226,9 +221,9 @@ add_custom_command(
         ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
         ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     COMMAND
-        ${CMAKE_COMMAND} -DPROJECT_NAME=${PROJECT_NAME} -DLIBRARY_NAME=${${PROJECT_NAME}-LIBRARY_NAME} -DSUBDIR=${UTILS_SUBDIR} -P ${PROJECT_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake -- ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+        ${CMAKE_COMMAND} -DPROJECT_NAME=${PROJECT_NAME} -DLIBRARY_NAME=${LIBRARY_NAME} -DSUBDIR=${UTILS_SUBDIR} -P ${PROJECT_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     MAIN_DEPENDENCY
-        ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h
+        ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     DEPENDS
         ${PROJECT_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake
     WORKING_DIRECTORY
@@ -238,14 +233,14 @@ add_custom_command(
     VERBATIM
 )
 
-add_custom_target(${${PROJECT_NAME}-LIBRARY_NAME}_utilities
+add_custom_target(${LIBRARY_NAME}_utilities
     DEPENDS ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
             ${PROJECT_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
 )
 
-add_library(${${PROJECT_NAME}-LIBRARY_NAME})
+add_library(${LIBRARY_NAME})
 
-target_compile_features(${${PROJECT_NAME}-LIBRARY_NAME} PRIVATE c_std_99)
+target_compile_features(${LIBRARY_NAME} PRIVATE c_std_99)
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
@@ -261,81 +256,112 @@ else()
     list(APPEND LIBRARY_DEPENDENCIES m)
 endif()
 
-target_link_libraries(${${PROJECT_NAME}-LIBRARY_NAME} PUBLIC ${LIBRARY_DEPENDENCIES})
+set_target_properties(${LIBRARY_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS "TRUE")
 
 # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
 #       contain a non-existent path so its build-time include directory
 #       must be specified for all of its dependent targets instead.
-target_include_directories(${${PROJECT_NAME}-LIBRARY_NAME}
+target_include_directories(${LIBRARY_NAME}
     PUBLIC "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR};${PROJECT_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}>"
            "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-add_dependencies(${${PROJECT_NAME}-LIBRARY_NAME} ${BINDINGS_NAME}_artifacts)
+add_dependencies(${LIBRARY_NAME} ${BINDINGS_NAME}_artifacts)
 
-if(WIN32)
-    find_program(LIB_TOOL "lib" REQUIRED)
+if(BUILD_SHARED_LIBS)
+    target_link_libraries(${LIBRARY_NAME} PUBLIC "$<LINK_LIBRARY:WHOLE_ARCHIVE,${BINDINGS_NAME}>" ${LIBRARY_DEPENDENCIES})
 
-    add_custom_command(
-        TARGET ${${PROJECT_NAME}-LIBRARY_NAME}
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${${PROJECT_NAME}-LIBRARY_NAME}>\"..."
-        COMMAND
-            ${LIB_TOOL} /OUT:$<TARGET_FILE_NAME:${${PROJECT_NAME}-LIBRARY_NAME}> $<TARGET_FILE_NAME:${${PROJECT_NAME}-LIBRARY_NAME}> $<TARGET_FILE:${BINDINGS_NAME}> ntdll.lib
-        WORKING_DIRECTORY
-            ${PROJECT_BINARY_DIR}
-        COMMENT
-            "Merging the libraries..."
-        VERBATIM
-    )
+    # Enable an external build tool to find the shared library in the root of the
+    # out-of-source build directory when it has overridden an aspect of its name.
+    if(NOT (("${SHARED_LIBRARY_PREFIX}" STREQUAL "${CMAKE_SHARED_LIBRARY_PREFIX}") AND
+            ("${LIBRARY_NAME}" STREQUAL "${DEFAULT_LIBRARY_NAME}") AND
+            ("${SHARED_LIBRARY_SUFFIX}" STREQUAL "${CMAKE_SHARED_LIBRARY_SUFFIX}")))
+        add_custom_command(
+            TARGET ${LIBRARY_NAME}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "Copying \"${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}\" to \"${PROJECT_BINARY_DIR}/${SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${SHARED_LIBRARY_SUFFIX}\"..."
+            COMMAND
+                ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX} ${PROJECT_BINARY_DIR}/${SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${SHARED_LIBRARY_SUFFIX}
+            WORKING_DIRECTORY
+                ${PROJECT_SOURCE_DIR}
+            COMMENT
+                "Aliasing the library for the external build tool..."
+            VERBATIM
+        )
+    endif()
 else()
-    set(OBJECTS_DIR objects)
+    target_link_libraries(${LIBRARY_NAME} PUBLIC ${BINDINGS_NAME} ${LIBRARY_DEPENDENCIES})
 
-    set(BINDINGS_OBJECTS_DIR ${OBJECTS_DIR}/$<TARGET_NAME:${BINDINGS_NAME}>)
+    if(WIN32)
+        find_program(LIB_TOOL "lib" REQUIRED)
 
-    add_custom_command(
-        TARGET "${${PROJECT_NAME}-LIBRARY_NAME}"
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${${PROJECT_NAME}-LIBRARY_NAME}>\"..."
-        COMMAND
-            ${CMAKE_COMMAND} -E rm -rf ${OBJECTS_DIR}
-        COMMAND
-            ${CMAKE_COMMAND} -E make_directory ${BINDINGS_OBJECTS_DIR}
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -x  --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>"
-        COMMAND
-            ${CMAKE_COMMAND} -E chdir ${BINDINGS_OBJECTS_DIR} ${CMAKE_AR} -x --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE:${BINDINGS_NAME}>
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${${PROJECT_NAME}-LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o"
-        COMMAND
-            ${CMAKE_AR} -rs --plugin /usr/lib/bfd-plugins/liblto_plugin.so $<TARGET_FILE_NAME:${${PROJECT_NAME}-LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o
-        WORKING_DIRECTORY
-            ${PROJECT_BINARY_DIR}
-        COMMENT
-            "Merging the libraries' constituent object files..."
-    )
+        add_custom_command(
+            TARGET ${LIBRARY_NAME}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${LIBRARY_NAME}>\"..."
+            COMMAND
+                ${LIB_TOOL} /OUT:$<TARGET_FILE_NAME:${LIBRARY_NAME}> $<TARGET_FILE_NAME:${LIBRARY_NAME}> $<TARGET_FILE:${BINDINGS_NAME}>
+            WORKING_DIRECTORY
+                ${PROJECT_BINARY_DIR}
+            COMMENT
+                "Merging the libraries..."
+            VERBATIM
+        )
+    else()
+        set(OBJECTS_DIR objects)
+
+        set(BINDINGS_OBJECTS_DIR ${OBJECTS_DIR}/$<TARGET_NAME:${BINDINGS_NAME}>)
+
+        add_custom_command(
+            TARGET "${LIBRARY_NAME}"
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "Merging its dependent libraries into \"$<TARGET_FILE:${LIBRARY_NAME}>\"..."
+            COMMAND
+                ${CMAKE_COMMAND} -E rm -rf ${OBJECTS_DIR}
+            COMMAND
+                ${CMAKE_COMMAND} -E make_directory ${BINDINGS_OBJECTS_DIR}
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -x  $<TARGET_FILE:${BINDINGS_NAME}>"
+            COMMAND
+                ${CMAKE_COMMAND} -E chdir ${BINDINGS_OBJECTS_DIR} ${CMAKE_AR} -x $<TARGET_FILE:${BINDINGS_NAME}>
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "${CMAKE_AR} -rs $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o"
+            COMMAND
+                ${CMAKE_AR} -rs $<TARGET_FILE_NAME:${LIBRARY_NAME}> ${BINDINGS_OBJECTS_DIR}/*.o
+            WORKING_DIRECTORY
+                ${PROJECT_BINARY_DIR}
+            COMMENT
+                "Merging the libraries' constituent object files..."
+        )
+    endif()
 endif()
 
-# Enable an external build tool to find the library in the root of the
-# out-of-source build directory when it has overridden an aspect of its name.
-if(NOT (("${${PROJECT_NAME}-LIBRARY_PREFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_PREFIX}") AND
-        ("${${PROJECT_NAME}-LIBRARY_NAME}" STREQUAL "${${PROJECT_NAME}-DEFAULT_LIBRARY_NAME}") AND
-        ("${${PROJECT_NAME}-LIBRARY_SUFFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_SUFFIX}")))
-    add_custom_command(
-        TARGET ${${PROJECT_NAME}-LIBRARY_NAME}
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E echo "Copying \"${CMAKE_STATIC_LIBRARY_PREFIX}${${PROJECT_NAME}-LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}\" to \"${PROJECT_BINARY_DIR}/${${PROJECT_NAME}-LIBRARY_PREFIX}${${PROJECT_NAME}-LIBRARY_NAME}${${PROJECT_NAME}-LIBRARY_SUFFIX}\"..."
-        COMMAND
-            ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${${PROJECT_NAME}-LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX} ${PROJECT_BINARY_DIR}/${${PROJECT_NAME}-LIBRARY_PREFIX}${${PROJECT_NAME}-LIBRARY_NAME}${${PROJECT_NAME}-LIBRARY_SUFFIX}
-        WORKING_DIRECTORY
-            ${PROJECT_SOURCE_DIR}
-        COMMENT
-            "Aliasing the library for the external build tool..."
-        VERBATIM
-    )
+if(NOT BUILD_SHARED_LIBS OR WIN32)
+    # Enable an external build tool to find the static/import library in the
+    # root of the out-of-source build directory when it has overridden an aspect
+    # of its name.
+    if(NOT (("${STATIC_LIBRARY_PREFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_PREFIX}") AND
+            ("${LIBRARY_NAME}" STREQUAL "${DEFAULT_LIBRARY_NAME}") AND
+            ("${STATIC_LIBRARY_SUFFIX}" STREQUAL "${CMAKE_STATIC_LIBRARY_SUFFIX}")))
+        add_custom_command(
+            TARGET ${LIBRARY_NAME}
+            POST_BUILD
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "(STATIC_LIBRARY_PREFIX, LIBRARY_NAME, STATIC_LIBRARY_SUFFIX) == (${STATIC_LIBRARY_PREFIX}, ${LIBRARY_NAME}, ${STATIC_LIBRARY_SUFFIX})"
+            COMMAND
+                ${CMAKE_COMMAND} -E echo "Copying \"${PROJECT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}\" to \"${PROJECT_BINARY_DIR}/${STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${STATIC_LIBRARY_SUFFIX}\"..."
+            COMMAND
+                ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX} ${PROJECT_BINARY_DIR}/${STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${STATIC_LIBRARY_SUFFIX}
+            WORKING_DIRECTORY
+                ${PROJECT_SOURCE_DIR}
+            COMMENT
+                "Aliasing the static/import library for the external build tool..."
+            VERBATIM
+        )
+    endif()
 endif()
 
 # Generate the configuration header.
@@ -356,7 +382,7 @@ configure_file(
     NEWLINE_STYLE LF
 )
 
-target_sources(${${PROJECT_NAME}-LIBRARY_NAME}
+target_sources(${LIBRARY_NAME}
     PRIVATE
         src/${UTILS_SUBDIR}/result.c
         src/${UTILS_SUBDIR}/stack_callback_data.c
@@ -369,7 +395,7 @@ target_sources(${${PROJECT_NAME}-LIBRARY_NAME}
                 ${CBINDGEN_INCLUDEDIR}
                 ${CMAKE_INSTALL_INCLUDEDIR}
             FILES
-                ${CBINDGEN_TARGET_DIR}/${${PROJECT_NAME}-LIBRARY_NAME}.h
+                ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
                 ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
                 ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h
                 ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h
@@ -384,7 +410,7 @@ target_sources(${${PROJECT_NAME}-LIBRARY_NAME}
 )
 
 install(
-    TARGETS ${${PROJECT_NAME}-LIBRARY_NAME}
+    TARGETS ${LIBRARY_NAME}
     EXPORT ${PROJECT_NAME}-config
     FILE_SET api
     FILE_SET config

@@ -31,14 +31,14 @@ impl AMchange {
         }
     }
 
-    pub fn message(&self) -> AMbyteSpan {
+    fn message(&self) -> AMbyteSpan {
         if let Some(message) = unsafe { (*self.body).message() } {
             return message.as_str().as_bytes().into();
         }
         Default::default()
     }
 
-    pub fn hash(&self) -> AMbyteSpan {
+    fn hash(&self) -> AMbyteSpan {
         let mut change_hash = self.change_hash.borrow_mut();
         if let Some(change_hash) = change_hash.as_ref() {
             change_hash.into()
@@ -219,7 +219,7 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let data = std::slice::from_raw_parts(src, count);
     to_result::<Result<Vec<am::Change>, _>>(
-        am::Automerge::load(data).map(|d| d.get_changes(&[]).into_iter().cloned().collect()),
+        am::Automerge::load(data).map(|d| d.get_changes(&[]).into_iter().collect()),
     )
 }
 

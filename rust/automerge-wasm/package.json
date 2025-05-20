@@ -8,7 +8,7 @@
   "description": "wasm-bindgen bindings to the automerge rust implementation",
   "homepage": "https://github.com/automerge/automerge/tree/main/rust/automerge-wasm",
   "repository": "github:automerge/automerge",
-  "version": "0.9.0",
+  "version": "1.0.0-preview.7",
   "license": "MIT",
   "files": [
     "README.md",
@@ -33,17 +33,18 @@
   "scripts": {
     "lint": "eslint test/*.ts index.d.ts",
     "debug": "cross-env PROFILE=dev TARGET_DIR=debug yarn buildall",
-    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target",
+    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target && node ./fixup-node-cjs.mjs",
     "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' yarn buildall",
     "release": "cross-env PROFILE=release TARGET_DIR=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target && cross-env TARGET=deno yarn target && TARGET=web yarn target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node ./fixup-node-cjs.mjs",
     "target": "rimraf ./$TARGET && yarn compile && yarn bindgen && yarn opt",
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
-    "bindgen": "wasm-bindgen --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
+    "bindgen": "wasm-bindgen --omit-default-module-path --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "mocha --loader=ts-node/esm test/**/*.mts"
   },
   "devDependencies": {
+    "@types/assert": "^1.5.10",
     "@types/mocha": "^10.0.1",
     "@types/node": "^18.11.13",
     "@types/uuid": "^9.0.1",
@@ -61,7 +62,7 @@
     "uuid": "^9.0.0"
   },
   "exports": {
-    "types": "index.d.ts",
+    "types": "./index.d.ts",
     "workerd": "./web/index.js",
     "browser": "./bundler/automerge_wasm.js",
     "require": "./nodejs/automerge_wasm.cjs",

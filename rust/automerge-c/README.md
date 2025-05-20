@@ -5,6 +5,14 @@ for other language bindings that have good support for calling C functions.
 
 # Installing
 
+## Prerequisites
+
+* Cargo >= 1.71.0
+* CMake >= 3.25
+* CMocka >= 1.1.5
+* Doxygen >= 1.9.1
+* Ninja >= 1.10.1
+
 See the main README for instructions on getting your environment set up and then
 you can build the automerge-c library and install its constituent files within
 a root directory of your choosing (e.g. "/usr/local") like so:
@@ -71,7 +79,7 @@ You can build and view the C API's HTML reference documentation like so:
 cmake -E make_directory automerge-c/build
 cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build --target automerge_docs
-firefox automerge-c/build/src/html/index.html
+firefox automerge-c/build/docs/html/index.html
 ```
 
 To get started quickly, look at the

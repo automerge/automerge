@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use crate::exid::ExId;
+use crate::patches::TextRepresentation;
 use crate::types::Prop;
 use crate::{PatchAction, ScalarValue};
 
@@ -12,12 +13,20 @@ pub struct Map(HashMap<String, MapValue>);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MapValue {
-    value: Value,
-    conflict: bool,
+    pub value: Value,
+    pub conflict: bool,
 }
 
 impl Map {
-    pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &MapValue)> {
+        self.0.iter()
+    }
+
+    pub(crate) fn apply(
+        &mut self,
+        text_rep: TextRepresentation,
+        patch: PatchAction,
+    ) -> Result<(), HydrateError> {
         match patch {
             PatchAction::DeleteMap { key } => {
                 self.0.remove(&key);
@@ -28,8 +37,9 @@ impl Map {
                 value,
                 conflict,
             } => {
+                let h_value = Value::new(value.0, text_rep);
                 self.0
-                    .insert(key, MapValue::new(value.0.into(), value.1, conflict));
+                    .insert(key, MapValue::new(h_value, value.1, conflict));
                 Ok(())
             }
             PatchAction::Increment {
@@ -46,7 +56,7 @@ impl Map {
         }
     }
 
-    pub fn get(&mut self, key: &str) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key).map(|mv| &mv.value)
     }
 
@@ -95,6 +105,23 @@ impl From<HashMap<&str, Value>> for Map {
             .map(|(k, value)| {
                 (
                     k.to_string(),
+                    MapValue {
+                        value,
+                        conflict: false,
+                    },
+                )
+            })
+            .collect())
+    }
+}
+
+impl From<HashMap<String, Value>> for Map {
+    fn from(value: HashMap<String, Value>) -> Self {
+        Map(value
+            .into_iter()
+            .map(|(k, value)| {
+                (
+                    k,
                     MapValue {
                         value,
                         conflict: false,

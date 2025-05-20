@@ -1,10 +1,13 @@
 use crate::automerge::diff::ReadDocAt;
+use crate::automerge::Automerge;
+use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate::Value;
-use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::{MarkAccumulator, MarkSet};
-use crate::types::{ObjId, ObjType, OpId, Prop};
-use crate::{Automerge, ChangeHash, Patch, ReadDoc};
+use crate::op_set2::PropRef;
+use crate::read::ReadDocInternal;
+use crate::types::{ActorId, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::{ChangeHash, Patch, ReadDoc};
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -28,11 +31,11 @@ use super::{PatchBuilder, TextRepresentation};
 ///
 /// ```no_run
 /// # use automerge::{AutoCommit, Change, Patch, PatchLog, Value, sync::{Message, State as
-/// SyncState, SyncDoc}, patches::TextRepresentation};
+/// SyncState, SyncDoc}, patches::TextRepresentation, TextEncoding};
 /// let doc = AutoCommit::new();
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
-/// let mut patch_log = PatchLog::active(TextRepresentation::String);
+/// let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::UnicodeCodePoint));
 /// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
@@ -41,14 +44,15 @@ use super::{PatchBuilder, TextRepresentation};
 /// ```
 #[derive(Clone, Debug)]
 pub struct PatchLog {
-    events: Vec<(ObjId, Event)>,
+    pub(crate) events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
     pub(crate) heads: Option<Vec<ChangeHash>>,
+    pub(crate) actors: Vec<ActorId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum Event {
     PutMap {
         key: String,
@@ -79,7 +83,6 @@ pub(crate) enum Event {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     },
     IncrementMap {
         key: String,
@@ -102,13 +105,63 @@ pub(crate) enum Event {
     },
 }
 
+impl Event {
+    pub(crate) fn with_new_actor(self, idx: usize) -> Self {
+        match self {
+            Self::PutMap {
+                key,
+                value,
+                id,
+                conflict,
+            } => Self::PutMap {
+                key,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::PutSeq {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::PutSeq {
+                index,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::Insert {
+                index,
+                value,
+                id,
+                conflict,
+            } => Self::Insert {
+                index,
+                value,
+                id: id.with_new_actor(idx),
+                conflict,
+            },
+            Self::IncrementMap { key, n, id } => Self::IncrementMap {
+                key,
+                n,
+                id: id.with_new_actor(idx),
+            },
+            Self::IncrementSeq { index, n, id } => Self::IncrementSeq {
+                index,
+                n,
+                id: id.with_new_actor(idx),
+            },
+            event => event,
+        }
+    }
+}
+
 impl PatchLog {
     /// Create a new [`PatchLog`]
     ///
     /// # Arguments
     ///
-    /// * `active`   - If `true` the log will record all changes made to the document. If [`false`]
-    ///                then no changes will be recorded.
+    /// * `active`   - If `true` the log will record all changes made to the document. If [`false`] then no changes will be recorded.
     /// * `text_rep` - How text will be represented in the generated patches
     ///
     /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
@@ -122,6 +175,7 @@ impl PatchLog {
             events: vec![],
             heads: None,
             text_rep,
+            actors: vec![],
         }
     }
 
@@ -133,7 +187,11 @@ impl PatchLog {
     }
 
     pub fn null() -> Self {
-        Self::new(false, TextRepresentation::default())
+        // Text encoding doesn't matter here as it will never be used
+        Self::new(
+            false,
+            TextRepresentation::String(TextEncoding::UnicodeCodePoint),
+        )
     }
 
     /// Create a new [`PatchLog`] which does record changes.
@@ -151,13 +209,6 @@ impl PatchLog {
         self.active
     }
 
-    pub(crate) fn delete(&mut self, obj: ObjId, prop: &Prop) {
-        match prop {
-            Prop::Map(key) => self.delete_map(obj, key),
-            Prop::Seq(index) => self.delete_seq(obj, *index, 1),
-        }
-    }
-
     pub(crate) fn delete_seq(&mut self, obj: ObjId, index: usize, num: usize) {
         self.events.push((obj, Event::DeleteSeq { index, num }))
     }
@@ -167,10 +218,10 @@ impl PatchLog {
             .push((obj, Event::DeleteMap { key: key.into() }))
     }
 
-    pub(crate) fn increment(&mut self, obj: ObjId, prop: &Prop, value: i64, id: OpId) {
+    pub(crate) fn increment2(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
         match prop {
-            Prop::Map(key) => self.increment_map(obj, key, value, id),
-            Prop::Seq(index) => self.increment_seq(obj, *index, value, id),
+            PropRef::Map(key) => self.increment_map(obj, key, value, id),
+            PropRef::Seq(index) => self.increment_seq(obj, index, value, id),
         }
     }
 
@@ -206,18 +257,18 @@ impl PatchLog {
         self.events.push((obj, Event::FlagConflictSeq { index }))
     }
 
-    pub(crate) fn put(
+    pub(crate) fn put2(
         &mut self,
         obj: ObjId,
-        prop: &Prop,
+        prop: PropRef<'_>,
         value: Value,
         id: OpId,
         conflict: bool,
         expose: bool,
     ) {
         match prop {
-            Prop::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
-            Prop::Seq(index) => self.put_seq(obj, *index, value, id, conflict, expose),
+            PropRef::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
+            PropRef::Seq(index) => self.put_seq(obj, index, value, id, conflict, expose),
         }
     }
 
@@ -294,6 +345,21 @@ impl PatchLog {
         self.events.push((obj, Event::Mark { marks: acc }))
     }
 
+    pub(crate) fn insert_and_maybe_expose(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: Value,
+        id: OpId,
+        conflict: bool,
+        expose: bool,
+    ) {
+        if expose && value.is_object() {
+            self.expose.insert(id);
+        }
+        self.insert(obj, index, value, id, conflict)
+    }
+
     pub(crate) fn insert(
         &mut self,
         obj: ObjId,
@@ -301,22 +367,19 @@ impl PatchLog {
         value: Value,
         id: OpId,
         conflict: bool,
-        marks: Option<Arc<MarkSet>>,
     ) {
-        self.events.push((
-            obj,
-            Event::Insert {
-                index,
-                value,
-                id,
-                conflict,
-                marks,
-            },
-        ))
+        let event = Event::Insert {
+            index,
+            value,
+            id,
+            conflict,
+        };
+        self.events.push((obj, event))
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        self.events.sort_by(|a, b| doc.ops().osd.lamport_cmp(a, b));
+        //self.migrate_actors(&doc.ops().actors).ok();
+        self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
             let read_doc = ReadDocAt { doc, heads };
@@ -326,14 +389,14 @@ impl PatchLog {
         }
     }
 
-    fn make_patches_inner<R: ReadDoc>(
+    fn make_patches_inner<R: ReadDocInternal>(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::default();
+        let mut patch_builder = PatchBuilder::new(read_doc, Some(events.len()), text_rep);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
@@ -353,17 +416,17 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.put(read_doc, exid, key.into(), (value.into(), opid), *conflict);
+                    patch_builder.put(exid, key.into(), (value.into(), opid), *conflict);
                 }
                 Event::DeleteMap { key } => {
-                    patch_builder.delete_map(read_doc, exid, key);
+                    patch_builder.delete_map(exid, key);
                 }
                 Event::IncrementMap { key, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(read_doc, exid, key.into(), (*n, opid));
+                    patch_builder.increment(exid, key.into(), (*n, opid));
                 }
                 Event::FlagConflictMap { key } => {
-                    patch_builder.flag_conflict(read_doc, exid, key.into());
+                    patch_builder.flag_conflict(exid, key.into());
                 }
                 Event::PutSeq {
                     index,
@@ -372,47 +435,38 @@ impl PatchLog {
                     conflict,
                 } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.put(
-                        read_doc,
-                        exid,
-                        index.into(),
-                        (value.into(), opid),
-                        *conflict,
-                    );
+                    patch_builder.put(exid, index.into(), (value.into(), opid), *conflict);
                 }
                 Event::Insert {
                     index,
                     value,
                     id,
                     conflict,
-                    marks,
+                    //marks,
                 } => {
                     let opid = doc.id_to_exid(*id);
                     patch_builder.insert(
-                        read_doc,
                         exid,
                         *index,
                         (value.into(), opid),
                         *conflict,
-                        marks.clone(),
+                        //marks.clone(),
                     );
                 }
                 Event::DeleteSeq { index, num } => {
-                    patch_builder.delete_seq(read_doc, exid, *index, *num);
+                    patch_builder.delete_seq(exid, *index, *num);
                 }
                 Event::IncrementSeq { index, n, id } => {
                     let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(read_doc, exid, index.into(), (*n, opid));
+                    patch_builder.increment(exid, index.into(), (*n, opid));
                 }
                 Event::FlagConflictSeq { index } => {
-                    patch_builder.flag_conflict(read_doc, exid, index.into());
+                    patch_builder.flag_conflict(exid, index.into());
                 }
                 Event::Splice { index, text, marks } => {
-                    patch_builder.splice_text(read_doc, exid, *index, text, marks.clone());
+                    patch_builder.splice_text(exid, *index, text, marks.clone());
                 }
-                Event::Mark { marks } => {
-                    patch_builder.mark(read_doc, exid, marks.clone().into_iter())
-                }
+                Event::Mark { marks } => patch_builder.mark(exid, marks.clone().into_iter()),
             }
         }
         // any objects exposed AFTER all other events get exposed here
@@ -434,7 +488,48 @@ impl PatchLog {
             events: Default::default(),
             text_rep: self.text_rep,
             heads: None,
+            actors: self.actors.clone(),
         }
+    }
+
+    pub(crate) fn migrate_actor(&mut self, index: usize) {
+        let dirty = std::mem::take(&mut self.events);
+        self.events = dirty
+            .into_iter()
+            .map(|(o, e)| (o.with_new_actor(index), e.with_new_actor(index)))
+            .collect();
+
+        let dirty = std::mem::take(&mut self.expose);
+        self.expose = dirty
+            .into_iter()
+            .map(|id| id.with_new_actor(index))
+            .collect();
+    }
+
+    // if a new actor is added to an opset, the id's inside the patch log need to be re-ordered
+    // this is an uncommon operation so this seems preferable to storing ExId's in place
+    // for every objid and opid
+    pub(crate) fn migrate_actors(&mut self, others: &Vec<ActorId>) -> Result<(), AutomergeError> {
+        if &self.actors != others {
+            if self.actors.is_empty() {
+                self.actors = others.clone();
+                return Ok(());
+            }
+            for i in 0..others.len() {
+                match (self.actors.get(i), others.get(i)) {
+                    (Some(a), Some(b)) if a == b => {}
+                    (Some(a), Some(b)) if b < a => {
+                        self.actors.insert(i, b.clone());
+                        self.migrate_actor(i);
+                    }
+                    (None, Some(b)) => {
+                        self.actors.insert(i, b.clone());
+                    }
+                    _ => return Err(AutomergeError::PatchLogMismatch),
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
@@ -471,7 +566,7 @@ impl ExposeQueue {
     fn pump_queue<R: ReadDoc>(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, R>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -486,7 +581,7 @@ impl ExposeQueue {
 
     fn flush_queue<R: ReadDoc>(
         &mut self,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, R>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -507,7 +602,7 @@ impl ExposeQueue {
     fn flush_obj<R: ReadDoc>(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder,
+        patch_builder: &mut PatchBuilder<'_, R>,
         doc: &Automerge,
         read_doc: &R,
         text_rep: TextRepresentation,
@@ -515,45 +610,31 @@ impl ExposeQueue {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
-            ObjType::Text if matches!(text_rep, TextRepresentation::String) => {
+            ObjType::Text if matches!(text_rep, TextRepresentation::String(_)) => {
                 let text = read_doc.text(&exid).ok()?;
                 // TODO - need read_doc, text_spans()
-                patch_builder.splice_text(read_doc, exid, 0, &text, None);
+                patch_builder.splice_text(exid, 0, &text, None);
             }
             ObjType::List | ObjType::Text => {
-                for ListRangeItem {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                    marks,
-                } in read_doc.list_range(&exid, ..)
-                {
+                for item in read_doc.list_range(&exid, ..) {
+                    let value = item.value.to_value();
+                    let id = item.id();
+                    let conflict = item.conflict;
+                    let index = item.index;
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.insert(
-                        read_doc,
-                        exid.clone(),
-                        index,
-                        (value, id),
-                        conflict,
-                        marks,
-                    );
+                    patch_builder.insert(exid.clone(), index, (value, id), conflict);
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for MapRangeItem {
-                    key,
-                    value,
-                    id,
-                    conflict,
-                } in read_doc.map_range(&exid, ..)
-                {
+                for m in read_doc.map_range(&exid, ..) {
+                    let value = m.value.to_value();
+                    let id = m.id();
                     if value.is_object() {
                         self.insert(id.clone());
                     }
-                    patch_builder.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
+                    patch_builder.put(exid.clone(), m.key.into(), (value, id), m.conflict);
                 }
             }
         }

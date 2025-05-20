@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+# see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
+THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+C_PROJECT=$THIS_SCRIPT/../../rust/automerge-c
+
+mkdir -p "${C_PROJECT}/build"
+cd "${C_PROJECT}/build"
+cmake -B . -S ..
+cmake --build . --target automerge_docs
+# Doxygen generated documentation resides in rust/automerge-c/build/docs
+
+

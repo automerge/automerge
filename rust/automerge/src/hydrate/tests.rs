@@ -1,12 +1,14 @@
-use crate::hydrate;
+use text_value::ConcreteTextValue;
+
+use crate::exid::ExId;
 use crate::patches::TextRepresentation;
-use crate::text_value::TextValue;
 use crate::transaction::Transactable;
 use crate::*;
 
 #[test]
 fn simple_hydrate() -> Result<(), AutomergeError> {
-    let mut doc = AutoCommit::default().with_text_rep(TextRepresentation::String);
+    let mut doc =
+        AutoCommit::default().with_text_rep(TextRepresentation::String(TextEncoding::default()));
     let list = doc.put_object(&ObjId::Root, "list", ObjType::List)?;
     doc.insert(&list, 0, 5)?;
     doc.insert(&list, 1, 6)?;
@@ -17,13 +19,13 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     doc.insert_object(&list, 6, ObjType::List)?;
     let text = doc.put_object(&ObjId::Root, "text", ObjType::Text)?;
     doc.splice_text(&text, 0, 0, "hello world")?;
-    let mut hydrated = doc.hydrate(None);
+    let mut hydrated = doc.hydrate(ExId::Root, None)?;
     assert_eq!(
         hydrated,
         hydrate_map!(
             "list" => hydrate_list!(5,6,7,"hello", ScalarValue::counter(100), hydrate_map!(), hydrate_list![]),
-            "text" => TextValue::new("hello world"),
-        )
+            "text" => ConcreteTextValue::new("hello world", TextRepresentation::String(TextEncoding::default())),
+        ).into()
     );
     doc.splice_text(&text, 6, 0, "big bad ")?;
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
@@ -31,10 +33,10 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     let cursor = doc.diff_cursor().to_vec();
     let patches = doc.diff(&cursor, &heads);
     doc.update_diff_cursor();
-    hydrated.apply_patches(patches)?;
-    assert_eq!(
-        hydrated.as_map().unwrap().get("text"),
-        Some(&TextValue::new("hello big bad world").into())
-    );
+    hydrated.apply_patches(TextRepresentation::String(TextEncoding::default()), patches)?;
+    let hydrate::Value::Text(val) = &hydrated.as_map().unwrap().get("text").unwrap() else {
+        panic!("expected text");
+    };
+    assert_eq!(String::from(val), "hello big bad world".to_string(),);
     Ok(())
 }

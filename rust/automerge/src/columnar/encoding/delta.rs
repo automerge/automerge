@@ -55,7 +55,8 @@ pub(crate) struct DeltaDecoder<'a> {
     absolute_val: i64,
 }
 
-impl<'a> DeltaDecoder<'a> {
+impl DeltaDecoder<'_> {
+    #[allow(unused)]
     pub(crate) fn done(&self) -> bool {
         self.rle.done()
     }
@@ -76,7 +77,7 @@ impl<'a> From<&'a [u8]> for DeltaDecoder<'a> {
     }
 }
 
-impl<'a> Iterator for DeltaDecoder<'a> {
+impl Iterator for DeltaDecoder<'_> {
     type Item = Result<Option<i64>, raw::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
