@@ -1,7 +1,4 @@
 {
-  "compilerOptions": {
-    "module": "commonjs"
-  },
   "extends": "../tsconfig.json",
   "exclude": [
     "../dist/**/*",

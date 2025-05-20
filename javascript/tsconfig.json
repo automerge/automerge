@@ -4,7 +4,7 @@
     "sourceMap": false,
     "declaration": true,
     "resolveJsonModule": true,
-    "module": "es6",
+    "module": "nodenext",
     "moduleResolution": "nodenext",
     "noImplicitAny": false,
     "allowSyntheticDefaultImports": true,
