@@ -557,11 +557,41 @@ function listMethods(target: Target) {
       return this
     },
 
-    indexOf(o: any, start = 0) {
+    indexOf(searchElement: any, start = 0) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
-        const value = context.getWithType(objectId, i)
-        if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
+        const valueWithType = context.getWithType(objectId, i)
+        if (!valueWithType) {
+          continue
+        }
+
+        const [valType, value] = valueWithType
+
+        // Either the target element is an object, and we return if we have found
+        // the same object or it is a primitive value and we return if it matches
+        // the current value
+        const isObject = ["map", "list", "text"].includes(valType)
+
+        if (!isObject) {
+          // If the element is not an object, then check if the value is equal to the target
+          if (value === searchElement) {
+            return i
+          } else {
+            continue
+          }
+        }
+
+        // if it's an object, but the type of the search element is a string, then we
+        // need to check if the object is a text object with the same value as the search element
+        if (valType === "text" && typeof searchElement === "string") {
+          if (searchElement === valueAt(target, i)) {
+            return i
+          }
+        }
+
+        // The only possible match now is if the searchElement is an object already in the
+        // automerge document with the same object ID as the value
+        if (searchElement[OBJECT_ID] === value) {
           return i
         }
       }
