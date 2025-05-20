@@ -340,7 +340,10 @@ impl AutoCommit {
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
-        self.isolation = Some(heads.to_vec())
+        self.isolation = Some(heads.to_vec());
+        self.patch_log
+            .migrate_actors(&self.doc.ops().actors)
+            .unwrap(); // we forked and m
     }
 
     pub fn integrate(&mut self) {
