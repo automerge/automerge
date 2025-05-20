@@ -15,10 +15,12 @@
 //! This crate is organised around two representations of a document -
 //! [`Automerge`] and [`AutoCommit`]. The difference between the two is that
 //! [`AutoCommit`] manages transactions for you. Both of these representations
-//! implement [`ReadDoc`] for reading values from a document and
-//! [`sync::SyncDoc`] for taking part in the sync protocol. [`AutoCommit`]
-//! directly implements [`transaction::Transactable`] for making changes to a
-//! document, whilst [`Automerge`] requires you to explicitly create a
+//! implement [`ReadDoc`] for reading values from a document and provide access
+//! to a [`sync::SyncDoc`] implementation (`Automerge` implements it directly
+//! whilst [`AutoCommit`] provides [`AutoCommit::sync`]) for taking part in the
+//! sync protocol. [`AutoCommit`] directly implements
+//! [`transaction::Transactable`] for making changes to a document, whilst
+//! [`Automerge`] requires you to explicitly create a
 //! [`transaction::Transaction`].
 //!
 //! NOTE: The API this library provides for modifying data is quite low level
