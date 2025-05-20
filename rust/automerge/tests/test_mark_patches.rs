@@ -23,9 +23,11 @@ fn mark_patches_at_end_of_text() {
     // Pop the patches
     doc2.diff_incremental();
     let changes_after_mark = doc1.save_after(&heads_before_mark);
+    doc2.dump();
     doc2.load_incremental(&changes_after_mark).unwrap();
 
     let mut patches = doc2.diff_incremental();
+    doc2.dump();
     assert_eq!(patches.len(), 1, "no patches generated");
     let patch = patches.pop().unwrap();
     assert_eq!(patch.obj, text);

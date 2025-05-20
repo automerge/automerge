@@ -5,7 +5,7 @@
     "declaration": true,
     "resolveJsonModule": true,
     "module": "es6",
-    "moduleResolution": "node",
+    "moduleResolution": "nodenext",
     "noImplicitAny": false,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,

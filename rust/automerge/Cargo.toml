@@ -1,38 +1,41 @@
 [package]
 name = "automerge"
-version = "0.5.7"
+version = "1.0.0-alpha.4"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge"
-rust-version = "1.57.0"
+rust-version = "1.73.0"
 description = "A JSON-like data structure (a CRDT) that can be modified concurrently by different users, and merged again automatically"
 readme = "./README.md"
 
 [features]
-optree-visualisation = ["dot", "rand"]
-wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
+optree-visualisation = ["dot"]
+wasm = ["js-sys", "wasm-bindgen", "web-sys", "getrandom/js", "hexane/wasm"]
 utf8-indexing = []
+utf16-indexing = []
 
 [dependencies]
+hexane = { version = "0.1.1", path = "../hexane" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
-sha2 = "^0.10.0"
+sha2 = "0.11.0-pre.5"
 thiserror = "^1.0.16"
-itertools = "0.12.0"
+itertools = "0.13.0"
 flate2 = "^1.0.22"
-uuid = { version = "^1.2.1", features = ["v4", "serde"] }
 smol_str = { version = "0.2", features = ["serde"] }
 tracing = { version = "^0.1.29" }
 fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
 serde = { version = "^1.0", features = ["derive"] }
+cfg-if = "1.0"
+getrandom = "0.2.16"
 
 # optional deps
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
-rand = { version = "^0.8.4", optional = true }
-im = "15.1.0"
+rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
+
 unicode-segmentation = "1.10.1"
 
 [dependencies.web-sys]
@@ -43,11 +46,15 @@ optional = true
 [dev-dependencies]
 pretty_assertions = "1.0.0"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
-serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features = true }
+serde_json = { version = "^1.0.73", features = [
+    "float_roundtrip",
+], default-features = true }
 maplit = { version = "^1.0" }
-criterion = "0.4.0"
-test-log = { version = "0.2.10", features = ["trace"], default-features = false}
-tracing-subscriber = { version = "0.3.9", features = ["fmt", "env-filter"] }
+criterion = "0.5"
+test-log = { version = "0.2.10", features = [
+    "trace",
+], default-features = false }
+tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
 
@@ -61,4 +68,8 @@ harness = false
 
 [[bench]]
 name = "sync"
+harness = false
+
+[[bench]]
+name = "load_save"
 harness = false

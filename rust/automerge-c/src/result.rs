@@ -1,8 +1,6 @@
 use am::marks::Mark;
 use automerge as am;
 
-use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
-
 use crate::byte_span::AMbyteSpan;
 use crate::index::AMindex;
 use crate::item::AMitem;
@@ -102,68 +100,36 @@ impl From<am::iter::Keys<'_>> for AMresult {
     }
 }
 
-impl From<am::iter::ListRange<'static, Range<usize>>> for AMresult {
-    fn from(list_range: am::iter::ListRange<'static, Range<usize>>) -> Self {
+impl From<am::iter::ListRange<'static>> for AMresult {
+    fn from(list_range: am::iter::ListRange<'static>) -> Self {
         Self::items(
             list_range
-                .map(|item| AMitem::indexed(AMindex::Pos(item.index), item.id, item.value.into()))
+                .map(|item| AMitem::indexed(AMindex::Pos(item.index), item.id(), item.value.into()))
                 .collect(),
         )
     }
 }
 
-impl From<am::iter::MapRange<'static, Range<String>>> for AMresult {
-    fn from(map_range: am::iter::MapRange<'static, Range<String>>) -> Self {
+impl From<am::iter::MapRange<'static>> for AMresult {
+    fn from(map_range: am::iter::MapRange<'static>) -> Self {
         Self::items(
             map_range
                 .map(|item| {
-                    AMitem::indexed(AMindex::Key(item.key.into()), item.id, item.value.into())
+                    AMitem::indexed(
+                        AMindex::Key(item.key.clone().into()),
+                        item.id(),
+                        item.value.into(),
+                    )
                 })
                 .collect(),
         )
     }
 }
 
-impl From<am::iter::MapRange<'static, RangeFrom<String>>> for AMresult {
-    fn from(map_range: am::iter::MapRange<'static, RangeFrom<String>>) -> Self {
-        Self::items(
-            map_range
-                .map(|item| {
-                    AMitem::indexed(AMindex::Key(item.key.into()), item.id, item.value.into())
-                })
-                .collect(),
-        )
-    }
-}
-
-impl From<am::iter::MapRange<'static, RangeFull>> for AMresult {
-    fn from(map_range: am::iter::MapRange<'static, RangeFull>) -> Self {
-        Self::items(
-            map_range
-                .map(|item| {
-                    AMitem::indexed(AMindex::Key(item.key.into()), item.id, item.value.into())
-                })
-                .collect(),
-        )
-    }
-}
-
-impl From<am::iter::MapRange<'static, RangeTo<String>>> for AMresult {
-    fn from(map_range: am::iter::MapRange<'static, RangeTo<String>>) -> Self {
-        Self::items(
-            map_range
-                .map(|item| {
-                    AMitem::indexed(AMindex::Key(item.key.into()), item.id, item.value.into())
-                })
-                .collect(),
-        )
-    }
-}
-
-impl From<Option<&am::Change>> for AMresult {
-    fn from(maybe: Option<&am::Change>) -> Self {
+impl From<Option<am::Change>> for AMresult {
+    fn from(maybe: Option<am::Change>) -> Self {
         Self::item(match maybe {
-            Some(change) => change.clone().into(),
+            Some(change) => change.into(),
             None => Default::default(),
         })
     }
@@ -218,6 +184,15 @@ impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     fn from(maybe: Result<am::Change, am::LoadChangeError>) -> Self {
         match maybe {
             Ok(change) => Self::item(change.into()),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<am::Cursor, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::Cursor, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(cursor) => Self::item(cursor.into()),
             Err(e) => Self::error(&e.to_string()),
         }
     }
@@ -418,8 +393,8 @@ impl From<Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for 
     }
 }
 
-impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
+impl From<Result<Vec<Mark>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<Mark>, am::AutomergeError>) -> Self {
         match maybe {
             Ok(marks) => Self::items(marks.iter().map(|mark| mark.clone().into()).collect()),
             Err(e) => Self::error(&e.to_string()),
@@ -442,14 +417,9 @@ impl From<&[am::Change]> for AMresult {
     }
 }
 
-impl From<Vec<&am::Change>> for AMresult {
-    fn from(changes: Vec<&am::Change>) -> Self {
-        Self::items(
-            changes
-                .into_iter()
-                .map(|change| change.clone().into())
-                .collect(),
-        )
+impl From<Vec<am::Change>> for AMresult {
+    fn from(changes: Vec<am::Change>) -> Self {
+        Self::items(changes.into_iter().map(|change| change.into()).collect())
     }
 }
 
@@ -501,7 +471,7 @@ pub fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
 /// \enum AMstatus
 /// \installed_headerfile
 /// \brief The status of an API call.
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub enum AMstatus {
     /// Success.
@@ -536,16 +506,14 @@ pub unsafe extern "C" fn AMresultCat(dest: *const AMresult, src: *const AMresult
 
     match (dest.as_ref(), src.as_ref()) {
         (Some(dest), Some(src)) => match (dest, src) {
-            (Items(dest_items), Items(src_items)) => {
-                return AMresult::items(
-                    dest_items
-                        .iter()
-                        .cloned()
-                        .chain(src_items.iter().cloned())
-                        .collect(),
-                )
-                .into();
-            }
+            (Items(dest_items), Items(src_items)) => AMresult::items(
+                dest_items
+                    .iter()
+                    .cloned()
+                    .chain(src_items.iter().cloned())
+                    .collect(),
+            )
+            .into(),
             (Error(_), Error(_)) | (Error(_), Items(_)) | (Items(_), Error(_)) => {
                 AMresult::error("Invalid `AMresult`").into()
             }

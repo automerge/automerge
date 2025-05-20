@@ -106,7 +106,11 @@ describe('Automerge', () => {
 
     it('it should allow registering type wrappers', () => {
       const doc1 = create()
-      doc1.registerDatatype("counter", (n: number) => new Counter(n))
+      doc1.registerDatatype("counter", (n: number) => new Counter(n), (c: any) => {
+          if (c instanceof Counter) {
+            return ["counter", c.value]
+          }
+      })
       const doc2 = doc1.fork()
       doc1.put("/", "n", 10, "counter")
       doc1.put("/", "m", 10, "int")
@@ -158,7 +162,11 @@ describe('Automerge', () => {
     it('should set the OBJECT_ID property on lists, maps, and text objects and not on scalars', () => {
         const doc1 = create({ actor: 'aaaa' })
         const mat: any = doc1.materialize("/")
-        doc1.registerDatatype("counter", (n: number) => new Counter(n))
+        doc1.registerDatatype("counter", (n: number) => new Counter(n), (c: any) => {
+            if (c instanceof Counter) {
+                return c.value
+            } 
+        })
         doc1.put("/", "string", "string", "str")
         doc1.put("/", "uint", 2, "uint")
         doc1.put("/", "int", 2, "int")

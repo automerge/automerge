@@ -35,7 +35,7 @@ pub(crate) use to_expand_mark;
 /// \enum AMmarkExpand
 /// \installed_headerfile
 /// \brief A mark's expansion mode for when bordering text is inserted.
-#[derive(PartialEq, Eq)]
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub enum AMmarkExpand {
     /// Include text inserted at the end offset.
@@ -78,17 +78,18 @@ impl TryFrom<&AMmarkExpand> for ExpandMark {
 
 /// \struct AMmark
 /// \installed_headerfile
-/// \brief An association of out-of-bound information with a sequence.
-pub struct AMmark<'a>(Mark<'a>);
+/// \brief An association of out-of-bound information with a list object or text
+///        object.
+pub struct AMmark(Mark);
 
-impl<'a> AMmark<'a> {
-    pub fn new(mark: Mark<'a>) -> Self {
+impl AMmark {
+    pub fn new(mark: Mark) -> Self {
         Self(mark)
     }
 }
 
-impl<'a> AsRef<Mark<'a>> for AMmark<'a> {
-    fn as_ref(&self) -> &Mark<'a> {
+impl AsRef<Mark> for AMmark {
+    fn as_ref(&self) -> &Mark {
         &self.0
     }
 }
@@ -176,7 +177,8 @@ pub unsafe extern "C" fn AMmarkEnd(mark: *const AMmark) -> usize {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] heads A pointer to an `AMitems` struct with `AM_VAL_TYPE_CHANGE_HASH`
-///                  items or `NULL`.
+///                  items to select a historical object or `NULL` to select the
+///                  current object.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_MARK` items.
 /// \pre \p doc `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to

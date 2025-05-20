@@ -1,12 +1,14 @@
 use std::ops::RangeBounds;
 
+use crate::automerge::{Automerge, Parents, ReadDoc};
+use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
-use crate::iter::{Keys, ListRange, MapRange, Values};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet};
-use crate::patches::PatchLog;
-use crate::types::Clock;
-use crate::AutomergeError;
-use crate::{Automerge, ChangeHash, Cursor, ObjType, Parents, Prop, ReadDoc, ScalarValue, Value};
+use crate::patches::{PatchLog, TextRepresentation};
+use crate::types::{Clock, ScalarValue};
+use crate::{hydrate, AutomergeError};
+use crate::{ChangeHash, Cursor, ObjType, Prop, Value};
 
 use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
@@ -32,7 +34,12 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, patch_log: PatchLog) -> Self {
+    pub(crate) fn new(
+        doc: &'a mut Automerge,
+        args: TransactionArgs,
+        mut patch_log: PatchLog,
+    ) -> Self {
+        patch_log.migrate_actors(&doc.ops().actors).unwrap(); // we forked and merged so there will be no mismatch
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
@@ -61,7 +68,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> Transaction<'a> {
+impl Transaction<'_> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
@@ -122,7 +129,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> ReadDoc for Transaction<'a> {
+impl ReadDoc for Transaction<'_> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys_for(obj.as_ref(), self.get_scope(None))
     }
@@ -131,11 +138,21 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
+    fn iter_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+        text_rep: TextRepresentation,
+    ) -> DocIter<'_> {
+        self.doc
+            .iter_for(obj.as_ref(), self.get_scope(heads), text_rep)
+    }
+
     fn map_range<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(
         &'b self,
         obj: O,
         range: R,
-    ) -> MapRange<'b, R> {
+    ) -> MapRange<'b> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(None))
     }
@@ -145,16 +162,12 @@ impl<'a> ReadDoc for Transaction<'a> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRange<'b, R> {
+    ) -> MapRange<'b> {
         self.doc
             .map_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-    ) -> ListRange<'_, R> {
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(&self, obj: O, range: R) -> ListRange<'_> {
         self.doc
             .list_range_for(obj.as_ref(), range, self.get_scope(None))
     }
@@ -164,7 +177,7 @@ impl<'a> ReadDoc for Transaction<'a> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+    ) -> ListRange<'_> {
         self.doc
             .list_range_for(obj.as_ref(), range, self.get_scope(Some(heads)))
     }
@@ -203,14 +216,46 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.text_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
-    fn get_cursor<O: AsRef<ExId>>(
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Spans<'_>, AutomergeError> {
+        self.doc.spans_for(obj.as_ref(), self.get_scope(None))
+    }
+
+    fn spans_at<O: AsRef<ExId>>(
         &self,
         obj: O,
-        position: usize,
+        heads: &[ChangeHash],
+    ) -> Result<Spans<'_>, AutomergeError> {
+        self.doc
+            .spans_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn get_cursor<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError> {
-        self.doc
-            .get_cursor_for(obj.as_ref(), position, self.get_scope(at))
+        self.doc.get_cursor_for(
+            obj.as_ref(),
+            position.into(),
+            self.get_scope(at),
+            MoveCursor::After,
+        )
+    }
+
+    fn get_cursor_moving<O: AsRef<ExId>, I: Into<CursorPosition>>(
+        &self,
+        obj: O,
+        position: I,
+        at: Option<&[ChangeHash]>,
+        move_cursor: MoveCursor,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor_for(
+            obj.as_ref(),
+            position.into(),
+            self.get_scope(at),
+            move_cursor,
+        )
     }
 
     fn get_cursor_position<O: AsRef<ExId>>(
@@ -223,7 +268,7 @@ impl<'a> ReadDoc for Transaction<'a> {
             .get_cursor_position_for(obj.as_ref(), address, self.get_scope(at))
     }
 
-    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
         self.doc.marks_for(obj.as_ref(), self.get_scope(None))
     }
 
@@ -231,9 +276,17 @@ impl<'a> ReadDoc for Transaction<'a> {
         &self,
         obj: O,
         heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    ) -> Result<Vec<Mark>, AutomergeError> {
         self.doc
             .marks_for(obj.as_ref(), self.get_scope(Some(heads)))
+    }
+
+    fn hydrate<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<hydrate::Value, AutomergeError> {
+        self.doc.hydrate_obj(obj.as_ref(), heads)
     }
 
     fn get_marks<O: AsRef<ExId>>(
@@ -301,12 +354,20 @@ impl<'a> ReadDoc for Transaction<'a> {
         self.doc.get_missing_deps(heads)
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<crate::Change> {
         self.doc.get_change_by_hash(hash)
+    }
+
+    fn stats(&self) -> crate::read::Stats {
+        self.doc.stats()
+    }
+
+    fn text_encoding(&self) -> crate::TextEncoding {
+        self.doc.text_encoding()
     }
 }
 
-impl<'a> Transactable for Transaction<'a> {
+impl Transactable for Transaction<'_> {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
@@ -400,7 +461,7 @@ impl<'a> Transactable for Transaction<'a> {
     fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: Mark<'_>,
+        mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| tx.mark(doc, hist, obj.as_ref(), mark, expand))
@@ -417,6 +478,27 @@ impl<'a> Transactable for Transaction<'a> {
         self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
+    fn split_block<'p, O>(&mut self, obj: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.split_block(doc, hist, obj.as_ref(), index))
+    }
+
+    fn join_block<O>(&mut self, text: O, index: usize) -> Result<(), AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.join_block(doc, hist, text.as_ref(), index))
+    }
+
+    fn replace_block<'p, O>(&mut self, text: O, index: usize) -> Result<ExId, AutomergeError>
+    where
+        O: AsRef<ExId>,
+    {
+        self.do_tx(|tx, doc, hist| tx.replace_block(doc, hist, text.as_ref(), index))
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.inner
             .as_ref()
@@ -431,9 +513,27 @@ impl<'a> Transactable for Transaction<'a> {
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
     }
+
+    fn update_spans<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
+        &mut self,
+        text: O,
+        new_text: I,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(move |tx, doc, hist| {
+            crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text)
+        })
+    }
+
+    fn update_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        new_value: &crate::hydrate::Value,
+    ) -> Result<(), crate::error::UpdateObjectError> {
+        self.do_tx(move |tx, doc, hist| tx.update_object(doc, hist, obj.as_ref(), new_value))
+    }
 }
 
-impl<'a> Drop for Transaction<'a> {
+impl Drop for Transaction<'_> {
     /// If a transaction is not commited or rolled back manually then it can leave the document in
     /// an intermediate state.
     /// This defaults to rolling back the transaction to be compatible with [`?`][std::ops::Try]

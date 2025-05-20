@@ -167,7 +167,7 @@ pub(crate) struct RleDecoder<'a, T> {
     literal: bool,
 }
 
-impl<'a, T> RleDecoder<'a, T> {
+impl<T> RleDecoder<'_, T> {
     pub(crate) fn done(&self) -> bool {
         self.decoder.done() && self.count == 0
     }
@@ -227,7 +227,7 @@ impl<'a, T> From<&'a [u8]> for RleDecoder<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for RleDecoder<'a, T>
+impl<T> Iterator for RleDecoder<'_, T>
 where
     T: Clone + Debug + Decodable,
 {

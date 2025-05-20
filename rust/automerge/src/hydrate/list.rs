@@ -1,40 +1,63 @@
 use std::collections::HashMap;
 
 use crate::exid::ExId;
+use crate::patches::TextRepresentation;
 use crate::types::Prop;
 use crate::{PatchAction, ScalarValue, SequenceTree};
 
 use super::{HydrateError, Value};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct List(SequenceTree<ListValue>);
+
+impl std::fmt::Debug for List {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.iter()).finish()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListValue {
-    value: Value,
-    marks: HashMap<String, ScalarValue>,
-    conflict: bool,
+    pub value: Value,
+    pub marks: HashMap<String, ScalarValue>,
+    pub conflict: bool,
 }
 
 impl List {
-    pub(crate) fn apply(&mut self, patch: PatchAction) -> Result<(), HydrateError> {
+    pub fn iter(&self) -> impl Iterator<Item = &ListValue> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub(crate) fn apply(
+        &mut self,
+        text_rep: TextRepresentation,
+        patch: PatchAction,
+    ) -> Result<(), HydrateError> {
         match patch {
             PatchAction::PutSeq {
                 index,
                 value,
                 conflict,
             } => {
+                let h_value = Value::new(value.0, text_rep);
                 *self
                     .0
                     .get_mut(index)
-                    .ok_or(HydrateError::InvalidIndex(index))? =
-                    ListValue::new(value.0.into(), conflict);
+                    .ok_or(HydrateError::InvalidIndex(index))? = ListValue::new(h_value, conflict);
                 Ok(())
             }
             PatchAction::Insert { index, values, .. } => {
                 for (n, value) in values.into_iter().enumerate() {
-                    self.0
-                        .insert(index + n, ListValue::new(value.0.clone().into(), value.2));
+                    let h_value = Value::new(value.0.clone(), text_rep);
+                    self.0.insert(index + n, ListValue::new(h_value, value.2));
                 }
                 Ok(())
             }
@@ -97,7 +120,7 @@ impl ListValue {
     }
 }
 
-impl From<Vec<Value>> for Value {
+impl From<Vec<Value>> for List {
     fn from(values: Vec<Value>) -> Self {
         let mut s = SequenceTree::new();
         for value in values {
@@ -107,6 +130,12 @@ impl From<Vec<Value>> for Value {
                 marks: Default::default(),
             })
         }
-        Value::List(List(s))
+        List(s)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(values: Vec<Value>) -> Self {
+        Value::List(List::from(values))
     }
 }

@@ -30,7 +30,7 @@ impl Detail {
         }
     }
 
-    pub fn advance(&mut self, n: isize) {
+    fn advance(&mut self, n: isize) {
         if n == 0 {
             return;
         }
@@ -55,7 +55,7 @@ impl Detail {
         }
     }
 
-    pub fn get_index(&self) -> usize {
+    fn get_index(&self) -> usize {
         (self.offset
             + if self.offset < 0 {
                 self.len as isize
@@ -64,7 +64,7 @@ impl Detail {
             }) as usize
     }
 
-    pub fn next(&mut self, n: isize) -> Option<&mut AMitem> {
+    fn next(&mut self, n: isize) -> Option<&mut AMitem> {
         if self.is_stopped() {
             return None;
         }
@@ -75,12 +75,12 @@ impl Detail {
         Some(value)
     }
 
-    pub fn is_stopped(&self) -> bool {
+    fn is_stopped(&self) -> bool {
         let len = self.len as isize;
         self.offset < -len || self.offset == len
     }
 
-    pub fn prev(&mut self, n: isize) -> Option<&mut AMitem> {
+    fn prev(&mut self, n: isize) -> Option<&mut AMitem> {
         self.advance(-n);
         if self.is_stopped() {
             return None;
@@ -90,7 +90,7 @@ impl Detail {
         Some(&mut slice[self.get_index()])
     }
 
-    pub fn reversed(&self) -> Self {
+    fn reversed(&self) -> Self {
         Self {
             len: self.len,
             offset: -(self.offset + 1),
@@ -98,7 +98,7 @@ impl Detail {
         }
     }
 
-    pub fn rewound(&self) -> Self {
+    fn rewound(&self) -> Self {
         Self {
             len: self.len,
             offset: if self.offset < 0 { -1 } else { 0 },
@@ -131,7 +131,7 @@ pub struct AMitems<'a> {
     phantom: PhantomData<&'a mut AMresult>,
 }
 
-impl<'a> AMitems<'a> {
+impl AMitems<'_> {
     pub fn new(items: &[AMitem]) -> Self {
         Self {
             detail: Detail::new(items, 0).into(),
@@ -139,27 +139,27 @@ impl<'a> AMitems<'a> {
         }
     }
 
-    pub fn advance(&mut self, n: isize) {
+    fn advance(&mut self, n: isize) {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
         detail.advance(n);
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         detail.len
     }
 
-    pub fn next(&mut self, n: isize) -> Option<&mut AMitem> {
+    fn next(&mut self, n: isize) -> Option<&mut AMitem> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
         detail.next(n)
     }
 
-    pub fn prev(&mut self, n: isize) -> Option<&mut AMitem> {
+    fn prev(&mut self, n: isize) -> Option<&mut AMitem> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
         detail.prev(n)
     }
 
-    pub fn reversed(&self) -> Self {
+    fn reversed(&self) -> Self {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         Self {
             detail: detail.reversed().into(),
@@ -167,7 +167,7 @@ impl<'a> AMitems<'a> {
         }
     }
 
-    pub fn rewound(&self) -> Self {
+    fn rewound(&self) -> Self {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         Self {
             detail: detail.rewound().into(),
@@ -176,14 +176,14 @@ impl<'a> AMitems<'a> {
     }
 }
 
-impl<'a> AsRef<[AMitem]> for AMitems<'a> {
+impl AsRef<[AMitem]> for AMitems<'_> {
     fn as_ref(&self) -> &[AMitem] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         unsafe { std::slice::from_raw_parts(detail.ptr as *const AMitem, detail.len) }
     }
 }
 
-impl<'a> Default for AMitems<'a> {
+impl Default for AMitems<'_> {
     fn default() -> Self {
         Self {
             detail: [0; USIZE_USIZE_USIZE_],
