@@ -2,7 +2,7 @@
   description = "automerge";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-24.05";
+    nixpkgs.url = "nixpkgs/nixos-24.11";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
     command-utils.url = "github:expede/nix-command-utils";
@@ -30,7 +30,7 @@
       pkgs = import nixpkgs { inherit system overlays; };
       unstable = import nixos-unstable { inherit system overlays; };
 
-      rustVersion = "1.82.0";
+      rustVersion = "1.86.0";
 
       rust-toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
         extensions = [
@@ -50,7 +50,6 @@
           "aarch64-unknown-linux-musl"
 
           "wasm32-unknown-unknown"
-          "wasm32-wasi"
         ];
       };
 
@@ -68,7 +67,7 @@
 
       cargo-installs = with pkgs; [
         cargo-criterion
-        cargo-deny
+        unstable.cargo-deny
         cargo-expand
         cargo-nextest
         cargo-outdated
@@ -77,7 +76,7 @@
         cargo-watch
         # llvmPackages.bintools
         twiggy
-        wasm-bindgen-cli
+        unstable.wasm-bindgen-cli
         wasm-tools
       ];
 
