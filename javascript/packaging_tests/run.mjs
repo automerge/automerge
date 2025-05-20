@@ -139,9 +139,24 @@ async function runViteDevServerTest(tmpProjectDir) {
   }
 }
 
+/**
+ * @param {string} tmpProjectDir
+*/
 async function runViteBuildTest(tmpProjectDir) {
   consola.info("running vite build")
   await exec("./node_modules/.bin/vite build", { cwd: tmpProjectDir })
+
+  // Check that only one version of the .wasm file is output to the build
+  // directory. See the comments in the `runWasmBindgen` function in `build.mjs`
+  // for details on why multiple wasm blobs might be produced
+  let assetsDir = path.join(tmpProjectDir, "dist", "assets")
+  let wasmBlobs = []
+  for await (const blob of fs.glob("*.wasm", { cwd: assetsDir} )){
+    wasmBlobs.push(blob)
+  }
+  if (wasmBlobs.length != 1) {
+    throw new Error(`Expected exctly one wasm blob in ${assetsDir} but found ${wasmBlobs.length}`)
+  }
 
   consola.info("running vite preview")
   const port = await findFreePort()
