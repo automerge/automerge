@@ -1,4 +1,4 @@
-use crate::marks::Mark;
+use crate::marks::OldMark;
 use crate::op_set::Op;
 use crate::op_tree::OpSetData;
 use crate::query::{Index, ListState, OpTreeNode, QueryResult, TreeQuery};
@@ -16,9 +16,9 @@ pub(crate) struct SeekMark<'a> {
     found_begin: bool,
     found_end: bool,
     mark_name: smol_str::SmolStr,
-    next_mark: Option<Mark<'a>>,
+    next_mark: Option<OldMark<'a>>,
     super_marks: HashMap<OpId, smol_str::SmolStr>,
-    marks: Vec<Mark<'a>>,
+    marks: Vec<OldMark<'a>>,
 }
 
 // should be able to use MarkStateMachine here now - FIXME
@@ -41,7 +41,7 @@ impl<'a> SeekMark<'a> {
     // Called once the the query has finished to account for the situation where the op we are
     // inserting is a MarkEnd op at the end of the text sequence. In this case
     // query_element_with_metadata won't be called
-    pub(crate) fn finish(mut self) -> Vec<Mark<'a>> {
+    pub(crate) fn finish(mut self) -> Vec<OldMark<'a>> {
         // If we searched every element in the sequence and we didn't find an end mark and there
         // are no superceding marks then we are inserting the MarkEnd as the last element in the
         // sequence.
@@ -75,7 +75,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 self.found_begin = true;
                 self.mark_name = data.name.clone();
                 // retain the name and the value
-                self.next_mark = Some(Mark::from_data(self.idx.index(), self.idx.index(), data));
+                self.next_mark = Some(OldMark::from_data(self.idx.index(), self.idx.index(), data));
                 // change id to the end id
                 self.id = self.id.next();
                 // remove all marks that dont match

@@ -206,7 +206,7 @@ pub(crate) struct ValueIter<'a> {
     raw: RawDecoder<'a>,
 }
 
-impl<'a> Iterator for ValueIter<'a> {
+impl Iterator for ValueIter<'_> {
     type Item = Result<ScalarValue, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -272,7 +272,7 @@ impl<'a> Iterator for ValueIter<'a> {
     }
 }
 
-impl<'a> ValueIter<'a> {
+impl ValueIter<'_> {
     fn parse_raw<'b, R, F: Fn(&'b [u8]) -> Result<R, DecodeColumnError>>(
         &'b mut self,
         meta: ValueMeta,
@@ -422,7 +422,7 @@ impl From<&ScalarValue> for ValueMeta {
             ScalarValue::Timestamp(i) => Self((lebsize(*i) << 4) | 9),
             ScalarValue::F64(_) => Self((8 << 4) | 5),
             ScalarValue::Counter(i) => Self((lebsize(i.start) << 4) | 8),
-            ScalarValue::Str(s) => Self(((s.as_bytes().len() as u64) << 4) | 6),
+            ScalarValue::Str(s) => Self(((s.len() as u64) << 4) | 6),
             ScalarValue::Bytes(b) => Self(((b.len() as u64) << 4) | 7),
             ScalarValue::Unknown { type_code, bytes } => {
                 Self(((bytes.len() as u64) << 4) | (*type_code as u64))

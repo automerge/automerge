@@ -123,7 +123,7 @@ pub(crate) struct Input<'a> {
     original: &'a [u8],
 }
 
-impl<'a> std::fmt::Debug for Input<'a> {
+impl std::fmt::Debug for Input<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -464,7 +464,7 @@ where
 pub(super) fn tuple2<'a, F, E, G, H, Er>(
     mut f: F,
     mut g: G,
-) -> impl FnMut(Input<'a>) -> ParseResult<'_, (E, H), Er>
+) -> impl FnMut(Input<'a>) -> ParseResult<'a, (E, H), Er>
 where
     F: Parser<'a, E, Er>,
     G: Parser<'a, H, Er>,
@@ -480,7 +480,7 @@ where
 pub(super) fn apply_n<'a, F, E, Er>(
     n: usize,
     mut f: F,
-) -> impl FnMut(Input<'a>) -> ParseResult<'_, Vec<E>, Er>
+) -> impl FnMut(Input<'a>) -> ParseResult<'a, Vec<E>, Er>
 where
     F: Parser<'a, E, Er>,
 {
@@ -587,6 +587,30 @@ where
     P: Parser<'a, R, E>,
 {
     input.range_of(parser)
+}
+
+pub(crate) fn range_only_unless_empty<'a, P, R, E>(
+    parser: P,
+    input: Input<'a>,
+) -> ParseResult<'a, std::ops::Range<usize>, E>
+where
+    P: Parser<'a, R, E>,
+{
+    if input.is_empty() {
+        Ok((input, 0..0))
+    } else {
+        range_only(parser, input)
+    }
+}
+
+pub(crate) fn range_only<'a, P, R, E>(
+    parser: P,
+    input: Input<'a>,
+) -> ParseResult<'a, std::ops::Range<usize>, E>
+where
+    P: Parser<'a, R, E>,
+{
+    input.range_of(parser).map(|(i, r)| (i, r.range))
 }
 
 /// Parse all the remaining input from the parser. This can never fail

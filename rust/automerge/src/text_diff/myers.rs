@@ -123,7 +123,7 @@ impl IndexMut<isize> for V {
 
 fn max_d(len1: usize, len2: usize) -> usize {
     // XXX look into reducing the need to have the additional '+ 1'
-    (len1 + len2 + 1) / 2 + 1
+    (len1 + len2).div_ceil(2) + 1
 }
 
 #[inline(always)]

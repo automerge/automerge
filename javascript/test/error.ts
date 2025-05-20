@@ -15,15 +15,4 @@ describe("Automerge errors", () => {
 
     assert(error instanceof Error)
   })
-
-  it("Automerge.from throws an error, not a string", () => {
-    let error
-    try {
-      Automerge.from({ "": "bad key" })
-    } catch (err) {
-      error = err
-    }
-
-    assert(error instanceof Error)
-  })
 })

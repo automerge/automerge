@@ -1,168 +1,36 @@
 use crate::interop::error;
+use crate::interop::ExternalTypeConstructor;
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
+use automerge::patches::TextRepresentation;
 use automerge::ChangeHash;
+use automerge::TextEncoding;
 use fxhash::FxBuildHasher;
-use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
-use std::ops::RangeFull;
+use std::ops::Deref;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::ObjId;
+use am::{ObjId, ObjType, ReadDoc};
 
-use am::iter::{ListRange, ListRangeItem, MapRange, MapRangeItem};
+use am::iter::{DocItem, DocObjItem};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
 const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
 const META_SYMBOL: &str = "_am_meta";
 
-#[derive(Debug)]
-enum Pending<'a> {
-    Map(
-        Object,
-        MapRangeItem<'a>,
-        MapRange<'a, RangeFull>,
-        ObjId,
-        Datatype,
-    ),
-    List(
-        Array,
-        ListRangeItem<'a>,
-        ListRange<'a, RangeFull>,
-        ObjId,
-        Datatype,
-    ),
-}
-
-impl<'a> Pending<'a> {
-    fn next_task(&self) -> Task<'a> {
-        match self {
-            Self::Map(_, item, ..) => Task::New(item.id.clone(), Datatype::from(&item.value)),
-            Self::List(_, item, ..) => Task::New(item.id.clone(), Datatype::from(&item.value)),
-        }
-    }
-
-    fn complete(
-        self,
-        value: JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Task<'a>, error::Export> {
-        match self {
-            Self::Map(js_obj, map_item, iter, obj, datatype) => {
-                export.set_prop(&js_obj, map_item.key, &value)?;
-                Ok(Task::Map(js_obj, iter, obj, datatype))
-            }
-            Self::List(js_array, _list_item, iter, obj, datatype) => {
-                js_array.push(&value);
-                Ok(Task::List(js_array, iter, obj, datatype))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Task<'a> {
-    New(ObjId, Datatype),
-    Map(Object, MapRange<'a, RangeFull>, ObjId, Datatype),
-    List(Array, ListRange<'a, RangeFull>, ObjId, Datatype),
-}
-
-impl<'a> Task<'a> {
-    #[inline(never)]
-    fn progress(
-        self,
-        export: &mut ExportCache<'a>,
-        heads: Option<&Vec<ChangeHash>>,
-        meta: &JsValue,
-    ) -> Result<Progress<'a>, error::Export> {
-        match self {
-            Self::New(obj, Datatype::Text) if export.doc.text_rep.is_string() => {
-                let text = export.doc.text_at(&obj, heads)?;
-                Ok(Progress::Done(JsValue::from(text)))
-            }
-            Self::New(obj, datatype) if datatype.is_seq() => {
-                let iter = export.doc.list_range_at(&obj, heads);
-                let array = Array::new();
-                Ok(Progress::Task(Task::List(array, iter, obj, datatype)))
-            }
-            Self::New(obj, datatype) => {
-                let iter = export.doc.map_range_at(&obj, heads);
-                let js_obj = Object::new();
-                Ok(Progress::Task(Task::Map(js_obj, iter, obj, datatype)))
-            }
-            Self::Map(js_obj, iter, obj, datatype) => {
-                Self::progress_map(js_obj, iter, obj, datatype, meta, export)
-            }
-            Self::List(js_array, iter, obj, datatype) => {
-                Self::progress_list(js_array, iter, obj, datatype, meta, export)
-            }
-        }
-    }
-
-    #[inline(never)]
-    fn progress_map(
-        js_obj: Object,
-        mut iter: MapRange<'a, RangeFull>,
-        obj: ObjId,
-        datatype: Datatype,
-        meta: &JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Progress<'a>, error::Export> {
-        while let Some(map_item) = iter.next() {
-            match map_item.value {
-                am::Value::Object(_) => {
-                    let pending = Pending::Map(js_obj, map_item, iter, obj, datatype);
-                    return Ok(Progress::Pending(pending));
-                }
-                am::Value::Scalar(s) => {
-                    export.set_prop(&js_obj, map_item.key, &export.export_scalar(&s)?)?
-                }
-            }
-        }
-        let wrapped = export.wrap_object(js_obj, &obj, datatype, meta)?;
-        Ok(Progress::Done(JsValue::from(wrapped)))
-    }
-
-    #[inline(never)]
-    fn progress_list(
-        js_array: Array,
-        mut iter: ListRange<'a, RangeFull>,
-        obj: ObjId,
-        datatype: Datatype,
-        meta: &JsValue,
-        export: &mut ExportCache<'a>,
-    ) -> Result<Progress<'a>, error::Export> {
-        while let Some(list_item) = iter.next() {
-            match list_item.value {
-                am::Value::Object(_) => {
-                    let pending = Pending::List(js_array, list_item, iter, obj, datatype);
-                    return Ok(Progress::Pending(pending));
-                }
-                am::Value::Scalar(s) => {
-                    js_array.push(&export.export_scalar(&s)?);
-                }
-            }
-        }
-        let wrapped = export.wrap_object(Object::from(js_array), &obj, datatype, meta)?;
-        Ok(Progress::Done(JsValue::from(wrapped)))
-    }
-}
-
-#[derive(Debug)]
-enum Progress<'a> {
-    Done(JsValue),
-    Task(Task<'a>),
-    Pending(Pending<'a>),
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ExportCache<'a> {
     pub(crate) objs: HashMap<ObjId, CachedObject, FxBuildHasher>,
+    obj_cache: HashMap<ObjId, (Object, JsValue)>,
+    to_freeze: Vec<Object>,
     datatypes: HashMap<Datatype, JsString, FxBuildHasher>,
-    keys: HashMap<&'a str, JsString>,
+    keys: HashMap<Cow<'a, str>, JsString>,
     definition: Object,
     value_key: JsValue,
     meta_sym: Symbol,
@@ -189,6 +57,8 @@ impl<'a> ExportCache<'a> {
         let value_key = "value".into();
         Ok(Self {
             objs: HashMap::default(),
+            obj_cache: HashMap::default(),
+            to_freeze: Vec::new(),
             datatypes: HashMap::default(),
             keys: HashMap::default(),
             definition,
@@ -201,69 +71,139 @@ impl<'a> ExportCache<'a> {
         })
     }
 
+    fn make_value_ref(
+        &mut self,
+        parent: &Object,
+        prop: &JsValue,
+        obj: ObjId,
+        value: am::ValueRef<'a>,
+        meta: &JsValue,
+    ) -> Result<JsValue, error::Export> {
+        Ok(match value {
+            am::ValueRef::Object(ObjType::Map) => self.make_map(obj, meta)?.into(),
+            am::ValueRef::Object(ObjType::Text) => {
+                self.obj_cache
+                    .insert(obj.clone(), (parent.clone(), prop.clone()));
+                JsValue::from_str("")
+            }
+            am::ValueRef::Scalar(s) => self.export_scalar_ref(&s)?,
+            am::ValueRef::Object(obj_type) => self.make_list(obj, obj_type.into(), meta)?.into(),
+        })
+    }
+
+    fn make_object(
+        &mut self,
+        obj: &ObjId,
+        d: Datatype,
+        meta: &JsValue,
+    ) -> Result<Option<Object>, error::Export> {
+        match d {
+            Datatype::Map => Ok(Some(self.make_map(obj.clone(), meta)?)),
+            Datatype::List => Ok(Some(self.make_list(obj.clone(), d, meta)?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn make_list(
+        &mut self,
+        obj: ObjId,
+        datatype: Datatype,
+        meta: &JsValue,
+    ) -> Result<Object, error::Export> {
+        let child = Array::new();
+        self.obj_cache
+            .insert(obj.clone(), (child.clone().into(), JsValue::null()));
+        self.wrap_object(child.into(), &obj, datatype, meta)
+    }
+
+    fn make_map(&mut self, obj: ObjId, meta: &JsValue) -> Result<Object, error::Export> {
+        let child = Object::new();
+        self.obj_cache
+            .insert(obj.clone(), (child.clone(), JsValue::null()));
+        self.wrap_object(child, &obj, Datatype::Map, meta)
+    }
+
     #[inline(never)]
     pub(crate) fn materialize(
         &mut self,
         obj: ObjId,
         datatype: Datatype,
-        heads: Option<&Vec<ChangeHash>>,
+        heads: Option<&[ChangeHash]>,
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
-        let mut task = Task::New(obj, datatype);
-        let mut stack: Vec<Pending<'_>> = Vec::new();
-        loop {
-            match task.progress(self, heads, meta)? {
-                Progress::Task(t) => {
-                    task = t;
+        if datatype == Datatype::Text {
+            return Ok(self.doc.text_at(&obj, heads)?.into());
+        }
+        let mut current_obj_id = Arc::new(obj.clone());
+        let mut o = self
+            .make_object(&current_obj_id, datatype, meta)?
+            .ok_or(error::Export::InvalidRoot)?;
+        let mut index = 0;
+        let mut buffer = String::new();
+        let mut parent_prop = JsValue::null();
+        let result = JsValue::from(&o);
+        let iter = self.doc.doc.iter_at(
+            obj,
+            heads,
+            TextRepresentation::String(TextEncoding::Utf16CodeUnit),
+        );
+        for DocObjItem { obj, item } in iter {
+            if obj != current_obj_id {
+                if !buffer.is_empty() {
+                    _set(&o, &parent_prop, &JsValue::from_str(&buffer))?;
+                    buffer.truncate(0);
                 }
-                Progress::Done(value) => match stack.pop() {
-                    Some(pending) => {
-                        task = pending.complete(value, self)?;
-                    }
-                    None => return Ok(value),
-                },
-                Progress::Pending(p) => {
-                    task = p.next_task();
-                    stack.push(p);
+                if let Some((new_o, new_p)) = self.obj_cache.get(&obj) {
+                    o = new_o.clone();
+                    parent_prop = new_p.clone();
+                }
+                current_obj_id = obj;
+                index = 0;
+            }
+            match item {
+                DocItem::Text(span) => {
+                    buffer.push_str(span.as_str());
+                }
+                DocItem::Map(map) => {
+                    let prop = self.ensure_key(map.key.clone());
+                    let value = self.make_value_ref(&o, &prop, map.id(), map.value, meta)?;
+                    _set(&o, &prop, &value)?;
+                }
+                DocItem::List(list) => {
+                    let prop = JsValue::from_f64(index as f64);
+                    let value = self.make_value_ref(&o, &prop, list.id(), list.value, meta)?;
+                    _set(&o, &prop, &value)?;
+                    index += 1;
                 }
             }
         }
+        if !buffer.is_empty() {
+            _set(&o, &parent_prop, &JsValue::from_str(&buffer))?;
+        }
+        for o in &self.to_freeze {
+            Object::freeze(o);
+        }
+        Ok(result)
     }
 
     #[inline(never)]
-    pub(crate) fn set_prop(
-        &mut self,
-        obj: &Object,
-        key: &'a str,
-        value: &JsValue,
-    ) -> Result<(), error::Export> {
-        self.ensure_key(key);
-        let key = self.keys.get(&key).unwrap(); // save - ensure above
-        Reflect::set(obj, key, value).map_err(|error| error::SetProp {
-            property: JsValue::from(key),
-            error,
-        })?;
-        Ok(())
-    }
-
-    #[inline(never)]
-    fn export_scalar(&self, value: &am::ScalarValue) -> Result<JsValue, error::Export> {
+    fn export_scalar_ref(&self, value: &am::ScalarValueRef<'_>) -> Result<JsValue, error::Export> {
         let (datatype, js_value) = match value {
-            am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
-            am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
-            am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
-            am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
-            am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
-            am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
-            am::ScalarValue::Timestamp(v) => (
+            am::ScalarValueRef::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.deref()).into()),
+            am::ScalarValueRef::Str(v) => (Datatype::Str, v.to_string().into()),
+            am::ScalarValueRef::Int(v) => (Datatype::Int, (*v as f64).into()),
+            am::ScalarValueRef::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+            am::ScalarValueRef::F64(v) => (Datatype::F64, (*v).into()),
+            am::ScalarValueRef::Counter(v) => (Datatype::Counter, (*v as f64).into()),
+            am::ScalarValueRef::Timestamp(v) => (
                 Datatype::Timestamp,
                 js_sys::Date::new(&(*v as f64).into()).into(),
             ),
-            am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
-            am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
-            am::ScalarValue::Unknown { bytes, type_code } => (
+            am::ScalarValueRef::Boolean(v) => (Datatype::Boolean, (*v).into()),
+            am::ScalarValueRef::Null => (Datatype::Null, JsValue::null()),
+            am::ScalarValueRef::Unknown { bytes, type_code } => (
                 Datatype::Unknown(*type_code),
-                Uint8Array::from(bytes.as_slice()).into(),
+                Uint8Array::from(bytes.deref()).into(),
             ),
         };
         self.wrap_scalar(js_value, datatype)
@@ -271,10 +211,8 @@ impl<'a> ExportCache<'a> {
 
     #[inline(never)]
     fn wrap_scalar(&self, value: JsValue, datatype: Datatype) -> Result<JsValue, error::Export> {
-        if let Some(function) = self.doc.external_types.get(&datatype) {
-            let wrapped_value = function
-                .call1(&JsValue::undefined(), &value)
-                .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        if let Some(constructor) = self.doc.external_types.get(&datatype) {
+            let wrapped_value = constructor.construct(&value, datatype)?;
             let o = wrapped_value
                 .dyn_into::<Object>()
                 .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -294,8 +232,14 @@ impl<'a> ExportCache<'a> {
     }
 
     #[inline(never)]
-    fn ensure_key(&mut self, key: &'a str) {
-        self.keys.entry(key).or_insert_with(|| JsString::from(key));
+    fn ensure_key(&mut self, key: Cow<'a, str>) -> JsValue {
+        if let Some(v) = self.keys.get(&key) {
+            v.into()
+        } else {
+            let v = JsString::from(key.borrow());
+            self.keys.insert(key, v.clone());
+            v.into()
+        }
     }
 
     #[inline(never)]
@@ -306,8 +250,8 @@ impl<'a> ExportCache<'a> {
         datatype: Datatype,
         meta: &JsValue,
     ) -> Result<Object, error::Export> {
-        let value = if let Some(function) = self.doc.external_types.get(&datatype) {
-            self.wrap_custom_object(&value, datatype, function)?
+        let value = if let Some(constructor) = self.doc.external_types.get(&datatype) {
+            self.wrap_custom_object(&value, datatype, constructor)?
         } else {
             value
         };
@@ -321,8 +265,9 @@ impl<'a> ExportCache<'a> {
         self.set_hidden(&value, &js_objid, js_datatype, meta)?;
 
         if self.doc.freeze {
-            Object::freeze(&value);
+            self.to_freeze.push(value.clone());
         }
+
         Ok(value)
     }
 
@@ -331,11 +276,9 @@ impl<'a> ExportCache<'a> {
         &self,
         value: &Object,
         datatype: Datatype,
-        function: &Function,
+        constructor: &ExternalTypeConstructor,
     ) -> Result<Object, error::Export> {
-        let wrapped_value = function
-            .call1(&JsValue::undefined(), value)
-            .map_err(|e| error::Export::CallDataHandler(datatype.to_string(), e))?;
+        let wrapped_value = constructor.construct(value, datatype)?;
         let wrapped_object = wrapped_value
             .dyn_into::<Object>()
             .map_err(|_| error::Export::InvalidDataHandler(datatype.to_string()))?;
@@ -405,6 +348,10 @@ impl<'a> ExportCache<'a> {
         self.set_value(obj, &self.datatype_sym, datatype)?;
         self.set_value(obj, &self.meta_sym, meta)
     }
+}
+
+fn _set(obj: &JsValue, property: &JsValue, value: &JsValue) -> Result<bool, error::Export> {
+    Reflect::set(obj, property, value).map_err(error::Export::ReflectSet)
 }
 
 #[derive(Debug, Clone)]

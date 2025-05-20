@@ -41,6 +41,7 @@ impl GenericColumnRange {
 }
 
 /// The type of values which can be stored in a generic column
+#[allow(dead_code)]
 pub(crate) enum CellValue {
     /// The contents of a simple column
     Simple(SimpleValue),
@@ -48,6 +49,7 @@ pub(crate) enum CellValue {
     Group(Vec<Vec<SimpleValue>>),
 }
 
+#[allow(dead_code)]
 pub(crate) enum SimpleValue {
     Uint(Option<u64>),
     Int(Option<i64>),
@@ -65,7 +67,7 @@ pub(crate) enum GenericColIter<'a> {
     Group(GroupIter<'a>),
 }
 
-impl<'a> GenericColIter<'a> {
+impl GenericColIter<'_> {
     fn try_next(&mut self) -> Result<Option<CellValue>, DecodeColumnError> {
         match self {
             Self::Simple(s) => s
@@ -82,7 +84,7 @@ impl<'a> GenericColIter<'a> {
     }
 }
 
-impl<'a> Iterator for GenericColIter<'a> {
+impl Iterator for GenericColIter<'_> {
     type Item = Result<CellValue, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {

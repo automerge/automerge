@@ -12,6 +12,18 @@ describe("Proxies", () => {
     doc = from({ list: ["a", "b", "c"] })
   })
 
+  describe("recursive document", () => {
+    it("should throw a useful RangeError when attempting to set a document inside itself", () => {
+      type RecursiveDoc = { [key: string]: RecursiveDoc }
+      const doc = from<RecursiveDoc>({})
+      change(doc, d => {
+        assert.throws(() => {
+          d.doc = doc
+        }, /Cannot create a reference to an existing document object/)
+      })
+    })
+  })
+
   describe("List Iterators", () => {
     it("should return iterable entries", () => {
       change(doc, d => {
@@ -47,6 +59,25 @@ describe("Proxies", () => {
         }
 
         assert.equal(count, 0)
+      })
+    })
+  })
+
+  describe("List indexOf", () => {
+    let doc: Doc<DocType>
+    beforeEach(() => {
+      doc = from({ list: ["a", "b", "c"] })
+    })
+
+    it("should return the index of a value for a string in a list of strings", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("b"), 1)
+      })
+    })
+
+    it("should return -1 if the value is not found", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("d"), -1)
       })
     })
   })
@@ -93,12 +124,29 @@ describe("Proxies", () => {
       change(doc, d => {
         assert.throws(() => {
           d.list.splice(0, 0, 5, undefined)
-        }, /Unsupported type undefined for path \/list at index 1 in the input/)
+        }, /Cannot assign undefined value at \/list.*at index 1 in the input/)
       })
     })
   })
 
   describe("map proxy", () => {
+    it("does allow null values", () => {
+      let doc = from<any>({})
+      doc = change(doc, doc => {
+        doc.foo = null
+      })
+      assert.equal(doc.foo, null)
+    })
+
+    it("does not allow undefined values", () => {
+      let doc = from<any>({})
+      assert.throws(() => {
+        doc = change(doc, doc => {
+          doc.foo = undefined
+        })
+      }, "Cannot assign undefined")
+    })
+
     it("should print the property path in the error when setting an undefined key", () => {
       const doc = from({ map: {} })
       change(doc, d => {
@@ -117,6 +165,23 @@ describe("Proxies", () => {
           d.list[0] = undefined
         }, /list\/0/)
       })
+    })
+
+    it("should support .at() to access values", () => {
+      const doc = from<{ list: string[] }>({ list: ["a", "b"] })
+      change(doc, d => {
+        assert.doesNotThrow(() => {
+          assert.equal(typeof d.list.at(0), "string")
+        })
+      })
+    })
+  })
+
+  describe("structuredClone support", () => {
+    it("should support objects cloned with structuredClone", () => {
+      const doc = from({ map: structuredClone({ key: "value", number: 2 }) })
+
+      assert.deepEqual(doc, { map: { key: "value", number: 2 } })
     })
   })
 })

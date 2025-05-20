@@ -5,7 +5,7 @@
  * Other libraries can be built on top of this one which provide IO and
  * persistence.
  *
- * An automerge document can be though of an immutable POJO (plain old javascript
+ * An automerge document can be thought of an immutable POJO (plain old javascript
  * object) which `automerge` tracks the history of, allowing it to be merged with
  * any other automerge document.
  *
@@ -186,7 +186,7 @@
  * let conflicts = automerge.getConflicts(doc3.pets[0], "name")
  *
  * // The two conflicting values are the keys of the conflicts object
- * assert.deepEqual(Object.values(conflicts), ["Babe", Beethoven"])
+ * assert.deepEqual(Object.values(conflicts), ["Babe", "Beethoven"])
  * ```
  *
  * ## Actor IDs
@@ -225,14 +225,7 @@
  * let doc1 = automerge.init()
  * let doc2 = automerge.change(automerge.clone(doc1), d => (d.key = "value"))
  * ```
- * @packageDocumentation
- *
- * ## The {@link next} module
- *
- * There have been several additions and changes to the automerge API which
- * are not backwards compatible. This API will become the API of the next major
- * release of automerge. New applications should use the {@link next} module.
  */
-export * from "./stable.js"
-import * as next from "./next.js"
-export { next }
+
+export * from "./implementation.js"
+export * as next from "./implementation.js"

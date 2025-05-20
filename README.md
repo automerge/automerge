@@ -6,7 +6,6 @@
 [![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge/automerge/)
 [![latest docs](https://img.shields.io/badge/docs-latest-informational)](https://docs.rs/automerge/latest/automerge)
 [![ci](https://github.com/automerge/automerge/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/ci.yaml)
-[![docs](https://github.com/automerge/automerge/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/docs.yaml)
 
 Automerge is a library which provides fast implementations of several different
 CRDTs, a compact compression format for these CRDTs, and a sync protocol for
@@ -17,26 +16,28 @@ which allow application developers to avoid thinking about hard distributed
 computing problems. Automerge aims to be PostgreSQL for your local-first app.
 
 If you're looking for documentation on the JavaScript implementation take a look
-at https://automerge.org/docs/hello/. There are other implementations in both
-Rust and C, but they are earlier and don't have documentation yet. You can find
-them in `rust/automerge` and `rust/automerge-c` if you are comfortable
-reading the code and tests to figure out how to use them.
+at https://automerge.org/docs/hello/. This repository also contains the core
+Rust library which is compiled to WebAssembly and exposed in JavaScript. The
+docs for this library can be found on
+[docs.rs](https://docs.rs/automerge/latest/automerge/). Finally, there is a C
+library in `rust/automerge-c`, take a look at the README there for more details.
 
 If you're familiar with CRDTs and interested in the design of Automerge in
 particular take a look at https://automerge.org/automerge-binary-format-spec.
 
-Finally, if you want to talk to us about this project please [join our Discord server](https://discord.gg/HrpnPAU5zx)!
+Finally, if you want to talk to us about this project please [join our Discord
+server](https://discord.gg/HrpnPAU5zx)!
 
 ## Status
 
 This project is formed of a core Rust implementation which is exposed via FFI in
 javascript+WASM, C, and soon other languages. Alex
-([@alexjg](https://github.com/alexjg/)) is working full time on maintaining
+([@alexjg](https://github.com/alexjg/)) and Orion
+([@orionz](https://github.com/orionz)) are working full time on maintaining
 automerge, other members of Ink and Switch are also contributing time and there
-are several other maintainers. The focus is currently on shipping the new JS
-package. We expect to be iterating the API and adding new features over the next
-six months so there will likely be several major version bumps in all packages
-in that time.
+are several other maintainers. We are currently focusing on a new implementation
+of the internals (with no API change) which achieves around a 100x reduction in
+memory usage.
 
 In general we try and respect semver.
 
@@ -44,8 +45,34 @@ In general we try and respect semver.
 
 A stable release of the javascript package is currently available as
 `@automerge/automerge@2.0.0` where. pre-release verisions of the `2.0.1` are
-available as `2.0.1-alpha.n`. `2.0.1*` packages are also available for Deno at
-https://deno.land/x/automerge
+available as `2.0.1-alpha.n`.
+
+#### 3.0 Beta
+
+There is a beta version of Automerge 3.0 available as
+`@automerge/automerge@3.0.0-beta.<n>`, where `n` is the latest version - look at
+[npm](https://www.npmjs.com/package/@automerge/automerge?activeTab=versions) for
+the latest version.
+
+The biggest difference from 2.0 with this release is that it uses enormously less
+memory (up to 100x less) than 2.0. There are also some incompatible differences
+from 2.0. The concrete changes you will need to make to migrate to the beta depend
+on if you were using the [next API](https://automerge.org/docs/the_js_packages/#the-next-api)
+
+If you are using `next` (i.e. you use `string` for collaborative text):
+
+* replace any `import .. from "@automerge/automerge/next"` with
+  `import .. from "@automerge/automerge"`
+* replace any `import .. from "@automerge/automerge/slim/next"` with
+  `import .. from "@automerge/automerge/slim"`
+* replace any mention of `RawString` with `ImmutableString` and `isRawString`
+  with `isImmutableString`
+
+If you are not using `next` (i.e you use `Text` for collaborative text)
+
+* update any code which uses `Text` to use `string` and `Automerge.splice`
+* update any code which uses `string` to use `ImmutableString`
+
 
 ### Rust
 
@@ -55,7 +82,7 @@ not well documented. We will be returning to this over the next few months but
 for now you will need to be comfortable reading the tests and asking questions
 to figure out how to use it. If you are looking to build rust applications which
 use automerge you may want to look into
-[autosurgeon](https://github.com/alexjg/autosurgeon)
+[autosurgeon](https://github.com/automerge/autosurgeon)
 
 ## Repository Organisation
 
@@ -75,8 +102,13 @@ To build this codebase you will need:
 - `rust`
 - `node`
 - `yarn`
+
+And if you are interested in building the automerge-c library
+
 - `cmake`
 - `cmocka`
+- `doxygen`
+- `ninja`
 
 You will also need to install the following with `cargo install`
 
@@ -138,6 +170,37 @@ export LIBRARY_PATH=/opt/homebrew/lib
 ./scripts/ci/run
 ```
 
+## Nix Flake
+
+If you have [Nix](https://nixos.org/) installed, there is a flake available with all
+of the dependencies configured and some helper scripts.
+
+``` console
+$ nix develop
+
+  ____                                          _
+ / ___|___  _ __ ___  _ __ ___   __ _ _ __   __| |___
+| |   / _ \| '_ ` _ \| '_ ` _ \ / _` | '_ \ / _` / __|
+| |__| (_) | | | | | | | | | | | (_| | | | | (_| \__ \
+ \____\___/|_| |_| |_|_| |_| |_|\__,_|_| |_|\__,_|___/
+
+
+build:deno          | Build Deno-wrapped Wasm library
+build:host          | Build for aarch64-darwin
+build:node          | Build JS-wrapped Wasm library
+build:wasi          | Build for Wasm32-WASI
+build:wasm:nodejs   | Build for wasm32-unknown-unknown with Node.js bindgings
+build:wasm:web      | Build for wasm32-unknown-unknown with web bindings
+docs:build:host     | Refresh the docs
+docs:build:wasm     | Refresh the docs with the wasm32-unknown-unknown target
+docs:open:host      | Open refreshed docs
+docs:open:wasm      | Open refreshed docs
+# ✂️  SNIP ✂️
+
+$ rustc --version
+rustc 1.82.0 (f6e511eec 2024-10-15) # latest at time of writing
+```
+
 ## Contributing
 
 Please try and split your changes up into relatively independent commits which
@@ -157,18 +220,15 @@ There are four artefacts in this repository which need releasing:
 
 #### JS Packages
 
-The NPM and Deno packages are all released automatically by CI tooling whenever
-the version number in the respective `package.json` changes. This means that
-the process for releasing a new JS version is:
+The NPM package is released automatically by CI tooling whenever a new Github release
+is created. This means that the process for releasing an ew JS version is:
 
-1. Bump the version in the `rust/automerge-wasm/package.json` (skip this if there
-   are no new changes to the WASM)
-2. Bump the version of `@automerge/automerge-wasm` we depend on in `javascript/package.json`
-3. Bump the version in `@automerge/automerge` also in `javascript/package.json`
+1. Bump the version in `@automerge/automerge` also in `javascript/package.json`
+2. Put in a PR to main with the version bump, wait for tests to run and merge to `main`
+3. Once merged to main, create a tag of the form `js/automerge-<version>`
+4. Create a new release on Github referring to the tag in question
 
-Put all of these bumps in a PR and wait for a clean CI run. Then merge the PR.
-The CI tooling will pick up a push to `main` with a new version and publish it
-to NPM. This does depend on an access token available as `NPM_TOKEN` in the 
+This does depend on an access token available as `NPM_TOKEN` in the
 actions environment, this token is generated with a 30 day expiry date so needs
 (manually) refreshing every so often.
 

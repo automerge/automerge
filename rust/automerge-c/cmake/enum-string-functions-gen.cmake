@@ -1,7 +1,7 @@
 # This CMake script is used to generate a header and a source file for utility
 # functions that convert the tags of generated enum types into strings and
 # strings into the tags of generated enum types.
-cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 
 # Seeks the starting line of the source enum's declaration.
 macro(seek_enum_mode)

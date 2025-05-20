@@ -27,7 +27,7 @@ impl<'a, R: ReadDoc> From<&'a R> for AutoSerde<'a, R> {
     }
 }
 
-impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerde<'a, R> {
+impl<R: crate::ReadDoc> serde::Serialize for AutoSerde<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -45,7 +45,7 @@ struct AutoSerdeMap<'a, R> {
     obj: ObjId,
 }
 
-impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeMap<'a, R> {
+impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeMap<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -71,7 +71,7 @@ struct AutoSerdeSeq<'a, R> {
     obj: ObjId,
 }
 
-impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeSeq<'a, R> {
+impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeSeq<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -98,7 +98,7 @@ struct AutoSerdeVal<'a, R> {
     obj: ObjId,
 }
 
-impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'a, R> {
+impl<R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'_, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -111,7 +111,11 @@ impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'a, R> {
                 };
                 map.serialize(serializer)
             }
-            Value::Object(ObjType::List | ObjType::Text) => {
+            Value::Object(ObjType::Text) => {
+                let text = self.doc.text(&self.obj).unwrap();
+                text.serialize(serializer)
+            }
+            Value::Object(ObjType::List) => {
                 let seq = AutoSerdeSeq {
                     doc: self.doc,
                     obj: self.obj.clone(),

@@ -1,3 +1,75 @@
+# 0.6.1
+
+* Fix a bug where `{Automerge, AutoCommit}::get_marks` would return removed marks
+  as mark with value `ScalarValue::Null` rather than not returning them at all.
+
+# 0.6.0
+
+* Add the ability to set the text encoding used when calculating the indices
+  into text objects via the Automerge::new_with_encoding constructor.
+* Update the cursor API to allow creating cursors which point at the beginning
+  or end of the text and to allow configuring how the cursor position is
+  resolved when the original character which the cursor referenced has been
+  deleted.
+
+# 0.5.12
+
+* Allow empty keys in maps
+* Add `SyncState::has_our_changes` to indicate whether we think the other end
+  has everything we have.
+* Add `ReadDoc::stats` to obtain basic statistics about a document (number of 
+  operations and changes)
+* Allow configuring the character widths used for the wasm32 target by
+  introducing the utf-16 indexing feature flag
+
+# 0.5.11
+
+* Fixed a bug where actor IDs were written incorrectly to the save document
+  format rendering it impossible to load the document
+
+# 0.5.10
+
+The primary feature of this release is a set of methods for managing block 
+markers in rich text. These methods are:
+
+* ReadDoc::{spans, spans_at} which return spans of text grouped by marks and
+  separated by block markers
+* Transactable::{split_block, join_block, update_block} which allow you to
+  create, remove, and update block markers in a text sequence
+* Transactable::update_spans, which allows you to update all the block markers
+  and text in a text sequence in one go. Analogous to update_text for block
+  structure
+
+These methods are not well documented as they have primarily been written to
+support the JS implementation. Documentation and examples will follow in future
+releases
+
+Other changes:
+
+* Fix a bug where marks which were set to not expand at the end still produced
+  splice patches containing the mark when inserting at the end of the mark
+* Fix a bug where splicing into the end of a mark which was set to expand did
+  not produce patches containing the marks when receiving the change from a 
+  remote
+* Fix a bug where "undeleted" objects were not emitted in patches when patching
+  in "reverse" - i.e. when the before heads were topoligically after the after
+  heads when calling `diff`
+
+# 0.5.9
+
+* Fix a bug introduced in 0.5.8 which caused an error when loading a saved
+  document which contained empty commits
+* Improve performance when diffing documents which contain a large number of 
+  objects
+
+# 0.5.8
+
+* Fix a bug where the logic to rollback a transaction on error could panic
+* Fix a bug where marks were calculated incorrectly when viewing a document at
+  a particular set of heads (i.e. not the "current" heads)
+* Update the `LoadOptions::migrate_strings` logic to no-op if there are no
+  strings to convert
+
 # 0.5.7
 
 * Update itertools dependency to 0.12.0
