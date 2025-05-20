@@ -63,6 +63,25 @@ describe("Proxies", () => {
     })
   })
 
+  describe("List indexOf", () => {
+    let doc: Doc<DocType>
+    beforeEach(() => {
+      doc = from({ list: ["a", "b", "c"] })
+    })
+
+    it("should return the index of a value for a string in a list of strings", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("b"), 1)
+      })
+    })
+
+    it("should return -1 if the value is not found", () => {
+      change(doc, d => {
+        assert.equal(d.list.indexOf("d"), -1)
+      })
+    })
+  })
+
   describe("List splice", () => {
     it("should be able to remove a defined number of list entries", () => {
       doc = change(doc, d => {
