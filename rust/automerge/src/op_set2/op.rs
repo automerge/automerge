@@ -1078,6 +1078,13 @@ impl<'a> Op<'a> {
         self.action == Action::Set
     }
 
+    pub(crate) fn is_make(&self) -> bool {
+        matches!(
+            self.action,
+            Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
+        )
+    }
+
     pub(crate) fn value(&self) -> ValueRef<'a> {
         match &self.action() {
             OpType::Make(obj_type) => ValueRef::Object(*obj_type),
