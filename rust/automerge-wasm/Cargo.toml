@@ -4,7 +4,11 @@ name = "automerge-wasm"
 description = "An js/wasm wrapper for the rust implementation of automerge-backend"
 repository = "https://github.com/automerge/automerge"
 version = "0.1.0"
-authors = ["Alex Good <alex@memoryandthought.me>","Orion Henry <orion@inkandswitch.com>", "Martin Kleppmann"]
+authors = [
+    "Alex Good <alex@memoryandthought.me>",
+    "Orion Henry <orion@inkandswitch.com>",
+    "Martin Kleppmann",
+]
 categories = ["wasm"]
 readme = "README.md"
 edition = "2021"
@@ -12,7 +16,7 @@ license = "MIT"
 rust-version = "1.73.0"
 
 [lib]
-crate-type = ["cdylib","rlib"]
+crate-type = ["cdylib", "rlib"]
 bench = false
 
 [features]
@@ -50,7 +54,6 @@ version = "0.3.22"
 features = ["console"]
 
 [dev-dependencies]
-futures = "^0.1"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 wasm-bindgen-futures = "^0.4"
 wasm-bindgen-test = "^0.3"
