@@ -340,7 +340,7 @@ impl AutoCommit {
     pub fn isolate(&mut self, heads: &[ChangeHash]) {
         self.ensure_transaction_closed();
         self.patch_to(heads);
-        self.isolation = Some(heads.to_vec())
+        self.isolation = Some(heads.to_vec());
     }
 
     pub fn integrate(&mut self) {
@@ -352,8 +352,12 @@ impl AutoCommit {
     pub(crate) fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args(self.isolation.as_deref());
+            self.patch_log
+                .migrate_actors(&self.doc.ops().actors)
+                .unwrap();
             let inner = TransactionInner::new(args);
-            self.transaction = Some((self.patch_log.branch(), inner))
+            let branch = self.patch_log.branch();
+            self.transaction = Some((branch, inner));
         }
     }
 

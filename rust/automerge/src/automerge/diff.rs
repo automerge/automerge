@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use std::collections::HashSet;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use crate::{
     marks::{MarkSet, MarkStateMachine},
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ListEncoding, Prop, Value},
+    types::{Clock, ListEncoding, ObjId, Prop, Value},
     AutomergeError, ChangeHash, Cursor, ObjId as ExId, ObjType, ROOT,
 };
 
@@ -136,7 +137,11 @@ impl<'a> Patch<'a> {
 }
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
+    let mut visible = HashSet::from([ObjId::root()]);
     for (obj, ops) in doc.ops().iter_objs() {
+        if !visible.contains(&obj.id) {
+            continue;
+        }
         let mut diff = RichTextDiff::default();
         let ops_by_key = ops.diff(before, after).chunk_by(|d| d.op.elemid_or_key());
         let diffs = ops_by_key
@@ -144,17 +149,20 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
             .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
         match (obj.typ, patch_log.text_rep()) {
             (ObjType::Text, TextRepresentation::String(encoding)) => {
-                log_text_diff(patch_log, &obj, encoding, diffs);
+                log_text_diff(&mut visible, patch_log, &obj, encoding, diffs);
             }
             (ObjType::Text, TextRepresentation::Array) | (ObjType::List, _) => {
-                log_list_diff(patch_log, &obj, diffs);
+                log_list_diff(&mut visible, patch_log, &obj, diffs);
             }
-            (ObjType::Map | ObjType::Table, _) => log_map_diff(doc, patch_log, &obj, diffs),
+            (ObjType::Map | ObjType::Table, _) => {
+                log_map_diff(&mut visible, patch_log, &obj, diffs)
+            }
         }
     }
 }
 
 fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
+    visible: &mut HashSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     patches: I,
@@ -166,6 +174,9 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 
             let conflict = winner.conflict;
             let expose = winner.cross_visible;
+            if winner.op.is_make() {
+                visible.insert(ObjId(winner.op.id));
+            }
             patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             index + 1
         }
@@ -174,6 +185,9 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             let value = after.value(patch_log.text_rep());
             let id = after.op.id;
             let expose = after.cross_visible;
+            if after.op.is_make() {
+                visible.insert(ObjId(after.op.id));
+            }
             patch_log.put_seq(obj.id, index, value, id, conflict, expose);
             index + 1
         }
@@ -191,6 +205,9 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
             if let Some(marks) = &marks {
                 patch_log.mark(obj.id, index, 1, marks)
             }
+            if after.op.is_make() {
+                visible.insert(ObjId(after.op.id));
+            }
             index + 1
         }
         Patch::Delete(_) => {
@@ -201,6 +218,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
+    visible: &mut HashSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     text_encoding: TextEncoding,
@@ -217,6 +235,9 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
+                if winner.op.is_make() {
+                    visible.insert(ObjId(id));
+                }
                 patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             }
             index + winner.op.width(encoding)
@@ -245,7 +266,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    _doc: &'a Automerge,
+    visible: &mut HashSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     diffs: I,
@@ -258,6 +279,9 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
+                if winner.op.is_make() {
+                    visible.insert(ObjId(winner.op.id));
+                }
                 patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
             Patch::Update { after, .. } => {
@@ -265,6 +289,9 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 let value = after.value(patch_log.text_rep());
                 let id = after.op.id;
                 let expose = after.cross_visible;
+                if after.op.is_make() {
+                    visible.insert(ObjId(after.op.id));
+                }
                 patch_log.put_map(obj.id, &key, value, id, conflict, expose)
             }
             Patch::Old { before, after, .. } => {
@@ -273,6 +300,9 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 }
                 if let Some(n) = get_inc(&before, &after) {
                     patch_log.increment_map(obj.id, &key, n, after.op.id);
+                }
+                if after.op.is_make() {
+                    visible.insert(ObjId(after.op.id));
                 }
             }
             Patch::Delete(_) => patch_log.delete_map(obj.id, &key),

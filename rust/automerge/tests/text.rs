@@ -1142,11 +1142,11 @@ fn print_path(path: &[(automerge::ObjId, Prop)]) -> String {
     for (_, prop) in path {
         match prop {
             Prop::Map(key) => {
-                path_str.push_str("/");
+                path_str.push('/');
                 path_str.push_str(key);
             }
             Prop::Seq(index) => {
-                path_str.push_str("/");
+                path_str.push('/');
                 path_str.push_str(index.to_string().as_str());
             }
         }

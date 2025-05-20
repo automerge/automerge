@@ -378,7 +378,6 @@ impl PatchLog {
     }
 
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
-        //self.migrate_actors(&doc.ops().actors).ok();
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         if let Some(heads) = self.heads.as_ref() {
