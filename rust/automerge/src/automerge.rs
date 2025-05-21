@@ -1641,7 +1641,7 @@ impl Automerge {
             if !visible_objs.contains(&obj.id) {
                 continue;
             }
-            for op in ops.visible(at.clone()) {
+            for op in ops.visible(at.clone()).top_ops() {
                 //if op.visible_at(at.as_ref()) {
                 if let OpType::Make(_) = op.op_type() {
                     visible_objs.insert(op.id.into());

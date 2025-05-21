@@ -6,8 +6,8 @@ use automerge::{
     marks::{ExpandMark, Mark},
     patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
-    TextEncoding, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, Prop, ReadDoc,
+    ScalarValue, TextEncoding, Value, ROOT,
 };
 const B: usize = 16;
 
@@ -858,4 +858,141 @@ fn removed_marks_should_not_appear_in_get_marks() {
     assert_eq!(marks.iter().collect::<Vec<_>>(), vec![]);
     assert_eq!(marks.len(), 0);
     assert_eq!(marks.num_marks(), 0);
+}
+
+#[test]
+fn incorrect_patches_produced_when_isolating_and_integrating() {
+    // This test exercises the bug reported in https://github.com/automerge/automerge/issues/951
+    //
+    // The issue was reported as to do with `changeAt`, hence the use of
+    // `isolate` and `integrate` here. But in fact it occurs whenever there are
+    // conflicting changes and more than 100 patches
+
+    // Hard code actor ID to avoid flakes in patch ordering
+    let actor = ActorId::from_str("aaaaaa").unwrap();
+    let mut doc = AutoCommit::new().with_actor(actor);
+
+    let beginning = doc.get_heads();
+
+    // This issue was observed when the number of patches was larger than
+    // 100. This is because if there are more than 100 patches then the
+    // PatchBuilder::new function precomputes a visible path cache
+    const NUM_CHARS_IN_NEW_NAME: usize = 100;
+    let name = doc.put_object(&ROOT, "name", ObjType::Text).unwrap();
+    let new_name = "a".repeat(NUM_CHARS_IN_NEW_NAME);
+    doc.splice_text(&name, 0, 0, &new_name).unwrap();
+
+    // Create a concurrent change at the root
+    doc.isolate(&beginning);
+    let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
+    doc.splice_text(&color, 0, 0, "red").unwrap();
+    doc.integrate();
+    assert_eq!(doc.text(&color).unwrap(), "red");
+
+    // Pop the patches - this is necessary to make the test work
+    let _ignored_patches = doc.diff_incremental();
+
+    // Make sure the document has a clean patch log
+    doc.commit();
+
+    // Create another concurrent change
+    doc.isolate(&beginning);
+    let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
+    doc.splice_text(&color, 0, 0, "unset").unwrap();
+    doc.commit();
+    doc.integrate();
+
+    let patches = doc.diff_incremental();
+
+    // Here we would expect the patches to be something like:
+    //
+    // first patch back to the beginning of doc
+    // * DeleteMap ROOT "color"
+    // * DeleteMap ROOT "name"
+    //
+    // Now insert new items
+    // * PutMap ROOT "color" Text
+    // * PutMap ROOT "name" Text
+    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    // * SpliceText "color" "unset"
+    //
+    // But what we actually get is
+    //
+    // * DeleteMap ROOT "color"
+    // * DeleteMap ROOT "name"
+    //
+    // Now insert new items
+    // * PutMap ROOT "color" Text
+    // * PutMap ROOT "name" Text
+    // * DeleteSeq "color" 3
+    // * SpliceText "color" "red"
+    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    // * SpliceText "unset"
+    //
+    // Where it appears that the 'red' property has been inserted into the patch
+    // log in the wrong order (we would at least expect the deletion to come
+    // after the insertion)
+
+    // This assertion works until NUM_CHARS_IN_NEW_NAME is greater than 44
+    assert_eq!(
+        patches,
+        vec![
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::DeleteMap {
+                    key: "color".to_string()
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::DeleteMap {
+                    key: "name".to_string()
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::PutMap {
+                    key: "color".to_string(),
+                    value: (Value::Object(ObjType::Text), color.clone()),
+                    conflict: true
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::PutMap {
+                    key: "name".to_string(),
+                    value: (Value::Object(ObjType::Text), name.clone()),
+                    conflict: false
+                },
+            },
+            Patch {
+                obj: name,
+                path: vec![(ROOT, Prop::Map("name".to_string()))],
+                action: PatchAction::SpliceText {
+                    index: 0,
+                    value: ConcreteTextValue::new(
+                        &new_name,
+                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
+                    ),
+                    marks: None
+                }
+            },
+            Patch {
+                obj: color,
+                path: vec![(ROOT, Prop::Map("color".to_string()))],
+                action: PatchAction::SpliceText {
+                    index: 0,
+                    value: ConcreteTextValue::new(
+                        "unset",
+                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
+                    ),
+                    marks: None
+                }
+            }
+        ]
+    );
 }

@@ -137,4 +137,31 @@ describe("patches", () => {
       },
     )
   })
+
+  it("should produce correct patches during changeAt", () => {
+    // This test exercises the bug reported in https://github.com/automerge/automerge/issues/951
+    //
+    // The problem was that the patches emitted by changeAt erroenously included
+    // patches for objects that are not visible in the final state of the document
+    // which cause garbled content. This was especially difficult to track down
+    // because it was only triggered by larger patches
+
+    let doc = Automerge.init<{ name?: string; color?: string }>()
+
+    let beginning = Automerge.getHeads(doc)
+
+    doc = Automerge.change(doc, (d: any) => {
+      d.name = "a".repeat(100) // Bug is triggered by more than 100 patches
+    })
+
+    doc = Automerge.changeAt(doc, beginning, (d: any) => {
+      d.color = "red"
+    }).newDoc
+
+    doc = Automerge.changeAt(doc, beginning, (d: any) => {
+      d.color = "unset"
+    }).newDoc
+    // The bug manifested as `doc.color` being "usetred" rather than the expected "unset"
+    assert.deepStrictEqual(doc.color, "unset")
+  })
 })
