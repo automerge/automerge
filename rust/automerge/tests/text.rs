@@ -6,8 +6,8 @@ use automerge::{
     marks::{ExpandMark, Mark},
     patches::TextRepresentation,
     transaction::Transactable,
-    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, ReadDoc, ScalarValue,
-    TextEncoding, ROOT,
+    ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, Prop, ReadDoc,
+    ScalarValue, TextEncoding, Value, ROOT,
 };
 const B: usize = 16;
 
@@ -858,4 +858,298 @@ fn removed_marks_should_not_appear_in_get_marks() {
     assert_eq!(marks.iter().collect::<Vec<_>>(), vec![]);
     assert_eq!(marks.len(), 0);
     assert_eq!(marks.num_marks(), 0);
+}
+
+#[test]
+fn weird_patches() {
+    let mut doc = AutoCommit::new();
+
+    let beginning = doc.get_heads();
+
+    // Once this is larger than 44 the test fails
+    const NUM_CHARS_IN_NEW_NAME: usize = 45;
+    let name = doc.put_object(&ROOT, "name", ObjType::Text).unwrap();
+    let new_name = "a".repeat(NUM_CHARS_IN_NEW_NAME);
+    doc.splice_text(&name, 0, 0, &new_name).unwrap();
+
+    // Create a concurrent change at the root
+    doc.isolate(&beginning);
+    let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
+    doc.splice_text(&color, 0, 0, "red").unwrap();
+    doc.integrate();
+    assert_eq!(doc.text(&color).unwrap(), "red");
+
+    // Pop the patches
+    doc.diff_incremental();
+
+    doc.isolate(&beginning);
+    let color = doc.put_object(&ROOT, "color", ObjType::Text).unwrap();
+    doc.splice_text(&color, 0, 0, "unset").unwrap();
+    doc.integrate();
+
+    let patches = doc.diff_incremental();
+
+    // Here we would expect the patches to be something like:
+    //
+    // first patch back to the beginning of doc
+    // * DeleteMap ROOT "color"
+    // * DeleteMap ROOT "name"
+    //
+    // Now insert new items
+    // * PutMap ROOT "color" Text
+    // * PutMap ROOT "name" Text
+    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    // * SpliceText "color" "unset"
+    //
+    // But what we actually get is
+    //
+    // * DeleteMap ROOT "color"
+    // * DeleteMap ROOT "name"
+    //
+    // Now insert new items
+    // * PutMap ROOT "color" Text
+    // * PutMap ROOT "name" Text
+    // * DeleteSeq "color" 3
+    // * SpliceText "color" "red"
+    // * SpliceText "name" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    // * SpliceText "unset"
+    //
+    // Where it appears that the 'red' property has been inserted into the patch
+    // log in the wrong order (we would at least expect the deletion to come
+    // after the insertion)
+
+    print_patch_table(&patches);
+
+    // This assertion works until NUM_CHARS_IN_NEW_NAME is greater than 44
+    assert_eq!(
+        patches,
+        vec![
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::DeleteMap {
+                    key: "color".to_string()
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::DeleteMap {
+                    key: "name".to_string()
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::PutMap {
+                    key: "color".to_string(),
+                    value: (Value::Object(ObjType::Text), color.clone()),
+                    conflict: true
+                },
+            },
+            Patch {
+                obj: ROOT,
+                path: vec![],
+                action: PatchAction::PutMap {
+                    key: "name".to_string(),
+                    value: (Value::Object(ObjType::Text), name.clone()),
+                    conflict: false
+                },
+            },
+            Patch {
+                obj: name,
+                path: vec![(ROOT, Prop::Map("name".to_string()))],
+                action: PatchAction::SpliceText {
+                    index: 0,
+                    value: ConcreteTextValue::new(
+                        &new_name,
+                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
+                    ),
+                    marks: None
+                }
+            },
+            Patch {
+                obj: color,
+                path: vec![(ROOT, Prop::Map("color".to_string()))],
+                action: PatchAction::SpliceText {
+                    index: 0,
+                    value: ConcreteTextValue::new(
+                        "unset",
+                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
+                    ),
+                    marks: None
+                }
+            }
+        ]
+    );
+}
+
+fn print_patch_table(patches: &[automerge::Patch]) {
+    if patches.is_empty() {
+        println!("No patches to display.");
+        return;
+    }
+
+    // New column order: Object, Path, Action, Prop/Idx, Value, Count
+    let mut col_widths = [
+        "Object".len(),   // Object
+        "Path".len(),     // Path
+        "Action".len(),   // Action
+        "Prop/Idx".len(), // Prop/Idx
+        "Value".len(),    // Value
+        "Count".len(),    // Count
+    ];
+
+    let data_rows: Vec<[String; 6]> = patches
+        .iter()
+        .map(|patch| {
+            let action_str;
+            let mut prop_idx_str = String::new();
+            let mut value_str = String::new();
+            let mut count_str = String::new();
+
+            match &patch.action {
+                automerge::PatchAction::PutMap { key, value, .. } => {
+                    action_str = "PutMap".to_string();
+                    prop_idx_str = format!("{:?}", key);
+                    value_str = format!("{:?}", value.0);
+                }
+                automerge::PatchAction::PutSeq { index, value, .. } => {
+                    action_str = "PutSeq".to_string();
+                    prop_idx_str = format!("{}", index);
+                    value_str = format!("{:?}", value.0);
+                }
+                automerge::PatchAction::Insert { index, values, .. } => {
+                    action_str = "Insert".to_string();
+                    prop_idx_str = format!("{}", index);
+                    let mut vals_str = String::new();
+                    for (val, _id, _) in values.iter() {
+                        vals_str.push_str(&format!("{:?}, ", val));
+                    }
+                    if vals_str.ends_with(", ") {
+                        vals_str.pop();
+                        vals_str.pop();
+                    }
+                    value_str = vals_str;
+                }
+                automerge::PatchAction::SpliceText { index, value, .. } => {
+                    action_str = "SpliceText".to_string();
+                    prop_idx_str = format!("{}", index);
+                    value_str = value.make_string();
+                }
+                automerge::PatchAction::DeleteMap { key, .. } => {
+                    action_str = "DeleteMap".to_string();
+                    prop_idx_str = format!("{:?}", key);
+                }
+                automerge::PatchAction::DeleteSeq { index, length, .. } => {
+                    action_str = "DeleteSeq".to_string();
+                    prop_idx_str = format!("{}", index);
+                    count_str = format!("{}", length);
+                }
+                automerge::PatchAction::Increment { prop, value, .. } => {
+                    action_str = "Increment".to_string();
+                    prop_idx_str = format!("{:?}", prop);
+                    value_str = format!("{}", value);
+                }
+                automerge::PatchAction::Conflict { prop } => {
+                    action_str = "Conflict".to_string();
+                    prop_idx_str = format!("{:?}", prop);
+                }
+                automerge::PatchAction::Mark { marks: _ } => {
+                    action_str = "Mark".to_string();
+                }
+            }
+            // Adjusted order for data_rows
+            [
+                format!("{}", patch.obj), // 0: Object
+                print_path(&patch.path),  // 1: Path
+                action_str,               // 2: Action
+                prop_idx_str,             // 3: Prop/Idx
+                value_str,                // 4: Value
+                count_str,                // 5: Count
+            ]
+        })
+        .collect();
+
+    for row in &data_rows {
+        col_widths[0] = std::cmp::max(col_widths[0], row[0].len()); // Object
+        col_widths[1] = std::cmp::max(col_widths[1], row[1].len()); // Path
+        col_widths[2] = std::cmp::max(col_widths[2], row[2].len()); // Action
+        col_widths[3] = std::cmp::max(col_widths[3], row[3].len()); // Prop/Idx
+        col_widths[4] = std::cmp::max(col_widths[4], row[4].len()); // Value
+        col_widths[5] = std::cmp::max(col_widths[5], row[5].len()); // Count
+    }
+
+    // Print header with new order
+    println!(
+        "| {:<w0$} | {:<w1$} | {:<w2$} | {:<w3$} | {:<w4$} | {:<w5$} |",
+        "Object",   // w0
+        "Path",     // w1
+        "Action",   // w2
+        "Prop/Idx", // w3
+        "Value",    // w4
+        "Count",    // w5
+        w0 = col_widths[0],
+        w1 = col_widths[1],
+        w2 = col_widths[2],
+        w3 = col_widths[3],
+        w4 = col_widths[4],
+        w5 = col_widths[5]
+    );
+
+    // Print separator with new order
+    println!(
+        "|-{:-<w0$}-|-{:-<w1$}-|-{:-<w2$}-|-{:-<w3$}-|-{:-<w4$}-|-{:-<w5$}-|",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "", // Six for the hyphens
+        w0 = col_widths[0],
+        w1 = col_widths[1],
+        w2 = col_widths[2],
+        w3 = col_widths[3],
+        w4 = col_widths[4],
+        w5 = col_widths[5]
+    );
+
+    // Print data rows with new order
+    for row in &data_rows {
+        println!(
+            "| {:<w0$} | {:<w1$} | {:<w2$} | {:<w3$} | {:<w4$} | {:<w5$} |",
+            row[0], // Object
+            row[1], // Path
+            row[2], // Action
+            row[3], // Prop/Idx
+            row[4], // Value
+            row[5], // Count
+            w0 = col_widths[0],
+            w1 = col_widths[1],
+            w2 = col_widths[2],
+            w3 = col_widths[3],
+            w4 = col_widths[4],
+            w5 = col_widths[5]
+        );
+    }
+}
+
+fn print_path(path: &[(automerge::ObjId, Prop)]) -> String {
+    if path.is_empty() {
+        return "/".to_string();
+    }
+    let mut path_str = String::new();
+    for (_, prop) in path {
+        match prop {
+            Prop::Map(key) => {
+                path_str.push_str("/");
+                path_str.push_str(key);
+            }
+            Prop::Seq(index) => {
+                path_str.push_str("/");
+                path_str.push_str(index.to_string().as_str());
+            }
+        }
+    }
+    path_str
 }
