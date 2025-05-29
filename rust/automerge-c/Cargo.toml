@@ -16,7 +16,7 @@ doc = false
 automerge = { path = "../automerge" }
 hex = "^0.4.3"
 libc = "^0.2"
-smol_str = "0.2"
+smol_str = "0.3"
 
 [build-dependencies]
 cbindgen = "^0.29"
