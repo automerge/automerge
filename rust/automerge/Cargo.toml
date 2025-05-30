@@ -20,7 +20,7 @@ hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "0.11.0-pre.5"
 thiserror = "^2.0.12"
-itertools = "0.13.0"
+itertools = "0.14.0"
 flate2 = "^1.0.22"
 smol_str = { version = "0.3", features = ["serde"] }
 tracing = { version = "^0.1.29" }
