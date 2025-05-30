@@ -54,6 +54,331 @@ use value::Datatype;
 
 use crate::interop::SubValIter;
 
+#[wasm_bindgen(typescript_custom_section)]
+const TS: &'static str = r#"
+export type Actor = string;
+export type ObjID = string;
+export type Change = Uint8Array;
+export type SyncMessage = Uint8Array;
+export type Prop = string | number;
+export type Hash = string;
+export type Heads = Hash[];
+export type ScalarValue = string | number | boolean | null | Date | Uint8Array;
+export type Value = ScalarValue | object;
+export type MaterializeValue =
+  | { [key: string]: MaterializeValue }
+  | Array<MaterializeValue>
+  | Value;
+export type MapObjType = { [key: string]: ObjType | Value };
+export type ObjInfo = { id: ObjID; type: ObjTypeName; path?: Prop[] };
+export type Span =
+  | { type: "text"; value: string; marks?: MarkSet }
+  | { type: "block"; value: { [key: string]: MaterializeValue } };
+export type ListObjType = Array<ObjType | Value>;
+export type ObjType = string | ListObjType | MapObjType;
+export type FullValue =
+  | ["str", string]
+  | ["int", number]
+  | ["uint", number]
+  | ["f64", number]
+  | ["boolean", boolean]
+  | ["timestamp", Date]
+  | ["counter", number]
+  | ["bytes", Uint8Array]
+  | ["null", null]
+  | ["map", ObjID]
+  | ["list", ObjID]
+  | ["text", ObjID]
+  | ["table", ObjID];
+
+export type Cursor = string;
+export type CursorPosition = number | "start" | "end";
+export type MoveCursor = "before" | "after";
+
+export type FullValueWithId =
+  | ["str", string, ObjID]
+  | ["int", number, ObjID]
+  | ["uint", number, ObjID]
+  | ["f64", number, ObjID]
+  | ["boolean", boolean, ObjID]
+  | ["timestamp", Date, ObjID]
+  | ["counter", number, ObjID]
+  | ["bytes", Uint8Array, ObjID]
+  | ["null", null, ObjID]
+  | ["map", ObjID]
+  | ["list", ObjID]
+  | ["text", ObjID]
+  | ["table", ObjID];
+
+export enum ObjTypeName {
+  list = "list",
+  map = "map",
+  table = "table",
+  text = "text",
+}
+
+export type Datatype =
+  | "boolean"
+  | "str"
+  | "int"
+  | "uint"
+  | "f64"
+  | "null"
+  | "timestamp"
+  | "counter"
+  | "bytes"
+  | "map"
+  | "text"
+  | "list";
+
+export type SyncHave = {
+  lastSync: Heads;
+  bloom: Uint8Array;
+};
+
+export type DecodedSyncMessage = {
+  heads: Heads;
+  need: Heads;
+  have: SyncHave[];
+  changes: Change[];
+};
+
+export type DecodedChange = {
+  actor: Actor;
+  seq: number;
+  startOp: number;
+  time: number;
+  message: string | null;
+  deps: Heads;
+  hash: Hash;
+  ops: Op[];
+};
+
+export type ChangeMetadata = {
+  actor: Actor;
+  seq: number;
+  startOp: number;
+  maxOp: number;
+  time: number;
+  message: string | null;
+  deps: Heads;
+  hash: Hash;
+};
+
+type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+export type ChangeToEncode = PartialBy<DecodedChange, "hash">;
+
+export type Op = {
+  action: string;
+  obj: ObjID;
+  key: string;
+  value?: string | number | boolean;
+  datatype?: string;
+  pred: string[];
+};
+
+export type PatchValue =
+  | string
+  | number
+  | boolean
+  | null
+  | Date
+  | Uint8Array
+  | {}
+  | [];
+export type Patch =
+  | PutPatch
+  | DelPatch
+  | SpliceTextPatch
+  | IncPatch
+  | InsertPatch
+  | MarkPatch
+  | UnmarkPatch
+  | ConflictPatch;
+
+export type PutPatch = {
+  action: "put";
+  path: Prop[];
+  value: PatchValue;
+  conflict?: boolean;
+};
+
+export interface MarkSet {
+  [name: string]: ScalarValue;
+}
+
+export type MarkPatch = {
+  action: "mark";
+  path: Prop[];
+  marks: Mark[];
+};
+
+export type MarkRange = {
+  expand?: "before" | "after" | "both" | "none";
+  start: number;
+  end: number;
+};
+
+export type UnmarkPatch = {
+  action: "unmark";
+  path: Prop[];
+  name: string;
+  start: number;
+  end: number;
+};
+
+export type IncPatch = {
+  action: "inc";
+  path: Prop[];
+  value: number;
+};
+
+export type DelPatch = {
+  action: "del";
+  path: Prop[];
+  length?: number;
+};
+
+export type SpliceTextPatch = {
+  action: "splice";
+  path: Prop[];
+  value: string;
+  marks?: MarkSet;
+};
+
+export type InsertPatch = {
+  action: "insert";
+  path: Prop[];
+  values: PatchValue[];
+  marks?: MarkSet;
+  conflicts?: boolean[];
+};
+
+export type ConflictPatch = {
+  action: "conflict";
+  path: Prop[];
+};
+
+export type Mark = {
+  name: string;
+  value: ScalarValue;
+  start: number;
+  end: number;
+};
+
+// Some definitions can't be typed using the wasm_bindgen annotations
+// (specifically optional function parameters) so we do that work here
+// and merge this definition with the `class Automerge` definition
+// which follows
+interface Automerge {
+
+    fork(actor?: string, heads?: Heads): Automerge;
+
+    put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): void;
+    get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
+    getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
+    getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
+
+    keys(obj: ObjID, heads?: Heads): string[];
+    text(obj: ObjID, heads?: Heads): string;
+    spans(obj: ObjID, heads?: Heads): Span[];
+    marks(obj: ObjID, heads?: Heads): Mark[];
+    marksAt(obj: ObjID, index: number, heads?: Heads): MarkSet;
+    length(obj: ObjID, heads?: Heads): number;
+
+    objInfo(obj: ObjID, heads?: Heads): ObjInfo;
+
+    materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
+
+    push(obj: ObjID, value: Value, datatype?: Datatype): void;
+
+    insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): void;
+
+    splice(
+      obj: ObjID,
+      start: number,
+      delete_count: number,
+      text?: string | Array<Value>,
+    ): void;
+
+    mark(
+      obj: ObjID,
+      range: MarkRange,
+      name: string,
+      value: Value,
+      datatype?: Datatype,
+    ): void;
+
+    getCursor(
+      obj: ObjID,
+      position: CursorPosition,
+      heads?: Heads,
+      move?: MoveCursor,
+    ): Cursor;
+
+    applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
+
+    applyAndReturnPatches<Doc>(
+      obj: Doc,
+      meta?: unknown,
+    ): { value: Doc; patches: Patch[] };
+
+    getBlock(obj: ObjID, index: number, heads?: Heads): { [key: string]: MaterializeValue } | null;
+
+    getMissingDeps(heads?: Heads): Heads;
+
+    getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
+}
+
+
+export type LoadOptions = {
+  actor?: Actor;
+  unchecked?: boolean;
+  allowMissingDeps?: boolean;
+  convertImmutableStringsToText?: boolean;
+};
+
+export type InitOptions = {
+  actor?: Actor;
+};
+
+export function create(options?: InitOptions): Automerge;
+export function load(data: Uint8Array, options?: LoadOptions): Automerge;
+
+export interface JsSyncState {
+  sharedHeads: Heads;
+  lastSentHeads: Heads;
+  theirHeads: Heads | undefined;
+  theirHeed: Heads | undefined;
+  theirHave: SyncHave[] | undefined;
+  sentHashes: Heads;
+}
+
+export interface API {
+  create(options?: InitOptions): Automerge;
+  load(data: Uint8Array, options?: LoadOptions): Automerge;
+  encodeChange(change: ChangeToEncode): Change;
+  decodeChange(change: Change): DecodedChange;
+  initSyncState(): SyncState;
+  encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
+  decodeSyncMessage(msg: SyncMessage): DecodedSyncMessage;
+  encodeSyncState(state: SyncState): Uint8Array;
+  decodeSyncState(data: Uint8Array): SyncState;
+  exportSyncState(state: SyncState): JsSyncState;
+  importSyncState(state: JsSyncState): SyncState;
+}
+
+export interface Stats {
+  numChanges: number;
+  numOps: number;
+  numActors: number;
+  cargoPackageName: string;
+  cargoPackageVersion: string;
+  rustcVersion: string;
+};
+
+"#;
+
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
@@ -99,6 +424,9 @@ impl Automerge {
         Ok(automerge)
     }
 
+    // We skip typescript here because the function is defined in the `interface Automerge`
+    // definition at the top of this file
+    #[wasm_bindgen(skip_typescript)]
     pub fn fork(
         &mut self,
         actor: Option<String>,
@@ -123,11 +451,12 @@ impl Automerge {
         Ok(automerge)
     }
 
-    #[wasm_bindgen(js_name = pendingOps)]
+    #[wasm_bindgen(js_name = pendingOps, unchecked_return_type="number")]
     pub fn pending_ops(&self) -> JsValue {
         (self.doc.pending_ops() as u32).into()
     }
 
+    #[wasm_bindgen(unchecked_return_type = "Hash | null")]
     pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let mut commit_opts = CommitOptions::default();
         if let Some(message) = message {
@@ -143,6 +472,7 @@ impl Automerge {
         }
     }
 
+    #[wasm_bindgen(unchecked_return_type = "Heads")]
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
         let heads = self.doc.merge(&mut other.doc)?;
         let heads: Array = heads
@@ -156,6 +486,8 @@ impl Automerge {
         self.doc.rollback() as f64
     }
 
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(skip_typescript)]
     pub fn keys(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
         let (obj, _) = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads)? {
@@ -169,6 +501,8 @@ impl Automerge {
         Ok(result)
     }
 
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(skip_typescript)]
     pub fn text(&self, obj: JsValue, heads: Option<Array>) -> Result<String, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
@@ -178,6 +512,8 @@ impl Automerge {
         }
     }
 
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(skip_typescript)]
     pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::GetSpans> {
         let (obj, _) = self.import(obj)?;
         let spans = if let Some(heads) = get_heads(heads)? {
@@ -189,6 +525,9 @@ impl Automerge {
         Ok(interop::export_spans(self, cache, spans)?)
     }
 
+    // skip_typescript as the text argument is optional which can only be typed
+    // in the typescript custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn splice(
         &mut self,
         obj: JsValue,
@@ -241,8 +580,8 @@ impl Automerge {
     #[wasm_bindgen(js_name = updateText)]
     pub fn update_text(
         &mut self,
-        obj: JsValue,
-        new_text: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "string")] new_text: JsValue,
     ) -> Result<(), error::UpdateText> {
         let (obj, obj_type) = self.import(obj)?;
         if !matches!(obj_type, am::ObjType::Text) {
@@ -257,7 +596,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = updateSpans)]
-    pub fn update_spans(&mut self, obj: JsValue, args: JsValue) -> Result<(), error::UpdateSpans> {
+    pub fn update_spans(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Span[]")] args: JsValue,
+    ) -> Result<(), error::UpdateSpans> {
         let (obj, obj_type) = self.import(obj)?;
         if !matches!(obj_type, am::ObjType::Text) {
             return Err(error::UpdateSpans::ObjectNotText);
@@ -267,6 +610,9 @@ impl Automerge {
         Ok(())
     }
 
+    // skip_typescript as the datatype argument is optional which can only be
+    // typed in the typescript custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn push(
         &mut self,
         obj: JsValue,
@@ -283,12 +629,12 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = pushObject)]
+    #[wasm_bindgen(js_name = pushObject, unchecked_return_type="ObjID")]
     pub fn push_object(
         &mut self,
-        obj: JsValue,
-        value: JsValue,
-    ) -> Result<Option<String>, error::InsertObject> {
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjType")] value: JsValue,
+    ) -> Result<String, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let imported_obj = import_obj(&value, None)?;
         let index = self.doc.length(&obj);
@@ -300,9 +646,12 @@ impl Automerge {
         } else {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
-        Ok(opid.to_string().into())
+        Ok(opid.to_string())
     }
 
+    // skip_typescript as the datatype argument is optional which can only be
+    // typed in the typescript custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn insert(
         &mut self,
         obj: JsValue,
@@ -322,24 +671,28 @@ impl Automerge {
     #[wasm_bindgen(js_name = splitBlock)]
     pub fn split_block(
         &mut self,
-        obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
         index: f64,
-        args: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "{[key: string]: MaterializeValue}")] block: JsValue,
     ) -> Result<(), error::SplitBlock> {
         let (obj, _) = self.import(obj)?;
-        let block = self.doc.split_block(&obj, index as usize)?;
-        let hydrate = match interop::js_val_to_hydrate(self, args) {
+        let block_id = self.doc.split_block(&obj, index as usize)?;
+        let hydrate = match interop::js_val_to_hydrate(self, block) {
             Ok(val @ am::hydrate::Value::Map(_)) => val,
             _ => return Err(error::SplitBlock::InvalidArgs),
         };
 
-        self.doc.update_object(&block, &hydrate)?;
+        self.doc.update_object(&block_id, &hydrate)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = joinBlock)]
-    pub fn join_block(&mut self, text: JsValue, index: usize) -> Result<(), error::Block> {
-        let (text, _) = self.import(text)?;
+    pub fn join_block(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        index: usize,
+    ) -> Result<(), error::Block> {
+        let (text, _) = self.import(obj)?;
         self.doc.join_block(&text, index)?;
         Ok(())
     }
@@ -347,13 +700,13 @@ impl Automerge {
     #[wasm_bindgen(js_name = updateBlock)]
     pub fn update_block(
         &mut self,
-        text: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
         index: usize,
-        args: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "{[key: string]: MaterializeValue}")] block: JsValue,
     ) -> Result<(), error::UpdateBlock> {
-        let (text, _) = self.import(text)?;
+        let (text, _) = self.import(obj)?;
         let new_block = self.doc.replace_block(&text, index)?;
-        let new_value = interop::js_val_to_hydrate(self, args)?;
+        let new_value = interop::js_val_to_hydrate(self, block)?;
         if !matches!(new_value, am::hydrate::Value::Map(_)) {
             return Err(error::UpdateBlock::InvalidArgs);
         }
@@ -361,7 +714,8 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = getBlock)]
+    // skip_typescript as the optional heads parameter can't be typed here
+    #[wasm_bindgen(js_name = getBlock, skip_typescript)]
     pub fn get_block(
         &mut self,
         text: JsValue,
@@ -387,13 +741,13 @@ impl Automerge {
         ))
     }
 
-    #[wasm_bindgen(js_name = insertObject)]
+    #[wasm_bindgen(js_name = insertObject, unchecked_return_type="ObjID")]
     pub fn insert_object(
         &mut self,
-        obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
         index: f64,
-        value: JsValue,
-    ) -> Result<Option<String>, error::InsertObject> {
+        #[wasm_bindgen(unchecked_param_type = "ObjType")] value: JsValue,
+    ) -> Result<String, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let imported_obj = import_obj(&value, None)?;
         let opid = self
@@ -404,9 +758,12 @@ impl Automerge {
         } else {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
-        Ok(opid.to_string().into())
+        Ok(opid.to_string())
     }
 
+    // skip_typescript as the datatype argument is optional which can only be
+    // typed in the custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn put(
         &mut self,
         obj: JsValue,
@@ -424,12 +781,12 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = putObject)]
+    #[wasm_bindgen(js_name = putObject, unchecked_return_type="ObjID")]
     pub fn put_object(
         &mut self,
-        obj: JsValue,
-        prop: JsValue,
-        value: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Prop")] prop: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjType")] value: JsValue,
     ) -> Result<JsValue, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
@@ -478,9 +835,9 @@ impl Automerge {
 
     pub fn increment(
         &mut self,
-        obj: JsValue,
-        prop: JsValue,
-        value: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Prop")] prop: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "number")] value: JsValue,
     ) -> Result<(), error::Increment> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
@@ -489,7 +846,8 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = get)]
+    // skip_typescript as the optional heads parameter can't be typed here
+    #[wasm_bindgen(js_name = get, skip_typescript)]
     pub fn get(
         &self,
         obj: JsValue,
@@ -518,7 +876,8 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = getWithType)]
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(js_name = getWithType, skip_typescript)]
     pub fn get_with_type(
         &self,
         obj: JsValue,
@@ -558,7 +917,8 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = objInfo)]
+    // skip_typescript as we can't type the optional heads parameter
+    #[wasm_bindgen(js_name = objInfo, skip_typescript)]
     pub fn obj_info(&self, obj: JsValue, heads: Option<Array>) -> Result<Object, error::Get> {
         // fixme - import takes a path - needs heads to be accurate
         let (obj, _) = self.import(obj)?;
@@ -578,7 +938,8 @@ impl Automerge {
         Ok(result)
     }
 
-    #[wasm_bindgen(js_name = getAll)]
+    // skip_typescript as the optional heads parameter can't be typed here
+    #[wasm_bindgen(js_name = getAll, skip_typescript)]
     pub fn get_all(
         &self,
         obj: JsValue,
@@ -609,20 +970,28 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = enableFreeze)]
-    pub fn enable_freeze(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
+    pub fn enable_freeze(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "boolean")] enable: JsValue,
+    ) -> Result<bool, JsValue> {
         let enable = enable
             .as_bool()
             .ok_or_else(|| to_js_err("must pass a bool to enableFreeze"))?;
         let old_freeze = self.freeze;
         self.freeze = enable;
-        Ok(old_freeze.into())
+        Ok(old_freeze)
     }
 
-    #[wasm_bindgen(js_name = registerDatatype)]
+    #[wasm_bindgen(js_name=registerDatatype)]
     pub fn register_datatype(
         &mut self,
-        datatype: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "string")] datatype: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Function", js_name = "construct")]
         export_function: JsValue,
+        #[wasm_bindgen(
+            unchecked_param_type = "(arg: any) => any | undefined",
+            js_name = "deconstruct"
+        )]
         import_function: JsValue,
     ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
@@ -641,13 +1010,15 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = applyPatches)]
+    // skip_typescript as the function can only by typed in the custom section
+    #[wasm_bindgen(js_name = applyPatches, skip_typescript)]
     pub fn apply_patches(&mut self, object: JsValue, meta: JsValue) -> Result<JsValue, JsValue> {
         let (value, _patches) = self.apply_patches_impl(object, meta)?;
         Ok(value)
     }
 
-    #[wasm_bindgen(js_name = applyAndReturnPatches)]
+    // skip_typescript as the function can only by typed in the custom section
+    #[wasm_bindgen(js_name = applyAndReturnPatches, skip_typescript)]
     pub fn apply_and_return_patches(
         &mut self,
         object: JsValue,
@@ -700,7 +1071,7 @@ impl Automerge {
         Ok((object.into(), patches))
     }
 
-    #[wasm_bindgen(js_name = diffIncremental)]
+    #[wasm_bindgen(js_name = diffIncremental, unchecked_return_type="Patch[]")]
     pub fn diff_incremental(&mut self) -> Result<Array, error::PopPatches> {
         // transactions send out observer updates as they occur, not waiting for them to be
         // committed.
@@ -721,7 +1092,12 @@ impl Automerge {
         self.doc.reset_diff_cursor();
     }
 
-    pub fn diff(&mut self, before: Array, after: Array) -> Result<Array, error::Diff> {
+    #[wasm_bindgen(unchecked_return_type = "Patch[]")]
+    pub fn diff(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] before: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] after: Array,
+    ) -> Result<Array, error::Diff> {
         let before = get_heads(Some(before))?.unwrap();
         let after = get_heads(Some(after))?.unwrap();
 
@@ -730,7 +1106,10 @@ impl Automerge {
         Ok(interop::export_patches(&self.external_types, patches)?)
     }
 
-    pub fn isolate(&mut self, heads: Array) -> Result<(), error::Isolate> {
+    pub fn isolate(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: Array,
+    ) -> Result<(), error::Isolate> {
         let heads = get_heads(Some(heads))?.unwrap();
         self.doc.isolate(&heads);
         Ok(())
@@ -740,6 +1119,8 @@ impl Automerge {
         self.doc.integrate()
     }
 
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(skip_typescript)]
     pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
@@ -749,7 +1130,11 @@ impl Automerge {
         }
     }
 
-    pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), error::Get> {
+    pub fn delete(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Prop")] prop: JsValue,
+    ) -> Result<(), error::Get> {
         let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop)?;
         self.doc.delete(&obj, prop)?;
@@ -769,7 +1154,7 @@ impl Automerge {
     #[wasm_bindgen(js_name=saveSince)]
     pub fn save_since(
         &mut self,
-        heads: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: Array,
     ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
         let heads = get_heads(Some(heads))?.unwrap_or(Vec::new());
         let bytes = self.doc.save_after(&heads);
@@ -797,7 +1182,10 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), error::ApplyChangesError> {
+    pub fn apply_changes(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Change[]")] changes: JsValue,
+    ) -> Result<(), error::ApplyChangesError> {
         let changes: Vec<Change> = JS(changes).try_into()?;
 
         //for c in &changes {
@@ -807,8 +1195,11 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
+    #[wasm_bindgen(js_name = getChanges, unchecked_return_type="Change[]")]
+    pub fn get_changes(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
+    ) -> Result<Array, error::Get> {
         let deps: Vec<_> = JS(have_deps).try_into()?;
         let changes = self.doc.get_changes(&deps);
         let changes: Array = changes
@@ -818,18 +1209,21 @@ impl Automerge {
         Ok(changes)
     }
 
-    #[wasm_bindgen(js_name = getChangesMeta)]
-    pub fn get_changes_meta(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
+    #[wasm_bindgen(js_name = getChangesMeta, unchecked_return_type="ChangeMetadata[]")]
+    pub fn get_changes_meta(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] have_deps: JsValue,
+    ) -> Result<Array, error::Get> {
         let deps: Vec<_> = JS(have_deps).try_into()?;
         let changes = self.doc.get_changes_meta(&deps);
         let changes: Array = changes.iter().map(JS::from).collect();
         Ok(changes)
     }
 
-    #[wasm_bindgen(js_name = getChangeByHash)]
+    #[wasm_bindgen(js_name = getChangeByHash, unchecked_return_type="Change | null")]
     pub fn get_change_by_hash(
         &mut self,
-        hash: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, interop::error::BadChangeHash> {
         let hash = JS(hash).try_into()?;
         let change = self.doc.get_change_by_hash(&hash);
@@ -840,10 +1234,10 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = getChangeMetaByHash)]
+    #[wasm_bindgen(js_name = getChangeMetaByHash, unchecked_return_type="ChangeMetadata | null")]
     pub fn get_change_meta_by_hash(
         &mut self,
-        hash: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, interop::error::BadChangeHash> {
         let hash = JS(hash).try_into()?;
         let change_meta = self.doc.get_change_meta_by_hash(&hash);
@@ -854,10 +1248,10 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = getDecodedChangeByHash)]
+    #[wasm_bindgen(js_name = getDecodedChangeByHash, unchecked_return_type="DecodedChange | null")]
     pub fn get_decoded_change_by_hash(
         &mut self,
-        hash: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Hash")] hash: JsValue,
     ) -> Result<JsValue, error::GetDecodedChangeByHash> {
         let hash = JS(hash).try_into()?;
         let change = self.doc.get_change_by_hash(&hash);
@@ -870,7 +1264,7 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = getChangesAdded)]
+    #[wasm_bindgen(js_name = getChangesAdded, unchecked_return_type="Change[]")]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
         let changes = self.doc.get_changes_added(&mut other.doc);
         let changes: Array = changes
@@ -880,18 +1274,18 @@ impl Automerge {
         changes
     }
 
-    #[wasm_bindgen(js_name = getHeads)]
+    #[wasm_bindgen(js_name = getHeads, unchecked_return_type="Heads")]
     pub fn get_heads(&mut self) -> Array {
         let heads = self.doc.get_heads();
         AR::from(heads).into()
     }
 
-    #[wasm_bindgen(js_name = getActorId)]
+    #[wasm_bindgen(js_name = getActorId, unchecked_return_type="Actor")]
     pub fn get_actor_id(&self) -> String {
         self.doc.get_actor().to_string()
     }
 
-    #[wasm_bindgen(js_name = getLastLocalChange)]
+    #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
     pub fn get_last_local_change(&mut self) -> JsValue {
         if let Some(change) = self.doc.get_last_local_change() {
             Uint8Array::from(change.raw_bytes()).into()
@@ -904,7 +1298,8 @@ impl Automerge {
         self.doc.dump()
     }
 
-    #[wasm_bindgen(js_name = getMissingDeps)]
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(js_name = getMissingDeps, skip_typescript)]
     pub fn get_missing_deps(&mut self, heads: Option<Array>) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
         let deps = self.doc.get_missing_deps(&heads);
@@ -919,7 +1314,7 @@ impl Automerge {
     pub fn receive_sync_message(
         &mut self,
         state: &mut SyncState,
-        message: Uint8Array,
+        #[wasm_bindgen(unchecked_param_type = "SyncMessage")] message: Uint8Array,
     ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
         //am::log!("receive sync message: {:?}", message.as_slice());
@@ -930,7 +1325,7 @@ impl Automerge {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = generateSyncMessage)]
+    #[wasm_bindgen(js_name = generateSyncMessage, unchecked_return_type = "SyncMessage | null")]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
         if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
             let message = message.encode();
@@ -941,12 +1336,15 @@ impl Automerge {
         }
     }
 
-    #[wasm_bindgen(js_name = toJS)]
+    #[wasm_bindgen(js_name = toJS, unchecked_return_type="MaterializeValue")]
     pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
         let mut cache = interop::ExportCache::new(self)?;
         cache.materialize(ROOT, Datatype::Map, None, &meta)
     }
 
+    // Skip typescript as the arguments are all optional which can only be typed
+    // in the typescript custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn materialize(
         &mut self,
         obj: JsValue,
@@ -960,7 +1358,9 @@ impl Automerge {
         Ok(cache.materialize(obj, obj_type.into(), heads.as_deref(), &meta)?)
     }
 
-    #[wasm_bindgen(js_name = getCursor)]
+    // skip_typescript as the heads and move_cursor arguments are optional which
+    // can only be typed in the typescript custom section
+    #[wasm_bindgen(js_name = getCursor, skip_typescript)]
     pub fn get_cursor(
         &mut self,
         obj: JsValue,
@@ -1008,7 +1408,8 @@ impl Automerge {
         Ok(cursor.to_string())
     }
 
-    #[wasm_bindgen(js_name = getCursorPosition)]
+    // skip_typescript as the optional heads parameter can't be typed
+    #[wasm_bindgen(js_name = getCursorPosition, skip_typescript)]
     pub fn get_cursor_position(
         &mut self,
         obj: JsValue,
@@ -1028,7 +1429,7 @@ impl Automerge {
         Ok(position as f64)
     }
 
-    #[wasm_bindgen(js_name = emptyChange)]
+    #[wasm_bindgen(js_name = emptyChange, unchecked_return_type="Hash")]
     pub fn empty_change(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let time = time.map(|f| f as i64);
         let options = CommitOptions { message, time };
@@ -1036,6 +1437,9 @@ impl Automerge {
         JsValue::from_str(&hex::encode(hash))
     }
 
+    // skip_typescript because the datatype argument is optional which can only
+    // be typed in the typescript custom section
+    #[wasm_bindgen(skip_typescript)]
     pub fn mark(
         &mut self,
         obj: JsValue,
@@ -1074,13 +1478,15 @@ impl Automerge {
 
     pub fn unmark(
         &mut self,
-        obj: JsValue,
-        range: JsValue,
-        name: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "MarkRange")] range: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "string")] name: JsValue,
     ) -> Result<(), error::Mark> {
         self.mark(obj, range, name, JsValue::NULL, JsValue::from_str("null"))
     }
 
+    // skip_typescript as we can't type the optional heads paramater
+    #[wasm_bindgen(skip_typescript)]
     pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
@@ -1102,7 +1508,8 @@ impl Automerge {
         Ok(result.into())
     }
 
-    #[wasm_bindgen(js_name = marksAt)]
+    // skip_typescript as we can't type the optional heads paramater
+    #[wasm_bindgen(js_name = marksAt, skip_typescript)]
     pub fn marks_at(
         &mut self,
         obj: JsValue,
@@ -1136,11 +1543,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = hasOurChanges)]
-    pub fn has_our_changes(&mut self, state: &mut SyncState) -> JsValue {
-        self.doc.has_our_changes(&state.0).into()
+    pub fn has_our_changes(&mut self, state: &mut SyncState) -> bool {
+        self.doc.has_our_changes(&state.0)
     }
 
-    #[wasm_bindgen(js_name = topoHistoryTraversal)]
+    #[wasm_bindgen(js_name = topoHistoryTraversal, unchecked_return_type="Hash[]")]
     pub fn topo_history_traversal(&mut self) -> JsValue {
         let hashes = self
             .doc
@@ -1151,7 +1558,7 @@ impl Automerge {
         AR::from(hashes).into()
     }
 
-    #[wasm_bindgen(js_name = stats)]
+    #[wasm_bindgen(js_name = stats, unchecked_return_type="Stats")]
     pub fn stats(&mut self) -> JsValue {
         let stats = self.doc.stats();
         let result = Object::new();
@@ -1171,14 +1578,18 @@ impl Automerge {
     }
 }
 
-#[wasm_bindgen(js_name = create)]
+// skip_typescript as the definition requires an optional argument so we define
+// the function in the typescript custom section at the top of the file
+#[wasm_bindgen(js_name = create, skip_typescript)]
 pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
     console_error_panic_hook::set_once();
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     Automerge::new(actor)
 }
 
-#[wasm_bindgen(js_name = load)]
+// skip_typescript as the options argument is optional which can only be typed
+// in the typescript custom section
+#[wasm_bindgen(js_name = load, skip_typescript)]
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
     //am::log!("load: {:?}", data.as_slice());
@@ -1241,7 +1652,7 @@ pub fn encode_change(change: JsValue) -> Result<Uint8Array, error::EncodeChange>
     Ok(Uint8Array::from(change.raw_bytes()))
 }
 
-#[wasm_bindgen(js_name = decodeChange)]
+#[wasm_bindgen(js_name = decodeChange, unchecked_return_type="DecodedChange")]
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, error::DecodeChange> {
     let change = Change::from_bytes(change.to_vec())?;
     let change: am::ExpandedChange = change.decode();
@@ -1249,7 +1660,7 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, error::DecodeChange>
     Ok(change.serialize(&serializer)?)
 }
 
-#[wasm_bindgen(js_name = initSyncState)]
+#[wasm_bindgen(js_name = initSyncState, unchecked_return_type="SyncState")]
 pub fn init_sync_state() -> SyncState {
     SyncState(am::sync::State::new())
 }
@@ -1261,18 +1672,18 @@ pub fn import_sync_state(state: JsValue) -> Result<SyncState, interop::error::Ba
 }
 
 // this is needed to be compatible with the automerge-js api
-#[wasm_bindgen(js_name = exportSyncState)]
+#[wasm_bindgen(js_name = exportSyncState, unchecked_return_type="JsSyncState")]
 pub fn export_sync_state(state: &SyncState) -> JsValue {
     JS::from(state.0.clone()).into()
 }
 
-#[wasm_bindgen(js_name = encodeSyncMessage)]
+#[wasm_bindgen(js_name = encodeSyncMessage, unchecked_return_type="SyncMessage")]
 pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, interop::error::BadSyncMessage> {
     let message: am::sync::Message = JS(message).try_into()?;
     Ok(Uint8Array::from(message.encode().as_slice()))
 }
 
-#[wasm_bindgen(js_name = decodeSyncMessage)]
+#[wasm_bindgen(js_name = decodeSyncMessage, unchecked_return_type="DecodedSyncMessage")]
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMessage> {
     let data = msg.to_vec();
     let msg = am::sync::Message::decode(&data)?;
@@ -1309,7 +1720,7 @@ pub fn encode_sync_state(state: &SyncState) -> Uint8Array {
     Uint8Array::from(state.0.encode().as_slice())
 }
 
-#[wasm_bindgen(js_name = decodeSyncState)]
+#[wasm_bindgen(js_name = decodeSyncState, unchecked_return_type="SyncState")]
 pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSyncStateErr> {
     SyncState::decode(data)
 }

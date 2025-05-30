@@ -5,3 +5,4 @@
 /web
 Cargo.lock
 yarn.lock
+index.d.ts

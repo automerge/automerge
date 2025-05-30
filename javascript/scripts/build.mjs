@@ -99,7 +99,7 @@ function buildWasm(outputDir) {
     const outputPath = path.join(outputDir, target)
     fs.mkdirSync(outputPath, { recursive: true })
     execSync(
-      `wasm-bindgen ${wasmBlobPath} --out-dir ${outputPath} --target ${target} --no-typescript --weak-refs`,
+      `wasm-bindgen ${wasmBlobPath} --out-dir ${outputPath} --target ${target} --weak-refs`,
       {
         cwd: __dirname,
       },
@@ -253,9 +253,11 @@ function copyAndFixupWasm(wasmBuildTarball) {
   const wasmBlobDistPath = path.join(jsProjectDir, "dist", "automerge.wasm")
   fs.cpSync(webWasmPath, wasmBlobDistPath)
 
-  console.log("copying 'automerge-wasm/index.d.ts' to 'src/wasm_types.d.ts'")
+  console.log(
+    `copying '${nodeOutputPath}/automerge_wasm.d.ts' to 'src/wasm_types.d.ts'`,
+  )
   fs.copyFileSync(
-    path.join(automergeWasmPath, "index.d.ts"),
+    path.join(nodeOutputPath, "automerge_wasm.d.ts"),
     path.join(jsProjectDir, "src", "wasm_types.d.ts"),
   )
 }
