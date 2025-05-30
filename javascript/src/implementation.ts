@@ -877,7 +877,8 @@ export function getConflicts<T>(
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (objectId != null) {
-    return conflictAt(state.handle, objectId, prop)
+    const withinChangeCallback = _is_proxy(doc)
+    return conflictAt(state.handle, objectId, prop, withinChangeCallback)
   } else {
     return undefined
   }
