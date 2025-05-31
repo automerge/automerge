@@ -5,7 +5,7 @@ use super::types::{ActionCursor, ActorCursor, ActorIdx};
 use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};
 use crate::storage::{Change, ChunkType, Header};
-use crate::types::ActorId;
+use crate::types::{ActorId, ChangeHash};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::Write;
@@ -18,15 +18,32 @@ pub(crate) mod collector;
 
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
+pub(crate) trait GetHash {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash>;
+}
+
+impl GetHash for Vec<crate::Change> {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        Some(self.get(index)?.hash())
+    }
+}
+
+impl GetHash for ChangeGraph {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        self.index_to_hash(index).copied()
+    }
+}
+
 #[inline(never)]
-pub(crate) fn build_change<T>(
+pub(crate) fn build_change<T, G>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
-    graph: &ChangeGraph,
+    graph: &G,
     actors: &[ActorId],
 ) -> Change<'static, Verified>
 where
     T: AsChangeOp,
+    G: GetHash,
 {
     let num_ops = ops.len();
     let mut col_data = Vec::new();
@@ -42,7 +59,7 @@ where
     let deps: Vec<_> = meta
         .deps
         .iter()
-        .map(|i| *graph.index_to_hash(*i as usize).unwrap())
+        .map(|i| graph.get_hash(*i as usize).unwrap())
         .collect();
 
     for hash in &deps {

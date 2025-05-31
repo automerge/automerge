@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::num::NonZeroU32;
+use std::ops::Add;
 
 use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 
@@ -21,7 +22,7 @@ use crate::{
 /// lists, we keep all the edges and nodes in two vecs and reference them by index which plays nice
 /// with the cache
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
@@ -45,6 +46,14 @@ const CACHE_STEP: u32 = 16;
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct NodeIdx(u32);
 
+impl Add<usize> for NodeIdx {
+    type Output = Self;
+
+    fn add(self, other: usize) -> Self {
+        NodeIdx(self.0 + other as u32)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct EdgeIdx(NonZeroU32);
 
@@ -57,7 +66,7 @@ impl EdgeIdx {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 struct Edge {
     // Edges are always child -> parent so we only store the target, the child is implicit
     // as you get the edge from the child
@@ -394,38 +403,102 @@ impl ChangeGraph {
         self.heads.insert(change.hash());
     }
 
-    pub(crate) fn add_change(
+    pub(crate) fn from_iter<
+        'a,
+        I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone,
+    >(
+        iter: I,
+        deps: usize,
+        num_actors: usize,
+    ) -> Result<Self, MissingDep> {
+        let mut seen = HashSet::new();
+        for (change, _) in iter.clone() {
+            for h in change.deps().iter() {
+                if !seen.contains(h) {
+                    return Err(MissingDep(*h));
+                }
+            }
+            seen.insert(change.hash());
+        }
+
+        let mut graph = ChangeGraph::with_capacity(iter.len(), deps, num_actors);
+        graph.add_changes(iter)?;
+        Ok(graph)
+    }
+
+    #[inline(never)]
+    pub(crate) fn add_nodes<
+        'a,
+        I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone,
+    >(
         &mut self,
-        change: &Change,
-        actor_idx: usize,
+        iter: I,
+    ) {
+        self.actors
+            .extend(iter.clone().map(|(_, a)| ActorIdx::from(a)));
+        self.seq.extend(iter.clone().map(|(c, _)| c.seq() as u32));
+        self.max_ops
+            .extend(iter.clone().map(|(c, _)| c.max_op() as u32));
+        self.num_ops
+            .extend(iter.clone().map(|(c, _)| c.len() as u64));
+        self.timestamps
+            .extend(iter.clone().map(|(c, _)| c.timestamp()));
+        self.messages
+            .extend(iter.clone().map(|(c, _)| c.message().cloned()));
+        self.extra_bytes_meta
+            .extend(iter.clone().map(|(c, _)| ValueMeta::from(c.extra_bytes())));
+        self.parents
+            .extend(std::iter::repeat(None).take(iter.len()));
+        for (c, _) in iter {
+            self.extra_bytes_raw.extend_from_slice(c.extra_bytes());
+        }
+    }
+
+    fn add_changes<'a, I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone>(
+        &mut self,
+        iter: I,
     ) -> Result<(), MissingDep> {
-        let actor_idx = ActorIdx::from(actor_idx);
+        let node = NodeIdx(self.hashes.len() as u32);
+
+        self.add_nodes(iter.clone());
+
+        for (i, (change, actor)) in iter.enumerate() {
+            let node_idx = node + i;
+            let hash = change.hash();
+            self.hashes.push(hash);
+            debug_assert!(!self.nodes_by_hash.contains_key(&hash));
+            self.nodes_by_hash.insert(hash, node_idx);
+            self.update_heads(change);
+
+            assert!(actor < self.seq_index.len());
+            assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
+            self.seq_index[actor].push(node_idx);
+
+            for parent_hash in change.deps().iter() {
+                self.add_parent(node_idx, parent_hash);
+            }
+
+            if (node_idx + 1).0 % CACHE_STEP == 0 {
+                self.cache_clock(node_idx);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
         let hash = change.hash();
+
         if self.nodes_by_hash.contains_key(&hash) {
             return Ok(());
         }
 
-        let parent_indices = change
-            .deps()
-            .iter()
-            .map(|h| self.nodes_by_hash.get(h).copied().ok_or(MissingDep(*h)))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let change_seq = change.seq();
-        self.update_heads(change);
-        let node_idx = self.add_node(actor_idx, change);
-        self.index_by_seq(actor_idx, node_idx, change_seq);
-        self.nodes_by_hash.insert(hash, node_idx);
-
-        for parent_idx in parent_indices {
-            self.add_parent(node_idx, parent_idx);
+        for h in change.deps().iter() {
+            if !self.nodes_by_hash.contains_key(h) {
+                return Err(MissingDep(*h));
+            }
         }
 
-        if (node_idx.0 + 1) % CACHE_STEP == 0 {
-            self.cache_clock(node_idx);
-        }
-
-        Ok(())
+        self.add_changes([(change, actor)].into_iter())
     }
 
     fn cache_clock(&mut self, node_idx: NodeIdx) -> Clock {
@@ -444,36 +517,14 @@ impl ChangeGraph {
         clock
     }
 
-    fn index_by_seq(&mut self, actor_index: ActorIdx, node_idx: NodeIdx, seq: u64) {
-        let actor_index = actor_index.0 as usize;
-        assert!(actor_index < self.seq_index.len());
-        assert_eq!(self.seq_index[actor_index].len() + 1, seq as usize);
-        self.seq_index[actor_index].push(node_idx);
-    }
-
-    fn add_node(&mut self, actor_index: ActorIdx, change: &Change) -> NodeIdx {
-        let idx = NodeIdx(self.hashes.len() as u32);
-        self.hashes.push(change.hash());
-        self.actors.push(actor_index);
-        self.seq.push(change.seq() as u32);
-        self.max_ops.push(change.max_op() as u32);
-        self.num_ops.push(change.len() as u64);
-        self.timestamps.push(change.timestamp());
-        self.messages.push(change.message().cloned());
-        self.extra_bytes_meta
-            .push(ValueMeta::from(change.extra_bytes()));
-        self.extra_bytes_raw.extend(change.extra_bytes());
-        self.parents.push(None);
-        idx
-    }
-
-    fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
+    fn add_parent(&mut self, child_idx: NodeIdx, parent_hash: &ChangeHash) {
+        debug_assert!(self.nodes_by_hash.contains_key(parent_hash));
+        let parent_idx = *self.nodes_by_hash.get(parent_hash).unwrap();
         let new_edge_idx = EdgeIdx::new(self.edges.len());
-        let new_edge = Edge {
+        self.edges.push(Edge {
             target: parent_idx,
             next: None,
-        };
-        self.edges.push(new_edge);
+        });
 
         let child = &mut self.parents[child_idx.0 as usize];
         if let Some(edge_idx) = child {
@@ -517,6 +568,7 @@ impl ChangeGraph {
         }
     }
 
+    #[inline(never)]
     fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> Clock {
         let mut clock = Clock::new(self.num_actors());
         let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();

@@ -757,7 +757,6 @@ describe("Automerge", () => {
         ["str", "Goldfinch", "1@bbbb"],
       ]);
       assert.deepEqual(doc3.diffIncremental(), [
-        { action: "put", path: ["bird"], value: "Greenfinch" },
         { action: "put", path: ["bird"], conflict: true, value: "Goldfinch" },
       ]);
       assert.deepEqual(doc4.diffIncremental(), [
@@ -824,6 +823,9 @@ describe("Automerge", () => {
       const doc1 = create({ actor: "aaaa" }),
         doc2 = create({ actor: "bbbb" }),
         doc3 = create({ actor: "cccc" });
+      // diffIncremental() from empty doc collapses conflicts
+      // we dont want that for this test
+      doc3.emptyChange();
       doc1.put("_root", "bird", "Greenfinch");
       doc2.put("_root", "bird", "Chaffinch");
       assert.deepEqual(doc3.diffIncremental(), []);
@@ -981,7 +983,6 @@ describe("Automerge", () => {
         ["str", "Wren", "1@bbbb"],
       ]);
       assert.deepEqual(doc3.diffIncremental(), [
-        { action: "put", path: ["bird"], value: "Robin" },
         { action: "put", path: ["bird"], value: "Wren", conflict: true },
       ]);
       doc3.loadIncremental(change3);
@@ -1053,11 +1054,10 @@ describe("Automerge", () => {
       doc1.putObject("_root", "list", []);
 
       assert.deepEqual(doc1.diffIncremental(), [
-        { action: "put", path: ["key1"], value: 1 },
         { action: "put", path: ["key1"], value: 2 },
         { action: "put", path: ["key2"], value: 3 },
-        { action: "put", path: ["map"], value: {} },
         { action: "put", path: ["list"], value: [] },
+        { action: "put", path: ["map"], value: {} },
       ]);
     });
 
@@ -1103,6 +1103,12 @@ describe("Automerge", () => {
 
     it("should capture local increment ops", () => {
       const doc1 = create({ actor: "aaaa" });
+      // the first diff incremental collapses increments for efficent loading
+      doc1.put("_root", "counter0", 10, "counter");
+      doc1.increment("_root", "counter0", 2);
+      assert.deepEqual(doc1.diffIncremental(), [
+        { action: "put", path: ["counter0"], value: 12 },
+      ]);
       assert.deepEqual(doc1.diffIncremental(), []);
       doc1.put("_root", "counter", 2, "counter");
       doc1.increment("_root", "counter", 4);
@@ -1115,6 +1121,9 @@ describe("Automerge", () => {
 
     it("should capture local delete ops", () => {
       const doc1 = create({ actor: "aaaa" });
+      // the first diff incremental collapses deletes for efficient loading
+      doc1.put("_root", "key0", 1);
+      doc1.delete("_root", "key0");
       assert.deepEqual(doc1.diffIncremental(), []);
       doc1.put("_root", "key1", 1);
       doc1.put("_root", "key2", 2);
@@ -1138,8 +1147,7 @@ describe("Automerge", () => {
       doc2.loadIncremental(doc1.saveIncremental());
       assert.deepEqual(doc2.getWithType("_root", "starlings"), ["counter", 3]);
       assert.deepEqual(doc2.diffIncremental(), [
-        { action: "put", path: ["starlings"], value: 2 },
-        { action: "inc", path: ["starlings"], value: 1 },
+        { action: "put", path: ["starlings"], value: 3 },
       ]);
     });
 
@@ -1158,9 +1166,7 @@ describe("Automerge", () => {
 
       assert.deepEqual(doc2.diffIncremental(), [
         { action: "put", path: ["list"], value: [] },
-        { action: "insert", path: ["list", 0], values: [1] },
-        { action: "inc", path: ["list", 0], value: 2 },
-        { action: "inc", path: ["list", 0], value: -5 },
+        { action: "insert", path: ["list", 0], values: [-2] },
       ]);
     });
 

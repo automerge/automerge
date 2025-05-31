@@ -184,9 +184,12 @@ impl AutoCommit {
     /// [`Self::reset_diff_cursor()`]
     pub fn update_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log.set_active(true);
-        self.patch_log.truncate();
-        self.diff_cursor = self.doc.get_heads();
+        let heads = self.doc.get_heads();
+        if !heads.is_empty() {
+            self.patch_log.set_active(true);
+            self.patch_log.truncate();
+            self.diff_cursor = heads;
+        }
     }
 
     /// Returns the cursor set by [`Self::update_diff_cursor()`]

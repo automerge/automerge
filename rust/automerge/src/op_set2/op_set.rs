@@ -116,6 +116,7 @@ impl OpSet {
         IndexBuilder::new(self, self.text_encoding)
     }
 
+    #[inline(never)]
     pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
         let indexes = builder.finish();
 
@@ -651,6 +652,7 @@ impl OpSet {
         }
     }
 
+    #[inline(never)]
     pub(crate) fn from_doc(
         doc: &Document<'_>,
         text_encoding: TextEncoding,

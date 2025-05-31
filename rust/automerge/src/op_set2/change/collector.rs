@@ -80,6 +80,7 @@ impl<'a> ChangeBuilder<'a> {
 }
 
 impl<'a> ChangeCollector<'a> {
+    #[inline(never)]
     pub(crate) fn new<I>(changes: I) -> Result<ChangeCollector<'a>, ReadChangeError>
     where
         I: Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>>,
@@ -117,6 +118,7 @@ impl<'a> ChangeCollector<'a> {
         Ok(Self::from_change_meta(changes, num_deps))
     }
 
+    #[inline(never)]
     fn from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
@@ -297,11 +299,13 @@ impl<'a> ChangeCollector<'a> {
         collector.finish(change_graph, &op_set.actors).unwrap()
     }
 
+    #[inline(never)]
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
         self.preds.entry(succ_id).or_default().push(op_id);
     }
 
+    #[inline(never)]
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
 
@@ -351,7 +355,7 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn finish(
         mut self,
-        change_graph: &ChangeGraph,
+        graph: &ChangeGraph,
         actors: &[ActorId],
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
@@ -371,7 +375,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), change.max_op);
             }
 
-            let finished = super::build_change(ops, &change, change_graph, actors);
+            let finished = super::build_change(ops, &change, graph, actors);
 
             changes.push(Change::new(finished));
         }
@@ -387,10 +391,12 @@ impl<'a> ChangeCollector<'a> {
         let mut seq = vec![0; num_actors];
         let mut changes = Vec::with_capacity(self.changes.len());
         let mut heads = BTreeSet::new();
-        let mut change_graph =
-            ChangeGraph::with_capacity(self.changes.len(), self.num_deps, num_actors);
+        //let mut change_graph =
+        //    ChangeGraph::with_capacity(self.changes.len(), self.num_deps, num_actors);
 
-        for change in self.changes.into_iter() {
+        let mut actors = Vec::with_capacity(self.changes.len());
+
+        for change in self.changes.iter() {
             let actor = change.actor;
 
             if actor >= num_actors {
@@ -418,7 +424,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), max_op);
             }
 
-            let finished = super::build_change(ops, &change, &change_graph, &op_set.actors);
+            let finished = super::build_change(ops, change, &changes, &op_set.actors);
 
             let hash = finished.hash();
 
@@ -432,12 +438,21 @@ impl<'a> ChangeCollector<'a> {
 
             let change = Change::new(finished);
 
-            change_graph.add_change(&change, actor)?;
+            //change_graph.add_change(&change, actor)?;
 
             changes.push(change);
+            actors.push(actor);
         }
 
         let max_op = self.max_op;
+
+        let change_graph = ChangeGraph::from_iter(
+            changes.iter().zip(actors.into_iter()),
+            self.num_deps,
+            num_actors,
+        )?;
+
+        //assert_eq!(change_graph, change_graph2);
 
         Ok(CollectedChanges {
             changes,
