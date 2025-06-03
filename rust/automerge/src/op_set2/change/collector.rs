@@ -391,8 +391,6 @@ impl<'a> ChangeCollector<'a> {
         let mut seq = vec![0; num_actors];
         let mut changes = Vec::with_capacity(self.changes.len());
         let mut heads = BTreeSet::new();
-        //let mut change_graph =
-        //    ChangeGraph::with_capacity(self.changes.len(), self.num_deps, num_actors);
 
         let mut actors = Vec::with_capacity(self.changes.len());
 
@@ -428,8 +426,6 @@ impl<'a> ChangeCollector<'a> {
 
             let hash = finished.hash();
 
-            //hashes.insert(index, hash);
-
             for dep in finished.dependencies() {
                 heads.remove(dep);
             }
@@ -437,8 +433,6 @@ impl<'a> ChangeCollector<'a> {
             heads.insert(hash);
 
             let change = Change::new(finished);
-
-            //change_graph.add_change(&change, actor)?;
 
             changes.push(change);
             actors.push(actor);
@@ -451,8 +445,6 @@ impl<'a> ChangeCollector<'a> {
             self.num_deps,
             num_actors,
         )?;
-
-        //assert_eq!(change_graph, change_graph2);
 
         Ok(CollectedChanges {
             changes,
