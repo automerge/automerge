@@ -34,7 +34,6 @@ impl GetHash for ChangeGraph {
     }
 }
 
-#[inline(never)]
 pub(crate) fn build_change<T, G>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -49,7 +48,6 @@ where
     build_change_inner(ops, meta, graph, &mut mapper)
 }
 
-#[inline(never)]
 pub(crate) fn build_change_inner<T, G>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -185,7 +183,6 @@ impl<'a> PartialEq for OpBuilder<'a> {
 
 impl Eq for OpBuilder<'_> {}
 
-#[inline(never)]
 fn write_change_ops<T>(
     ops: &[T],
     meta: &BuildChangeMetadata<'_>,
@@ -201,13 +198,13 @@ where
 
     mapper.remap_actors(ops, meta);
 
-    let _remap = move |actor: Option<Cow<'_, ActorIdx>>| {
+    let remap = move |actor: Option<Cow<'_, ActorIdx>>| {
         actor.map(|a| Cow::Owned(mapper.mapping[usize::from(*a)].unwrap()))
     };
 
-    let obj_actor = ActorCursor::encode(data, ops.iter().map(T::obj_actor).map(&_remap), false);
+    let obj_actor = ActorCursor::encode(data, ops.iter().map(T::obj_actor).map(&remap), false);
     let obj_ctr = UIntCursor::encode(data, ops.iter().map(T::obj_ctr), false);
-    let key_actor = ActorCursor::encode(data, ops.iter().map(T::key_actor).map(&_remap), false);
+    let key_actor = ActorCursor::encode(data, ops.iter().map(T::key_actor).map(&remap), false);
     let key_ctr = DeltaCursor::encode(data, ops.iter().map(T::key_ctr), false);
     let key_str = StrCursor::encode(data, ops.iter().map(T::key_str), false);
     let insert = BooleanCursor::encode(data, ops.iter().map(T::insert), true); // force
@@ -216,7 +213,7 @@ where
     let value = RawCursor::encode(data, ops.iter().map(T::value), false);
     let pred_count = UIntCursor::encode(data, ops.iter().map(T::pred_count), false);
     let pred_iter = ops.iter().map(T::pred).flat_map(|id| id.iter());
-    let pred_actor_iter = pred_iter.clone().map(T::id_actor).map(&_remap);
+    let pred_actor_iter = pred_iter.clone().map(T::id_actor).map(&remap);
     let pred_actor = ActorCursor::encode(data, pred_actor_iter, false);
     let pred_ctr_iter = pred_iter.map(T::id_ctr);
     let pred_ctr = DeltaCursor::encode(data, pred_ctr_iter, false);
@@ -243,6 +240,11 @@ where
     cols.into()
 }
 
+// The many small mallocs in the remap_actors
+// was causing some memory thrashing with dmalloc/wasm
+// this structure allows for the vectors to be allocated
+// once and reused (via trucate()) when creating a large number
+// of changes (like on load)
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
     mapping: Vec<Option<ActorIdx>>,
@@ -264,7 +266,6 @@ impl<'a> ActorMapper<'a> {
         }
     }
 
-    #[inline(never)]
     fn remap_actors<C>(&mut self, ops: &[C], meta: &BuildChangeMetadata<'_>)
     where
         C: AsChangeOp,

@@ -80,7 +80,6 @@ impl<'a> ChangeBuilder<'a> {
 }
 
 impl<'a> ChangeCollector<'a> {
-    #[inline(never)]
     pub(crate) fn new<I>(changes: I) -> Result<ChangeCollector<'a>, ReadChangeError>
     where
         I: Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>>,
@@ -118,7 +117,6 @@ impl<'a> ChangeCollector<'a> {
         Ok(Self::from_change_meta(changes, num_deps))
     }
 
-    #[inline(never)]
     fn from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
@@ -299,13 +297,11 @@ impl<'a> ChangeCollector<'a> {
         collector.finish(change_graph, &op_set.actors).unwrap()
     }
 
-    #[inline(never)]
     pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId) {
         self.max_op = std::cmp::max(self.max_op, succ_id.counter());
         self.preds.entry(succ_id).or_default().push(op_id);
     }
 
-    #[inline(never)]
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
 

@@ -426,7 +426,6 @@ impl ChangeGraph {
         Ok(graph)
     }
 
-    #[inline(never)]
     pub(crate) fn add_nodes<
         'a,
         I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone,
@@ -568,7 +567,6 @@ impl ChangeGraph {
         }
     }
 
-    #[inline(never)]
     fn calculate_clock(&self, nodes: Vec<NodeIdx>) -> Clock {
         let mut clock = Clock::new(self.num_actors());
         let mut to_visit = nodes.into_iter().collect::<BTreeSet<_>>();
