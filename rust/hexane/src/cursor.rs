@@ -161,6 +161,7 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
     type SlabIndex: Debug + Clone + HasPos + HasAcc + SpanWeight<Slab>;
 
     // TODO: needs a test
+    #[inline(never)]
     fn encode<'a, I>(out: &mut Vec<u8>, values: I, force: bool) -> Range<usize>
     where
         I: Iterator<Item = Option<Cow<'a, Self::Item>>>,

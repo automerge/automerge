@@ -1641,8 +1641,18 @@ impl Automerge {
             if !visible_objs.contains(&obj.id) {
                 continue;
             }
-            for op in ops.visible(at.clone()).top_ops() {
-                //if op.visible_at(at.as_ref()) {
+            let mut index = 0;
+            let encoding = self.text_rep(obj.typ);
+            //for op in ops.visible(at.clone()).top_ops() {
+            let mut iter = ops.visible2(self.ops(), at.as_ref()).peekable();
+            while let Some(op) = iter.next() {
+                // cheap top ops
+                if let Some(p) = iter.peek() {
+                    if p.elemid_or_key() == op.elemid_or_key() {
+                        continue;
+                    }
+                }
+                let next_width = op.width(encoding);
                 if let OpType::Make(_) = op.op_type() {
                     visible_objs.insert(op.id.into());
                     let (mut path, parent_obj_id) = if obj.id.is_root() {
@@ -1653,19 +1663,13 @@ impl Automerge {
                     };
                     let prop = match op.key {
                         KeyRef::Map(prop) => Prop::Map(prop.into()),
-                        KeyRef::Seq(_) => {
-                            let encoding = self.text_rep(obj.typ);
-                            let found = self
-                                .ops
-                                .seek_list_opid(&obj.id, op.id, encoding, at.as_ref())
-                                .unwrap();
-                            Prop::Seq(found.index)
-                        }
+                        KeyRef::Seq(_) => Prop::Seq(index),
                     };
                     path.push((parent_obj_id.clone(), prop));
                     let obj_id = self.ops.id_to_exid(op.id);
                     paths.insert(obj_id, path);
                 }
+                index += next_width;
             }
         }
         paths

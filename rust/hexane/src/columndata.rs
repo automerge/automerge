@@ -31,6 +31,14 @@ impl<C: ColumnCursor> Default for ColumnData<C> {
     }
 }
 
+impl<C: ColumnCursor> PartialEq for ColumnData<C> {
+    fn eq(&self, other: &Self) -> bool {
+        // we could use run iter execept sometimes runs are broken across slab boundaries
+        // maybe a top level run_iter that glues runs together?
+        self.iter().eq(other.iter())
+    }
+}
+
 impl<C: ColumnCursor> ColumnData<C> {
     pub fn byte_len(&self) -> usize {
         self.slabs.iter().map(|s| s.as_slice().len()).sum()
@@ -732,6 +740,16 @@ impl<C: ColumnCursor> ColumnData<C> {
     {
         let index = self.len();
         self.splice(index, 0, [value])
+    }
+
+    pub fn extend<'b, M, I>(&mut self, values: I) -> Acc
+    where
+        M: MaybePackable<'b, C::Item>,
+        I: IntoIterator<Item = M>,
+        C::Item: 'b,
+    {
+        let index = self.len();
+        self.splice(index, 0, values)
     }
 
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc

@@ -791,7 +791,6 @@ impl Automerge {
     #[wasm_bindgen(js_name = loadIncremental)]
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, error::Load> {
         let data = data.to_vec();
-        //am::log!("load_incremental: {:?}", data.as_slice());
         let len = self.doc.load_incremental(&data)?;
         Ok(len as f64)
     }
@@ -1181,7 +1180,6 @@ pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
 #[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
-    //am::log!("load: {:?}", data.as_slice());
     let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
     let unchecked = js_get(&options, "unchecked")
         .ok()

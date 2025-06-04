@@ -426,6 +426,7 @@ where
         }
     }
 
+    #[inline(never)]
     pub(crate) fn append_chunk(&mut self, run: Run<'a, C::Item>) -> usize {
         self.len += run.count;
         self.state.append_chunk(&mut self.writer, run)
@@ -476,6 +477,7 @@ where
         self.state.flush(&mut self.writer);
     }
 
+    #[inline(never)]
     pub fn finish(mut self) -> Vec<Slab> {
         self.state.flush(&mut self.writer);
         self.writer.finish()

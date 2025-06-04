@@ -351,12 +351,14 @@ impl<'a> ChangeCollector<'a> {
 
     pub(crate) fn finish(
         mut self,
-        change_graph: &ChangeGraph,
+        graph: &ChangeGraph,
         actors: &[ActorId],
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
 
         let mut changes = Vec::with_capacity(self.changes.len());
+
+        let mut mapper = super::ActorMapper::new(actors);
 
         for change in self.changes.into_iter() {
             let actor = change.actor;
@@ -371,7 +373,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), change.max_op);
             }
 
-            let finished = super::build_change(ops, &change, change_graph, actors);
+            let finished = super::build_change_inner(ops, &change, graph, &mut mapper);
 
             changes.push(Change::new(finished));
         }
@@ -387,8 +389,9 @@ impl<'a> ChangeCollector<'a> {
         let mut seq = vec![0; num_actors];
         let mut changes = Vec::with_capacity(self.changes.len());
         let mut heads = BTreeSet::new();
-        let mut change_graph =
-            ChangeGraph::with_capacity(self.changes.len(), self.num_deps, num_actors);
+
+        let mut actors = Vec::with_capacity(self.changes.len());
+        let mut mapper = super::ActorMapper::new(&op_set.actors);
 
         for change in self.changes.into_iter() {
             let actor = change.actor;
@@ -418,11 +421,9 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), max_op);
             }
 
-            let finished = super::build_change(ops, &change, &change_graph, &op_set.actors);
+            let finished = super::build_change_inner(ops, &change, &changes, &mut mapper);
 
             let hash = finished.hash();
-
-            //hashes.insert(index, hash);
 
             for dep in finished.dependencies() {
                 heads.remove(dep);
@@ -432,12 +433,17 @@ impl<'a> ChangeCollector<'a> {
 
             let change = Change::new(finished);
 
-            change_graph.add_change(&change, actor)?;
-
             changes.push(change);
+            actors.push(actor);
         }
 
         let max_op = self.max_op;
+
+        let change_graph = ChangeGraph::from_iter(
+            changes.iter().zip(actors.into_iter()),
+            self.num_deps,
+            num_actors,
+        )?;
 
         Ok(CollectedChanges {
             changes,
