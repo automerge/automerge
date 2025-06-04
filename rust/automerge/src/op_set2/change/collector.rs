@@ -362,6 +362,8 @@ impl<'a> ChangeCollector<'a> {
 
         let mut changes = Vec::with_capacity(self.changes.len());
 
+        let mut mapper = super::ActorMapper::new(actors);
+
         for change in self.changes.into_iter() {
             let actor = change.actor;
 
@@ -375,7 +377,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), change.max_op);
             }
 
-            let finished = super::build_change(ops, &change, graph, actors);
+            let finished = super::build_change_inner(ops, &change, graph, &mut mapper);
 
             changes.push(Change::new(finished));
         }
@@ -393,8 +395,9 @@ impl<'a> ChangeCollector<'a> {
         let mut heads = BTreeSet::new();
 
         let mut actors = Vec::with_capacity(self.changes.len());
+        let mut mapper = super::ActorMapper::new(&op_set.actors);
 
-        for change in self.changes.iter() {
+        for change in self.changes.into_iter() {
             let actor = change.actor;
 
             if actor >= num_actors {
@@ -422,7 +425,7 @@ impl<'a> ChangeCollector<'a> {
                 assert_eq!(last.id.counter(), max_op);
             }
 
-            let finished = super::build_change(ops, change, &changes, &op_set.actors);
+            let finished = super::build_change_inner(ops, &change, &changes, &mut mapper);
 
             let hash = finished.hash();
 
