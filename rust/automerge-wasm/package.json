@@ -33,13 +33,13 @@
   "scripts": {
     "lint": "eslint test/*.ts index.d.ts",
     "debug": "cross-env PROFILE=dev TARGET_DIR=debug yarn buildall",
-    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target && node ./fixup-node-cjs.mjs",
+    "dev": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' TARGET=nodejs yarn target && node -e \"require('fs').cpSync('./nodejs/automerge_wasm.d.ts', './index.d.ts')\" && node ./fixup-node-cjs.mjs",
     "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' yarn buildall",
     "release": "cross-env PROFILE=release TARGET_DIR=release yarn buildall",
-    "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target && cross-env TARGET=deno yarn target && TARGET=web yarn target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node ./fixup-node-cjs.mjs",
+    "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target && cross-env TARGET=deno yarn target && TARGET=web yarn target && node -e \"require('fs').cpSync('./src/export-web-wasm.js', './web/index.js')\" && node -e \"require('fs').cpSync('./nodejs/automerge_wasm.d.ts', './index.d.ts')\" && node ./fixup-node-cjs.mjs",
     "target": "rimraf ./$TARGET && yarn compile && yarn bindgen && yarn opt",
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
-    "bindgen": "wasm-bindgen --omit-default-module-path --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
+    "bindgen": "wasm-bindgen --omit-default-module-path --weak-refs --typescript --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "mocha --loader=ts-node/esm test/**/*.mts"
   },

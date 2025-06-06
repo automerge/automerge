@@ -13,12 +13,12 @@ pub struct SyncState(pub(crate) am::sync::State);
 
 #[wasm_bindgen]
 impl SyncState {
-    #[wasm_bindgen(getter, js_name = sharedHeads)]
+    #[wasm_bindgen(getter, js_name = sharedHeads, unchecked_return_type="Heads")]
     pub fn shared_heads(&self) -> JsValue {
         AR::from(self.0.shared_heads.as_slice()).into()
     }
 
-    #[wasm_bindgen(getter, js_name = lastSentHeads)]
+    #[wasm_bindgen(getter, js_name = lastSentHeads, unchecked_return_type="Heads")]
     pub fn last_sent_heads(&self) -> JsValue {
         AR::from(self.0.last_sent_heads.as_slice()).into()
     }
@@ -26,7 +26,7 @@ impl SyncState {
     #[wasm_bindgen(setter, js_name = lastSentHeads)]
     pub fn set_last_sent_heads(
         &mut self,
-        heads: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<(), interop::error::BadChangeHashes> {
         let heads: Vec<ChangeHash> = JS(heads).try_into()?;
         self.0.last_sent_heads = heads;
@@ -34,7 +34,10 @@ impl SyncState {
     }
 
     #[wasm_bindgen(setter, js_name = sentHashes)]
-    pub fn set_sent_hashes(&mut self, hashes: JsValue) -> Result<(), JsValue> {
+    pub fn set_sent_hashes(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] hashes: JsValue,
+    ) -> Result<(), JsValue> {
         let hashes_map: HashMap<ChangeHash, bool> =
             serde_wasm_bindgen::from_value(hashes).map_err(to_js_err)?;
         let hashes_set: BTreeSet<ChangeHash> = hashes_map.keys().cloned().collect();
