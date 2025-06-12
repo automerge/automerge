@@ -20,6 +20,10 @@ pub struct MapRangeItem<'a> {
 }
 
 impl MapRangeItem<'_> {
+    pub(crate) fn op_id(&self) -> OpId {
+        self.maybe_exid.id
+    }
+
     pub fn id(&self) -> ExId {
         self.maybe_exid.exid()
     }

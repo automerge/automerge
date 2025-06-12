@@ -11,7 +11,7 @@ pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
     ChangeMetadata, KeyRef, OpQuery, OpQueryTerm, OpSet, OpType, Parents,
 };
-pub(crate) use crate::read::{ReadDoc, ReadDocInternal};
+pub(crate) use crate::read::ReadDoc;
 
 use crate::change_graph::ChangeGraph;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
@@ -687,9 +687,9 @@ impl Automerge {
     /// * `data` - The data to load
     /// * `options` - The options to use when loading
     #[tracing::instrument(skip(data), err)]
-    pub fn load_with_options<'a, 'b>(
-        data: &'a [u8],
-        options: LoadOptions<'b>,
+    pub fn load_with_options(
+        data: &[u8],
+        options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -754,7 +754,7 @@ impl Automerge {
         }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
-                current_state::log_current_state_patches(&am, patch_log);
+                am.log_current_state(patch_log);
             }
         }
         Ok(am)
@@ -774,7 +774,7 @@ impl Automerge {
     /// [diff]: Self::diff()
     pub fn current_state(&self, text_rep: TextRepresentation) -> Vec<Patch> {
         let mut patch_log = PatchLog::active(text_rep);
-        current_state::log_current_state_patches(self, &mut patch_log);
+        self.log_current_state(&mut patch_log);
         patch_log.make_patches(self)
     }
 
@@ -808,7 +808,7 @@ impl Automerge {
             )?;
             doc = doc.with_actor(self.actor_id().clone());
             if patch_log.is_active() {
-                current_state::log_current_state_patches(&doc, patch_log);
+                doc.log_current_state(patch_log);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -828,6 +828,16 @@ impl Automerge {
         self.apply_changes_log_patches(changes, patch_log)?;
         let delta = self.ops.len() - start;
         Ok(delta)
+    }
+
+    pub(crate) fn log_current_state(&self, patch_log: &mut PatchLog) {
+        let mut iter = self.iter().internal();
+
+        for item in iter.by_ref() {
+            item.log(patch_log);
+        }
+
+        patch_log.path_hint(iter.path_map);
     }
 
     fn seq_for_actor(&self, actor: &ActorId) -> u64 {
@@ -1623,11 +1633,7 @@ impl Automerge {
         Ok(())
     }
 
-    pub(crate) fn visible_obj_paths(
-        &self,
-        at: Option<&[ChangeHash]>,
-    ) -> HashMap<ExId, Vec<(ExId, Prop)>> {
-        let at = at.map(|heads| self.clock_at(heads));
+    pub(crate) fn visible_obj_paths(&self, at: Option<Clock>) -> HashMap<ExId, Vec<(ExId, Prop)>> {
         let mut paths = HashMap::<ExId, Vec<(ExId, Prop)>>::new();
         let mut visible_objs = HashSet::<crate::types::ObjId>::new();
         visible_objs.insert(crate::types::ObjId::root());
@@ -1961,12 +1967,6 @@ impl ReadDoc for Automerge {
 
     fn text_encoding(&self) -> TextEncoding {
         self.ops.text_encoding
-    }
-}
-
-impl ReadDocInternal for Automerge {
-    fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>> {
-        self.visible_obj_paths(None)
     }
 }
 

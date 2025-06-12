@@ -4,7 +4,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
+use crate::op_set2::op_set::IndexBuilder;
 use crate::storage::document::ReadChangeError;
+use crate::storage::load::change_collector::Error;
 use crate::{
     change::Change,
     op_set2::{ChangeMetadata, KeyRef, Op, OpBuilder, OpSet},
@@ -12,7 +14,39 @@ use crate::{
     types::{ActorId, ChangeHash, ObjId, OpId},
 };
 
-use crate::storage::load::change_collector::Error;
+pub(crate) struct IndexedChangeCollector<'a> {
+    pub(crate) index: IndexBuilder,
+    pub(crate) collector: ChangeCollector<'a>,
+}
+
+impl<'a> IndexedChangeCollector<'a> {
+    pub(crate) fn process_succ(&mut self, op_id: OpId, succ_id: OpId, is_counter: bool) {
+        self.index.process_succ(is_counter, succ_id);
+        self.collector.process_succ(op_id, succ_id);
+    }
+
+    pub(crate) fn build_changegraph(
+        self,
+        op_set: &OpSet,
+    ) -> Result<(IndexBuilder, CollectedChanges), Error> {
+        let index = self.index;
+        let changes = self.collector.build_changegraph(op_set)?;
+        Ok((index, changes))
+    }
+
+    pub(crate) fn process_op(&mut self, op: Op<'a>) {
+        let next = Some((op.obj, op.elemid_or_key()));
+        let flush = self.collector.last != next;
+        if flush {
+            self.index.flush();
+        }
+        self.index.process_op(&op);
+        self.collector.process_op_internal(op, flush);
+        if flush {
+            self.collector.last = next;
+        }
+    }
+}
 
 pub(crate) struct ChangeCollector<'a> {
     changes: Vec<BuildChangeMetadata<'a>>,
@@ -80,6 +114,13 @@ impl<'a> ChangeBuilder<'a> {
 }
 
 impl<'a> ChangeCollector<'a> {
+    pub(crate) fn with_index(self, index: IndexBuilder) -> IndexedChangeCollector<'a> {
+        IndexedChangeCollector {
+            collector: self,
+            index,
+        }
+    }
+
     pub(crate) fn new<I>(changes: I) -> Result<ChangeCollector<'a>, ReadChangeError>
     where
         I: Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>>,
@@ -303,13 +344,21 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
+        let next = Some((op.obj, op.elemid_or_key()));
+        let flush = self.last != next;
+
+        self.process_op_internal(op, flush);
+
+        if flush {
+            self.last = next;
+        }
+    }
+
+    fn process_op_internal(&mut self, op: Op<'a>, flush: bool) {
         self.max_op = std::cmp::max(self.max_op, op.id.counter());
 
-        let next = Some((op.obj, op.elemid_or_key()));
-
-        if self.last != next {
+        if flush {
             self.flush_deletes();
-            self.last = next;
         }
 
         let pred = self.preds.remove(&op.id).unwrap_or_default();
@@ -350,11 +399,23 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn finish(
+        self,
+        change_graph: &ChangeGraph,
+        actors: &[ActorId],
+    ) -> Result<Vec<Change>, Error> {
+        self.finish_inner(change_graph, actors, None)
+    }
+
+    fn finish_inner(
         mut self,
         graph: &ChangeGraph,
         actors: &[ActorId],
+        index: Option<&mut IndexBuilder>,
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
+        if let Some(i) = index {
+            i.flush()
+        }
 
         let mut changes = Vec::with_capacity(self.changes.len());
 

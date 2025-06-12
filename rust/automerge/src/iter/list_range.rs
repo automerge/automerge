@@ -9,7 +9,7 @@ use crate::types::OpId;
 use std::fmt::Debug;
 use std::ops::{Bound, Range, RangeBounds};
 
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct ListRangeItem<'a> {
     pub index: usize,
     pub value: ValueRef<'a>,
@@ -18,6 +18,10 @@ pub struct ListRangeItem<'a> {
 }
 
 impl ListRangeItem<'_> {
+    pub(crate) fn op_id(&self) -> OpId {
+        self.maybe_exid.id
+    }
+
     pub fn id(&self) -> ExId {
         self.maybe_exid.exid()
     }

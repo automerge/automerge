@@ -1,11 +1,12 @@
-use super::{ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans};
+use super::{ListRange, ListRangeItem, MapRange, MapRangeItem, Span, SpanInternal, SpansInternal};
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
-use crate::patches::TextRepresentation;
-use crate::types::{ObjId, ObjMeta, ObjType};
+use crate::patches::{PatchLog, TextRepresentation};
+use crate::types::{ObjId, ObjMeta, ObjType, Prop};
 use crate::Automerge;
+use crate::TextEncoding;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -14,35 +15,19 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct DocIter<'a> {
     op_set: Option<&'a OpSet>,
-    next_objs: BTreeMap<ObjId, IterType>,
-    obj_id_iter: ObjIdIter<'a>,
-    map_iter: MapRange<'a>,
-    list_iter: ListRange<'a>,
-    span_iter: Spans<'a>,
-    iter_type: IterType,
-    obj: ObjId,
     obj_export: Arc<ExId>,
-    text_rep: TextRepresentation,
-}
-
-impl Default for DocIter<'_> {
-    fn default() -> Self {
-        Self {
-            op_set: None,
-            next_objs: BTreeMap::default(),
-            obj_id_iter: ObjIdIter::default(),
-            map_iter: MapRange::default(),
-            list_iter: ListRange::default(),
-            span_iter: Spans::default(),
-            iter_type: IterType::Map,
-            obj: ObjId::root(),
-            obj_export: Arc::new(ExId::Root),
-            text_rep: TextRepresentation::Array,
-        }
-    }
+    inner: DocIterInternal<'a>,
 }
 
 impl<'a> DocIter<'a> {
+    fn encoding(&self) -> TextEncoding {
+        self.inner.span_iter.encoding()
+    }
+
+    fn clock(&self) -> Option<&Clock> {
+        self.inner.span_iter.clock()
+    }
+
     pub(crate) fn new(
         doc: &'a Automerge,
         obj: ObjMeta,
@@ -51,58 +36,113 @@ impl<'a> DocIter<'a> {
     ) -> Self {
         let op_set = doc.ops();
         let next_objs = BTreeMap::new();
+        let path_map = BTreeMap::new();
         let mut obj_id_iter = op_set.obj_id_iter();
-        //let exid = op_set.id_to_exid(obj.id.0);
         let iter_type = IterType::new(text_rep, obj.typ);
         let obj = obj.id;
         let obj_export = Arc::new(op_set.id_to_exid(obj.0));
         let scope = obj_id_iter.seek_to_value(obj);
         let map_iter = MapRange::new(op_set, scope.clone(), clock.clone());
         let list_iter = ListRange::new(op_set, scope.clone(), clock.clone(), ..);
-        let span_iter = Spans::new(op_set, scope, clock, doc.text_encoding());
+        let encoding = doc.text_encoding();
+        let span_iter = SpansInternal::new(op_set, scope, clock, encoding);
         let op_set = Some(op_set);
         Self {
-            map_iter,
-            list_iter,
-            span_iter,
             op_set,
-            obj,
             obj_export,
-            iter_type,
-            obj_id_iter,
-            next_objs,
-            text_rep,
+            inner: DocIterInternal {
+                map_iter,
+                list_iter,
+                span_iter,
+                obj,
+                iter_type,
+                obj_id_iter,
+                next_objs,
+                path_map,
+                text_rep,
+            },
+        }
+    }
+    pub(crate) fn internal(self) -> DocIterInternal<'a> {
+        self.inner
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DocIterInternal<'a> {
+    next_objs: BTreeMap<ObjId, IterType>,
+    pub(crate) path_map: BTreeMap<ObjId, (Prop, ObjId)>,
+    obj_id_iter: ObjIdIter<'a>,
+    map_iter: MapRange<'a>,
+    list_iter: ListRange<'a>,
+    span_iter: SpansInternal<'a>,
+    iter_type: IterType,
+    obj: ObjId,
+    text_rep: TextRepresentation,
+}
+
+impl Default for DocIter<'_> {
+    fn default() -> Self {
+        Self {
+            op_set: None,
+            obj_export: Arc::new(ExId::Root),
+            inner: Default::default(),
         }
     }
 }
 
-impl<'a> DocIter<'a> {
-    fn process_item(&mut self, item: DocItem<'a>) -> Option<DocObjItem<'a>> {
-        if let Some((next_obj, next_typ)) = item.make_obj(self.text_rep) {
-            self.next_objs.insert(next_obj, next_typ);
+impl Default for DocIterInternal<'_> {
+    fn default() -> Self {
+        Self {
+            next_objs: BTreeMap::default(),
+            path_map: BTreeMap::default(),
+            obj_id_iter: ObjIdIter::default(),
+            map_iter: MapRange::default(),
+            list_iter: ListRange::default(),
+            span_iter: SpansInternal::default(),
+            iter_type: IterType::Map,
+            obj: ObjId::root(),
+            text_rep: TextRepresentation::Array,
         }
-        Some(DocObjItem {
-            obj: self.obj_export.clone(),
+    }
+}
+
+impl<'a> DocIterInternal<'a> {
+    fn process_item(&mut self, item: DocItemInternal<'a>) -> Option<DocObjItemInternal<'a>> {
+        if let Some((next_obj, next_typ)) = item.make_obj(self.text_rep) {
+            let prop = item.prop();
+            self.next_objs.insert(next_obj, next_typ);
+            self.path_map.insert(next_obj, (prop, self.obj));
+        }
+        Some(DocObjItemInternal {
+            obj: self.obj,
             item,
         })
     }
 
-    fn shift(&mut self, next_type: IterType, next_range: Range<usize>) -> Option<DocItem<'a>> {
+    fn shift(
+        &mut self,
+        next_type: IterType,
+        next_range: Range<usize>,
+    ) -> Option<DocItemInternal<'a>> {
         match next_type {
-            IterType::Map => Some(DocItem::Map(self.map_iter.shift_next(next_range)?)),
-            IterType::List => Some(DocItem::List(self.list_iter.shift_next(next_range)?)),
-            IterType::Text => Some(DocItem::Text(self.span_iter.shift_next(next_range)?)),
+            IterType::Map => Some(DocItemInternal::Map(self.map_iter.shift_next(next_range)?)),
+            IterType::List => Some(DocItemInternal::List(
+                self.list_iter.shift_next(next_range)?,
+            )),
+            IterType::Text => Some(DocItemInternal::Text(
+                self.span_iter.shift_next(next_range)?,
+            )),
         }
     }
 
-    fn next_object(&mut self) -> Option<Option<DocObjItem<'a>>> {
+    fn next_object(&mut self) -> Option<Option<DocObjItemInternal<'a>>> {
         let (next, next_type) = self.next_objs.pop_first()?;
         let next_range = self.obj_id_iter.seek_to_value(next);
         if next_range.is_empty() {
             Some(None)
         } else if let Some(item) = self.shift(next_type, next_range) {
             self.obj = next;
-            self.obj_export = Arc::new(self.op_set?.id_to_exid(next.0));
             self.iter_type = next_type;
             Some(self.process_item(item))
         } else {
@@ -110,18 +150,18 @@ impl<'a> DocIter<'a> {
         }
     }
 
-    fn next_prop(&mut self) -> Option<DocObjItem<'a>> {
+    fn next_prop(&mut self) -> Option<DocObjItemInternal<'a>> {
         match self.iter_type {
             IterType::Map => {
-                let map = DocItem::Map(self.map_iter.next()?);
+                let map = DocItemInternal::Map(self.map_iter.next()?);
                 self.process_item(map)
             }
             IterType::List => {
-                let list = DocItem::List(self.list_iter.next()?);
+                let list = DocItemInternal::List(self.list_iter.next()?);
                 self.process_item(list)
             }
             IterType::Text => {
-                let span = DocItem::Text(self.span_iter.next()?);
+                let span = DocItemInternal::Text(self.span_iter.next()?);
                 self.process_item(span)
             }
         }
@@ -149,10 +189,24 @@ impl<'a> Iterator for DocIter<'a> {
     type Item = DocObjItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        let DocObjItemInternal { obj, item } = self.inner.next()?;
+        if *self.obj_export != obj {
+            self.obj_export = Arc::new(self.op_set?.id_to_exid(self.inner.obj.0));
+        }
+        Some(DocObjItem {
+            obj: self.obj_export.clone(),
+            item: item.export(self.op_set?, self.clock(), self.encoding()),
+        })
+    }
+}
+
+impl<'a> Iterator for DocIterInternal<'a> {
+    type Item = DocObjItemInternal<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         if let Some(item) = self.next_prop() {
             return Some(item);
         }
-        // could rewrite this as an iterator
         loop {
             if let Some(item) = self.next_object()? {
                 return Some(item);
@@ -161,10 +215,23 @@ impl<'a> Iterator for DocIter<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DocObjItem<'a> {
     pub obj: Arc<ExId>,
     pub item: DocItem<'a>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DocObjItemInternal<'a> {
+    pub(crate) obj: ObjId,
+    pub(crate) item: DocItemInternal<'a>,
+}
+
+impl DocObjItemInternal<'_> {
+    pub(crate) fn log(self, log: &mut PatchLog) {
+        let obj = self.obj;
+        self.item.log(obj, log)
+    }
 }
 
 impl<'a> DocObjItem<'a> {
@@ -185,11 +252,92 @@ impl<'a> DocObjItem<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum DocItem<'a> {
     Map(MapRangeItem<'a>),
     List(ListRangeItem<'a>),
     Text(Span),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DocItemInternal<'a> {
+    Map(MapRangeItem<'a>),
+    List(ListRangeItem<'a>),
+    Text(SpanInternal),
+}
+
+impl<'a> DocItemInternal<'a> {
+    fn prop(&self) -> Prop {
+        match self {
+            Self::Map(m) => Prop::Map(m.key.to_string()),
+            Self::List(l) => Prop::Seq(l.index),
+            Self::Text(SpanInternal::Obj(_, index)) => Prop::Seq(*index),
+            Self::Text(SpanInternal::Text(_, index, _)) => Prop::Seq(*index),
+        }
+    }
+
+    fn export(
+        self,
+        op_set: &'a OpSet,
+        clock: Option<&Clock>,
+        encoding: TextEncoding,
+    ) -> DocItem<'a> {
+        match self {
+            Self::Map(m) => DocItem::Map(m),
+            Self::List(l) => DocItem::List(l),
+            Self::Text(t) => DocItem::Text(t.export(op_set, clock, encoding)),
+        }
+    }
+
+    fn make_obj(&self, text_rep: TextRepresentation) -> Option<(ObjId, IterType)> {
+        match self {
+            DocItemInternal::Map(MapRangeItem {
+                value: ValueRef::Object(ot),
+                maybe_exid,
+                ..
+            }) => {
+                let new_typ = IterType::new(text_rep, *ot);
+                let new_obj = ObjId(maybe_exid.id);
+                Some((new_obj, new_typ))
+            }
+            DocItemInternal::List(ListRangeItem {
+                value: ValueRef::Object(ot),
+                maybe_exid,
+                ..
+            }) => {
+                let new_typ = IterType::new(text_rep, *ot);
+                let new_obj = ObjId(maybe_exid.id);
+                Some((new_obj, new_typ))
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog) {
+        match self {
+            Self::Map(map) => {
+                let id = map.op_id();
+                let key = &map.key;
+                let conflict = map.conflict;
+                let value = map.value.hydrate(TextRepresentation::Array);
+                log.put_map(obj, key, value, id, conflict, false);
+            }
+            Self::List(list) => {
+                let index = list.index;
+                let id = list.op_id();
+                let conflict = list.conflict;
+                let value = list.value.hydrate(TextRepresentation::Array);
+                log.insert(obj, index, value, id, conflict)
+            }
+            Self::Text(SpanInternal::Text(text, index, marks)) => {
+                log.splice(obj, index, &text, marks);
+            }
+            Self::Text(SpanInternal::Obj(id, index)) => {
+                let value = crate::hydrate::Value::Map(crate::hydrate::Map::new());
+                log.insert(obj, index, value, id, false);
+            }
+        }
+    }
 }
 
 impl<'a> DocItem<'a> {
@@ -197,30 +345,6 @@ impl<'a> DocItem<'a> {
         match self {
             DocItem::Map(m) => Some(m.id()),
             DocItem::List(l) => Some(l.id()),
-            _ => None,
-        }
-    }
-
-    fn make_obj(&self, text_rep: TextRepresentation) -> Option<(ObjId, IterType)> {
-        match self {
-            DocItem::Map(MapRangeItem {
-                value: ValueRef::Object(ot),
-                maybe_exid,
-                ..
-            }) => {
-                let new_typ = IterType::new(text_rep, *ot);
-                let new_obj = ObjId(maybe_exid.id);
-                Some((new_obj, new_typ))
-            }
-            DocItem::List(ListRangeItem {
-                value: ValueRef::Object(ot),
-                maybe_exid,
-                ..
-            }) => {
-                let new_typ = IterType::new(text_rep, *ot);
-                let new_obj = ObjId(maybe_exid.id);
-                Some((new_obj, new_typ))
-            }
             _ => None,
         }
     }

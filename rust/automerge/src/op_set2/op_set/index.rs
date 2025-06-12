@@ -10,10 +10,12 @@ use std::collections::HashMap;
 pub(crate) struct IndexBuilder {
     counters: HashMap<OpId, Vec<(usize, usize)>>,
     succ: Vec<u32>,
+    //top: Vec<bool>,
     widths: Vec<u64>,
     incs: Vec<Option<i64>>,
     marks: Vec<Option<MarkIndexBuilder>>,
     obj_info: ObjIndex,
+    last_flush: usize,
     encoding: TextEncoding,
 }
 
@@ -80,6 +82,7 @@ impl OpBuilder<'_> {
 
 pub(crate) struct Indexes {
     pub(crate) text: ColumnData<UIntCursor>,
+    //pub(crate) top: ColumnData<BooleanCursor>,
     pub(crate) visible: ColumnData<BooleanCursor>,
     pub(crate) inc: ColumnData<IntCursor>,
     pub(crate) mark: MarkIndexColumn,
@@ -91,24 +94,35 @@ impl IndexBuilder {
         Self {
             counters: HashMap::new(),
             succ: Vec::with_capacity(op_set.len()),
+            //top: Vec::with_capacity(op_set.len()),
             widths: Vec::with_capacity(op_set.len()),
             incs: Vec::with_capacity(op_set.sub_len()),
             marks: Vec::with_capacity(op_set.len()),
             obj_info: ObjIndex::default(),
+            last_flush: 0,
             encoding,
         }
     }
 
+    pub(crate) fn flush(&mut self) {
+        let len = self.succ.len();
+        /*
+                for (delta, succ) in self.succ[self.last_flush..].iter().rev().enumerate() {
+                    if *succ == 0 {
+                        self.top[len - delta - 1] = true;
+                        break;
+                    }
+                }
+        */
+        self.last_flush = len;
+    }
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         self.marks.push(op.mark_index());
 
         self.succ.push(vis_num(op));
+        //self.top.push(false);
 
-        if op.succ().len() == 0 {
-            self.widths.push(op.width(self.encoding.into()) as u64);
-        } else {
-            self.widths.push(0);
-        }
+        self.widths.push(op.width(self.encoding.into()) as u64);
 
         let count = self.counters.remove(&op.id);
 
@@ -134,11 +148,28 @@ impl IndexBuilder {
         self.incs.push(None); // will update later
     }
 
-    pub(crate) fn finish(self) -> Indexes {
-        let mut text = ColumnData::new();
-        text.splice(0, 0, self.widths);
+    pub(crate) fn finish(mut self) -> Indexes {
+        self.flush();
+
+        /*
+                let text = self
+                    .widths
+                    .iter()
+                    .zip(self.top.iter())
+                    .map(|(w, t)| if *t { Some(*w) } else { None })
+                    .collect();
+        */
+
+        let text = self
+            .widths
+            .iter()
+            .zip(self.succ.iter())
+            .map(|(w, t)| if *t == 0 { Some(*w) } else { None })
+            .collect();
 
         let visible = self.succ.iter().map(|&n| n == 0).collect();
+
+        //let top = self.top.iter().collect();
 
         let mut inc = ColumnData::new();
         inc.splice(0, 0, self.incs);
@@ -150,6 +181,7 @@ impl IndexBuilder {
 
         Indexes {
             text,
+            //top,
             visible,
             inc,
             mark,

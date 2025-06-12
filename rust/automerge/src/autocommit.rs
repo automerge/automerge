@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
+use crate::automerge::diff;
 use crate::automerge::SaveOptions;
-use crate::automerge::{current_state, diff};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
@@ -258,7 +258,7 @@ impl AutoCommit {
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
             patch_log.heads = None;
-            current_state::log_current_state_patches(&self.doc, &mut patch_log);
+            self.doc.log_current_state(&mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
             let before_clock = self.doc.clock_at(range.before());

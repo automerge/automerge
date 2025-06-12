@@ -125,6 +125,7 @@ impl OpSet {
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
         self.cols.index.text = indexes.text;
+        //self.cols.index.top = indexes.top;
         self.cols.index.visible = indexes.visible;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
@@ -146,6 +147,7 @@ impl OpSet {
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
+        const NONE: Option<u64> = None;
         let mut succ_inc = 0;
         let mut last_pos = None;
         for i in op_pos.iter().rev() {
@@ -159,9 +161,10 @@ impl OpSet {
             self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
             self.cols.succ_ctr.splice(i.sub_pos, 0, [i.id.icounter()]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            self.cols.index.text.splice(i.pos, 1, [0]);
             if i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
+                self.cols.index.text.splice(i.pos, 1, [NONE]);
+                //self.cols.index.top.splice(i.pos, 1, [false]);
             }
         }
     }
@@ -376,8 +379,10 @@ impl OpSet {
         key: &str,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        let iter = self.iter_prop(obj, key);
+        let range = self.prop_range(obj, key);
+        let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
+        assert_eq!(end_pos, range.end);
         let ops = iter.visible2(self, clock).collect::<Vec<_>>();
         OpsFound {
             index: 0,
@@ -719,10 +724,9 @@ impl OpSet {
         )
     }
 
-    pub(crate) fn iter_prop(&self, obj: &ObjId, prop: &str) -> OpIter<'_> {
+    pub(crate) fn prop_range(&self, obj: &ObjId, prop: &str) -> Range<usize> {
         let range = self.scope_to_obj(obj);
-        let range = self.cols.key_str.scope_to_value(Some(prop), range);
-        self.iter_range(&range)
+        self.cols.key_str.scope_to_value(Some(prop), range)
     }
 
     pub(crate) fn iter_obj<'a>(&'a self, obj: &ObjId) -> OpIter<'a> {
@@ -1331,7 +1335,8 @@ mod tests {
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[2..8], ops.as_slice());
 
-            let iter = opset.iter_prop(&ObjId(OpId::new(1, 1)), "key2");
+            let range = opset.prop_range(&ObjId(OpId::new(1, 1)), "key2");
+            let iter = opset.iter_range(&range);
             let ops = iter.collect::<Vec<_>>();
             assert_eq!(&test_ops[3..6], ops.as_slice());
 
