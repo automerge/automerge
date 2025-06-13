@@ -71,8 +71,4 @@ impl MessageBuilder {
             version: self.version,
         }
     }
-
-    pub(super) fn has_changes_to_send(&self) -> bool {
-        !self.changes.is_empty()
-    }
 }
