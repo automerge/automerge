@@ -74,7 +74,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     patches::{PatchLog, TextRepresentation},
     storage::{parse, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, ReadDoc,
 };
 
 mod bloom;
@@ -183,7 +183,7 @@ impl SyncDoc for Automerge {
                 if !first_have
                     .last_sync
                     .iter()
-                    .all(|hash| self.get_change_by_hash(hash).is_some())
+                    .all(|hash| self.has_change(hash))
                 {
                     let reset_msg = Message {
                         heads: our_heads,
@@ -205,30 +205,23 @@ impl SyncDoc for Automerge {
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
-            let send_doc = sync_state
-                .their_heads
-                .as_ref()
-                .map(|h| h.is_empty())
-                .unwrap_or(false)
-                && !sync_state.have_responded
-                && sync_state.supports_v2_messages();
+            let send_doc =
+                sync_state.their_heads == Some(vec![]) && sync_state.supports_v2_messages();
 
             if send_doc {
-                let hashes = self
-                    .get_changes(&[])
-                    .iter()
-                    .map(|c| c.hash())
-                    .collect::<Vec<_>>();
+                let hashes = self.change_graph.get_hashes(&[]);
                 (MessageBuilder::new_v2(self.save()), hashes)
             } else {
-                let all_changes = self
-                    .get_changes_to_send(their_have, their_need)
+                let all_hashes = self
+                    .get_hashes_to_send(their_have, their_need)
                     .expect("Should have only used hashes that are in the document");
                 // deduplicate the changes to send with those we have already sent and clone it now
-                let changes = all_changes
+                let hashes: Vec<_> = all_hashes
                     .into_iter()
-                    .filter(|change| !sync_state.sent_hashes.contains(&change.hash()));
-                let hashes = changes.clone().map(|c| c.hash()).collect::<Vec<_>>();
+                    .filter(|hash| !sync_state.sent_hashes.contains(hash))
+                    .collect();
+                let changes = self.get_changes_by_hashes(hashes.clone()).ok()?;
+
                 if sync_state.supports_v2_messages() {
                     let encoded = changes
                         .into_iter()
@@ -236,7 +229,7 @@ impl SyncDoc for Automerge {
                         .collect::<Vec<_>>();
                     (MessageBuilder::new_v2(encoded), hashes)
                 } else {
-                    (MessageBuilder::new_v1(changes), hashes)
+                    (MessageBuilder::new_v1(changes.into_iter()), hashes)
                 }
             }
         } else if sync_state.supports_v2_messages() {
@@ -254,7 +247,7 @@ impl SyncDoc for Automerge {
         };
 
         if heads_unchanged && sync_state.have_responded {
-            if heads_equal && !message_builder.has_changes_to_send() {
+            if heads_equal && sent_hashes.is_empty() {
                 return None;
             }
             if sync_state.in_flight {
@@ -305,25 +298,23 @@ impl SyncDoc for Automerge {
 }
 
 impl Automerge {
+    #[inline(never)]
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync);
-        let hashes = new_changes.iter().map(|change| change.hash());
+        let hashes = self.change_graph.get_hashes(&last_sync);
         Have {
             last_sync,
-            bloom: BloomFilter::from_hashes(hashes),
+            bloom: BloomFilter::from_hashes(hashes.into_iter()),
         }
     }
 
-    fn get_changes_to_send(
+    #[inline(never)]
+    fn get_hashes_to_send(
         &self,
         have: &[Have],
         need: &[ChangeHash],
-    ) -> Result<Vec<Change>, AutomergeError> {
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         if have.is_empty() {
-            Ok(need
-                .iter()
-                .filter_map(|hash| self.get_change_by_hash(hash))
-                .collect())
+            Ok(need.to_vec())
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -335,24 +326,21 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes);
+            let hashes = self.change_graph.get_hashes(&last_sync_hashes);
 
-            let mut change_hashes = HashSet::with_capacity(changes.len());
+            let mut change_hashes = HashSet::with_capacity(hashes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
             let mut hashes_to_send = HashSet::new();
 
-            for change in &changes {
-                change_hashes.insert(change.hash());
+            for hash in &hashes {
+                change_hashes.insert(*hash);
 
-                for dep in change.deps() {
-                    dependents.entry(*dep).or_default().push(change.hash());
+                for dep in self.change_graph.deps(hash) {
+                    dependents.entry(dep).or_default().push(*hash);
                 }
 
-                if bloom_filters
-                    .iter()
-                    .all(|bloom| !bloom.contains_hash(&change.hash()))
-                {
-                    hashes_to_send.insert(change.hash());
+                if bloom_filters.iter().all(|bloom| !bloom.contains_hash(hash)) {
+                    hashes_to_send.insert(*hash);
                 }
             }
 
@@ -367,24 +355,23 @@ impl Automerge {
                 }
             }
 
-            let mut changes_to_send = Vec::new();
+            let mut final_hashes = Vec::with_capacity(hashes_to_send.len() + need.len());
             for hash in need {
                 if !hashes_to_send.contains(hash) {
-                    if let Some(change) = self.get_change_by_hash(hash) {
-                        changes_to_send.push(change);
-                    }
+                    final_hashes.push(*hash);
                 }
             }
 
-            for change in changes {
-                if hashes_to_send.contains(&change.hash()) {
-                    changes_to_send.push(change);
+            for hash in hashes {
+                if hashes_to_send.contains(&hash) {
+                    final_hashes.push(hash);
                 }
             }
-            Ok(changes_to_send)
+            Ok(final_hashes)
         }
     }
 
+    #[inline(never)]
     pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,
@@ -428,7 +415,7 @@ impl Automerge {
 
         let known_heads = message_heads
             .iter()
-            .filter(|head| self.get_change_by_hash(head).is_some())
+            .filter(|head| self.has_change(head))
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads.clone_from(&message_heads);

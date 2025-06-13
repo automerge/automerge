@@ -539,7 +539,7 @@ impl Automerge {
         Ok(f)
     }
 
-    fn get_changes_by_hashes(
+    pub(crate) fn get_changes_by_hashes(
         &self,
         hashes: Vec<ChangeHash>,
     ) -> Result<Vec<Change>, AutomergeError> {
@@ -1686,7 +1686,7 @@ impl Automerge {
         other.shared_heads == self.get_heads()
     }
 
-    fn has_change(&self, head: &ChangeHash) -> bool {
+    pub(crate) fn has_change(&self, head: &ChangeHash) -> bool {
         self.change_graph.has_change(head)
     }
 
@@ -1914,9 +1914,9 @@ impl ReadDoc for Automerge {
         let opid = self.exid_to_opid(obj)?;
         let typ = self.ops.object_type(&ObjId(opid));
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
-        //Ok(typ)
     }
 
+    #[inline(never)]
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash()).collect();
         let mut missing = HashSet::new();

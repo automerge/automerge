@@ -356,15 +356,7 @@ impl ChangeGraph {
         (changes, num_deps)
     }
 
-    pub(crate) fn get_build_metadata_clock(
-        &self,
-        have_deps: &[ChangeHash],
-    ) -> (Vec<BuildChangeMetadata<'_>>, usize) {
-        // get the clock for the given deps
-        let clock = self.clock_for_heads(have_deps);
-
-        // get the documents current clock
-
+    fn get_build_indexes(&self, clock: Clock) -> Vec<NodeIdx> {
         let mut change_indexes: Vec<NodeIdx> = Vec::new();
         // walk the state from the given deps clock and add them into the vec
         for (actor_index, actor_changes) in self.seq_index.iter().enumerate() {
@@ -380,6 +372,25 @@ impl ChangeGraph {
         // ensure the changes are still in sorted order
         change_indexes.sort_unstable();
 
+        change_indexes
+    }
+
+    #[inline(never)]
+    pub(crate) fn get_hashes(&self, have_deps: &[ChangeHash]) -> Vec<ChangeHash> {
+        let clock = self.clock_for_heads(have_deps);
+        self.get_build_indexes(clock)
+            .into_iter()
+            .filter_map(|node| self.hashes.get(node.0 as usize))
+            .copied()
+            .collect()
+    }
+
+    pub(crate) fn get_build_metadata_clock(
+        &self,
+        have_deps: &[ChangeHash],
+    ) -> (Vec<BuildChangeMetadata<'_>>, usize) {
+        let clock = self.clock_for_heads(have_deps);
+        let change_indexes = self.get_build_indexes(clock);
         self.get_build_metadata_for_indexes(change_indexes)
     }
 
@@ -535,6 +546,14 @@ impl ChangeGraph {
         } else {
             *child = Some(new_edge_idx);
         }
+    }
+
+    pub(crate) fn deps(&self, hash: &ChangeHash) -> impl Iterator<Item = ChangeHash> + '_ {
+        let mut iter = self.nodes_by_hash.get(hash).map(|node| self.parents(*node));
+        std::iter::from_fn(move || {
+            let next = iter.as_mut()?.next()?;
+            self.hashes.get(next.0 as usize).copied()
+        })
     }
 
     fn parents(&self, node_idx: NodeIdx) -> impl Iterator<Item = NodeIdx> + '_ {
