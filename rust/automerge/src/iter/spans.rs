@@ -65,6 +65,13 @@ impl<'a> SpansInternal<'a> {
         self.next()
     }
 
+    pub(crate) fn clock(&self) -> Option<&Clock> {
+        self.clock.as_ref()
+    }
+    pub(crate) fn encoding(&self) -> TextEncoding {
+        self.state.encoding
+    }
+
     pub(crate) fn new(
         op_set: &'a OpSet,
         range: Range<usize>,
@@ -97,13 +104,11 @@ impl<'a> SpansInternal<'a> {
     }
 
     fn next_opid(&mut self) -> Option<OpId> {
-        //let pos = self.action_value.pos() - 1;
         let id_pos = self.op_id.pos();
         self.op_id.nth(self.pos - id_pos)
     }
 
     fn next_mark_name(&mut self) -> Option<Cow<'a, str>> {
-        //let pos = self.action_value.pos() - 1;
         let mark_pos = self.mark_info.pos();
         let (mark_name, _expand) = self.mark_info.nth(self.pos - mark_pos)?;
         mark_name
@@ -274,13 +279,6 @@ impl<'a> Spans<'a> {
         Spans {
             internal: SpansInternal::new(op_set, range, clock, encoding),
         }
-    }
-    pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        Some(self.internal.shift_next(range)?.export(
-            self.internal.op_set?,
-            self.internal.clock.as_ref(),
-            self.internal.state.encoding,
-        ))
     }
 }
 

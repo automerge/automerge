@@ -1,15 +1,12 @@
-use crate::automerge::diff::ReadDocAt;
 use crate::automerge::Automerge;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
-use crate::read::ReadDocInternal;
-use crate::types::{ActorId, ObjId, ObjType, OpId, Prop, TextEncoding};
-use crate::{ChangeHash, Patch, ReadDoc};
-use std::collections::BTreeSet;
-use std::collections::HashSet;
+use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::{ChangeHash, Patch};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 
 use super::{PatchBuilder, TextRepresentation};
@@ -48,6 +45,8 @@ pub struct PatchLog {
     expose: HashSet<OpId>,
     active: bool,
     text_rep: TextRepresentation,
+    path_map: BTreeMap<ObjId, (Prop, ObjId)>,
+    path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
     pub(crate) actors: Vec<ActorId>,
 }
@@ -174,6 +173,8 @@ impl PatchLog {
             expose: HashSet::default(),
             events: vec![],
             heads: None,
+            path_map: Default::default(),
+            path_hint: 0,
             text_rep,
             actors: vec![],
         }
@@ -377,25 +378,32 @@ impl PatchLog {
         self.events.push((obj, event))
     }
 
+    fn get_path_map(&mut self) -> BTreeMap<ObjId, (Prop, ObjId)> {
+        if self.path_hint != self.events.len() {
+            self.path_hint = 0;
+            self.path_map = BTreeMap::default();
+        }
+        std::mem::take(&mut self.path_map)
+    }
+
     pub(crate) fn make_patches(&mut self, doc: &Automerge) -> Vec<Patch> {
         self.events.sort_by(|(a, _), (b, _)| a.cmp(b));
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
-        if let Some(heads) = self.heads.as_ref() {
-            let read_doc = ReadDocAt { doc, heads };
-            Self::make_patches_inner(&self.events, expose, doc, &read_doc, self.text_rep)
-        } else {
-            Self::make_patches_inner(&self.events, expose, doc, doc, self.text_rep)
-        }
+        let clock = self.heads.as_ref().map(|h| doc.clock_at(h));
+        let path_map = self.get_path_map();
+        Self::make_patches_inner(&self.events, expose, path_map, doc, clock, self.text_rep)
     }
 
-    fn make_patches_inner<R: ReadDocInternal>(
+    fn make_patches_inner(
         events: &[(ObjId, Event)],
         mut expose_queue: ExposeQueue,
+        path_map: BTreeMap<ObjId, (Prop, ObjId)>,
         doc: &Automerge,
-        read_doc: &R,
+        clock: Option<Clock>,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder = PatchBuilder::new(read_doc, Some(events.len()), text_rep);
+        let mut patch_builder =
+            PatchBuilder::new(doc, path_map, clock.clone(), Some(events.len()), text_rep);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
@@ -406,7 +414,7 @@ impl PatchLog {
                 continue;
             }
             // any objects exposed BEFORE exid get observed here
-            expose_queue.pump_queue(&exid, &mut patch_builder, doc, read_doc, text_rep);
+            expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref(), text_rep);
             match event {
                 Event::PutMap {
                     key,
@@ -469,7 +477,7 @@ impl PatchLog {
             }
         }
         // any objects exposed AFTER all other events get exposed here
-        expose_queue.flush_queue(&mut patch_builder, doc, read_doc, text_rep);
+        expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref(), text_rep);
 
         patch_builder.take_patches()
     }
@@ -477,6 +485,8 @@ impl PatchLog {
     pub(crate) fn truncate(&mut self) {
         self.active = true;
         self.events.truncate(0);
+        self.path_hint = 0;
+        self.path_map = Default::default();
         self.expose.clear();
     }
 
@@ -485,6 +495,8 @@ impl PatchLog {
             active: self.active,
             expose: HashSet::new(),
             events: Default::default(),
+            path_map: Default::default(),
+            path_hint: 0,
             text_rep: self.text_rep,
             heads: None,
             actors: self.actors.clone(),
@@ -542,6 +554,11 @@ impl PatchLog {
     pub(crate) fn set_text_rep(&mut self, rep: TextRepresentation) {
         self.text_rep = rep;
     }
+
+    pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {
+        self.path_map = hint;
+        self.path_hint = self.events.len();
+    }
 }
 
 impl AsRef<OpId> for &(ObjId, Event) {
@@ -562,31 +579,31 @@ impl ExposeQueue {
         }
     }
 
-    fn pump_queue<R: ReadDoc>(
+    fn pump_queue(
         &mut self,
         obj: &ExId,
-        patch_builder: &mut PatchBuilder<'_, R>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        read_doc: &R,
+        clock: Option<&Clock>,
         text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
             if exposed >= obj {
                 break;
             }
-            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
+            self.flush_obj(exposed.clone(), patch_builder, doc, clock, text_rep);
         }
     }
 
-    fn flush_queue<R: ReadDoc>(
+    fn flush_queue(
         &mut self,
-        patch_builder: &mut PatchBuilder<'_, R>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        read_doc: &R,
+        clock: Option<&Clock>,
         text_rep: TextRepresentation,
     ) {
         while let Some(exposed) = self.0.first() {
-            self.flush_obj(exposed.clone(), patch_builder, doc, read_doc, text_rep);
+            self.flush_obj(exposed.clone(), patch_builder, doc, clock, text_rep);
         }
     }
 
@@ -598,24 +615,24 @@ impl ExposeQueue {
         self.0.remove(obj)
     }
 
-    fn flush_obj<R: ReadDoc>(
+    fn flush_obj(
         &mut self,
         exid: ExId,
-        patch_builder: &mut PatchBuilder<'_, R>,
+        patch_builder: &mut PatchBuilder<'_>,
         doc: &Automerge,
-        read_doc: &R,
+        clock: Option<&Clock>,
         text_rep: TextRepresentation,
     ) -> Option<()> {
         let id = exid.to_internal_obj();
         self.remove(&exid);
         match doc.ops().object_type(&id)? {
             ObjType::Text if matches!(text_rep, TextRepresentation::String(_)) => {
-                let text = read_doc.text(&exid).ok()?;
-                // TODO - need read_doc, text_spans()
+                let text = doc.text_for(&exid, clock.cloned()).ok()?;
+                // TODO - need doc, text_spans()
                 patch_builder.splice_text(exid, 0, &text, None);
             }
             ObjType::List | ObjType::Text => {
-                for item in read_doc.list_range(&exid, ..) {
+                for item in doc.list_range_for(&exid, .., clock.cloned()) {
                     let value = item.value.to_value();
                     let id = item.id();
                     let conflict = item.conflict;
@@ -627,7 +644,7 @@ impl ExposeQueue {
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for m in read_doc.map_range(&exid, ..) {
+                for m in doc.map_range_for(&exid, .., clock.cloned()) {
                     let value = m.value.to_value();
                     let id = m.id();
                     if value.is_object() {

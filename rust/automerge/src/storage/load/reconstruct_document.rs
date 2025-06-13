@@ -62,73 +62,57 @@ pub(crate) fn reconstruct_opset<'a>(
     text_encoding: TextEncoding,
 ) -> Result<ReconOpSet, Error> {
     let mut op_set = OpSet::from_doc(doc, text_encoding)?;
-    let mut change_collector = ChangeCollector::new(doc.iter_changes())?;
+    let index_builder2 = op_set.index_builder();
+    let mut change_collector = ChangeCollector::new(doc.iter_changes())?.with_index(index_builder2);
     let mut iter = op_set.iter();
-    let mut index_builder = op_set.index_builder();
-    let mut stepper = Default::default();
-    let mut _ordered = true;
 
     while let Some(op) = iter.try_next()? {
-        _ordered &= op.step(&mut stepper);
         let op_id = op.id;
         let op_is_counter = op.is_counter();
         let op_succ = op.succ();
-        index_builder.process_op(&op);
+
         change_collector.process_op(op);
 
         for id in op_succ {
-            change_collector.process_succ(op_id, id);
-            index_builder.process_succ(op_is_counter, id);
+            change_collector.process_succ(op_id, id, op_is_counter);
         }
     }
 
-    let (changes, heads, max_op, change_graph) =
-        flush_changes(change_collector, doc, mode, &op_set)?;
+    let (index, changes) = change_collector.build_changegraph(&op_set)?;
 
-    op_set.set_indexes(index_builder);
+    verify_changes(&changes, doc, mode)?;
 
-    //if !ordered {
-    //  log!("ERR: ops not ordered in document load");
-    //}
+    op_set.set_indexes(index);
 
     Ok(ReconOpSet {
-        changes,
-        max_op,
+        changes: changes.changes,
+        max_op: changes.max_op,
         op_set,
-        heads,
-        change_graph,
+        heads: changes.heads,
+        change_graph: changes.change_graph,
     })
 }
 
 // create all binary changes
 // look for mismatched heads
 
-#[inline(never)]
-fn flush_changes(
-    change_collector: ChangeCollector<'_>,
+fn verify_changes(
+    cc: &CollectedChanges,
     doc: &Document<'_>,
     mode: VerificationMode,
-    op_set: &OpSet,
-) -> Result<(Vec<Change>, BTreeSet<ChangeHash>, u64, ChangeGraph), Error> {
-    let CollectedChanges {
-        changes,
-        heads,
-        max_op,
-        change_graph,
-    } = change_collector.build_changegraph(op_set)?;
-
+) -> Result<(), Error> {
     if matches!(mode, VerificationMode::Check) {
         let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
-        if expected_heads != heads {
-            tracing::error!(?expected_heads, ?heads, "mismatching heads");
+        if expected_heads != cc.heads {
+            tracing::error!(?expected_heads, ?cc.heads, "mismatching heads");
             return Err(Error::MismatchingHeads(MismatchedHeads {
-                changes,
+                changes: cc.changes.clone(),
                 expected_heads,
-                derived_heads: heads,
+                derived_heads: cc.heads.clone(),
             }));
         }
     }
-    Ok((changes, heads, max_op, change_graph))
+    Ok(())
 }
 
 pub(crate) struct ReconOpSet {

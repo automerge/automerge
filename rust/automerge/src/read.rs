@@ -11,7 +11,7 @@ use crate::{
 
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 
-use std::{collections::HashMap, ops::RangeBounds};
+use std::ops::RangeBounds;
 
 /// Methods for reading values from an automerge document
 ///
@@ -299,11 +299,6 @@ pub trait ReadDoc {
     fn stats(&self) -> Stats;
 
     fn text_encoding(&self) -> TextEncoding;
-}
-
-pub(crate) trait ReadDocInternal: ReadDoc {
-    /// Produce a map from object ID to path for all visible objects in this doc
-    fn live_obj_paths(&self) -> HashMap<ExId, Vec<(ExId, Prop)>>;
 }
 
 /// Statistics about the document

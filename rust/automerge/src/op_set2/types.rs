@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
 use crate::error::AutomergeError;
+use crate::hydrate;
+use crate::patches::TextRepresentation;
 use crate::types;
-use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
+use crate::types::{ActorId, ChangeHash, ElemId, ObjType, Prop};
 use crate::value;
 
 use std::cmp::Ordering;
@@ -648,6 +650,15 @@ pub(crate) enum PropRef<'a> {
     Seq(usize),
 }
 
+impl From<&PropRef<'_>> for Prop {
+    fn from(p: &PropRef<'_>) -> Prop {
+        match p {
+            PropRef::Map(s) => Prop::Map(s.to_string()),
+            PropRef::Seq(i) => Prop::Seq(*i),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PropRef2<'a> {
     Map(Cow<'a, str>),
@@ -770,6 +781,16 @@ impl<'a> ValueRef<'a> {
             Action::MakeText => ValueRef::Object(ObjType::Text),
             Action::MakeTable => ValueRef::Object(ObjType::Table),
             _ => ValueRef::Scalar(value),
+        }
+    }
+
+    pub(crate) fn hydrate(self, rep: TextRepresentation) -> hydrate::Value {
+        match self {
+            Self::Object(ObjType::Map) => hydrate::Value::map(),
+            Self::Object(ObjType::Table) => hydrate::Value::map(),
+            Self::Object(ObjType::List) => hydrate::Value::list(),
+            Self::Object(ObjType::Text) => hydrate::Value::text(rep, ""),
+            Self::Scalar(s) => hydrate::Value::Scalar(s.into()),
         }
     }
 

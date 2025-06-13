@@ -904,48 +904,7 @@ pub(crate) struct SuccInsert {
     pub(crate) sub_pos: usize,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct OpStepper<'a> {
-    obj: ObjId,
-    key: KeyRef<'a>,
-    id: OpId,
-}
-
-impl Default for OpStepper<'_> {
-    fn default() -> Self {
-        OpStepper {
-            obj: ObjId::root(),
-            key: KeyRef::Map(Cow::Borrowed("")),
-            id: OpId::default(),
-        }
-    }
-}
-
 impl<'a> Op<'a> {
-    pub(crate) fn step(&self, stepper: &mut OpStepper<'a>) -> bool {
-        if self.obj != stepper.obj {
-            stepper.obj = self.obj;
-            stepper.key = self.elemid_or_key();
-            stepper.id = self.id;
-            self.obj > stepper.obj
-        } else {
-            let ok = if self.elemid_or_key() == stepper.key {
-                self.id > stepper.id
-            } else {
-                match (&self.key, &stepper.key) {
-                    (KeyRef::Map(s1), KeyRef::Map(s2)) => s1 > s2,
-                    (KeyRef::Seq(e1), KeyRef::Seq(e2)) if self.insert => {
-                        e1 == e2 || ElemId(self.id) < *e2
-                    }
-                    _ => false,
-                }
-            };
-            stepper.key = self.elemid_or_key();
-            stepper.id = self.id;
-            ok
-        }
-    }
-
     pub(crate) fn mark_index(&self) -> Option<MarkIndexBuilder> {
         match (&self.action, &self.mark_name) {
             (Action::Mark, Some(name)) => {
@@ -1027,7 +986,7 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn succ_inc(&self) -> impl ExactSizeIterator<Item = (OpId, Option<i64>)> + 'a {
-        SuccIncCursors(self.succ_cursors.clone())
+        self.succ_cursors.clone().with_inc()
     }
 
     pub(crate) fn exid(&self, op_set: &OpSet) -> ExId {
@@ -1345,5 +1304,8 @@ pub(crate) trait OpLike: Debug {
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, encoding: ListEncoding) -> u64;
     fn visible(op: &Self) -> bool;
+    //fn top(op: &Self) -> bool {
+    //    Self::visible(op)
+    //}
     fn obj_info(&self) -> Option<ObjInfo>;
 }

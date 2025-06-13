@@ -1323,15 +1323,12 @@ where
     type Item = SubCursor<'a, T, W>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(walker) = self.stack.last_mut()?.next_walker(&self.func) {
-            self.stack.push(walker);
-            // recursion here is safe b/c max depth is max tree depth
-            self.next()
-        } else if let Some(result) = self.pop_cursor() {
-            Some(result)
-        } else {
-            // this could get as large as N - should be fine
-            self.next()
+        loop {
+            if let Some(walker) = self.stack.last_mut()?.next_walker(&self.func) {
+                self.stack.push(walker);
+            } else if let Some(result) = self.pop_cursor() {
+                return Some(result);
+            }
         }
     }
 }

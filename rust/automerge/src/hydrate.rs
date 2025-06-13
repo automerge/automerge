@@ -27,41 +27,6 @@ pub enum Value {
     Text(Text),
 }
 
-/*
-#[derive(PartialEq, Debug, Clone)]
-pub enum ScalarValue {
-    Bytes(Vec<u8>),
-    Str(String),
-    Int(i64),
-    Uint(u64),
-    F64(f64),
-    Counter(i64),
-    Timestamp(i64),
-    Boolean(bool),
-    Unknown { type_code: u8, bytes: Vec<u8> },
-    Null,
-}
-*/
-
-/*
-impl<'a> From<op_set2::ScalarValue<'a>> for ScalarValue {
-  fn from(s: op_set2::ScalarValue<'a>) -> Self {
-    match s {
-      op_set2::ScalarValue::Bytes(b) => ScalarValue::Bytes(b.to_vec()),
-      op_set2::ScalarValue::Str(s) => ScalarValue::Str(s.to_string()),
-      op_set2::ScalarValue::Int(i) => ScalarValue::Int(i),
-      op_set2::ScalarValue::Uint(u) => ScalarValue::Uint(u),
-      op_set2::ScalarValue::F64(f) => ScalarValue::F64(f),
-      op_set2::ScalarValue::Counter(c) => ScalarValue::Counter(c),
-      op_set2::ScalarValue::Timestamp(t) => ScalarValue::Timestamp(t),
-      op_set2::ScalarValue::Boolean(b) => ScalarValue::Boolean(b),
-      op_set2::ScalarValue::Unknown { type_code, bytes } =. ScalarValue::Unknown { type_code, bytes: bytes.to_vec() },
-      op_set2::ScalarValue::Null =. ScalarValue::Null,
-    }
-  }
-}
-*/
-
 impl Value {
     pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_rep: TextRepresentation) -> Self {
         match value.into() {
@@ -176,19 +141,6 @@ impl From<Value> for value::Value<'_> {
         }
     }
 }
-
-/*
-impl From<ObjType> for Value {
-    fn from(o: ObjType) -> Self {
-        match o {
-            ObjType::Map => Value::Map(Map::default()),
-            ObjType::Table => Value::Map(Map::default()),
-            ObjType::List => Value::List(List::default()),
-            ObjType::Text => Value::Text(Text::default()),
-        }
-    }
-}
-*/
 
 impl From<Map> for Value {
     fn from(value: Map) -> Self {

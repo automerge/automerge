@@ -68,22 +68,6 @@ impl ExId {
         }
     }
 
-    /*
-        pub(crate) fn actor(&self) -> ActorId {
-            match self {
-                ExId::Root => panic!(),
-                ExId::Id(_, actor, _) => actor.clone(),
-            }
-        }
-
-        pub(crate) fn counter(&self) -> u64 {
-            match self {
-                ExId::Root => 0,
-                ExId::Id(ctr, _, _) => *ctr,
-            }
-        }
-    */
-
     pub(crate) fn to_internal_obj(&self) -> ObjId {
         match self {
             ExId::Root => ObjId::root(),
@@ -150,6 +134,12 @@ impl PartialEq for ExId {
             }
             _ => false,
         }
+    }
+}
+
+impl PartialEq<ObjId> for ExId {
+    fn eq(&self, other: &ObjId) -> bool {
+        &self.to_internal_obj() == other
     }
 }
 
