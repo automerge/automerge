@@ -31,6 +31,14 @@ impl ObjIndex {
         }
     }
 
+    pub(crate) fn object_parent(&self, obj: &ObjId) -> Option<ObjId> {
+        if obj.is_root() {
+            None
+        } else {
+            self.0.get(&obj.0).map(|p| p.parent)
+        }
+    }
+
     pub(crate) fn insert(&mut self, id: OpId, obj_info: ObjInfo) {
         self.0.insert(id, obj_info);
     }

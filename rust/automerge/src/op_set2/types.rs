@@ -818,6 +818,10 @@ impl<'a> ValueRef<'a> {
     pub(crate) fn str(s: &'a str) -> ValueRef<'a> {
         Self::Scalar(ScalarValue::str(s))
     }
+
+    pub(crate) fn is_object(&self) -> bool {
+        matches!(self, Self::Object(_))
+    }
 }
 
 impl Packable for Action {
