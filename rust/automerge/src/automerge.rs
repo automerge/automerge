@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -1375,8 +1375,7 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<Spans<'_>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let range = self.ops.scope_to_obj(&obj.id);
-        Ok(Spans::new(self.ops(), range, clock, self.text_encoding()))
+        Ok(Spans::new(self.ops.spans(&obj.id, clock)))
     }
 
     pub(crate) fn get_cursor_for(
@@ -1631,54 +1630,6 @@ impl Automerge {
         }
 
         Ok(())
-    }
-
-    pub(crate) fn visible_obj_paths(&self, at: Option<Clock>) -> HashMap<ExId, Vec<(ExId, Prop)>> {
-        let mut paths = HashMap::<ExId, Vec<(ExId, Prop)>>::new();
-        let mut visible_objs = HashSet::<crate::types::ObjId>::new();
-        visible_objs.insert(crate::types::ObjId::root());
-        paths.insert(ExId::Root, vec![]);
-
-        for (obj, ops) in self.ops.iter_objs() {
-            // Note that this works because the OpSet iterates in causal order,
-            // which means that we have already seen the operation which
-            // creates the object and added it to the visible_objs set if it
-            // is visible.
-            if !visible_objs.contains(&obj.id) {
-                continue;
-            }
-            let mut index = 0;
-            let encoding = self.text_rep(obj.typ);
-            //for op in ops.visible(at.clone()).top_ops() {
-            let mut iter = ops.visible2(self.ops(), at.as_ref()).peekable();
-            while let Some(op) = iter.next() {
-                // cheap top ops
-                if let Some(p) = iter.peek() {
-                    if p.elemid_or_key() == op.elemid_or_key() {
-                        continue;
-                    }
-                }
-                let next_width = op.width(encoding);
-                if let OpType::Make(_) = op.op_type() {
-                    visible_objs.insert(op.id.into());
-                    let (mut path, parent_obj_id) = if obj.id.is_root() {
-                        (vec![], ExId::Root)
-                    } else {
-                        let parent_obj_id = self.ops.id_to_exid(obj.id.into());
-                        (paths.get(&parent_obj_id).cloned().unwrap(), parent_obj_id)
-                    };
-                    let prop = match op.key {
-                        KeyRef::Map(prop) => Prop::Map(prop.into()),
-                        KeyRef::Seq(_) => Prop::Seq(index),
-                    };
-                    path.push((parent_obj_id.clone(), prop));
-                    let obj_id = self.ops.id_to_exid(op.id);
-                    paths.insert(obj_id, path);
-                }
-                index += next_width;
-            }
-        }
-        paths
     }
 
     /// Whether the peer represented by `other` has all the changes we have

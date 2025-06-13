@@ -35,7 +35,7 @@ mod visible;
 
 pub(crate) use index::{IndexBuilder, ObjIndex, ObjInfo};
 
-pub(crate) use crate::iter::{Keys, ListRange, MapRange};
+pub(crate) use crate::iter::{Keys, ListRange, MapRange, SpansInternal};
 
 pub(crate) use found_op::OpsFoundIter;
 pub(crate) use insert::InsertQuery;
@@ -198,6 +198,11 @@ impl OpSet {
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
         let iter = self.iter_obj(obj).visible(clock).top_ops();
         Keys::new(self, iter)
+    }
+
+    pub(crate) fn spans(&self, obj: &ObjId, clock: Option<Clock>) -> SpansInternal<'_> {
+        let range = self.scope_to_obj(obj);
+        SpansInternal::new(self, range, clock, self.text_encoding)
     }
 
     pub(crate) fn list_range<R: RangeBounds<usize>>(
@@ -633,6 +638,10 @@ impl OpSet {
 
     pub(crate) fn object_type(&self, obj: &ObjId) -> Option<ObjType> {
         self.obj_info.object_type(obj)
+    }
+
+    pub(crate) fn object_parent(&self, obj: &ObjId) -> Option<ObjId> {
+        self.obj_info.object_parent(obj)
     }
 
     pub(crate) fn get_actor(&self, idx: usize) -> &ActorId {

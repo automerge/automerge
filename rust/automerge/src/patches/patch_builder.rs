@@ -1,12 +1,12 @@
 use core::fmt::Debug;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use crate::exid::ExId;
+use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
 use crate::text_value::ConcreteTextValue;
-use crate::types::Clock;
-use crate::types::ObjId;
+use crate::types::{Clock, ObjId, ObjType};
 use crate::{Automerge, Prop, Value};
 
 use super::{Patch, PatchAction, TextRepresentation};
@@ -17,7 +17,7 @@ pub(crate) struct PatchBuilder<'a> {
     patches: Vec<Patch>,
     last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
-    visible_paths: Option<HashMap<ExId, Vec<(ExId, Prop)>>>,
+    seen: HashSet<ObjId>,
     text_rep: TextRepresentation,
     clock: Option<Clock>,
     doc: &'a Automerge,
@@ -28,23 +28,16 @@ impl<'a> PatchBuilder<'a> {
         doc: &'a Automerge,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
         clock: Option<Clock>,
-        patches_size_hint: Option<usize>,
         text_rep: TextRepresentation,
     ) -> Self {
         // If we are expecting a lot of patches then precompute all the visible
         // paths up front to avoid doing many seek operations in the `Parents`
         // iterator in `Self::get_path`
-        let path_lookup =
-            if path_map.is_empty() && patches_size_hint.map(|n| n > 100).unwrap_or(false) {
-                Some(doc.visible_obj_paths(clock.clone()))
-            } else {
-                None
-            };
         Self {
             patches: Vec::new(),
             last_mark_set: None,
-            visible_paths: path_lookup,
             path_map,
+            seen: HashSet::new(),
             doc,
             clock,
             text_rep,
@@ -53,23 +46,53 @@ impl<'a> PatchBuilder<'a> {
 }
 
 impl PatchBuilder<'_> {
+    fn update_path_map(&mut self, parent_id: ObjId, parent_type: ObjType) {
+        match parent_type {
+            ObjType::List => {
+                for item in self.doc.ops.list_range(&parent_id, .., self.clock.clone()) {
+                    if item.value.is_object() {
+                        let prop = Prop::from(item.index);
+                        self.path_map.insert(ObjId(item.op_id()), (prop, parent_id));
+                    }
+                }
+            }
+            ObjType::Text => {
+                for span in self.doc.ops.spans(&parent_id, self.clock.clone()) {
+                    if let SpanInternal::Obj(id, index) = span {
+                        let prop = Prop::from(index);
+                        self.path_map.insert(ObjId(id), (prop, parent_id));
+                    }
+                }
+            }
+            _ => {
+                for item in self.doc.ops.map_range(&parent_id, .., self.clock.clone()) {
+                    if item.value.is_object() {
+                        self.path_map.insert(
+                            ObjId(item.op_id()),
+                            (Prop::from(item.key.to_string()), parent_id),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[inline(never)]
-    fn build_path(&mut self, obj: &ExId) -> Option<Vec<(ExId, Prop)>> {
+    pub(crate) fn get_path(&mut self, obj: &ExId) -> Option<Vec<(ExId, Prop)>> {
         let mut path = vec![];
         let mut obj = obj.to_internal_obj();
         while !obj.is_root() {
-            let (o, p) = if let Some((prop, parent)) = self.path_map.get(&obj) {
-                (*parent, prop.clone())
+            let (p, o) = if let Some(r) = self.path_map.get(&obj).cloned() {
+                r
             } else {
-                let parent =
-                    self.doc
-                        .ops()
-                        .parent_object(&obj, self.text_rep, self.clock.as_ref())?;
-                if !parent.visible {
+                let parent_id = self.doc.ops().object_parent(&obj)?;
+                let parent_type = self.doc.ops().object_type(&parent_id)?;
+                if self.seen.contains(&obj) {
                     return None;
                 }
-                self.path_map.insert(obj, (parent.prop.clone(), parent.obj));
-                (parent.obj, parent.prop)
+                self.seen.insert(obj);
+                self.update_path_map(parent_id, parent_type);
+                self.path_map.get(&obj).cloned()?
             };
             obj = o;
             let parent_obj = self.doc.ops().id_to_exid(obj.0);
@@ -77,15 +100,6 @@ impl PatchBuilder<'_> {
         }
         path.reverse();
         Some(path)
-    }
-
-    #[inline(never)]
-    pub(crate) fn get_path(&mut self, obj: &ExId) -> Option<Vec<(ExId, Prop)>> {
-        if let Some(visible_paths) = &self.visible_paths {
-            visible_paths.get(obj).cloned()
-        } else {
-            self.build_path(obj)
-        }
     }
 
     pub(crate) fn take_patches(&mut self) -> Vec<Patch> {

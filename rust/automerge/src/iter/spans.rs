@@ -182,11 +182,12 @@ impl SpanState {
     fn push_block(&mut self, id: OpId) -> SpanInternal {
         assert!(self.next_span.is_none());
         let width = self.encoding.width(PLACEHOLDER);
-        let block = SpanInternal::Obj(id, self.index);
         if let Some(text) = self.flush() {
+            let block = SpanInternal::Obj(id, self.index);
             self.next_span = Some((block, width));
             text
         } else {
+            let block = SpanInternal::Obj(id, self.index);
             self.index += width;
             block
         }
@@ -269,16 +270,9 @@ impl SpanInternal {
     }
 }
 
-impl<'a> Spans<'a> {
-    pub(crate) fn new(
-        op_set: &'a OpSet,
-        range: Range<usize>,
-        clock: Option<Clock>,
-        encoding: TextEncoding,
-    ) -> Self {
-        Spans {
-            internal: SpansInternal::new(op_set, range, clock, encoding),
-        }
+impl Spans<'_> {
+    pub(crate) fn new(internal: SpansInternal<'_>) -> Spans<'_> {
+        Spans { internal }
     }
 }
 

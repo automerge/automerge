@@ -402,8 +402,7 @@ impl PatchLog {
         clock: Option<Clock>,
         text_rep: TextRepresentation,
     ) -> Vec<Patch> {
-        let mut patch_builder =
-            PatchBuilder::new(doc, path_map, clock.clone(), Some(events.len()), text_rep);
+        let mut patch_builder = PatchBuilder::new(doc, path_map, clock.clone(), text_rep);
         for (obj, event) in events {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
