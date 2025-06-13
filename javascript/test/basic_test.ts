@@ -839,6 +839,17 @@ describe("Automerge", () => {
       assert.strictEqual(Automerge.isImmutableString(d.bar), false)
     })
   })
+  it("rust preview number should match js preview number", async () => {
+    // this test can be removed after the alpha/preview peroid
+    const pkg = JSON.parse(await readFile("./package.json", "utf8"))
+    let doc = Automerge.init()
+    let stats = Automerge.stats(doc)
+    assert.strictEqual(stats.cargoPackageName, "automerge")
+    assert.strictEqual(
+      stats.cargoPackageVersion.split(".").pop(),
+      pkg.version.split(".").pop(),
+    )
+  })
   it("it should be able to roll back a transaction", () => {
     let doc1 = Automerge.from<any>({ foo: "bar" })
     let save1 = Automerge.save(doc1)
