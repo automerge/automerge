@@ -665,7 +665,7 @@ pub(crate) enum PropRef2<'a> {
     Seq(usize),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub(crate) enum KeyRef<'a> {
     Map(Cow<'a, str>),
     Seq(ElemId),

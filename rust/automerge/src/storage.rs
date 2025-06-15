@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 pub(crate) mod change;
+mod change_bundle;
 mod chunk;
 pub(crate) mod columns;
 pub(crate) mod document;

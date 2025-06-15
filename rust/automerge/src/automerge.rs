@@ -912,6 +912,10 @@ impl Automerge {
         bytes
     }
 
+    pub fn save_bundle(&self, start: Option<&[ChangeHash]>, end: Option<&[ChangeHash]>) -> Vec<u8> {
+        Vec::new()
+    }
+
     #[cfg(test)]
     pub fn debug_cmp(&self, other: &Self) {
         self.ops.debug_cmp(&other.ops);

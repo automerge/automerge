@@ -79,7 +79,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
-    pub fn and_remap<F>(self, f: F) -> Self
+    pub fn map<F>(self, f: F) -> Self
     where
         F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
     {
@@ -94,7 +94,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         encoder.into_column_data()
     }
 
-    pub fn remap<F>(&mut self, f: F)
+    pub fn map_in_place<F>(&mut self, f: F)
     where
         F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
     {

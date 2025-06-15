@@ -6,6 +6,7 @@ use std::ops::Add;
 
 use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 
+use crate::ActorId;
 use crate::{
     clock::{Clock, ClockData},
     columnar::column_range::{DepsRange, ValueRange},
@@ -650,6 +651,37 @@ impl ChangeGraph {
                 to_visit.extend(self.parents(idx));
             }
         }
+    }
+
+    pub fn extract_actors_for_paths(
+        &self,
+        paths: &[(Vec<ChangeHash>, Vec<ChangeHash>)],
+    ) -> HashSet<ActorIdx> {
+        let mut selected_nodes = HashSet::new();
+
+        for (start_hashes, end_hashes) in paths {
+            let end_nodes: HashSet<NodeIdx> = end_hashes
+                .iter()
+                .filter_map(|h| self.hash_to_index(h).map(|i| NodeIdx(i as u32)))
+                .collect();
+
+            let start_nodes: Vec<NodeIdx> = start_hashes
+                .iter()
+                .filter_map(|h| self.hash_to_index(h).map(|i| NodeIdx(i as u32)))
+                .collect();
+
+            self.traverse_ancestors(start_nodes, |node| {
+                selected_nodes.insert(node);
+                // Continue traversing if we haven't hit an end node
+                !end_nodes.contains(&node)
+            });
+        }
+
+        // Extract actors
+        selected_nodes
+            .iter()
+            .map(|&node| self.actors[node.0 as usize])
+            .collect()
     }
 }
 

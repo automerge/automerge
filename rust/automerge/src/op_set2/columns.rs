@@ -11,6 +11,7 @@ use crate::storage::columns::ColumnId;
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ActorId, TextEncoding};
+use crate::ChangeHash;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -267,10 +268,10 @@ impl Columns {
     where
         F: Fn(Option<Cow<'_, ActorIdx>>) -> Option<Cow<'_, ActorIdx>>,
     {
-        self.id_actor.remap(&f);
-        self.obj_actor.remap(&f);
-        self.key_actor.remap(&f);
-        self.succ_actor.remap(&f);
+        self.id_actor.map_in_place(&f);
+        self.obj_actor.map_in_place(&f);
+        self.key_actor.map_in_place(&f);
+        self.succ_actor.map_in_place(&f);
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {

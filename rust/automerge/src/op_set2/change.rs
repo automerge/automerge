@@ -247,7 +247,7 @@ where
 // of changes (like on load)
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
-    mapping: Vec<Option<ActorIdx>>,
+    pub(crate) mapping: Vec<Option<ActorIdx>>,
     actors: &'a [ActorId],
     other_actors: Vec<usize>,
 }
