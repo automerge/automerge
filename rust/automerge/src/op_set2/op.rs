@@ -56,6 +56,7 @@ pub(crate) struct ChangeOp {
     pub(crate) succ: Vec<(OpId, Option<i64>)>,
     pub(crate) pos: Option<usize>,
     pub(crate) subsort: usize,
+    pub(crate) conflicted: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -625,6 +626,10 @@ impl OpLike for ChangeOp {
 
     fn visible(op: &Self) -> bool {
         !(op.bld.is_inc() || op.bld.is_delete() || op.succ.iter().any(|(_, inc)| inc.is_none()))
+    }
+
+    fn top(op: &Self) -> bool {
+        !op.conflicted && Self::visible(op)
     }
 
     fn obj_info(&self) -> Option<ObjInfo> {
@@ -1304,8 +1309,8 @@ pub(crate) trait OpLike: Debug {
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
     fn width(op: &Self, encoding: ListEncoding) -> u64;
     fn visible(op: &Self) -> bool;
-    //fn top(op: &Self) -> bool {
-    //    Self::visible(op)
-    //}
+    fn top(op: &Self) -> bool {
+        Self::visible(op)
+    }
     fn obj_info(&self) -> Option<ObjInfo>;
 }

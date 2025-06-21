@@ -116,6 +116,93 @@ impl OpSet {
         IndexBuilder::new(self, self.text_encoding)
     }
 
+    pub(crate) fn reset_top(&mut self, range: Range<usize>) {
+        let top = self.cols.index.top.iter_range(range.clone());
+        let vis = self.cols.index.visible.iter_range(range.clone());
+
+        // convert Option<Cow<'_,bool>> into bool :(
+        let top = top.map(|b| b.as_deref().copied().unwrap_or(false));
+        let vis = vis.map(|b| b.as_deref().copied().unwrap_or(false));
+
+        let mut conflicts = vec![];
+        let mut expose = None;
+        let mut last_t = None;
+        for (i, (v, t)) in vis.zip(top).enumerate() {
+            if t {
+                assert!(v);
+                if let Some(n) = last_t {
+                    conflicts.push(n);
+                }
+                last_t = Some(i);
+                expose = None;
+            } else if v {
+                if let Some(n) = last_t {
+                    conflicts.push(n);
+                }
+                last_t = None;
+                expose = Some(i);
+            }
+        }
+
+        for n in conflicts {
+            self.conflict(range.start + n)
+        }
+
+        if let Some(n) = expose {
+            self.expose(range.start + n)
+        }
+    }
+
+    pub(crate) fn conflict(&mut self, pos: usize) {
+        self.cols.index.top.splice(pos, 1, [false]);
+    }
+
+    pub(crate) fn expose(&mut self, pos: usize) {
+        self.cols.index.top.splice(pos, 1, [true]);
+    }
+
+    pub(crate) fn validate_top_index(&self) -> bool {
+        let _top = &self.cols.index.top;
+        let _visible = &self.cols.index.visible;
+
+        assert_eq!(_top.len(), _visible.len());
+        assert_eq!(_top.len(), self.len());
+
+        let top_iter = _top.iter();
+        let vis_iter = _visible.iter();
+        let op_iter = self.iter();
+
+        let mut last_op = None;
+        let mut first_top = None;
+        let mut last_vis = None;
+
+        for ((top, vis), op) in top_iter.zip(vis_iter).zip(op_iter) {
+            let vis = *vis.unwrap();
+            let top = *top.unwrap();
+
+            let this_op = Some((op.obj, op.elemid_or_key()));
+
+            if this_op != last_op {
+                assert_eq!(first_top, last_vis);
+                last_op = this_op;
+                first_top = None;
+                last_vis = None;
+            }
+
+            if top {
+                assert!(vis);
+                if first_top.is_none() {
+                    first_top = Some(op.pos);
+                }
+            }
+            if vis {
+                last_vis = Some(op.pos);
+            }
+        }
+        assert_eq!(first_top, last_vis);
+        true
+    }
+
     pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
         let indexes = builder.finish();
 
@@ -125,7 +212,7 @@ impl OpSet {
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
         self.cols.index.text = indexes.text;
-        //self.cols.index.top = indexes.top;
+        self.cols.index.top = indexes.top;
         self.cols.index.visible = indexes.visible;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
@@ -140,10 +227,10 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) {
-        self.cols.splice(pos, ops, self.text_encoding);
+    pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) -> usize {
+        let added = self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
-        //self.len += ops.len();
+        added
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
@@ -164,7 +251,7 @@ impl OpSet {
             if i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [NONE]);
-                //self.cols.index.top.splice(i.pos, 1, [false]);
+                self.cols.index.top.splice(i.pos, 1, [false]);
             }
         }
     }
@@ -387,11 +474,12 @@ impl OpSet {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        assert_eq!(end_pos, range.end);
         let ops = iter.visible2(self, clock).collect::<Vec<_>>();
+        assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
             ops,
+            range,
             end_pos,
         }
     }
@@ -425,6 +513,7 @@ impl OpSet {
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
         let mut len = 0;
+        let mut range = end_pos..end_pos;
         for mut ops in iter {
             let width = ops.width(encoding);
             if len + width > index {
@@ -433,11 +522,14 @@ impl OpSet {
             }
             len += width;
             end_pos = ops.end_pos;
+            range = ops.range;
         }
+        assert_eq!(range.end, end_pos);
         OpsFound {
             index,
             ops: vec![],
             end_pos,
+            range,
         }
     }
 
@@ -452,7 +544,7 @@ impl OpSet {
             return None;
         }
 
-        let range = self.scope_to_obj(obj);
+        let mut range = self.scope_to_obj(obj);
 
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
 
@@ -462,24 +554,28 @@ impl OpSet {
         let obj_start = iter.acc();
         if let Some(tx) = iter.nth(index) {
             assert!(tx.acc >= obj_start);
+            range.start = tx.pos;
             index = (tx.acc - obj_start).as_usize();
             // TODO
             // could use a SkipIter here
             // could grab only needed fields and not all ops
-            for op in self.iter_range(&(tx.pos..range.end)) {
+            for op in self.iter_range(&range) {
                 if op.insert && !ops.is_empty() {
                     break;
                 }
                 end_pos = op.pos + 1;
+                range.end = op.pos + 1;
                 if op.succ().len() == 0 && op.action != Action::Mark {
                     ops.push(op);
                 }
             }
         }
 
+        assert_eq!(range.end, end_pos);
         Some(OpsFound {
             index,
             ops,
+            range,
             end_pos,
         })
     }
@@ -927,6 +1023,7 @@ pub(crate) struct OpsFound<'a> {
     pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
     pub(crate) end_pos: usize,
+    pub(crate) range: Range<usize>,
 }
 
 impl OpsFound<'_> {

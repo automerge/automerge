@@ -1759,7 +1759,9 @@ fn can_isolate() -> Result<(), AutomergeError> {
     assert_eq!(doc1.text(&txt).unwrap(), "aaabbbccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(100));
     doc1.splice_text(&txt, 3, 3, "QQQ")?;
+    println!("---- A ");
     doc1.put(&ROOT, "size", 200)?;
+    println!("---- N ");
     assert_eq!(doc1.text(&txt).unwrap(), "aaaQQQccc");
     assert_eq!(doc1.get(&ROOT, "size").unwrap().unwrap().0, Value::int(200));
 

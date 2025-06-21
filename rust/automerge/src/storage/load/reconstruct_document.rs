@@ -84,6 +84,8 @@ pub(crate) fn reconstruct_opset<'a>(
 
     op_set.set_indexes(index);
 
+    debug_assert!(op_set.validate_top_index());
+
     Ok(ReconOpSet {
         changes: changes.changes,
         max_op: changes.max_op,
