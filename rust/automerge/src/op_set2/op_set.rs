@@ -560,8 +560,11 @@ impl OpSet {
             // could use a SkipIter here
             // could grab only needed fields and not all ops
             for op in self.iter_range(&range) {
-                if op.insert && !ops.is_empty() {
+                if op.insert {
+                  if !ops.is_empty() {
                     break;
+                  }
+                  range.start = op.pos;
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
