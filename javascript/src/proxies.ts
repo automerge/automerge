@@ -954,6 +954,18 @@ export function isImmutableString(obj: any): obj is ImmutableString {
   )
 }
 
+export function isCounter(obj: any): obj is Counter {
+  // We used to determine whether something was a Counter by doing an instanceof check, but
+  // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
+  // of a symbol to determine if something is a Counter
+
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    Object.prototype.hasOwnProperty.call(obj, COUNTER)
+  )
+}
+
 /*
  * Check if an object is a {@link Text}
  */
