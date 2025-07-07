@@ -419,6 +419,25 @@ impl OpSet {
         query.resolve(index - 1).ok()
     }
 
+    pub(crate) fn query_insert_at_list(
+        &self,
+        obj: &ObjId,
+        index: usize,
+        encoding: ListEncoding,
+        _clock: Option<&Clock>,
+    ) -> Option<QueryNth> {
+        let range = self.scope_to_obj(obj);
+
+        let mut iter = self.cols.index.top.iter_range(range.clone());
+        //let start_acc = iter.calculate_acc().as_usize();
+        iter.advance_acc_by(index - 1);
+        let start_pos = iter.pos();
+        let iter = self.iter_range(&(start_pos..range.end));
+        let marks = self.cols.index.mark.rich_text_at(start_pos, None);
+        let mut query = InsertQuery::new(iter, index, encoding, None, marks);
+        query.resolve(index - 1).ok()
+    }
+
     pub(crate) fn query_insert_at(
         &self,
         obj: &ObjId,
@@ -426,30 +445,36 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
-            debug_assert_eq!(
-                Ok(&query),
-                InsertQuery::new(
-                    self.iter_obj(obj),
-                    index,
-                    encoding,
-                    clock,
-                    Default::default()
-                )
-                .resolve(0)
-                .as_ref()
-            );
-            Ok(query)
-        } else {
-            InsertQuery::new(
-                self.iter_obj(obj),
-                index,
-                encoding,
-                clock,
-                Default::default(),
-            )
-            .resolve(0)
+        if clock.is_none() && index > 0 {
+            let query = if encoding == ListEncoding::List {
+                self.query_insert_at_list(obj, index, encoding, None)
+            } else {
+                self.query_insert_at_text(obj, index, encoding, None)
+            };
+            if let Some(q) = query {
+                debug_assert_eq!(
+                    Ok(&q),
+                    InsertQuery::new(
+                        self.iter_obj(obj),
+                        index,
+                        encoding,
+                        clock,
+                        Default::default()
+                    )
+                    .resolve(0)
+                    .as_ref()
+                );
+                return Ok(q);
+            }
         }
+        InsertQuery::new(
+            self.iter_obj(obj),
+            index,
+            encoding,
+            clock,
+            Default::default(),
+        )
+        .resolve(0)
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -491,11 +516,17 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        if let Some(found) = self.seek_ops_by_index_fast(obj, index, encoding, clock) {
-            debug_assert_eq!(
-                found,
-                self.seek_ops_by_index_slow(obj, index, encoding, clock)
-            );
+        if clock.is_none() {
+            let found = if encoding == ListEncoding::List {
+                self.seek_list_ops_by_index_fast(obj, index)
+            } else {
+                self.seek_text_ops_by_index_fast(obj, index)
+            };
+            #[cfg(debug_assertions)]
+            {
+                let slow = self.seek_ops_by_index_slow(obj, index, encoding, clock);
+                assert_eq!(found, slow);
+            }
             found
         } else {
             self.seek_ops_by_index_slow(obj, index, encoding, clock)
@@ -533,24 +564,67 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn seek_ops_by_index_fast<'a>(
+    fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Option<Range<usize>> {
+        let mut iter = self.cols.insert.iter_range(pos..range.end);
+        let acc = iter.calculate_acc().as_usize();
+        let insert_op = iter.next().flatten().as_deref().copied().unwrap_or(false);
+
+        if insert_op {
+            iter.advance_acc_by(0);
+            Some(pos..(iter.pos()))
+        } else {
+            let mut iter = self.cols.insert.iter_range(0..range.end);
+            iter.advance_acc_by(acc - 1);
+            let start = iter.pos();
+            iter.advance_acc_by(1);
+            let end = iter.pos();
+            Some(start..end)
+        }
+    }
+
+    pub(crate) fn seek_list_ops_by_index_fast<'a>(
+        &'a self,
+        obj: &ObjId,
+        index: usize,
+    ) -> OpsFound<'a> {
+        let range = self.scope_to_obj(obj);
+
+        let mut iter = self.cols.index.top.iter_range(range.clone());
+        iter.advance_acc_by(index);
+        let tx_pos = iter.pos();
+
+        if iter.next().is_some() {
+            let range = self.list_register_at_pos(tx_pos, range).unwrap();
+            let end_pos = range.end;
+            let ops = self.iter_range(&range).visible2(self, None).collect();
+            OpsFound {
+                index,
+                ops,
+                range,
+                end_pos,
+            }
+        } else {
+            let end_pos = range.end;
+            OpsFound {
+                index,
+                ops: vec![],
+                range,
+                end_pos,
+            }
+        }
+    }
+
+    pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
         mut index: usize,
-        encoding: ListEncoding,
-        clock: Option<&Clock>,
-    ) -> Option<OpsFound<'a>> {
-        if encoding == ListEncoding::List || clock.is_some() {
-            return None;
-        }
-
+    ) -> OpsFound<'a> {
         let mut range = self.scope_to_obj(obj);
 
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
 
         let mut ops = vec![];
         let mut end_pos = range.end;
-
         let obj_start = iter.acc();
         if let Some(tx) = iter.nth(index) {
             assert!(tx.acc >= obj_start);
@@ -561,10 +635,10 @@ impl OpSet {
             // could grab only needed fields and not all ops
             for op in self.iter_range(&range) {
                 if op.insert {
-                  if !ops.is_empty() {
-                    break;
-                  }
-                  range.start = op.pos;
+                    if !ops.is_empty() {
+                        break;
+                    }
+                    range.start = op.pos;
                 }
                 end_pos = op.pos + 1;
                 range.end = op.pos + 1;
@@ -575,12 +649,12 @@ impl OpSet {
         }
 
         assert_eq!(range.end, end_pos);
-        Some(OpsFound {
+        OpsFound {
             index,
             ops,
             range,
             end_pos,
-        })
+        }
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
@@ -598,6 +672,7 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
+        // TODO : INDEX : needs an indexed version
         // this iterates over the ops twice
         // needs faster rewrite
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;

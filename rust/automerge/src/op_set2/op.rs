@@ -1106,7 +1106,13 @@ impl<'a> Op<'a> {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        !(self.is_inc() || self.succ_inc().any(|(_, inc)| inc.is_none()))
+        if self.is_inc() {
+            false
+        } else if self.is_counter() {
+            !self.succ_inc().any(|(_, inc)| inc.is_none())
+        } else {
+            self.succ_cursors.len() == 0
+        }
     }
 
     pub(crate) fn del(id: OpId, obj: ObjId, key: KeyRef<'a>) -> Self {

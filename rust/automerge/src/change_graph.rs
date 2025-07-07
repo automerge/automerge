@@ -143,7 +143,7 @@ impl ChangeGraph {
             .map(|h| self.nodes_by_hash.get(h).unwrap().0 as u64)
     }
 
-    fn num_actors(&self) -> usize {
+    pub(crate) fn num_actors(&self) -> usize {
         self.seq_index.len()
     }
 

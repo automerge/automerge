@@ -44,6 +44,13 @@ pub(crate) enum Actor {
 }
 
 impl Actor {
+    fn remove_actor(&mut self, index: usize) {
+        if let Actor::Cached(idx) = self {
+            if *idx >= index {
+                *idx -= 1;
+            }
+        }
+    }
     fn rewrite_with_new_actor(&mut self, index: usize) {
         if let Actor::Cached(idx) = self {
             if *idx >= index {
@@ -280,6 +287,7 @@ impl Automerge {
         }
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
+        self.actor.remove_actor(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {
@@ -1393,9 +1401,9 @@ impl Automerge {
                 CursorPosition::Start => Ok(Cursor::Start),
                 CursorPosition::End => Ok(Cursor::End),
                 CursorPosition::Index(i) => {
-                    let found = self.ops.seek_ops_by_prop(
+                    let found = self.ops.seek_ops_by_index(
                         &obj.id,
-                        i.into(),
+                        i,
                         self.text_rep(obj.typ),
                         clock.as_ref(),
                     );
