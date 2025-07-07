@@ -278,9 +278,8 @@ impl OpSet {
         let prop = match op.key {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
             KeyRef::Seq(_) => {
-                let index = self
-                    .seek_list_opid(&op.obj, op.id, text_rep.encoding(typ), clock)?
-                    .index;
+                let encoding = text_rep.encoding(typ);
+                let index = self.seek_list_opid(&op.obj, op.id, encoding, clock)?.index;
                 Prop::Seq(index)
             }
         };
@@ -667,6 +666,10 @@ impl OpSet {
         }
     }
 
+    fn get(&self, pos: usize) -> Option<Op<'_>> {
+        self.iter_range(&(pos..(pos + 1))).next()
+    }
+
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
         let counters = &self.cols.id_ctr;
         let actors = &self.cols.id_actor;
@@ -682,9 +685,45 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        // TODO : INDEX : needs an indexed version
-        // this iterates over the ops twice
-        // needs faster rewrite
+        if clock.is_none() {
+            let found = self.seek_list_opid_fast(obj, opid, encoding);
+            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, encoding, clock));
+            found
+        } else {
+            self.seek_list_opid_slow(obj, opid, encoding, clock)
+        }
+    }
+
+    pub(crate) fn seek_list_opid_fast(
+        &self,
+        obj: &ObjId,
+        id: OpId,
+        encoding: ListEncoding,
+    ) -> Option<FoundOpId<'_>> {
+        let ostart = self.scope_to_obj(obj).start;
+        let pos = self.get_op_id_pos(id)?;
+        let op = self.get(pos)?;
+        let visible;
+        let index;
+        if encoding == ListEncoding::List {
+            let (delta, item) = self.cols.index.top.get_acc_delta(ostart, pos);
+            visible = item.as_deref().copied().unwrap_or(false);
+            index = delta.as_usize();
+        } else {
+            let (delta, item) = self.cols.index.text.get_acc_delta(ostart, pos);
+            visible = item.is_some();
+            index = delta.as_usize();
+        }
+        Some(FoundOpId { op, index, visible })
+    }
+
+    pub(crate) fn seek_list_opid_slow(
+        &self,
+        obj: &ObjId,
+        opid: OpId,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;
         let iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut index = 0;
@@ -785,23 +824,49 @@ impl OpSet {
         id: &OpId,
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
+        if clock.is_none() {
+            let result = self.find_op_by_id_and_vis_fast(id);
+            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, clock));
+            result
+        } else {
+            self.find_op_by_id_and_vis_slow(id, clock)
+        }
+    }
+
+    pub(crate) fn find_op_by_id_and_vis_fast(&self, id: &OpId) -> Option<(Op<'_>, bool)> {
+        let pos = self.get_op_id_pos(*id)?;
+        let visible = self
+            .cols
+            .index
+            .top
+            .get(pos)
+            .flatten()
+            .as_deref()
+            .copied()
+            .unwrap_or(false);
+        let op = self.get(pos)?;
+        Some((op, visible))
+    }
+
+    pub(crate) fn find_op_by_id_and_vis_slow(
+        &self,
+        id: &OpId,
+        clock: Option<&Clock>,
+    ) -> Option<(Op<'_>, bool)> {
         let start = self.get_op_id_pos(*id)?;
         let mut iter = self.iter_range(&(start..self.len()));
-        while let Some(mut o1) = iter.next() {
-            if &o1.id == id {
-                let mut vis = o1.scope_to_clock(clock);
-                for mut o2 in iter {
-                    if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
-                        break;
-                    }
-                    if o2.scope_to_clock(clock) {
-                        vis = false;
-                    }
-                }
-                return Some((o1, vis));
+        let mut o1 = iter.next()?;
+        let mut vis = o1.scope_to_clock(clock);
+        for mut o2 in iter {
+            if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
+                break;
+            }
+            if o2.scope_to_clock(clock) {
+                vis = false;
+                break;
             }
         }
-        None
+        Some((o1, vis))
     }
 
     pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {

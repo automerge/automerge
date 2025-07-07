@@ -50,6 +50,21 @@ impl<C: ColumnCursor> ColumnData<C> {
         iter.next()
     }
 
+    pub fn get_acc_delta(&self, index1: usize, index2: usize) -> (Acc, Option<Cow<'_, C::Item>>) {
+        assert!(index1 <= index2);
+        let acc1 = self.get_acc(index1);
+        let mut iter = self.iter_range(index2..(index2 + 1));
+        let acc2 = iter.calculate_acc();
+        let item = iter.next().flatten();
+        (acc2 - acc1, item)
+    }
+
+    pub fn get_acc(&self, index: usize) -> Acc {
+        let range = index..(index + 1);
+        let iter = self.iter_range(range);
+        iter.calculate_acc()
+    }
+
     pub fn get_with_acc(
         &self,
         index: usize,
