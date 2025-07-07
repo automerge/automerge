@@ -1015,6 +1015,31 @@ impl<'a> Op<'a> {
         }
     }
 
+    pub(crate) fn step(&self, stepper: &mut OpStepper<'a>) -> bool {
+        if self.obj != stepper.obj {
+            let ok = self.obj > stepper.obj;
+            stepper.obj = self.obj;
+            stepper.key = self.elemid_or_key();
+            stepper.id = self.id;
+            ok
+        } else {
+            let ok = if self.elemid_or_key() == stepper.key {
+                self.id > stepper.id
+            } else {
+                match (&self.key, &stepper.key) {
+                    (KeyRef::Map(s1), KeyRef::Map(s2)) => s1 > s2,
+                    (KeyRef::Seq(e1), KeyRef::Seq(e2)) if self.insert => {
+                        e1 == e2 || ElemId(self.id) < *e2
+                    }
+                    _ => false,
+                }
+            };
+            stepper.key = self.elemid_or_key();
+            stepper.id = self.id;
+            ok
+        }
+    }
+
     pub(crate) fn cursor(&self) -> Result<ElemId, AutomergeError> {
         if self.insert {
             Ok(ElemId(self.id))
@@ -1319,4 +1344,21 @@ pub(crate) trait OpLike: Debug {
         Self::visible(op)
     }
     fn obj_info(&self) -> Option<ObjInfo>;
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OpStepper<'a> {
+    obj: ObjId,
+    key: KeyRef<'a>,
+    id: OpId,
+}
+
+impl Default for OpStepper<'_> {
+    fn default() -> Self {
+        OpStepper {
+            obj: ObjId::root(),
+            key: KeyRef::Map(Cow::Borrowed("")),
+            id: OpId::default(),
+        }
+    }
 }

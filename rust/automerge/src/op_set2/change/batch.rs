@@ -165,6 +165,8 @@ impl<'a> Untangler<'a> {
         let mut conflict = false;
         let mut vis = None;
 
+        let key = KeyRef::Seq(ElemId(op.id()));
+
         assert!(op.pos.is_none());
         op.pos = Some(insert_pos);
         op.subsort = self.count;
@@ -186,7 +188,7 @@ impl<'a> Untangler<'a> {
 
                 pos += 1;
 
-                if next_op.insert() {
+                if next_op.insert() || next_op.key() != &key {
                     break;
                 }
 
@@ -847,6 +849,8 @@ impl BatchApply {
         doc.ops.add_succ(&succ);
 
         self.insert_runs_of_ops(doc);
+
+        debug_assert!(doc.ops.validate_op_order());
     }
 
     fn insert_runs_of_ops(&mut self, doc: &mut Automerge) {

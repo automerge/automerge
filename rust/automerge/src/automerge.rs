@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
 use std::env;
 use std::fmt::Debug;
@@ -44,13 +45,16 @@ pub(crate) enum Actor {
 }
 
 impl Actor {
-    fn remove_actor(&mut self, index: usize) {
+    fn remove_actor(&mut self, index: usize, actors: &[ActorId]) {
         if let Actor::Cached(idx) = self {
-            if *idx >= index {
-                *idx -= 1;
+            match (*idx).cmp(&index) {
+                Ordering::Equal => *self = Actor::Unused(actors[index].clone()),
+                Ordering::Greater => *idx -= 1,
+                Ordering::Less => (),
             }
         }
     }
+
     fn rewrite_with_new_actor(&mut self, index: usize) {
         if let Actor::Cached(idx) = self {
             if *idx >= index {
@@ -282,12 +286,9 @@ impl Automerge {
     }
 
     pub(crate) fn remove_actor(&mut self, actor: usize) {
-        if self.actor == Actor::Cached(actor) {
-            self.actor = Actor::Unused(self.ops.get_actor(actor).clone())
-        }
+        self.actor.remove_actor(actor, &self.ops.actors);
         self.ops.remove_actor(actor);
         self.change_graph.remove_actor(actor);
-        self.actor.remove_actor(actor);
     }
 
     pub(crate) fn assert_no_unused_actors(&self, panic: bool) {

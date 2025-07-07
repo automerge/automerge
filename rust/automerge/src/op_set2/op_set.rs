@@ -161,6 +161,16 @@ impl OpSet {
         self.cols.index.top.splice(pos, 1, [true]);
     }
 
+    pub(crate) fn validate_op_order(&self) -> bool {
+        let mut stepper = Default::default();
+        for op in self.iter() {
+            if !op.step(&mut stepper) {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn validate_top_index(&self) -> bool {
         let _top = &self.cols.index.top;
         let _visible = &self.cols.index.visible;
