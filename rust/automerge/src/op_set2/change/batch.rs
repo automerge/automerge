@@ -30,13 +30,23 @@ struct BatchApply {
 }
 
 struct Untangler<'a> {
-    gosub: SmallHashMap<usize, Vec<usize>>,
-    stack: Vec<usize>,
+    // the tangle of change ops we need to navigate
+    change_ops: &'a mut [ChangeOp],
+    // these are entry points into the change_op tangle
+    // when we see a doc_op.id equal to key, put this vec onto the stack
+    // ops inserted after HEAD are put onto the stack immidately
     entry: SmallHashMap<OpId, Vec<usize>>,
+    // same concept as entry but internal to the change_ops array
+    gosub: SmallHashMap<usize, Vec<usize>>,
+    // stack of change ops ready to be processed
+    stack: Vec<usize>,
+    // these are change ops updating a pre-existing doc op elemid's
+    // and are handled differently than inserts
     updates: SmallHashMap<ElemId, Vec<usize>>,
     updates_stack: Vec<usize>,
-    change_ops: &'a mut [ChangeOp],
     pred: &'a mut PredCache,
+    // Top and Conflicts keep track of changes that need to
+    // be made to the index.top and index.visible columns
     top: Top,
     conflicts: &'a mut Vec<Adjust>,
     value: ValueState<'a>,

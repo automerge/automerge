@@ -20,6 +20,7 @@ use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, Scal
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
@@ -407,44 +408,32 @@ impl OpSet {
     pub(crate) fn query_insert_at_text(
         &self,
         obj: &ObjId,
-        index: usize,
+        index: NonZeroUsize,
         encoding: ListEncoding,
-        clock: Option<&Clock>,
     ) -> Option<QueryNth> {
-        if encoding == ListEncoding::List || clock.is_some() {
-            return None;
-        }
-
         let range = self.scope_to_obj(obj);
-
-        if index == 0 {
-            return None;
-        }
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
-        let tx = iter.nth(index - 1)?;
+        let tx = iter.nth(index.get() - 1)?;
         let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(tx.pos, clock);
-        let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
-        query.resolve(index - 1).ok()
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
+        let mut query = InsertQuery::new(iter, index.get(), encoding, None, marks);
+        query.resolve(index.get() - 1).ok()
     }
 
     pub(crate) fn query_insert_at_list(
         &self,
         obj: &ObjId,
-        index: usize,
-        encoding: ListEncoding,
-        _clock: Option<&Clock>,
+        index: NonZeroUsize,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
         let mut iter = self.cols.index.top.iter_range(range.clone());
-        //let start_acc = iter.calculate_acc().as_usize();
-        iter.advance_acc_by(index - 1);
+        iter.advance_acc_by(index.get() - 1);
         let start_pos = iter.pos();
         let iter = self.iter_range(&(start_pos..range.end));
         let marks = self.cols.index.mark.rich_text_at(start_pos, None);
-        let mut query = InsertQuery::new(iter, index, encoding, None, marks);
-        query.resolve(index - 1).ok()
+        let mut query = InsertQuery::new(iter, index.get(), ListEncoding::List, None, marks);
+        query.resolve(index.get() - 1).ok()
     }
 
     pub(crate) fn query_insert_at(
@@ -455,17 +444,18 @@ impl OpSet {
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         if clock.is_none() && index > 0 {
+            let index = NonZeroUsize::new(index).unwrap();
             let query = if encoding == ListEncoding::List {
-                self.query_insert_at_list(obj, index, encoding, None)
+                self.query_insert_at_list(obj, index)
             } else {
-                self.query_insert_at_text(obj, index, encoding, None)
+                self.query_insert_at_text(obj, index, encoding)
             };
             if let Some(q) = query {
                 debug_assert_eq!(
                     Ok(&q),
                     InsertQuery::new(
                         self.iter_obj(obj),
-                        index,
+                        index.get(),
                         encoding,
                         clock,
                         Default::default()
@@ -573,21 +563,24 @@ impl OpSet {
         }
     }
 
-    fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Option<Range<usize>> {
+    fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Range<usize> {
         let mut iter = self.cols.insert.iter_range(pos..range.end);
         let acc = iter.calculate_acc().as_usize();
         let insert_op = iter.next().flatten().as_deref().copied().unwrap_or(false);
 
         if insert_op {
             iter.advance_acc_by(0);
-            Some(pos..(iter.pos()))
+            pos..iter.pos()
         } else {
+            // ACC here represents the number of insert ops to come before pos
+            // as insert_op is false and this is a list we know there's at least one
+            // insert op before us and acc > 0
             let mut iter = self.cols.insert.iter_range(0..range.end);
             iter.advance_acc_by(acc - 1);
             let start = iter.pos();
             iter.advance_acc_by(1);
             let end = iter.pos();
-            Some(start..end)
+            start..end
         }
     }
 
@@ -603,7 +596,7 @@ impl OpSet {
         let tx_pos = iter.pos();
 
         if iter.next().is_some() {
-            let range = self.list_register_at_pos(tx_pos, range).unwrap();
+            let range = self.list_register_at_pos(tx_pos, range);
             let end_pos = range.end;
             let ops = self.iter_range(&range).visible2(self, None).collect();
             OpsFound {

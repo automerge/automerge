@@ -157,15 +157,6 @@ impl IndexBuilder {
     pub(crate) fn finish(mut self) -> Indexes {
         self.flush();
 
-        /*
-        let text = self
-            .widths
-            .iter()
-            .zip(self.top.iter())
-            .map(|(w, t)| if *t { Some(*w) } else { None })
-            .collect();
-        */
-
         let text = self
             .widths
             .iter()

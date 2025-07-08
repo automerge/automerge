@@ -234,7 +234,6 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let pos = cursor.weight.pos();
         let slabs = slab::SpanTreeIter::new(slabs, cursor);
         let run = slab.sub_advance(0);
-        // FIXME what if pos > max here?
         ColumnDataIter {
             pos,
             max,
@@ -479,24 +478,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(())
     }
 
-    fn reset_iter_to_acc(&mut self, acc: Acc) -> Option<Acc> {
-        let starting_acc = self.calculate_acc();
-        assert!(acc > starting_acc);
-        let tree = self.slabs.span_tree()?;
-        let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
-        let new_acc = self.calculate_acc();
-        assert!(new_acc >= starting_acc);
-        Some(new_acc - starting_acc)
-    }
-
-    fn reset_iter_to_acc2(&mut self, acc: Acc) -> Acc {
-        // FIXME - put these checks back in once I fix the double reset
-        //let starting_acc = self.calculate_acc();
-        //assert!(acc > starting_acc);
+    fn reset_iter_to_acc(&mut self, acc: Acc) -> Acc {
         if let Some(tree) = self.slabs.span_tree() {
             let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
             let new_acc = self.calculate_acc();
-            //assert!(new_acc >= starting_acc);
             acc - new_acc
         } else {
             Acc::default()
@@ -526,7 +511,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             self.nth(self.max - self.pos);
         } else {
             if self.slabs.weight().acc() <= target {
-                n = self.reset_iter_to_acc2(target);
+                n = self.reset_iter_to_acc(target);
             }
 
             if let Some(r) = self.run.as_mut() {
@@ -639,42 +624,8 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let mut n = Acc::from(n);
-        let target: Acc = self.iter.calculate_acc() + n;
-        if target
-            >= self
-                .iter
-                .slabs
-                .total_weight()
-                .map(|w| w.acc())
-                .unwrap_or_default()
-        {
-            return None;
-        }
-        if self.iter.slabs.weight().acc() < target {
-            let delta = self.iter.reset_iter_to_acc(target)?;
-            self.iter.check_pos();
-            n -= delta;
-        }
-        if self.iter.run_acc() > n {
-            let agg = self.iter.run.as_ref().unwrap().agg();
-            let advance = n / agg;
-            self.iter.pos += advance;
-            if advance > 0 {
-                self.iter.run.as_mut().and_then(|r| r.nth(advance - 1));
-            }
-            self.iter.check_pos();
-            self.next()
-        } else {
-            self.iter.pos += self.iter.run_count();
-            let n = n - self.iter.run_acc();
-            let (advance, run) = self.iter.slab.sub_advance_acc(n);
-            self.iter.run = run;
-            self.iter.pos += advance;
-            self.iter.check_pos();
-            assert!(self.iter.calculate_acc() <= target);
-            self.next()
-        }
+        self.iter.advance_acc_by(n);
+        self.next()
     }
 }
 
@@ -1737,9 +1688,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iter_range_with_acc() {
-        //let seed = rand::random::<u64>();
-        let seed = 16821371807298729682;
-        log!("SEED={:?}", seed);
+        let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
         const MAX: usize = FUZZ_SIZE;
