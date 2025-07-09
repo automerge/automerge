@@ -1,6 +1,6 @@
 import * as assert from "assert"
 import * as Automerge from "../src/index.js"
-import { type List } from "../src/index.js"
+import { Patch, type List } from "../src/index.js"
 
 describe("patches", () => {
   describe("the patchCallback", () => {
@@ -163,5 +163,312 @@ describe("patches", () => {
     }).newDoc
     // The bug manifested as `doc.color` being "usetred" rather than the expected "unset"
     assert.deepStrictEqual(doc.color, "unset")
+  })
+
+  describe("the applyPatches function", () => {
+    describe("when applying to an automerge document", () => {
+      it("should apply a map update patch to the root", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "put",
+          path: ["foo"],
+          value: "baz",
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, "baz")
+      })
+
+      it("should apply a map update to a nested map", () => {
+        let doc = Automerge.from<{ foo: { bar: string } }>({
+          foo: { bar: "baz" },
+        })
+        const patch: Patch = {
+          action: "put",
+          path: ["foo", "bar"],
+          value: "qux",
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo.bar, "qux")
+      })
+
+      it("should apply a list update patch", () => {
+        let doc = Automerge.from<{ foo: string[] }>({ foo: ["bar"] })
+        const patch: Patch = {
+          action: "put",
+          path: ["foo", 0],
+          value: "baz",
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo[0], "baz")
+      })
+
+      it("should apply a list insertion patch", () => {
+        let doc = Automerge.from<{ foo: string[] }>({ foo: ["bar"] })
+        const patch: Patch = {
+          action: "insert",
+          path: ["foo", 1],
+          values: ["baz", "qux"],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, ["bar", "baz", "qux"])
+      })
+
+      it("should apply a list deletion patch without length", () => {
+        let doc = Automerge.from<{ foo: string[] }>({
+          foo: ["bar", "baz", "qux"],
+        })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 1],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, ["bar", "qux"])
+      })
+
+      it("should apply a list deletion patch with length", () => {
+        let doc = Automerge.from<{ foo: string[] }>({
+          foo: ["bar", "baz", "qux"],
+        })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+          length: 2,
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, ["qux"])
+      })
+
+      it("should apply a text splice patch", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "splice",
+          path: ["foo", 3],
+          value: "baz",
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, "barbaz")
+      })
+
+      it("should apply a text deletion patch without length", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, "ar")
+      })
+
+      it("should apply a text deletion patch with length", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+          length: 2,
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, "r")
+      })
+
+      it("should apply an increment patch", () => {
+        let doc = Automerge.from<{ foo: Automerge.Counter }>({
+          foo: new Automerge.Counter(1),
+        })
+        const patch: Patch = {
+          action: "inc",
+          path: ["foo"],
+          value: 2,
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo.value, 3)
+      })
+
+      it("should apply a mark patch", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "mark",
+          path: ["foo"],
+          marks: [
+            {
+              name: "bold",
+              value: true,
+              start: 0,
+              end: 2,
+            },
+          ],
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        const marks = Automerge.marks(doc, ["foo"])
+        assert.deepStrictEqual(marks, [
+          { name: "bold", value: true, start: 0, end: 2 },
+        ])
+      })
+
+      it("should apply an unmark patch", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        doc = Automerge.change(doc, d => {
+          Automerge.mark(
+            d,
+            ["foo"],
+            { start: 0, end: 2, expand: "none" },
+            "bold",
+            true,
+          )
+        })
+        const patch: Patch = {
+          action: "unmark",
+          path: ["foo"],
+          name: "bold",
+          start: 0,
+          end: 2,
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        const marks = Automerge.marks(doc, ["foo"])
+        assert.deepStrictEqual(marks, [])
+      })
+    })
+
+    describe("when applying to a vanilla javascript object", () => {
+      it("should apply a map update patch to the root", () => {
+        let doc = { foo: "bar" }
+        const patch: Patch = {
+          action: "put",
+          path: ["foo"],
+          value: "baz",
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc, { foo: "baz" })
+      })
+
+      it("should apply a map update to a nested map", () => {
+        let doc = { foo: { bar: "baz" } }
+        const patch: Patch = {
+          action: "put",
+          path: ["foo", "bar"],
+          value: "qux",
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo.bar, "qux")
+      })
+
+      it("should apply a list update patch", () => {
+        let doc = { foo: ["bar"] }
+        const patch: Patch = {
+          action: "put",
+          path: ["foo", 0],
+          value: "baz",
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo[0], "baz")
+      })
+
+      it("should apply a list insertion patch", () => {
+        let doc = { foo: ["bar"] }
+        const patch: Patch = {
+          action: "insert",
+          path: ["foo", 1],
+          values: ["baz", "qux"],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, ["bar", "baz", "qux"])
+      })
+
+      it("should apply a list deletion patch without length", () => {
+        let doc = {
+          foo: ["bar", "baz", "qux"],
+        }
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 1],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, ["bar", "qux"])
+      })
+
+      it("should apply a list deletion patch with length", () => {
+        let doc = {
+          foo: ["bar", "baz", "qux"],
+        }
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+          length: 2,
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, ["qux"])
+      })
+
+      it("should apply a text splice patch", () => {
+        let doc = { foo: "bar" }
+        const patch: Patch = {
+          action: "splice",
+          path: ["foo", 3],
+          value: "baz",
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, "barbaz")
+      })
+
+      it("should apply a text deletion patch without length", () => {
+        let doc = { foo: "bar" }
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, "ar")
+      })
+
+      it("should apply a text deletion patch with length", () => {
+        let doc = Automerge.from<{ foo: string }>({ foo: "bar" })
+        const patch: Patch = {
+          action: "del",
+          path: ["foo", 0],
+          length: 2,
+        }
+        doc = Automerge.change(doc, d => Automerge.applyPatches(d, [patch]))
+        assert.deepStrictEqual(doc.foo, "r")
+      })
+
+      it("should apply an increment patch", () => {
+        let doc = { foo: 1 }
+        const patch: Patch = {
+          action: "inc",
+          path: ["foo"],
+          value: 2,
+        }
+        Automerge.applyPatches(doc, [patch])
+        assert.deepStrictEqual(doc.foo, 3)
+      })
+
+      it("should ignore a mark patch", () => {
+        let doc = { foo: "bar" }
+        const patch: Patch = {
+          action: "mark",
+          path: ["foo"],
+          marks: [
+            {
+              name: "bold",
+              value: true,
+              start: 0,
+              end: 2,
+            },
+          ],
+        }
+        Automerge.applyPatches(doc, [patch])
+      })
+
+      it("should ignore an unmark patch", () => {
+        let doc = { foo: "bar" }
+        const patch: Patch = {
+          action: "unmark",
+          path: ["foo"],
+          name: "bold",
+          start: 0,
+          end: 2,
+        }
+        Automerge.applyPatches(doc, [patch])
+      })
+    })
   })
 })
