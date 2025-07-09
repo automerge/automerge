@@ -96,6 +96,19 @@ enum Command {
         skip_verifying_heads: VerifyFlag,
     },
 
+    UnsafeExportDoc {
+        /// Format for output: json, toml
+        #[clap(long, short, default_value = "json")]
+        format: ExportFormat,
+
+        /// Path that contains Automerge changes
+        changes_file: Option<PathBuf>,
+
+        /// The file to write to. If omitted assumes stdout
+        #[clap(long("out"), short('o'))]
+        output_file: Option<PathBuf>,
+    },
+
     Import {
         /// Format for input: json, toml
         #[clap(long, short, default_value = "json")]
@@ -179,6 +192,28 @@ fn main() -> Result<()> {
                         &mut in_buffer,
                         output,
                         skip_verifying_heads,
+                        std::io::stdout().is_terminal(),
+                    )
+                }
+                ExportFormat::Toml => unimplemented!(),
+            }
+        }
+        Command::UnsafeExportDoc {
+            changes_file,
+            format,
+            output_file,
+        } => {
+            let output: Box<dyn std::io::Write> = if let Some(output_file) = output_file {
+                Box::new(File::create(output_file)?)
+            } else {
+                Box::new(std::io::stdout())
+            };
+            match format {
+                ExportFormat::Json => {
+                    let mut in_buffer = open_file_or_stdin(changes_file)?;
+                    export::unsafe_export_json(
+                        &mut in_buffer,
+                        output,
                         std::io::stdout().is_terminal(),
                     )
                 }

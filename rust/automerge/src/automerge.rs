@@ -769,6 +769,48 @@ impl Automerge {
         Ok(am)
     }
 
+    pub fn load_without_changegraph(data: Vec<u8>) -> Result<Automerge, AutomergeError> {
+        if data.is_empty() {
+            tracing::trace!("no data, initializing empty document");
+            return Ok(Self::new());
+        }
+        tracing::trace!("loading first chunk");
+        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(&data))
+            .map_err(|e| load::Error::Parse(Box::new(e)))?;
+        if !first_chunk.checksum_valid() {
+            return Err(load::Error::BadChecksum.into());
+        }
+
+        if !remaining.is_empty() {
+            panic!("only works for a single document chunk");
+        }
+
+        let storage::Chunk::Document(doc) = first_chunk else {
+            panic!("only works for a single document chunk");
+        };
+        let mut op_set = OpSet::from_doc(&doc, TextEncoding::UnicodeCodePoint)?;
+
+        let mut index_builder = op_set.index_builder();
+        let mut iter = op_set.iter();
+
+        while let Some(op) = iter.try_next().unwrap() {
+            index_builder.process_op(&op);
+            for succ_id in op.succ() {
+                index_builder.process_succ(op.is_counter(), succ_id);
+            }
+        }
+
+        op_set.set_indexes(index_builder);
+        Ok(Self {
+            queue: Vec::new(),
+            change_graph: ChangeGraph::default(),
+            deps: HashSet::new(),
+            ops: op_set,
+            actor: Actor::Unused(ActorId::random()),
+            max_op: 0,
+        })
+    }
+
     /// Create the patches from a [`PatchLog`]
     ///
     /// See the documentation for [`PatchLog`] for more details on this

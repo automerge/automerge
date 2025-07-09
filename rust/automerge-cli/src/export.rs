@@ -31,6 +31,33 @@ pub(crate) fn export_json(
     Ok(())
 }
 
+fn unsafe_get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
+    let doc = automerge::Automerge::load_without_changegraph(input_data)?;
+    serde_json::to_value(am::AutoSerde::from(&doc)).map_err(Into::into)
+}
+
+pub(crate) fn unsafe_export_json(
+    mut changes_reader: impl std::io::Read,
+    mut writer: impl std::io::Write,
+    is_tty: bool,
+) -> Result<()> {
+    let mut input_data = vec![];
+    changes_reader.read_to_end(&mut input_data)?;
+
+    let state_json = unsafe_get_state_json(input_data)?;
+    if is_tty {
+        print_colored_json(&state_json).unwrap();
+        writeln!(writer).unwrap();
+    } else {
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string_pretty(&state_json).unwrap()
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
