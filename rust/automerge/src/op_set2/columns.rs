@@ -41,7 +41,7 @@ pub(super) struct Columns {
 #[derive(Debug, Clone)]
 pub(super) struct Indexes {
     pub(super) text: ColumnData<UIntCursor>,
-    //pub(super) top: ColumnData<BooleanCursor>,
+    pub(super) top: ColumnData<BooleanCursor>,
     pub(super) visible: ColumnData<BooleanCursor>,
     pub(super) inc: ColumnData<IntCursor>,
     pub(super) mark: MarkIndexColumn,
@@ -51,7 +51,7 @@ impl Default for Indexes {
     fn default() -> Self {
         Self {
             text: ColumnData::new(),
-            //top: ColumnData::new(),
+            top: ColumnData::new(),
             visible: ColumnData::new(),
             inc: ColumnData::new(),
             mark: MarkIndexColumn::new(),
@@ -292,7 +292,7 @@ impl Columns {
         });
     }
 
-    pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], encoding: TextEncoding)
+    pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], encoding: TextEncoding) -> usize
     where
         O: OpLike,
     {
@@ -346,10 +346,12 @@ impl Columns {
         self.index
             .text
             .splice(pos, 0, ops.clone().map(|s| O::width(s, encoding.into())));
-        //self.index.top.splice(pos, 0, ops.clone().map(O::top));
+        self.index.top.splice(pos, 0, ops.clone().map(O::top));
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+
+        ops.count()
     }
 
     #[cfg(test)]
@@ -383,19 +385,19 @@ impl Columns {
         let mut value = self.value.raw_reader(0);
         let mut succ = self.succ_count.iter();
         let mut insert = self.insert.iter();
-        log!(":: id      obj     key        elem     ins act  suc value");
+        let mut vis = self.index.visible.iter();
+        let mut top = self.index.top.iter();
+        let mut pos = 0;
+        log!("::::: id       obj      key        elem     i v t act suc value");
         loop {
             let id_a = fmt(id_a.next());
             let id_c = fmt(id_c.next());
             let obj_a = fmt(obj_a.next());
             let obj_c = fmt(obj_c.next());
             let act = fmt(act.next());
-            let insert = insert.next();
-            let insert = if insert.flatten().as_deref() == Some(&true) {
-                "t"
-            } else {
-                "-"
-            };
+            let insert = fmt_bool(insert.next());
+            let vis = fmt_bool(vis.next());
+            let top = fmt_bool(top.next());
             let key_s = fmt(key_str.next());
             let key_a = fmt(key_a.next());
             let key_c = fmt(key_c.next());
@@ -411,16 +413,20 @@ impl Columns {
                 break;
             }
             log!(
-                ":: {:7} {:7} {:10} {:8} {:3} {:3}  {:1}   {}",
+                "{:4}: {:8} {:8} {:10} {:8} {:1} {:1} {:1} {:3} {:1}   {}",
+                pos,
                 format!("({}, {})", id_c, id_a),
                 format!("({}, {})", obj_c, obj_a),
                 key_s,
                 format!("({}, {})", key_c, key_a),
                 insert,
+                vis,
+                top,
                 act,
                 succ,
                 v,
             );
+            pos += 1;
         }
     }
 }
@@ -607,6 +613,14 @@ impl Column {
     }
 }
 */
+
+fn fmt_bool(val: Option<Option<Cow<'_, bool>>>) -> &'static str {
+    if val.flatten().as_deref() == Some(&true) {
+        "t"
+    } else {
+        "-"
+    }
+}
 
 // Stick all of the column ID initialization in a module so we can turn off
 // rustfmt for the whole thing

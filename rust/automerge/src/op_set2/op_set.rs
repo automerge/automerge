@@ -20,6 +20,7 @@ use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, Scal
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
 
@@ -116,6 +117,103 @@ impl OpSet {
         IndexBuilder::new(self, self.text_encoding)
     }
 
+    pub(crate) fn reset_top(&mut self, range: Range<usize>) {
+        let top = self.cols.index.top.iter_range(range.clone());
+        let vis = self.cols.index.visible.iter_range(range.clone());
+
+        // convert Option<Cow<'_,bool>> into bool :(
+        let top = top.map(|b| b.as_deref().copied().unwrap_or(false));
+        let vis = vis.map(|b| b.as_deref().copied().unwrap_or(false));
+
+        let mut conflicts = vec![];
+        let mut expose = None;
+        let mut last_t = None;
+        for (i, (v, t)) in vis.zip(top).enumerate() {
+            if t {
+                assert!(v);
+                if let Some(n) = last_t {
+                    conflicts.push(n);
+                }
+                last_t = Some(i);
+                expose = None;
+            } else if v {
+                if let Some(n) = last_t {
+                    conflicts.push(n);
+                }
+                last_t = None;
+                expose = Some(i);
+            }
+        }
+
+        for n in conflicts {
+            self.conflict(range.start + n)
+        }
+
+        if let Some(n) = expose {
+            self.expose(range.start + n)
+        }
+    }
+
+    pub(crate) fn conflict(&mut self, pos: usize) {
+        self.cols.index.top.splice(pos, 1, [false]);
+    }
+
+    pub(crate) fn expose(&mut self, pos: usize) {
+        self.cols.index.top.splice(pos, 1, [true]);
+    }
+
+    pub(crate) fn validate_op_order(&self) -> bool {
+        let mut stepper = Default::default();
+        for op in self.iter() {
+            if !op.step(&mut stepper) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub(crate) fn validate_top_index(&self) -> bool {
+        let _top = &self.cols.index.top;
+        let _visible = &self.cols.index.visible;
+
+        assert_eq!(_top.len(), _visible.len());
+        assert_eq!(_top.len(), self.len());
+
+        let top_iter = _top.iter();
+        let vis_iter = _visible.iter();
+        let op_iter = self.iter();
+
+        let mut last_op = None;
+        let mut first_top = None;
+        let mut last_vis = None;
+
+        for ((top, vis), op) in top_iter.zip(vis_iter).zip(op_iter) {
+            let vis = *vis.unwrap();
+            let top = *top.unwrap();
+
+            let this_op = Some((op.obj, op.elemid_or_key()));
+
+            if this_op != last_op {
+                assert_eq!(first_top, last_vis);
+                last_op = this_op;
+                first_top = None;
+                last_vis = None;
+            }
+
+            if top {
+                assert!(vis);
+                if first_top.is_none() {
+                    first_top = Some(op.pos);
+                }
+            }
+            if vis {
+                last_vis = Some(op.pos);
+            }
+        }
+        assert_eq!(first_top, last_vis);
+        true
+    }
+
     pub(crate) fn set_indexes(&mut self, builder: IndexBuilder) {
         let indexes = builder.finish();
 
@@ -125,7 +223,7 @@ impl OpSet {
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
         self.cols.index.text = indexes.text;
-        //self.cols.index.top = indexes.top;
+        self.cols.index.top = indexes.top;
         self.cols.index.visible = indexes.visible;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
@@ -140,10 +238,10 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) {
-        self.cols.splice(pos, ops, self.text_encoding);
+    pub(crate) fn splice<O: OpLike>(&mut self, pos: usize, ops: &[O]) -> usize {
+        let added = self.cols.splice(pos, ops, self.text_encoding);
         self.splice_objects(ops);
-        //self.len += ops.len();
+        added
     }
 
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
@@ -164,7 +262,7 @@ impl OpSet {
             if i.inc.is_none() {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [NONE]);
-                //self.cols.index.top.splice(i.pos, 1, [false]);
+                self.cols.index.top.splice(i.pos, 1, [false]);
             }
         }
     }
@@ -181,9 +279,8 @@ impl OpSet {
         let prop = match op.key {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
             KeyRef::Seq(_) => {
-                let index = self
-                    .seek_list_opid(&op.obj, op.id, text_rep.encoding(typ), clock)?
-                    .index;
+                let encoding = text_rep.encoding(typ);
+                let index = self.seek_list_opid(&op.obj, op.id, encoding, clock)?.index;
                 Prop::Seq(index)
             }
         };
@@ -311,25 +408,32 @@ impl OpSet {
     pub(crate) fn query_insert_at_text(
         &self,
         obj: &ObjId,
-        index: usize,
+        index: NonZeroUsize,
         encoding: ListEncoding,
-        clock: Option<&Clock>,
     ) -> Option<QueryNth> {
-        if encoding == ListEncoding::List || clock.is_some() {
-            return None;
-        }
+        let range = self.scope_to_obj(obj);
+        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
+        let tx = iter.nth(index.get() - 1)?;
+        let iter = self.iter_range(&(tx.pos..range.end));
+        let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
+        let mut query = InsertQuery::new(iter, index.get(), encoding, None, marks);
+        query.resolve(index.get() - 1).ok()
+    }
 
+    pub(crate) fn query_insert_at_list(
+        &self,
+        obj: &ObjId,
+        index: NonZeroUsize,
+    ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
 
-        if index == 0 {
-            return None;
-        }
-        let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
-        let tx = iter.nth(index - 1)?;
-        let iter = self.iter_range(&(tx.pos..range.end));
-        let marks = self.cols.index.mark.rich_text_at(tx.pos, clock);
-        let mut query = InsertQuery::new(iter, index, encoding, clock.cloned(), marks);
-        query.resolve(index - 1).ok()
+        let mut iter = self.cols.index.top.iter_range(range.clone());
+        iter.advance_acc_by(index.get() - 1);
+        let start_pos = iter.pos();
+        let iter = self.iter_range(&(start_pos..range.end));
+        let marks = self.cols.index.mark.rich_text_at(start_pos, None);
+        let mut query = InsertQuery::new(iter, index.get(), ListEncoding::List, None, marks);
+        query.resolve(index.get() - 1).ok()
     }
 
     pub(crate) fn query_insert_at(
@@ -339,30 +443,37 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
-        if let Some(query) = self.query_insert_at_text(obj, index, encoding, clock.as_ref()) {
-            debug_assert_eq!(
-                Ok(&query),
-                InsertQuery::new(
-                    self.iter_obj(obj),
-                    index,
-                    encoding,
-                    clock,
-                    Default::default()
-                )
-                .resolve(0)
-                .as_ref()
-            );
-            Ok(query)
-        } else {
-            InsertQuery::new(
-                self.iter_obj(obj),
-                index,
-                encoding,
-                clock,
-                Default::default(),
-            )
-            .resolve(0)
+        if clock.is_none() && index > 0 {
+            let index = NonZeroUsize::new(index).unwrap();
+            let query = if encoding == ListEncoding::List {
+                self.query_insert_at_list(obj, index)
+            } else {
+                self.query_insert_at_text(obj, index, encoding)
+            };
+            if let Some(q) = query {
+                debug_assert_eq!(
+                    Ok(&q),
+                    InsertQuery::new(
+                        self.iter_obj(obj),
+                        index.get(),
+                        encoding,
+                        clock,
+                        Default::default()
+                    )
+                    .resolve(0)
+                    .as_ref()
+                );
+                return Ok(q);
+            }
         }
+        InsertQuery::new(
+            self.iter_obj(obj),
+            index,
+            encoding,
+            clock,
+            Default::default(),
+        )
+        .resolve(0)
     }
 
     pub(crate) fn seek_ops_by_prop<'a>(
@@ -387,11 +498,12 @@ impl OpSet {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        assert_eq!(end_pos, range.end);
         let ops = iter.visible2(self, clock).collect::<Vec<_>>();
+        assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
             ops,
+            range,
             end_pos,
         }
     }
@@ -403,11 +515,17 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        if let Some(found) = self.seek_ops_by_index_fast(obj, index, encoding, clock) {
-            debug_assert_eq!(
-                found,
-                self.seek_ops_by_index_slow(obj, index, encoding, clock)
-            );
+        if clock.is_none() {
+            let found = if encoding == ListEncoding::List {
+                self.seek_list_ops_by_index_fast(obj, index)
+            } else {
+                self.seek_text_ops_by_index_fast(obj, index)
+            };
+            #[cfg(debug_assertions)]
+            {
+                let slow = self.seek_ops_by_index_slow(obj, index, encoding, clock);
+                assert_eq!(found, slow);
+            }
             found
         } else {
             self.seek_ops_by_index_slow(obj, index, encoding, clock)
@@ -425,6 +543,7 @@ impl OpSet {
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
         let mut len = 0;
+        let mut range = end_pos..end_pos;
         for mut ops in iter {
             let width = ops.width(encoding);
             if len + width > index {
@@ -433,55 +552,115 @@ impl OpSet {
             }
             len += width;
             end_pos = ops.end_pos;
+            range = ops.range;
         }
+        assert_eq!(range.end, end_pos);
         OpsFound {
             index,
             ops: vec![],
             end_pos,
+            range,
         }
     }
 
-    pub(crate) fn seek_ops_by_index_fast<'a>(
+    fn list_register_at_pos(&self, pos: usize, range: Range<usize>) -> Range<usize> {
+        let mut iter = self.cols.insert.iter_range(pos..range.end);
+        let acc = iter.calculate_acc().as_usize();
+        let insert_op = iter.next().flatten().as_deref().copied().unwrap_or(false);
+
+        if insert_op {
+            iter.advance_acc_by(0);
+            pos..iter.pos()
+        } else {
+            // ACC here represents the number of insert ops to come before pos
+            // as insert_op is false and this is a list we know there's at least one
+            // insert op before us and acc > 0
+            let mut iter = self.cols.insert.iter_range(0..range.end);
+            iter.advance_acc_by(acc - 1);
+            let start = iter.pos();
+            iter.advance_acc_by(1);
+            let end = iter.pos();
+            start..end
+        }
+    }
+
+    pub(crate) fn seek_list_ops_by_index_fast<'a>(
+        &'a self,
+        obj: &ObjId,
+        index: usize,
+    ) -> OpsFound<'a> {
+        let range = self.scope_to_obj(obj);
+
+        let mut iter = self.cols.index.top.iter_range(range.clone());
+        iter.advance_acc_by(index);
+        let tx_pos = iter.pos();
+
+        if iter.next().is_some() {
+            let range = self.list_register_at_pos(tx_pos, range);
+            let end_pos = range.end;
+            let ops = self.iter_range(&range).visible2(self, None).collect();
+            OpsFound {
+                index,
+                ops,
+                range,
+                end_pos,
+            }
+        } else {
+            let end_pos = range.end;
+            OpsFound {
+                index,
+                ops: vec![],
+                range,
+                end_pos,
+            }
+        }
+    }
+
+    pub(crate) fn seek_text_ops_by_index_fast<'a>(
         &'a self,
         obj: &ObjId,
         mut index: usize,
-        encoding: ListEncoding,
-        clock: Option<&Clock>,
-    ) -> Option<OpsFound<'a>> {
-        if encoding == ListEncoding::List || clock.is_some() {
-            return None;
-        }
-
-        let range = self.scope_to_obj(obj);
+    ) -> OpsFound<'a> {
+        let mut range = self.scope_to_obj(obj);
 
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
 
         let mut ops = vec![];
         let mut end_pos = range.end;
-
         let obj_start = iter.acc();
         if let Some(tx) = iter.nth(index) {
             assert!(tx.acc >= obj_start);
+            range.start = tx.pos;
             index = (tx.acc - obj_start).as_usize();
             // TODO
             // could use a SkipIter here
             // could grab only needed fields and not all ops
-            for op in self.iter_range(&(tx.pos..range.end)) {
-                if op.insert && !ops.is_empty() {
-                    break;
+            for op in self.iter_range(&range) {
+                if op.insert {
+                    if !ops.is_empty() {
+                        break;
+                    }
+                    range.start = op.pos;
                 }
                 end_pos = op.pos + 1;
+                range.end = op.pos + 1;
                 if op.succ().len() == 0 && op.action != Action::Mark {
                     ops.push(op);
                 }
             }
         }
 
-        Some(OpsFound {
+        assert_eq!(range.end, end_pos);
+        OpsFound {
             index,
             ops,
+            range,
             end_pos,
-        })
+        }
+    }
+
+    fn get(&self, pos: usize) -> Option<Op<'_>> {
+        self.iter_range(&(pos..(pos + 1))).next()
     }
 
     fn get_op_id_pos(&self, id: OpId) -> Option<usize> {
@@ -499,8 +678,45 @@ impl OpSet {
         encoding: ListEncoding,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        // this iterates over the ops twice
-        // needs faster rewrite
+        if clock.is_none() {
+            let found = self.seek_list_opid_fast(obj, opid, encoding);
+            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, encoding, clock));
+            found
+        } else {
+            self.seek_list_opid_slow(obj, opid, encoding, clock)
+        }
+    }
+
+    pub(crate) fn seek_list_opid_fast(
+        &self,
+        obj: &ObjId,
+        id: OpId,
+        encoding: ListEncoding,
+    ) -> Option<FoundOpId<'_>> {
+        let ostart = self.scope_to_obj(obj).start;
+        let pos = self.get_op_id_pos(id)?;
+        let op = self.get(pos)?;
+        let visible;
+        let index;
+        if encoding == ListEncoding::List {
+            let (delta, item) = self.cols.index.top.get_acc_delta(ostart, pos);
+            visible = item.as_deref().copied().unwrap_or(false);
+            index = delta.as_usize();
+        } else {
+            let (delta, item) = self.cols.index.text.get_acc_delta(ostart, pos);
+            visible = item.is_some();
+            index = delta.as_usize();
+        }
+        Some(FoundOpId { op, index, visible })
+    }
+
+    pub(crate) fn seek_list_opid_slow(
+        &self,
+        obj: &ObjId,
+        opid: OpId,
+        encoding: ListEncoding,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;
         let iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
         let mut index = 0;
@@ -601,23 +817,49 @@ impl OpSet {
         id: &OpId,
         clock: Option<&Clock>,
     ) -> Option<(Op<'_>, bool)> {
+        if clock.is_none() {
+            let result = self.find_op_by_id_and_vis_fast(id);
+            debug_assert_eq!(result, self.find_op_by_id_and_vis_slow(id, clock));
+            result
+        } else {
+            self.find_op_by_id_and_vis_slow(id, clock)
+        }
+    }
+
+    pub(crate) fn find_op_by_id_and_vis_fast(&self, id: &OpId) -> Option<(Op<'_>, bool)> {
+        let pos = self.get_op_id_pos(*id)?;
+        let visible = self
+            .cols
+            .index
+            .top
+            .get(pos)
+            .flatten()
+            .as_deref()
+            .copied()
+            .unwrap_or(false);
+        let op = self.get(pos)?;
+        Some((op, visible))
+    }
+
+    pub(crate) fn find_op_by_id_and_vis_slow(
+        &self,
+        id: &OpId,
+        clock: Option<&Clock>,
+    ) -> Option<(Op<'_>, bool)> {
         let start = self.get_op_id_pos(*id)?;
         let mut iter = self.iter_range(&(start..self.len()));
-        while let Some(mut o1) = iter.next() {
-            if &o1.id == id {
-                let mut vis = o1.scope_to_clock(clock);
-                for mut o2 in iter {
-                    if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
-                        break;
-                    }
-                    if o2.scope_to_clock(clock) {
-                        vis = false;
-                    }
-                }
-                return Some((o1, vis));
+        let mut o1 = iter.next()?;
+        let mut vis = o1.scope_to_clock(clock);
+        for mut o2 in iter {
+            if o2.obj != o1.obj || o1.elemid_or_key() != o2.elemid_or_key() {
+                break;
+            }
+            if o2.scope_to_clock(clock) {
+                vis = false;
+                break;
             }
         }
-        None
+        Some((o1, vis))
     }
 
     pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {
@@ -927,6 +1169,7 @@ pub(crate) struct OpsFound<'a> {
     pub(crate) index: usize,
     pub(crate) ops: Vec<Op<'a>>,
     pub(crate) end_pos: usize,
+    pub(crate) range: Range<usize>,
 }
 
 impl OpsFound<'_> {

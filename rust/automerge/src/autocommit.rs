@@ -460,6 +460,11 @@ impl AutoCommit {
         self.doc.debug_cmp(&other.doc);
     }
 
+    #[cfg(test)]
+    pub(crate) fn validate_top_index(&self) -> bool {
+        self.doc.ops.validate_top_index()
+    }
+
     /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
         self.save_with_options(SaveOptions {

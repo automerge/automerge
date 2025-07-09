@@ -50,6 +50,21 @@ impl<C: ColumnCursor> ColumnData<C> {
         iter.next()
     }
 
+    pub fn get_acc_delta(&self, index1: usize, index2: usize) -> (Acc, Option<Cow<'_, C::Item>>) {
+        assert!(index1 <= index2);
+        let acc1 = self.get_acc(index1);
+        let mut iter = self.iter_range(index2..(index2 + 1));
+        let acc2 = iter.calculate_acc();
+        let item = iter.next().flatten();
+        (acc2 - acc1, item)
+    }
+
+    pub fn get_acc(&self, index: usize) -> Acc {
+        let range = index..(index + 1);
+        let iter = self.iter_range(range);
+        iter.calculate_acc()
+    }
+
     pub fn get_with_acc(
         &self,
         index: usize,
@@ -57,12 +72,6 @@ impl<C: ColumnCursor> ColumnData<C> {
         let range = index..(index + 1);
         let mut iter = self.iter_range(range).with_acc();
         iter.next()
-    }
-
-    pub fn get_acc(&self, index: usize) -> Acc {
-        let range = index..(index + 1);
-        let iter = self.iter_range(range).with_acc();
-        iter.acc()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -249,7 +258,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             self.slabs.weight().pos() - self.slab.pos_left() - self.run_count(),
             self.pos
         );
-        self.pos
+        std::cmp::min(self.pos, self.max)
     }
 
     fn check_pos(&self) {
@@ -290,7 +299,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             self.pos += count;
         }
         self.check_pos();
-        Some(run)
+        if run.count == 0 {
+            self.next_run()
+        } else {
+            Some(run)
+        }
     }
 
     fn pop_run(&mut self) -> Option<Run<'a, C::Item>> {
@@ -465,20 +478,59 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         Some(())
     }
 
-    fn reset_iter_to_acc(&mut self, acc: Acc) -> Option<Acc> {
-        let starting_acc = self.calculate_acc();
-        assert!(acc > starting_acc);
-        let tree = self.slabs.span_tree()?;
-        let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
-        let new_acc = self.calculate_acc();
-        assert!(new_acc >= starting_acc);
-        Some(new_acc - starting_acc)
+    fn reset_iter_to_acc(&mut self, acc: Acc) -> Acc {
+        if let Some(tree) = self.slabs.span_tree() {
+            let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
+            let new_acc = self.calculate_acc();
+            acc - new_acc
+        } else {
+            Acc::default()
+        }
     }
 
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         assert!(range.start >= self.pos);
         self.max = range.end;
         self.nth(range.start - self.pos)
+    }
+
+    fn total_acc(&self) -> Acc {
+        self.slabs
+            .total_weight()
+            .map(|w| w.acc())
+            .unwrap_or_default()
+    }
+
+    pub fn advance_acc_by<A: Into<Acc>>(&mut self, n: A) -> usize {
+        let mut n = n.into();
+        let start_pos = self.pos();
+        let start = self.calculate_acc();
+        let target: Acc = self.calculate_acc() + n;
+
+        if start + n > self.total_acc() {
+            self.nth(self.max - self.pos);
+        } else {
+            if self.slabs.weight().acc() <= target {
+                n = self.reset_iter_to_acc(target);
+            }
+
+            if let Some(r) = self.run.as_mut() {
+                if r.acc() > n {
+                    let advance = n / r.agg();
+                    self.pos += advance;
+                    r.count -= advance;
+                    return self.pos() - start_pos;
+                }
+                self.pos += r.count;
+                n -= r.acc();
+                r.count = 0;
+            }
+            let (advance, run) = self.slab.sub_advance_acc(n);
+            self.run = run;
+            self.pos += advance;
+            self.check_pos();
+        }
+        self.pos() - start_pos
     }
 }
 
@@ -530,9 +582,17 @@ pub struct ColGroupIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
 }
 
-impl<C: ColumnCursor> ColGroupIter<'_, C> {
+impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     pub fn advance_by(&mut self, amount: usize) {
         self.iter.advance_by(amount)
+    }
+
+    pub fn run_count(&self) -> usize {
+        self.iter.run_count()
+    }
+
+    pub fn unwrap(self) -> ColumnDataIter<'a, C> {
+        self.iter
     }
 
     pub fn acc(&self) -> Acc {
@@ -564,42 +624,8 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let mut n = Acc::from(n);
-        let target: Acc = self.iter.calculate_acc() + n;
-        if target
-            >= self
-                .iter
-                .slabs
-                .total_weight()
-                .map(|w| w.acc())
-                .unwrap_or_default()
-        {
-            return None;
-        }
-        if self.iter.slabs.weight().acc() < target {
-            let delta = self.iter.reset_iter_to_acc(target)?;
-            self.iter.check_pos();
-            n -= delta;
-        }
-        if self.iter.run_acc() > n {
-            let agg = self.iter.run.as_ref().unwrap().agg();
-            let advance = n / agg;
-            self.iter.pos += advance;
-            if advance > 0 {
-                self.iter.run.as_mut().and_then(|r| r.nth(advance - 1));
-            }
-            self.iter.check_pos();
-            self.next()
-        } else {
-            self.iter.pos += self.iter.run_count();
-            let n = n - self.iter.run_acc();
-            let (advance, run) = self.iter.slab.sub_advance_acc(n);
-            self.iter.run = run;
-            self.iter.pos += advance;
-            self.iter.check_pos();
-            assert!(self.iter.calculate_acc() <= target);
-            self.next()
-        }
+        self.iter.advance_acc_by(n);
+        self.next()
     }
 }
 
@@ -908,6 +934,17 @@ pub(crate) fn normalize_range<R: RangeBounds<usize>>(range: R) -> (usize, usize)
         Bound::Excluded(n) => *n,
     };
     (start, end)
+}
+
+impl<'a, C, M> From<Vec<M>> for ColumnData<C>
+where
+    C: ColumnCursor,
+    M: MaybePackable<'a, C::Item>,
+    C::Item: 'a,
+{
+    fn from(i: Vec<M>) -> Self {
+        i.into_iter().collect()
+    }
 }
 
 impl<'a, C, M> FromIterator<M> for ColumnData<C>
@@ -1396,7 +1433,7 @@ pub(crate) mod tests {
     fn make_rng() -> SmallRng {
         let seed = rand::random::<u64>();
         //let seed = 16821371807298729682;
-        //let seed = 15806113931944186106;
+        //let seed = 14189760879853346850;
         log!("SEED: {}", seed);
         SmallRng::seed_from_u64(seed)
     }
@@ -1651,9 +1688,7 @@ pub(crate) mod tests {
 
     #[test]
     fn iter_range_with_acc() {
-        //let seed = rand::random::<u64>();
-        let seed = 16821371807298729682;
-        log!("SEED={:?}", seed);
+        let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
         const MAX: usize = FUZZ_SIZE;
@@ -1841,5 +1876,84 @@ pub(crate) mod tests {
         assert_eq!(iter.seek_to_value(Some(0), ..), 0..3);
         assert_eq!(iter.seek_to_value(Some(1), ..), 3..6);
         assert_eq!(iter.seek_to_value(Some(6), ..), 6..9);
+    }
+
+    #[test]
+    fn simple_advance_by_acc() {
+        type C = ColumnData<RleCursor<8, u64>>;
+
+        let column = C::from(vec![0, 1, 1, 0, 1, 1, 0]);
+
+        assert_eq!(column.iter().advance_acc_by(0), 1);
+        assert_eq!(column.iter().advance_acc_by(1), 2);
+        assert_eq!(column.iter().advance_acc_by(2), 4);
+        assert_eq!(column.iter().advance_acc_by(3), 5);
+        assert_eq!(column.iter().advance_acc_by(4), 7);
+        assert_eq!(column.iter().advance_acc_by(100), 7);
+
+        assert_eq!(column.iter_range(2..7).advance_acc_by(0), 0);
+        assert_eq!(column.iter_range(2..7).advance_acc_by(1), 2);
+        assert_eq!(column.iter_range(2..7).advance_acc_by(2), 3);
+        assert_eq!(column.iter_range(2..7).advance_acc_by(3), 5);
+        assert_eq!(column.iter_range(2..7).advance_acc_by(100), 5);
+
+        let column = C::from(vec![0, 0, 1, 1, 0, 0, 1, 1, 0]);
+
+        let mut iter = column.iter_range(1..5);
+        assert_eq!(iter.advance_acc_by(0), 1);
+        iter.next();
+        assert_eq!(iter.advance_acc_by(0), 0);
+
+        let mut iter = column.iter_range(0..5);
+        assert_eq!(iter.advance_acc_by(1), 3);
+        iter.next();
+        assert_eq!(iter.advance_acc_by(0), 1);
+        assert_eq!(iter.pos(), 5);
+
+        let column = C::from(vec![0, 3, 3, 0, 3, 3, 0]);
+
+        assert_eq!(column.iter().advance_acc_by(0), 1);
+        assert_eq!(column.iter().advance_acc_by(1), 1);
+        assert_eq!(column.iter().advance_acc_by(2), 1);
+        assert_eq!(column.iter().advance_acc_by(3), 2);
+        assert_eq!(column.iter().advance_acc_by(4), 2);
+        assert_eq!(column.iter().advance_acc_by(5), 2);
+        assert_eq!(column.iter().advance_acc_by(6), 4);
+    }
+
+    #[test]
+    fn fuzz_advance_by_acc() {
+        const SIZE: usize = 10000;
+        let mut rng = make_rng();
+        let mut data = vec![];
+        let mut acc = vec![];
+        let mut agg = 0;
+        for _ in 0..SIZE {
+            let val = rng.gen::<u64>() % 4;
+            agg += val;
+            data.push(val);
+            acc.push(agg);
+        }
+        let column: ColumnData<RleCursor<8, u64>> = data.iter().cloned().collect();
+        for _ in 0..10 {
+            let mut iter = column.iter();
+            loop {
+                let advance = rng.gen::<usize>() % 8 + 1;
+                let pos1 = iter.pos();
+                iter.advance_acc_by(advance);
+                if let Some(val) = iter.next() {
+                    let pos2 = iter.pos();
+                    let _acc = iter.calculate_acc();
+                    assert!(pos2 > pos1);
+                    assert!(Acc::from(acc[pos2 - 1]) >= _acc);
+                    if pos2 > 1 {
+                        assert!(Acc::from(acc[pos2 - 2]) <= _acc);
+                    }
+                    assert_eq!(data[pos2 - 1], val.as_deref().copied().unwrap_or_default());
+                } else {
+                    break;
+                }
+            }
+        }
     }
 }

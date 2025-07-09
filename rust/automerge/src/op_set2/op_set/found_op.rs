@@ -7,6 +7,7 @@ use std::fmt::Debug;
 #[derive(Clone, Debug)]
 pub(crate) struct OpsFoundIter<'a, I: Iterator<Item = Op<'a>>> {
     iter: I,
+    start_pos: usize,
     clock: Option<Clock>,
     last_key: Option<KeyRef<'a>>,
     found: Option<OpsFound<'a>>,
@@ -17,6 +18,7 @@ impl<'a, I: Iterator<Item = Op<'a>>> OpsFoundIter<'a, I> {
         Self {
             iter,
             clock,
+            start_pos: 0,
             found: None,
             last_key: None,
         }
@@ -34,9 +36,11 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
                 result = self.found.take();
                 self.last_key = Some(key);
                 self.found = Some(OpsFound::default());
+                self.start_pos = op.pos;
             }
             if let Some(found) = &mut self.found {
                 found.end_pos = op.pos + 1;
+                found.range = self.start_pos..(op.pos + 1);
                 if op.action != Action::Increment && op.scope_to_clock(self.clock.as_ref()) {
                     found.ops.push(op);
                 }

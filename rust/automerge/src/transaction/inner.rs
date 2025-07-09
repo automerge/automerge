@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::change_graph::ChangeGraph;
@@ -267,12 +268,15 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         op: TxOp,
         succ: &[SuccInsert],
+        range: Range<usize>,
     ) {
-        if !op.is_delete() {
-            doc.ops_mut().splice(op.pos, &[&op]);
-        }
+        let added = doc.ops_mut().splice(op.pos, &[&op]);
 
         doc.ops_mut().add_succ(succ);
+
+        if self.scope.is_some() {
+            doc.ops_mut().reset_top(range.start..(range.end + added));
+        }
 
         self.finalize_op(patch_log, &op, None);
 
@@ -395,7 +399,7 @@ impl TransactionInner {
             .map(|op| op.add_succ(id, inc_value))
             .collect();
 
-        self.insert_local_op(doc, patch_log, op, &succ);
+        self.insert_local_op(doc, patch_log, op, &succ, query.range);
 
         Ok(Some(id))
     }
@@ -432,17 +436,6 @@ impl TransactionInner {
 
         let pred = query.ops.iter().map(|op| op.id).collect();
         let op = TxOp::list(id, *obj, query.end_pos, index, action, eid, pred);
-        /*
-                    id,
-                    obj: *obj,
-                    pos: query.end_pos,
-                    index,
-                    action,
-                    key: key.into_owned(),
-                    insert: false,
-                    pred,
-                };
-        */
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -450,7 +443,14 @@ impl TransactionInner {
             .map(|op| op.add_succ(id, inc_value))
             .collect::<Vec<_>>();
 
-        self.insert_local_op(doc, patch_log, op, &succ);
+        self.insert_local_op(doc, patch_log, op, &succ, query.range);
+
+        // inserts can delete a conflicted value reveal a counter
+        if let Some((i, s)) = succ.iter().rev().enumerate().find(|(_, s)| s.inc.is_some()) {
+            if i > 0 {
+                doc.ops.expose(s.pos)
+            }
+        }
 
         Ok(Some(id))
     }
