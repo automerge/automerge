@@ -268,7 +268,7 @@ impl ChangeGraph {
                 let start = max_op as u64 - num_ops + 1;
                 if counter < start {
                     Ordering::Greater
-                } else if max_op as u64 <= counter {
+                } else if (max_op as u64) < counter {
                     Ordering::Less
                 } else {
                     Ordering::Equal
