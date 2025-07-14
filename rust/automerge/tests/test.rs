@@ -2411,3 +2411,26 @@ fn confirm_last_change(doc: &mut AutoCommit) {
     let change = doc.get_last_local_change().unwrap();
     assert_eq!(vec![change.hash()], heads);
 }
+
+#[test]
+fn test_overwriting_a_conflict() {
+    let mut doc1 = AutoCommit::new();
+    let mut doc2 = doc1.fork();
+
+    // put the same values
+    doc1.put(&ROOT, "key", "value").unwrap();
+    doc2.put(&ROOT, "key", "value").unwrap();
+    doc1.merge(&mut doc2).unwrap();
+    doc2.merge(&mut doc1).unwrap();
+
+    assert_eq!(doc1.get_all(&ROOT, "key").unwrap().len(), 2);
+    assert_eq!(doc2.get_all(&ROOT, "key").unwrap().len(), 2);
+
+    doc1.put(&ROOT, "key", "value").unwrap();
+    doc2.put(&ROOT, "key", "value").unwrap();
+    doc1.merge(&mut doc2).unwrap();
+    doc2.merge(&mut doc1).unwrap();
+
+    assert_eq!(doc1.get_all(&ROOT, "key").unwrap().len(), 1);
+    assert_eq!(doc2.get_all(&ROOT, "key").unwrap().len(), 1);
+}

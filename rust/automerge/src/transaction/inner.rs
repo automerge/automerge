@@ -367,18 +367,17 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: &ObjMeta,
         prop: String,
-        action: OpType,
+        mut action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc
+        let mut query = doc
             .ops()
             .seek_ops_by_map_key(&obj.id, &prop, self.scope.as_ref());
 
+        let noop = query.check_for_noop(&mut action);
+        //if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
         if query.ops.is_empty() && action == OpType::Delete {
-            return Ok(None);
-        }
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
             return Ok(None);
         }
 
@@ -389,7 +388,7 @@ impl TransactionInner {
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::map(id, *obj, query.end_pos, action, prop, pred);
+        let op = TxOp::map(id, *obj, query.end_pos, action, prop, pred, noop);
 
         let inc_value = op.get_increment_value();
 
@@ -410,10 +409,10 @@ impl TransactionInner {
         patch_log: &mut PatchLog,
         obj: &ObjMeta,
         index: usize,
-        action: OpType,
+        mut action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let encoding = patch_log.text_rep().encoding(obj.typ);
-        let query = doc
+        let mut query = doc
             .ops()
             .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
         let id = self.next_id();
@@ -423,7 +422,9 @@ impl TransactionInner {
             .and_then(|op| op.cursor().ok())
             .ok_or(AutomergeError::InvalidIndex(index))?;
 
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+        let noop = query.check_for_noop(&mut action);
+        //if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+        if query.ops.is_empty() && action == OpType::Delete {
             return Ok(None);
         }
 
@@ -435,7 +436,7 @@ impl TransactionInner {
         }
 
         let pred = query.ops.iter().map(|op| op.id).collect();
-        let op = TxOp::list(id, *obj, query.end_pos, index, action, eid, pred);
+        let op = TxOp::list(id, *obj, query.end_pos, index, action, eid, pred, noop);
         let inc_value = op.get_increment_value();
         let succ = query
             .ops
@@ -829,7 +830,7 @@ impl TransactionInner {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
         let text_rep = patch_log.text_rep();
-        if patch_log.is_active() {
+        if patch_log.is_active() && !op.noop {
             if op.bld.insert {
                 if !op.is_mark() {
                     assert!(obj_typ.is_sequence());

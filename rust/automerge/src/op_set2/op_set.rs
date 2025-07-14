@@ -1177,6 +1177,19 @@ impl OpsFound<'_> {
         self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
     }
 
+    pub(crate) fn check_for_noop(&mut self, action: &mut types::OpType) -> bool {
+        if let Some(op) = self.ops.last() {
+            if let types::OpType::Put(v) = action {
+                if op.action == Action::Set && &op.value == v {
+                    self.ops.pop();
+                    *action = types::OpType::Delete;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         self.ops.last().and_then(|o| o.cursor().ok())
     }

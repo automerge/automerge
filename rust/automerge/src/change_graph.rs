@@ -801,6 +801,7 @@ mod tests {
                         OpType::Put("value".into()),
                         "key".to_string(),
                         vec![],
+                        false,
                     )
                 })
                 .collect::<Vec<_>>();

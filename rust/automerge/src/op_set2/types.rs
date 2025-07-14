@@ -681,29 +681,9 @@ impl PartialOrd for KeyRef<'_> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Key {
-    Map(String),
-    Seq(ElemId),
-}
-
-impl Key {}
-
-impl From<ElemId> for Key {
-    fn from(e: ElemId) -> Key {
-        Key::Seq(e)
-    }
-}
-
 impl From<ElemId> for KeyRef<'static> {
     fn from(e: ElemId) -> KeyRef<'static> {
         KeyRef::Seq(e)
-    }
-}
-
-impl From<String> for Key {
-    fn from(s: String) -> Key {
-        Key::Map(s)
     }
 }
 

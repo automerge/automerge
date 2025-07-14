@@ -169,6 +169,7 @@ pub(crate) struct TxOp {
     pub(crate) obj_type: ObjType,
     pub(crate) index: usize,
     pub(crate) pos: usize,
+    pub(crate) noop: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -255,6 +256,7 @@ impl TxOp {
         self.bld.id
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn list(
         id: OpId,
         obj: ObjMeta,
@@ -263,12 +265,14 @@ impl TxOp {
         _action: types::OpType,
         elemid: ElemId,
         pred: Vec<OpId>,
+        noop: bool,
     ) -> Self {
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -290,12 +294,14 @@ impl TxOp {
         _action: types::OpType,
         prop: String,
         pred: Vec<OpId>,
+        noop: bool,
     ) -> Self {
         let (action, value, expand, mark_name) = _action.clone().decompose();
         TxOp {
             obj_type: obj.typ,
             index: 0,
             pos,
+            noop,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -323,6 +329,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -350,6 +357,7 @@ impl TxOp {
             pos,
             index: 0,
             obj_type: obj.typ,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -378,6 +386,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -405,6 +414,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos: 0,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -1098,10 +1108,6 @@ impl<'a> Op<'a> {
 
     pub(crate) fn action(&self) -> OpType<'a> {
         self.op_type()
-    }
-
-    pub(crate) fn is_noop(&self, action: &types::OpType) -> bool {
-        matches!((&self.action(), action), (OpType::Put(n), types::OpType::Put(m)) if n == m)
     }
 
     pub(crate) fn is_inc(&self) -> bool {
