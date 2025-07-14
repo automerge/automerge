@@ -1,5 +1,5 @@
 use super::hexane::{ColumnDataIter, DeltaCursor, IntCursor};
-use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet};
+use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction};
 use super::types::{
     Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
 };
@@ -169,6 +169,7 @@ pub(crate) struct TxOp {
     pub(crate) obj_type: ObjType,
     pub(crate) index: usize,
     pub(crate) pos: usize,
+    pub(crate) noop: bool,
     pub(crate) bld: OpBuilder<'static>,
 }
 
@@ -255,20 +256,26 @@ impl TxOp {
         self.bld.id
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn list(
         id: OpId,
         obj: ObjMeta,
         pos: usize,
         index: usize,
-        _action: types::OpType,
+        action: ResolvedAction,
         elemid: ElemId,
         pred: Vec<OpId>,
     ) -> Self {
-        let (action, value, expand, mark_name) = _action.clone().decompose();
+        let (op_type, noop) = match action {
+            ResolvedAction::ConflictResolution(action) => (action, true),
+            ResolvedAction::VisibleUpdate(action) => (action, false),
+        };
+        let (action, value, expand, mark_name) = op_type.decompose();
         TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -287,15 +294,20 @@ impl TxOp {
         id: OpId,
         obj: ObjMeta,
         pos: usize,
-        _action: types::OpType,
+        action: ResolvedAction,
         prop: String,
         pred: Vec<OpId>,
     ) -> Self {
-        let (action, value, expand, mark_name) = _action.clone().decompose();
+        let (action, noop) = match action {
+            ResolvedAction::ConflictResolution(action) => (action, true),
+            ResolvedAction::VisibleUpdate(action) => (action, false),
+        };
+        let (action, value, expand, mark_name) = action.clone().decompose();
         TxOp {
             obj_type: obj.typ,
             index: 0,
             pos,
+            noop,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -323,6 +335,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -350,6 +363,7 @@ impl TxOp {
             pos,
             index: 0,
             obj_type: obj.typ,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -378,6 +392,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -405,6 +420,7 @@ impl TxOp {
             obj_type: obj.typ,
             pos: 0,
             index,
+            noop: false,
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -1098,10 +1114,6 @@ impl<'a> Op<'a> {
 
     pub(crate) fn action(&self) -> OpType<'a> {
         self.op_type()
-    }
-
-    pub(crate) fn is_noop(&self, action: &types::OpType) -> bool {
-        matches!((&self.action(), action), (OpType::Put(n), types::OpType::Put(m)) if n == m)
     }
 
     pub(crate) fn is_inc(&self) -> bool {

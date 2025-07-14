@@ -686,7 +686,7 @@ mod tests {
 
     use crate::{
         clock::ClockData,
-        op_set2::{change::build_change, OpSet, TxOp},
+        op_set2::{change::build_change, op_set::ResolvedAction, OpSet, TxOp},
         types::{ObjMeta, OpId, OpType},
         ActorId,
     };
@@ -798,7 +798,7 @@ mod tests {
                         OpId::new(start_op + opnum as u64, actor_idx),
                         ObjMeta::root(),
                         0,
-                        OpType::Put("value".into()),
+                        ResolvedAction::VisibleUpdate(OpType::Put("value".into())),
                         "key".to_string(),
                         vec![],
                     )
