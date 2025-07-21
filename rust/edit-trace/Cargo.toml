@@ -8,7 +8,7 @@ license = "MIT"
 automerge = { path = "../automerge" }
 criterion = "^0.6"
 jzon = "^0.12.5"
-rand = "^0.8"
+rand = "^0.9"
 serde_json = "1.0.128"
 
 

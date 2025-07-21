@@ -2,7 +2,7 @@ use divan::Bencher;
 use hexane::*;
 use std::time::Duration;
 
-use rand::{thread_rng, RngCore};
+use rand::{rng, RngCore};
 
 const N: u64 = 10_000;
 
@@ -14,7 +14,7 @@ const IRANGE: i64 = 1000;
 const URANGE: u64 = 1000;
 
 fn rand_u64() -> u64 {
-    thread_rng().next_u64() % URANGE
+    rng().next_u64() % URANGE
 }
 fn rand_i64() -> i64 {
     rand_u64() as i64 - IRANGE / 2
@@ -23,7 +23,7 @@ fn rand_bool() -> bool {
     rand_u64() % 2 == 0
 }
 fn rand_usize() -> usize {
-    thread_rng().next_u64() as usize
+    rng().next_u64() as usize
 }
 
 #[inline(never)]
