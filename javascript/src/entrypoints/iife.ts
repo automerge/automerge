@@ -4,9 +4,6 @@ UseApi(api)
 
 import * as Automerge from "../index.js"
 
-declare global {
-  interface Window {
-    Automerge: typeof Automerge
-  }
+if (typeof window !== "undefined") {
+  ;(window as any).Automerge = Automerge
 }
-window.Automerge = Automerge
