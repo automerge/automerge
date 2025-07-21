@@ -143,8 +143,6 @@ skip = [
     { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
     { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },
     { crate = "itertools@0.13.0", reason = "this is bought in by criterion-plot, which we only use in benchmarks" },
-    { crate = "getrandom@0.3.3", reason = "this is bought in by cbindgen which is only in build" },
-    { crate = "wasi@0.14.2+wasi-0.2.4", reason = "this is bought in by cbindgens dependency on getrandom, which is only in build" },
     { crate = "windows_x86_64_msvc@0.52.6", reason = "this is bought in by dev dependencies" },
     { crate = "windows_x86_64_gnullvm@0.52.6", reason = "this is bought in by dev dependencies" },
     { crate = "windows_i686_msvc@0.52.6", reason = "this is bought in by dev dependencies" },

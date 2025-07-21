@@ -2,11 +2,11 @@ use automerge::{transaction::Transactable, Automerge, ObjType, ROOT};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::distr::Alphanumeric;
+use rand::{rng, Rng};
 
 fn random_string(n: u64) -> String {
-    let rand_string: String = thread_rng()
+    let rand_string: String = rng()
         .sample_iter(&Alphanumeric)
         .take(n as usize)
         .map(char::from)

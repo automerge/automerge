@@ -171,3 +171,31 @@ module loader conventions. In order to make sure that this stuff continues to
 work we have a test suite which builds a package for each (subpath, platform)
 combination and tests that the package loads the WebAssembly correctly. This
 is implemented in `./packaging_tests/run.mjs`.
+
+### `getrandom` support
+
+The rust code relies on the
+[`getrandom`](https://docs.rs/getrandom/latest/getrandom/) crate to provide random
+number generation. In JavaScript this in turn depends on the WebCrypto API being
+available. For most platforms this is the case, however, there is a little
+complexity in Node 18.
+
+Node 18 doesn't support the WebCrypto API by default, but it can be accessed either
+by enabling the `--experimental-global-webcrypto` flag or by calling `require("crypto")`.
+For a long time `automerge-wasm` was using `getrandom` version `0.2.3` which contains
+a polyfill that checks if the code is running inside a CommonJS module in Node and
+if so uses `require("crypto")` to access the WebCrypto API. This meant that if you
+were using Node 18 with CommonJS modules then `automerge` would work fine. ESM modules
+have to enable the `--experimental-global-webcrypto` flag to make automerge work.
+
+`getrandom` has since removed the polyfill. We don't want to break code which was
+previously working without a major version bump though, so we add this polyfill to
+our own codebase. We do this by prepending some code to the generated `.cjs`
+file which is used in the node CommonJS environment. This code checks if we are
+in node 18 and if so polyfills `globalThis.crypto` with the `node:crypto`
+module. This prepending is achieved in the `javascript/build.mjs` script in a
+function called `prependWebcryptoPolyfill`.
+
+This unfortunately requires some slightly more complicated testing to make sure
+it continues to work. In `scripts/ci/node_18_packaging_test` there is some code
+which uses `fnm` to run the node_cjs_fullfat` test in a Node 18 environment.

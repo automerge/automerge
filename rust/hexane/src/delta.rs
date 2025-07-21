@@ -688,7 +688,7 @@ pub(crate) mod tests {
         let mut col: ColumnData<DeltaCursor> = ColumnData::new();
         let mut data = vec![];
         for _ in 0..10000 {
-            let value = rand::random::<usize>() % 10;
+            let value = rand::random::<u32>() % 10;
             if value > 0 {
                 data.push(Some(value as i64 - 1));
             } else {
@@ -700,11 +700,11 @@ pub(crate) mod tests {
         for _ in 0..1000 {
             let mut iter1 = data.iter();
             let mut iter2 = col.iter();
-            let mut step = rand::random::<usize>() % 40;
-            while let Some(val1) = iter1.nth(step) {
-                let val2 = iter2.nth(step);
+            let mut step = rand::random::<u32>() % 40;
+            while let Some(val1) = iter1.nth(step as usize) {
+                let val2 = iter2.nth(step as usize);
                 assert_eq!(val1.as_ref(), val2.flatten().as_deref());
-                step = rand::random::<usize>() % (data.len() / 2);
+                step = rand::random::<u32>() % ((data.len() as u32) / 2);
             }
         }
     }

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+# see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
+THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+JS_PROJECT=$THIS_SCRIPT/../../javascript;
+USE_NVM=false
+
+# We have to run the node_cjs_fullfat test in a node 18 environment
+# to make sure the webcrypto polyfill for Node 18 is picked up
+# correctly. See the notes in `javascript/HACKING.md#getrandom-support`.
+# If you change the logic here make sure to update the notes there
+#
+# To run in a Node 18 environment we try and use `fnm` otherwise we give up
+# CI always runs this test anyway so we'll catch any issues there
+if node --version | grep -q "v18"; then
+    echo "Running tests in Node 18 environment"
+elif command -v fnm &> /dev/null; then
+    USE_NVM=true
+else
+    echo "Warning: Not running node 18 packaging test as fnm is not available and current Node version is not 18."
+    exit 0
+fi
+
+yarn --cwd $JS_PROJECT install
+node $JS_PROJECT/scripts/build.mjs
+
+if [ "$USE_NVM" = true ]; then
+    fnm exec --using 18 -- node $JS_PROJECT/packaging_tests/run.mjs node_cjs_fullfat
+else
+    node $JS_PROJECT/packaging_tests/run.mjs node_cjs_fullfat
+fi

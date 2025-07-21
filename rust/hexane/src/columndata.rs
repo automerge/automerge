@@ -987,7 +987,7 @@ pub(crate) mod tests {
     use rand::rngs::SmallRng;
     use std::cmp::{max, min};
 
-    const FUZZ_SIZE: usize = 1_000;
+    const FUZZ_SIZE: u32 = 1_000;
 
     fn test_splice<'a, C: ColumnCursor, E>(
         vec: &'a mut Vec<E>,
@@ -1015,7 +1015,7 @@ pub(crate) mod tests {
         let mut advanced_by = 0;
         let mut iter = col.iter();
         while advanced_by < data.len() - 1 {
-            let advance_by = rng.gen_range(1..(data.len() - advanced_by));
+            let advance_by = rng.random_range(1..(data.len() - advanced_by));
             iter.advance_by(advance_by);
             let expected = data[advance_by + advanced_by..].to_vec();
             let actual = iter.clone().to_vec();
@@ -1357,7 +1357,7 @@ pub(crate) mod tests {
         fn index(len: usize, rng: &mut SmallRng) -> usize {
             match len {
                 0 => 0,
-                _ => rng.gen::<usize>() % len,
+                _ => (rng.random::<u32>() as usize) % len,
             }
         }
         fn null() -> Self;
@@ -1368,9 +1368,9 @@ pub(crate) mod tests {
             Self: Sized,
         {
             let mut result = vec![];
-            let len = rng.gen::<usize>() % 40 + 1;
+            let len = rng.random::<u32>() % 40 + 1;
             for _ in 0..len {
-                if rng.gen::<i64>() % 3 == 0 {
+                if rng.random::<i64>() % 3 == 0 {
                     result.push(Self::null())
                 } else {
                     result.push(Self::rand(rng))
@@ -1386,7 +1386,7 @@ pub(crate) mod tests {
         }
 
         fn rand(rng: &mut SmallRng) -> Option<i64> {
-            Some((rng.gen::<u64>() % 10) as i64)
+            Some((rng.random::<u64>() % 10) as i64)
         }
 
         fn plus(&self, index: usize) -> Option<i64> {
@@ -1399,7 +1399,7 @@ pub(crate) mod tests {
             false
         }
         fn rand(rng: &mut SmallRng) -> bool {
-            rng.gen::<bool>()
+            rng.random::<bool>()
         }
         fn plus(&self, _index: usize) -> bool {
             true
@@ -1411,7 +1411,7 @@ pub(crate) mod tests {
             None
         }
         fn rand(rng: &mut SmallRng) -> Option<u64> {
-            Some(rng.gen::<u64>() % 10)
+            Some(rng.random::<u64>() % 10)
         }
         fn plus(&self, index: usize) -> Option<u64> {
             self.map(|i| i + index as u64)
@@ -1423,7 +1423,7 @@ pub(crate) mod tests {
             None
         }
         fn rand(rng: &mut SmallRng) -> Option<String> {
-            Some(format!("0x{:X}", rng.gen::<usize>()).to_owned())
+            Some(format!("0x{:X}", rng.random::<u32>()).to_owned())
         }
         fn plus(&self, index: usize) -> Option<String> {
             self.as_ref().map(|s| format!("{}/{}", s, index).to_owned())
@@ -1440,7 +1440,7 @@ pub(crate) mod tests {
 
     fn generate_splice<T: TestRand>(len: usize, rng: &mut SmallRng) -> (usize, Vec<T>) {
         let index = T::index(len, rng);
-        let patch = match rng.gen::<usize>() % 4 {
+        let patch = match rng.random::<u32>() % 4 {
             0 => vec![T::null(), T::null(), T::null()],
             1 => {
                 let n = T::rand(rng);
@@ -1448,7 +1448,7 @@ pub(crate) mod tests {
             }
             2 => {
                 let n = T::rand(rng);
-                let step = rng.gen::<usize>() % 4;
+                let step = (rng.random::<u32>() as usize) % 4;
                 vec![n.clone(), n.plus(step), n.plus(step * 2)]
             }
             _ => T::rand_vec(rng),
@@ -1666,7 +1666,7 @@ pub(crate) mod tests {
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
         for _ in 0..FUZZ_SIZE {
-            let val = rng.gen::<u64>() % 4;
+            let val = rng.random::<u64>() % 4;
             if val == 0 {
                 data.push(None);
             } else {
@@ -1677,10 +1677,10 @@ pub(crate) mod tests {
         col.splice(0, 0, data.clone());
 
         for _ in 0..FUZZ_SIZE {
-            let a = rng.gen::<usize>() % FUZZ_SIZE;
-            let b = rng.gen::<usize>() % FUZZ_SIZE;
-            let min = std::cmp::min(a, b);
-            let max = std::cmp::max(a, b);
+            let a = rng.random::<u32>() % FUZZ_SIZE;
+            let b = rng.random::<u32>() % FUZZ_SIZE;
+            let min = std::cmp::min(a, b) as usize;
+            let max = std::cmp::max(a, b) as usize;
 
             assert_eq!(col.iter_range(min..max).to_vec(), data[min..max].to_vec());
         }
@@ -1691,9 +1691,9 @@ pub(crate) mod tests {
         let seed = rand::random::<u64>();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data = vec![];
-        const MAX: usize = FUZZ_SIZE;
+        const MAX: usize = FUZZ_SIZE as usize;
         for _ in 0..MAX {
-            let val = rng.gen::<u64>() % 4;
+            let val = rng.random::<u64>() % 4;
             if val == 0 {
                 data.push(None);
             } else {
@@ -1730,9 +1730,9 @@ pub(crate) mod tests {
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut data_i64 = vec![];
         let mut data_u64 = vec![];
-        const MAX: usize = FUZZ_SIZE;
+        const MAX: usize = FUZZ_SIZE as usize;
         for _ in 0..MAX {
-            let val = rng.gen::<u32>();
+            let val = rng.random::<u32>();
             if val == 0 {
                 data_i64.push(None);
                 data_u64.push(None);
@@ -1763,26 +1763,26 @@ pub(crate) mod tests {
 
     #[test]
     fn fuzz_find_by_values() {
-        const N: usize = 10_000;
-        const STEP: usize = 3;
+        const N: u32 = 10_000;
+        const STEP: u32 = 3;
         let mut rng = make_rng();
         let col: ColumnData<UIntCursor> = (0..N)
-            .flat_map(|i| [i as u64 * 2 + 1; STEP].into_iter())
+            .flat_map(|i| [i as u64 * 2 + 1; STEP as usize].into_iter())
             .collect();
         for _ in 0..FUZZ_SIZE {
-            let roll = rng.gen::<usize>() % N;
+            let roll = rng.random::<u32>() % N;
             let target1 = (roll * 2) as u64;
             let target2 = (roll * 2 + 1) as u64;
 
-            let mut a = rng.gen::<usize>() % (N * STEP);
-            let mut b = rng.gen::<usize>() % (N * STEP);
+            let mut a = (rng.random::<u32>() % (N * STEP)) as usize;
+            let mut b = (rng.random::<u32>() % (N * STEP)) as usize;
             if a > b {
                 std::mem::swap(&mut a, &mut b);
             }
 
             assert!(b >= a);
 
-            let start = roll * 3;
+            let start = (roll * 3) as usize;
             let a_start = min(b, max(start, a));
             let a_end1 = max(a_start, min(start, b));
             let a_end2 = max(a_start, min(start + 3, b));
@@ -1827,18 +1827,18 @@ pub(crate) mod tests {
     #[test]
     fn fuzz_find_by_range() {
         const N: usize = 8;
-        const STEP: u64 = 4;
+        const STEP: u32 = 4;
         let mut rng = make_rng();
         for _ in 0..FUZZ_SIZE {
             let data = (0..N)
-                .map(|_| rng.gen::<u64>() % STEP + 1)
+                .map(|_| rng.random::<u64>() % (STEP + 1) as u64)
                 .collect::<Vec<_>>();
             let col1: ColumnData<UIntCursor> = data.clone().into_iter().collect();
             let col2: ColumnData<DeltaCursor> =
                 data.clone().into_iter().map(|i| i as i64).collect();
 
-            let a = rng.gen::<usize>() % (STEP as usize) + 1;
-            let b = rng.gen::<usize>() % (STEP as usize) + 1;
+            let a = (rng.random::<u32>() % STEP + 1) as usize;
+            let b = (rng.random::<u32>() % STEP + 1) as usize;
             let range = a.min(b)..a.max(b);
 
             let result1 = col1.find_by_range(range.clone()).collect::<Vec<_>>();
@@ -1929,7 +1929,7 @@ pub(crate) mod tests {
         let mut acc = vec![];
         let mut agg = 0;
         for _ in 0..SIZE {
-            let val = rng.gen::<u64>() % 4;
+            let val = rng.random::<u64>() % 4;
             agg += val;
             data.push(val);
             acc.push(agg);
@@ -1938,7 +1938,7 @@ pub(crate) mod tests {
         for _ in 0..10 {
             let mut iter = column.iter();
             loop {
-                let advance = rng.gen::<usize>() % 8 + 1;
+                let advance = rng.random::<u64>() % 8 + 1;
                 let pos1 = iter.pos();
                 iter.advance_acc_by(advance);
                 if let Some(val) = iter.next() {

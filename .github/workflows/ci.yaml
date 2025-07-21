@@ -101,6 +101,28 @@ jobs:
       - name: run tests
         run: ./scripts/ci/js_tests
 
+  # This test is necessary because we want to make sure that the webcrypto polyfill
+  # for node 18 works correctly. See the notes in javascript/HACKING.md#getrandom-support
+  node_18_packaging_test:
+    runs-on: ubuntu-latest
+    needs:
+      - build_wasm
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+      - uses: jetli/wasm-bindgen-action@v0.2.0
+        with:
+          # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
+          version: "0.2.100"
+      - name: Install wasm32 target
+        working-directory: rust
+        run: rustup target add wasm32-unknown-unknown
+      - name: run tests
+        run: ./scripts/ci/node_18_packaging_test
+
   linux:
     runs-on: ubuntu-latest
     strategy:

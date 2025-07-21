@@ -20,8 +20,8 @@ leb128 = "^0.2.5"
 thiserror = "^2.0.12"
 
 [dev-dependencies]
-proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
-rand = { version = "^0.8.4", optional = false, features = [ "small_rng"] }
+proptest = { version = "^1.7", default-features = false, features = ["std"] }
+rand = { version = "^0.9", optional = false, features = ["small_rng"] }
 divan = "0.1.15"
 
 [profile.release]
@@ -43,5 +43,3 @@ harness = false
 version = "^0.3.55"
 features = ["console"]
 optional = true
-
-
