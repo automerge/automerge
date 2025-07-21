@@ -45,7 +45,7 @@ optional = true
 
 [dev-dependencies]
 pretty_assertions = "1.0.0"
-proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
+proptest = { version = "^1.7.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features = [
     "float_roundtrip",
 ], default-features = true }
