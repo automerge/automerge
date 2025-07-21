@@ -266,9 +266,17 @@ function copyAndFixupWasm(wasmBuildTarball) {
 
 function compileTypescript() {
   console.log("compiling typescript")
-  execSync("node_modules/.bin/tsc -p config/mjs.json", {
-    cwd: jsProjectDir,
-  })
+  try {
+    execSync("node_modules/.bin/tsc -p config/mjs.json", {
+      cwd: jsProjectDir,
+    })
+  } catch (error) {
+    console.error(".-------------------------------.")
+    console.error("| TypeScript compilation failed |")
+    console.error("'-------------------------------'")
+    process.stdout.write(error.stdout)
+    process.exit(1)
+  }
 
   execSync(
     "node_modules/.bin/tsc -p config/declonly.json --emitDeclarationOnly",

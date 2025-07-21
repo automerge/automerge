@@ -435,34 +435,6 @@ const ListHandler = {
   },
 }
 
-const TextHandler = Object.assign({}, ListHandler, {
-  get(target: Target, index: any) {
-    const { context, objectId } = target
-    index = parseListIndex(index)
-    if (index === Symbol.hasInstance) {
-      return (instance: any) => {
-        return Array.isArray(instance)
-      }
-    }
-    if (index === Symbol.toStringTag) {
-      return target[Symbol.toStringTag]
-    }
-    if (index === OBJECT_ID) return objectId
-    if (index === IS_PROXY) return true
-    if (index === TRACE) return target.trace
-    if (index === STATE) return { handle: context }
-    if (index === "length") return context.length(objectId)
-    if (typeof index === "number") {
-      return valueAt(target, index)
-    } else {
-      return textMethods(target)[index] || listMethods(target)[index]
-    }
-  },
-  getPrototypeOf(/*target*/) {
-    return Object.getPrototypeOf(new Text())
-  },
-})
-
 export function mapProxy(
   context: Automerge,
   objectId: ObjID,
@@ -497,26 +469,6 @@ export function listProxy(
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   return new Proxy(proxied, ListHandler) as unknown as ListValue
-}
-
-interface TextProxy extends Text {
-  splice: (index: any, del: any, ...vals: any[]) => void
-}
-
-export function textProxy(
-  context: Automerge,
-  objectId: ObjID,
-  path: Prop[],
-): TextProxy {
-  const target: Target = {
-    context,
-    objectId,
-    path: path || [],
-    cache: {},
-  }
-  const proxied = {}
-  Object.assign(proxied, target)
-  return new Proxy(proxied, TextHandler) as unknown as TextProxy
 }
 
 export function rootProxy<T>(context: Automerge): T {
@@ -963,20 +915,5 @@ export function isCounter(obj: any): obj is Counter {
     typeof obj === "object" &&
     obj !== null &&
     Object.prototype.hasOwnProperty.call(obj, COUNTER)
-  )
-}
-
-/*
- * Check if an object is a {@link Text}
- */
-export function isText(obj: any): obj is Text {
-  // We used to determine whether something was a Text by doing an instanceof check, but
-  // this doesn't work if the automerge module is loaded twice somehow. Instead, use the presence
-  // of a symbol to determine if something is a TEXT
-
-  return (
-    typeof obj === "object" &&
-    obj !== null &&
-    Object.prototype.hasOwnProperty.call(obj, TEXT)
   )
 }
