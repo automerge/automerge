@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use crate::exid::ExId;
-use crate::marks::{ExpandMark, Mark};
+use crate::iter::Span;
+use crate::marks::{ExpandMark, Mark, UpdateSpansConfig};
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
@@ -136,9 +137,13 @@ pub trait Transactable: ReadDoc {
     /// This performs a diff against the current state of both the text and the block markers in a
     /// text object and attempts to perform a reasonably minimal set of operations to update the
     /// document to match the new text.
-    fn update_spans<'a, O: AsRef<ExId>, I: IntoIterator<Item = BlockOrText<'a>>>(
+    ///
+    /// The `config` argument is an [`UpdateSpansConfig`] object which is used to configure how the
+    /// [`ExpandMark`] flag will be set for spans which are created as part of the reconciliation
+    fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
         &mut self,
         text: O,
+        config: UpdateSpansConfig,
         new_text: I,
     ) -> Result<(), AutomergeError>;
 

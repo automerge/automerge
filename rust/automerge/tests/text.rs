@@ -3,7 +3,7 @@ use std::str::FromStr;
 use automerge::{
     hydrate_list, hydrate_map,
     iter::Span,
-    marks::{ExpandMark, Mark},
+    marks::{ExpandMark, Mark, UpdateSpansConfig},
     patches::TextRepresentation,
     transaction::Transactable,
     ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, Prop, ReadDoc,
@@ -352,7 +352,10 @@ fn empty_marks_before_block_marker_dont_repeat_text() {
         vec![
             Span::Block(hydrate_map! {}),
             Span::Block(hydrate_map! {}),
-            Span::Text("a".to_string(), None),
+            Span::Text {
+                text: "a".to_string(),
+                marks: None
+            },
         ]
     );
 }
@@ -393,19 +396,15 @@ fn insertions_after_noexpand_spans_are_not_marked() {
     .unwrap();
 
     let spans = doc.spans(&text).unwrap();
-    let mut new_blocks = spans
-        .map(|s| match s {
-            Span::Text(s, _) => automerge::BlockOrText::Text(s.into()),
-            Span::Block(m) => automerge::BlockOrText::Block(m),
-        })
-        .collect::<Vec<_>>();
-    new_blocks.push(automerge::BlockOrText::Block(hydrate_map! {
+    let mut new_blocks = spans.collect::<Vec<_>>();
+    new_blocks.push(Span::Block(hydrate_map! {
         "type" => "paragraph",
         "parents" => hydrate_list![],
         "attrs" => hydrate_map!{},
     }));
 
-    doc.update_spans(&text, new_blocks).unwrap();
+    doc.update_spans(&text, UpdateSpansConfig::default(), new_blocks)
+        .unwrap();
 
     let heads_before = doc.get_heads();
     doc.splice_text(&text, 11, 0, "a").unwrap();
@@ -702,7 +701,7 @@ proptest::proptest! {
         }
 
         let span_chars = spans.iter().map(|span| match span {
-            Span::Text(text, _) => text.clone(),
+            Span::Text{ text, marks: _ } => text.clone(),
             Span::Block(_) => "\n".to_string(),
         }).collect::<String>();
         if !span_chars.chars().eq(expected_chars.chars()) {
@@ -727,7 +726,7 @@ fn marks_are_consolidated(spans: &Vec<Span>) -> bool {
     let mut last_marks = None;
     for span in spans {
         match span {
-            Span::Text(_, marks) => {
+            Span::Text { text: _, marks } => {
                 if Some(marks) == last_marks {
                     return false;
                 }

@@ -1,11 +1,12 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::automerge::Automerge;
+use crate::iter::Span;
 use crate::{
     clock::Clock,
     iter::{SpanInternal, SpansInternal},
     transaction::TransactionInner,
-    BlockOrText, ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
+    ObjId as ExId, PatchLog, ReadDoc, TextEncoding,
 };
 mod myers;
 mod replace;
@@ -132,16 +133,20 @@ impl myers::DiffHook for TxHook<'_> {
     }
 }
 
-pub(crate) fn myers_block_diff<'a, 'b, I: IntoIterator<Item = BlockOrText<'b>>>(
+pub(crate) fn myers_block_diff<'a, I: IntoIterator<Item = Span>>(
     doc: &'a mut Automerge,
     tx: &'a mut TransactionInner,
     patch_log: &mut PatchLog,
     text_obj: &crate::ObjId,
     new: I,
+    config: &crate::marks::UpdateSpansConfig,
 ) -> Result<(), crate::AutomergeError> {
     let text_obj_meta = doc.exid_to_obj(text_obj)?;
     let old = spans_as_grapheme(doc, &text_obj_meta.id, None)?;
-    let new = block_or_text_as_grapheme(new.into_iter());
+    let new_spans: Vec<Span> = new.into_iter().collect();
+    let new = span_as_grapheme(new_spans.iter().cloned());
+
+    // First pass: Update text and block structure
     let mut hook = replace::Replace::new(BlockDiffHook {
         tx,
         doc,
@@ -151,16 +156,95 @@ pub(crate) fn myers_block_diff<'a, 'b, I: IntoIterator<Item = BlockOrText<'b>>>(
         old: &old,
         new: &new,
     });
-    //let mut hook = BlockDiffHook {
-    //tx,
-    //doc,
-    //patch_log,
-    //obj: text_obj,
-    //idx: 0,
-    //old: &old,
-    //new: &new,
-    //};
-    myers::diff(&mut hook, &old, 0..old.len(), &new, 0..new.len())
+    myers::diff(&mut hook, &old, 0..old.len(), &new, 0..new.len())?;
+
+    // Second pass: Apply marks
+    apply_marks_diff(doc, tx, patch_log, text_obj, &new_spans, config)
+}
+
+fn apply_marks_diff(
+    doc: &mut Automerge,
+    tx: &mut TransactionInner,
+    patch_log: &mut PatchLog,
+    text_obj: &crate::ObjId,
+    new_spans: &[Span],
+    config: &crate::marks::UpdateSpansConfig,
+) -> Result<(), crate::AutomergeError> {
+    // Collect all marks that should exist after the update
+    let mut new_marks = Vec::new();
+    let mut idx = 0;
+    for span in new_spans {
+        match span {
+            Span::Block(_) => {
+                idx += 1; // Blocks take up one position
+            }
+            Span::Text { text, marks } => {
+                let text_width = doc.text_encoding().width(text);
+
+                if let Some(mark_set) = marks {
+                    for (mark_name, mark_value) in mark_set.iter() {
+                        new_marks.push((
+                            mark_name.to_string(),
+                            mark_value.clone(),
+                            idx,
+                            idx + text_width,
+                        ));
+                    }
+                }
+
+                idx += text_width;
+            }
+        }
+    }
+
+    // Get current marks on the text
+    let current_marks = doc.marks_for(text_obj, None)?;
+
+    // Determine which marks to remove (those not in the new set)
+    let mut marks_to_remove = Vec::new();
+    for mark in current_marks {
+        let should_keep = new_marks.iter().any(|(name, value, start, end)| {
+            name == mark.name && value == &mark.value && *start == mark.start && *end == mark.end
+        });
+
+        if !should_keep {
+            marks_to_remove.push(mark);
+        }
+    }
+
+    // Remove marks that are no longer needed
+    for mark in marks_to_remove {
+        let expand = config
+            .per_mark_expands
+            .get(mark.name.as_str())
+            .copied()
+            .unwrap_or(config.default_expand);
+
+        tx.unmark(
+            doc, patch_log, text_obj, &mark.name, mark.start, mark.end, expand,
+        )?;
+    }
+
+    // Add new marks that don't already exist
+    for (mark_name, mark_value, start, end) in new_marks {
+        let already_exists = doc.marks_for(text_obj, None)?.iter().any(|m| {
+            m.name == mark_name && m.value == mark_value && m.start == start && m.end == end
+        });
+
+        if !already_exists {
+            let expand = config
+                .per_mark_expands
+                .get(&mark_name)
+                .copied()
+                .unwrap_or(config.default_expand);
+
+            let mark = crate::marks::Mark::new(mark_name, mark_value, start, end);
+
+            tx.mark(doc, patch_log, text_obj, mark, expand)?;
+        }
+    }
+
+    Ok(())
 }
 
 struct BlockDiffHook<'a> {
@@ -388,15 +472,13 @@ fn spans_as_grapheme(
     Ok(result)
 }
 
-fn block_or_text_as_grapheme<'a, I: Iterator<Item = BlockOrText<'a>>>(
-    iter: I,
-) -> Vec<BlockOrGrapheme> {
+fn span_as_grapheme<I: Iterator<Item = Span>>(iter: I) -> Vec<BlockOrGrapheme> {
     let mut result = Vec::with_capacity(iter.size_hint().0);
     for b in iter {
         match b {
-            BlockOrText::Block(b) => result.push(BlockOrGrapheme::Block(b)),
-            BlockOrText::Text(t) => {
-                for g in t.graphemes(true) {
+            Span::Block(b) => result.push(BlockOrGrapheme::Block(b)),
+            Span::Text { text, .. } => {
+                for g in text.graphemes(true) {
                     result.push(BlockOrGrapheme::Grapheme(g.to_string()));
                 }
             }

@@ -39,7 +39,10 @@ pub(crate) enum SpanInternal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Span {
     /// A span of text and the marks that were active for that span
-    Text(String, Option<Arc<MarkSet>>),
+    Text {
+        text: String,
+        marks: Option<Arc<MarkSet>>,
+    },
     /// A block marker
     Block(crate::hydrate::Map),
 }
@@ -47,7 +50,7 @@ pub enum Span {
 impl Span {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Text(s, _) => s,
+            Self::Text { text, .. } => text,
             Self::Block(_) => PLACEHOLDER,
         }
     }
@@ -285,16 +288,16 @@ impl SpanInternal {
         encoding: TextEncoding,
     ) -> Span {
         match self {
-            SpanInternal::Text(txt, _, marks) => Span::Text(
-                txt,
-                marks.and_then(|m| {
+            SpanInternal::Text(text, _, marks) => Span::Text {
+                text,
+                marks: marks.and_then(|m| {
                     if m.non_deleted_marks().is_empty() {
                         None
                     } else {
                         Some(Arc::new(m.as_ref().clone().without_unmarks()))
                     }
                 }),
-            ),
+            },
             SpanInternal::Obj(opid, _) => {
                 let value = op_set.hydrate_map(&opid.into(), clock, encoding);
                 let Value::Map(value) = value else {
