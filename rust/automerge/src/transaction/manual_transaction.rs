@@ -3,8 +3,8 @@ use std::ops::RangeBounds;
 use crate::automerge::{Automerge, Parents, ReadDoc};
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
-use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
-use crate::marks::{ExpandMark, Mark, MarkSet};
+use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
+use crate::marks::{ExpandMark, Mark, MarkSet, UpdateSpansConfig};
 use crate::patches::{PatchLog, TextRepresentation};
 use crate::types::{Clock, ScalarValue};
 use crate::{hydrate, AutomergeError};
@@ -514,13 +514,14 @@ impl Transactable for Transaction<'_> {
         self.do_tx(|tx, doc, hist| crate::text_diff::myers_diff(doc, tx, hist, obj, new_text))
     }
 
-    fn update_spans<'b, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'b>>>(
+    fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
         &mut self,
         text: O,
+        config: UpdateSpansConfig,
         new_text: I,
     ) -> Result<(), AutomergeError> {
         self.do_tx(move |tx, doc, hist| {
-            crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text)
+            crate::text_diff::myers_block_diff(doc, tx, hist, text.as_ref(), new_text, &config)
         })
     }
 

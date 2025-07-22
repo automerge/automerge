@@ -662,10 +662,10 @@ impl TryFrom<JS> for Vec<Capability> {
     }
 }
 
-pub(crate) fn import_block_or_text(
+pub(crate) fn import_span(
     doc: &Automerge,
     value: JS,
-) -> Result<am::BlockOrText<'static>, error::InvalidBlockOrText> {
+) -> Result<am::Span, error::InvalidBlockOrText> {
     let Ok(obj) = value.0.dyn_into::<Object>() else {
         return Err(error::InvalidBlockOrText::NotObjectOrString);
     };
@@ -679,7 +679,7 @@ pub(crate) fn import_block_or_text(
             let text = text
                 .as_string()
                 .ok_or(error::InvalidBlockOrText::TextNotString)?;
-            Ok(am::BlockOrText::Text(text.into()))
+            Ok(am::Span::Text { text, marks: None })
         }
         "block" => {
             let value = js_get(&obj, "value")?;
@@ -687,7 +687,7 @@ pub(crate) fn import_block_or_text(
             let Ok(am::hydrate::Value::Map(map)) = hydrate_val else {
                 return Err(error::InvalidBlockOrText::BlockNotObject);
             };
-            Ok(am::BlockOrText::Block(map))
+            Ok(am::Span::Block(map))
         }
         other => Err(error::InvalidBlockOrText::InvalidType(other.to_string())),
     }
@@ -703,9 +703,9 @@ pub(crate) fn import_update_spans_args(
         .map_err(|_| error::InvalidUpdateSpansArgs::NotArray)?;
     let mut values = Vec::new();
     for (i, v) in value.into_iter().enumerate() {
-        let block = import_block_or_text(doc, JS(v))
+        let span = import_span(doc, JS(v))
             .map_err(|e| error::InvalidUpdateSpansArgs::InvalidElement(i, e))?;
-        values.push(block);
+        values.push(span);
     }
     Ok(UpdateSpansArgs(values))
 }
@@ -1457,7 +1457,7 @@ pub(crate) fn export_span(
     span: Span,
 ) -> Result<Object, error::SetProp> {
     match span {
-        Span::Text(t, m) => {
+        Span::Text { text: t, marks: m } => {
             let result = Object::new();
             js_set(&result, "type", "text")?;
             js_set(&result, "value", t)?;

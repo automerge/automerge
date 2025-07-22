@@ -395,7 +395,10 @@ fn split_block() {
             doc.spans(text)
                 .unwrap()
                 .filter_map(|s| match s {
-                    automerge::iter::Span::Text(val, _) => Some(val),
+                    automerge::iter::Span::Text {
+                        text: val,
+                        marks: _,
+                    } => Some(val),
                     automerge::iter::Span::Block(_) => None,
                 })
                 .collect::<Vec<_>>()

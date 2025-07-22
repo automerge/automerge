@@ -32,6 +32,7 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
+use automerge::marks::UpdateSpansConfig;
 use automerge::patches::TextRepresentation;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
@@ -606,7 +607,8 @@ impl Automerge {
             return Err(error::UpdateSpans::ObjectNotText);
         }
         let args = interop::import_update_spans_args(self, JS(args))?;
-        self.doc.update_spans(&obj, args.0)?;
+        self.doc
+            .update_spans(&obj, UpdateSpansConfig::default(), args.0)?;
         Ok(())
     }
 
@@ -1723,7 +1725,7 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
     SyncState::decode(data)
 }
 
-struct UpdateSpansArgs(Vec<am::BlockOrText<'static>>);
+struct UpdateSpansArgs(Vec<am::iter::Span>);
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use automerge::{
     hydrate_list, hydrate_map, hydrate_text,
     iter::Span,
-    marks::{ExpandMark, Mark},
+    marks::{ExpandMark, Mark, UpdateSpansConfig},
     transaction::Transactable,
-    AutoCommit, BlockOrText, ObjType, ReadDoc, ScalarValue, ROOT,
+    AutoCommit, ObjType, ReadDoc, ScalarValue, ROOT,
 };
 use test_log::test;
 
@@ -51,48 +51,54 @@ fn update_blocks_change_block_properties() {
 
     doc.update_spans(
         &text,
+        UpdateSpansConfig::default(),
         [
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "paragraph",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("item 1".into()),
-            BlockOrText::Block(hydrate_map! {
+            Span::Text {
+                text: "item 1".into(),
+                marks: Default::default(),
+            },
+            Span::Block(hydrate_map! {
                 "type" => "unordered-list-item",
                 "parents" => hydrate_list!["ordered-list-item"],
                 "attrs" => hydrate_map!{
                     "key" => 1,
                 },
             }),
-            BlockOrText::Text("item 2".into()),
+            Span::Text {
+                text: "item 2".into(),
+                marks: Default::default(),
+            },
         ],
     )
     .unwrap();
 
-    let spans = doc
-        .spans(&text)
-        .unwrap()
-        .map(|s| match s {
-            automerge::iter::Span::Block(b) => BlockOrText::Block(b),
-            automerge::iter::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
-        })
-        .collect::<Vec<_>>();
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
     assert_eq!(
         spans,
         vec![
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "paragraph",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("item 1".into()),
-            BlockOrText::Block(hydrate_map! {
+            Span::Text {
+                text: "item 1".into(),
+                marks: Default::default()
+            },
+            Span::Block(hydrate_map! {
                 "type" => "unordered-list-item",
                 "parents" => hydrate_list!["ordered-list-item"],
                 "attrs" => hydrate_map!{"key" => 1}
             }),
-            BlockOrText::Text("item 2".into()),
+            Span::Text {
+                text: "item 2".into(),
+                marks: Default::default()
+            },
         ]
     );
 }
@@ -110,48 +116,117 @@ fn update_blocks_updates_text() {
 
     doc.update_spans(
         &text,
+        UpdateSpansConfig::default(),
         [
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "ordered-list-item",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("the first thing".into()),
-            BlockOrText::Block(hydrate_map! {
+            Span::Text {
+                text: "the first thing".into(),
+                marks: Default::default(),
+            },
+            Span::Block(hydrate_map! {
                 "type" => "paragraph",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("the things are done".into()),
+            Span::Text {
+                text: "the things are done".into(),
+                marks: Default::default(),
+            },
         ],
     )
     .unwrap();
 
     //let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    let spans = doc
-        .spans(&text)
-        .unwrap()
-        .map(|s| match s {
-            automerge::iter::Span::Block(b) => BlockOrText::Block(b),
-            automerge::iter::Span::Text(t, _) => BlockOrText::Text(std::borrow::Cow::Owned(t)),
-        })
-        .collect::<Vec<_>>();
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
     assert_eq!(
         spans,
         vec![
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "ordered-list-item",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("the first thing".into()),
-            BlockOrText::Block(hydrate_map! {
+            Span::Text {
+                text: "the first thing".into(),
+                marks: Default::default()
+            },
+            Span::Block(hydrate_map! {
                 "type" => "paragraph",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("the things are done".into()),
+            Span::Text {
+                text: "the things are done".into(),
+                marks: Default::default()
+            },
         ]
+    );
+}
+
+#[test]
+fn update_blocks_updates_marks() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "onetwo").unwrap();
+    let _block2 = doc.split_block(&text, 6).unwrap();
+    doc.splice_text(&text, 7, 0, "threefour").unwrap();
+
+    doc.update_diff_cursor();
+
+    doc.update_spans(
+        &text,
+        UpdateSpansConfig::default(),
+        [
+            Span::Text {
+                text: "one".into(),
+                marks: Default::default(),
+            },
+            Span::Text {
+                text: "two".into(),
+                marks: markset(vec![("bold", true.into())]),
+            },
+            Span::Block(hydrate_map! {}),
+            Span::Text {
+                text: "three".into(),
+                marks: markset(vec![("bold", true.into())]),
+            },
+            Span::Text {
+                text: "four".into(),
+                marks: Default::default(),
+            },
+            Span::Block(hydrate_map! {}),
+        ],
+    )
+    .unwrap();
+
+    //let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text {
+                text: "one".into(),
+                marks: Default::default()
+            },
+            Span::Text {
+                text: "two".into(),
+                marks: markset(vec![("bold", true.into())])
+            },
+            Span::Block(hydrate_map! {}),
+            Span::Text {
+                text: "three".into(),
+                marks: markset(vec![("bold", true.into())])
+            },
+            Span::Text {
+                text: "four".into(),
+                marks: Default::default()
+            },
+            Span::Block(hydrate_map! {}),
+        ],
     );
 }
 
@@ -176,13 +251,17 @@ fn update_blocks_noop() {
 
     doc.update_spans(
         &text,
+        UpdateSpansConfig::default(),
         [
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "ordered-list-item",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("item 1".into()),
+            Span::Text {
+                text: "item 1".into(),
+                marks: Default::default(),
+            },
         ],
     )
     .unwrap();
@@ -211,13 +290,17 @@ fn update_blocks_updates_text_and_blocks_at_once() {
 
     doc.update_spans(
         &text,
+        UpdateSpansConfig::default(),
         vec![
-            BlockOrText::Block(hydrate_map! {
+            Span::Block(hydrate_map! {
                 "type" => "unordered-list-item",
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            BlockOrText::Text("goodbye world".into()),
+            Span::Text {
+                text: "goodbye world".into(),
+                marks: Default::default(),
+            },
         ],
     )
     .unwrap();
@@ -231,7 +314,10 @@ fn update_blocks_updates_text_and_blocks_at_once() {
                 "parents" => hydrate_list![],
                 "attrs" => hydrate_map!{}
             }),
-            automerge::iter::Span::Text("goodbye world".into(), None),
+            automerge::iter::Span::Text {
+                text: "goodbye world".into(),
+                marks: None
+            },
         ]
     );
 }
@@ -287,7 +373,8 @@ fn update_spans_delete_attribute() {
 
     doc.update_spans(
         &text,
-        [BlockOrText::Block(hydrate_map! {
+        UpdateSpansConfig::default(),
+        [Span::Block(hydrate_map! {
             "type" => "ordered-list-item",
             "parents" => hydrate_list![],
         })],
@@ -330,15 +417,14 @@ fn marks_on_spans_respect_heads() {
     assert_eq!(
         spans,
         vec![
-            Span::Text(
-                "hello".to_string(),
-                Some(Arc::new(
-                    vec![("bold".to_string(), ScalarValue::Boolean(true))]
-                        .into_iter()
-                        .collect()
-                ))
-            ),
-            Span::Text(" world".to_string(), None,)
+            Span::Text {
+                text: "hello".to_string(),
+                marks: markset(vec![("bold", ScalarValue::Boolean(true))]),
+            },
+            Span::Text {
+                text: " world".to_string(),
+                marks: None,
+            }
         ]
     );
 }
@@ -361,23 +447,15 @@ fn marks_in_spans_cross_block_markers() {
     assert_eq!(
         spans,
         vec![
-            Span::Text(
-                "l".to_string(),
-                Some(Arc::new(
-                    vec![("bold".to_string(), true.into())]
-                        .into_iter()
-                        .collect()
-                ))
-            ),
+            Span::Text {
+                text: "l".to_string(),
+                marks: markset(vec![("bold", true.into())])
+            },
             Span::Block(hydrate_map! {}),
-            Span::Text(
-                "ix".to_string(),
-                Some(Arc::new(
-                    vec![("bold".to_string(), true.into())]
-                        .into_iter()
-                        .collect()
-                ))
-            ),
+            Span::Text {
+                text: "ix".to_string(),
+                marks: markset(vec![("bold", true.into())])
+            },
         ]
     );
 }
@@ -404,7 +482,13 @@ fn test_mark_behavior_on_delete_insert() {
     eprintln!("After delete and insert: {:?}", spans);
 
     // The bold mark should not apply to the new text
-    assert_eq!(spans, vec![Span::Text("hi".to_string(), None)]);
+    assert_eq!(
+        spans,
+        vec![Span::Text {
+            text: "hi".to_string(),
+            marks: None
+        }]
+    );
 }
 
 #[test]
@@ -450,9 +534,18 @@ fn spans_consolidates_marks_which_are_empty_due_to_deleted_marks() {
     assert_eq!(
         spans,
         vec![
-            Span::Text("hello ".to_string(), markset(vec![("bold", true.into())])),
-            Span::Text("middle".to_string(), None),
-            Span::Text(" world".to_string(), markset(vec![("italic", true.into())])),
+            Span::Text {
+                text: "hello ".to_string(),
+                marks: markset(vec![("bold", true.into())])
+            },
+            Span::Text {
+                text: "middle".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: " world".to_string(),
+                marks: markset(vec![("italic", true.into())])
+            },
         ]
     );
 }
@@ -481,7 +574,13 @@ fn spans_consolidates_marks_with_deleted_marks_followed_by_empty_marks() {
 
     // Check what marks are present
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    assert_eq!(spans, vec![Span::Text("hello world".to_string(), None),]);
+    assert_eq!(
+        spans,
+        vec![Span::Text {
+            text: "hello world".to_string(),
+            marks: None
+        },]
+    );
 }
 
 #[test]
@@ -508,5 +607,119 @@ fn spans_consolidates_marks_with_empty_marks_followed_by_deleted_marks() {
 
     // Check what marks are present
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
-    assert_eq!(spans, vec![Span::Text("hello world".to_string(), None),]);
+    assert_eq!(
+        spans,
+        vec![Span::Text {
+            text: "hello world".to_string(),
+            marks: None
+        },]
+    );
+}
+
+#[test]
+fn update_spans_diffs_marks() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    // Initial text with some marks
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 5),
+        ExpandMark::Both,
+    )
+    .unwrap();
+
+    // Update spans with different marks
+    doc.update_spans(
+        &text,
+        UpdateSpansConfig::default(),
+        [
+            Span::Text {
+                text: "hello".into(),
+                marks: markset(vec![("italic", true.into())]),
+            },
+            Span::Text {
+                text: " ".into(),
+                marks: Default::default(),
+            },
+            Span::Text {
+                text: "world".into(),
+                marks: markset(vec![("bold", true.into()), ("italic", true.into())]),
+            },
+        ],
+    )
+    .unwrap();
+
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text {
+                text: "hello".to_string(),
+                marks: markset(vec![("italic", true.into())])
+            },
+            Span::Text {
+                text: " ".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: "world".to_string(),
+                marks: markset(vec![("bold", true.into()), ("italic", true.into())])
+            },
+        ]
+    );
+}
+
+#[test]
+fn update_spans_uses_expand_config() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    // Create custom config with different expand behaviors
+    let config = UpdateSpansConfig::default()
+        .with_default_expand(ExpandMark::None)
+        .with_mark_expand("bold", ExpandMark::After);
+
+    // Apply marks with the config
+    doc.update_spans(
+        &text,
+        config,
+        [
+            Span::Text {
+                text: "hello".into(),
+                marks: markset(vec![("bold", true.into())]),
+            },
+            Span::Text {
+                text: " world".into(),
+                marks: Default::default(),
+            },
+        ],
+    )
+    .unwrap();
+
+    // Insert text after "hello" - should be marked because ExpandMark::After
+    doc.splice_text(&text, 5, 0, "!").unwrap();
+
+    // Insert text before "hello" - should NOT be marked because ExpandMark::After
+    doc.splice_text(&text, 0, 0, "Oh ").unwrap();
+
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text {
+                text: "Oh ".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: "hello!".to_string(),
+                marks: markset(vec![("bold", true.into())])
+            },
+            Span::Text {
+                text: " world".to_string(),
+                marks: None
+            },
+        ]
+    );
 }

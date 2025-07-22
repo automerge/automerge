@@ -4,7 +4,9 @@ use crate::automerge::diff;
 use crate::automerge::SaveOptions;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
+use crate::iter::Span;
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
+use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::{PatchLog, TextRepresentation};
@@ -1103,14 +1105,22 @@ impl Transactable for AutoCommit {
         crate::text_diff::myers_diff(&mut self.doc, tx, patch_log, obj, new_text)
     }
 
-    fn update_spans<'a, O: AsRef<ExId>, I: IntoIterator<Item = crate::BlockOrText<'a>>>(
+    fn update_spans<O: AsRef<ExId>, I: IntoIterator<Item = Span>>(
         &mut self,
         text: O,
+        config: UpdateSpansConfig,
         new_text: I,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
-        crate::text_diff::myers_block_diff(&mut self.doc, tx, patch_log, text.as_ref(), new_text)
+        crate::text_diff::myers_block_diff(
+            &mut self.doc,
+            tx,
+            patch_log,
+            text.as_ref(),
+            new_text,
+            &config,
+        )
     }
 
     fn update_object<O: AsRef<ExId>>(

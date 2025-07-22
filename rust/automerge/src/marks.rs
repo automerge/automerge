@@ -1,7 +1,7 @@
 use smol_str::SmolStr;
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -462,5 +462,27 @@ impl NonDeletedMarks<'_> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+/// Configure the expand flag used when creating marks in [`update_spans`](crate::transaction::Transactable::update_spans)
+#[derive(Default, Debug, Clone)]
+pub struct UpdateSpansConfig {
+    /// The expand flag to use when the mark does not have a flag set in Self::per_mark_expands.
+    pub default_expand: ExpandMark,
+    /// A map of mark names to the expand flag to use for that mark
+    pub per_mark_expands: HashMap<String, ExpandMark>,
+}
+
+impl UpdateSpansConfig {
+    pub fn with_default_expand(mut self, expand: ExpandMark) -> Self {
+        self.default_expand = expand;
+        self
+    }
+
+    pub fn with_mark_expand<S: AsRef<str>>(mut self, mark_name: S, expand: ExpandMark) -> Self {
+        self.per_mark_expands
+            .insert(mark_name.as_ref().to_string(), expand);
+        self
     }
 }
