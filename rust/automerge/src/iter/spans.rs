@@ -8,7 +8,6 @@ use crate::types::OpId;
 use crate::types::{Clock, TextEncoding};
 
 use std::borrow::Cow;
-use std::mem;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -114,15 +113,16 @@ impl<'a> SpansInternal<'a> {
         mark_name
     }
 
-    fn process_mark(&mut self, value: ScalarValue<'a>) -> Option<SpanInternal> {
-        let id = self.next_opid()?;
+    fn process_mark(&mut self, value: ScalarValue<'a>) {
+        let Some(id) = self.next_opid() else {
+            return;
+        };
         if let Some(name) = self.next_mark_name() {
             self.marks.mark_begin(id, MarkData { name, value });
         } else {
             self.marks.mark_end(id);
         }
         self.state.push_marks(self.marks.current());
-        None
     }
 
     fn process_action_val(&mut self, av: (Action, ScalarValue<'a>, usize)) -> Option<SpanInternal> {
@@ -130,7 +130,10 @@ impl<'a> SpansInternal<'a> {
         match av {
             (Action::Set, ScalarValue::Str(s), _) => self.state.push_str(&s),
             (Action::MakeMap, _, _) => self.push_block(),
-            (Action::Mark, value, _) => self.process_mark(value),
+            (Action::Mark, value, _) => {
+                self.process_mark(value);
+                None
+            }
             (Action::Delete, _, _) | (Action::Increment, _, _) => None,
             _ => self.state.push_str(PLACEHOLDER),
         }
@@ -141,42 +144,68 @@ const PLACEHOLDER: &str = "\u{fffc}";
 
 #[derive(Clone, Default, Debug)]
 struct SpanState {
-    buff: String,
-    len: usize,
     index: usize,
+    // The next text span we will emit
+    next_text: Option<NextText>,
+    // The currently active marks. Note that this can be different to the marks
+    // on `next_text` because we may encounter multiple open and closing marks
+    // with no text in between them. E.g. if we encounter:
+    //
+    // * start bold
+    // * 'aaa'
+    // * start italic
+    // * end italic
+    // * 'bbb'
+    //
+    // Then the next_text will always have 'bold' marks but the active marks
+    // will pass through ['bold', 'bold,italic', 'bold']
     marks: Option<Arc<MarkSet>>,
-    next_marks: Option<Option<Arc<MarkSet>>>,
+    // The next span we will emit if any. This is really used when we encounter
+    // a block marker which requires us to emit the current text span and put
+    // the block marker in `next_span` to be emitted on the next call to
+    // `next()`.
     next_span: Option<(SpanInternal, usize)>,
     encoding: TextEncoding,
+}
+
+#[derive(Clone, Default, Debug)]
+struct NextText {
+    // The actual text
+    buff: String,
+    // The length of this text according to the text encoding
+    len: usize,
+    // The marks for this text
+    marks: Option<Arc<MarkSet>>,
 }
 
 impl SpanState {
     fn new(encoding: TextEncoding) -> Self {
         Self {
-            buff: String::new(),
-            len: 0,
             index: 0,
-            marks: None,
-            next_marks: None,
+            next_text: None,
             next_span: None,
+            marks: None,
             encoding,
         }
     }
 
     fn push_str(&mut self, s: &str) -> Option<SpanInternal> {
         assert!(self.next_span.is_none());
-        if self.next_marks.is_some() {
-            let text = self.take_text();
-            let width = self.encoding.width(s);
-            self.buff.push_str(s);
-            self.len += width;
-            Some(text)
-        } else {
-            let width = self.encoding.width(s);
-            self.buff.push_str(s);
-            self.len += width;
-            None
-        }
+
+        let flush_needed = match &self.next_text {
+            Some(NextText { len, marks, .. }) => *len > 0 && marks.as_ref() != self.marks.as_ref(),
+            None => false,
+        };
+        let span = if flush_needed { self.flush() } else { None };
+        let next_text = self.next_text.get_or_insert_with(|| NextText {
+            buff: String::new(),
+            len: 0,
+            marks: self.marks.clone(),
+        });
+        next_text.buff.push_str(s);
+        let width = self.encoding.width(s);
+        next_text.len += width;
+        span
     }
 
     fn push_block(&mut self, id: OpId) -> SpanInternal {
@@ -195,35 +224,21 @@ impl SpanState {
 
     fn push_marks(&mut self, new_marks: Option<&Arc<MarkSet>>) {
         assert!(self.next_span.is_none());
-        if self.marks.as_ref() != new_marks {
-            if self.len > 0 {
-                self.next_marks = Some(new_marks.cloned());
-            } else {
-                self.marks = new_marks.cloned();
-            }
-        } else if self.next_marks.is_some() {
-            self.next_marks = None;
-        }
+        self.marks = new_marks.cloned();
     }
 
     fn flush(&mut self) -> Option<SpanInternal> {
-        if self.len > 0 {
-            Some(self.take_text())
-        } else {
-            None
-        }
-    }
-
-    fn take_text(&mut self) -> SpanInternal {
         assert!(self.next_span.is_none());
-        assert!(self.len > 0);
-        let buff = mem::take(&mut self.buff);
-        let len = mem::take(&mut self.len);
-        let marks = mem::take(&mut self.marks);
-        let text = SpanInternal::Text(buff, self.index, marks);
-        self.marks = mem::take(&mut self.next_marks).unwrap_or_default();
+        let Some(NextText { buff, len, marks }) = self.next_text.take() else {
+            // No text to flush
+            return None;
+        };
+        assert!(len > 0);
+
+        let span = SpanInternal::Text(buff, self.index, marks);
         self.index += len;
-        text
+
+        Some(span)
     }
 
     fn pop(&mut self) -> Option<SpanInternal> {

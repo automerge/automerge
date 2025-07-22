@@ -677,19 +677,19 @@ proptest::proptest! {
         let mut expected_chars = String::new();
         for action in &scenario {
             match action {
-                Action::Insert(index, value) => {
+                Action::Insert{ index, value } => {
                     doc.splice_text(&text, *index, 0, value).unwrap();
                     expected_chars.insert_str(*index, value);
                 }
-                Action::Delete(index, len) => {
+                Action::Delete{ index, len } => {
                     doc.splice_text(&text, *index, *len as isize, "").unwrap();
                     expected_chars.drain(*index..(*index + *len));
                 }
-                Action::SplitBlock(index) => {
+                Action::SplitBlock{ index } => {
                     doc.split_block(&text, *index).unwrap();
                     expected_chars.insert(*index, '\n');
                 }
-                Action::AddMark(index, len, name, value) => {
+                Action::AddMark{ index, len, name, value } => {
                     doc.mark(&text, Mark::new(name.clone(), value.clone(), *index, index + len), automerge::marks::ExpandMark::Both).unwrap();
                 }
             }
@@ -743,38 +743,57 @@ fn marks_are_consolidated(spans: &Vec<Span>) -> bool {
 
 #[derive(Debug, Clone)]
 enum Action {
-    Insert(usize, String),
-    Delete(usize, usize),
-    SplitBlock(usize),
-    AddMark(usize, usize, String, ScalarValue),
+    Insert {
+        index: usize,
+        value: String,
+    },
+    Delete {
+        index: usize,
+        len: usize,
+    },
+    SplitBlock {
+        index: usize,
+    },
+    AddMark {
+        index: usize,
+        len: usize,
+        name: String,
+        value: ScalarValue,
+    },
 }
 
 fn arb_insert(text: &str) -> impl proptest::strategy::Strategy<Value = Action> {
-    (0..=text.len(), "[a-zA-Z]{1,10}").prop_map(|(index, value)| Action::Insert(index, value))
+    (0..=text.len(), "[a-zA-Z]{1,10}").prop_map(|(index, value)| Action::Insert { index, value })
 }
 
 fn arb_delete(text: &str) -> impl proptest::strategy::Strategy<Value = Action> {
     let len = text.len();
     if len == 1 {
-        return proptest::strategy::Just(Action::Delete(0, 1)).boxed();
+        return proptest::strategy::Just(Action::Delete { index: 0, len: 1 }).boxed();
     }
     (1..len)
         .prop_flat_map(move |delete_len| {
-            (0..(len - delete_len)).prop_map(move |index| Action::Delete(index, delete_len))
+            (0..(len - delete_len)).prop_map(move |index| Action::Delete {
+                index,
+                len: delete_len,
+            })
         })
         .boxed()
 }
 
 fn arb_split_block(text: &str) -> impl proptest::strategy::Strategy<Value = Action> {
-    (0..=text.len()).prop_map(Action::SplitBlock)
+    (0..=text.len()).prop_map(|i| Action::SplitBlock { index: i })
 }
 
 fn arb_add_mark(text: &str) -> impl proptest::strategy::Strategy<Value = Action> {
     let text_len = text.len();
     (0..text_len).prop_flat_map(move |index| {
         (0..(text_len - index)).prop_flat_map(move |len| {
-            ("[a-zA-Z]{1,10}", "[a-zA-Z]{1,10}").prop_map(move |(name, value)| {
-                Action::AddMark(index, len, name, ScalarValue::from(value))
+            ("[a-zA-Z]{1,10}", "[a-zA-Z]{1,10}").prop_map(move |(name, value)| Action::AddMark {
+                index,
+                len,
+                name,
+                value: ScalarValue::from(value),
             })
         })
     })
@@ -808,16 +827,16 @@ fn arb_scenario() -> impl proptest::strategy::Strategy<Value = Vec<Action>> {
                 let mut actions_so_far = actions_so_far.clone();
                 actions_so_far.push(action.clone());
                 match action {
-                    Action::Insert(index, value) => {
+                    Action::Insert { index, value } => {
                         state.insert_str(index, &value);
                     }
-                    Action::Delete(index, len) => {
+                    Action::Delete { index, len } => {
                         state.drain(index..index + len);
                     }
-                    Action::SplitBlock(index) => {
+                    Action::SplitBlock { index } => {
                         state.insert(index, '\n');
                     }
-                    Action::AddMark(..) => {}
+                    Action::AddMark { .. } => {}
                 }
                 pump(state, actions_so_far, max_actions)
             })

@@ -1535,7 +1535,7 @@ export function updateSpans<T>(doc: Doc<T>, path: Prop[], newSpans: Span[]) {
   try {
     state.handle.updateSpans(objPath, newSpans)
   } catch (e) {
-    throw new RangeError(`Cannot updateBlock: ${e}`)
+    throw new RangeError(`Cannot updateSpans: ${e}`)
   }
 }
 
