@@ -5,7 +5,7 @@ use automerge::{
     iter::Span,
     marks::{ExpandMark, Mark},
     transaction::Transactable,
-    BlockOrText, ObjType, ReadDoc, ScalarValue, ROOT,
+    AutoCommit, BlockOrText, ObjType, ReadDoc, ScalarValue, ROOT,
 };
 use test_log::test;
 
@@ -330,6 +330,45 @@ fn marks_on_spans_respect_heads() {
                 ))
             ),
             Span::Text(" world".to_string(), None,)
+        ]
+    );
+}
+
+#[test]
+fn marks_in_spans_cross_block_markers() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.splice_text(&text, 0, 0, "lix").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 3),
+        ExpandMark::After,
+    )
+    .unwrap();
+    let _block = doc.split_block(&text, 1).unwrap();
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text(
+                "l".to_string(),
+                Some(Arc::new(
+                    vec![("bold".to_string(), true.into())]
+                        .into_iter()
+                        .collect()
+                ))
+            ),
+            Span::Block(hydrate_map! {}),
+            Span::Text(
+                "ix".to_string(),
+                Some(Arc::new(
+                    vec![("bold".to_string(), true.into())]
+                        .into_iter()
+                        .collect()
+                ))
+            ),
         ]
     );
 }
