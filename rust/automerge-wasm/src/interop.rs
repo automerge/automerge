@@ -5,6 +5,7 @@ use crate::{Automerge, UpdateSpansArgs};
 use am::sync::{Capability, ChunkList, MessageVersion};
 use automerge as am;
 use automerge::iter::{Span, Spans};
+use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
@@ -13,6 +14,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -662,34 +664,73 @@ impl TryFrom<JS> for Vec<Capability> {
     }
 }
 
-pub(crate) fn import_span(
-    doc: &Automerge,
-    value: JS,
-) -> Result<am::Span, error::InvalidBlockOrText> {
-    let Ok(obj) = value.0.dyn_into::<Object>() else {
-        return Err(error::InvalidBlockOrText::NotObjectOrString);
+pub(crate) fn import_span(doc: &Automerge, value: JsValue) -> Result<am::Span, error::InvalidSpan> {
+    let Ok(obj) = value.dyn_into::<Object>() else {
+        return Err(error::InvalidSpan::NotObjectOrString);
     };
+    if let Some(str) = obj.as_string() {
+        return Ok(am::Span::Text {
+            text: str,
+            marks: None,
+        });
+    }
     let type_str = js_get(&obj, "type")?;
     let type_str = type_str
         .as_string()
-        .ok_or(error::InvalidBlockOrText::TypeNotString)?;
+        .ok_or(error::InvalidSpan::TypeNotString)?;
     match type_str.as_str() {
         "text" => {
-            let text = js_get(&obj, "value")?;
-            let text = text
+            let text_value = js_get(&obj, "value")?
                 .as_string()
-                .ok_or(error::InvalidBlockOrText::TextNotString)?;
-            Ok(am::Span::Text { text, marks: None })
+                .ok_or(error::InvalidSpan::TextNotString)?;
+
+            let marks = js_get(&obj, "marks")?;
+            let markset = import_marks(marks.0).map_err(error::InvalidSpan::InvalidMarks)?;
+            Ok(am::Span::Text {
+                text: text_value,
+                marks: markset,
+            })
         }
         "block" => {
             let value = js_get(&obj, "value")?;
             let hydrate_val = js_val_to_hydrate(doc, value.0);
             let Ok(am::hydrate::Value::Map(map)) = hydrate_val else {
-                return Err(error::InvalidBlockOrText::BlockNotObject);
+                return Err(error::InvalidSpan::BlockNotObject);
             };
             Ok(am::Span::Block(map))
         }
-        other => Err(error::InvalidBlockOrText::InvalidType(other.to_string())),
+        other => Err(error::InvalidSpan::InvalidType(other.to_string())),
+    }
+}
+
+fn import_marks(value: JsValue) -> Result<Option<Arc<MarkSet>>, error::ImportMark> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    let value = value
+        .dyn_into::<js_sys::Object>()
+        .map_err(|_| error::ImportMark::NotObject)?;
+    let kvs = js_sys::Object::entries(&value);
+
+    let mark_pairs = kvs
+        .iter()
+        .map(|kv| {
+            let kv = kv
+                .dyn_into::<Array>()
+                .expect("entries returns an iterator of arrays");
+            let key = kv.get(0).as_string().expect("keys are strings");
+            let value = kv.get(1);
+            let value = import_scalar(&value, None)
+                .ok_or_else(|| error::ImportMark::InvalidValue(key.clone()))?;
+            Ok::<_, error::ImportMark>((key, value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let marks = MarkSet::from_iter(mark_pairs);
+    if marks.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(Arc::new(marks)))
     }
 }
 
@@ -703,11 +744,52 @@ pub(crate) fn import_update_spans_args(
         .map_err(|_| error::InvalidUpdateSpansArgs::NotArray)?;
     let mut values = Vec::new();
     for (i, v) in value.into_iter().enumerate() {
-        let span = import_span(doc, JS(v))
-            .map_err(|e| error::InvalidUpdateSpansArgs::InvalidElement(i, e))?;
+        let span =
+            import_span(doc, v).map_err(|e| error::InvalidUpdateSpansArgs::InvalidElement(i, e))?;
         values.push(span);
     }
     Ok(UpdateSpansArgs(values))
+}
+
+pub(crate) fn import_update_spans_config(
+    value: JsValue,
+) -> Result<UpdateSpansConfig, error::ImportUpdateSpansConfig> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(UpdateSpansConfig::default());
+    }
+    let value = value
+        .dyn_into::<Object>()
+        .map_err(|_| error::ImportUpdateSpansConfig::NotObject)?;
+    let default_expand = js_get(&value, "defaultExpand")?
+        .try_into()
+        .map_err(error::ImportUpdateSpansConfig::BadDefaultExpand)?;
+
+    let mut config = UpdateSpansConfig::default().with_default_expand(default_expand);
+
+    let per_mark_expands = js_get(&value, "perMarkExpand")?;
+    if per_mark_expands.0.is_undefined() || per_mark_expands.0.is_null() {
+        return Ok(config);
+    }
+
+    if let Ok(obj) = per_mark_expands.0.dyn_into::<Object>() {
+        let kvs = js_sys::Object::entries(&obj);
+        for kv in kvs.iter() {
+            let kv = kv
+                .dyn_into::<Array>()
+                .expect("entries returns an iterator of arrays");
+            let key = kv.get(0).as_string().expect("keys are strings");
+            let value = kv.get(1);
+            let expand: ExpandMark = JS(value).try_into().map_err(|e| {
+                error::ImportUpdateSpansConfig::BadPerMarkExpand {
+                    key: key.clone(),
+                    error: e,
+                }
+            })?;
+            config = config.with_mark_expand(key, expand);
+        }
+    }
+
+    Ok(config)
 }
 
 pub(crate) fn to_js_err<T: Display>(err: T) -> JsValue {
@@ -909,6 +991,55 @@ impl ExternalTypeConstructor {
             return Ok(None);
         }
         Ok(Some(decon_result))
+    }
+}
+
+pub(crate) fn import_scalar(
+    value: &JsValue,
+    datatype: Option<Datatype>,
+) -> Option<am::ScalarValue> {
+    match datatype {
+        Some(Datatype::Boolean) => value.as_bool().map(am::ScalarValue::Boolean),
+        Some(Datatype::Int) => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
+        Some(Datatype::Uint) => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+        Some(Datatype::Str) => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
+        Some(Datatype::F64) => value.as_f64().map(am::ScalarValue::F64),
+        Some(Datatype::Bytes) => Some(am::ScalarValue::Bytes(
+            value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
+        )),
+        Some(Datatype::Counter) => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
+        Some(Datatype::Timestamp) => {
+            if let Some(v) = value.as_f64() {
+                Some(am::ScalarValue::Timestamp(v as i64))
+            } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                Some(am::ScalarValue::Timestamp(d.get_time() as i64))
+            } else {
+                None
+            }
+        }
+        Some(Datatype::Null) => Some(am::ScalarValue::Null),
+        Some(_) => None,
+        None => {
+            if value.is_null() {
+                Some(am::ScalarValue::Null)
+            } else if let Some(b) = value.as_bool() {
+                Some(am::ScalarValue::Boolean(b))
+            } else if let Some(s) = value.as_string() {
+                Some(am::ScalarValue::Str(s.into()))
+            } else if let Some(n) = value.as_f64() {
+                if (n.round() - n).abs() < f64::EPSILON {
+                    Some(am::ScalarValue::Int(n as i64))
+                } else {
+                    Some(am::ScalarValue::F64(n))
+                }
+            } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                Some(am::ScalarValue::Timestamp(d.get_time() as i64))
+            } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
+                Some(am::ScalarValue::Bytes(o.to_vec()))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -1318,62 +1449,12 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn import_scalar(
-        &self,
-        value: &JsValue,
-        datatype: Option<Datatype>,
-    ) -> Option<am::ScalarValue> {
-        match datatype {
-            Some(Datatype::Boolean) => value.as_bool().map(am::ScalarValue::Boolean),
-            Some(Datatype::Int) => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
-            Some(Datatype::Uint) => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
-            Some(Datatype::Str) => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
-            Some(Datatype::F64) => value.as_f64().map(am::ScalarValue::F64),
-            Some(Datatype::Bytes) => Some(am::ScalarValue::Bytes(
-                value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
-            )),
-            Some(Datatype::Counter) => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
-            Some(Datatype::Timestamp) => {
-                if let Some(v) = value.as_f64() {
-                    Some(am::ScalarValue::Timestamp(v as i64))
-                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-                } else {
-                    None
-                }
-            }
-            Some(Datatype::Null) => Some(am::ScalarValue::Null),
-            Some(_) => None,
-            None => {
-                if value.is_null() {
-                    Some(am::ScalarValue::Null)
-                } else if let Some(b) = value.as_bool() {
-                    Some(am::ScalarValue::Boolean(b))
-                } else if let Some(s) = value.as_string() {
-                    Some(am::ScalarValue::Str(s.into()))
-                } else if let Some(n) = value.as_f64() {
-                    if (n.round() - n).abs() < f64::EPSILON {
-                        Some(am::ScalarValue::Int(n as i64))
-                    } else {
-                        Some(am::ScalarValue::F64(n))
-                    }
-                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-                } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
-                    Some(am::ScalarValue::Bytes(o.to_vec()))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
     pub(crate) fn import_value(
         &self,
         value: &JsValue,
         datatype: Option<Datatype>,
     ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), error::InvalidValue> {
-        match self.import_scalar(value, datatype) {
+        match import_scalar(value, datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {
                 if let Ok(js_obj) = import_obj(value, datatype) {
@@ -1727,7 +1808,7 @@ pub(super) fn js_val_to_hydrate(
                 )))
             }
         }
-    } else if let Some(val) = doc.import_scalar(&value, datatype) {
+    } else if let Some(val) = import_scalar(&value, datatype) {
         Ok(am::hydrate::Value::Scalar(val))
     } else {
         Err(error::JsValToHydrate::UnknownType)
@@ -2052,8 +2133,8 @@ pub(crate) mod error {
     }
 
     #[derive(thiserror::Error, Debug)]
-    pub enum InvalidBlockOrText {
-        #[error("must be a block object or a string")]
+    pub enum InvalidSpan {
+        #[error("must be a block object or a text span")]
         NotObjectOrString,
         #[error("block must be an object")]
         BlockNotObject,
@@ -2065,6 +2146,10 @@ pub(crate) mod error {
         InvalidType(String),
         #[error("'text' property must be a string")]
         TextNotString,
+        #[error("invalid marks: {0}")]
+        InvalidMarks(ImportMark),
+        #[error("marks were not an object")]
+        MarksNotObject,
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -2072,7 +2157,7 @@ pub(crate) mod error {
         #[error("updateSpans args must be an array")]
         NotArray,
         #[error("block {0} not a valid block: {1}")]
-        InvalidElement(usize, InvalidBlockOrText),
+        InvalidElement(usize, InvalidSpan),
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -2095,5 +2180,29 @@ pub(crate) mod error {
         InvalidText,
         #[error("unable to determine type of value")]
         UnknownType,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum ImportMark {
+        #[error("key at index {0} was not a string")]
+        KeyNotString(usize),
+        #[error("value for key {0} could not be converted to a scalar value")]
+        InvalidValue(String),
+        #[error("marks was not an object")]
+        NotObject,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum ImportUpdateSpansConfig {
+        #[error("config was not an object")]
+        NotObject,
+        #[error("failed to get property {0}")]
+        GetProp(#[from] GetProp),
+        #[error("invalid defaultExpand: {0}")]
+        BadDefaultExpand(BadExpand),
+        #[error("invalid perMarkExpand{key}: {error}")]
+        BadPerMarkExpand { key: String, error: BadExpand },
+        #[error("perMarkExpands was not null but also not an object")]
+        PerMarkNotObject,
     }
 }
