@@ -32,10 +32,10 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
-use automerge::marks::UpdateSpansConfig;
 use automerge::patches::TextRepresentation;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
+use interop::import_scalar;
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -378,6 +378,10 @@ export interface Stats {
   rustcVersion: string;
 };
 
+export type UpdateSpansConfig = {
+    defaultExpand?: "before" | "after" | "both" | "none";
+    perMarkExpand?: {[key: string]: "before" | "after" | "both" | "none" }
+}
 "#;
 
 #[allow(unused_macros)]
@@ -552,9 +556,8 @@ impl Automerge {
             let mut vals = vec![];
             if let Ok(array) = text.dyn_into::<Array>() {
                 for (index, i) in array.iter().enumerate() {
-                    let value = self
-                        .import_scalar(&i, None)
-                        .ok_or(error::Splice::ValueNotPrimitive(index))?;
+                    let value =
+                        import_scalar(&i, None).ok_or(error::Splice::ValueNotPrimitive(index))?;
                     vals.push(value);
                 }
             }
@@ -601,14 +604,16 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Span[]")] args: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "UpdateSpansConfig | undefined | null")]
+        config: JsValue,
     ) -> Result<(), error::UpdateSpans> {
         let (obj, obj_type) = self.import(obj)?;
         if !matches!(obj_type, am::ObjType::Text) {
             return Err(error::UpdateSpans::ObjectNotText);
         }
         let args = interop::import_update_spans_args(self, JS(args))?;
-        self.doc
-            .update_spans(&obj, UpdateSpansConfig::default(), args.0)?;
+        let config = interop::import_update_spans_config(config)?;
+        self.doc.update_spans(&obj, config, args.0)?;
         Ok(())
     }
 
@@ -623,9 +628,7 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let datatype = JS(datatype).try_into()?;
-        let value = self
-            .import_scalar(&value, datatype)
-            .ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
         let index = self.doc.length(&obj);
         self.doc.insert(&obj, index, value)?;
         Ok(())
@@ -663,9 +666,7 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let datatype = JS(datatype).try_into()?;
-        let value = self
-            .import_scalar(&value, datatype)
-            .ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.insert(&obj, index as usize, value)?;
         Ok(())
     }
@@ -776,9 +777,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let datatype = JS(datatype).try_into()?;
-        let value = self
-            .import_scalar(&value, datatype)
-            .ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.put(&obj, prop, value)?;
         Ok(())
     }
@@ -1468,9 +1467,7 @@ impl Automerge {
         let name = name.as_string().ok_or(error::Mark::InvalidName)?;
 
         let datatype = JS(datatype).try_into()?;
-        let value = self
-            .import_scalar(&value, datatype)
-            .ok_or_else(|| error::Mark::InvalidValue)?;
+        let value = import_scalar(&value, datatype).ok_or_else(|| error::Mark::InvalidValue)?;
 
         self.doc
             .mark(&obj, Mark::new(name, value, start, end), expand)?;
@@ -1857,6 +1854,8 @@ pub mod error {
         InvalidArgs(#[from] interop::error::InvalidUpdateSpansArgs),
         #[error("update_text is only availalbe for the string representation of text objects")]
         TextRepNotString,
+        #[error("invalid config: {0}")]
+        BadConfig(#[from] interop::error::ImportUpdateSpansConfig),
     }
 
     impl From<UpdateSpans> for JsValue {

@@ -52,6 +52,7 @@ import type {
   SyncMessage,
   Span,
   DecodedSyncMessage,
+  UpdateSpansConfig,
 } from "./wasm_types.js"
 export type {
   ChangeMetadata,
@@ -62,6 +63,7 @@ export type {
   IncPatch,
   Span,
   SyncMessage,
+  UpdateSpansConfig,
 } from "./wasm_types.js"
 
 /** @hidden **/
@@ -1523,8 +1525,21 @@ export function updateBlock<T>(
  * Like {@link updateText} this will diff `newSpans` against the current state
  * of the text at `path` and perform a reasonably minimal number of operations
  * required to update the spans to the new state.
+ *
+ * When updating spans, we need to know what to set the "expand" behavior of
+ * newly created marks to. By default we set it to "both", meaning that the
+ * spans will expand on either, but this can be overridden by passing
+ * `{ defaultExpand: "<expand>"}` as the final `config` parameter. You
+ * can also pass `{perMarkExpand: {"<markname>": "<expand config>"}` to
+ * set the expand configuration for specific marks where it should be
+ * different from the default.
  */
-export function updateSpans<T>(doc: Doc<T>, path: Prop[], newSpans: Span[]) {
+export function updateSpans<T>(
+  doc: Doc<T>,
+  path: Prop[],
+  newSpans: Span[],
+  config?: UpdateSpansConfig,
+) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
@@ -1533,7 +1548,7 @@ export function updateSpans<T>(doc: Doc<T>, path: Prop[], newSpans: Span[]) {
   _clear_cache(doc)
 
   try {
-    state.handle.updateSpans(objPath, newSpans)
+    state.handle.updateSpans(objPath, newSpans, config)
   } catch (e) {
     throw new RangeError(`Cannot updateSpans: ${e}`)
   }
