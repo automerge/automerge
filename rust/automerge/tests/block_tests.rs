@@ -9,6 +9,15 @@ use automerge::{
 };
 use test_log::test;
 
+fn markset(values: Vec<(&'static str, ScalarValue)>) -> Option<Arc<automerge::marks::MarkSet>> {
+    Some(Arc::new(
+        values
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect::<automerge::marks::MarkSet>(),
+    ))
+}
+
 #[test]
 fn update_blocks_change_block_properties() {
     let mut doc = automerge::AutoCommit::new();
@@ -371,4 +380,133 @@ fn marks_in_spans_cross_block_markers() {
             ),
         ]
     );
+}
+
+#[test]
+fn test_mark_behavior_on_delete_insert() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    // Insert text with a bold mark
+    doc.splice_text(&text, 0, 0, "hello").unwrap();
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 5),
+        ExpandMark::Both,
+    )
+    .unwrap();
+
+    // Delete the text and insert new text at the same position
+    doc.splice_text(&text, 0, 5, "hi").unwrap();
+
+    // Check what marks are present
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    eprintln!("After delete and insert: {:?}", spans);
+
+    // The bold mark should not apply to the new text
+    assert_eq!(spans, vec![Span::Text("hi".to_string(), None)]);
+}
+
+#[test]
+fn spans_consolidates_marks_which_are_empty_due_to_deleted_marks() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    // Insert text with a bold mark
+    doc.splice_text(&text, 0, 0, "hello middle world").unwrap();
+
+    // Bold up to the second 'd' in middle
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 9),
+        ExpandMark::None,
+    )
+    .unwrap();
+    // Italic from the second 'd' in middle to the end
+    doc.mark(
+        &text,
+        Mark::new("italic".to_string(), true, 9, 18),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Now delete the bold range on middle
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), ScalarValue::Null, 6, 9),
+        ExpandMark::None,
+    )
+    .unwrap();
+    // And delete the italic range on middle
+    doc.mark(
+        &text,
+        Mark::new("italic".to_string(), ScalarValue::Null, 9, 12),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Check what marks are present
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans,
+        vec![
+            Span::Text("hello ".to_string(), markset(vec![("bold", true.into())])),
+            Span::Text("middle".to_string(), None),
+            Span::Text(" world".to_string(), markset(vec![("italic", true.into())])),
+        ]
+    );
+}
+
+#[test]
+fn spans_consolidates_marks_with_deleted_marks_followed_by_empty_marks() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+
+    // Bold world
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 0, 6),
+        ExpandMark::None,
+    )
+    .unwrap();
+    // Now unbold it
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), ScalarValue::Null, 0, 6),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Check what marks are present
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(spans, vec![Span::Text("hello world".to_string(), None),]);
+}
+
+#[test]
+fn spans_consolidates_marks_with_empty_marks_followed_by_deleted_marks() {
+    let mut doc = automerge::AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+
+    // Bold world
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), true, 6, 11),
+        ExpandMark::None,
+    )
+    .unwrap();
+    // Now unbold it
+    doc.mark(
+        &text,
+        Mark::new("bold".to_string(), ScalarValue::Null, 6, 11),
+        ExpandMark::None,
+    )
+    .unwrap();
+
+    // Check what marks are present
+    let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
+    assert_eq!(spans, vec![Span::Text("hello world".to_string(), None),]);
 }

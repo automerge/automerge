@@ -176,6 +176,29 @@ impl MarkSet {
         marks.retain(|_, value| !matches!(value, ScalarValue::Null));
         MarkSet { marks }
     }
+
+    // Returns a wrapper for comparing two MarkSets while ignoring marks that have been deleted.
+    //
+    // Marksets track which marks have been deleted by storing them with a value of `ScalarValue::Null`.
+    // When we want to compare the marks in two MarkSets, we often want to ignore these deleted marks so
+    // that we can focus on whether the user visible state has changed.
+    //
+    // ## Example
+    //
+    // ```rust
+    // let markset1 = MarkSet::from_iter(vec![
+    //     ("bold".to_string(), ScalarValue::String("true".to_string())),
+    //     ("italic".to_string(), ScalarValue::Null),
+    // ]);
+    // let markset2 = MarkSet::from_iter(vec![
+    //     ("bold".to_string(), ScalarValue::String("true".to_string())),
+    //     ("underlined".to_string(), ScalarValue::Null),
+    // ]);
+    // assert_eq!(markset1.non_deleted_marks(), markset2.non_deleted_marks());
+    // ```
+    pub fn non_deleted_marks(&self) -> NonDeletedMarks<'_> {
+        NonDeletedMarks(self)
+    }
 }
 
 // FromIterator implementation for an iterator of (String, ScalarValue) tuples
@@ -408,4 +431,36 @@ impl<'a> RichTextQueryState<'a> {
             self.map.remove(op);
         }
     */
+}
+
+// Useful for comparing MarkSets while ignoring marks that have been deleted (i.e. have a value of Null).
+//
+// Returned by [`MarkSet::non_deleted_marks()`]
+#[derive(Debug)]
+pub struct NonDeletedMarks<'a>(&'a MarkSet);
+
+impl PartialEq for NonDeletedMarks<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let us_in_them = self.0.marks.iter().all(|(name, value)| {
+            matches!(value, ScalarValue::Null) || other.0.marks.get(name) == Some(value)
+        });
+        let them_in_us = other.0.marks.iter().all(|(name, value)| {
+            matches!(value, ScalarValue::Null) || self.0.marks.get(name) == Some(value)
+        });
+        us_in_them && them_in_us
+    }
+}
+
+impl NonDeletedMarks<'_> {
+    pub fn len(&self) -> usize {
+        self.0
+            .marks
+            .iter()
+            .filter(|(_, v)| !matches!(v, ScalarValue::Null))
+            .count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
