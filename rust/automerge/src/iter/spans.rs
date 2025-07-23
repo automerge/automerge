@@ -193,7 +193,20 @@ impl SpanState {
         assert!(self.next_span.is_none());
 
         let flush_needed = match &self.next_text {
-            Some(NextText { len, marks, .. }) => *len > 0 && marks.as_ref() != self.marks.as_ref(),
+            Some(NextText { len, marks, .. }) => {
+                if *len == 0 {
+                    false
+                } else {
+                    match (marks, self.marks.as_ref()) {
+                        (Some(next_flush), Some(active)) => {
+                            next_flush.non_deleted_marks() != active.non_deleted_marks()
+                        }
+                        (None, None) => false,
+                        (None, Some(active)) => !active.non_deleted_marks().is_empty(),
+                        (Some(next_flush), None) => !next_flush.non_deleted_marks().is_empty(),
+                    }
+                }
+            }
             None => false,
         };
         let span = if flush_needed { self.flush() } else { None };
@@ -272,7 +285,16 @@ impl SpanInternal {
         encoding: TextEncoding,
     ) -> Span {
         match self {
-            SpanInternal::Text(txt, _, marks) => Span::Text(txt, marks),
+            SpanInternal::Text(txt, _, marks) => Span::Text(
+                txt,
+                marks.and_then(|m| {
+                    if m.non_deleted_marks().is_empty() {
+                        None
+                    } else {
+                        Some(Arc::new(m.as_ref().clone().without_unmarks()))
+                    }
+                }),
+            ),
             SpanInternal::Obj(opid, _) => {
                 let value = op_set.hydrate_map(&opid.into(), clock, encoding);
                 let Value::Map(value) = value else {
