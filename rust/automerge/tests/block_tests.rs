@@ -5,7 +5,7 @@ use automerge::{
     iter::Span,
     marks::{ExpandMark, Mark, UpdateSpansConfig},
     transaction::Transactable,
-    AutoCommit, ObjType, ReadDoc, ScalarValue, ROOT,
+    AutoCommit, ObjType, Patch, Prop, ReadDoc, ScalarValue, Value, ROOT,
 };
 use test_log::test;
 
@@ -722,4 +722,60 @@ fn update_spans_uses_expand_config() {
             },
         ]
     );
+}
+
+#[test]
+fn diff_emits_block_updates() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    // Disable patch log to make sure we are testing the diff not the patch log
+    doc.reset_diff_cursor();
+    let block = doc.split_block(&text, 0).unwrap();
+    let parents = doc.put_object(&block, "parents", ObjType::List).unwrap();
+
+    let heads = doc.get_heads();
+    let patches = doc.diff(&[], &heads);
+
+    let expected_patches = vec![
+        Patch {
+            action: automerge::PatchAction::PutMap {
+                key: "text".to_string(),
+                value: (Value::Object(ObjType::Text), text.clone()),
+                conflict: false,
+            },
+            path: vec![],
+            obj: ROOT,
+        },
+        Patch {
+            action: automerge::PatchAction::Insert {
+                index: 0,
+                values: [(Value::Object(ObjType::Map), block.clone(), false)]
+                    .into_iter()
+                    .collect(),
+            },
+            path: vec![(ROOT, Prop::Map("text".to_string()))],
+            obj: text.clone(),
+        },
+        Patch {
+            action: automerge::PatchAction::PutMap {
+                key: "parents".to_string(),
+                value: (Value::Object(ObjType::List), parents.clone()),
+                conflict: false,
+            },
+            path: vec![
+                (ROOT, Prop::Map("text".to_string())),
+                (text.clone(), Prop::Seq(0)),
+            ],
+            obj: block,
+        },
+    ];
+
+    assert_eq!(patches, expected_patches);
+
+    // Now make a new change to the document so that diff has to use clocks,
+    // which exercises a different code path
+    doc.splice_text(&text, 0, 0, "hello world").unwrap();
+
+    let patches = doc.diff(&[], &heads);
+    assert_eq!(patches, expected_patches);
 }
