@@ -309,6 +309,11 @@ impl<'a> DocItemInternal<'a> {
                 let new_obj = ObjId(maybe_exid.id);
                 Some((new_obj, new_typ))
             }
+            DocItemInternal::Text(SpanInternal::Obj(id, _position)) => {
+                let new_typ = IterType::new(text_rep, ObjType::Map);
+                let new_obj = ObjId(*id);
+                Some((new_obj, new_typ))
+            }
             _ => None,
         }
     }
