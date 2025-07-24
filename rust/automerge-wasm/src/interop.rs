@@ -1027,7 +1027,7 @@ pub(crate) fn import_scalar(
             } else if let Some(s) = value.as_string() {
                 Some(am::ScalarValue::Str(s.into()))
             } else if let Some(n) = value.as_f64() {
-                if (n.round() - n).abs() < f64::EPSILON {
+                if (n.round() >= 1.0) && (n.round() - n).abs() < f64::EPSILON {
                     Some(am::ScalarValue::Int(n as i64))
                 } else {
                     Some(am::ScalarValue::F64(n))

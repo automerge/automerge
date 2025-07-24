@@ -379,4 +379,16 @@ describe("Automerge", () => {
       ])
     })
   })
+
+  it("can allow small values in block attributes", () => {
+    // Exercise an issue where very small floating point numbers were converted
+    // to 0 when stored in a block attribute
+    const smallnum = 1.401298464324817e-45
+    let doc = Automerge.from({ text: "" })
+    doc = Automerge.change(doc, d => {
+      Automerge.splitBlock(d, ["text"], 0, { smallnum })
+    })
+    const block = Automerge.block(doc, ["text"], 0)
+    assert.equal(block?.smallnum, smallnum)
+  })
 })
