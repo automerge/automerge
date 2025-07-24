@@ -7,7 +7,7 @@ use std::{
 pub(crate) const B: usize = 16;
 pub type SequenceTree<T> = SequenceTreeInternal<T>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SequenceTreeInternal<T> {
     root_node: Option<SequenceTreeNode<T>>,
 }
@@ -21,7 +21,7 @@ struct SequenceTreeNode<T> {
 
 impl<T> SequenceTreeInternal<T>
 where
-    T: Clone + Debug,
+    T: Debug,
 {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
@@ -134,7 +134,7 @@ where
 
 impl<T> SequenceTreeNode<T>
 where
-    T: Clone + Debug,
+    T: Debug,
 {
     fn new() -> Self {
         Self {
@@ -493,6 +493,16 @@ where
     }
 }
 
+impl<T: Clone + Debug> FromIterator<T> for SequenceTreeInternal<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut tree = Self::new();
+        for item in iter {
+            tree.push(item);
+        }
+        tree
+    }
+}
+
 #[derive(Debug)]
 pub struct Iter<'a, T> {
     inner: &'a SequenceTreeInternal<T>,
@@ -501,7 +511,7 @@ pub struct Iter<'a, T> {
 
 impl<'a, T> Iterator for Iter<'a, T>
 where
-    T: Clone + Debug,
+    T: Debug,
 {
     type Item = &'a T;
 
@@ -513,6 +523,16 @@ where
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.index += n + 1;
         self.inner.get(self.index - 1)
+    }
+}
+
+impl<T: Debug> std::fmt::Debug for SequenceTreeInternal<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SequenceTree(")?;
+        for item in self.iter() {
+            write!(f, "{:?}, ", item)?;
+        }
+        write!(f, ")")
     }
 }
 
