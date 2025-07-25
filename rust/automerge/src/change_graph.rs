@@ -6,6 +6,7 @@ use std::ops::Add;
 
 use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 
+use crate::storage::BundleMetadata;
 use crate::{
     clock::{Clock, SeqClock},
     columnar::column_range::{DepsRange, ValueRange},
@@ -293,6 +294,55 @@ impl ChangeGraph {
 
     pub(crate) fn has_change(&self, hash: &ChangeHash) -> bool {
         self.nodes_by_hash.contains_key(hash)
+    }
+
+    pub(crate) fn get_bundle_metadata<I>(
+        &self,
+        hashes: I,
+    ) -> impl Iterator<Item = Result<BundleMetadata<'_>, MissingDep>>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        hashes.into_iter().map(|hash| {
+            let index = self
+                .nodes_by_hash
+                .get(&hash)
+                .cloned()
+                .ok_or(MissingDep(hash))?;
+            let i = index.0 as usize;
+            let actor = self.actors[i].into();
+            let timestamp = *self.timestamps.get(i).flatten().unwrap_or_default();
+            let max_op = self.max_ops[i] as u64;
+            let num_ops = *self.num_ops.get(i).flatten().unwrap_or_default();
+            let message = self.messages.get(i).flatten();
+
+            // FIXME - this needs a test
+            let meta = self.extra_bytes_meta.get_with_acc(i).unwrap();
+            let meta_range =
+                meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+            let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
+
+            let deps = self
+                .parents(index)
+                .map(|p| self.hashes[p.0 as usize])
+                .collect::<Vec<_>>();
+
+            //num_deps += deps.len();
+            let start_op = max_op - num_ops + 1;
+            let seq = self.seq[i] as u64;
+            Ok(BundleMetadata {
+                hash,
+                actor,
+                seq,
+                start_op,
+                max_op,
+                timestamp,
+                message,
+                extra,
+                deps,
+                builder: i,
+            })
+        })
     }
 
     pub(crate) fn get_build_metadata<I>(

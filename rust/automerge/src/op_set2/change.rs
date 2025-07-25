@@ -14,8 +14,10 @@ use std::num::NonZero;
 use std::ops::Range;
 
 pub(crate) mod batch;
+//pub(crate) mod bundle;
 pub(crate) mod collector;
 
+//pub(crate) use bundle::{Bundle, BundleMetadata};
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
 pub(crate) trait GetHash {
@@ -65,7 +67,7 @@ where
 
     let start_op = ops.first().map(T::op_id_ctr).unwrap_or(meta.max_op + 1);
 
-    let ops_meta = write_change_ops(ops, meta, &mut col_data, mapper);
+    let ops_meta = write_change_ops(ops, meta.actor, &mut col_data, mapper);
 
     let other_actors: Vec<_> = mapper.iter().collect();
 
@@ -165,11 +167,11 @@ pub(crate) struct ChangeOpsColumns {
     pub(crate) mark_name: Range<usize>,
 }
 
-fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {
+pub(crate) fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {
     range.start + by..range.end + by
 }
 
-fn length_prefixed_bytes<B: AsRef<[u8]>>(b: B, out: &mut Vec<u8>) -> usize {
+pub(crate) fn length_prefixed_bytes<B: AsRef<[u8]>>(b: B, out: &mut Vec<u8>) -> usize {
     let prefix_len = leb128::write::unsigned(out, b.as_ref().len() as u64).unwrap();
     out.write_all(b.as_ref()).unwrap();
     prefix_len + b.as_ref().len()
@@ -185,7 +187,7 @@ impl Eq for OpBuilder<'_> {}
 
 fn write_change_ops<T>(
     ops: &[T],
-    meta: &BuildChangeMetadata<'_>,
+    change_actor: usize,
     data: &mut Vec<u8>,
     mapper: &mut ActorMapper<'_>,
 ) -> ChangeOpsColumns2
@@ -196,7 +198,7 @@ where
         return ChangeOpsColumns::default().into();
     }
 
-    mapper.remap_actors(ops, meta);
+    mapper.remap_actors(ops, change_actor);
 
     let remap = move |actor: Option<Cow<'_, ActorIdx>>| {
         actor.map(|a| Cow::Owned(mapper.mapping[usize::from(*a)].unwrap()))
@@ -247,29 +249,27 @@ where
 // of changes (like on load)
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
-    mapping: Vec<Option<ActorIdx>>,
+    pub(crate) mapping: Vec<Option<ActorIdx>>,
     actors: &'a [ActorId],
     other_actors: Vec<usize>,
 }
 
 impl<'a> ActorMapper<'a> {
-    pub(crate) fn iter(&self) -> impl Iterator<Item = ActorId> + '_ {
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = ActorId> + '_ {
         self.other_actors.iter().map(|i| self.actors[*i].clone())
     }
 
     pub(crate) fn new(actors: &'a [ActorId]) -> ActorMapper<'a> {
+        let len = actors.len();
         ActorMapper {
-            seen_actors: vec![],
-            mapping: vec![],
+            seen_actors: vec![false; len],
+            mapping: vec![None; len],
             actors,
             other_actors: vec![],
         }
     }
 
-    fn remap_actors<C>(&mut self, ops: &[C], meta: &BuildChangeMetadata<'_>)
-    where
-        C: AsChangeOp,
-    {
+    fn reset(&mut self) {
         let len = self.actors.len();
         self.seen_actors.truncate(0);
         self.mapping.truncate(0);
@@ -277,30 +277,55 @@ impl<'a> ActorMapper<'a> {
 
         self.seen_actors.resize(len, false);
         self.mapping.resize(len, None);
+    }
+
+    pub(crate) fn process_actor(&mut self, actor: usize) {
+        self.seen_actors[actor] = true;
+    }
+
+    pub(crate) fn process_op<C>(&mut self, op: &C)
+    where
+        C: AsChangeOp,
+    {
+        if let Some(actor) = C::obj_actor(op).as_deref() {
+            self.process_actor(usize::from(*actor))
+        }
+        if let Some(actor) = C::key_actor(op).as_deref() {
+            self.process_actor(usize::from(*actor));
+        }
+        for id in C::pred(op) {
+            self.process_actor(id.actor());
+        }
+    }
+
+    pub(crate) fn build_mapping(&mut self, default_actor: Option<usize>) {
         let mut seen_index = 0;
 
-        for op in ops {
-            if let Some(actor) = C::obj_actor(op).as_deref() {
-                self.seen_actors[usize::from(*actor)] = true;
-            }
-            if let Some(actor) = C::key_actor(op).as_deref() {
-                self.seen_actors[usize::from(*actor)] = true;
-            }
-            for id in C::pred(op) {
-                self.seen_actors[id.actor()] = true;
-            }
+        if let Some(actor) = default_actor {
+            self.seen_actors[actor] = false;
+            self.mapping[actor] = Some(ActorIdx(0));
+            seen_index = 1;
         }
-
-        self.seen_actors[meta.actor] = false;
-        self.mapping[meta.actor] = Some(ActorIdx(seen_index));
 
         for (index, seen) in self.seen_actors.iter().enumerate() {
             if *seen {
-                //self.other_actors.push(self.actors[index].clone());
                 self.other_actors.push(index);
-                seen_index += 1;
                 self.mapping[index] = Some(ActorIdx(seen_index));
+                seen_index += 1;
             }
         }
+    }
+
+    fn remap_actors<C>(&mut self, ops: &[C], change_actor: usize)
+    where
+        C: AsChangeOp,
+    {
+        self.reset();
+
+        for op in ops {
+            self.process_op(op);
+        }
+
+        self.build_mapping(Some(change_actor));
     }
 }

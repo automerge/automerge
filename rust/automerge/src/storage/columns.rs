@@ -49,7 +49,7 @@ pub(crate) mod compression {
     pub(crate) struct Uncompressed;
 
     /// A witness for what we know about whether or not a column is compressed
-    pub(crate) trait ColumnCompression {}
+    pub(crate) trait ColumnCompression: std::fmt::Debug {}
     impl ColumnCompression for Unknown {}
     impl ColumnCompression for Uncompressed {}
 }

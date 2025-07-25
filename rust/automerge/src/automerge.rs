@@ -20,7 +20,7 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
-use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
+use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
@@ -714,6 +714,9 @@ impl Automerge {
                 );
                 Self::new()
             }
+            storage::Chunk::Bundle(_b) => {
+                todo!()
+            }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
                 change = Some(
@@ -878,6 +881,13 @@ impl Automerge {
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
+    }
+
+    pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        Bundle::for_hashes(&self.ops, &self.change_graph, hashes)
     }
 
     /// Save the entirety of this document in a compact form.
