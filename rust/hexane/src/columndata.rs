@@ -1831,7 +1831,7 @@ pub(crate) mod tests {
         let mut rng = make_rng();
         for _ in 0..FUZZ_SIZE {
             let data = (0..N)
-                .map(|_| rng.random::<u64>() % (STEP + 1) as u64)
+                .map(|_| rng.random::<u64>() % STEP as u64 + 1)
                 .collect::<Vec<_>>();
             let col1: ColumnData<UIntCursor> = data.clone().into_iter().collect();
             let col2: ColumnData<DeltaCursor> =

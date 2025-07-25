@@ -173,7 +173,7 @@ impl OpId {
 }
 
 impl ObjId {
-    fn try_load(
+    pub(crate) fn try_load(
         actor: Option<Cow<'_, ActorIdx>>,
         ctr: Option<Cow<'_, u64>>,
     ) -> Result<ObjId, ReadOpError> {
@@ -190,6 +190,13 @@ impl ObjId {
                 "missing actor or counter".to_string(),
             )),
         }
+    }
+
+    pub(crate) fn try_load_i(
+        actor: Option<Cow<'_, ActorIdx>>,
+        ctr: Option<Cow<'_, i64>>,
+    ) -> Result<ObjId, ReadOpError> {
+        Self::try_load(actor, ctr.map(|c| Cow::Owned(*c as u64)))
     }
 }
 
@@ -211,7 +218,7 @@ impl ElemId {
 }
 
 impl<'a> KeyRef<'a> {
-    fn try_load(
+    pub(crate) fn try_load(
         key_str: Option<Cow<'a, str>>,
         key_actor: Option<Cow<'a, ActorIdx>>,
         key_counter: Option<Cow<'a, i64>>,

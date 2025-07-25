@@ -7,18 +7,19 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use super::{change::Unverified, parse, Change, Compressed, Document, MAGIC_BYTES};
+use super::{change::Unverified, parse, BundleStorage, Change, Compressed, Document, MAGIC_BYTES};
 use crate::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
 pub(crate) enum Chunk<'a> {
     Document(Document<'a>),
     Change(Change<'a, Unverified>),
+    Bundle(BundleStorage<'a, Unverified>),
     CompressedChange(Change<'static, Unverified>, Compressed<'a>),
 }
 
 pub(crate) mod error {
     use super::parse;
-    use crate::storage::{change, document};
+    use crate::storage::{bundle, change, document};
 
     #[derive(thiserror::Error, Debug)]
     pub(crate) enum Chunk {
@@ -26,6 +27,8 @@ pub(crate) mod error {
         LeftoverData,
         #[error(transparent)]
         Leb128(#[from] parse::leb128::Error),
+        #[error("failed to parse bundle: {0}")]
+        Bundle(#[from] bundle::ParseError),
         #[error("failed to parse header: {0}")]
         Header(#[from] Header),
         #[error("bad change chunk: {0}")]
@@ -95,6 +98,15 @@ impl<'a> Chunk<'a> {
                     Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
+            ChunkType::Bundle => {
+                let (remaining, bundle) =
+                    BundleStorage::parse_following_header(chunk_input, header)
+                        .map_err(|e| e.lift())?;
+                if !remaining.is_empty() {
+                    return Err(parse::ParseError::Error(error::Chunk::LeftoverData));
+                }
+                Chunk::Bundle(bundle)
+            }
         };
         Ok((remaining, chunk))
     }
@@ -106,6 +118,7 @@ impl<'a> Chunk<'a> {
             Self::CompressedChange(change, compressed) => {
                 compressed.checksum() == change.checksum() && change.checksum_valid()
             }
+            Self::Bundle(b) => b.checksum_valid(),
         }
     }
 }
@@ -115,6 +128,7 @@ pub(crate) enum ChunkType {
     Document,
     Change,
     Compressed,
+    Bundle,
 }
 
 impl TryFrom<u8> for ChunkType {
@@ -125,6 +139,7 @@ impl TryFrom<u8> for ChunkType {
             0 => Ok(Self::Document),
             1 => Ok(Self::Change),
             2 => Ok(Self::Compressed),
+            3 => Ok(Self::Bundle),
             other => Err(other),
         }
     }
@@ -136,6 +151,7 @@ impl From<ChunkType> for u8 {
             ChunkType::Document => 0,
             ChunkType::Change => 1,
             ChunkType::Compressed => 2,
+            ChunkType::Bundle => 3,
         }
     }
 }
