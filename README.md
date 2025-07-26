@@ -59,7 +59,7 @@ use automerge you may want to look into
 
 ## Repository Organisation
 
-- `./rust` - the rust rust implementation and also the Rust components of
+- `./rust` - the rust implementation and also the Rust components of
   platform specific wrappers (e.g. `automerge-wasm` for the WASM API or
   `automerge-c` for the C FFI bindings)
 - `./javascript` - The javascript library which uses `automerge-wasm`
