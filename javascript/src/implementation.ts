@@ -4,10 +4,13 @@ import { STATE } from "./constants.js"
 
 import {
   type AutomergeValue,
+  type ConflictPatch,
   Counter,
   type Cursor,
   type CursorPosition,
   type Mark,
+  type MarkPatch,
+  type UnmarkPatch,
   type MarkSet,
   type MarkRange,
   type MarkValue,
