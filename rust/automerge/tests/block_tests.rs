@@ -5,7 +5,7 @@ use automerge::{
     iter::Span,
     marks::{ExpandMark, Mark, UpdateSpansConfig},
     transaction::Transactable,
-    AutoCommit, ObjType, Patch, Prop, ReadDoc, ScalarValue, Value, ROOT,
+    AutoCommit, ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, Value, ROOT,
 };
 use test_log::test;
 
@@ -778,4 +778,35 @@ fn diff_emits_block_updates() {
 
     let patches = doc.diff(&[], &heads);
     assert_eq!(patches, expected_patches);
+}
+
+#[test]
+fn merge_produces_block_insertion_diffs() {
+    let mut doc = AutoCommit::new();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+
+    let mut doc2 = doc.fork();
+
+    let block1 = doc.split_block(&text, 0).unwrap();
+
+    doc2.update_diff_cursor();
+    let heads_before = doc2.get_heads();
+    doc2.merge(&mut doc).unwrap();
+    let heads_after = doc2.get_heads();
+    let patches = doc2.diff(&heads_before, &heads_after);
+    for patch in &patches {
+        println!("{:?}", patch);
+    }
+
+    let patch = patches[0].clone();
+    assert_eq!(patch.obj, text);
+    assert_eq!(
+        patch.action,
+        PatchAction::Insert {
+            index: 0,
+            values: vec![(Value::Object(ObjType::Map), block1, false)]
+                .into_iter()
+                .collect()
+        }
+    );
 }
