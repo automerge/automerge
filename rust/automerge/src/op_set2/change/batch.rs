@@ -227,7 +227,21 @@ impl<'a> Untangler<'a> {
                 self.index += 1;
             } else {
                 let marks = self.value.marks.after.current().cloned();
-                log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
+                match op.bld.action {
+                    Action::MakeMap => {
+                        // Block markers
+                        log.insert(
+                            op.bld.obj,
+                            self.index,
+                            Value::map(),
+                            op.bld.id,
+                            op.conflicted,
+                        );
+                    }
+                    _ => {
+                        log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
+                    }
+                }
                 self.index += op.width(self.encoding);
             }
         }
@@ -668,8 +682,17 @@ impl<'a> ValueState<'a> {
         } else {
             match (self.doc.0.take(), self.change.0.take()) {
                 (None, Some(c)) => {
-                    let marks = self.marks.after.current().cloned();
-                    log.splice(obj, index, c.value.as_str(), marks);
+                    match c.value {
+                        Value::Scalar(_) => {
+                            // I don't think this branch can ever actually happen in practice. If we
+                            // reach here it's because there is a non-inserting operation (i.e. an
+                            // update) to the operation at `index`, but we only allow insertions
+                            // into text objects. Regardless, we handle this is a splice just in
+                            // case
+                            log.splice(obj, index, c.value.as_str(), self.marks.current().clone());
+                        }
+                        _ => log.insert(obj, index, c.value, c.id, c.conflict),
+                    }
                 }
                 (Some(d), None) if d.deleted => {
                     let w = d.value.width(encoding);
