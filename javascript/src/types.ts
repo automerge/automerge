@@ -4,6 +4,7 @@ export { Int, Uint, Float64 } from "./numbers.js"
 import { Counter } from "./counter.js"
 import type { Patch } from "./wasm_types.js"
 export type {
+  ConflictPatch,
   Cursor,
   CursorPosition,
   MoveCursor,
@@ -13,6 +14,7 @@ export type {
   MarkRange,
   MarkPatch,
   Patch,
+  UnmarkPatch,
 } from "./wasm_types.js"
 
 export type MarkValue = string | number | null | boolean | Date | Uint8Array

@@ -136,10 +136,19 @@ impl PartialEq for ExIdPromise<'_> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum OpSetOrExId<'a> {
     OpSet(&'a OpSet),
     ExId(ExId),
+}
+
+impl std::fmt::Debug for OpSetOrExId<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpSetOrExId::OpSet(_) => write!(f, "OpSetOrExId::OpSet"),
+            OpSetOrExId::ExId(e) => write!(f, "OpSetOrExId::ExId({:?})", e),
+        }
+    }
 }
 
 impl OpSetOrExId<'_> {
