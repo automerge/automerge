@@ -1014,3 +1014,105 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
         ]
     );
 }
+
+#[test]
+fn deleting_in_middle_of_multibyte_char_produces_patch_which_deletes_entire_char() {
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
+        .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.splice_text(&text, 0, 0, "🐻🐻🐻🐻🐻🐻").unwrap();
+
+    assert_eq!(doc.text(&text).unwrap(), "🐻🐻🐻🐻🐻🐻");
+
+    doc.splice_text(&text, 2, 2, "A🐻A").unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "🐻A🐻A🐻🐻🐻🐻");
+
+    // Deleting in the middle of the multibyte character 🐻 at index 4
+    // (according to utf16 offsets) should delete the whole character
+    doc.splice_text(&text, 4, 1, "X").unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "🐻AXA🐻🐻🐻🐻");
+}
+
+#[test]
+fn splicing_into_multibyte_characters() {
+    // This test checks that splicing into multibyte characters works correctly. Multibyte
+    // characters are _usually_ utf16 surrogate pairs, but there are other possibilities
+    // because technically the payload of an insertion operation can be any valid utf-8
+    // string. In this test we use the deprecated `legacy` API to create an operation
+    // which has the string 'BBBBB' as it's payload and use this string to test the
+    // behavior of splicing into and around multibyte characters.
+
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
+        .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    let actor = doc.get_actor().clone();
+    doc.splice_text(&text, 0, 0, "A").unwrap();
+    let parent_hash = doc.commit().unwrap();
+
+    // We have to construct this change using the legacy API because we intentionally make it
+    // impossible to create these kind of changes. The notable thing here is that there is
+    // an op which is a single insertion but contains multiple grapheme clusters (the 'BBBBB')
+    let weird_actor = ActorId::random();
+    let weird_change = automerge::ExpandedChange {
+        operations: vec![
+            automerge::legacy::Op {
+                action: automerge::legacy::OpType::Put("BBBBB".into()),
+                obj: automerge::legacy::ObjectId::Id(automerge::legacy::OpId(1, actor.clone())),
+                key: automerge::legacy::Key::Seq(automerge::legacy::ElementId::Id(
+                    automerge::legacy::OpId(2, actor.clone()),
+                )),
+                pred: automerge::legacy::SortedVec::new(),
+                insert: true,
+            },
+            automerge::legacy::Op {
+                action: automerge::legacy::OpType::Make(ObjType::Map),
+                obj: automerge::legacy::ObjectId::Id(automerge::legacy::OpId(1, actor.clone())),
+                key: automerge::legacy::Key::Seq(automerge::legacy::ElementId::Id(
+                    automerge::legacy::OpId(3, weird_actor.clone()),
+                )),
+                pred: automerge::legacy::SortedVec::new(),
+                insert: true,
+            },
+            automerge::legacy::Op {
+                action: automerge::legacy::OpType::Put("C".into()),
+                obj: automerge::legacy::ObjectId::Id(automerge::legacy::OpId(1, actor.clone())),
+                key: automerge::legacy::Key::Seq(automerge::legacy::ElementId::Id(
+                    automerge::legacy::OpId(4, weird_actor.clone()),
+                )),
+                pred: automerge::legacy::SortedVec::new(),
+                insert: true,
+            },
+        ],
+        actor_id: weird_actor,
+        hash: None,
+        seq: 1,
+        start_op: std::num::NonZero::new(3).unwrap(),
+        time: 0,
+        message: None,
+        deps: vec![parent_hash],
+        extra_bytes: Vec::new(),
+    };
+    doc.apply_changes(vec![weird_change.into()]).unwrap();
+
+    assert_eq!(doc.text(&text).unwrap(), "ABBBBB\u{fffc}C");
+
+    let mut doc1 = doc.clone();
+    doc1.splice_text(&text, 3, 4, "X").unwrap();
+
+    // deleting in the middle of a multi-byte character will delete the whole thing
+    // and characters past its end
+    assert_eq!(doc1.text(&text).unwrap(), "AXC");
+
+    let mut doc2 = doc.clone();
+    doc2.splice_text(&text, 3, 0, "X").unwrap();
+
+    // inserting in the middle of a mutli-bytes span inserts after
+    assert_eq!(doc2.text(&text).unwrap(), "ABBBBBX\u{fffc}C");
+
+    let mut doc3 = doc.clone();
+    doc3.splice_text(&text, 3, 1, "").unwrap();
+
+    // deleting in the middle of a multi-byte character will delete the whole thing
+    // and characters past its end, even without inserting
+    assert_eq!(doc3.text(&text).unwrap(), "A\u{fffc}C");
+}
