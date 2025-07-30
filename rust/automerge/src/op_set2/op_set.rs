@@ -524,7 +524,7 @@ impl OpSet {
             #[cfg(debug_assertions)]
             {
                 let slow = self.seek_ops_by_index_slow(obj, index, encoding, clock);
-                assert_eq!(found, slow);
+                assert_eq!(found, slow, "fast != slow");
             }
             found
         } else {
@@ -540,6 +540,7 @@ impl OpSet {
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         let sub_iter = self.iter_obj(obj);
+        let end = sub_iter.range.end;
         let mut end_pos = sub_iter.pos();
         let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
         let mut len = 0;
@@ -558,8 +559,8 @@ impl OpSet {
         OpsFound {
             index,
             ops: vec![],
-            end_pos,
-            range,
+            end_pos: end,
+            range: end..end,
         }
     }
 
@@ -610,7 +611,7 @@ impl OpSet {
             OpsFound {
                 index,
                 ops: vec![],
-                range,
+                range: end_pos..end_pos,
                 end_pos,
             }
         }
@@ -648,9 +649,20 @@ impl OpSet {
                     ops.push(op);
                 }
             }
+        } else {
+            // This is required for the returned FoundOps to have the same
+            // range as in the OpSet::seek_ops_by_index_slow function in
+            // the case where there are no ops in the object
+            range.start = range.end;
         }
 
         assert_eq!(range.end, end_pos);
+        if ops.is_empty() {
+            // As above, this line is needed to normalise the `range` produced to
+            // match that for the OpSet::seek_ops_by_index_slow function in the
+            // case where there are no ops
+            range = end_pos..end_pos;
+        }
         OpsFound {
             index,
             ops,
@@ -1037,6 +1049,7 @@ impl OpSet {
             value,
             marks: self.mark_info_iter_range(range),
             op_set: self,
+            range: range.clone(),
         }
     }
 
@@ -1065,6 +1078,7 @@ impl OpSet {
             value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.raw_reader(0)),
             marks: MarkInfoIter::new(self.cols.mark_name.iter(), self.cols.expand.iter()),
             op_set: self,
+            range: 0..self.len(),
         }
     }
 

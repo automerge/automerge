@@ -50,6 +50,11 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
                 _ => (),
             }
         }
-        self.found.take()
+        let found = self.found.take()?;
+        if found.ops.is_empty() {
+            None
+        } else {
+            Some(found)
+        }
     }
 }
