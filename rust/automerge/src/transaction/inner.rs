@@ -580,49 +580,9 @@ impl TransactionInner {
             }
         }
 
-        //let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding(self.text_encoding);
-        // delete `del` items - performing the query for each one
-        let mut deleted: usize = 0;
-        while deleted < (del as usize) {
-            // TODO: could do this with a single custom query
 
-            let query = doc
-                .ops()
-                .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
-
-            // if we delete in the middle of a multi-character
-            // move cursor back to the beginning and expand the del width
-            let adjusted_index = query.index;
-            if adjusted_index < index {
-                del += (index - adjusted_index) as isize;
-                index = adjusted_index;
-            }
-
-            let step = if let Some(op) = query.ops.last() {
-                op.width(encoding)
-            } else {
-                break;
-            };
-
-            let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
-            let op = self.next_delete(obj, index, query_elemid, &query.ops);
-            let ops_pos = query
-                .ops
-                .iter()
-                .map(|o| o.add_succ(op.id(), None))
-                .collect::<Vec<_>>();
-
-            doc.ops_mut().add_succ(&ops_pos);
-
-            deleted += step;
-
-            self.pending.push(op);
-        }
-
-        if deleted > 0 && patch_log.is_active() {
-            patch_log.delete_seq(obj.id, index, deleted);
-        }
+        let mut inserted_width = 0;
 
         // do the insert query for the first item and then
         // insert the remaining ops one after the other
@@ -630,6 +590,9 @@ impl TransactionInner {
             let query = doc
                 .ops()
                 .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+
+            index = query.index;
+
             let mut pos = query.pos;
             let mut elemid = query.elemid;
             let marks = query.marks;
@@ -639,6 +602,8 @@ impl TransactionInner {
 
             for v in &values {
                 let op = TxOp::insert_val(self.next_id(), obj, pos, v.clone(), elemid);
+
+                inserted_width += op.bld.width(encoding);
 
                 elemid = ElemId(op.id());
 
@@ -667,6 +632,49 @@ impl TransactionInner {
                 }
             }
         }
+
+        // delete `del` items - performing the query for each one
+        let mut delete_index = index + inserted_width;
+        let mut deleted: usize = 0;
+        while deleted < (del as usize) {
+            // TODO: could do this with a single custom query
+
+            let query =
+                doc.ops()
+                    .seek_ops_by_index(&obj.id, delete_index, encoding, self.scope.as_ref());
+
+            let step = if let Some(op) = query.ops.last() {
+                op.width(encoding)
+            } else {
+                break;
+            };
+
+            // if we delete in the middle of a multi-character
+            // move cursor to the next character
+            if query.index < delete_index {
+                delete_index = query.index + step;
+                continue;
+            }
+
+            let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
+            let op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
+            let ops_pos = query
+                .ops
+                .iter()
+                .map(|o| o.add_succ(op.id(), None))
+                .collect::<Vec<_>>();
+
+            doc.ops_mut().add_succ(&ops_pos);
+
+            deleted += step;
+
+            self.pending.push(op);
+        }
+
+        if deleted > 0 && patch_log.is_active() {
+            patch_log.delete_seq(obj.id, delete_index, deleted);
+        }
+
         Ok(())
     }
 

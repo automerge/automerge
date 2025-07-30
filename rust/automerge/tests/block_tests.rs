@@ -475,7 +475,8 @@ fn test_mark_behavior_on_delete_insert() {
     .unwrap();
 
     // Delete the text and insert new text at the same position
-    doc.splice_text(&text, 0, 5, "hi").unwrap();
+    doc.splice_text(&text, 0, 5, "").unwrap();
+    doc.splice_text(&text, 0, 0, "hi").unwrap();
 
     // Check what marks are present
     let spans = doc.spans(&text).unwrap().collect::<Vec<_>>();
@@ -808,5 +809,79 @@ fn merge_produces_block_insertion_diffs() {
                 .into_iter()
                 .collect()
         }
+    );
+}
+
+#[test]
+fn test_splice_with_mark() {
+    // Reproduces the issue in https://github.com/automerge/automerge/issues/935
+    // The problem was that replacing some marked text using `splice_text` would
+    // not preserve marks around the text if the mark boundaries were on the ends
+    // of the text that was being replaced.
+
+    let s1 = "abc";
+    let m1 = automerge::marks::Mark::new(
+        "some_nonexpanding_mark_type".into(),
+        "marked".to_string(),
+        1,
+        2,
+    );
+    let m2 = automerge::marks::Mark::new(
+        "some_expanding_mark_type".into(),
+        "marked".to_string(),
+        1,
+        2,
+    );
+    let mut doc = AutoCommit::new();
+    let txt = doc
+        .put_object(&automerge::ROOT, "txt", ObjType::Text)
+        .unwrap();
+    doc.splice_text(&txt, 0, 0, s1).unwrap();
+    doc.mark(&txt, m1, automerge::marks::ExpandMark::None)
+        .unwrap();
+    doc.mark(&txt, m2, automerge::marks::ExpandMark::Both)
+        .unwrap();
+
+    let spans_before = doc.spans(&txt).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans_before,
+        vec![
+            Span::Text {
+                text: "a".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: "b".to_string(),
+                marks: markset(vec![
+                    ("some_nonexpanding_mark_type", "marked".into()),
+                    ("some_expanding_mark_type", "marked".into())
+                ])
+            },
+            Span::Text {
+                text: "c".to_string(),
+                marks: None
+            },
+        ]
+    );
+
+    doc.splice_text(&txt, 1, 1, "d").unwrap();
+
+    let spans_after = doc.spans(&txt).unwrap().collect::<Vec<_>>();
+    assert_eq!(
+        spans_after,
+        vec![
+            Span::Text {
+                text: "a".to_string(),
+                marks: None
+            },
+            Span::Text {
+                text: "d".to_string(),
+                marks: markset(vec![("some_expanding_mark_type", "marked".into())])
+            },
+            Span::Text {
+                text: "c".to_string(),
+                marks: None
+            },
+        ]
     );
 }
