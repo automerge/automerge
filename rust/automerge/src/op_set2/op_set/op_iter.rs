@@ -33,6 +33,7 @@ pub(crate) struct OpIter<'a> {
     pub(super) value: ValueIter<'a>,
     pub(super) marks: MarkInfoIter<'a>,
     pub(super) op_set: &'a OpSet,
+    pub(super) range: Range<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
