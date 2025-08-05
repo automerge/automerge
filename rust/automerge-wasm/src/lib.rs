@@ -376,7 +376,7 @@ export interface Stats {
   cargoPackageName: string;
   cargoPackageVersion: string;
   rustcVersion: string;
-};
+}
 
 export type UpdateSpansConfig = {
     defaultExpand?: "before" | "after" | "both" | "none";
