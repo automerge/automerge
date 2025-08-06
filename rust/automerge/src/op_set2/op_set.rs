@@ -413,11 +413,13 @@ impl OpSet {
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
+        let start_acc = iter.acc().as_usize();
         let tx = iter.nth(index.get() - 1)?;
+        let current_acc = tx.acc.as_usize();
         let iter = self.iter_range(&(tx.pos..range.end));
         let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
         let mut query = InsertQuery::new(iter, index.get(), encoding, None, marks);
-        query.resolve(index.get() - 1).ok()
+        query.resolve(current_acc - start_acc).ok()
     }
 
     pub(crate) fn query_insert_at_list(
@@ -1168,6 +1170,7 @@ pub(crate) struct Parent {
 pub(crate) struct QueryNth {
     pub(crate) marks: Option<Arc<MarkSet>>,
     pub(crate) pos: usize,
+    pub(crate) index: usize,
     pub(crate) elemid: ElemId,
 }
 

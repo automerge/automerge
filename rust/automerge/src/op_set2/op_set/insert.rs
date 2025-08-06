@@ -130,12 +130,14 @@ impl<'a> InsertQuery<'a> {
                 pos: loc.pos,
                 marks: MarkSet::from_query_state(&self.marks),
                 elemid: loc.cursor,
+                index,
             })
         } else if let Some(cursor) = self.last_visible_cursor {
             Ok(QueryNth {
                 pos: pos + 1,
                 marks: MarkSet::from_query_state(&self.marks),
                 elemid: cursor,
+                index,
             })
         } else {
             Err(AutomergeError::InvalidIndex(self.target))

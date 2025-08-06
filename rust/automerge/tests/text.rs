@@ -1016,7 +1016,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 }
 
 #[test]
-fn deleting_in_middle_of_multibyte_char_produces_patch_which_deletes_entire_char() {
+fn deleting_in_middle_of_multibyte_char_moves_the_cursor_to_after_the_character() {
     let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
         .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
@@ -1028,9 +1028,12 @@ fn deleting_in_middle_of_multibyte_char_produces_patch_which_deletes_entire_char
     assert_eq!(doc.text(&text).unwrap(), "🐻A🐻A🐻🐻🐻🐻");
 
     // Deleting in the middle of the multibyte character 🐻 at index 4
-    // (according to utf16 offsets) should delete the whole character
+    // (according to utf16 offsets) should delete the following character
     doc.splice_text(&text, 4, 1, "X").unwrap();
-    assert_eq!(doc.text(&text).unwrap(), "🐻AXA🐻🐻🐻🐻");
+    assert_eq!(doc.text(&text).unwrap(), "🐻A🐻X🐻🐻🐻🐻");
+
+    doc.splice_text(&text, 4, 2, "Y").unwrap();
+    assert_eq!(doc.text(&text).unwrap(), "🐻A🐻Y🐻🐻🐻");
 }
 
 #[test]
@@ -1099,9 +1102,8 @@ fn splicing_into_multibyte_characters() {
     let mut doc1 = doc.clone();
     doc1.splice_text(&text, 3, 4, "X").unwrap();
 
-    // deleting in the middle of a multi-byte character will delete the whole thing
-    // and characters past its end
-    assert_eq!(doc1.text(&text).unwrap(), "AXC");
+    // deleting in the middle of a multi-byte character will delete after
+    assert_eq!(doc1.text(&text).unwrap(), "ABBBBBX");
 
     let mut doc2 = doc.clone();
     doc2.splice_text(&text, 3, 0, "X").unwrap();
@@ -1112,7 +1114,6 @@ fn splicing_into_multibyte_characters() {
     let mut doc3 = doc.clone();
     doc3.splice_text(&text, 3, 1, "").unwrap();
 
-    // deleting in the middle of a multi-byte character will delete the whole thing
-    // and characters past its end, even without inserting
-    assert_eq!(doc3.text(&text).unwrap(), "A\u{fffc}C");
+    // deleting in the middle of a multi-byte character will delete after
+    assert_eq!(doc3.text(&text).unwrap(), "ABBBBBC");
 }

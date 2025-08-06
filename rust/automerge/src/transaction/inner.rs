@@ -580,29 +580,7 @@ impl TransactionInner {
             }
         }
 
-        //let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding(self.text_encoding);
-
-        // First check that the insertion point is not inside a multibyte character
-        // If it is, move the insertion point forwards to just after the multibyte
-        // character
-        let query = doc
-            .ops()
-            .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
-        if query.index < index {
-            if let Some(op) = query.ops.last() {
-                // We're inside a multibyte character
-                if del > 0 {
-                    // if we are deleting, we insert before the multibyte character
-                    // then expand the deletion to cover the whole multibyte character
-                    del += (index - query.index) as isize;
-                    index = query.index;
-                } else {
-                    // We just move the insertion point to after the multibyte character
-                    index = query.index + op.width(encoding);
-                }
-            }
-        }
 
         let mut inserted_width = 0;
 
@@ -612,6 +590,8 @@ impl TransactionInner {
             let query = doc
                 .ops()
                 .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+
+            index = query.index;
 
             let mut pos = query.pos;
             let mut elemid = query.elemid;
@@ -654,7 +634,7 @@ impl TransactionInner {
         }
 
         // delete `del` items - performing the query for each one
-        let delete_index = index + inserted_width;
+        let mut delete_index = index + inserted_width;
         let mut deleted: usize = 0;
         while deleted < (del as usize) {
             // TODO: could do this with a single custom query
@@ -663,19 +643,18 @@ impl TransactionInner {
                 doc.ops()
                     .seek_ops_by_index(&obj.id, delete_index, encoding, self.scope.as_ref());
 
-            // if we delete in the middle of a multi-character
-            // move cursor back to the beginning and expand the del width
-            let adjusted_index = query.index;
-            if adjusted_index < delete_index {
-                del += (delete_index - adjusted_index) as isize;
-                index = adjusted_index;
-            }
-
             let step = if let Some(op) = query.ops.last() {
                 op.width(encoding)
             } else {
                 break;
             };
+
+            // if we delete in the middle of a multi-character
+            // move cursor to the next character
+            if query.index < delete_index {
+                delete_index = query.index + step;
+                continue;
+            }
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
             let op = self.next_delete(obj, delete_index, query_elemid, &query.ops);

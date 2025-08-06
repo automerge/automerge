@@ -2486,13 +2486,13 @@ describe("Automerge", () => {
       assert.deepEqual(remote.length("/width2"), 14);
       assert.deepEqual(remote.length("/mixed"), 7);
 
-      // when indexing in the middle of a multibyte char it indexes at the char before
+      // when indexing in the middle of a multibyte char it indexes at the char after
       doc.splice("/width2", 4, 1, "X");
       mat = doc.applyPatches(mat);
       remote.loadIncremental(doc.saveIncremental());
       r_mat = remote.applyPatches(r_mat);
 
-      assert.deepEqual(mat.width2, "🐻AXA🐻🐻🐻🐻");
+      assert.deepEqual(mat.width2, "🐻A🐻X🐻🐻🐻🐻");
 
       assert.deepEqual(doc.length("/width1", heads1), 6);
       assert.deepEqual(doc.length("/width2", heads1), 12);
@@ -2558,19 +2558,18 @@ describe("Automerge", () => {
       assert.deepEqual(doc.text("/bad_text"), "ABBBBB\ufffcC");
       assert.deepEqual(doc.materialize("/bad_text"), "ABBBBB\ufffcC");
 
-      // deleting in the middle of a multi-byte character will delete the whole thing
+      // deleting in the middle of a multi-byte character will delete after 
       const doc1 = doc.fork();
       doc1.splice("/bad_text", 3, 3, "X");
-      assert.deepEqual(doc1.text("/bad_text"), "AX\ufffcC");
+      assert.deepEqual(doc1.text("/bad_text"), "ABBBBBX");
 
-      // deleting in the middle of a multi-byte character will delete the whole thing
-      // and characters past its end
+      // deleting in the middle of a multi-byte character will delete after
       const doc2 = doc.fork();
       doc2.splice("/bad_text", 3, 4, "X");
-      assert.deepEqual(doc2.text("/bad_text"), "AXC");
+      assert.deepEqual(doc2.text("/bad_text"), "ABBBBBX");
 
       const doc3 = doc.fork();
-      doc3.splice("/bad_text", 3, 5, "X");
+      doc3.splice("/bad_text", 1, 7, "X");
       assert.deepEqual(doc3.text("/bad_text"), "AX");
 
       // inserting in the middle of a mutli-bytes span inserts after
