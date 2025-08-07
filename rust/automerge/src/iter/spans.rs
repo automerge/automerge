@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct SpansInternal<'a> {
     action_value: Unshift<SkipIter<ActionValueIter<'a>, VisIter<'a>>>,
     mark_info: MarkInfoIter<'a>,
@@ -25,7 +25,7 @@ pub(crate) struct SpansInternal<'a> {
 
 /// A sequence of block markers and text spans. Returned by [`crate::ReadDoc::spans`] and
 /// [`crate::ReadDoc::spans_at`]
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct Spans<'a> {
     internal: SpansInternal<'a>,
 }
@@ -57,13 +57,26 @@ impl Span {
 }
 
 impl<'a> SpansInternal<'a> {
+    pub(crate) fn empty(encoding: TextEncoding) -> Self {
+        Self {
+            action_value: Default::default(),
+            mark_info: Default::default(),
+            op_id: Default::default(),
+            marks: Default::default(),
+            op_set: Default::default(),
+            clock: Default::default(),
+            state: SpanState::empty(encoding),
+            pos: Default::default(),
+        }
+    }
+
     pub(crate) fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.mark_info.set_max(range.end);
         self.op_id.set_max(range.end);
         self.action_value.shift(range);
 
         self.marks = MarkStateMachine::default();
-        self.state = SpanState::default();
+        self.state = SpanState::empty(self.state.encoding);
         self.next()
     }
 
@@ -85,7 +98,7 @@ impl<'a> SpansInternal<'a> {
         let mark_info = op_set.mark_info_iter_range(&range);
         let action_value = Unshift::new(op_set.action_value_iter(range, clock.as_ref()));
         let marks = MarkStateMachine::default();
-        let state = SpanState::new(encoding);
+        let state = SpanState::empty(encoding);
         let op_set = Some(op_set);
 
         Self {
@@ -145,7 +158,7 @@ impl<'a> SpansInternal<'a> {
 
 const PLACEHOLDER: &str = "\u{fffc}";
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 struct SpanState {
     index: usize,
     // The next text span we will emit
@@ -182,7 +195,7 @@ struct NextText {
 }
 
 impl SpanState {
-    fn new(encoding: TextEncoding) -> Self {
+    fn empty(encoding: TextEncoding) -> Self {
         Self {
             index: 0,
             next_text: None,

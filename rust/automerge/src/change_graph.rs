@@ -688,7 +688,7 @@ mod tests {
         clock::ClockData,
         op_set2::{change::build_change, op_set::ResolvedAction, OpSet, TxOp},
         types::{ObjMeta, OpId, OpType},
-        ActorId,
+        ActorId, TextEncoding,
     };
 
     use super::*;
@@ -776,7 +776,7 @@ mod tests {
             num_new_ops: usize,
             parents: &[ChangeHash],
         ) -> ChangeHash {
-            let osd = OpSet::from_actors(self.actors.clone());
+            let osd = OpSet::from_actors(self.actors.clone(), TextEncoding::platform_default());
 
             let start_op = parents
                 .iter()

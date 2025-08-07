@@ -736,11 +736,16 @@ impl ObjMeta {
     }
 }
 
+/// How the indexes into a string are counted
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextEncoding {
+    /// Each unicode code point counts as one unit
     UnicodeCodePoint,
+    /// Each UTF-8 code unit counts as one unit (i.e. each byte in the utf-8 encoding of the string counts as one unit)
     Utf8CodeUnit,
+    /// Each utf-16 code unit counts as one unit, (i.e. each byte in the utf-16 encoding of the string counts as one unit)
     Utf16CodeUnit,
+    /// Each grapheme cluster counts as one unit
     GraphemeCluster,
 }
 

@@ -213,7 +213,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 0,
-                value: ConcreteTextValue::new("the ", TextEncoding::default()),
+                value: ConcreteTextValue::new("the ", TextEncoding::platform_default()),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -226,7 +226,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 4,
-                value: ConcreteTextValue::new("quick ", TextEncoding::default()),
+                value: ConcreteTextValue::new("quick ", TextEncoding::platform_default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -242,7 +242,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 10,
-                value: ConcreteTextValue::new("fox", TextEncoding::default()),
+                value: ConcreteTextValue::new("fox", TextEncoding::platform_default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -262,7 +262,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 13,
-                value: ConcreteTextValue::new(" jumps", TextEncoding::default()),
+                value: ConcreteTextValue::new(" jumps", TextEncoding::platform_default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -278,7 +278,10 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 19,
-                value: ConcreteTextValue::new(" over the lazy dog", TextEncoding::default()),
+                value: ConcreteTextValue::new(
+                    " over the lazy dog",
+                    TextEncoding::platform_default(),
+                ),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()

@@ -20,6 +20,14 @@ pub struct DocIter<'a> {
 }
 
 impl<'a> DocIter<'a> {
+    pub(crate) fn empty(encoding: TextEncoding) -> Self {
+        Self {
+            op_set: None,
+            obj_export: Arc::new(ExId::Root),
+            inner: DocIterInternal::empty(encoding),
+        }
+    }
+
     fn encoding(&self) -> TextEncoding {
         self.inner.span_iter.encoding()
     }
@@ -73,32 +81,19 @@ pub(crate) struct DocIterInternal<'a> {
     obj: ObjId,
 }
 
-impl Default for DocIter<'_> {
-    fn default() -> Self {
-        Self {
-            op_set: None,
-            obj_export: Arc::new(ExId::Root),
-            inner: Default::default(),
-        }
-    }
-}
-
-impl Default for DocIterInternal<'_> {
-    fn default() -> Self {
+impl<'a> DocIterInternal<'a> {
+    fn empty(encoding: TextEncoding) -> Self {
         Self {
             next_objs: BTreeMap::default(),
             path_map: BTreeMap::default(),
             obj_id_iter: ObjIdIter::default(),
             map_iter: MapRange::default(),
             list_iter: ListRange::default(),
-            span_iter: SpansInternal::default(),
+            span_iter: SpansInternal::empty(encoding),
             iter_type: IterType::Map,
             obj: ObjId::root(),
         }
     }
-}
-
-impl<'a> DocIterInternal<'a> {
     fn process_item(&mut self, item: DocItemInternal<'a>) -> Option<DocObjItemInternal<'a>> {
         if let Some((next_obj, next_typ)) = item.make_obj() {
             let prop = item.prop();

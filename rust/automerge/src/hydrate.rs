@@ -318,7 +318,7 @@ macro_rules! hydrate_list {
 #[macro_export]
 macro_rules! hydrate_text {
     {$t: expr} => {
-        $crate::hydrate::Text::new($crate::TextEncoding::default(), $t)
+        $crate::hydrate::Text::new($crate::TextEncoding::platform_default(), $t)
     };
 }
 
