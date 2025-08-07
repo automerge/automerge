@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use crate::exid::ExId;
-use crate::patches::TextRepresentation;
 use crate::types::Prop;
-use crate::{PatchAction, ScalarValue, SequenceTree};
+use crate::{PatchAction, ScalarValue, SequenceTree, TextEncoding};
 
 use super::{HydrateError, Value};
 
@@ -38,7 +37,7 @@ impl List {
 
     pub(crate) fn apply(
         &mut self,
-        text_rep: TextRepresentation,
+        text_encoding: TextEncoding,
         patch: PatchAction,
     ) -> Result<(), HydrateError> {
         match patch {
@@ -47,7 +46,7 @@ impl List {
                 value,
                 conflict,
             } => {
-                let h_value = Value::new(value.0, text_rep);
+                let h_value = Value::new(value.0, text_encoding);
                 *self
                     .0
                     .get_mut(index)
@@ -56,7 +55,7 @@ impl List {
             }
             PatchAction::Insert { index, values, .. } => {
                 for (n, value) in values.into_iter().enumerate() {
-                    let h_value = Value::new(value.0.clone(), text_rep);
+                    let h_value = Value::new(value.0.clone(), text_encoding);
                     self.0.insert(index + n, ListValue::new(h_value, value.2));
                 }
                 Ok(())

@@ -188,6 +188,14 @@ impl ObjType {
     pub fn is_sequence(&self) -> bool {
         matches!(self, Self::List | Self::Text)
     }
+
+    pub(crate) fn as_sequence_type(&self) -> Option<SequenceType> {
+        match self {
+            ObjType::List => Some(SequenceType::List),
+            ObjType::Text => Some(SequenceType::Text),
+            _ => None,
+        }
+    }
 }
 
 impl From<amp::MapType> for ObjType {
@@ -749,26 +757,10 @@ impl TextEncoding {
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub(crate) enum ListEncoding {
-    #[default]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum SequenceType {
     List,
-    Text(TextEncoding),
-}
-
-impl From<TextEncoding> for ListEncoding {
-    fn from(enc: TextEncoding) -> Self {
-        Self::Text(enc)
-    }
-}
-
-impl ListEncoding {
-    pub(crate) fn width(&self, s: &str) -> usize {
-        match self {
-            ListEncoding::List => 1,
-            ListEncoding::Text(enc) => enc.width(s),
-        }
-    }
+    Text,
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]

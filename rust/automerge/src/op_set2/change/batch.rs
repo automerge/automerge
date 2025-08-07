@@ -2,12 +2,11 @@ use crate::automerge::diff::RichTextDiff;
 use crate::hydrate::Value;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
 use crate::op_set2::SuccInsert;
-use crate::patches::TextRepresentation;
 use crate::types::{
-    ActorId, ElemId, ListEncoding, ObjId, ObjType, OpId, Prop, ScalarValue, SmallHashMap,
+    ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
 };
-use crate::AutomergeError;
 use crate::{Automerge, Change, ChangeHash, PatchLog};
+use crate::{AutomergeError, TextEncoding};
 
 use super::super::op::{ChangeOp, Op, OpBuilder};
 use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
@@ -50,7 +49,8 @@ struct Untangler<'a> {
     top: Top,
     conflicts: &'a mut Vec<Adjust>,
     value: ValueState<'a>,
-    encoding: ListEncoding,
+    seq_type: SequenceType,
+    text_encoding: TextEncoding,
     count: usize,
     index: usize,
     max: usize,
@@ -80,7 +80,7 @@ impl<'a> Untangler<'a> {
         }
 
         if doc_op.visible() && !deleted {
-            self.width = doc_op.width(self.encoding);
+            self.width = doc_op.width(self.seq_type, self.text_encoding);
         }
         self.value.process_doc_op(doc_op, deleted);
         self.top.process_doc_op(self.change_ops, doc_op, deleted);
@@ -93,7 +93,7 @@ impl<'a> Untangler<'a> {
                 self.change_ops[last].pos = Some(doc_op.pos);
                 self.change_ops[last].subsort = self.count;
                 if self.change_ops[last].visible() {
-                    self.width = self.change_ops[last].width(self.encoding);
+                    self.width = self.change_ops[last].width(self.seq_type, self.text_encoding);
                 }
                 self.value.process_change_op(&self.change_ops[last]);
                 self.count += 1;
@@ -111,7 +111,7 @@ impl<'a> Untangler<'a> {
             self.change_ops[*i].subsort = self.count;
             self.width = 0;
             if self.change_ops[*i].visible() {
-                self.width = self.change_ops[*i].width(self.encoding);
+                self.width = self.change_ops[*i].width(self.seq_type, self.text_encoding);
             }
             self.value.process_change_op(&self.change_ops[*i]);
 
@@ -221,8 +221,8 @@ impl<'a> Untangler<'a> {
 
         if let Some(p) = vis {
             let op = &mut self.change_ops[p];
-            if self.encoding == ListEncoding::List {
-                let value = op.hydrate_value_and_fix_counters(self.encoding.into());
+            if self.seq_type == SequenceType::List {
+                let value = op.hydrate_value_and_fix_counters(self.text_encoding);
                 log.insert(op.bld.obj, self.index, value, op.id(), conflict);
                 self.index += 1;
             } else {
@@ -242,7 +242,7 @@ impl<'a> Untangler<'a> {
                         log.splice(op.bld.obj, self.index, op.bld.as_str(), marks);
                     }
                 }
-                self.index += op.width(self.encoding);
+                self.index += op.width(self.seq_type, self.text_encoding);
             }
         }
 
@@ -251,7 +251,8 @@ impl<'a> Untangler<'a> {
 
     fn new(
         obj: ObjId,
-        encoding: ListEncoding,
+        encoding: SequenceType,
+        text_encoding: TextEncoding,
         conflicts: &'a mut Vec<Adjust>,
         change_ops: &'a mut [ChangeOp],
         pred: &'a mut PredCache,
@@ -263,7 +264,7 @@ impl<'a> Untangler<'a> {
         let mut stack: Vec<usize> = Vec::with_capacity(change_ops.len());
         let mut updates: SmallHashMap<ElemId, Vec<usize>> = HashMap::default();
         let mut last_e = None;
-        let value = ValueState::new(obj, encoding);
+        let value = ValueState::new(obj, encoding, text_encoding);
         for (i, op) in change_ops.iter_mut().enumerate() {
             if let Some(v) = pred.remove(&op.id()) {
                 op.succ = v;
@@ -295,7 +296,8 @@ impl<'a> Untangler<'a> {
             pred,
             change_ops,
             updates,
-            encoding,
+            seq_type: encoding,
+            text_encoding,
             conflicts,
             updates_stack,
             top: Top::Nothing,
@@ -392,6 +394,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     fn new(
         obj: ObjId,
         mut ops: OpIter<'a>,
+        text_encoding: TextEncoding,
         pred: &'b mut PredCache,
         succ: &'b mut Vec<SuccInsert>,
         log: &'b mut PatchLog,
@@ -399,7 +402,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     ) -> Self {
         let pos = ops.pos();
         let doc_op = ops.next();
-        let value = ValueState::new(obj, ListEncoding::List);
+        let value = ValueState::new(obj, SequenceType::List, text_encoding);
         let top = Top::Nothing;
         MapWalker {
             ops,
@@ -493,7 +496,8 @@ fn process_pred(doc_op: Option<&Op<'_>>, pred: &mut PredCache, succ: &mut Vec<Su
 #[derive(Debug, Clone)]
 struct ValueState<'a> {
     obj: ObjId,
-    encoding: ListEncoding,
+    seq_type: SequenceType,
+    text_encoding: TextEncoding,
     key: Option<PropRef2<'a>>,
     doc: OpValueOption,
     change: OpValueOption,
@@ -572,10 +576,11 @@ impl OpValueOption {
 }
 
 impl<'a> ValueState<'a> {
-    fn new(obj: ObjId, encoding: ListEncoding) -> Self {
+    fn new(obj: ObjId, encoding: SequenceType, text_encoding: TextEncoding) -> Self {
         Self {
             obj,
-            encoding,
+            seq_type: encoding,
+            text_encoding,
             key: None,
             doc: OpValueOption(None),
             change: OpValueOption(None),
@@ -592,11 +597,8 @@ impl<'a> ValueState<'a> {
             }
             _ => {
                 if doc_op.visible() {
-                    self.doc.set(
-                        doc_op.hydrate_value(self.encoding.into()),
-                        doc_op.id,
-                        deleted,
-                    );
+                    self.doc
+                        .set(doc_op.hydrate_value(self.text_encoding), doc_op.id, deleted);
                 }
             }
         }
@@ -633,7 +635,7 @@ impl<'a> ValueState<'a> {
             _ => {
                 if op.visible() {
                     self.change
-                        .set(op.hydrate_value(self.encoding.into()), op.id(), false);
+                        .set(op.hydrate_value(self.text_encoding), op.id(), false);
                 }
             }
         }
@@ -653,8 +655,8 @@ impl<'a> ValueState<'a> {
             return;
         }
         let obj = self.obj;
-        let encoding = self.encoding;
-        if encoding == ListEncoding::List {
+        let encoding = self.seq_type;
+        if encoding == SequenceType::List {
             match (self.doc.0.take(), self.change.0.take()) {
                 (None, Some(c)) => log.insert(obj, index, c.value, c.id, c.conflict),
                 (Some(d), Some(c)) if d.id == c.id => {
@@ -695,12 +697,17 @@ impl<'a> ValueState<'a> {
                     }
                 }
                 (Some(d), None) if d.deleted => {
-                    let w = d.value.width(encoding);
+                    let w = d.value.width(self.seq_type, self.text_encoding);
                     log.delete_seq(obj, index, w);
                 }
                 (Some(d), None) => {
                     if let Some(m) = self.marks.current() {
-                        log.mark(obj, index, d.value.width(encoding), &m);
+                        log.mark(
+                            obj,
+                            index,
+                            d.value.width(self.seq_type, self.text_encoding),
+                            &m,
+                        );
                     }
                 }
                 _ => {}
@@ -746,16 +753,7 @@ impl<'a> ValueState<'a> {
     }
 }
 
-fn walk_map(
-    obj: ObjId,
-    doc_ops: OpIter<'_>,
-    change_ops: &mut [ChangeOp],
-    pred: &mut PredCache,
-    succ: &mut Vec<SuccInsert>,
-    conflicts: &mut Vec<Adjust>,
-    log: &mut PatchLog,
-) {
-    let mut mw = MapWalker::new(obj, doc_ops, pred, succ, log, conflicts);
+fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
     for pos in 0..change_ops.len() {
         mw.change_op(change_ops, pos);
     }
@@ -834,19 +832,29 @@ impl BatchApply {
             let obj_range = walker.seek_to_obj(os.obj);
             let doc_ops = doc.ops().iter_range(&obj_range);
             match obj_info.object_type(&os.obj) {
-                Some(ObjType::Map) => walk_map(
-                    os.obj,
-                    doc_ops,
-                    &mut self.ops[os.span.clone()],
-                    &mut self.pred,
-                    &mut succ,
-                    &mut conflicts,
-                    log,
-                ),
+                Some(ObjType::Map) => {
+                    let mut walker = MapWalker::new(
+                        os.obj,
+                        doc_ops,
+                        doc.text_encoding(),
+                        &mut self.pred,
+                        &mut succ,
+                        log,
+                        &mut conflicts,
+                    );
+                    let change_ops = &mut self.ops[os.span.clone()];
+                    walk_map(&mut walker, change_ops);
+                }
                 Some(otype) if otype.is_sequence() => {
+                    let sequence_type = match otype {
+                        ObjType::Text => SequenceType::Text,
+                        ObjType::List => SequenceType::List,
+                        _ => unreachable!(),
+                    };
                     let ut = Untangler::new(
                         os.obj,
-                        doc.text_rep(otype),
+                        sequence_type,
+                        doc.text_encoding(),
                         &mut conflicts,
                         &mut self.ops[os.span.clone()],
                         &mut self.pred,
@@ -978,10 +986,7 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(
-            changes,
-            &mut PatchLog::inactive(TextRepresentation::String(self.text_encoding())),
-        )
+        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive(self.text_encoding()))
     }
 
     pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(

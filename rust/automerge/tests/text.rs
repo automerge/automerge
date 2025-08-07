@@ -4,7 +4,6 @@ use automerge::{
     hydrate_list, hydrate_map,
     iter::Span,
     marks::{ExpandMark, Mark, UpdateSpansConfig},
-    patches::TextRepresentation,
     transaction::Transactable,
     ActorId, AutoCommit, ConcreteTextValue, ObjType, Patch, PatchAction, Prop, ReadDoc,
     ScalarValue, TextEncoding, Value, ROOT,
@@ -214,10 +213,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 0,
-                value: ConcreteTextValue::new(
-                    "the ",
-                    TextRepresentation::String(TextEncoding::default()),
-                ),
+                value: ConcreteTextValue::new("the ", TextEncoding::default()),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -230,10 +226,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 4,
-                value: ConcreteTextValue::new(
-                    "quick ",
-                    TextRepresentation::String(TextEncoding::default()),
-                ),
+                value: ConcreteTextValue::new("quick ", TextEncoding::default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -249,10 +242,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 10,
-                value: ConcreteTextValue::new(
-                    "fox",
-                    TextRepresentation::String(TextEncoding::default()),
-                ),
+                value: ConcreteTextValue::new("fox", TextEncoding::default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -272,10 +262,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 13,
-                value: ConcreteTextValue::new(
-                    " jumps",
-                    TextRepresentation::String(TextEncoding::default()),
-                ),
+                value: ConcreteTextValue::new(" jumps", TextEncoding::default()),
                 marks: Some(
                     vec![
                         ("bold".to_string(), ScalarValue::from(true)),
@@ -291,10 +278,7 @@ fn local_patches_created_for_marks() {
             path: vec![(automerge::ROOT, "text".into())],
             action: PatchAction::SpliceText {
                 index: 19,
-                value: ConcreteTextValue::new(
-                    " over the lazy dog",
-                    TextRepresentation::String(TextEncoding::default()),
-                ),
+                value: ConcreteTextValue::new(" over the lazy dog", TextEncoding::default()),
                 marks: Some(
                     vec![("bold".to_string(), ScalarValue::from(true))]
                         .into_iter()
@@ -992,10 +976,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
                 path: vec![(ROOT, Prop::Map("name".to_string()))],
                 action: PatchAction::SpliceText {
                     index: 0,
-                    value: ConcreteTextValue::new(
-                        &new_name,
-                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
-                    ),
+                    value: ConcreteTextValue::new(&new_name, TextEncoding::UnicodeCodePoint),
                     marks: None
                 }
             },
@@ -1004,10 +985,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
                 path: vec![(ROOT, Prop::Map("color".to_string()))],
                 action: PatchAction::SpliceText {
                     index: 0,
-                    value: ConcreteTextValue::new(
-                        "unset",
-                        TextRepresentation::String(TextEncoding::UnicodeCodePoint)
-                    ),
+                    value: ConcreteTextValue::new("unset", TextEncoding::UnicodeCodePoint),
                     marks: None
                 }
             }
@@ -1017,8 +995,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 
 #[test]
 fn deleting_in_middle_of_multibyte_char_moves_the_cursor_to_after_the_character() {
-    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
-        .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     doc.splice_text(&text, 0, 0, "🐻🐻🐻🐻🐻🐻").unwrap();
 
@@ -1045,8 +1022,7 @@ fn splicing_into_multibyte_characters() {
     // which has the string 'BBBBB' as it's payload and use this string to test the
     // behavior of splicing into and around multibyte characters.
 
-    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit)
-        .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
     let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     let actor = doc.get_actor().clone();
     doc.splice_text(&text, 0, 0, "A").unwrap();

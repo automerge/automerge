@@ -9,7 +9,7 @@ use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
-use crate::patches::{PatchLog, TextRepresentation};
+use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Clock;
@@ -73,7 +73,7 @@ pub struct AutoCommit {
 impl Default for AutoCommit {
     fn default() -> Self {
         let doc = Automerge::new();
-        let text_rep = doc.text_encoding().into();
+        let text_rep = doc.text_encoding();
         AutoCommit {
             doc: Automerge::new(),
             transaction: None,
@@ -97,7 +97,7 @@ impl AutoCommit {
 
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
         let doc = Automerge::new_with_encoding(encoding);
-        let text_rep = doc.text_encoding().into();
+        let text_rep = doc.text_encoding();
         AutoCommit {
             doc,
             transaction: None,
@@ -115,7 +115,7 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding.into()),
+            patch_log: PatchLog::inactive(text_encoding),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -129,7 +129,7 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding.into()),
+            patch_log: PatchLog::inactive(text_encoding),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -160,7 +160,7 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding.into()),
+            patch_log: PatchLog::inactive(text_encoding),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -172,7 +172,7 @@ impl AutoCommit {
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log = PatchLog::inactive(self.doc.text_encoding().into());
+        self.patch_log = PatchLog::inactive(self.doc.text_encoding());
         self.diff_cursor = Vec::new();
     }
 
@@ -255,7 +255,7 @@ impl AutoCommit {
         {
             self.patch_log.make_patches(&self.doc)
         } else if range.before().is_empty() && range.after() == heads {
-            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
+            let mut patch_log = PatchLog::active(self.patch_log.text_encoding());
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
@@ -265,7 +265,7 @@ impl AutoCommit {
         } else {
             let before_clock = self.doc.clock_at(range.before());
             let after_clock = self.doc.clock_at(range.after());
-            let mut patch_log = PatchLog::active(self.patch_log.text_rep());
+            let mut patch_log = PatchLog::active(self.patch_log.text_encoding());
             patch_log.heads = Some(range.after().to_vec());
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
@@ -298,7 +298,7 @@ impl AutoCommit {
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(self.patch_log.text_rep()),
+            patch_log: PatchLog::inactive(self.patch_log.text_encoding()),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],
@@ -311,7 +311,7 @@ impl AutoCommit {
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(self.patch_log.text_rep()),
+            patch_log: PatchLog::inactive(self.patch_log.text_encoding()),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],
@@ -566,19 +566,6 @@ impl AutoCommit {
         }
     }
 
-    pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.patch_log.set_text_rep(text_rep)
-    }
-
-    pub fn get_text_rep(&mut self) -> TextRepresentation {
-        self.patch_log.text_rep()
-    }
-
-    pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.patch_log.set_text_rep(text_rep);
-        self
-    }
-
     /// Commit any uncommitted changes
     ///
     /// Returns [`None`] if there were no operations to commit
@@ -710,19 +697,12 @@ impl ReadDoc for AutoCommit {
         self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeHash]>,
-        text_rep: TextRepresentation,
-    ) -> DocIter<'_> {
-        self.doc
-            .iter_for(obj.as_ref(), self.get_scope(heads), text_rep)
+    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
+        self.doc.iter_for(obj.as_ref(), self.get_scope(heads))
     }
 
     fn iter(&self) -> DocIter<'_> {
-        self.doc
-            .iter_for(&ROOT, self.get_scope(None), self.patch_log.text_rep())
+        self.doc.iter_for(&ROOT, self.get_scope(None))
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(

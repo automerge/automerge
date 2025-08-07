@@ -5,7 +5,6 @@ use crate::{
     hydrate,
     marks::{Mark, MarkSet},
     op_set2::Parents,
-    patches::TextRepresentation,
     Change, ChangeHash, Cursor, ObjType, Prop, TextEncoding, Value, ROOT,
 };
 
@@ -55,19 +54,10 @@ pub trait ReadDoc {
     /// See [`Self::keys()`]
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeHash]>,
-        text_rep: TextRepresentation,
-    ) -> DocIter<'_>;
+    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_>;
 
     fn iter(&self) -> DocIter<'_> {
-        self.iter_at(
-            &ROOT,
-            None,
-            TextRepresentation::String(self.text_encoding()),
-        )
+        self.iter_at(&ROOT, None)
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.

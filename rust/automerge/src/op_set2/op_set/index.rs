@@ -1,6 +1,6 @@
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
-use crate::types::{ObjId, ObjType, OpId, TextEncoding};
+use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
 use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
 
@@ -16,7 +16,7 @@ pub(crate) struct IndexBuilder {
     marks: Vec<Option<MarkIndexBuilder>>,
     obj_info: ObjIndex,
     last_flush: usize,
-    encoding: TextEncoding,
+    text_encoding: TextEncoding,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -108,7 +108,7 @@ impl IndexBuilder {
             marks: Vec::with_capacity(op_set.len()),
             obj_info: ObjIndex::default(),
             last_flush: 0,
-            encoding,
+            text_encoding: encoding,
         }
     }
 
@@ -128,7 +128,8 @@ impl IndexBuilder {
         self.succ.push(vis_num(op));
         self.top.push(false);
 
-        self.widths.push(op.width(self.encoding.into()) as u64);
+        self.widths
+            .push(op.width(SequenceType::Text, self.text_encoding) as u64);
 
         let count = self.counters.remove(&op.id);
 

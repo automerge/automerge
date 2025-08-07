@@ -4,14 +4,13 @@ use std::sync::Arc;
 
 use crate::automerge::Automerge;
 use crate::hydrate;
-use crate::patches::TextRepresentation;
 use crate::types::ObjMeta;
 use crate::types::TextEncoding;
 use crate::{
     marks::{MarkSet, MarkStateMachine},
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ListEncoding, ObjId},
+    types::{Clock, ObjId, SequenceType},
     ObjType,
 };
 
@@ -26,11 +25,11 @@ struct Winner<'a> {
 }
 
 impl Winner<'_> {
-    fn value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+    fn value(&self, text_encoding: TextEncoding) -> hydrate::Value {
         if let Some(v) = &self.value_at {
-            hydrate::Value::new(v, text_rep)
+            hydrate::Value::new(v, text_encoding)
         } else {
-            self.op.hydrate_value(text_rep)
+            self.op.hydrate_value(text_encoding)
         }
     }
 }
@@ -143,11 +142,11 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
-        match (obj.typ, patch_log.text_rep()) {
-            (ObjType::Text, TextRepresentation::String(encoding)) => {
+        match (obj.typ, patch_log.text_encoding()) {
+            (ObjType::Text, encoding) => {
                 log_text_diff(&mut visible, patch_log, &obj, encoding, diffs);
             }
-            (ObjType::Text, TextRepresentation::Array) | (ObjType::List, _) => {
+            (ObjType::List, _) => {
                 log_list_diff(&mut visible, patch_log, &obj, diffs);
             }
             (ObjType::Map | ObjType::Table, _) => {
@@ -165,7 +164,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 ) {
     patches.fold(0, |index, patch| match patch {
         Patch::New(winner, _) => {
-            let value = winner.value(patch_log.text_rep());
+            let value = winner.value(patch_log.text_encoding());
             let id = winner.op.id;
 
             let conflict = winner.conflict;
@@ -178,7 +177,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Update { after, .. } => {
             let conflict = after.conflict;
-            let value = after.value(patch_log.text_rep());
+            let value = after.value(patch_log.text_encoding());
             let id = after.op.id;
             let expose = after.cross_visible;
             if after.op.is_make() {
@@ -220,14 +219,14 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     text_encoding: TextEncoding,
     patches: I,
 ) {
-    let encoding = ListEncoding::Text(text_encoding);
+    let seq_type = SequenceType::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::New(winner, marks) => {
             if winner.op.is_put() {
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
                 // blocks
-                let value = winner.value(patch_log.text_rep());
+                let value = winner.value(patch_log.text_encoding());
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -236,26 +235,26 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
                 }
                 patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
             }
-            index + winner.op.width(encoding)
+            index + winner.op.width(seq_type, text_encoding)
         }
         Patch::Update {
             before,
             after,
             marks,
         } => {
-            patch_log.delete_seq(obj.id, index, before.op.width(encoding));
+            patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
             patch_log.splice(obj.id, index, after.op.as_str(), marks.clone());
-            index + after.op.width(encoding)
+            index + after.op.width(seq_type, text_encoding)
         }
         Patch::Old { after, marks, .. } => {
-            let len = after.op.width(encoding);
+            let len = after.op.width(seq_type, text_encoding);
             if let Some(marks) = marks {
                 patch_log.mark(obj.id, index, len, marks)
             }
             index + len
         }
         Patch::Delete(before) => {
-            patch_log.delete_seq(obj.id, index, before.op.width(encoding));
+            patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
             index
         }
     });
@@ -271,7 +270,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .filter_map(|patch| Some((patch.op().key.key_str()?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(winner, _) => {
-                let value = winner.value(patch_log.text_rep());
+                let value = winner.value(patch_log.text_encoding());
                 let id = winner.op.id;
                 let conflict = winner.conflict;
                 let expose = winner.cross_visible;
@@ -282,7 +281,7 @@ fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
             }
             Patch::Update { after, .. } => {
                 let conflict = after.conflict;
-                let value = after.value(patch_log.text_rep());
+                let value = after.value(patch_log.text_encoding());
                 let id = after.op.id;
                 let expose = after.cross_visible;
                 if after.op.is_make() {
@@ -315,8 +314,8 @@ fn get_prop<'a>(_doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if before.op.is_counter() && after.op.is_counter() {
         //let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
-        let rep = TextRepresentation::Array;
-        let n = after.value(rep).as_i64() - before.value(rep).as_i64();
+        let encoding = TextEncoding::default();
+        let n = after.value(encoding).as_i64() - before.value(encoding).as_i64();
         if n != 0 {
             return Some(n);
         }
@@ -359,9 +358,8 @@ mod tests {
     use std::borrow::Cow;
 
     use crate::{
-        hydrate_list, hydrate_map, marks::Mark, patches::TextRepresentation,
-        transaction::Transactable, AutoCommit, ObjType, Patch, PatchAction, Prop, ScalarValue,
-        TextEncoding, Value, ROOT,
+        hydrate_list, hydrate_map, marks::Mark, transaction::Transactable, AutoCommit, ObjType,
+        Patch, PatchAction, Prop, ScalarValue, Value, ROOT,
     };
     use itertools::Itertools;
 
@@ -1173,7 +1171,6 @@ mod tests {
     #[test]
     fn diff_with_before_and_after_heads() {
         let mut doc = AutoCommit::new();
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
 
         let text = doc.put_object(ROOT, "value", ObjType::Text).unwrap();
         doc.splice_text(&text, 0, 0, "aaa").unwrap();

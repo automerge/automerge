@@ -32,7 +32,6 @@ use am::ScalarValue;
 use am::StringMigration;
 use am::VerificationMode;
 use automerge as am;
-use automerge::patches::TextRepresentation;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use interop::import_scalar;
@@ -402,8 +401,7 @@ pub struct Automerge {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::default()
-            .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+        let mut doc = AutoCommit::new_with_encoding(TextEncoding::Utf16CodeUnit);
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -1623,9 +1621,9 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         am::LoadOptions::new()
             .on_partial_load(on_partial_load)
             .verification_mode(verification_mode)
-            .migrate_strings(string_migration),
-    )?
-    .with_text_rep(TextRepresentation::String(TextEncoding::Utf16CodeUnit));
+            .migrate_strings(string_migration)
+            .text_encoding(TextEncoding::Utf16CodeUnit),
+    )?;
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

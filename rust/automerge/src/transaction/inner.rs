@@ -11,8 +11,8 @@ use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
-use crate::patches::{PatchLog, TextRepresentation};
-use crate::types::{Clock, ElemId, ListEncoding, ObjMeta, OpId, ScalarValue, TextEncoding};
+use crate::patches::PatchLog;
+use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding};
 use crate::Automerge;
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -292,12 +292,12 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
-        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
-        }
+        };
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(doc, patch_log, &obj, index, value.into())?;
+        self.do_insert(doc, patch_log, &obj, seq_type, index, value.into())?;
         Ok(())
     }
 
@@ -310,10 +310,10 @@ impl TransactionInner {
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
-        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
             return Err(AutomergeError::InvalidOp(obj.typ));
-        }
-        let id = self.do_insert(doc, patch_log, &obj, index, value.into())?;
+        };
+        let id = self.do_insert(doc, patch_log, &obj, seq_type, index, value.into())?;
         Ok(doc.ops().id_to_exid(id))
     }
 
@@ -322,16 +322,15 @@ impl TransactionInner {
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
         obj: &ObjMeta,
+        seq_type: SequenceType,
         index: usize,
         action: OpType,
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let encoding = patch_log.text_rep().encoding(obj.typ);
-
         let query = doc
             .ops()
-            .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+            .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
 
         let marks = query.marks;
         let pos = query.pos;
@@ -409,10 +408,12 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let encoding = patch_log.text_rep().encoding(obj.typ);
+        let Some(seq_type) = obj.typ.as_sequence_type() else {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        };
         let mut query = doc
             .ops()
-            .seek_ops_by_index(&obj.id, index, encoding, self.scope.as_ref());
+            .seek_ops_by_index(&obj.id, index, seq_type, self.scope.as_ref());
         let id = self.next_id();
         let eid = query
             .ops
@@ -580,7 +581,7 @@ impl TransactionInner {
             }
         }
 
-        let encoding = splice_type.encoding(self.text_encoding);
+        let seq_type = splice_type.seq_type();
 
         let mut inserted_width = 0;
 
@@ -589,7 +590,7 @@ impl TransactionInner {
         if !values.is_empty() {
             let query = doc
                 .ops()
-                .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+                .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
 
             index = query.index;
 
@@ -603,7 +604,7 @@ impl TransactionInner {
             for v in &values {
                 let op = TxOp::insert_val(self.next_id(), obj, pos, v.clone(), elemid);
 
-                inserted_width += op.bld.width(encoding);
+                inserted_width += op.bld.width(seq_type, self.text_encoding);
 
                 elemid = ElemId(op.id());
 
@@ -615,17 +616,15 @@ impl TransactionInner {
 
             if patch_log.is_active() {
                 match splice_type {
-                    SpliceType::Text(text)
-                        if matches!(patch_log.text_rep(), TextRepresentation::String(_)) =>
-                    {
+                    SpliceType::Text(text) => {
                         patch_log.splice(obj.id, index, text, marks);
                     }
-                    SpliceType::List | SpliceType::Text(..) => {
+                    SpliceType::List => {
                         let mut opid = self.next_id().minus(values.len());
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
                             let hydrated =
-                                crate::hydrate::Value::new(v.clone(), patch_log.text_rep());
+                                crate::hydrate::Value::new(v.clone(), patch_log.text_encoding());
                             patch_log.insert(obj.id, index + offset, hydrated, opid, false);
                         }
                     }
@@ -641,10 +640,10 @@ impl TransactionInner {
 
             let query =
                 doc.ops()
-                    .seek_ops_by_index(&obj.id, delete_index, encoding, self.scope.as_ref());
+                    .seek_ops_by_index(&obj.id, delete_index, seq_type, self.scope.as_ref());
 
             let step = if let Some(op) = query.ops.last() {
-                op.width(encoding)
+                op.width(seq_type, self.text_encoding)
             } else {
                 break;
             };
@@ -686,6 +685,10 @@ impl TransactionInner {
         mark: Mark,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if ObjType::Text != obj.typ {
+            return Err(AutomergeError::InvalidOp(obj.typ));
+        }
         if mark.start == mark.end && expand == ExpandMark::None {
             // In peritext terms this is the same as a mark which has a begin anchor before one
             // character and an end anchor after the character preceding that character. E.g in the
@@ -699,14 +702,14 @@ impl TransactionInner {
             // "b" and end at the anchor point after "a". This is nonsensical so we ignore it.
             return Ok(());
         }
-        let obj = doc.exid_to_obj(ex_obj)?;
         let action = OpType::MarkBegin(expand.before(), mark.old_data());
 
-        self.do_insert(doc, patch_log, &obj, mark.start, action)?;
+        self.do_insert(doc, patch_log, &obj, SequenceType::Text, mark.start, action)?;
         self.do_insert(
             doc,
             patch_log,
             &obj,
+            SequenceType::Text,
             mark.end,
             OpType::MarkEnd(expand.after()),
         )?;
@@ -743,11 +746,9 @@ impl TransactionInner {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
 
-        let encoding = patch_log.text_rep().encoding(obj.typ);
-
-        let query = doc
-            .ops()
-            .query_insert_at(&obj.id, index, encoding, self.scope.clone())?;
+        let query =
+            doc.ops()
+                .query_insert_at(&obj.id, index, SequenceType::Text, self.scope.clone())?;
 
         let pos = query.pos;
 
@@ -788,10 +789,9 @@ impl TransactionInner {
         // 2. it doesn't seem to validate that what its deleting is a block??
         // --> self.local_op(doc, patch_log, &obj, Prop::Seq(index), OpType::Delete)?;
 
-        let encoding = patch_log.text_rep().encoding(text_obj.typ);
         let target = doc
             .ops()
-            .seek_ops_by_index(&text_obj.id, index, encoding, self.scope.as_ref())
+            .seek_ops_by_index(&text_obj.id, index, SequenceType::Text, self.scope.as_ref())
             .ops
             .into_iter()
             .next_back()
@@ -803,7 +803,12 @@ impl TransactionInner {
         // FIXME - no clock?
         let found = doc
             .ops()
-            .seek_list_opid(&text_obj.id, block_id, encoding, self.scope.as_ref())
+            .seek_list_opid(
+                &text_obj.id,
+                block_id,
+                SequenceType::Text,
+                self.scope.as_ref(),
+            )
             .unwrap();
 
         let op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
@@ -833,7 +838,6 @@ impl TransactionInner {
     fn finalize_op(&mut self, patch_log: &mut PatchLog, op: &TxOp, marks: Option<Arc<MarkSet>>) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
-        let text_rep = patch_log.text_rep();
         if patch_log.is_active() && !op.noop {
             if op.bld.insert {
                 if !op.is_mark() {
@@ -843,23 +847,13 @@ impl TransactionInner {
                             patch_log.insert(
                                 obj,
                                 index,
-                                op.hydrate_value(text_rep),
+                                op.hydrate_value(patch_log.text_encoding()),
                                 op.id(),
                                 false,
                             );
                         }
                         (ObjType::Text, PropRef::Seq(index)) => {
-                            if matches!(patch_log.text_rep(), TextRepresentation::Array) {
-                                patch_log.insert(
-                                    obj,
-                                    index,
-                                    op.hydrate_value(text_rep),
-                                    op.id(),
-                                    false,
-                                );
-                            } else {
-                                patch_log.splice(obj, index, op.as_str(), marks);
-                            }
+                            patch_log.splice(obj, index, op.as_str(), marks);
                         }
                         _ => {}
                     }
@@ -875,7 +869,7 @@ impl TransactionInner {
                 patch_log.put2(
                     obj,
                     op.prop(),
-                    op.hydrate_value(text_rep),
+                    op.hydrate_value(patch_log.text_encoding()),
                     op.id(),
                     false,
                     false,
@@ -1080,10 +1074,10 @@ enum SpliceType<'a> {
 }
 
 impl SpliceType<'_> {
-    fn encoding(&self, text_encoding: TextEncoding) -> ListEncoding {
+    fn seq_type(&self) -> SequenceType {
         match self {
-            SpliceType::List => ListEncoding::List,
-            SpliceType::Text(_) => ListEncoding::Text(text_encoding),
+            SpliceType::List => SequenceType::List,
+            SpliceType::Text(_) => SequenceType::Text,
         }
     }
 }

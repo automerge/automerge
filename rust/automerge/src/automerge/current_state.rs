@@ -3,10 +3,8 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        patches::{PatchLog, TextRepresentation},
-        read::ReadDoc,
-        transaction::Transactable,
-        Automerge, ObjType, Patch, PatchAction, Prop, TextEncoding, Value,
+        patches::PatchLog, read::ReadDoc, transaction::Transactable, Automerge, ObjType, Patch,
+        PatchAction, Prop, TextEncoding, Value,
     };
 
     // Patches often carry a "tagged value", which is a value and the OpID of the op which
@@ -210,9 +208,7 @@ mod tests {
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
 
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         let doc_patches = Patches::from(p);
         let test_patches = Patches(vec![
@@ -285,9 +281,7 @@ mod tests {
             .unwrap();
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         assert_eq!(
             Patches::from(p),
@@ -322,10 +316,7 @@ mod tests {
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         assert_eq!(
             Patches::from(p),
@@ -361,10 +352,7 @@ mod tests {
 
         doc.merge(&mut doc2).unwrap();
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         assert_eq!(
             Patches::from(p),
@@ -387,10 +375,7 @@ mod tests {
         doc.insert(&list, 0, 1).unwrap();
         doc.insert(&list, 1, 2).unwrap();
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         assert_eq!(
             Patches::from(p),
@@ -435,10 +420,7 @@ mod tests {
             doc2.hydrate(&crate::ROOT, None)
         );
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-        let p = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let p = doc.document().current_state();
 
         assert_eq!(
             Patches::from(p),
@@ -472,10 +454,7 @@ mod tests {
         let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
         doc.put(&map, "key", "value").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-        let patches = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let patches = doc.document().current_state();
 
         assert_eq!(
             Patches::from(patches),
@@ -512,11 +491,7 @@ mod tests {
         doc.put(&list, 0, "three").unwrap();
         doc.put(&list, 1, "four").unwrap();
 
-        doc.set_text_rep(TextRepresentation::String(TextEncoding::default()));
-
-        let patches = doc
-            .document()
-            .current_state(TextRepresentation::String(TextEncoding::default()));
+        let patches = doc.document().current_state();
 
         assert_eq!(
             Patches::from(patches),
@@ -547,7 +522,7 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active(TextRepresentation::String(TextEncoding::default()));
+        let mut patch_log = PatchLog::active(TextEncoding::default());
         let _doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
             crate::LoadOptions::new()

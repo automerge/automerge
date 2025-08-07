@@ -8,10 +8,9 @@ use super::{ValueMeta, ValueRef};
 use crate::clock::Clock;
 use crate::error::AutomergeError;
 use crate::exid::ExId;
-use crate::hydrate;
-use crate::patches::TextRepresentation;
 use crate::types;
-use crate::types::{ElemId, ListEncoding, ObjId, ObjMeta, ObjType, OpId};
+use crate::types::{ElemId, ObjId, ObjMeta, ObjType, OpId, SequenceType};
+use crate::{hydrate, TextEncoding};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -82,13 +81,13 @@ impl ChangeOp {
         Some(MarkData { name, value })
     }
 
-    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
-        self.bld.hydrate_value(text_rep)
+    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
+        self.bld.hydrate_value(text_encoding)
     }
 
     pub(crate) fn hydrate_value_and_fix_counters(
         &self,
-        text_rep: TextRepresentation,
+        text_encoding: TextEncoding,
     ) -> hydrate::Value {
         if self.bld.action == Action::Set {
             if let ScalarValue::Counter(c) = &self.bld.value {
@@ -98,12 +97,12 @@ impl ChangeOp {
                 hydrate::Value::Scalar(self.bld.value.to_owned())
             }
         } else {
-            self.bld.hydrate_value(text_rep)
+            self.bld.hydrate_value(text_encoding)
         }
     }
 
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        self.bld.width(encoding)
+    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
+        self.bld.width(seq_type, text_encoding)
     }
 
     pub(crate) fn visible(&self) -> bool {
@@ -200,11 +199,11 @@ impl OpBuilder<'_> {
         }
     }
 
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        match encoding {
-            ListEncoding::List => 1,
-            ListEncoding::Text(_) if self.is_mark() => 0,
-            ListEncoding::Text(enc) => enc.width(self.as_str()),
+    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
+        match seq_type {
+            SequenceType::List => 1,
+            SequenceType::Text if self.is_mark() => 0,
+            SequenceType::Text => text_encoding.width(self.as_str()),
         }
     }
 
@@ -236,14 +235,14 @@ impl OpBuilder<'_> {
         }
     }
 
-    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
         // FIXME
         match self.action {
             Action::Set => hydrate::Value::Scalar(self.value.to_owned()),
             Action::MakeMap => hydrate::Value::map(),
             Action::MakeList => hydrate::Value::list(),
-            Action::MakeText => hydrate::Value::new(ObjType::Text, text_rep),
-            Action::MakeTable => hydrate::Value::new(ObjType::Table, text_rep),
+            Action::MakeText => hydrate::Value::new(ObjType::Text, text_encoding),
+            Action::MakeTable => hydrate::Value::new(ObjType::Table, text_encoding),
             //Action::Mark if self.mark_name.is_some() => hydrate::Value::new(&self.value, text_rep),
             //Action::Mark => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
@@ -443,8 +442,8 @@ impl TxOp {
         }
     }
 
-    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
-        self.bld.hydrate_value(text_rep)
+    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
+        self.bld.hydrate_value(text_encoding)
     }
 
     pub(crate) fn get_increment_value(&self) -> Option<i64> {
@@ -474,8 +473,8 @@ impl OpLike for &TxOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self, encoding: ListEncoding) -> u64 {
-        op.bld.width(encoding) as u64
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
+        op.bld.width(seq_type, text_encoding) as u64
     }
 
     fn visible(op: &Self) -> bool {
@@ -553,8 +552,8 @@ impl OpLike for TxOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self, encoding: ListEncoding) -> u64 {
-        op.bld.width(encoding) as u64
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
+        op.bld.width(seq_type, text_encoding) as u64
     }
 
     fn visible(op: &Self) -> bool {
@@ -632,9 +631,9 @@ impl OpLike for ChangeOp {
         op.bld.mark_index()
     }
 
-    fn width(op: &Self, encoding: ListEncoding) -> u64 {
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
         if Self::visible(op) {
-            op.bld.width(encoding) as u64
+            op.bld.width(seq_type, text_encoding) as u64
         } else {
             0
         }
@@ -741,8 +740,8 @@ impl<'a> OpLike for Op<'a> {
         op.mark_index()
     }
 
-    fn width(op: &Self, encoding: ListEncoding) -> u64 {
-        op.width(encoding) as u64
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64 {
+        op.width(seq_type, text_encoding) as u64
     }
 
     fn visible(_op: &Self) -> bool {
@@ -990,11 +989,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        match encoding {
-            ListEncoding::List => 1,
-            ListEncoding::Text(_) if self.action == Action::Mark => 0,
-            ListEncoding::Text(enc) => enc.width(self.as_str()),
+    pub(crate) fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
+        match seq_type {
+            SequenceType::List => 1,
+            SequenceType::Text if self.action == Action::Mark => 0,
+            SequenceType::Text => text_encoding.width(self.as_str()),
         }
     }
 
@@ -1102,11 +1101,11 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn hydrate_value(&self, text_rep: TextRepresentation) -> hydrate::Value {
+    pub(crate) fn hydrate_value(&self, text_encoding: TextEncoding) -> hydrate::Value {
         match &self.action() {
-            OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_rep),
+            OpType::Make(obj_type) => hydrate::Value::new(*obj_type, text_encoding),
             OpType::Put(scalar) => hydrate::Value::Scalar(scalar.to_owned()),
-            OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_rep),
+            OpType::MarkBegin(_, mark) => hydrate::Value::new(&mark.value, text_encoding),
             OpType::MarkEnd(_) => hydrate::Value::Scalar("markEnd".into()),
             _ => panic!("cant convert op into a value"),
         }
@@ -1350,7 +1349,7 @@ pub(crate) trait OpLike: Debug {
     fn succ_inc(op: &Self) -> Box<dyn Iterator<Item = Option<i64>> + '_>;
     fn mark_name(op: &Self) -> Option<Cow<'_, str>>;
     fn mark_index(op: &Self) -> Option<MarkIndexBuilder>;
-    fn width(op: &Self, encoding: ListEncoding) -> u64;
+    fn width(op: &Self, seq_type: SequenceType, text_encoding: TextEncoding) -> u64;
     fn visible(op: &Self) -> bool;
     fn top(op: &Self) -> bool {
         Self::visible(op)

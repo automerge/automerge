@@ -3,7 +3,7 @@ use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
-use crate::patches::{PatchLog, TextRepresentation};
+use crate::patches::PatchLog;
 use crate::types::{ObjId, ObjMeta, ObjType, Prop};
 use crate::Automerge;
 use crate::TextEncoding;
@@ -28,24 +28,18 @@ impl<'a> DocIter<'a> {
         self.inner.span_iter.clock()
     }
 
-    pub(crate) fn new(
-        doc: &'a Automerge,
-        obj: ObjMeta,
-        clock: Option<Clock>,
-        text_rep: TextRepresentation,
-    ) -> Self {
+    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, clock: Option<Clock>) -> Self {
         let op_set = doc.ops();
         let next_objs = BTreeMap::new();
         let path_map = BTreeMap::new();
         let mut obj_id_iter = op_set.obj_id_iter();
-        let iter_type = IterType::new(text_rep, obj.typ);
+        let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
         let obj_export = Arc::new(op_set.id_to_exid(obj.0));
         let scope = obj_id_iter.seek_to_value(obj);
         let map_iter = MapRange::new(op_set, scope.clone(), clock.clone());
         let list_iter = ListRange::new(op_set, scope.clone(), clock.clone(), ..);
-        let encoding = doc.text_encoding();
-        let span_iter = SpansInternal::new(op_set, scope, clock, encoding);
+        let span_iter = SpansInternal::new(op_set, scope, clock, doc.text_encoding());
         let op_set = Some(op_set);
         Self {
             op_set,
@@ -59,7 +53,6 @@ impl<'a> DocIter<'a> {
                 obj_id_iter,
                 next_objs,
                 path_map,
-                text_rep,
             },
         }
     }
@@ -78,7 +71,6 @@ pub(crate) struct DocIterInternal<'a> {
     span_iter: SpansInternal<'a>,
     iter_type: IterType,
     obj: ObjId,
-    text_rep: TextRepresentation,
 }
 
 impl Default for DocIter<'_> {
@@ -102,14 +94,13 @@ impl Default for DocIterInternal<'_> {
             span_iter: SpansInternal::default(),
             iter_type: IterType::Map,
             obj: ObjId::root(),
-            text_rep: TextRepresentation::Array,
         }
     }
 }
 
 impl<'a> DocIterInternal<'a> {
     fn process_item(&mut self, item: DocItemInternal<'a>) -> Option<DocObjItemInternal<'a>> {
-        if let Some((next_obj, next_typ)) = item.make_obj(self.text_rep) {
+        if let Some((next_obj, next_typ)) = item.make_obj() {
             let prop = item.prop();
             self.next_objs.insert(next_obj, next_typ);
             self.path_map.insert(next_obj, (prop, self.obj));
@@ -176,10 +167,10 @@ enum IterType {
 }
 
 impl IterType {
-    fn new(text_rep: TextRepresentation, obj_type: ObjType) -> Self {
-        match (obj_type, text_rep) {
-            (ObjType::Text, TextRepresentation::String(_)) => IterType::Text,
-            (ObjType::Map, _) => IterType::Map,
+    fn new(obj_type: ObjType) -> Self {
+        match obj_type {
+            ObjType::Text => IterType::Text,
+            ObjType::Map => IterType::Map,
             _ => IterType::List,
         }
     }
@@ -289,14 +280,14 @@ impl<'a> DocItemInternal<'a> {
         }
     }
 
-    fn make_obj(&self, text_rep: TextRepresentation) -> Option<(ObjId, IterType)> {
+    fn make_obj(&self) -> Option<(ObjId, IterType)> {
         match self {
             DocItemInternal::Map(MapRangeItem {
                 value: ValueRef::Object(ot),
                 maybe_exid,
                 ..
             }) => {
-                let new_typ = IterType::new(text_rep, *ot);
+                let new_typ = IterType::new(*ot);
                 let new_obj = ObjId(maybe_exid.id);
                 Some((new_obj, new_typ))
             }
@@ -305,12 +296,12 @@ impl<'a> DocItemInternal<'a> {
                 maybe_exid,
                 ..
             }) => {
-                let new_typ = IterType::new(text_rep, *ot);
+                let new_typ = IterType::new(*ot);
                 let new_obj = ObjId(maybe_exid.id);
                 Some((new_obj, new_typ))
             }
             DocItemInternal::Text(SpanInternal::Obj(id, _position)) => {
-                let new_typ = IterType::new(text_rep, ObjType::Map);
+                let new_typ = IterType::new(ObjType::Map);
                 let new_obj = ObjId(*id);
                 Some((new_obj, new_typ))
             }
@@ -324,14 +315,14 @@ impl<'a> DocItemInternal<'a> {
                 let id = map.op_id();
                 let key = &map.key;
                 let conflict = map.conflict;
-                let value = map.value.hydrate(TextRepresentation::Array);
+                let value = map.value.hydrate(log.text_encoding());
                 log.put_map(obj, key, value, id, conflict, false);
             }
             Self::List(list) => {
                 let index = list.index;
                 let id = list.op_id();
                 let conflict = list.conflict;
-                let value = list.value.hydrate(TextRepresentation::Array);
+                let value = list.value.hydrate(log.text_encoding());
                 log.insert(obj, index, value, id, conflict)
             }
             Self::Text(SpanInternal::Text(text, index, marks)) => {

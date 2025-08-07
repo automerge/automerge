@@ -10,7 +10,7 @@ use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::ColumnId;
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
-use crate::types::{ActorId, TextEncoding};
+use crate::types::{ActorId, SequenceType, TextEncoding};
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -292,7 +292,7 @@ impl Columns {
         });
     }
 
-    pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], encoding: TextEncoding) -> usize
+    pub(crate) fn splice<O>(&mut self, pos: usize, ops: &[O], text_encoding: TextEncoding) -> usize
     where
         O: OpLike,
     {
@@ -343,9 +343,12 @@ impl Columns {
         self.index
             .mark
             .splice(pos, 0, ops.clone().map(O::mark_index).collect());
-        self.index
-            .text
-            .splice(pos, 0, ops.clone().map(|s| O::width(s, encoding.into())));
+        self.index.text.splice(
+            pos,
+            0,
+            ops.clone()
+                .map(|s| O::width(s, SequenceType::Text, text_encoding)),
+        );
         self.index.top.splice(pos, 0, ops.clone().map(O::top));
         self.index
             .visible
