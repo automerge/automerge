@@ -1,6 +1,5 @@
 use crate::op_set2::{Op, OpSet, OpType};
-use crate::patches::TextRepresentation;
-use crate::types::{Clock, ListEncoding, ObjId, ScalarValue};
+use crate::types::{Clock, ObjId, ScalarValue, SequenceType};
 use crate::TextEncoding;
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop};
 use std::borrow::Cow;
@@ -28,11 +27,11 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_rep: TextRepresentation) -> Self {
+    pub fn new<'a, V: Into<crate::Value<'a>>>(value: V, text_encoding: TextEncoding) -> Self {
         match value.into() {
             value::Value::Object(ObjType::Map) => Value::Map(Map::default()),
             value::Value::Object(ObjType::List) => Value::List(List::default()),
-            value::Value::Object(ObjType::Text) => Value::Text(Text::new(text_rep, "")),
+            value::Value::Object(ObjType::Text) => Value::Text(Text::new(text_encoding, "")),
             value::Value::Object(ObjType::Table) => Value::Map(Map::default()),
             value::Value::Scalar(s) => Value::Scalar(s.into_owned()),
         }
@@ -46,8 +45,8 @@ impl Value {
         Value::List(List::default())
     }
 
-    pub fn text(text_rep: TextRepresentation, s: &str) -> Self {
-        Value::Text(Text::new(text_rep, s))
+    pub fn text(text_encoding: TextEncoding, s: &str) -> Self {
+        Value::Text(Text::new(text_encoding, s))
     }
 
     pub fn scalar<V: Into<ScalarValue>>(val: V) -> Self {
@@ -58,10 +57,10 @@ impl Value {
         matches!(self, Value::Scalar(_))
     }
 
-    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
-        match encoding {
-            ListEncoding::List => 1,
-            ListEncoding::Text(enc) => enc.width(self.as_str()),
+    pub(crate) fn width(&self, seq_type: SequenceType, encoding: TextEncoding) -> usize {
+        match seq_type {
+            SequenceType::List => 1,
+            SequenceType::Text => encoding.width(self.as_str()),
         }
     }
 
@@ -78,11 +77,11 @@ impl Value {
 
     pub fn apply_patches<P: IntoIterator<Item = Patch>>(
         &mut self,
-        text_rep: TextRepresentation,
+        text_encoding: TextEncoding,
         patches: P,
     ) -> Result<(), HydrateError> {
         for p in patches {
-            self.apply(p.path.iter().map(|(_, prop)| prop), text_rep, p.action)?;
+            self.apply(p.path.iter().map(|(_, prop)| prop), text_encoding, p.action)?;
         }
         Ok(())
     }
@@ -90,20 +89,20 @@ impl Value {
     pub(crate) fn apply<'a, P: Iterator<Item = &'a Prop>>(
         &mut self,
         mut path: P,
-        text_rep: TextRepresentation,
+        text_encoding: TextEncoding,
         patch: PatchAction,
     ) -> Result<(), HydrateError> {
         match (path.next(), self) {
             (Some(Prop::Seq(n)), Value::List(list)) => list
                 .get_mut(*n)
                 .ok_or_else(|| HydrateError::ApplyInvalidProp(patch.clone()))?
-                .apply(path, text_rep, patch),
+                .apply(path, text_encoding, patch),
             (Some(Prop::Map(s)), Value::Map(map)) => map
                 .get_mut(s)
                 .ok_or_else(|| HydrateError::ApplyInvalidProp(patch.clone()))?
-                .apply(path, text_rep, patch),
-            (None, Value::Map(map)) => map.apply(text_rep, patch),
-            (None, Value::List(list)) => list.apply(text_rep, patch),
+                .apply(path, text_encoding, patch),
+            (None, Value::Map(map)) => map.apply(text_encoding, patch),
+            (None, Value::List(list)) => list.apply(text_encoding, patch),
             (None, Value::Text(text)) => text.apply(patch),
             _ => Err(HydrateError::Fail),
         }
@@ -279,7 +278,7 @@ impl OpSet {
         encoding: TextEncoding,
     ) -> Value {
         let text = self.text(obj, clock.cloned());
-        Value::Text(Text::new(encoding.into(), text))
+        Value::Text(Text::new(encoding, text))
     }
 
     pub(crate) fn hydrate_op(
@@ -319,7 +318,7 @@ macro_rules! hydrate_list {
 #[macro_export]
 macro_rules! hydrate_text {
     {$t: expr} => {
-        $crate::hydrate::Text::new($crate::patches::TextRepresentation::String($crate::TextEncoding::default()), $t)
+        $crate::hydrate::Text::new($crate::TextEncoding::default(), $t)
     };
 }
 

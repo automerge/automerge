@@ -1,7 +1,8 @@
 use crate::{
     error::AutomergeError,
     marks::{MarkSet, RichTextQueryState},
-    types::{Clock, ElemId, ListEncoding, OpId},
+    types::{Clock, ElemId, OpId, SequenceType},
+    TextEncoding,
 };
 
 use super::{Action, Op, OpIter, OpType, QueryNth};
@@ -12,7 +13,8 @@ use std::fmt::Debug;
 pub(crate) struct InsertQuery<'a> {
     iter: OpIter<'a>,
     marks: RichTextQueryState<'a>,
-    encoding: ListEncoding,
+    seq_type: SequenceType,
+    text_encoding: TextEncoding,
     clock: Option<Clock>,
     candidates: Vec<Loc>,
     last_visible_cursor: Option<ElemId>,
@@ -23,7 +25,8 @@ impl<'a> InsertQuery<'a> {
     pub(crate) fn new(
         iter: OpIter<'a>,
         target: usize,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
+        text_encoding: TextEncoding,
         clock: Option<Clock>,
         marks: RichTextQueryState<'a>,
     ) -> Self {
@@ -36,7 +39,8 @@ impl<'a> InsertQuery<'a> {
         Self {
             iter,
             marks,
-            encoding,
+            seq_type,
+            text_encoding,
             target,
             candidates,
             clock,
@@ -105,7 +109,7 @@ impl<'a> InsertQuery<'a> {
             } else if visible {
                 if !op.is_mark() {
                     self.last_visible_cursor = Some(cursor);
-                    last_width = Some(op.width(self.encoding));
+                    last_width = Some(op.width(self.seq_type, self.text_encoding));
                 }
                 self.marks.process(op, None);
             }

@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 
 use crate::error::AutomergeError;
-use crate::hydrate;
-use crate::patches::TextRepresentation;
 use crate::types;
 use crate::types::{ActorId, ChangeHash, ElemId, ObjType, Prop};
 use crate::value;
+use crate::{hydrate, TextEncoding};
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -764,12 +763,12 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub(crate) fn hydrate(self, rep: TextRepresentation) -> hydrate::Value {
+    pub(crate) fn hydrate(self, encoding: TextEncoding) -> hydrate::Value {
         match self {
             Self::Object(ObjType::Map) => hydrate::Value::map(),
             Self::Object(ObjType::Table) => hydrate::Value::map(),
             Self::Object(ObjType::List) => hydrate::Value::list(),
-            Self::Object(ObjType::Text) => hydrate::Value::text(rep, ""),
+            Self::Object(ObjType::Text) => hydrate::Value::text(encoding, ""),
             Self::Scalar(s) => hydrate::Value::Scalar(s.into()),
         }
     }

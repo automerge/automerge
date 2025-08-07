@@ -1,5 +1,4 @@
 use crate::op_set2::OpSet;
-use crate::patches::TextRepresentation;
 use crate::types::{ObjId, ObjType};
 use crate::{clock::Clock, exid::ExId, Prop};
 
@@ -14,7 +13,6 @@ use crate::{clock::Clock, exid::ExId, Prop};
 #[derive(Debug, Clone)]
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
-    pub(crate) text_rep: TextRepresentation,
     pub(crate) ops: &'a OpSet,
     pub(crate) clock: Option<Clock>,
 }
@@ -63,7 +61,7 @@ impl Iterator for Parents<'_> {
             ..
         } = self
             .ops
-            .parent_object(&self.obj, self.text_rep, self.clock.as_ref())
+            .parent_object(&self.obj, self.clock.as_ref())
             .unwrap();
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);

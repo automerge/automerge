@@ -5,7 +5,7 @@ use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
 use crate::iter::{DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
 use crate::marks::{ExpandMark, Mark, MarkSet, UpdateSpansConfig};
-use crate::patches::{PatchLog, TextRepresentation};
+use crate::patches::PatchLog;
 use crate::types::{Clock, ScalarValue};
 use crate::{hydrate, AutomergeError};
 use crate::{ChangeHash, Cursor, ObjType, Prop, Value};
@@ -138,14 +138,8 @@ impl ReadDoc for Transaction<'_> {
         self.doc.keys_for(obj.as_ref(), self.get_scope(Some(heads)))
     }
 
-    fn iter_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: Option<&[ChangeHash]>,
-        text_rep: TextRepresentation,
-    ) -> DocIter<'_> {
-        self.doc
-            .iter_for(obj.as_ref(), self.get_scope(heads), text_rep)
+    fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_> {
+        self.doc.iter_for(obj.as_ref(), self.get_scope(heads))
     }
 
     fn map_range<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(

@@ -7,9 +7,9 @@ use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
 use crate::text_value::ConcreteTextValue;
 use crate::types::{Clock, ObjId, ObjType};
-use crate::{Automerge, Prop, Value};
+use crate::{Automerge, Prop, TextEncoding, Value};
 
-use super::{Patch, PatchAction, TextRepresentation};
+use super::{Patch, PatchAction};
 use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub(crate) struct PatchBuilder<'a> {
     last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     seen: HashSet<ObjId>,
-    text_rep: TextRepresentation,
+    text_encoding: TextEncoding,
     clock: Option<Clock>,
     doc: &'a Automerge,
 }
@@ -28,7 +28,7 @@ impl<'a> PatchBuilder<'a> {
         doc: &'a Automerge,
         path_map: BTreeMap<ObjId, (Prop, ObjId)>,
         clock: Option<Clock>,
-        text_rep: TextRepresentation,
+        text_encoding: TextEncoding,
     ) -> Self {
         // If we are expecting a lot of patches then precompute all the visible
         // paths up front to avoid doing many seek operations in the `Parents`
@@ -40,7 +40,7 @@ impl<'a> PatchBuilder<'a> {
             seen: HashSet::new(),
             doc,
             clock,
-            text_rep,
+            text_encoding,
         }
     }
 }
@@ -162,7 +162,7 @@ impl PatchBuilder<'_> {
         if let Some(path) = self.get_path(&obj) {
             let action = PatchAction::SpliceText {
                 index,
-                value: ConcreteTextValue::new(value, self.text_rep),
+                value: ConcreteTextValue::new(value, self.text_encoding),
                 marks: marks.as_deref().cloned(),
             };
             self.push(Patch { obj, path, action });

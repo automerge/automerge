@@ -3,9 +3,7 @@ use crate::interop::ExternalTypeConstructor;
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
-use automerge::patches::TextRepresentation;
 use automerge::ChangeHash;
-use automerge::TextEncoding;
 use fxhash::FxBuildHasher;
 use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::{Borrow, Cow};
@@ -142,11 +140,7 @@ impl<'a> ExportCache<'a> {
         let mut buffer = String::new();
         let mut parent_prop = JsValue::null();
         let result = JsValue::from(&o);
-        let iter = self.doc.doc.iter_at(
-            obj,
-            heads,
-            TextRepresentation::String(TextEncoding::Utf16CodeUnit),
-        );
+        let iter = self.doc.doc.iter_at(obj, heads);
         for DocObjItem { obj, item } in iter {
             if obj != current_obj_id {
                 if !buffer.is_empty() {

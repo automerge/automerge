@@ -1,4 +1,4 @@
-use crate::{patches::TextRepresentation, sequence_tree::SequenceTree, TextEncoding};
+use crate::{sequence_tree::SequenceTree, TextEncoding};
 use cfg_if::cfg_if;
 
 cfg_if! {
@@ -150,45 +150,6 @@ impl TextValue for Utf16 {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct List(SequenceTree<String>);
-
-impl TextValue for List {
-    type Elem = String;
-
-    fn new(s: &str) -> Self {
-        let mut v = SequenceTree::new();
-        for ch in s.chars() {
-            v.push(ch.to_string())
-        }
-        Self(v)
-    }
-
-    fn splice(&mut self, index: usize, value: &str) {
-        for (n, ch) in value.chars().enumerate() {
-            self.0.insert(index + n, ch.to_string())
-        }
-    }
-
-    fn splice_text_value(&mut self, index: usize, value: &SequenceTree<Self::Elem>) {
-        for (n, ch) in value.iter().cloned().enumerate() {
-            self.0.insert(index + n, ch)
-        }
-    }
-
-    fn make_string(&self) -> String {
-        self.0.iter().fold(String::new(), |acc, s| acc + s)
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    fn remove(&mut self, index: usize) {
-        self.0.remove(index);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Grapheme(SequenceTree<String>);
 
 impl TextValue for Grapheme {
@@ -233,20 +194,16 @@ pub enum ConcreteTextValue {
     Utf8CodeUnit(Utf8),
     Utf16CodeUnit(Utf16),
     CodePoint(CodePoint),
-    List(List),
     Grapheme(Grapheme),
 }
 
 impl ConcreteTextValue {
-    pub fn new(s: &str, text_rep: TextRepresentation) -> Self {
-        match text_rep {
-            TextRepresentation::Array => Self::List(List::new(s)),
-            TextRepresentation::String(text_encoding) => match text_encoding {
-                TextEncoding::Utf8CodeUnit => Self::Utf8CodeUnit(Utf8::new(s)),
-                TextEncoding::Utf16CodeUnit => Self::Utf16CodeUnit(Utf16::new(s)),
-                TextEncoding::UnicodeCodePoint => Self::CodePoint(CodePoint::new(s)),
-                TextEncoding::GraphemeCluster => Self::Grapheme(Grapheme::new(s)),
-            },
+    pub fn new(s: &str, text_encoding: TextEncoding) -> Self {
+        match text_encoding {
+            TextEncoding::Utf8CodeUnit => Self::Utf8CodeUnit(Utf8::new(s)),
+            TextEncoding::Utf16CodeUnit => Self::Utf16CodeUnit(Utf16::new(s)),
+            TextEncoding::UnicodeCodePoint => Self::CodePoint(CodePoint::new(s)),
+            TextEncoding::GraphemeCluster => Self::Grapheme(Grapheme::new(s)),
         }
     }
 
@@ -255,7 +212,6 @@ impl ConcreteTextValue {
             Self::Utf8CodeUnit(u) => u.make_string(),
             Self::Utf16CodeUnit(u) => u.make_string(),
             Self::CodePoint(u) => u.make_string(),
-            Self::List(u) => u.make_string(),
             Self::Grapheme(u) => u.make_string(),
         }
     }
@@ -278,10 +234,6 @@ impl ConcreteTextValue {
                 this.splice_text_value(index, &other.0);
                 Ok(())
             }
-            (ConcreteTextValue::List(this), ConcreteTextValue::List(other)) => {
-                this.splice_text_value(index, &other.0);
-                Ok(())
-            }
             (ConcreteTextValue::Grapheme(this), ConcreteTextValue::Grapheme(other)) => {
                 this.splice_text_value(index, &other.0);
                 Ok(())
@@ -295,7 +247,6 @@ impl ConcreteTextValue {
             Self::Utf8CodeUnit(u) => u.splice(index, value),
             Self::Utf16CodeUnit(u) => u.splice(index, value),
             Self::CodePoint(u) => u.splice(index, value),
-            Self::List(u) => u.splice(index, value),
             Self::Grapheme(u) => u.splice(index, value),
         }
     }
@@ -305,7 +256,6 @@ impl ConcreteTextValue {
             Self::Utf8CodeUnit(u) => u.len(),
             Self::Utf16CodeUnit(u) => u.len(),
             Self::CodePoint(u) => u.len(),
-            Self::List(u) => u.len(),
             Self::Grapheme(u) => u.len(),
         }
     }
@@ -315,7 +265,6 @@ impl ConcreteTextValue {
             Self::Utf8CodeUnit(u) => u.remove(index),
             Self::Utf16CodeUnit(u) => u.remove(index),
             Self::CodePoint(u) => u.remove(index),
-            Self::List(u) => u.remove(index),
             Self::Grapheme(u) => u.remove(index),
         }
     }

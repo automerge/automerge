@@ -1801,10 +1801,9 @@ pub(super) fn js_val_to_hydrate(
                 };
                 // This code path is only used in `next`, which uses a string representation
                 // and we're targeting JS, which uses utf16 strings
-                let text_rep =
-                    am::patches::TextRepresentation::String(am::TextEncoding::Utf16CodeUnit);
                 Ok(am::hydrate::Value::Text(am::hydrate::Text::new(
-                    text_rep, obj,
+                    am::TextEncoding::Utf16CodeUnit,
+                    obj,
                 )))
             }
         }

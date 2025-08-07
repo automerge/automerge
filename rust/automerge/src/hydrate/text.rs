@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{patches::TextRepresentation, text_value::ConcreteTextValue, PatchAction, ScalarValue};
+use crate::{text_value::ConcreteTextValue, PatchAction, ScalarValue, TextEncoding};
 
 use super::HydrateError;
 
@@ -41,9 +41,9 @@ impl Text {
         }
     }
 
-    pub fn new<S: AsRef<str>>(text_rep: TextRepresentation, text: S) -> Self {
+    pub fn new<S: AsRef<str>>(text_encoding: TextEncoding, text: S) -> Self {
         Self {
-            value: ConcreteTextValue::new(text.as_ref(), text_rep),
+            value: ConcreteTextValue::new(text.as_ref(), text_encoding),
             marks: Default::default(),
         }
     }

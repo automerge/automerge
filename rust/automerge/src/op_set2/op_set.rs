@@ -2,11 +2,10 @@ use super::parents::Parents;
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
-use crate::patches::TextRepresentation;
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, Clock, ElemId, Export, Exportable, ListEncoding, ObjId, ObjMeta, ObjType, OpId, Prop,
+    ActorId, Clock, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
     TextEncoding,
 };
 use crate::AutomergeError;
@@ -99,16 +98,10 @@ impl OpSet {
         self.cols.dump();
     }
 
-    pub(crate) fn parents(
-        &self,
-        obj: ObjId,
-        text_rep: TextRepresentation,
-        clock: Option<Clock>,
-    ) -> Parents<'_> {
+    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
         Parents {
             obj,
             ops: self,
-            text_rep,
             clock,
         }
     }
@@ -267,20 +260,19 @@ impl OpSet {
         }
     }
 
-    pub(crate) fn parent_object(
-        &self,
-        child: &ObjId,
-        text_rep: TextRepresentation,
-        clock: Option<&Clock>,
-    ) -> Option<Parent> {
+    pub(crate) fn parent_object(&self, child: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
         let obj = op.obj;
         let typ = self.object_type(&obj)?;
         let prop = match op.key {
             KeyRef::Map(k) => Prop::Map(k.to_string()),
             KeyRef::Seq(_) => {
-                let encoding = text_rep.encoding(typ);
-                let index = self.seek_list_opid(&op.obj, op.id, encoding, clock)?.index;
+                let seq_type = match typ {
+                    ObjType::List => SequenceType::List,
+                    ObjType::Text => SequenceType::Text,
+                    _ => panic!("unexpected object type {:?} for seq key {:?}", typ, op.key),
+                };
+                let index = self.seek_list_opid(&op.obj, op.id, seq_type, clock)?.index;
                 Prop::Seq(index)
             }
         };
@@ -366,13 +358,13 @@ impl OpSet {
     pub(crate) fn seq_length(
         &self,
         obj: &ObjId,
-        encoding: ListEncoding,
+        text_encoding: TextEncoding,
         clock: Option<Clock>,
     ) -> usize {
         let range = self.scope_to_obj(obj);
         let vis = VisIter::new(self, clock.as_ref(), range.clone());
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
-        if typ == ObjType::Text && encoding != ListEncoding::List {
+        if typ == ObjType::Text {
             if clock.is_none() {
                 let text = self.cols.index.text.iter_range(range.clone());
                 let iter = SkipIter::new(text.clone(), vis.clone());
@@ -380,9 +372,9 @@ impl OpSet {
             } else {
                 self.action_value_iter(range.clone(), clock.as_ref())
                     .map(|(action, value, _)| match (action, &value) {
-                        (Action::Set, ScalarValue::Str(s)) => encoding.width(s),
+                        (Action::Set, ScalarValue::Str(s)) => text_encoding.width(s),
                         (Action::Mark, _) => 0,
-                        _ => encoding.width("\u{fffc}"),
+                        _ => text_encoding.width("\u{fffc}"),
                     })
                     .sum()
             }
@@ -409,7 +401,6 @@ impl OpSet {
         &self,
         obj: &ObjId,
         index: NonZeroUsize,
-        encoding: ListEncoding,
     ) -> Option<QueryNth> {
         let range = self.scope_to_obj(obj);
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
@@ -418,7 +409,14 @@ impl OpSet {
         let current_acc = tx.acc.as_usize();
         let iter = self.iter_range(&(tx.pos..range.end));
         let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
-        let mut query = InsertQuery::new(iter, index.get(), encoding, None, marks);
+        let mut query = InsertQuery::new(
+            iter,
+            index.get(),
+            SequenceType::Text,
+            self.text_encoding,
+            None,
+            marks,
+        );
         query.resolve(current_acc - start_acc).ok()
     }
 
@@ -434,7 +432,14 @@ impl OpSet {
         let start_pos = iter.pos();
         let iter = self.iter_range(&(start_pos..range.end));
         let marks = self.cols.index.mark.rich_text_at(start_pos, None);
-        let mut query = InsertQuery::new(iter, index.get(), ListEncoding::List, None, marks);
+        let mut query = InsertQuery::new(
+            iter,
+            index.get(),
+            SequenceType::List,
+            self.text_encoding,
+            None,
+            marks,
+        );
         query.resolve(index.get() - 1).ok()
     }
 
@@ -442,15 +447,15 @@ impl OpSet {
         &self,
         obj: &ObjId,
         index: usize,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
         clock: Option<Clock>,
     ) -> Result<QueryNth, AutomergeError> {
         if clock.is_none() && index > 0 {
             let index = NonZeroUsize::new(index).unwrap();
-            let query = if encoding == ListEncoding::List {
+            let query = if seq_type == SequenceType::List {
                 self.query_insert_at_list(obj, index)
             } else {
-                self.query_insert_at_text(obj, index, encoding)
+                self.query_insert_at_text(obj, index)
             };
             if let Some(q) = query {
                 debug_assert_eq!(
@@ -458,7 +463,8 @@ impl OpSet {
                     InsertQuery::new(
                         self.iter_obj(obj),
                         index.get(),
-                        encoding,
+                        seq_type,
+                        self.text_encoding,
                         clock,
                         Default::default()
                     )
@@ -471,24 +477,12 @@ impl OpSet {
         InsertQuery::new(
             self.iter_obj(obj),
             index,
-            encoding,
+            seq_type,
+            self.text_encoding,
             clock,
             Default::default(),
         )
         .resolve(0)
-    }
-
-    pub(crate) fn seek_ops_by_prop<'a>(
-        &'a self,
-        obj: &ObjId,
-        prop: Prop,
-        encoding: ListEncoding,
-        clock: Option<&Clock>,
-    ) -> OpsFound<'a> {
-        match prop {
-            Prop::Map(key_name) => self.seek_ops_by_map_key(obj, &key_name, clock),
-            Prop::Seq(index) => self.seek_ops_by_index(obj, index, encoding, clock),
-        }
     }
 
     pub(crate) fn seek_ops_by_map_key<'a>(
@@ -514,23 +508,23 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         index: usize,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         if clock.is_none() {
-            let found = if encoding == ListEncoding::List {
+            let found = if seq_type == SequenceType::List {
                 self.seek_list_ops_by_index_fast(obj, index)
             } else {
                 self.seek_text_ops_by_index_fast(obj, index)
             };
             #[cfg(debug_assertions)]
             {
-                let slow = self.seek_ops_by_index_slow(obj, index, encoding, clock);
+                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
                 assert_eq!(found, slow, "fast != slow");
             }
             found
         } else {
-            self.seek_ops_by_index_slow(obj, index, encoding, clock)
+            self.seek_ops_by_index_slow(obj, index, seq_type, clock)
         }
     }
 
@@ -538,7 +532,7 @@ impl OpSet {
         &'a self,
         obj: &ObjId,
         index: usize,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
         let sub_iter = self.iter_obj(obj);
@@ -548,7 +542,7 @@ impl OpSet {
         let mut len = 0;
         let mut range = end_pos..end_pos;
         for mut ops in iter {
-            let width = ops.width(encoding);
+            let width = ops.width(seq_type, self.text_encoding);
             if len + width > index {
                 ops.index = len;
                 return ops;
@@ -689,15 +683,15 @@ impl OpSet {
         &self,
         obj: &ObjId,
         opid: OpId,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
         if clock.is_none() {
-            let found = self.seek_list_opid_fast(obj, opid, encoding);
-            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, encoding, clock));
+            let found = self.seek_list_opid_fast(obj, opid, seq_type);
+            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, seq_type, clock));
             found
         } else {
-            self.seek_list_opid_slow(obj, opid, encoding, clock)
+            self.seek_list_opid_slow(obj, opid, seq_type, clock)
         }
     }
 
@@ -705,14 +699,14 @@ impl OpSet {
         &self,
         obj: &ObjId,
         id: OpId,
-        encoding: ListEncoding,
+        encoding: SequenceType,
     ) -> Option<FoundOpId<'_>> {
         let ostart = self.scope_to_obj(obj).start;
         let pos = self.get_op_id_pos(id)?;
         let op = self.get(pos)?;
         let visible;
         let index;
-        if encoding == ListEncoding::List {
+        if encoding == SequenceType::List {
             let (delta, item) = self.cols.index.top.get_acc_delta(ostart, pos);
             visible = item.as_deref().copied().unwrap_or(false);
             index = delta.as_usize();
@@ -728,7 +722,7 @@ impl OpSet {
         &self,
         obj: &ObjId,
         opid: OpId,
-        encoding: ListEncoding,
+        seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;
@@ -739,7 +733,7 @@ impl OpSet {
                 let visible = ops.ops.contains(&op);
                 return Some(FoundOpId { op, index, visible });
             }
-            index += ops.width(encoding);
+            index += ops.width(seq_type, self.text_encoding);
         }
         None
     }
@@ -1190,8 +1184,11 @@ pub(crate) struct OpsFound<'a> {
 }
 
 impl OpsFound<'_> {
-    fn width(&self, encoding: ListEncoding) -> usize {
-        self.ops.last().map(|o| o.width(encoding)).unwrap_or(0)
+    fn width(&self, seq_type: SequenceType, text_encoding: TextEncoding) -> usize {
+        self.ops
+            .last()
+            .map(|o| o.width(seq_type, text_encoding))
+            .unwrap_or(0)
     }
 
     /// Determine what action to take based on the found operations
