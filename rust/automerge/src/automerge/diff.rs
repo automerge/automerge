@@ -32,6 +32,14 @@ impl Winner<'_> {
             self.op.hydrate_value(text_encoding)
         }
     }
+
+    fn as_i64(&self) -> i64 {
+        if let Some(s) = &self.value_at {
+            s.as_i64()
+        } else {
+            self.op.value.as_i64()
+        }
+    }
 }
 
 fn process<'a, T: Iterator<Item = DiffOp<'a>>>(
@@ -314,8 +322,7 @@ fn get_prop<'a>(_doc: &'a Automerge, op: Op<'a>) -> Option<&'a str> {
 fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
     if before.op.is_counter() && after.op.is_counter() {
         //let n = after.op.inc_at(after.clock) - before.op.inc_at(before.clock);
-        let encoding = TextEncoding::default();
-        let n = after.value(encoding).as_i64() - before.value(encoding).as_i64();
+        let n = after.as_i64() - before.as_i64();
         if n != 0 {
             return Some(n);
         }

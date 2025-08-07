@@ -165,7 +165,7 @@ impl std::default::Default for LoadOptions<'static> {
             verification_mode: VerificationMode::Check,
             patch_log: None,
             string_migration: StringMigration::NoMigration,
-            text_encoding: TextEncoding::default(),
+            text_encoding: TextEncoding::platform_default(),
         }
     }
 }
@@ -220,7 +220,7 @@ impl Automerge {
         Automerge {
             queue: vec![],
             change_graph: ChangeGraph::new(0),
-            ops: Default::default(),
+            ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
@@ -1297,7 +1297,7 @@ impl Automerge {
         self.exid_to_obj(obj)
             .ok()
             .map(|obj| DocIter::new(self, obj, clock))
-            .unwrap_or_default()
+            .unwrap_or_else(|| DocIter::empty(self.text_encoding()))
     }
 
     pub(crate) fn map_range_for<'a, R: RangeBounds<String> + 'a>(

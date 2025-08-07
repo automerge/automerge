@@ -1,23 +1,22 @@
 use crate::{sequence_tree::SequenceTree, TextEncoding};
 use cfg_if::cfg_if;
 
-cfg_if! {
-    if #[cfg(feature = "utf8-indexing")] {
-        impl std::default::Default for TextEncoding {
-            fn default() -> Self {
-                Self::Utf8CodeUnit
-            }
-        }
-    } else if #[cfg(feature = "utf16-indexing")] {
-        impl std::default::Default for TextEncoding {
-            fn default() -> Self {
-                Self::Utf16CodeUnit
-            }
-        }
-    } else {
-        impl std::default::Default for TextEncoding {
-            fn default() -> Self {
-                Self::UnicodeCodePoint
+impl TextEncoding {
+    /// Return the default text encoding for the platform you are building for.
+    ///
+    /// This is set to
+    ///
+    /// * UTF-8 code units if the `utf8-indexing` feature is enabled.
+    /// * UTF-16 code units if the `utf16-indexing` feature is enabled (as it is in the automerge-wasm build)
+    /// * Unicode code points if neither feature is enabled.
+    pub fn platform_default() -> Self {
+        cfg_if! {
+            if #[cfg(feature = "utf8-indexing")] {
+                    Self::Utf8CodeUnit
+            } else if #[cfg(feature = "utf16-indexing")] {
+                    Self::Utf16CodeUnit
+            } else {
+                    Self::UnicodeCodePoint
             }
         }
     }

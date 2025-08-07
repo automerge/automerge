@@ -21,7 +21,7 @@ fn main() {
         .unwrap();
     get_changes(&doc, doc.make_patches(&mut result.patch_log));
 
-    let mut tx = doc.transaction_log_patches(PatchLog::active(TextEncoding::default()));
+    let mut tx = doc.transaction_log_patches(PatchLog::active(TextEncoding::platform_default()));
     let map = tx
         .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();

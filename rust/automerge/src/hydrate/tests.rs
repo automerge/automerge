@@ -22,7 +22,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
         hydrated,
         hydrate_map!(
             "list" => hydrate_list!(5,6,7,"hello", ScalarValue::counter(100), hydrate_map!(), hydrate_list![]),
-            "text" => ConcreteTextValue::new("hello world", TextEncoding::default()),
+            "text" => ConcreteTextValue::new("hello world", TextEncoding::platform_default()),
         ).into()
     );
     doc.splice_text(&text, 6, 0, "big bad ")?;
@@ -31,7 +31,7 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     let cursor = doc.diff_cursor().to_vec();
     let patches = doc.diff(&cursor, &heads);
     doc.update_diff_cursor();
-    hydrated.apply_patches(TextEncoding::default(), patches)?;
+    hydrated.apply_patches(TextEncoding::platform_default(), patches)?;
     let hydrate::Value::Text(val) = &hydrated.as_map().unwrap().get("text").unwrap() else {
         panic!("expected text");
     };

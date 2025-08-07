@@ -363,7 +363,7 @@ impl Columns {
     ) -> Self {
         let mut op_set = Self::default();
         let ops: Vec<_> = ops.collect();
-        op_set.splice(0, &ops, TextEncoding::default());
+        op_set.splice(0, &ops, TextEncoding::platform_default());
         op_set
     }
 

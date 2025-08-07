@@ -51,7 +51,7 @@ pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = super::hexane::ColAccIter<'a, BooleanCursor>;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct OpSet {
     pub(crate) actors: Vec<ActorId>,
     pub(crate) obj_info: ObjIndex,
@@ -77,7 +77,7 @@ impl OpSet {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+    pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
             //len: 0,
             actors,
@@ -87,7 +87,7 @@ impl OpSet {
             //inc_index: ColumnData::new(),
             //mark_index: MarkIndexColumn::new(),
             obj_info: ObjIndex::default(),
-            text_encoding: TextEncoding::default(),
+            text_encoding: encoding,
         }
     }
 
@@ -938,7 +938,7 @@ impl OpSet {
             actors,
             cols,
             obj_info: ObjIndex::default(),
-            text_encoding: TextEncoding::default(),
+            text_encoding: TextEncoding::platform_default(),
         }
     }
 
@@ -1339,7 +1339,7 @@ mod tests {
         doc.delete(crate::ROOT, "key2").unwrap();
         let saved = doc.save();
         let doc_chunk = load_document_chunk(&saved);
-        let opset = super::OpSet::from_doc(&doc_chunk, TextEncoding::default()).unwrap();
+        let opset = super::OpSet::from_doc(&doc_chunk, TextEncoding::platform_default()).unwrap();
         let ops = opset.iter().collect::<Vec<_>>();
         let actual_ops = doc.doc.ops().iter().collect::<Vec<_>>();
         if ops != actual_ops {
