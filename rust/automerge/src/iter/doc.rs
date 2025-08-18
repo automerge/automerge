@@ -214,9 +214,9 @@ pub(crate) struct DocObjItemInternal<'a> {
 }
 
 impl DocObjItemInternal<'_> {
-    pub(crate) fn log(self, log: &mut PatchLog) {
+    pub(crate) fn log(self, log: &mut PatchLog, text_encoding: TextEncoding) {
         let obj = self.obj;
-        self.item.log(obj, log)
+        self.item.log(obj, log, text_encoding)
     }
 }
 
@@ -304,20 +304,20 @@ impl<'a> DocItemInternal<'a> {
         }
     }
 
-    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog) {
+    pub(crate) fn log(self, obj: ObjId, log: &mut PatchLog, text_encoding: TextEncoding) {
         match self {
             Self::Map(map) => {
                 let id = map.op_id();
                 let key = &map.key;
                 let conflict = map.conflict;
-                let value = map.value.hydrate(log.text_encoding());
+                let value = map.value.hydrate(text_encoding);
                 log.put_map(obj, key, value, id, conflict, false);
             }
             Self::List(list) => {
                 let index = list.index;
                 let id = list.op_id();
                 let conflict = list.conflict;
-                let value = list.value.hydrate(log.text_encoding());
+                let value = list.value.hydrate(text_encoding);
                 log.insert(obj, index, value, id, conflict)
             }
             Self::Text(SpanInternal::Text(text, index, marks)) => {

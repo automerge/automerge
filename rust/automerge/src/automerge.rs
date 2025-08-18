@@ -335,7 +335,7 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args(None);
-        Transaction::new(self, args, PatchLog::inactive(self.text_encoding()))
+        Transaction::new(self, args, PatchLog::inactive())
     }
 
     /// Start a transaction which records changes in a [`PatchLog`]
@@ -387,7 +387,6 @@ impl Automerge {
             deps,
             checkpoint,
             scope,
-            text_encoding: self.text_encoding(),
         }
     }
 
@@ -471,7 +470,7 @@ impl Automerge {
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
-        let mut tx = self.transaction_log_patches(PatchLog::active(self.text_encoding()));
+        let mut tx = self.transaction_log_patches(PatchLog::active());
         let result = f(&mut tx);
         match result {
             Ok(result) => {
@@ -772,7 +771,7 @@ impl Automerge {
     ///
     /// [diff]: Self::diff()
     pub fn current_state(&self) -> Vec<Patch> {
-        let mut patch_log = PatchLog::active(self.text_encoding());
+        let mut patch_log = PatchLog::active();
         self.log_current_state(&mut patch_log);
         patch_log.make_patches(self)
     }
@@ -785,7 +784,7 @@ impl Automerge {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_log_patches(data, &mut PatchLog::inactive(self.text_encoding()))
+        self.load_incremental_log_patches(data, &mut PatchLog::inactive())
     }
 
     /// Like [`Self::load_incremental()`] but log the changes to the current state of the document
@@ -830,7 +829,7 @@ impl Automerge {
         let mut iter = self.iter().internal();
 
         for item in iter.by_ref() {
-            item.log(patch_log);
+            item.log(patch_log, self.text_encoding());
         }
 
         patch_log.path_hint(iter.path_map);
@@ -855,7 +854,7 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_log_patches(changes, &mut PatchLog::inactive(self.text_encoding()))
+        self.apply_changes_log_patches(changes, &mut PatchLog::inactive())
     }
 
     /// Like [`Self::apply_changes()`] but log the resulting changes to the current state of the
@@ -870,7 +869,7 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_and_log_patches(other, &mut PatchLog::inactive(self.text_encoding()))
+        self.merge_and_log_patches(other, &mut PatchLog::inactive())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them whilst logging
@@ -1146,7 +1145,7 @@ impl Automerge {
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
-        let mut patch_log = PatchLog::active(self.text_encoding());
+        let mut patch_log = PatchLog::active();
         diff::log_diff(self, &before, &after, &mut patch_log);
         patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)

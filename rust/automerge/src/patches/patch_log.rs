@@ -32,7 +32,7 @@ use super::PatchBuilder;
 /// let doc = AutoCommit::new();
 /// let sync_message: Message = unimplemented!();
 /// let mut sync_state = SyncState::new();
-/// let mut patch_log = PatchLog::active(TextEncoding::UnicodeCodePoint);
+/// let mut patch_log = PatchLog::active();
 /// doc.sync().receive_sync_message_log_patches(&mut sync_state, sync_message, &mut patch_log);
 ///
 /// // These patches represent the changes needed to go from the state of the document before the
@@ -44,7 +44,6 @@ pub struct PatchLog {
     pub(crate) events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
-    text_encoding: TextEncoding,
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     path_hint: usize,
     pub(crate) heads: Option<Vec<ChangeHash>>,
@@ -161,13 +160,12 @@ impl PatchLog {
     /// # Arguments
     ///
     /// * `active`   - If `true` the log will record all changes made to the document. If [`false`] then no changes will be recorded.
-    /// * `text_encoding` - How text indexes will be calculated in the generated patches
     ///
     /// Why, you ask, would you create a [`PatchLog`] which doesn't record any changes? Operations
     /// which record patches are more expensive, so sometimes you may wish to turn off patch
     /// logging for parts of the application, but not others; but you don't want to complicate your
     /// code with an [`Option<PatchLog>`]. In that case you can use an inactive [`PatchLog`].
-    pub fn new(active: bool, text_encoding: TextEncoding) -> Self {
+    pub fn new(active: bool) -> Self {
         PatchLog {
             active,
             expose: HashSet::default(),
@@ -175,7 +173,6 @@ impl PatchLog {
             heads: None,
             path_map: Default::default(),
             path_hint: 0,
-            text_encoding,
             actors: vec![],
         }
     }
@@ -183,20 +180,19 @@ impl PatchLog {
     /// Create a new [`PatchLog`] which doesn't record any changes.
     ///
     /// See also: [`PatchLog::new()`] for a more detailed explanation.
-    pub fn inactive(text_encoding: TextEncoding) -> Self {
-        Self::new(false, text_encoding)
+    pub fn inactive() -> Self {
+        Self::new(false)
     }
 
     pub fn null() -> Self {
-        // Text encoding doesn't matter here as it will never be used
-        Self::new(false, TextEncoding::UnicodeCodePoint)
+        Self::new(false)
     }
 
     /// Create a new [`PatchLog`] which does record changes.
     ///
     /// See also: [`PatchLog::new()`] for a more detailed explanation.
-    pub fn active(text_encoding: TextEncoding) -> Self {
-        Self::new(true, text_encoding)
+    pub fn active() -> Self {
+        Self::new(true)
     }
 
     pub(crate) fn set_active(&mut self, setting: bool) {
@@ -388,14 +384,8 @@ impl PatchLog {
         let expose = ExposeQueue(self.expose.iter().map(|id| doc.id_to_exid(*id)).collect());
         let clock = self.heads.as_ref().map(|h| doc.clock_at(h));
         let path_map = self.get_path_map();
-        Self::make_patches_inner(
-            &self.events,
-            expose,
-            path_map,
-            doc,
-            clock,
-            self.text_encoding,
-        )
+        let text_encoding = doc.text_encoding();
+        Self::make_patches_inner(&self.events, expose, path_map, doc, clock, text_encoding)
     }
 
     fn make_patches_inner(
@@ -500,7 +490,6 @@ impl PatchLog {
             events: Default::default(),
             path_map: Default::default(),
             path_hint: 0,
-            text_encoding: self.text_encoding,
             heads: None,
             actors: self.actors.clone(),
         }
@@ -548,10 +537,6 @@ impl PatchLog {
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.events.extend(other.events);
-    }
-
-    pub(crate) fn text_encoding(&self) -> TextEncoding {
-        self.text_encoding
     }
 
     pub(crate) fn path_hint(&mut self, hint: BTreeMap<ObjId, (Prop, ObjId)>) {

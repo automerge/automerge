@@ -283,7 +283,7 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        let mut patch_log = PatchLog::inactive(self.text_encoding());
+        let mut patch_log = PatchLog::inactive();
         self.receive_sync_message_inner(sync_state, message, &mut patch_log)
     }
 
