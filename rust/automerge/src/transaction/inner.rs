@@ -28,7 +28,6 @@ pub(crate) struct TransactionInner {
     scope: Option<Clock>,
     checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
-    text_encoding: TextEncoding,
 }
 
 /// Arguments required to create a new transaction
@@ -46,8 +45,6 @@ pub(crate) struct TransactionArgs {
     pub(crate) deps: Vec<ChangeHash>,
     /// The scope that should be visible to the transaction
     pub(crate) scope: Option<Clock>,
-    /// How text indices should be calculated
-    pub(crate) text_encoding: TextEncoding,
 }
 
 impl TransactionInner {
@@ -59,7 +56,6 @@ impl TransactionInner {
             checkpoint,
             deps,
             scope,
-            text_encoding,
         }: TransactionArgs,
     ) -> Self {
         TransactionInner {
@@ -72,7 +68,6 @@ impl TransactionInner {
             deps,
             pending: vec![],
             scope,
-            text_encoding,
         }
     }
 
@@ -278,7 +273,7 @@ impl TransactionInner {
             doc.ops_mut().reset_top(range.start..(range.end + added));
         }
 
-        self.finalize_op(patch_log, &op, None);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, None);
 
         self.pending.push(op);
     }
@@ -340,7 +335,7 @@ impl TransactionInner {
         let op = TxOp::insert(id, *obj, pos, index, action, query.elemid);
 
         doc.ops_mut().splice(op.pos, &[&op]);
-        self.finalize_op(patch_log, &op, marks);
+        self.finalize_op(doc.text_encoding(), patch_log, &op, marks);
         self.pending.push(op);
 
         Ok(id)
@@ -604,7 +599,7 @@ impl TransactionInner {
             for v in &values {
                 let op = TxOp::insert_val(self.next_id(), obj, pos, v.clone(), elemid);
 
-                inserted_width += op.bld.width(seq_type, self.text_encoding);
+                inserted_width += op.bld.width(seq_type, doc.text_encoding());
 
                 elemid = ElemId(op.id());
 
@@ -624,7 +619,7 @@ impl TransactionInner {
                         for (offset, v) in values.iter().enumerate() {
                             opid = opid.next();
                             let hydrated =
-                                crate::hydrate::Value::new(v.clone(), patch_log.text_encoding());
+                                crate::hydrate::Value::new(v.clone(), doc.text_encoding());
                             patch_log.insert(obj.id, index + offset, hydrated, opid, false);
                         }
                     }
@@ -643,7 +638,7 @@ impl TransactionInner {
                     .seek_ops_by_index(&obj.id, delete_index, seq_type, self.scope.as_ref());
 
             let step = if let Some(op) = query.ops.last() {
-                op.width(seq_type, self.text_encoding)
+                op.width(seq_type, doc.text_encoding())
             } else {
                 break;
             };
@@ -835,7 +830,13 @@ impl TransactionInner {
         self.split_block(doc, patch_log, text, index)
     }
 
-    fn finalize_op(&mut self, patch_log: &mut PatchLog, op: &TxOp, marks: Option<Arc<MarkSet>>) {
+    fn finalize_op(
+        &mut self,
+        encoding: TextEncoding,
+        patch_log: &mut PatchLog,
+        op: &TxOp,
+        marks: Option<Arc<MarkSet>>,
+    ) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;
         if patch_log.is_active() && !op.noop {
@@ -847,7 +848,7 @@ impl TransactionInner {
                             patch_log.insert(
                                 obj,
                                 index,
-                                op.hydrate_value(patch_log.text_encoding()),
+                                op.hydrate_value(encoding),
                                 op.id(),
                                 false,
                             );
@@ -869,7 +870,7 @@ impl TransactionInner {
                 patch_log.put2(
                     obj,
                     op.prop(),
-                    op.hydrate_value(patch_log.text_encoding()),
+                    op.hydrate_value(encoding),
                     op.id(),
                     false,
                     false,

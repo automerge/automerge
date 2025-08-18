@@ -72,12 +72,10 @@ pub struct AutoCommit {
 /// See [`AutoCommit`]
 impl Default for AutoCommit {
     fn default() -> Self {
-        let doc = Automerge::new();
-        let text_rep = doc.text_encoding();
         AutoCommit {
             doc: Automerge::new(),
             transaction: None,
-            patch_log: PatchLog::inactive(text_rep),
+            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -97,11 +95,10 @@ impl AutoCommit {
 
     pub fn new_with_encoding(encoding: TextEncoding) -> AutoCommit {
         let doc = Automerge::new_with_encoding(encoding);
-        let text_rep = doc.text_encoding();
         AutoCommit {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_rep),
+            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -111,11 +108,10 @@ impl AutoCommit {
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
         let doc = Automerge::load(data)?;
-        let text_encoding = doc.text_encoding();
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding),
+            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -125,11 +121,10 @@ impl AutoCommit {
 
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_unverified_heads(data)?;
-        let text_encoding = doc.text_encoding();
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding),
+            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -156,11 +151,10 @@ impl AutoCommit {
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with_options(data, options)?;
-        let text_encoding = doc.text_encoding();
         Ok(Self {
             doc,
             transaction: None,
-            patch_log: PatchLog::inactive(text_encoding),
+            patch_log: PatchLog::inactive(),
             diff_cursor: Vec::new(),
             diff_cache: None,
             save_cursor: Vec::new(),
@@ -172,7 +166,7 @@ impl AutoCommit {
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {
         self.ensure_transaction_closed();
-        self.patch_log = PatchLog::inactive(self.doc.text_encoding());
+        self.patch_log = PatchLog::inactive();
         self.diff_cursor = Vec::new();
     }
 
@@ -255,7 +249,7 @@ impl AutoCommit {
         {
             self.patch_log.make_patches(&self.doc)
         } else if range.before().is_empty() && range.after() == heads {
-            let mut patch_log = PatchLog::active(self.patch_log.text_encoding());
+            let mut patch_log = PatchLog::active();
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
@@ -265,7 +259,7 @@ impl AutoCommit {
         } else {
             let before_clock = self.doc.clock_at(range.before());
             let after_clock = self.doc.clock_at(range.after());
-            let mut patch_log = PatchLog::active(self.patch_log.text_encoding());
+            let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
             diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
@@ -298,7 +292,7 @@ impl AutoCommit {
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(self.patch_log.text_encoding()),
+            patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],
@@ -311,7 +305,7 @@ impl AutoCommit {
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
             transaction: self.transaction.clone(),
-            patch_log: PatchLog::inactive(self.patch_log.text_encoding()),
+            patch_log: PatchLog::inactive(),
             diff_cursor: vec![],
             diff_cache: None,
             save_cursor: vec![],

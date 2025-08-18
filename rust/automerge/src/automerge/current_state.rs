@@ -4,7 +4,7 @@ mod tests {
 
     use crate::{
         patches::PatchLog, read::ReadDoc, transaction::Transactable, Automerge, ObjType, Patch,
-        PatchAction, Prop, TextEncoding, Value,
+        PatchAction, Prop, Value,
     };
 
     // Patches often carry a "tagged value", which is a value and the OpID of the op which
@@ -522,7 +522,7 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut patch_log = PatchLog::active(TextEncoding::platform_default());
+        let mut patch_log = PatchLog::active();
         let _doc = Automerge::load_with_options(
             &fixture("counter_value_is_ok.automerge"),
             crate::LoadOptions::new()

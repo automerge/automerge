@@ -986,7 +986,7 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change> + Clone,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive(self.text_encoding()))
+        self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
     }
 
     pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
