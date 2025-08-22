@@ -58,7 +58,7 @@ impl PatchBuilder<'_> {
             }
             ObjType::Text => {
                 for span in self.doc.ops.spans(&parent_id, self.clock.clone()) {
-                    if let SpanInternal::Obj(id, index) = span {
+                    if let SpanInternal::Obj(id, index, _) = span {
                         let prop = Prop::from(index);
                         self.path_map.insert(ObjId(id), (prop, parent_id));
                     }
