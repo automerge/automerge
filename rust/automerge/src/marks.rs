@@ -109,12 +109,43 @@ pub struct MarkSet {
     marks: BTreeMap<SmolStr, ScalarValue>,
 }
 
-impl MarkSet {
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
-        self.marks
-            .iter()
+use std::collections::btree_map;
+
+#[derive(Debug, Clone, Default)]
+pub struct MarkSetIter<'a> {
+    set: Option<btree_map::Iter<'a, SmolStr, ScalarValue>>,
+}
+
+impl<'a> MarkSetIter<'a> {
+    fn new(set: &'a MarkSet) -> Self {
+        Self {
+            set: Some(set.marks.iter()),
+        }
+    }
+}
+
+impl<'a> Iterator for MarkSetIter<'a> {
+    type Item = (&'a str, &'a ScalarValue);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.set
+            .as_mut()?
+            .next()
             .map(|(name, value)| (name.as_str(), value))
     }
+}
+
+impl MarkSet {
+    pub fn iter(&self) -> MarkSetIter<'_> {
+        MarkSetIter::new(self)
+    }
+    /*
+        pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
+            self.marks
+                .iter()
+                .map(|(name, value)| (name.as_str(), value))
+        }
+    */
 
     pub fn num_marks(&self) -> usize {
         self.marks.len()
@@ -140,27 +171,6 @@ impl MarkSet {
         self.inner().is_empty()
     }
 
-    pub(crate) fn diff(&self, other: &Self) -> Self {
-        let mut diff = BTreeMap::default();
-        for (name, value) in self.marks.iter() {
-            match other.marks.get(name) {
-                Some(v) if v != value => {
-                    diff.insert(name.clone(), v.clone());
-                }
-                None => {
-                    diff.insert(name.clone(), ScalarValue::Null);
-                }
-                _ => {}
-            }
-        }
-        for (name, value) in other.marks.iter() {
-            if !self.marks.contains_key(name) {
-                diff.insert(name.clone(), value.clone());
-            }
-        }
-        MarkSet { marks: diff }
-    }
-
     pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Arc<Self>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in q.iter() {
@@ -172,6 +182,7 @@ impl MarkSet {
     /// Return this MarkSet without any marks which have a value of Null, i.e.
     /// marks which have been removed.
     pub(crate) fn without_unmarks(self) -> Self {
+        // FIXME - do I need this clone?
         let mut marks = self.marks.clone();
         marks.retain(|_, value| !matches!(value, ScalarValue::Null));
         MarkSet { marks }

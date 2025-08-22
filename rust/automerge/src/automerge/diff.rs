@@ -1,16 +1,18 @@
 use itertools::Itertools;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::automerge::Automerge;
 use crate::hydrate;
+use crate::iter::{DiffIter, ListDiff, MapDiff, SpansDiff};
 use crate::types::ObjMeta;
 use crate::types::TextEncoding;
 use crate::{
+    clock::{Clock, ClockRange},
     marks::{MarkSet, MarkStateMachine},
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ObjId, SequenceType},
+    types::{ObjId, SequenceType},
     ObjType,
 };
 
@@ -140,7 +142,13 @@ impl<'a> Patch<'a> {
 }
 
 pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
-    let mut visible = HashSet::from([ObjId::root()]);
+    let obj = ObjMeta::root(); 
+    let clock = ClockRange::Diff(before.clone(), after.clone());
+    DiffIter::log(doc, obj, clock, patch_log);
+}
+
+pub(crate) fn log_diff1(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
+    let mut visible = BTreeSet::from([ObjId::root()]);
     let encoding = doc.text_encoding();
     for (obj, ops) in doc.ops().iter_objs() {
         if !visible.contains(&obj.id) {
@@ -165,8 +173,73 @@ pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log
     }
 }
 
+pub(crate) fn log_diff2(
+    doc: &Automerge,
+    root: ObjId,
+    before: &Clock,
+    after: &Clock,
+    patch_log: &mut PatchLog,
+) {
+    let mut visible = BTreeSet::from([root]);
+    let encoding = doc.text_encoding();
+    while let Some(id) = visible.pop_first() {
+        let typ = doc.ops().object_type(&id).unwrap();
+        let obj = ObjMeta { id, typ };
+        let range = doc.ops().scope_to_obj(&obj.id);
+        let ops = doc.ops().iter_range(&range);
+        let mut diff = RichTextDiff::default();
+        let ops_by_key = ops.diff(before, after).chunk_by(|d| d.op.elemid_or_key());
+        let diffs = ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| process(key_ops, before, after, &mut diff));
+        match obj.typ {
+            ObjType::Text => {
+                let mut text_diffs2 = SpansDiff::new(
+                    doc.ops(),
+                    range.clone(),
+                    ClockRange::diff(before.clone(), after.clone()),
+                    encoding,
+                );
+                log_text_diff2(&mut visible, patch_log, obj.id, encoding, &mut text_diffs2);
+                //log_text_diff(&mut visible, patch_log, &obj, encoding, diffs);
+            }
+            ObjType::List => {
+                let mut list_diffs2 = ListDiff::new(
+                    doc.ops(),
+                    range.clone(),
+                    ClockRange::diff(before.clone(), after.clone()),
+                );
+                log_list_diff2(&mut visible, patch_log, obj.id, encoding, &mut list_diffs2)
+            }
+            ObjType::Map | ObjType::Table => {
+                let mut map_diffs2 = MapDiff::new(
+                    doc.ops(),
+                    range.clone(),
+                    ClockRange::diff(before.clone(), after.clone()),
+                );
+                log_map_diff2(&mut visible, patch_log, obj.id, encoding, &mut map_diffs2)
+            }
+        }
+    }
+}
+
+fn log_list_diff2(
+    visible: &mut BTreeSet<ObjId>,
+    patch_log: &mut PatchLog,
+    obj: ObjId,
+    encoding: TextEncoding,
+    diffs: &mut ListDiff<'_>,
+) {
+    for item in diffs.by_ref() {
+        if item.diff.is_visible() && item.value.is_object() {
+            visible.insert(ObjId(item.id));
+        }
+        item.log(obj, patch_log, encoding);
+    }
+}
+
 fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    visible: &mut HashSet<ObjId>,
+    visible: &mut BTreeSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     encoding: TextEncoding,
@@ -223,7 +296,7 @@ fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
 }
 
 fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    visible: &mut HashSet<ObjId>,
+    visible: &mut BTreeSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     text_encoding: TextEncoding,
@@ -232,6 +305,7 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     let seq_type = SequenceType::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::New(winner, marks) => {
+            //log!("NEW index={} {:?} {:?}",index,winner,marks);
             if winner.op.is_put() {
                 patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
             } else {
@@ -252,11 +326,13 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             after,
             marks,
         } => {
+            //log!("UPDATE index={} {:?} {:?} {:?}",index,before,after,marks);
             patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
             patch_log.splice(obj.id, index, after.op.as_str(), marks.clone());
             index + after.op.width(seq_type, text_encoding)
         }
         Patch::Old { after, marks, .. } => {
+            //log!("OLD index={} {:?} {:?}",index,after,marks);
             let len = after.op.width(seq_type, text_encoding);
             if let Some(marks) = marks {
                 patch_log.mark(obj.id, index, len, marks)
@@ -264,14 +340,86 @@ fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index + len
         }
         Patch::Delete(before) => {
+            //log!("OLD index={} {:?}",index,before);
             patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
             index
         }
     });
 }
 
+fn log_text_diff2(
+    visible: &mut BTreeSet<ObjId>,
+    patch_log: &mut PatchLog,
+    obj: ObjId,
+    encoding: TextEncoding,
+    diffs: &mut SpansDiff<'_>,
+) {
+    for span in diffs.by_ref() {
+        if let Some(obj) = span.get_object() {
+            visible.insert(obj);
+        }
+        span.log(obj, patch_log, encoding);
+    }
+    /*
+        let seq_type = SequenceType::Text;
+        patches.fold(0, |index, patch| match &patch {
+            Patch::New(winner, marks) => {
+                if winner.op.is_put() {
+                    patch_log.splice(obj.id, index, winner.op.as_str(), marks.clone());
+                } else {
+                    // blocks
+                    let value = winner.value(text_encoding);
+                    let id = winner.op.id;
+                    let conflict = winner.conflict;
+                    let expose = winner.cross_visible;
+                    if winner.op.is_make() {
+                        visible.insert(ObjId(id));
+                    }
+                    patch_log.insert_and_maybe_expose(obj.id, index, value, id, conflict, expose);
+                }
+                index + winner.op.width(seq_type, text_encoding)
+            }
+            Patch::Update {
+                before,
+                after,
+                marks,
+            } => {
+                patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
+                patch_log.splice(obj.id, index, after.op.as_str(), marks.clone());
+                index + after.op.width(seq_type, text_encoding)
+            }
+            Patch::Old { after, marks, .. } => {
+                let len = after.op.width(seq_type, text_encoding);
+                if let Some(marks) = marks {
+                    patch_log.mark(obj.id, index, len, marks)
+                }
+                index + len
+            }
+            Patch::Delete(before) => {
+                patch_log.delete_seq(obj.id, index, before.op.width(seq_type, text_encoding));
+                index
+            }
+        });
+    */
+}
+
+fn log_map_diff2(
+    visible: &mut BTreeSet<ObjId>,
+    patch_log: &mut PatchLog,
+    obj: ObjId,
+    encoding: TextEncoding,
+    diffs: &mut MapDiff<'_>,
+) {
+    for item in diffs.by_ref() {
+        if item.diff.is_visible() && item.value.is_object() {
+            visible.insert(ObjId(item.id));
+        }
+        item.log(obj, patch_log, encoding);
+    }
+}
+
 fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    visible: &mut HashSet<ObjId>,
+    visible: &mut BTreeSet<ObjId>,
     patch_log: &mut PatchLog,
     obj: &ObjMeta,
     encoding: TextEncoding,

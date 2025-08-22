@@ -533,6 +533,10 @@ impl OpId {
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
     }
+
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
+        clock.map_or(true, |c| c.covers(self))
+    }
 }
 
 impl AsRef<OpId> for OpId {

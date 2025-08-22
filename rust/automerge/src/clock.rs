@@ -56,6 +56,51 @@ impl PartialOrd for Clock {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClockRange {
+    Current(Option<Clock>),
+    Diff(Clock, Clock),
+}
+
+impl Default for ClockRange {
+    fn default() -> Self {
+        Self::Current(None)
+    }
+}
+
+impl ClockRange {
+    pub(crate) fn current(clock: Option<Clock>) -> Self {
+        Self::Current(clock)
+    }
+
+    pub(crate) fn after(&self) -> Option<&Clock> {
+        match self {
+            Self::Diff(_, after) => Some(after),
+            Self::Current(Some(after)) => Some(after),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn visible_after(&self, id: &OpId) -> bool {
+        match self {
+            Self::Current(Some(after)) => after.covers(id),
+            Self::Diff(_, after) => after.covers(id),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn visible_before(&self, id: &OpId) -> bool {
+        self.predates(id)
+    }
+
+    pub(crate) fn predates(&self, id: &OpId) -> bool {
+        match self {
+            Self::Diff(before, _) => before.covers(id),
+            _ => false,
+        }
+    }
+}
+
 impl Clock {
     pub(crate) fn new(size: usize) -> Self {
         //Self(vec![size; ClockData::new()])
