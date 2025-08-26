@@ -572,7 +572,7 @@ impl Column {
 
     pub(crate) fn external(
         spec: ColumnSpec,
-        data: Arc<Vec<u8>>,
+        data: Shared<Vec<u8>>,
         range: Range<usize>,
         actors: &[ActorId],
     ) -> Result<Self, PackError> {

@@ -888,6 +888,12 @@ impl From<Prop> for wasm_bindgen::JsValue {
     }
 }
 
+#[cfg(feature = "single-threaded")]
+pub type Shared<T> = std::rc::Rc<T>;
+
+#[cfg(not(feature = "single-threaded"))]
+pub type Shared<T> = std::sync::Arc<T>;
+
 #[cfg(test)]
 pub(crate) mod gen {
     //use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};

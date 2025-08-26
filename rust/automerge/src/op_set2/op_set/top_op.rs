@@ -1,10 +1,10 @@
 use crate::marks::MarkSet;
+use crate::types::Shared;
 
 use super::{Op, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct TopOpIter<'a, I: Iterator<Item = Op<'a>>> {
@@ -41,7 +41,7 @@ impl<'a, I: Iterator<Item = Op<'a>>> Iterator for TopOpIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a>> OpQueryTerm<'a> for TopOpIter<'a, I> {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         self.iter.get_marks()
     }
     fn range(&self) -> Range<usize> {

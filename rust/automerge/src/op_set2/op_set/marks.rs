@@ -1,10 +1,10 @@
 use crate::marks::{MarkSet, MarkStateMachine};
+use crate::types::Shared;
 
 use super::{Action, MarkData, Op, OpQueryTerm};
 
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct MarkIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
@@ -41,7 +41,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for MarkIter<'a, I> {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         self.marks.current()
     }
 
@@ -76,7 +76,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for NoMarkIter<'a, I> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for NoMarkIter<'a, I> {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         None
     }
 

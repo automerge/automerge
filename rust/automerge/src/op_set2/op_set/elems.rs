@@ -1,12 +1,11 @@
 use crate::{
     marks::{MarkSet, MarkStateMachine},
-    types::Clock,
+    types::{Clock, Shared},
 };
 
 use super::{Op, OpIter, OpQueryTerm, OpType};
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ElemIter<'a, I: Iterator<Item = Op<'a>> + Clone> {
@@ -37,7 +36,7 @@ impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for ElemIter<'a, I> {
         self.iter.get_opiter()
     }
 
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         self.iter.get_marks()
     }
 }

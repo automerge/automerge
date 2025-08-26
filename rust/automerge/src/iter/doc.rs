@@ -4,18 +4,17 @@ use crate::exid::ExId;
 use crate::op_set2::op_set::{ObjIdIter, OpSet};
 use crate::op_set2::types::ValueRef;
 use crate::patches::PatchLog;
-use crate::types::{ObjId, ObjMeta, ObjType, Prop};
+use crate::types::{ObjId, ObjMeta, ObjType, Prop, Shared};
 use crate::Automerge;
 use crate::TextEncoding;
 
 use std::collections::BTreeMap;
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct DocIter<'a> {
     op_set: Option<&'a OpSet>,
-    obj_export: Arc<ExId>,
+    obj_export: Shared<ExId>,
     inner: DocIterInternal<'a>,
 }
 
@@ -23,7 +22,7 @@ impl<'a> DocIter<'a> {
     pub(crate) fn empty(encoding: TextEncoding) -> Self {
         Self {
             op_set: None,
-            obj_export: Arc::new(ExId::Root),
+            obj_export: Shared::new(ExId::Root),
             inner: DocIterInternal::empty(encoding),
         }
     }
@@ -43,7 +42,7 @@ impl<'a> DocIter<'a> {
         let mut obj_id_iter = op_set.obj_id_iter();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
-        let obj_export = Arc::new(op_set.id_to_exid(obj.0));
+        let obj_export = Shared::new(op_set.id_to_exid(obj.0));
         let scope = obj_id_iter.seek_to_value(obj);
         let map_iter = MapRange::new(op_set, scope.clone(), clock.clone());
         let list_iter = ListRange::new(op_set, scope.clone(), clock.clone(), ..);
@@ -177,7 +176,7 @@ impl<'a> Iterator for DocIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let DocObjItemInternal { obj, item } = self.inner.next()?;
         if *self.obj_export != obj {
-            self.obj_export = Arc::new(self.op_set?.id_to_exid(self.inner.obj.0));
+            self.obj_export = Shared::new(self.op_set?.id_to_exid(self.inner.obj.0));
         }
         Some(DocObjItem {
             obj: self.obj_export.clone(),
@@ -203,7 +202,7 @@ impl<'a> Iterator for DocIterInternal<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct DocObjItem<'a> {
-    pub obj: Arc<ExId>,
+    pub obj: Shared<ExId>,
     pub item: DocItem<'a>,
 }
 

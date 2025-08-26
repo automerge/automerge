@@ -2,17 +2,16 @@ use super::visible::VisIter;
 use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
 use crate::iter::tools::SkipIter;
 use crate::marks::MarkSet;
-use crate::types::Clock;
+use crate::types::{Clock, Shared};
 
 #[cfg(test)]
 use crate::iter::KeyOpIter;
 
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
 
 pub(crate) trait OpQueryTerm<'a>: Iterator<Item = Op<'a>> + Debug {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>>;
+    fn get_marks(&self) -> Option<&Shared<MarkSet>>;
 
     fn range(&self) -> Range<usize>;
 }
@@ -50,7 +49,7 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
 }
 
 impl<'a> OpQueryTerm<'a> for OpIter<'a> {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         None
     }
 

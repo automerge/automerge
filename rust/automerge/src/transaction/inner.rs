@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
-use std::sync::Arc;
 
 use crate::change_graph::ChangeGraph;
 use unicode_segmentation::UnicodeSegmentation;
@@ -12,7 +11,7 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
 use crate::patches::PatchLog;
-use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding};
+use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, Shared, TextEncoding};
 use crate::Automerge;
 use crate::{AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
@@ -835,7 +834,7 @@ impl TransactionInner {
         encoding: TextEncoding,
         patch_log: &mut PatchLog,
         op: &TxOp,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     ) {
         let obj_typ = op.obj_type;
         let obj = op.bld.obj;

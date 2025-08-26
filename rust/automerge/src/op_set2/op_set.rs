@@ -6,7 +6,7 @@ use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, R
 use crate::types;
 use crate::types::{
     ActorId, Clock, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
-    TextEncoding,
+    Shared, TextEncoding,
 };
 use crate::AutomergeError;
 
@@ -21,7 +21,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::ops::{Range, RangeBounds};
-use std::sync::Arc;
 
 mod found_op;
 mod index;
@@ -1162,7 +1161,7 @@ pub(crate) struct Parent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryNth {
-    pub(crate) marks: Option<Arc<MarkSet>>,
+    pub(crate) marks: Option<Shared<MarkSet>>,
     pub(crate) pos: usize,
     pub(crate) index: usize,
     pub(crate) elemid: ElemId,

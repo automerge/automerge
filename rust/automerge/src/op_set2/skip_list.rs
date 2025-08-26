@@ -2,7 +2,6 @@
 
 use fxhash::FxBuildHasher;
 //use im::HashMap;
-//use std::sync::Arc;
 use std::collections::HashMap;
 //use rand::rngs::ThreadRng;
 use rand::prelude::*;

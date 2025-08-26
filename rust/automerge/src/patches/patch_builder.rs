@@ -1,12 +1,11 @@
 use core::fmt::Debug;
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 use crate::exid::ExId;
 use crate::iter::SpanInternal;
 use crate::marks::MarkSet;
 use crate::text_value::ConcreteTextValue;
-use crate::types::{Clock, ObjId, ObjType};
+use crate::types::{Clock, ObjId, ObjType, Shared};
 use crate::{Automerge, Prop, TextEncoding, Value};
 
 use super::{Patch, PatchAction};
@@ -15,7 +14,7 @@ use crate::{marks::Mark, sequence_tree::SequenceTree};
 #[derive(Debug, Clone)]
 pub(crate) struct PatchBuilder<'a> {
     patches: Vec<Patch>,
-    last_mark_set: Option<Arc<MarkSet>>, // keep this around for a quick pointer equality test
+    last_mark_set: Option<Shared<MarkSet>>, // keep this around for a quick pointer equality test
     path_map: BTreeMap<ObjId, (Prop, ObjId)>,
     seen: HashSet<ObjId>,
     text_encoding: TextEncoding,
@@ -144,7 +143,7 @@ impl PatchBuilder<'_> {
         obj: ExId,
         index: usize,
         value: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     ) {
         if let Some(PatchAction::SpliceText {
             index: tail_index,

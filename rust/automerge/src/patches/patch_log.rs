@@ -4,10 +4,9 @@ use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::{MarkAccumulator, MarkSet};
 use crate::op_set2::PropRef;
-use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, TextEncoding};
+use crate::types::{ActorId, Clock, ObjId, ObjType, OpId, Prop, Shared, TextEncoding};
 use crate::{ChangeHash, Patch};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::sync::Arc;
 
 use super::PatchBuilder;
 
@@ -74,7 +73,7 @@ pub(crate) enum Event {
     Splice {
         index: usize,
         text: String,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     },
     Insert {
         index: usize,
@@ -317,7 +316,7 @@ impl PatchLog {
         obj: ObjId,
         index: usize,
         text: &str,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     ) {
         self.events.push((
             obj,
@@ -329,7 +328,7 @@ impl PatchLog {
         ))
     }
 
-    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Arc<MarkSet>) {
+    pub(crate) fn mark(&mut self, obj: ObjId, index: usize, len: usize, marks: &Shared<MarkSet>) {
         if let Some((_, Event::Mark { marks: tail_marks })) = self.events.last_mut() {
             tail_marks.add(index, len, marks);
             return;

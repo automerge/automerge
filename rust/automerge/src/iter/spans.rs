@@ -4,12 +4,10 @@ use crate::iter::tools::Unshift;
 use crate::marks::{MarkSet, MarkStateMachine};
 use crate::op_set2::op_set::{ActionValueIter, MarkInfoIter, OpIdIter, OpSet, VisIter};
 use crate::op_set2::types::{Action, MarkData, ScalarValue};
-use crate::types::OpId;
-use crate::types::{Clock, TextEncoding};
+use crate::types::{Clock, OpId, Shared, TextEncoding};
 
 use std::borrow::Cow;
 use std::ops::Range;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SpansInternal<'a> {
@@ -32,7 +30,7 @@ pub struct Spans<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SpanInternal {
-    Text(String, usize, Option<Arc<MarkSet>>),
+    Text(String, usize, Option<Shared<MarkSet>>),
     Obj(OpId, usize),
 }
 
@@ -41,7 +39,7 @@ pub enum Span {
     /// A span of text and the marks that were active for that span
     Text {
         text: String,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     },
     /// A block marker
     Block(crate::hydrate::Map),
@@ -175,7 +173,7 @@ struct SpanState {
     //
     // Then the next_text will always have 'bold' marks but the active marks
     // will pass through ['bold', 'bold,italic', 'bold']
-    marks: Option<Arc<MarkSet>>,
+    marks: Option<Shared<MarkSet>>,
     // The next span we will emit if any. This is really used when we encounter
     // a block marker which requires us to emit the current text span and put
     // the block marker in `next_span` to be emitted on the next call to
@@ -191,7 +189,7 @@ struct NextText {
     // The length of this text according to the text encoding
     len: usize,
     // The marks for this text
-    marks: Option<Arc<MarkSet>>,
+    marks: Option<Shared<MarkSet>>,
 }
 
 impl SpanState {
@@ -251,7 +249,7 @@ impl SpanState {
         }
     }
 
-    fn push_marks(&mut self, new_marks: Option<&Arc<MarkSet>>) {
+    fn push_marks(&mut self, new_marks: Option<&Shared<MarkSet>>) {
         assert!(self.next_span.is_none());
         self.marks = new_marks.cloned();
     }
@@ -307,7 +305,7 @@ impl SpanInternal {
                     if m.non_deleted_marks().is_empty() {
                         None
                     } else {
-                        Some(Arc::new(m.as_ref().clone().without_unmarks()))
+                        Some(Shared::new(m.as_ref().clone().without_unmarks()))
                     }
                 }),
             },

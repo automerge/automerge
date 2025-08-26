@@ -4,10 +4,9 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fmt::Display;
-use std::sync::Arc;
 
 use crate::op_set2::{MarkData, Op, OpType};
-use crate::types::{Clock, ObjType, OpId, SmallHashMap};
+use crate::types::{Clock, ObjType, OpId, Shared, SmallHashMap};
 use crate::value::ScalarValue;
 
 /// Marks let you store out-of-bound information about sequences.
@@ -44,13 +43,13 @@ impl Mark {
         self.end - self.start
     }
 
-    pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
+    pub(crate) fn into_mark_set(self) -> Shared<MarkSet> {
         let mut m = MarkSet::default();
         //let data = self.data.into_owned();
         //let name = self.name;
         //m.insert(data.name, data.value);
         m.insert(self.name, self.value);
-        Arc::new(m)
+        Shared::new(m)
     }
 }
 
@@ -161,7 +160,7 @@ impl MarkSet {
         MarkSet { marks: diff }
     }
 
-    pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Arc<Self>> {
+    pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Shared<Self>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in q.iter() {
             marks.mark_begin(*id, mark_data.clone());
@@ -235,11 +234,11 @@ impl Mark {
 pub(crate) struct MarkStateMachine<'a> {
     // would this make more sense as a BTree<OpId, MarkData<'a>>?
     state: Vec<(OpId, MarkData<'a>)>,
-    current: Arc<MarkSet>,
+    current: Shared<MarkSet>,
 }
 
 impl<'a> MarkStateMachine<'a> {
-    pub(crate) fn current(&self) -> Option<&Arc<MarkSet>> {
+    pub(crate) fn current(&self) -> Option<&Shared<MarkSet>> {
         if self.current.is_empty() {
             None
         } else {
@@ -266,13 +265,13 @@ impl<'a> MarkStateMachine<'a> {
         if Self::mark_above(&self.state, index, mark.clone()).is_none() {
             if let Some(below) = Self::mark_below(&mut self.state, index, mark.clone()) {
                 if below.value != mark.value {
-                    Arc::make_mut(&mut self.current)
+                    Shared::make_mut(&mut self.current)
                         .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                     result = true
                 }
             } else {
                 // nothing above or below
-                Arc::make_mut(&mut self.current)
+                Shared::make_mut(&mut self.current)
                     .insert(SmolStr::from(mark.name.as_ref()), mark.value.to_owned());
                 result = true
             }
@@ -296,12 +295,12 @@ impl<'a> MarkStateMachine<'a> {
             match Self::mark_below(&mut self.state, index, mark.clone()) {
                 Some(below) if below.value == mark.value => {}
                 Some(below) => {
-                    Arc::make_mut(&mut self.current)
+                    Shared::make_mut(&mut self.current)
                         .insert(SmolStr::from(below.name), below.value.into());
                     result = true;
                 }
                 None => {
-                    Arc::make_mut(&mut self.current).remove(&SmolStr::from(mark.name.as_ref()));
+                    Shared::make_mut(&mut self.current).remove(&SmolStr::from(mark.name.as_ref()));
                     result = true;
                 }
             }

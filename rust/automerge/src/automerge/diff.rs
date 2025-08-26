@@ -1,6 +1,5 @@
 use itertools::Itertools;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::automerge::Automerge;
 use crate::hydrate;
@@ -10,7 +9,7 @@ use crate::{
     marks::{MarkSet, MarkStateMachine},
     op_set2::{DiffOp, Op, OpQuery, OpType, ScalarValue},
     patches::PatchLog,
-    types::{Clock, ObjId, SequenceType},
+    types::{Clock, ObjId, Shared, SequenceType},
     ObjType,
 };
 
@@ -114,16 +113,16 @@ fn resolve<'a>(
 
 #[derive(Debug, Clone)]
 enum Patch<'a> {
-    New(Winner<'a>, Option<Arc<MarkSet>>),
+    New(Winner<'a>, Option<Shared<MarkSet>>),
     Old {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     },
     Update {
         before: Winner<'a>,
         after: Winner<'a>,
-        marks: Option<Arc<MarkSet>>,
+        marks: Option<Shared<MarkSet>>,
     },
     Delete(Winner<'a>),
 }
@@ -340,13 +339,13 @@ pub(crate) struct RichTextDiff<'a> {
 }
 
 impl<'a> RichTextDiff<'a> {
-    pub(crate) fn current(&self) -> Option<Arc<MarkSet>> {
+    pub(crate) fn current(&self) -> Option<Shared<MarkSet>> {
         // do this without all the cloning - cache the result
         let b = self.before.current().cloned().unwrap_or_default();
         let a = self.after.current().cloned().unwrap_or_default();
         if a != b {
             let result = b.diff(&a);
-            Some(Arc::new(result))
+            Some(Shared::new(result))
         } else {
             None
         }

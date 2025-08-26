@@ -1,4 +1,4 @@
-use crate::{marks::MarkSet, types::Clock};
+use crate::{marks::MarkSet, types::{Clock, Shared}};
 
 use super::{ActionIter, Op, OpId, OpIdIter, OpQueryTerm, SuccIterIter};
 use crate::op_set2::op::SuccCursors;
@@ -9,7 +9,6 @@ use hexane::{BooleanCursor, ColumnDataIter};
 
 use std::fmt::Debug;
 use std::ops::Range;
-use std::sync::Arc;
 
 use crate::iter::tools::{Shiftable, Skipper};
 
@@ -280,7 +279,7 @@ impl Visibility<'_> {
 }
 
 impl<'a, I: OpQueryTerm<'a> + Clone> OpQueryTerm<'a> for VisibleOpIter<'a, I> {
-    fn get_marks(&self) -> Option<&Arc<MarkSet>> {
+    fn get_marks(&self) -> Option<&Shared<MarkSet>> {
         self.iter.get_marks()
     }
 
