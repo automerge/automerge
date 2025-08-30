@@ -301,7 +301,7 @@ pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
 pub use patches::{Patch, PatchAction, PatchLog};
-pub use read::ReadDoc;
+pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
 pub use storage::VerificationMode;
 pub use text_value::ConcreteTextValue;
