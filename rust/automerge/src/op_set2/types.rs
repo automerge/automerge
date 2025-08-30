@@ -780,7 +780,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub(crate) fn into_value(self) -> value::Value<'static> {
+    pub fn into_value(self) -> value::Value<'static> {
         match self {
             Self::Object(o) => value::Value::Object(o),
             Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
