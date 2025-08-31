@@ -500,17 +500,12 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.run.as_mut() {
-            Some(Run { count, value }) if *count > 0 => {
-                *count -= 1;
-                Some(Ok(value.clone()))
-            }
+            Some(run) if run.count > 0 => Ok(self.cursor.pop(run)).transpose(),
             _ => match self.next_run() {
-                Ok(Some(Run { count, value })) if count > 0 => {
-                    self.run = Some(Run {
-                        count: count - 1,
-                        value: value.clone(),
-                    });
-                    Some(Ok(value))
+                Ok(Some(mut run)) if run.count > 0 => {
+                    let value = self.cursor.pop(&mut run);
+                    self.run = Some(run);
+                    Ok(value).transpose()
                 }
                 Ok(_) => None,
                 Err(e) => Some(Err(e)),

@@ -3,7 +3,7 @@ use tracing::instrument;
 use crate::{
     change::Change,
     change_graph::ChangeGraph,
-    storage::{self, parse},
+    storage::{self, parse, Bundle},
     types::TextEncoding,
 };
 
@@ -23,6 +23,10 @@ pub enum Error {
     InvalidOpsColumns(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("a chunk contained leftover data")]
     LeftoverData,
+    #[error("a bundle contained an invalid column")]
+    InvalidBundleColumn(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("a bundle contained an invalid change")]
+    InvalidBundleChange(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("error inflating document chunk ops: {0}")]
     InflateDocument(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("bad checksum")]
@@ -107,6 +111,15 @@ fn load_next_change<'a>(
             #[cfg(not(debug_assertions))]
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
             changes.push(change);
+        }
+        storage::Chunk::Bundle(bundle) => {
+            tracing::trace!("loading bundle chunk");
+            let bundle = Bundle::new_from_unverified(bundle.into_owned())
+                .map_err(|e| Error::InvalidBundleColumn(Box::new(e)))?;
+            let bundle_changes = bundle
+                .to_changes()
+                .map_err(|e| Error::InvalidBundleChange(Box::new(e)))?;
+            changes.extend(bundle_changes);
         }
         storage::Chunk::CompressedChange(change, compressed) => {
             tracing::trace!("loading compressed change chunk");

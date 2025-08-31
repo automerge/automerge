@@ -311,6 +311,10 @@ impl<'a, P: Packable + ?Sized> SlabWriter<'a, P> {
         self.init_abs = abs;
     }
 
+    pub fn is_locked(&self) -> bool {
+        self.locked
+    }
+
     pub fn unlock(&mut self) {
         self.locked = false;
     }

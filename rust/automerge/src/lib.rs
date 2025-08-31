@@ -303,7 +303,7 @@ pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef
 pub use patches::{Patch, PatchAction, PatchLog};
 pub use read::{ReadDoc, Stats};
 pub use sequence_tree::SequenceTree;
-pub use storage::VerificationMode;
+pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
