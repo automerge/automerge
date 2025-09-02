@@ -16,7 +16,7 @@ use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
 //use fnv::FnvBuildHasher;
-use fxhash::FxBuildHasher;
+use rustc_hash::FxBuildHasher;
 pub(crate) type SmallHasher = FxBuildHasher;
 pub(crate) type SmallHashMap<A, B> = HashMap<A, B, SmallHasher>;
 
