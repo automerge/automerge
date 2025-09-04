@@ -15,15 +15,14 @@ databases support server applications - by providing mechanisms for persistence
 which allow application developers to avoid thinking about hard distributed
 computing problems. Automerge aims to be PostgreSQL for your local-first app.
 
-If you're looking for documentation on the JavaScript implementation take a look
-at https://automerge.org/docs/hello/. This repository also contains the core
-Rust library which is compiled to WebAssembly and exposed in JavaScript. The
-docs for this library can be found on
-[docs.rs](https://docs.rs/automerge/latest/automerge/). Finally, there is a C
-library in `rust/automerge-c`, take a look at the README there for more details.
+On our website you'll find [documentation for JavaScript](https://automerge.org/docs/hello/),
+complete with tutorials and an API reference.
+This repository also contains the core Rust library which is compiled to WebAssembly and exposed in JavaScript,
+the docs for which can be found on [docs.rs](https://docs.rs/automerge/latest/automerge/).
+Finally, there is a C library in `rust/automerge-c` — take a look at the README there for more details.
 
 If you're familiar with CRDTs and interested in the design of Automerge in
-particular take a look at https://automerge.org/automerge-binary-format-spec.
+particular take a look at [the binary format spec](https://automerge.org/automerge-binary-format-spec).
 
 Finally, if you want to talk to us about this project please [join our Discord
 server](https://discord.gg/HrpnPAU5zx)!
@@ -34,18 +33,15 @@ This project is formed of a core Rust implementation which is exposed via FFI in
 javascript+WASM, C, and soon other languages. Alex
 ([@alexjg](https://github.com/alexjg/)) and Orion
 ([@orionz](https://github.com/orionz)) are working full time on maintaining
-automerge, other members of Ink and Switch are also contributing time and there
-are several other maintainers. We are currently focusing on a new implementation
-of the internals (with no API change) which achieves around a 100x reduction in
-memory usage.
+automerge, other members of Ink & Switch are also contributing time and there
+are several other maintainers. We recently released [Automerge 3](https://automerge.org/blog/automerge-3/)
+which achieved around a 10x reduction in memory usage.
 
 In general we try and respect semver.
 
 ### JavaScript
 
-A stable release of the javascript package is currently available as
-`@automerge/automerge@2.0.0` where. pre-release verisions of the `2.0.1` are
-available as `2.0.1-alpha.n`.
+A stable release of the javascript package is available as `@automerge/automerge`.
 
 ### Rust
 
@@ -55,7 +51,7 @@ not well documented. We will be returning to this over the next few months but
 for now you will need to be comfortable reading the tests and asking questions
 to figure out how to use it. If you are looking to build rust applications which
 use automerge you may want to look into
-[autosurgeon](https://github.com/automerge/autosurgeon)
+[autosurgeon](https://github.com/automerge/autosurgeon).
 
 ## Repository Organisation
 
@@ -194,7 +190,7 @@ There are four artefacts in this repository which need releasing:
 #### JS Packages
 
 The NPM package is released automatically by CI tooling whenever a new Github release
-is created. This means that the process for releasing an ew JS version is:
+is created. This means that the process for releasing a new JS version is:
 
 1. Bump the version in `@automerge/automerge` also in `javascript/package.json`
 2. Put in a PR to main with the version bump, wait for tests to run and merge to `main`
