@@ -1,7 +1,10 @@
+use crate::clock::ClockRange;
 use crate::exid::ExId;
+use crate::op_set2::op_set::VisIter;
 use crate::op_set2::OpSet;
 use crate::types::OpId;
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::iter::Peekable;
 use std::ops::Range;
@@ -56,10 +59,11 @@ impl<T: Iterator> Iterator for Unshift<T> {
 
 pub(crate) trait Skipper: Iterator<Item = usize> {}
 
-pub(crate) trait Shiftable: Iterator {
+pub(crate) trait Shiftable: Iterator + Debug {
     fn shift_next(&mut self, _range: Range<usize>) -> Option<<Self as Iterator>::Item>;
 }
 
+#[derive(Debug)]
 pub(crate) struct SkipWrap<I: Iterator<Item = usize>> {
     pub(crate) pos: usize,
     iter: I,
@@ -240,5 +244,184 @@ where
                 return Some(next_val);
             }
         }
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+struct PastSkipper<'a> {
+    before: VisIter<'a>,
+    after: VisIter<'a>,
+    state: (Diff, usize),
+}
+
+#[derive(Clone, Debug)]
+enum DiffSkipper<'a> {
+    Diff(PastSkipper<'a>),
+    Current(VisIter<'a>),
+}
+
+impl Default for DiffSkipper<'_> {
+    fn default() -> Self {
+        Self::Current(VisIter::default())
+    }
+}
+
+impl<'a> DiffSkipper<'a> {
+    fn new(op_set: &'a OpSet, clock: ClockRange, range: Range<usize>) -> Self {
+        match clock {
+            ClockRange::Current(clock) => {
+                DiffSkipper::Current(VisIter::new(op_set, clock.as_ref(), range))
+            }
+            ClockRange::Diff(before, after) => {
+                let before = VisIter::new(op_set, Some(&before), range.clone());
+                let after = VisIter::new(op_set, Some(&after), range);
+                DiffSkipper::Diff(PastSkipper::new(before, after))
+            }
+        }
+    }
+}
+
+impl<'a> PastSkipper<'a> {
+    fn new(before: VisIter<'a>, after: VisIter<'a>) -> Self {
+        Self {
+            before,
+            after,
+            state: Default::default(),
+        }
+    }
+
+    fn progress(&mut self, before: usize, after: usize) -> (Diff, usize) {
+        match before.cmp(&after) {
+            Ordering::Equal => {
+                self.state = (Diff::Same, 0);
+                (Diff::Same, before)
+            }
+            Ordering::Less => {
+                self.state = (Diff::Del, after - before - 1);
+                (Diff::Del, before)
+            }
+            Ordering::Greater => {
+                self.state = (Diff::Add, before - after - 1);
+                (Diff::Add, after)
+            }
+        }
+    }
+
+    fn next_skip(&mut self) -> Option<(usize, usize)> {
+        match self.state {
+            (Diff::Same, _) => {
+                let before = self.before.next();
+                let after = self.after.next();
+                Some((before?, after?))
+            }
+            (Diff::Del, delta) => {
+                let before = self.before.next()?;
+                Some((before, delta))
+            }
+            (Diff::Add, delta) => {
+                let after = self.after.next()?;
+                Some((delta, after))
+            }
+        }
+    }
+}
+
+impl Iterator for DiffSkipper<'_> {
+    type Item = (Diff, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            DiffSkipper::Current(iter) => Some((Diff::Add, iter.next()?)),
+            DiffSkipper::Diff(iter) => iter.next(),
+        }
+    }
+}
+
+impl Iterator for PastSkipper<'_> {
+    type Item = (Diff, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (before, after) = self.next_skip()?;
+
+        Some(self.progress(before, after))
+    }
+}
+
+impl Shiftable for DiffSkipper<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
+        match self {
+            Self::Current(iter) => Some((Diff::Add, iter.shift_next(range)?)),
+            Self::Diff(iter) => iter.shift_next(range),
+        }
+    }
+}
+
+impl Shiftable for PastSkipper<'_> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<(Diff, usize)> {
+        let skip_before = self.before.shift_next(range.clone());
+        let skip_after = self.after.shift_next(range.clone());
+
+        Some(self.progress(skip_before?, skip_after?))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DiffIter<'a, I: Iterator + Debug + Clone> {
+    iter: I,
+    skipper: DiffSkipper<'a>,
+}
+
+impl<I: Iterator + Debug + Clone + Default> Default for DiffIter<'_, I> {
+    fn default() -> Self {
+        Self {
+            iter: I::default(),
+            skipper: DiffSkipper::default(),
+        }
+    }
+}
+
+impl<'a, I: Iterator + Debug + Clone> DiffIter<'a, I> {
+    pub(crate) fn new(op_set: &'a OpSet, iter: I, clock: ClockRange, range: Range<usize>) -> Self {
+        Self {
+            iter,
+            skipper: DiffSkipper::new(op_set, clock, range),
+        }
+    }
+}
+
+impl<I: Iterator + Debug + Clone + Shiftable> Shiftable for DiffIter<'_, I> {
+    fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
+        let (diff, skip) = self.skipper.shift_next(range.clone())?;
+        let start = range.start + skip;
+        let item = self.iter.shift_next(start..range.end)?;
+        Some((diff, item))
+    }
+}
+
+impl<I: Iterator + Debug + Clone> Iterator for DiffIter<'_, I> {
+    type Item = (Diff, I::Item);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (diff, skip) = self.skipper.next()?;
+        let item = self.iter.nth(skip);
+        Some((diff, item?))
+    }
+}
+
+#[derive(Clone, Default, Copy, Debug, PartialEq)]
+pub(crate) enum Diff {
+    #[default]
+    Same,
+    Add,
+    Del,
+}
+
+impl Diff {
+    pub(crate) fn is_del(&self) -> bool {
+        matches!(self, Diff::Del)
+    }
+
+    pub(crate) fn is_visible(&self) -> bool {
+        !self.is_del()
     }
 }

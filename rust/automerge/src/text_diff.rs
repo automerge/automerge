@@ -453,7 +453,7 @@ fn spans_as_grapheme(
     let mut result = Vec::with_capacity(spans_internal.size_hint().0);
     for span in spans_internal {
         match span {
-            SpanInternal::Obj(b, _) => {
+            SpanInternal::Obj(b, _, _) => {
                 let crate::hydrate::Value::Map(map) = doc.hydrate_map(&b.into(), clock.as_ref())
                 else {
                     tracing::warn!("unexpected non map object in text");

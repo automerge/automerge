@@ -1,5 +1,5 @@
-use crate::automerge::diff::RichTextDiff;
 use crate::hydrate::Value;
+use crate::iter::RichTextDiff;
 use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
 use crate::op_set2::SuccInsert;
 use crate::types::{
@@ -691,7 +691,7 @@ impl<'a> ValueState<'a> {
                             // update) to the operation at `index`, but we only allow insertions
                             // into text objects. Regardless, we handle this is a splice just in
                             // case
-                            log.splice(obj, index, c.value.as_str(), self.marks.current().clone());
+                            log.splice(obj, index, c.value.as_str(), self.marks.current().export());
                         }
                         _ => log.insert(obj, index, c.value, c.id, c.conflict),
                     }
@@ -701,7 +701,7 @@ impl<'a> ValueState<'a> {
                     log.delete_seq(obj, index, w);
                 }
                 (Some(d), None) => {
-                    if let Some(m) = self.marks.current() {
+                    if let Some(m) = self.marks.current().export() {
                         log.mark(
                             obj,
                             index,

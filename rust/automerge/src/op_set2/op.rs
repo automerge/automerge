@@ -855,6 +855,7 @@ impl std::fmt::Debug for SuccCursors<'_> {
 }
 
 pub(crate) struct SuccIncCursors<'a>(SuccCursors<'a>);
+
 struct IncCursors<'a>(SuccCursors<'a>);
 
 impl Iterator for SuccCursors<'_> {
@@ -1076,17 +1077,6 @@ impl<'a> Op<'a> {
             (Action::Increment, ScalarValue::Uint(i)) => Some(*i as i64),
             _ => None,
         }
-    }
-
-    pub(crate) fn is_put(&self) -> bool {
-        self.action == Action::Set
-    }
-
-    pub(crate) fn is_make(&self) -> bool {
-        matches!(
-            self.action,
-            Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
-        )
     }
 
     pub(crate) fn value(&self) -> ValueRef<'a> {

@@ -1,21 +1,24 @@
 use super::parents::Parents;
+use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, Clock, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
+    ActorId, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
     TextEncoding,
 };
 use crate::AutomergeError;
 
 use super::hexane::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
-use super::op::{Op, OpLike, SuccInsert};
+use super::op::{Op, OpLike, SuccCursors, SuccInsert};
 
 use super::columns::Columns;
 
-use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
+use super::types::{
+    Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue, ValueRef,
+};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -47,7 +50,7 @@ pub(crate) use op_iter::{
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
+pub(crate) use visible::{VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = super::hexane::ColAccIter<'a, BooleanCursor>;
 
@@ -260,6 +263,12 @@ impl OpSet {
         }
     }
 
+    /*
+        pub(crate) fn null_clock(&self) -> Option<Clock> {
+            Some(Clock::new(self.actors.len()))
+        }
+    */
+
     pub(crate) fn parent_object(&self, child: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
         let obj = op.obj;
@@ -366,6 +375,7 @@ impl OpSet {
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if clock.is_none() {
+                // TODO - this could be done faster with the index
                 let text = self.cols.index.text.iter_range(range.clone());
                 let iter = SkipIter::new(text.clone(), vis.clone());
                 iter.filter_map(|n| n.as_deref().copied()).sum::<u64>() as usize
@@ -870,19 +880,85 @@ impl OpSet {
         Some((o1, vis))
     }
 
-    pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {
-        // FIXME clock is ignored
+    pub(crate) fn value_at<'a>(
+        &'a self,
+        pos: usize,
+        action: Action,
+        value: ScalarValue<'a>,
+        clock: Option<&Clock>,
+    ) -> ValueRef<'a> {
+        if let ScalarValue::Counter(c) = &value {
+            let (_, inc) = self.get_increment_diff_at_pos(pos, None, clock);
+            ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
+        } else {
+            ValueRef::from_action_value(action, value)
+        }
+    }
+
+    pub(crate) fn get_increment_diff_at_pos_v2(
+        &self,
+        pos: usize,
+        clock: &ClockRange,
+    ) -> (i64, i64) {
         if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
             let start = val.acc.as_usize();
-            let end = start + *val.item.unwrap_or_default() as usize;
-            self.cols
-                .index
-                .inc
-                .iter_range(start..end)
-                .map(|v| *v.unwrap_or_default())
-                .sum()
+            let len = *val.item.unwrap_or_default() as usize;
+            let end = start + len;
+            let succ = SuccCursors {
+                len,
+                succ_actor: self.cols.succ_actor.iter_range(start..end),
+                succ_counter: self.cols.succ_ctr.iter_range(start..end),
+                inc_values: self.cols.index.inc.iter_range(start..end),
+            };
+            let mut inc1 = 0;
+            let mut inc2 = 0;
+            for (id, value) in succ.with_inc() {
+                if let Some(i) = value {
+                    if clock.visible_before(&id) {
+                        inc1 += i;
+                    }
+                    if clock.visible_after(&id) {
+                        inc2 += i;
+                    }
+                }
+            }
+            (inc1, inc2)
         } else {
-            0
+            (0, 0)
+        }
+    }
+
+    pub(crate) fn get_increment_diff_at_pos(
+        &self,
+        pos: usize,
+        clock1: Option<&Clock>,
+        clock2: Option<&Clock>,
+    ) -> (i64, i64) {
+        if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
+            let start = val.acc.as_usize();
+            let len = *val.item.unwrap_or_default() as usize;
+            let end = start + len;
+            let succ = SuccCursors {
+                len,
+                succ_actor: self.cols.succ_actor.iter_range(start..end),
+                succ_counter: self.cols.succ_ctr.iter_range(start..end),
+                inc_values: self.cols.index.inc.iter_range(start..end),
+            };
+            let mut inc1 = 0;
+            let mut inc2 = 0;
+            for (id, value) in succ.with_inc() {
+                if let Some(i) = value {
+                    if id.visible_at(clock1) {
+                        inc1 += i;
+                    }
+                    if id.visible_at(clock2) {
+                        inc2 += i;
+                    }
+                }
+            }
+            (inc1, inc2)
+        } else {
+            (0, 0)
         }
     }
 

@@ -1,5 +1,5 @@
 use super::visible::VisIter;
-use super::{DiffOpIter, MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
+use super::{MarkIter, NoMarkIter, Op, OpIter, OpSet, TopOpIter, VisibleOpIter};
 use crate::iter::tools::SkipIter;
 use crate::marks::MarkSet;
 use crate::types::Clock;
@@ -42,10 +42,6 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
     fn visible2(self, op_set: &'a OpSet, clock: Option<&Clock>) -> FixCounters<'a, Self> {
         let vis = VisIter::new(op_set, clock, self.range());
         FixCounters::new(SkipIter::new(self, vis), clock)
-    }
-
-    fn diff<'b>(self, before: &'b Clock, after: &'b Clock) -> DiffOpIter<'a, 'b, Self> {
-        DiffOpIter::new(self, before, after)
     }
 }
 
