@@ -139,9 +139,9 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    { crate = "regex-syntax@0.6.29", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
-    { crate = "regex-automata@0.1.10", reason = "this is bought in by tracing-subscriber, which we only use in tests and the CLI" },
-    { crate = "itertools@0.10.5", reason = "this is bought in by criterion, which we only use in benchmarks" },
+    { crate = "windows-link@0.1.3", reason = "brought in by clap used in automerge-cli, cbindgen, and criterion" },
+    { crate = "windows-sys@0.52.0", reason = "brought in by tracing-subscriber used in automerge (dev) and automerge-cli" },
+    { crate = "windows-sys@0.60.2", reason = "brought in by clap and other deps used in automerge-cli, cbindgen, and criterion" },
     { crate = "itertools@0.13.0", reason = "this is bought in by criterion-plot, which we only use in benchmarks" },
     { crate = "windows_x86_64_msvc@0.52.6", reason = "this is bought in by dev dependencies" },
     { crate = "windows_x86_64_gnullvm@0.52.6", reason = "this is bought in by dev dependencies" },
