@@ -38,7 +38,7 @@ thiserror = "^2.0.12"
 fxhash = "^0.2.1"
 
 [dependencies.wasm-bindgen]
-version = "= 0.2.100"
+version = "= 0.2.101"
 features = ["serde-serialize", "std"]
 
 [package.metadata.wasm-pack.profile.release]
