@@ -9,11 +9,12 @@ use automerge::marks::{MarkSet, UpdateSpansConfig};
 use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
-use js_sys::{Array, Function, JsString, Object, Reflect, Uint8Array};
+use js_sys::{Array, BigInt, Function, JsString, Number, Object, Reflect, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Display;
 use std::ops::Deref;
+use std::ops::Range;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -721,7 +722,8 @@ fn import_marks(value: JsValue) -> Result<Option<Arc<MarkSet>>, error::ImportMar
             let key = kv.get(0).as_string().expect("keys are strings");
             let value = kv.get(1);
             let value = import_scalar(&value, None)
-                .ok_or_else(|| error::ImportMark::InvalidValue(key.clone()))?;
+                .map_err(|_| error::ImportMark::InvalidValue(key.clone()))?;
+
             Ok::<_, error::ImportMark>((key, value))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -815,7 +817,8 @@ pub(crate) fn js_set<V: Into<JsValue>, S: std::fmt::Debug + Into<JsValue>>(
     val: V,
 ) -> Result<bool, error::SetProp> {
     let property = property.into();
-    Reflect::set(obj, &property, &val.into()).map_err(|error| error::SetProp { property, error })
+    let val = val.into();
+    Reflect::set(obj, &property, &val).map_err(|error| error::SetProp { property, error })
 }
 
 pub(crate) fn to_prop(p: JsValue) -> Result<Prop, error::InvalidProp> {
@@ -994,31 +997,94 @@ impl ExternalTypeConstructor {
     }
 }
 
+fn bigint_to_scalar(value: BigInt) -> Result<am::ScalarValue, error::ImportValue> {
+    let max = std::sync::LazyLock::new(|| BigInt::from(i64::MAX));
+    if value > *max {
+        Ok(am::ScalarValue::Uint(bigint_to_u64(value)?))
+    } else {
+        Ok(am::ScalarValue::Int(bigint_to_i64(value)?))
+    }
+}
+
+fn bigint_to_i64(value: BigInt) -> Result<i64, error::ImportValue> {
+    // going bigint -> string -> parse is inefficient but
+    // much much simpler b/c othrewise we'd need to bounce it through
+    // Number and deal with lossy bits, or mod/bit shift in 32 bit chunks
+
+    let max = std::sync::LazyLock::new(|| BigInt::from(i64::MAX));
+    let min = std::sync::LazyLock::new(|| BigInt::from(i64::MIN));
+
+    if value > *max {
+        return Err(error::ImportValue::BigIntTooLarge(value, max.clone()));
+    }
+    if value < *min {
+        return Err(error::ImportValue::BigIntTooSmall(value, min.clone()));
+    }
+
+    let value = value.to_string(10)?;
+    let value = String::from(value).parse::<i64>()?;
+    Ok(value)
+}
+
+fn jsvalue_to_u64(value: &JsValue) -> Result<u64, error::ImportValue> {
+    if BigInt::is_type_of(value) {
+        bigint_to_u64(BigInt::from(value.clone()))
+    } else if let Some(v) = value.as_f64() {
+        Ok(v as u64)
+    } else {
+        Err(error::ImportValue::Invalid(value.clone()))
+    }
+}
+
+fn jsvalue_to_i64(value: &JsValue) -> Result<i64, error::ImportValue> {
+    if BigInt::is_type_of(value) {
+        bigint_to_i64(BigInt::from(value.clone()))
+    } else if let Some(v) = value.as_f64() {
+        Ok(v as i64)
+    } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+        Ok(d.get_time() as i64)
+    } else {
+        Err(error::ImportValue::Invalid(value.clone()))
+    }
+}
+
+fn jsvalue_to_bytes(value: &JsValue) -> Result<Vec<u8>, error::ImportValue> {
+    if let Ok(v) = value.clone().dyn_into::<Uint8Array>() {
+        Ok(v.to_vec())
+    } else {
+        Err(error::ImportValue::Invalid(value.clone()))
+    }
+}
+
+fn bigint_to_u64(value: BigInt) -> Result<u64, error::ImportValue> {
+    let max = std::sync::LazyLock::new(|| BigInt::from(u64::MAX));
+    let min = std::sync::LazyLock::new(|| BigInt::from(u64::MIN));
+    if value > *max {
+        return Err(error::ImportValue::BigIntTooLarge(value, max.clone()));
+    }
+    if value < *min {
+        return Err(error::ImportValue::BigIntTooSmall(value, min.clone()));
+    }
+    let value = value.to_string(10)?;
+    let value = String::from(value).parse::<u64>()?;
+    Ok(value)
+}
+
 pub(crate) fn import_scalar(
     value: &JsValue,
     datatype: Option<Datatype>,
-) -> Option<am::ScalarValue> {
+) -> Result<am::ScalarValue, error::ImportValue> {
     match datatype {
         Some(Datatype::Boolean) => value.as_bool().map(am::ScalarValue::Boolean),
-        Some(Datatype::Int) => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
-        Some(Datatype::Uint) => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+        Some(Datatype::Int) => Some(am::ScalarValue::Int(jsvalue_to_i64(value)?)),
+        Some(Datatype::Uint) => Some(am::ScalarValue::Uint(jsvalue_to_u64(value)?)),
         Some(Datatype::Str) => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
         Some(Datatype::F64) => value.as_f64().map(am::ScalarValue::F64),
-        Some(Datatype::Bytes) => Some(am::ScalarValue::Bytes(
-            value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
-        )),
-        Some(Datatype::Counter) => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
-        Some(Datatype::Timestamp) => {
-            if let Some(v) = value.as_f64() {
-                Some(am::ScalarValue::Timestamp(v as i64))
-            } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-            } else {
-                None
-            }
-        }
+        Some(Datatype::Bytes) => Some(am::ScalarValue::Bytes(jsvalue_to_bytes(value)?)),
+        Some(Datatype::Counter) => Some(am::ScalarValue::counter(jsvalue_to_i64(value)?)),
+        Some(Datatype::Timestamp) => Some(am::ScalarValue::Timestamp(jsvalue_to_i64(value)?)),
         Some(Datatype::Null) => Some(am::ScalarValue::Null),
-        Some(_) => None,
+        Some(_) => return Err(error::ImportValue::ValueNotPrimitive), // Map, Text, List ...
         None => {
             if value.is_null() {
                 Some(am::ScalarValue::Null)
@@ -1026,6 +1092,8 @@ pub(crate) fn import_scalar(
                 Some(am::ScalarValue::Boolean(b))
             } else if let Some(s) = value.as_string() {
                 Some(am::ScalarValue::Str(s.into()))
+            } else if BigInt::is_type_of(value) {
+                Some(bigint_to_scalar(BigInt::from(value.clone()))?)
             } else if let Some(n) = value.as_f64() {
                 if (n.round() >= 1.0) && (n.round() - n).abs() < f64::EPSILON {
                     Some(am::ScalarValue::Int(n as i64))
@@ -1034,13 +1102,14 @@ pub(crate) fn import_scalar(
                 }
             } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
                 Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-            } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
+            } else if let Ok(o) = value.clone().dyn_into::<Uint8Array>() {
                 Some(am::ScalarValue::Bytes(o.to_vec()))
             } else {
                 None
             }
         }
     }
+    .ok_or_else(|| error::ImportValue::Invalid(value.clone()))
 }
 
 impl Automerge {
@@ -1454,7 +1523,7 @@ impl Automerge {
         value: &JsValue,
         datatype: Option<Datatype>,
     ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), error::InvalidValue> {
-        match import_scalar(value, datatype) {
+        match import_scalar(value, datatype).ok() {
             Some(val) => Ok((val.into(), vec![])),
             None => {
                 if let Ok(js_obj) = import_obj(value, datatype) {
@@ -1486,14 +1555,27 @@ pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
     }
 }
 
+pub(crate) const SAFE_INT: Range<i64> =
+    (Number::MIN_SAFE_INTEGER as i64)..(Number::MAX_SAFE_INTEGER as i64);
+pub(crate) const SAFE_UINT: Range<u64> = 0..(Number::MIN_SAFE_INTEGER as u64);
+
 pub(crate) fn alloc_scalar(value: &am::ScalarValue) -> (Datatype, JsValue) {
     match value {
         am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
         am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
-        am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
-        am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+        am::ScalarValue::Int(v) if SAFE_INT.contains(v) => (Datatype::Int, (*v as f64).into()),
+        am::ScalarValue::Int(v) => (Datatype::Int, BigInt::from(*v).into()),
+        am::ScalarValue::Uint(v) if SAFE_UINT.contains(v) => (Datatype::Uint, (*v as f64).into()),
+        am::ScalarValue::Uint(v) => (Datatype::Uint, BigInt::from(*v).into()),
         am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
-        am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
+        am::ScalarValue::Counter(v) => {
+            let v = i64::from(v);
+            if SAFE_INT.contains(&v) {
+                (Datatype::Counter, (v as f64).into())
+            } else {
+                (Datatype::Counter, BigInt::from(v).into())
+            }
+        }
         am::ScalarValue::Timestamp(v) => (
             Datatype::Timestamp,
             js_sys::Date::new(&(*v as f64).into()).into(),
@@ -1807,7 +1889,7 @@ pub(super) fn js_val_to_hydrate(
                 )))
             }
         }
-    } else if let Some(val) = import_scalar(&value, datatype) {
+    } else if let Ok(val) = import_scalar(&value, datatype) {
         Ok(am::hydrate::Value::Scalar(val))
     } else {
         Err(error::JsValToHydrate::UnknownType)
@@ -1816,6 +1898,7 @@ pub(super) fn js_val_to_hydrate(
 
 pub(crate) mod error {
     use automerge::{AutomergeError, LoadChangeError};
+    use js_sys::BigInt;
     use wasm_bindgen::JsValue;
 
     #[derive(Debug, thiserror::Error)]
@@ -2161,12 +2244,33 @@ pub(crate) mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum ImportValue {
+        #[error("value not primitive")]
+        ValueNotPrimitive,
+        #[error("invalid import: {0:?}")]
+        Invalid(JsValue),
+        #[error("bignum {0:?} larger than max {1:?}")]
+        BigIntTooLarge(BigInt, BigInt),
+        #[error("bignum {0:?} smaller than min {1:?}")]
+        BigIntTooSmall(BigInt, BigInt),
+        #[error("bignum invalid")]
+        BigIntInvalid,
         #[error("error calling deconstructor: {0:?}")]
         CallDataHandler(JsValue),
         #[error("deconstructor did not return an array of [datatype, value]")]
         BadDeconstructor,
         #[error("deconstructor returned a bad datatype: {0}")]
         BadDataType(#[from] crate::value::InvalidDatatype),
+    }
+
+    impl From<js_sys::RangeError> for ImportValue {
+        fn from(_: js_sys::RangeError) -> Self {
+            ImportValue::BigIntInvalid
+        }
+    }
+    impl From<std::num::ParseIntError> for ImportValue {
+        fn from(_: std::num::ParseIntError) -> Self {
+            ImportValue::BigIntInvalid
+        }
     }
 
     #[derive(thiserror::Error, Debug)]
@@ -2177,6 +2281,10 @@ pub(crate) mod error {
         InvalidValue(#[from] InvalidValue),
         #[error("text object had no text")]
         InvalidText,
+        #[error("bigint too large: {0}")]
+        BigIntTooLarge(js_sys::BigInt),
+        #[error("bigint too small: {0}")]
+        BigIntTooSmall(js_sys::BigInt),
         #[error("unable to determine type of value")]
         UnknownType,
     }

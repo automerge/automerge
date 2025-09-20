@@ -553,9 +553,8 @@ impl Automerge {
         } else {
             let mut vals = vec![];
             if let Ok(array) = text.dyn_into::<Array>() {
-                for (index, i) in array.iter().enumerate() {
-                    let value =
-                        import_scalar(&i, None).ok_or(error::Splice::ValueNotPrimitive(index))?;
+                for i in array.iter() {
+                    let value = import_scalar(&i, None)?;
                     vals.push(value);
                 }
             }
@@ -626,7 +625,7 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let datatype = JS(datatype).try_into()?;
-        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype)?;
         let index = self.doc.length(&obj);
         self.doc.insert(&obj, index, value)?;
         Ok(())
@@ -664,7 +663,7 @@ impl Automerge {
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
         let datatype = JS(datatype).try_into()?;
-        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype)?;
         self.doc.insert(&obj, index as usize, value)?;
         Ok(())
     }
@@ -775,7 +774,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let datatype = JS(datatype).try_into()?;
-        let value = import_scalar(&value, datatype).ok_or(error::Insert::ValueNotPrimitive)?;
+        let value = import_scalar(&value, datatype)?;
         self.doc.put(&obj, prop, value)?;
         Ok(())
     }
@@ -1465,7 +1464,7 @@ impl Automerge {
         let name = name.as_string().ok_or(error::Mark::InvalidName)?;
 
         let datatype = JS(datatype).try_into()?;
-        let value = import_scalar(&value, datatype).ok_or_else(|| error::Mark::InvalidValue)?;
+        let value = import_scalar(&value, datatype)?;
 
         self.doc
             .mark(&obj, Mark::new(name, value, start, end), expand)?;
@@ -1810,6 +1809,8 @@ pub mod error {
         ImportObj(#[from] interop::error::ImportObj),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidImport(#[from] interop::error::ImportValue),
         #[error("value at {0} in values to insert was not a primitive")]
         ValueNotPrimitive(usize),
     }
@@ -1866,12 +1867,12 @@ pub mod error {
     pub enum Insert {
         #[error("invalid object id: {0}")]
         ImportObj(#[from] interop::error::ImportObj),
-        #[error("the value to insert was not a primitive")]
-        ValueNotPrimitive,
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
         #[error(transparent)]
         InvalidProp(#[from] interop::error::InvalidProp),
+        #[error(transparent)]
+        InvalidImport(#[from] interop::error::ImportValue),
         #[error(transparent)]
         InvalidValue(#[from] interop::error::InvalidValue),
         #[error(transparent)]
@@ -2110,8 +2111,8 @@ pub mod error {
         Expand(#[from] interop::error::BadExpand),
         #[error("Invalid mark name")]
         InvalidName,
-        #[error("Invalid mark value")]
-        InvalidValue,
+        #[error("Invalid mark value: {0}")]
+        ImportValue(#[from] interop::error::ImportValue),
         #[error("start must be a number")]
         InvalidStart,
         #[error("end must be a number")]

@@ -1,10 +1,10 @@
 use crate::interop::error;
-use crate::interop::ExternalTypeConstructor;
+use crate::interop::{ExternalTypeConstructor, SAFE_INT, SAFE_UINT};
 use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
 use automerge::ChangeHash;
-use js_sys::{Array, JsString, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, BigInt, JsString, Object, Reflect, Symbol, Uint8Array};
 use rustc_hash::FxBuildHasher;
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
@@ -185,10 +185,19 @@ impl<'a> ExportCache<'a> {
         let (datatype, js_value) = match value {
             am::ScalarValueRef::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.deref()).into()),
             am::ScalarValueRef::Str(v) => (Datatype::Str, v.to_string().into()),
-            am::ScalarValueRef::Int(v) => (Datatype::Int, (*v as f64).into()),
-            am::ScalarValueRef::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+            am::ScalarValueRef::Int(v) if SAFE_INT.contains(v) => {
+                (Datatype::Int, (*v as f64).into())
+            }
+            am::ScalarValueRef::Int(v) => (Datatype::Int, BigInt::from(*v).into()),
+            am::ScalarValueRef::Uint(v) if SAFE_UINT.contains(v) => {
+                (Datatype::Uint, (*v as f64).into())
+            }
+            am::ScalarValueRef::Uint(v) => (Datatype::Uint, BigInt::from(*v).into()),
             am::ScalarValueRef::F64(v) => (Datatype::F64, (*v).into()),
-            am::ScalarValueRef::Counter(v) => (Datatype::Counter, (*v as f64).into()),
+            am::ScalarValueRef::Counter(v) if SAFE_INT.contains(v) => {
+                (Datatype::Counter, (*v as f64).into())
+            }
+            am::ScalarValueRef::Counter(v) => (Datatype::Counter, BigInt::from(*v).into()),
             am::ScalarValueRef::Timestamp(v) => (
                 Datatype::Timestamp,
                 js_sys::Date::new(&(*v as f64).into()).into(),

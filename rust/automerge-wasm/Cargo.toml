@@ -13,7 +13,7 @@ categories = ["wasm"]
 readme = "README.md"
 edition = "2021"
 license = "MIT"
-rust-version = "1.73.0"
+rust-version = "1.80.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -238,37 +238,6 @@ pub enum OpType {
 }
 
 impl OpType {
-    /*
-        /// The index into the action array as specified in [1]
-        ///
-        /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
-        pub(crate) fn action_index(&self) -> u64 {
-            match self {
-                Self::Make(ObjType::Map) => 0,
-                Self::Put(_) => 1,
-                Self::Make(ObjType::List) => 2,
-                Self::Delete => 3,
-                Self::Make(ObjType::Text) => 4,
-                Self::Increment(_) => 5,
-                Self::Make(ObjType::Table) => 6,
-                Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
-            }
-        }
-
-    pub(crate) fn expand(&self) -> bool {
-        matches!(self, OpType::MarkBegin(true, _) | OpType::MarkEnd(true))
-    }
-
-    pub(crate) fn value(&self) -> Cow<'_, ScalarValue> {
-        match self {
-            OpType::Put(v) => Cow::Borrowed(v),
-            OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
-            OpType::MarkBegin(_, OldMarkData { value, .. }) => Cow::Borrowed(value),
-            _ => Cow::Owned(ScalarValue::Null),
-        }
-    }
-    */
-
     pub(crate) fn validate_action_and_value(
         action: u64,
         value: &ScalarValue,
@@ -284,60 +253,6 @@ impl OpType {
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }
-
-    pub(crate) fn from_action_and_value(
-        action: u64,
-        value: ScalarValue,
-        mark_name: Option<smol_str::SmolStr>,
-        expand: bool,
-    ) -> OpType {
-        match action {
-            0 => Self::Make(ObjType::Map),
-            1 => Self::Put(value),
-            2 => Self::Make(ObjType::List),
-            3 => Self::Delete,
-            4 => Self::Make(ObjType::Text),
-            5 => match value {
-                ScalarValue::Int(i) => Self::Increment(i),
-                ScalarValue::Uint(i) => Self::Increment(i as i64),
-                _ => unreachable!("validate_action_and_value returned NonNumericInc"),
-            },
-            6 => Self::Make(ObjType::Table),
-            7 => match mark_name {
-                Some(name) => Self::MarkBegin(expand, OldMarkData { name, value }),
-                None => Self::MarkEnd(expand),
-            },
-            _ => unreachable!("validate_action_and_value returned UnknownAction"),
-        }
-    }
-
-    /*
-        pub(crate) fn to_str(&self) -> &str {
-            if let OpType::Put(ScalarValue::Str(s)) = &self {
-                s
-            } else if self.is_mark() {
-                ""
-            } else {
-                "\u{fffc}"
-            }
-        }
-
-        pub(crate) fn mark_name(&self) -> Option<&str> {
-            if let OpType::MarkBegin(_, data) = self {
-                Some(&data.name)
-            } else {
-                None
-            }
-        }
-
-        pub(crate) fn is_mark(&self) -> bool {
-            matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
-        }
-
-        pub(crate) fn is_block(&self) -> bool {
-            &OpType::Make(ObjType::Map) == self
-        }
-    */
 }
 
 impl From<ObjType> for OpType {
@@ -397,17 +312,6 @@ impl Exportable for OpId {
         Export::Id(*self)
     }
 }
-
-/*
-impl Exportable for Key {
-    fn export(&self) -> Export {
-        match self {
-            Key::Map(p) => Export::Prop(*p),
-            Key::Seq(e) => e.export(),
-        }
-    }
-}
-*/
 
 impl From<ObjId> for OpId {
     fn from(o: ObjId) -> Self {
