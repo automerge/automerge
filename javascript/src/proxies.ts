@@ -1,6 +1,8 @@
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 
+const MAX_I64 = BigInt("9223372036854775807") // 2n ** 63n - 1n;
+
 import type {
   AutomergeValue,
   ScalarValue,
@@ -141,6 +143,12 @@ function import_value(
       }
     case "boolean":
       return [value, "boolean"]
+    case "bigint":
+      if (value > MAX_I64) {
+        return [value, "uint"]
+      } else {
+        return [value, "int"]
+      }
     case "number":
       if (Number.isInteger(value)) {
         return [value, "int"]

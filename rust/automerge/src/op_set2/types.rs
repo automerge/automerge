@@ -373,16 +373,6 @@ impl<'a> ScalarValue<'a> {
             Self::Unknown { bytes, .. } => Some(bytes.clone()),
         }
     }
-
-    /*
-        pub(crate) fn as_i64(&self) -> i64 {
-            match self {
-                Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => *i,
-                Self::Uint(i) => *i as i64,
-                _ => 0,
-            }
-        }
-    */
 }
 
 // FIXME - this is a temporary fix - we ideally want
@@ -391,25 +381,6 @@ impl<'a> ScalarValue<'a> {
 
 impl crate::types::OpType {
     pub(crate) fn decompose(
-        self,
-    ) -> (
-        Action,
-        ScalarValue<'static>,
-        bool,
-        Option<Cow<'static, str>>,
-    ) {
-        let (a, v, x, m) = self.clone().decompose2();
-        let tmp = types::OpType::from_action_and_value(
-            a.into(),
-            v.clone().into(),
-            m.clone().map(|s| s.into()),
-            x,
-        );
-        assert_eq!(tmp, self);
-        (a, v, x, m)
-    }
-
-    pub(crate) fn decompose2(
         self,
     ) -> (
         Action,
@@ -434,21 +405,6 @@ impl crate::types::OpType {
             Self::MarkEnd(expand) => (Action::Mark, ScalarValue::Null, expand, None),
         }
     }
-
-    /*
-        pub(crate) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
-            match self {
-                Self::Put(v) => v.to_raw(),
-                Self::Increment(i) => {
-                    let mut out = Vec::new();
-                    leb128::write::signed(&mut out, *i).unwrap();
-                    Some(Cow::Owned(out))
-                }
-                Self::MarkBegin(_, crate::types::OldMarkData { value, .. }) => value.to_raw(),
-                _ => None,
-            }
-        }
-    */
 }
 
 impl crate::types::ScalarValue {
