@@ -1,6 +1,5 @@
 use crate::types::OpId;
 
-#[cfg(test)]
 use std::cmp::Ordering;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -80,11 +79,21 @@ impl Clock {
     }
 
     pub(crate) fn include(&mut self, actor_idx: usize, data: ClockData) -> bool {
-        if data.max_op > self.0[actor_idx].max_op {
-            self.0[actor_idx] = data;
-            true
-        } else {
-            false
+        match data.max_op.cmp(&self.0[actor_idx].max_op) {
+            Ordering::Less => {
+                // Nothing to do
+                false
+            }
+            Ordering::Equal => {
+                // This can occur if the actor has produced an empty change, their
+                // max_op won't have increased but their seq will have
+                self.0[actor_idx].seq = self.0[actor_idx].seq.max(data.seq);
+                true
+            }
+            Ordering::Greater => {
+                self.0[actor_idx] = data;
+                true
+            }
         }
     }
 
