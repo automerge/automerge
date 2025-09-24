@@ -2428,3 +2428,22 @@ fn test_overwriting_a_conflict() {
     assert_eq!(doc1.get_all(&ROOT, "key").unwrap().len(), 1);
     assert_eq!(doc2.get_all(&ROOT, "key").unwrap().len(), 1);
 }
+
+#[test]
+fn get_changes_with_hash_of_empty_change_produces_correct_result() {
+    // This test reproduces an issue where if you create an empty change, then
+    // call Automerge::get_changes(&[hash_of_empty_change]) the result would
+    // include the hash of the change just created but it should be empty. The
+    // reason this happend was that `get_changes` works by walking the change
+    // graph and combining all the (actor, seq) pairs to form a vector clock
+    // which represents the ancestors which should be filtered out. The logic
+    // which performed this walking combined clocks by comparing the `max_op` of
+    // two changes, but in the case of an empty change the `max_op` didn't
+    // change and this meant that the clock was not updated with the sequence
+    // number of the empty change. This meant that the clock did not include the
+    // empty change seq and so the empty change was not filtered out.
+    let mut doc = AutoCommit::new();
+    let head = doc.empty_change(CommitOptions::default());
+    let changes = doc.get_changes(&[head]);
+    assert!(changes.is_empty());
+}
