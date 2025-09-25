@@ -1,6 +1,6 @@
 use crate::hydrate::Value;
 use crate::iter::RichTextDiff;
-use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef2};
+use crate::op_set2::types::{Action, KeyRef, MarkData, PropRef};
 use crate::op_set2::SuccInsert;
 use crate::types::{
     ActorId, ElemId, ObjId, ObjType, OpId, Prop, ScalarValue, SequenceType, SmallHashMap,
@@ -76,7 +76,7 @@ impl<'a> Untangler<'a> {
 
         if doc_op.insert {
             self.flush(log);
-            self.value.key = Some(PropRef2::Seq(self.index));
+            self.value.key = Some(PropRef::Seq(self.index));
         }
 
         if doc_op.visible() && !deleted {
@@ -429,9 +429,9 @@ impl<'a, 'b> MapWalker<'a, 'b> {
 
         self.advance_doc_op(pos, ops);
 
-        if ops[pos].prop2() != self.value.key {
+        if ops[pos].prop() != self.value.key {
             self.value.map_flush(self.log);
-            self.value.key = ops[pos].prop2_static();
+            self.value.key = ops[pos].prop_static();
             self.top.reset(self.conflicts);
         }
         self.value.process_change_op(&ops[pos]);
@@ -449,9 +449,9 @@ impl<'a, 'b> MapWalker<'a, 'b> {
                 Some(Ordering::Equal) if d.id > ops[pos].id() => break,
                 _ => {
                     let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
-                    if d.prop2() != self.value.key {
+                    if d.prop() != self.value.key {
                         self.value.map_flush(self.log);
-                        self.value.key = d.prop2();
+                        self.value.key = d.prop();
                         self.top.reset(self.conflicts);
                     }
                     self.value.process_doc_op(d, deleted);
@@ -465,7 +465,7 @@ impl<'a, 'b> MapWalker<'a, 'b> {
     fn finish(&mut self, ops: &mut [ChangeOp]) {
         while let Some(d) = self.doc_op.as_ref() {
             let deleted = process_pred(self.doc_op.as_ref(), self.pred, self.succ);
-            if d.prop2() == self.value.key {
+            if d.prop() == self.value.key {
                 self.top.process_doc_op(ops, d, deleted);
                 self.value.process_doc_op(d, deleted);
                 self.next_doc_op();
@@ -498,7 +498,7 @@ struct ValueState<'a> {
     obj: ObjId,
     seq_type: SequenceType,
     text_encoding: TextEncoding,
-    key: Option<PropRef2<'a>>,
+    key: Option<PropRef<'a>>,
     doc: OpValueOption,
     change: OpValueOption,
     marks: RichTextDiff<'a>,
@@ -645,7 +645,7 @@ impl<'a> ValueState<'a> {
         let obj = self.obj;
         let change = self.change.take();
         let doc = self.doc.take();
-        if let Some(PropRef2::Map(key)) = self.key.take() {
+        if let Some(PropRef::Map(key)) = self.key.take() {
             Self::map_process(obj, &key, doc, change, log);
         }
     }

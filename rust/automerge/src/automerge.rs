@@ -1218,7 +1218,7 @@ impl Automerge {
         let mut top_ops = self
             .ops()
             .iter_obj(&obj.id)
-            .visible(clock)
+            .visible_slow(clock)
             .top_ops()
             .marks();
 
@@ -1558,7 +1558,12 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self.ops.iter_obj(&obj.id).visible(clock).top_ops().marks();
+        let mut iter = self
+            .ops
+            .iter_obj(&obj.id)
+            .visible_slow(clock)
+            .top_ops()
+            .marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
@@ -1576,7 +1581,7 @@ impl Automerge {
         for (obj, ops) in self.ops.iter_objs() {
             match obj.typ {
                 ObjType::Map | ObjType::List => {
-                    for op in ops.visible(None) {
+                    for op in ops.visible_slow(None) {
                         //if !op.visible() {
                         //    continue;
                         //}

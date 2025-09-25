@@ -862,12 +862,12 @@ impl TransactionInner {
             } else if op.is_delete() {
                 match op.prop() {
                     PropRef::Seq(index) => patch_log.delete_seq(obj, index, 1),
-                    PropRef::Map(key) => patch_log.delete_map(obj, key),
+                    PropRef::Map(key) => patch_log.delete_map(obj, &key),
                 }
             } else if let Some(value) = op.get_increment_value() {
-                patch_log.increment2(obj, op.prop(), value, op.id());
+                patch_log.increment(obj, op.prop(), value, op.id());
             } else {
-                patch_log.put2(
+                patch_log.put(
                     obj,
                     op.prop(),
                     op.hydrate_value(encoding),

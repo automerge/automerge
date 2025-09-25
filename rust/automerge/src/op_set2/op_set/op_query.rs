@@ -35,11 +35,11 @@ pub(crate) trait OpQuery<'a>: OpQueryTerm<'a> + Clone {
         KeyOpIter::new(self)
     }
 
-    fn visible(self, clock: Option<Clock>) -> VisibleOpIter<'a, Self> {
+    fn visible_slow(self, clock: Option<Clock>) -> VisibleOpIter<'a, Self> {
         VisibleOpIter::new(self, clock)
     }
 
-    fn visible2(self, op_set: &'a OpSet, clock: Option<&Clock>) -> FixCounters<'a, Self> {
+    fn visible(self, op_set: &'a OpSet, clock: Option<&Clock>) -> FixCounters<'a, Self> {
         let vis = VisIter::new(op_set, clock, self.range());
         FixCounters::new(SkipIter::new(self, vis), clock)
     }
