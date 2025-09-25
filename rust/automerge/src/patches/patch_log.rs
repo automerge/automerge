@@ -212,9 +212,9 @@ impl PatchLog {
             .push((obj, Event::DeleteMap { key: key.into() }))
     }
 
-    pub(crate) fn increment2(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
+    pub(crate) fn increment(&mut self, obj: ObjId, prop: PropRef<'_>, value: i64, id: OpId) {
         match prop {
-            PropRef::Map(key) => self.increment_map(obj, key, value, id),
+            PropRef::Map(key) => self.increment_map(obj, &key, value, id),
             PropRef::Seq(index) => self.increment_seq(obj, index, value, id),
         }
     }
@@ -251,7 +251,7 @@ impl PatchLog {
         self.events.push((obj, Event::FlagConflictSeq { index }))
     }
 
-    pub(crate) fn put2(
+    pub(crate) fn put(
         &mut self,
         obj: ObjId,
         prop: PropRef<'_>,
@@ -261,7 +261,7 @@ impl PatchLog {
         expose: bool,
     ) {
         match prop {
-            PropRef::Map(key) => self.put_map(obj, key, value, id, conflict, expose),
+            PropRef::Map(key) => self.put_map(obj, &key, value, id, conflict, expose),
             PropRef::Seq(index) => self.put_seq(obj, index, value, id, conflict, expose),
         }
     }

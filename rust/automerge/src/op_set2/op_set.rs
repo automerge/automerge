@@ -294,7 +294,7 @@ impl OpSet {
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        let iter = self.iter_obj(obj).visible(clock).top_ops();
+        let iter = self.iter_obj(obj).visible_slow(clock).top_ops();
         Keys::new(self, iter)
     }
 
@@ -504,7 +504,7 @@ impl OpSet {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        let ops = iter.visible2(self, clock).collect::<Vec<_>>();
+        let ops = iter.visible(self, clock).collect::<Vec<_>>();
         assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
@@ -605,7 +605,7 @@ impl OpSet {
         if iter.next().is_some() {
             let range = self.list_register_at_pos(tx_pos, range);
             let end_pos = range.end;
-            let ops = self.iter_range(&range).visible2(self, None).collect();
+            let ops = self.iter_range(&range).visible(self, None).collect();
             OpsFound {
                 index,
                 ops,
@@ -820,7 +820,7 @@ impl OpSet {
         obj: &ObjId,
         clock: Option<Clock>,
     ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>> {
-        self.iter_obj(obj).visible(clock).top_ops()
+        self.iter_obj(obj).visible_slow(clock).top_ops()
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -1772,7 +1772,7 @@ mod tests {
 
             let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter
-                .visible(None)
+                .visible_slow(None)
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
                 .collect::<Vec<_>>();
@@ -1787,7 +1787,7 @@ mod tests {
             assert!(key4.is_none());
 
             let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.visible(None).top_ops().collect::<Vec<_>>();
+            let ops = iter.visible_slow(None).top_ops().collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);
