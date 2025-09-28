@@ -764,7 +764,7 @@ impl BatchApply {
     fn has_change(&self, doc: &Automerge, hash: ChangeHash) -> bool {
         doc.change_graph.has_change(&hash)
             || self.hashes.contains(&hash)
-            || doc.ready_q_has_hash(&hash)
+            || doc.queue.has_hash(&hash)
     }
 
     fn push(&mut self, c: Change) {
@@ -794,7 +794,7 @@ impl BatchApply {
     }
 
     fn duplicate_seq(&self, doc: &Automerge, c: &Change) -> bool {
-        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
+        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.queue.has_dupe(c)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -989,11 +989,14 @@ impl Automerge {
         self.apply_changes_batch_log_patches(changes, &mut PatchLog::inactive())
     }
 
-    pub fn apply_changes_batch_log_patches<I: IntoIterator<Item = Change>>(
+    pub fn apply_changes_batch_log_patches<I>(
         &mut self,
         changes: I,
         log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<(), AutomergeError>
+    where
+        I: IntoIterator<Item = Change>,
+    {
         let mut chap = BatchApply::default();
         let mut result = Ok(());
         for c in changes {
@@ -1022,20 +1025,6 @@ impl Automerge {
         result
     }
 
-    fn ready_q_has_hash(&self, hash: &ChangeHash) -> bool {
-        // if the queue gets huge this could be slow - maybe add an index
-        self.queue.iter().any(|c| &c.hash() == hash)
-    }
-
-    fn ready_q_has_dupe(&self, change: &Change) -> bool {
-        // if the queue gets huge this could be slow - maybe add an index
-        self.queue.iter().any(|c| {
-            c.seq() == change.seq()
-                && c.actor_id() == change.actor_id()
-                && c.hash() != change.hash()
-        })
-    }
-
     fn is_causally_ready(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
         change
             .deps()
@@ -1044,14 +1033,17 @@ impl Automerge {
     }
 
     fn pop_next_causally_ready_change(&mut self, ready: &HashSet<ChangeHash>) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            if self.is_causally_ready(&self.queue[index], ready) {
-                return Some(self.queue.swap_remove(index));
+        let mut hash = None;
+        for change in self.queue.iter() {
+            if self.is_causally_ready(change, ready) {
+                hash = Some(change.hash());
+                break;
             }
-            index += 1;
+            if change.start_op().get() > self.max_op {
+                break;
+            }
         }
-        None
+        self.queue.remove(&hash?)
     }
 
     fn import_ops_to(
@@ -1593,6 +1585,50 @@ mod tests {
     }
 
     #[test]
+    fn ensure_queue_has_no_dupes() {
+        let mut rng = make_rng();
+        let mut doc1 = AutoCommit::new().with_actor(rng.random());
+        let list1 = doc1.put_object(&ROOT, "list1", ObjType::List).unwrap();
+        doc1.insert(&list1, 0, 10).unwrap();
+        doc1.insert(&list1, 1, 20).unwrap();
+        doc1.insert(&list1, 2, 30).unwrap();
+        let mut doc2 = doc1.fork();
+        doc1.insert(&list1, 3, 40).unwrap();
+        let change1 = doc1.get_last_local_change().unwrap();
+        doc1.insert(&list1, 4, 50).unwrap();
+        let change2 = doc1.get_last_local_change().unwrap();
+        doc1.insert(&list1, 5, 60).unwrap();
+        let change3 = doc1.get_last_local_change().unwrap();
+        let doc2_save1 = doc2.save();
+        let doc2_heads1 = doc2.get_heads();
+        doc2.apply_changes([change2.clone()]).unwrap();
+        assert_eq!(doc2_heads1, doc2.get_heads());
+        assert_eq!(
+            doc2_save1.len() + change2.raw_bytes().len(),
+            doc2.save().len()
+        );
+        doc2.apply_changes([change2.clone()]).unwrap();
+        doc2.apply_changes([change2.clone()]).unwrap();
+        assert_eq!(doc2_heads1, doc2.get_heads());
+        assert_eq!(
+            doc2_save1.len() + change2.raw_bytes().len(),
+            doc2.save().len()
+        );
+        doc2.apply_changes([change3.clone()]).unwrap();
+        assert_eq!(doc2_heads1, doc2.get_heads());
+        assert_eq!(
+            doc2_save1.len() + change2.raw_bytes().len() + change3.raw_bytes().len(),
+            doc2.save().len()
+        );
+        doc2.apply_changes([change1.clone()]).unwrap();
+        assert_eq!(vec![change3.hash()], doc2.get_heads());
+        assert!(
+            doc2_save1.len() + change2.raw_bytes().len() + change3.raw_bytes().len()
+                > doc2.save().len()
+        );
+    }
+
+    #[test]
     fn batch_counter_list_patch() {
         let mut rng = make_rng();
         let mut value = 0;
@@ -1661,6 +1697,7 @@ mod tests {
         doc1.insert(&list1, 2, val()).unwrap();
 
         let mut doc1_copy = doc1.fork().with_actor(rng.random());
+        let mut doc1_queue = doc1.fork().with_actor(rng.random());
         let mut doc2 = doc1.fork().with_actor(rng.random());
         let mut doc2_copy = doc1.fork().with_actor(rng.random());
 
@@ -1692,6 +1729,22 @@ mod tests {
             merge_and_diff(&mut doc2, &mut doc2_copy, &changes);
         }
         merge_and_diff(&mut doc1, &mut doc1_copy, &changes);
+
+        // make sure the queue behaves when changes are applied out of order
+        let start_heads = doc1_queue.get_heads();
+        let missing_changes = doc1.get_changes(&start_heads);
+        for n in (1..10).rev() {
+            doc1_queue
+                .apply_changes(missing_changes[n..].to_vec())
+                .unwrap();
+            assert!(!doc1_queue.doc.queue.is_empty());
+            assert!(doc1_queue.doc.queue.len() < missing_changes.len());
+        }
+        doc1_queue
+            .apply_changes(vec![missing_changes[0].clone()])
+            .unwrap();
+        assert!(doc1_queue.doc.queue.is_empty());
+        assert_eq!(doc1_queue.get_heads(), doc1.get_heads());
     }
 
     #[test]

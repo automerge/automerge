@@ -624,6 +624,47 @@ impl ChangeGraph {
         }
     }
 
+    // not the most efficient version but we currently only need this
+    // for debugging
+    pub(crate) fn common_ancestors(
+        &self,
+        heads1: &[ChangeHash],
+        heads2: &[ChangeHash],
+    ) -> Vec<ChangeHash> {
+        let nodes1 = self.heads_to_nodes(heads1);
+        let nodes2 = self.heads_to_nodes(heads2);
+
+        let mut to_visit: Vec<_> = nodes1.iter().chain(nodes2.iter()).copied().collect();
+
+        let seen1 = self.traverse_ancestors(nodes1, |_| true);
+        let seen2 = self.traverse_ancestors(nodes2, |_| true);
+
+        let common: BTreeSet<_> = seen1.intersection(&seen2).cloned().collect();
+
+        let mut bad = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+
+        while let Some(idx) = to_visit.pop() {
+            if visited.contains(&idx) {
+                continue;
+            } else {
+                visited.insert(idx);
+            }
+            for p in self.parents(idx) {
+                if common.contains(&idx) {
+                    // its bad if it has a child in the common set
+                    bad.insert(p);
+                }
+                to_visit.push(p);
+            }
+        }
+
+        common
+            .difference(&bad)
+            .map(|n| self.hashes[n.0 as usize])
+            .collect()
+    }
+
     pub(crate) fn remove_ancestors(
         &self,
         changes: &mut BTreeSet<ChangeHash>,
@@ -637,7 +678,11 @@ impl ChangeGraph {
         });
     }
 
-    fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(&self, mut to_visit: Vec<NodeIdx>, mut f: F) {
+    fn traverse_ancestors<F: FnMut(NodeIdx) -> bool>(
+        &self,
+        mut to_visit: Vec<NodeIdx>,
+        mut f: F,
+    ) -> BTreeSet<NodeIdx> {
         let mut visited = BTreeSet::new();
 
         while let Some(idx) = to_visit.pop() {
@@ -650,6 +695,8 @@ impl ChangeGraph {
                 to_visit.extend(self.parents(idx));
             }
         }
+
+        visited
     }
 }
 

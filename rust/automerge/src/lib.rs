@@ -279,6 +279,7 @@ pub mod legacy;
 pub mod marks;
 pub mod op_set2;
 pub mod patches;
+mod queue;
 mod read;
 mod sequence_tree;
 mod storage;

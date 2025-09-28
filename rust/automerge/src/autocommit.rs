@@ -89,6 +89,15 @@ impl AutoCommit {
         AutoCommit::default()
     }
 
+    pub fn common_ancestors(
+        &mut self,
+        heads1: &[ChangeHash],
+        heads2: &[ChangeHash],
+    ) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        self.doc.change_graph.common_ancestors(heads1, heads2)
+    }
+
     pub fn diff_opset(&self, other: &AutoCommit) -> Result<(), AutomergeError> {
         self.doc.diff_opset(&other.doc)
     }

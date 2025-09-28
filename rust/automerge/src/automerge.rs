@@ -26,6 +26,7 @@ use crate::transaction::{
 };
 
 use crate::hydrate;
+use crate::queue::ReadyQueue;
 use crate::types::{
     ActorId, ChangeHash, Clock, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value,
 };
@@ -201,7 +202,7 @@ impl std::default::Default for LoadOptions<'static> {
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: Vec<Change>,
+    pub(crate) queue: ReadyQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
     /// Current dependencies of this document (heads hashes).
@@ -211,14 +212,14 @@ pub struct Automerge {
     /// The current actor.
     actor: Actor,
     /// The maximum operation counter this document has seen.
-    max_op: u64,
+    pub(crate) max_op: u64,
 }
 
 impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
         Automerge {
-            queue: vec![],
+            queue: ReadyQueue::default(),
             change_graph: ChangeGraph::new(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
@@ -229,7 +230,7 @@ impl Automerge {
 
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
         Automerge {
-            queue: vec![],
+            queue: ReadyQueue::default(),
             change_graph: ChangeGraph::new(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
@@ -1852,7 +1853,6 @@ impl ReadDoc for Automerge {
 
     #[inline(never)]
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash()).collect();
         let mut missing = HashSet::new();
 
         for head in self.queue.iter().flat_map(|change| change.deps()) {
@@ -1869,7 +1869,7 @@ impl ReadDoc for Automerge {
 
         let mut missing = missing
             .into_iter()
-            .filter(|hash| !in_queue.contains(hash))
+            .filter(|hash| !self.queue.has_hash(hash))
             .copied()
             .collect::<Vec<_>>();
         missing.sort();
@@ -1960,7 +1960,7 @@ pub(crate) fn reconstruct_document<'a>(
         .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
 
     let mut doc = Automerge {
-        queue: vec![],
+        queue: ReadyQueue::default(),
         change_graph,
         ops: op_set,
         deps: heads.into_iter().collect(),
