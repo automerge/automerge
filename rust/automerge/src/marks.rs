@@ -46,9 +46,6 @@ impl Mark {
 
     pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
-        //let data = self.data.into_owned();
-        //let name = self.name;
-        //m.insert(data.name, data.value);
         m.insert(self.name, self.value);
         Arc::new(m)
     }
@@ -139,13 +136,6 @@ impl MarkSet {
     pub fn iter(&self) -> MarkSetIter<'_> {
         MarkSetIter::new(self)
     }
-    /*
-        pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
-            self.marks
-                .iter()
-                .map(|(name, value)| (name.as_str(), value))
-        }
-    */
 
     pub fn num_marks(&self) -> usize {
         self.marks.len()
@@ -212,7 +202,6 @@ impl MarkSet {
     }
 }
 
-// FromIterator implementation for an iterator of (String, ScalarValue) tuples
 impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
     fn from_iter<I: IntoIterator<Item = (String, ScalarValue)>>(iter: I) -> Self {
         let mut marks = BTreeMap::new();
@@ -432,16 +421,6 @@ impl<'a> RichTextQueryState<'a> {
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &MarkData<'a>)> {
         self.map.iter()
     }
-
-    /*
-        pub(crate) fn insert(&mut self, op: OpId, data: MarkData<'a>) {
-            self.map.insert(op, data);
-        }
-
-        pub(crate) fn remove(&mut self, op: &OpId) {
-            self.map.remove(op);
-        }
-    */
 }
 
 // Useful for comparing MarkSets while ignoring marks that have been deleted (i.e. have a value of Null).

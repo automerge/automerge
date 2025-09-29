@@ -198,7 +198,6 @@ impl<'a> SpansInternal<'a> {
     }
 
     pub(crate) fn clock(&self) -> Option<&Clock> {
-        //assert_eq!(self.iter2.clock.as_ref(), self.iter.clock.after());
         self.iter.clock.after()
     }
 
@@ -218,7 +217,6 @@ impl<'a> SpansInternal<'a> {
             ClockRange::current(clock.clone()),
             encoding,
         );
-        //let iter2 = SpansInternal2::new(op_set, range, clock, encoding);
         Self { iter }
     }
 }

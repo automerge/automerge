@@ -142,7 +142,7 @@ impl<'a> Iterator for ListDiff<'a> {
             }
 
             let value = if let ScalarValue::Counter(c) = &list.value {
-                let (inc1, inc2) = op_set.get_increment_diff_at_pos_v2(list.pos, &self.clock);
+                let (inc1, inc2) = op_set.get_increment_diff_at_pos(list.pos, &self.clock);
                 state.inc = inc2 - inc1;
                 ValueRef::from_action_value(list.action, ScalarValue::Counter(*c + inc2))
             } else {

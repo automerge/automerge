@@ -15,7 +15,6 @@ use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
-//use fnv::FnvBuildHasher;
 use rustc_hash::FxBuildHasher;
 pub(crate) type SmallHasher = FxBuildHasher;
 pub(crate) type SmallHashMap<A, B> = HashMap<A, B, SmallHasher>;
@@ -532,10 +531,6 @@ impl OpId {
     #[inline]
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
-    }
-
-    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
-        clock.map_or(true, |c| c.covers(self))
     }
 }
 

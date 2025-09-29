@@ -19,5 +19,3 @@ pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
     OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, ReadOpError, TopOpIter, VisibleOpIter,
 };
-
-//pub use op_set::{Keys, ListRange, ListRangeItem, MapRange, MapRangeItem, Span, Spans, Values};

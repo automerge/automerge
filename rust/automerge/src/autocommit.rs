@@ -256,13 +256,10 @@ impl AutoCommit {
             self.doc.log_current_state(&mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
-            //let before_clock = self.doc.clock_at(range.before());
-            //let after_clock = self.doc.clock_at(range.after());
             let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut patch_log);
-            //diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
         };
         self.diff_cache = Some((range, patches));
@@ -657,11 +654,8 @@ impl AutoCommit {
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
-            //let before_clock = self.doc.clock_at(&before);
-            //let after_clock = self.doc.clock_at(after);
             let clock = self.doc.clock_range(&before, after);
             DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log);
-            //diff::log_diff(&self.doc, &before_clock, &after_clock, &mut self.patch_log);
         }
     }
 

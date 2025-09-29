@@ -16,9 +16,7 @@ use super::op::{Op, OpLike, SuccCursors, SuccInsert};
 
 use super::columns::Columns;
 
-use super::types::{
-    Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue, ValueRef,
-};
+use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, ScalarValue};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -82,13 +80,8 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            //len: 0,
             actors,
             cols: Columns::default(),
-            //text_index: ColumnData::new(),
-            //visible_index: ColumnData::new(),
-            //inc_index: ColumnData::new(),
-            //mark_index: MarkIndexColumn::new(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
         }
@@ -262,12 +255,6 @@ impl OpSet {
             }
         }
     }
-
-    /*
-        pub(crate) fn null_clock(&self) -> Option<Clock> {
-            Some(Clock::new(self.actors.len()))
-        }
-    */
 
     pub(crate) fn parent_object(&self, child: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let (op, visible) = self.find_op_by_id_and_vis(child.id()?, clock)?;
@@ -880,26 +867,7 @@ impl OpSet {
         Some((o1, vis))
     }
 
-    pub(crate) fn value_at<'a>(
-        &'a self,
-        pos: usize,
-        action: Action,
-        value: ScalarValue<'a>,
-        clock: Option<&Clock>,
-    ) -> ValueRef<'a> {
-        if let ScalarValue::Counter(c) = &value {
-            let (_, inc) = self.get_increment_diff_at_pos(pos, None, clock);
-            ValueRef::from_action_value(action, ScalarValue::Counter(*c + inc))
-        } else {
-            ValueRef::from_action_value(action, value)
-        }
-    }
-
-    pub(crate) fn get_increment_diff_at_pos_v2(
-        &self,
-        pos: usize,
-        clock: &ClockRange,
-    ) -> (i64, i64) {
+    pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
         if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
             let start = val.acc.as_usize();
             let len = *val.item.unwrap_or_default() as usize;
@@ -918,40 +886,6 @@ impl OpSet {
                         inc1 += i;
                     }
                     if clock.visible_after(&id) {
-                        inc2 += i;
-                    }
-                }
-            }
-            (inc1, inc2)
-        } else {
-            (0, 0)
-        }
-    }
-
-    pub(crate) fn get_increment_diff_at_pos(
-        &self,
-        pos: usize,
-        clock1: Option<&Clock>,
-        clock2: Option<&Clock>,
-    ) -> (i64, i64) {
-        if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
-            let start = val.acc.as_usize();
-            let len = *val.item.unwrap_or_default() as usize;
-            let end = start + len;
-            let succ = SuccCursors {
-                len,
-                succ_actor: self.cols.succ_actor.iter_range(start..end),
-                succ_counter: self.cols.succ_ctr.iter_range(start..end),
-                inc_values: self.cols.index.inc.iter_range(start..end),
-            };
-            let mut inc1 = 0;
-            let mut inc2 = 0;
-            for (id, value) in succ.with_inc() {
-                if let Some(i) = value {
-                    if id.visible_at(clock1) {
-                        inc1 += i;
-                    }
-                    if id.visible_at(clock2) {
                         inc2 += i;
                     }
                 }

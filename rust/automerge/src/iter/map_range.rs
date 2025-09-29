@@ -120,7 +120,7 @@ impl Shiftable for MapIter<'_> {
         let action = self.action.shift_next(range.clone());
         let value = self.value.shift_next(range);
         let pos = self.id.pos() - 1;
-        Some(Map {
+        Some(MapEntry {
             key: key??,
             action: action?,
             value: value?,
@@ -131,7 +131,7 @@ impl Shiftable for MapIter<'_> {
 }
 
 #[derive(Clone, Debug)]
-struct Map<'a> {
+struct MapEntry<'a> {
     id: OpId,
     pos: usize,
     key: Cow<'a, str>,
@@ -139,7 +139,7 @@ struct Map<'a> {
     value: ScalarValue<'a>,
 }
 
-impl<'a> Map<'a> {
+impl<'a> MapEntry<'a> {
     fn diff_item(
         self,
         value: ValueRef<'a>,
@@ -168,7 +168,7 @@ impl<'a> Map<'a> {
 }
 
 impl<'a> Iterator for MapIter<'a> {
-    type Item = Map<'a>;
+    type Item = MapEntry<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.id.next()?;
@@ -176,7 +176,7 @@ impl<'a> Iterator for MapIter<'a> {
         let action = self.action.next()?;
         let value = self.value.next()?;
         let pos = self.id.pos() - 1;
-        Some(Map {
+        Some(MapEntry {
             id,
             pos,
             key,
@@ -191,7 +191,7 @@ impl<'a> Iterator for MapIter<'a> {
         let action = self.action.nth(n)?;
         let value = self.value.nth(n)?;
         let pos = self.id.pos() - 1;
-        Some(Map {
+        Some(MapEntry {
             key,
             action,
             value,
@@ -252,18 +252,9 @@ impl<'a> Iterator for MapDiff<'a> {
             let value;
             let inc;
             if let ScalarValue::Counter(c) = &map.value {
-                let (inc1, inc2) = op_set.get_increment_diff_at_pos_v2(map.pos, &self.clock);
+                let (inc1, inc2) = op_set.get_increment_diff_at_pos(map.pos, &self.clock);
                 inc = inc2 - inc1;
                 value = ValueRef::from_action_value(map.action, ScalarValue::Counter(*c + inc2));
-                debug_assert_eq!(
-                    value,
-                    op_set.value_at(
-                        map.pos,
-                        map.action,
-                        ScalarValue::Counter(*c),
-                        self.clock.after(),
-                    )
-                );
             } else {
                 value = ValueRef::from_action_value(map.action, map.value.clone());
                 inc = 0;
