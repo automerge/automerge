@@ -471,7 +471,11 @@ struct ChangeBuilder {
 pub struct BundleChangeIter<'a>(BundleChangeIterUnverified<'a>);
 
 impl<'a> BundleChangeIter<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+    // this will panic if passed unverified bytes
+    pub(crate) fn new_from_verified(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+    ) -> Self {
         Self(BundleChangeIterUnverified::try_new(columns, data).unwrap())
     }
 }
@@ -486,6 +490,11 @@ impl<'a> Iterator for BundleChangeIter<'a> {
 
 #[derive(Debug)]
 pub(crate) struct BundleChangeIterUnverified<'a> {
+    inner: Option<BundleChangeIterInner<'a>>,
+}
+
+#[derive(Debug)]
+struct BundleChangeIterInner<'a> {
     actor: CursorIter<'a, ActorCursor>,
     seq: CursorIter<'a, DeltaCursor>,
     max_op: CursorIter<'a, DeltaCursor>,
@@ -502,16 +511,33 @@ impl<'a> Iterator for BundleChangeIterUnverified<'a> {
     type Item = Result<BundleChange<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.try_next().transpose()
+        self.inner
+            .as_mut()?
+            .try_next()
+            .inspect_err(|_| self.inner = None)
+            .transpose()
     }
 }
 
 impl<'a> BundleChangeIterUnverified<'a> {
     pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
-        Self::try_new(columns, data).unwrap()
+        Self {
+            inner: BundleChangeIterInner::try_new(columns, data).ok(),
+        }
     }
 
     pub(crate) fn try_new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+    ) -> Result<Self, ParseError> {
+        Ok(Self {
+            inner: Some(BundleChangeIterInner::try_new(columns, data)?),
+        })
+    }
+}
+
+impl<'a> BundleChangeIterInner<'a> {
+    fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {
@@ -642,6 +668,27 @@ impl<'a> BundleChangeIterUnverified<'a> {
 }
 
 pub(crate) struct OpIterUnverified<'a> {
+    inner: Option<OpIterInner<'a>>,
+}
+
+impl<'a> OpIterUnverified<'a> {
+    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
+        Self {
+            inner: OpIterInner::try_new(columns, data).ok(),
+        }
+    }
+
+    pub(crate) fn try_new(
+        columns: &RawColumns<compression::Uncompressed>,
+        data: &'a [u8],
+    ) -> Result<Self, ParseError> {
+        Ok(Self {
+            inner: Some(OpIterInner::try_new(columns, data)?),
+        })
+    }
+}
+
+struct OpIterInner<'a> {
     obj_actor: CursorIter<'a, ActorCursor>,
     obj_ctr: CursorIter<'a, DeltaCursor>,
     key_actor: CursorIter<'a, ActorCursor>,
@@ -684,11 +731,15 @@ impl<'a> Iterator for OpIterUnverified<'a> {
     type Item = Result<OpBuilder<'a>, ParseError>;
 
     fn next(&mut self) -> Option<Result<OpBuilder<'a>, ParseError>> {
-        self.try_next().transpose()
+        self.inner
+            .as_mut()?
+            .try_next()
+            .inspect_err(|_| self.inner = None)
+            .transpose()
     }
 }
 
-impl<'a> OpIterUnverified<'a> {
+impl<'a> OpIterInner<'a> {
     fn try_next(&mut self) -> Result<Option<OpBuilder<'a>>, ParseError> {
         let id_actor = self.id_actor.next().transpose()?.flatten();
         let id_ctr = self.id_ctr.next().transpose()?.flatten();
@@ -768,11 +819,7 @@ impl<'a> OpIterUnverified<'a> {
         }))
     }
 
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
-        Self::try_new(columns, data).unwrap()
-    }
-
-    pub(crate) fn try_new(
+    fn try_new(
         columns: &RawColumns<compression::Uncompressed>,
         data: &'a [u8],
     ) -> Result<Self, ParseError> {

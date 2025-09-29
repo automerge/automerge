@@ -70,8 +70,6 @@ impl<'a> BundleStorage<'a, Unverified> {
         OpIterUnverified::try_new(&ops_meta, ops.value)
             .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
 
-        // TODO how do I error if there are extra bytes here?
-
         Ok((
             parse::Input::empty(),
             BundleStorage {
@@ -139,6 +137,6 @@ impl BundleStorage<'_, Verified> {
 
     pub(crate) fn iter_change_meta(&self) -> BundleChangeIter<'_> {
         let change_data = &self.bytes[self.changes_data.clone()];
-        BundleChangeIter::new(&self.changes_meta, change_data)
+        BundleChangeIter::new_from_verified(&self.changes_meta, change_data)
     }
 }

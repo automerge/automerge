@@ -14,10 +14,8 @@ use std::num::NonZero;
 use std::ops::Range;
 
 pub(crate) mod batch;
-//pub(crate) mod bundle;
 pub(crate) mod collector;
 
-//pub(crate) use bundle::{Bundle, BundleMetadata};
 pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
 
 pub(crate) trait GetHash {

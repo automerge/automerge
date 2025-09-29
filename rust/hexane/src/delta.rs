@@ -752,26 +752,25 @@ pub(crate) mod tests {
 
     // there is currently a bug where literal runs on slab boundaries save wrong
     // currently not fixed as save_to is only used on locked encoders
-    /*
     #[test]
+    #[ignore]
     fn delta_cursor_encoder_bug() {
         let bad_data = vec![
-            83, 84, 30, 37, 76, 77, 78, 79, 26, 26, 87, 88, 89, 90, 36, 97, 98, 99,
-            100, 41, 44, 120, 121, 122, 123, 27, 103, 104, 105, 106, 38, 31, 31, 71, 72, 73, 74,
-            15, 92, 93, 94, 95, 61, 108, 109, 110, 111, 62, 37, 35, 58, 114, 115, 116, 117, 30, 33,
+            83, 84, 30, 37, 76, 77, 78, 79, 26, 26, 87, 88, 89, 90, 36, 97, 98, 99, 100, 41, 44,
+            120, 121, 122, 123, 27, 103, 104, 105, 106, 38, 31, 31, 71, 72, 73, 74, 15, 92, 93, 94,
+            95, 61, 108, 109, 110, 111, 62, 37, 35, 58, 114, 115, 116, 117, 30, 33,
         ];
-        let mut enc : Encoder<'_, DeltaCursor> = Encoder::new(false);
+        let mut enc: Encoder<'_, DeltaCursor> = Encoder::new(false);
         for d in bad_data {
-          enc.append(d);
+            enc.append(d);
         }
         let mut data1 = vec![];
         let mut data2 = vec![];
         enc.clone().into_column_data().save_to(&mut data1);
         enc.save_to(&mut data2);
 
-        let mut c1 = DeltaCursor::iter(&data1);
-        let mut c2 = DeltaCursor::iter(&data2);
-        assert_eq!(data1,data2);
+        let _c1 = DeltaCursor::iter(&data1);
+        let _c2 = DeltaCursor::iter(&data2);
+        assert_eq!(data1, data2);
     }
-    */
 }
