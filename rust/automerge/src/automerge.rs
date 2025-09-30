@@ -890,6 +890,14 @@ impl Automerge {
         Ok(self.get_heads())
     }
 
+    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
+    ///
+    /// A "bundle" is a compact representation of a set of changes which uses
+    /// the same compression tricks as the document encoding we use in
+    /// [`Automerge::save`].
+    ///
+    /// This is an experimental API, the bundle format is still subject to change
+    /// and so should not be used in production just yet.
     pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
     where
         I: IntoIterator<Item = ChangeHash>,

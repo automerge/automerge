@@ -2,6 +2,7 @@ use crate::change_graph::ChangeGraph;
 use crate::op_set2::change::{ActorMapper, BuildChangeMetadata};
 use crate::op_set2::OpSet;
 use crate::storage::change::{Unverified, Verified};
+use crate::storage::{parse, Header};
 use crate::types::{ActorId, ChangeHash};
 use crate::{AutomergeError, Change};
 
@@ -19,7 +20,18 @@ pub(crate) use error::ParseError;
 pub(crate) use meta::BundleMetadata;
 pub(crate) use storage::BundleStorage;
 
-#[derive(Clone, Debug)]
+/// EXPERIMENTAL: A set of changes compressed into a bundle
+///
+/// Bundles are produced by [`Automerge::bundle`](crate::Automerge::bundle) and
+/// contain a set of compressed changes which is not necessarily the whole
+/// document. A bundle can be loaded using
+/// [`Automerge::load_incremental`](crate::Automerge::load_incremental) but can
+/// also be loaded using `TryFrom<&[u8]>` in order to examine the contents of
+/// the bundle.
+///
+/// This feature is experimental, the file format for bundles may still change
+/// so do not use this feature in systems where you expect data to stick around
+#[derive(Debug)]
 pub struct Bundle {
     pub(crate) storage: BundleStorage<'static, Verified>,
 }
@@ -123,6 +135,28 @@ impl<'a> From<BundleChange<'a>> for BuildChangeMetadata<'a> {
         }
     }
 }
+
+impl<'a> TryFrom<&'a [u8]> for Bundle {
+    type Error = InvalidBundle;
+
+    fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
+        let input = parse::Input::new(bytes);
+        let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
+            .map_err(|e| InvalidBundle(format!("invalid header: {}", e.to_string())))?;
+        let (_i, bundle) = BundleStorage::parse_following_header(i, header)
+            .map_err(|e| InvalidBundle(format!("invalid contents: {}", e.to_string())))?;
+        let verified = bundle
+            .verify()
+            .map_err(|e| InvalidBundle(format!("unable to verify ops: {}", e.to_string())))?;
+        Ok(Self {
+            storage: verified.into_owned(),
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid bundle: {0}")]
+pub struct InvalidBundle(String);
 
 #[cfg(test)]
 mod test {
