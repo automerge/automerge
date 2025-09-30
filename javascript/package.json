@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "3.1.2",
+  "version": "3.2.0-alpha.0",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge/tree/main/javascript",
   "repository": "github:automerge/automerge",
