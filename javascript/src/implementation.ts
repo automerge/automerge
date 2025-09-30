@@ -1713,3 +1713,27 @@ export const isRawString = isImmutableString
  * @deprecated This type has been renamed to {@link ImmutableString}
  */
 export const RawString = ImmutableString
+
+/**
+ * EXPERIMENTAL: save a bundle of changes from a document to an encoded form
+ * @experimental
+ * @param doc - The document containing the changes to save
+ * @param hashes - The hashes of the changes to save to a bundle
+ * @returns
+ */
+export function saveBundle(doc: Doc<unknown>, hashes: string[]): Uint8Array {
+  const state = _state(doc, false)
+  return state.handle.saveBundle(hashes)
+}
+
+/**
+ * EXPERIMENTAL: Load a bundle of changes to examine them
+ * @experimental
+ * @param bundle - The encoded bundle to read
+ */
+export function readBundle(bundle: Uint8Array): {
+  changes: DecodedChange[]
+  deps: Heads
+} {
+  return ApiHandler.readBundle(bundle)
+}

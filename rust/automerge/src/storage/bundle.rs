@@ -105,6 +105,10 @@ impl Bundle {
     pub fn bytes(&self) -> &[u8] {
         &self.storage.bytes
     }
+
+    pub fn deps(&self) -> &[ChangeHash] {
+        self.storage.deps()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -142,12 +146,12 @@ impl<'a> TryFrom<&'a [u8]> for Bundle {
     fn try_from(bytes: &'a [u8]) -> Result<Self, Self::Error> {
         let input = parse::Input::new(bytes);
         let (i, header) = Header::parse::<crate::storage::chunk::error::Header>(input)
-            .map_err(|e| InvalidBundle(format!("invalid header: {}", e.to_string())))?;
+            .map_err(|e| InvalidBundle(format!("invalid header: {}", e)))?;
         let (_i, bundle) = BundleStorage::parse_following_header(i, header)
-            .map_err(|e| InvalidBundle(format!("invalid contents: {}", e.to_string())))?;
+            .map_err(|e| InvalidBundle(format!("invalid contents: {}", e)))?;
         let verified = bundle
             .verify()
-            .map_err(|e| InvalidBundle(format!("unable to verify ops: {}", e.to_string())))?;
+            .map_err(|e| InvalidBundle(format!("unable to verify ops: {}", e)))?;
         Ok(Self {
             storage: verified.into_owned(),
         })

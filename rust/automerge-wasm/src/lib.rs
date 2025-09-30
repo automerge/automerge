@@ -35,6 +35,7 @@ use automerge as am;
 use automerge::TextEncoding;
 use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, ROOT};
 use interop::import_scalar;
+use js_sys::Reflect;
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -354,6 +355,11 @@ export interface JsSyncState {
   sentHashes: Heads;
 }
 
+export interface DecodedBundle {
+  changes: DecodedChange[];
+  deps: Heads;
+}
+
 export interface API {
   create(options?: InitOptions): Automerge;
   load(data: Uint8Array, options?: LoadOptions): Automerge;
@@ -366,6 +372,7 @@ export interface API {
   decodeSyncState(data: Uint8Array): SyncState;
   exportSyncState(state: SyncState): JsSyncState;
   importSyncState(state: JsSyncState): SyncState;
+  readBundle(data: Uint8Array): DecodedBundle;
 }
 
 export interface Stats {
@@ -1571,6 +1578,16 @@ impl Automerge {
         js_set(&result, "rustcVersion", rustc_version).unwrap();
         result.into()
     }
+
+    #[wasm_bindgen(js_name = "saveBundle")]
+    pub fn save_bundle(&mut self, hashes: JsValue) -> Result<Uint8Array, error::SaveBundle> {
+        let hashes: Vec<automerge::ChangeHash> = JS(hashes).try_into()?;
+        let bundle = self
+            .doc
+            .bundle(hashes.into_iter())
+            .map_err(error::SaveBundle::DoBundle)?;
+        Ok(Uint8Array::from(bundle.bytes()))
+    }
 }
 
 // skip_typescript as the definition requires an optional argument so we define
@@ -1720,6 +1737,37 @@ pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSync
 }
 
 struct UpdateSpansArgs(Vec<am::iter::Span>);
+
+#[wasm_bindgen(js_name = "readBundle")]
+pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
+    let bundle_bytes = bundle.to_vec();
+    let bundle = automerge::Bundle::try_from(bundle_bytes.as_slice())
+        .map_err(|e| error::ReadBundle(e.to_string()))?;
+    let changes = bundle
+        .to_changes()
+        .map_err(|e| error::ReadBundle(e.to_string()))?;
+    let js_changes = changes
+        .iter()
+        .map(|c| {
+            let legacy_change = automerge::ExpandedChange::from(c);
+            let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+            legacy_change
+                .serialize(&serializer)
+                .map_err(|e| error::ReadBundle(e.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let result = js_sys::Object::new();
+    Reflect::set(
+        &result,
+        &("changes").into(),
+        &js_sys::Array::from_iter(js_changes.iter()).into(),
+    )
+    .unwrap();
+
+    let deps = bundle.deps().to_vec();
+    Reflect::set(&result, &("deps").into(), &JS::from(deps).0).unwrap();
+    Ok(result.into())
+}
 
 pub mod error {
     use automerge::{AutomergeError, ObjType};
@@ -2218,6 +2266,30 @@ pub mod error {
     impl From<GetDecodedChangeByHash> for JsValue {
         fn from(e: GetDecodedChangeByHash) -> Self {
             RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum SaveBundle {
+        #[error(transparent)]
+        BadChangeHashes(#[from] interop::error::BadChangeHashes),
+        #[error("error creating bundle: {0}")]
+        DoBundle(automerge::AutomergeError),
+    }
+
+    impl From<SaveBundle> for JsValue {
+        fn from(e: SaveBundle) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("error parsing bundle: {}", 0)]
+    pub struct ReadBundle(pub(super) String);
+
+    impl From<ReadBundle> for JsValue {
+        fn from(e: ReadBundle) -> Self {
+            RangeError::new(&e.0).into()
         }
     }
 }

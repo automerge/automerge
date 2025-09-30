@@ -12,7 +12,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::ObjMeta;
-use crate::{hydrate, OnPartialLoad, TextEncoding};
+use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
@@ -447,6 +447,21 @@ impl AutoCommit {
         let bytes = self.save();
         Self::load(&bytes)?;
         Ok(bytes)
+    }
+
+    /// EXPERIMENTAL: Write the set of changes in `hashes` to a "bundle"
+    ///
+    /// A "bundle" is a compact representation of a set of changes which uses
+    /// the same compression tricks as the document encoding we use in
+    /// [`Automerge::save`].
+    ///
+    /// This is an experimental API, the bundle format is still subject to change
+    /// and so should not be used in production just yet.
+    pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        self.doc.bundle(hashes)
     }
 
     #[cfg(test)]
