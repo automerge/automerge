@@ -527,7 +527,7 @@ impl OpLike for &TxOp {
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
-        self.as_builder().value.to_raw()
+        self.as_builder().value.as_raw()
     }
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
@@ -606,7 +606,7 @@ impl OpLike for TxOp {
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
-        self.as_builder().value.to_raw()
+        self.as_builder().value.as_raw()
     }
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
@@ -692,7 +692,7 @@ impl OpLike for ChangeOp {
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
-        self.as_builder().value.to_raw()
+        self.as_builder().value.as_raw()
     }
     fn meta_value(&self) -> ValueMeta {
         ValueMeta::from(&self.as_builder().value)
@@ -784,7 +784,7 @@ impl<'a> OpLike for Op<'a> {
     }
 
     fn raw_value(&self) -> Option<Cow<'_, [u8]>> {
-        self.value.to_raw()
+        self.value.as_raw()
     }
 
     fn meta_value(&self) -> ValueMeta {
@@ -1284,7 +1284,7 @@ impl<B: AsBuilder> AsChangeOp for B {
         Some(Cow::Owned(op.as_builder().action))
     }
     fn value(op: &Self) -> Option<Cow<'_, [u8]>> {
-        op.as_builder().value.to_raw()
+        op.as_builder().value.as_raw()
     }
     fn value_meta(op: &Self) -> Option<Cow<'_, ValueMeta>> {
         Some(Cow::Owned(ValueMeta::from(&op.as_builder().value)))

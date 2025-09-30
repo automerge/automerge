@@ -20,7 +20,7 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
-use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
+use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
@@ -698,7 +698,7 @@ impl Automerge {
             return Err(load::Error::BadChecksum.into());
         }
 
-        let mut change: Option<Change> = None;
+        let mut changes = vec![];
         let mut first_chunk_was_doc = false;
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
@@ -708,15 +708,25 @@ impl Automerge {
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
-                change = Some(
+                changes.push(
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
                 Self::new()
             }
+            storage::Chunk::Bundle(bundle) => {
+                tracing::trace!("first chunk is change chunk");
+                let bundle = Bundle::new_from_unverified(bundle.into_owned())
+                    .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
+                let bundle_changes = bundle
+                    .to_changes()
+                    .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
+                changes.extend(bundle_changes);
+                Self::new()
+            }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
-                change = Some(
+                changes.push(
                     Change::new_from_unverified(
                         stored_change.into_owned(),
                         Some(compressed.into_owned()),
@@ -729,7 +739,7 @@ impl Automerge {
         tracing::trace!("loading change chunks");
         match load::load_changes(remaining.reset(), options.text_encoding, &am.change_graph) {
             load::LoadedChanges::Complete(c) => {
-                am.apply_changes(change.into_iter().chain(c))?;
+                am.apply_changes(changes.into_iter().chain(c))?;
                 // Only allow missing deps if the first chunk was a document chunk
                 // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
                 if !am.queue.is_empty()
@@ -878,6 +888,13 @@ impl Automerge {
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_log_patches(changes, patch_log)?;
         Ok(self.get_heads())
+    }
+
+    pub fn bundle<I>(&self, hashes: I) -> Result<Bundle, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        Bundle::for_hashes(&self.ops, &self.change_graph, hashes)
     }
 
     /// Save the entirety of this document in a compact form.

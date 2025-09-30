@@ -376,7 +376,7 @@ impl<C: ColumnCursor> Default for Encoder<'_, C> {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), false),
+            writer: SlabWriter::new(C::slab_size(), true),
             _phantom: PhantomData,
         }
     }
@@ -398,9 +398,7 @@ where
     C::Item: 'a,
 {
     pub fn append<M: MaybePackable<'a, C::Item>>(&mut self, value: M) -> usize {
-        let items = self.state.append(&mut self.writer, value.maybe_packable());
-        self.len += items;
-        items
+        self.append_item(value.maybe_packable())
     }
 
     pub fn append_item(&mut self, value: Option<Cow<'a, C::Item>>) -> usize {
@@ -484,6 +482,8 @@ where
     }
 
     pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
+        // theres a save_to bug w unlocked encoders on slab boundaries but its currently not needed anywhere
+        assert!(self.writer.is_locked());
         self.state.flush(&mut self.writer);
         let start = out.len();
         self.writer.write(out);
@@ -510,20 +510,28 @@ where
         range
     }
 
-    pub fn save_to_and_remap_unless_empty<'b, F>(mut self, out: &mut Vec<u8>, f: F) -> Range<usize>
+    pub fn save_to_and_remap_unless_empty<'b, F>(self, out: &mut Vec<u8>, f: F) -> Range<usize>
     where
         F: Fn(&C::Item) -> Option<&'b C::Item>,
         C::Item: 'b,
     {
         if !self.is_empty() {
-            self.state.flush(&mut self.writer);
-            let start = out.len();
-            self.writer.write_and_remap(out, f);
-            let end = out.len();
-            start..end
+            self.save_to_and_remap(out, f)
         } else {
             out.len()..out.len()
         }
+    }
+
+    pub fn save_to_and_remap<'b, F>(mut self, out: &mut Vec<u8>, f: F) -> Range<usize>
+    where
+        F: Fn(&C::Item) -> Option<&'b C::Item>,
+        C::Item: 'b,
+    {
+        self.state.flush(&mut self.writer);
+        let start = out.len();
+        self.writer.write_and_remap(out, f);
+        let end = out.len();
+        start..end
     }
 
     pub fn into_column_data(mut self) -> ColumnData<C> {

@@ -10,7 +10,9 @@ use std::cmp::Ordering;
 use std::fmt;
 
 use super::hexane::{PackError, Packable, RleCursor, ScanMeta};
-use super::meta::ValueType;
+use super::meta::{ValueMeta, ValueType};
+
+pub(crate) use super::meta::MetaCursor;
 
 /// An index into an array of actors stored elsewhere
 #[derive(Ord, PartialEq, Eq, Hash, PartialOrd, Debug, Clone, Default, Copy)]
@@ -319,7 +321,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(super) fn from_raw(
+    pub(crate) fn from_raw(
         meta: super::meta::ValueMeta,
         raw: &'a [u8],
     ) -> Result<Self, ReadScalarError> {
@@ -347,7 +349,33 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
+    pub(crate) fn to_raw(&self) -> Option<Cow<'a, [u8]>> {
+        match self {
+            Self::Bytes(b) => Some(b.clone()),
+            Self::Str(Cow::Borrowed(s)) => Some(Cow::Borrowed(s.as_bytes())),
+            Self::Str(Cow::Owned(s)) => Some(Cow::Owned(s.as_bytes().to_vec())),
+            Self::Null => None,
+            Self::Boolean(_) => None,
+            Self::Uint(i) => {
+                let mut out = Vec::new();
+                leb128::write::unsigned(&mut out, *i).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::Int(i) | Self::Counter(i) | Self::Timestamp(i) => {
+                let mut out = Vec::new();
+                leb128::write::signed(&mut out, *i).unwrap();
+                Some(Cow::Owned(out))
+            }
+            Self::F64(f) => {
+                let mut out = Vec::new();
+                out.extend_from_slice(&f.to_le_bytes());
+                Some(Cow::Owned(out))
+            }
+            Self::Unknown { bytes, .. } => Some(bytes.clone()),
+        }
+    }
+
+    pub(super) fn as_raw(&self) -> Option<Cow<'_, [u8]>> {
         match self {
             Self::Bytes(Cow::Borrowed(b)) => Some(Cow::Borrowed(b)),
             Self::Bytes(Cow::Owned(b)) => Some(Cow::Borrowed(b.as_slice())),
@@ -372,6 +400,10 @@ impl<'a> ScalarValue<'a> {
             }
             Self::Unknown { bytes, .. } => Some(bytes.clone()),
         }
+    }
+
+    pub(crate) fn meta(&self) -> ValueMeta {
+        ValueMeta::from(self)
     }
 }
 

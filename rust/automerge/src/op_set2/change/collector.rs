@@ -4,7 +4,9 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
+use crate::op_set2::change::GetHash;
 use crate::op_set2::op_set::IndexBuilder;
+use crate::storage::bundle::BundleChange;
 use crate::storage::document::ReadChangeError;
 use crate::storage::load::change_collector::Error;
 use crate::{
@@ -50,7 +52,7 @@ impl<'a> IndexedChangeCollector<'a> {
 
 pub(crate) struct ChangeCollector<'a> {
     changes: Vec<BuildChangeMetadata<'a>>,
-    builders: Vec<ChangeBuilder<'a>>,
+    pub(crate) builders: Vec<ChangeBuilder<'a>>,
     last: Option<(ObjId, KeyRef<'a>)>,
     preds: HashMap<OpId, Vec<OpId>>,
     max_op: u64,
@@ -71,7 +73,7 @@ pub(crate) struct BuildChangeMetadata<'a> {
 }
 
 impl BuildChangeMetadata<'_> {
-    fn num_ops(&self) -> usize {
+    pub(crate) fn num_ops(&self) -> usize {
         (1 + self.max_op - self.start_op) as usize
     }
 
@@ -81,7 +83,7 @@ impl BuildChangeMetadata<'_> {
 }
 
 #[derive(Debug)]
-struct ChangeBuilder<'a> {
+pub(crate) struct ChangeBuilder<'a> {
     actor: usize,
     seq: u64,
     change: usize,
@@ -108,6 +110,7 @@ impl<'a> ChangeBuilder<'a> {
     pub(crate) fn add(&mut self, op: OpBuilder<'a>) {
         let counter = op.id.counter();
         //if counter >= self.start_op && counter <= self.max_op() && op.id.actor() == self.actor {
+        assert!(self.ops[(counter - self.start_op) as usize].is_none());
         self.ops[(counter - self.start_op) as usize] = Some(op);
         //}
     }
@@ -158,7 +161,12 @@ impl<'a> ChangeCollector<'a> {
         Ok(Self::from_change_meta(changes, num_deps))
     }
 
-    fn from_change_meta(
+    pub(crate) fn from_bundle_changes(changes: Vec<BundleChange<'a>>) -> ChangeCollector<'a> {
+        let changes = changes.into_iter().map(|c| c.into()).collect();
+        Self::from_change_meta(changes, 0)
+    }
+
+    pub(crate) fn from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
     ) -> ChangeCollector<'a> {
@@ -278,15 +286,18 @@ impl<'a> ChangeCollector<'a> {
         changes: Vec<BuildChangeMetadata<'a>>,
         num_deps: usize,
     ) -> Vec<Change> {
-        let r1 = Self::from_build_meta1(op_set, change_graph, changes.clone(), num_deps);
-        #[cfg(debug_assertions)]
-        let r2 = Self::from_build_meta2(op_set, change_graph, changes, num_deps);
-        #[cfg(debug_assertions)]
-        assert_eq!(r1, r2);
+        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone(), num_deps);
+        debug_assert_eq!(
+            r1,
+            crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
+                .unwrap()
+                .to_changes()
+                .unwrap()
+        );
         r1
     }
 
-    fn from_build_meta1(
+    fn from_build_meta_inner(
         op_set: &OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
@@ -302,29 +313,6 @@ impl<'a> ChangeCollector<'a> {
         let mut collector = Self::from_change_meta(changes, num_deps);
 
         for op in op_set.iter_ctr_range(min..max) {
-            let op_id = op.id;
-            let op_succ = op.succ();
-            collector.process_op(op);
-
-            for id in op_succ {
-                collector.process_succ(op_id, id);
-            }
-        }
-
-        // this can error on load but should never on a live document
-        collector.finish(change_graph, &op_set.actors).unwrap()
-    }
-
-    #[cfg(debug_assertions)]
-    fn from_build_meta2(
-        op_set: &OpSet,
-        change_graph: &'a ChangeGraph,
-        changes: Vec<BuildChangeMetadata<'a>>,
-        num_deps: usize,
-    ) -> Vec<Change> {
-        let mut collector = Self::from_change_meta(changes, num_deps);
-
-        for op in op_set.iter() {
             let op_id = op.id;
             let op_succ = op.succ();
             collector.process_op(op);
@@ -365,12 +353,16 @@ impl<'a> ChangeCollector<'a> {
 
         let op = op.build(pred);
 
+        self.add(op);
+    }
+
+    pub(crate) fn add(&mut self, op: OpBuilder<'a>) {
         if let Some(index) = self.builders_index(op.id) {
             self.builders[index].add(op);
         }
     }
 
-    fn builders_index(&self, id: OpId) -> Option<usize> {
+    pub(crate) fn builders_index(&self, id: OpId) -> Option<usize> {
         self.builders
             .binary_search_by(|builder| {
                 builder
@@ -413,6 +405,7 @@ impl<'a> ChangeCollector<'a> {
         index: Option<&mut IndexBuilder>,
     ) -> Result<Vec<Change>, Error> {
         self.flush_deletes();
+
         if let Some(i) = index {
             i.flush()
         }
@@ -439,6 +432,34 @@ impl<'a> ChangeCollector<'a> {
             changes.push(Change::new(finished));
         }
 
+        Ok(changes)
+    }
+
+    pub(crate) fn unbundle(
+        self,
+        actors: &[ActorId],
+        deps: &[ChangeHash],
+    ) -> Result<Vec<Change>, Error> {
+        let num_actors = actors.len();
+        let num_changes = self.changes.len();
+        let mut changes = Vec::with_capacity(num_changes);
+        let mut mapper = super::ActorMapper::new(actors);
+
+        for change in self.changes.into_iter() {
+            if change.actor >= num_actors {
+                return Err(Error::MissingActor);
+            }
+
+            let ops = self.builders[change.builder].get_ops().unwrap();
+            let all_deps = BundleDeps::new(num_changes, &changes, deps);
+
+            changes.push(Change::new(super::build_change_inner(
+                ops,
+                &change,
+                &all_deps,
+                &mut mapper,
+            )));
+        }
         Ok(changes)
     }
 
@@ -520,4 +541,30 @@ pub(crate) struct CollectedChanges {
     pub(crate) heads: BTreeSet<ChangeHash>,
     pub(crate) max_op: u64,
     pub(crate) change_graph: ChangeGraph,
+}
+
+struct BundleDeps<'a> {
+    num_changes: usize,
+    changes: &'a Vec<Change>,
+    deps: &'a [ChangeHash],
+}
+
+impl<'a> BundleDeps<'a> {
+    fn new(num_changes: usize, changes: &'a Vec<Change>, deps: &'a [ChangeHash]) -> Self {
+        Self {
+            num_changes,
+            changes,
+            deps,
+        }
+    }
+}
+
+impl GetHash for BundleDeps<'_> {
+    fn get_hash(&self, index: usize) -> Option<ChangeHash> {
+        if index >= self.num_changes {
+            self.deps.get(index - self.num_changes).copied()
+        } else {
+            Some(self.changes.get(index)?.hash())
+        }
+    }
 }

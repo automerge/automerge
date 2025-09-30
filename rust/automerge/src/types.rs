@@ -606,6 +606,14 @@ impl ObjId {
         }
     }
 
+    pub(crate) fn icounter(&self) -> Option<i64> {
+        if self.is_root() {
+            None
+        } else {
+            Some(self.0.icounter())
+        }
+    }
+
     pub(crate) fn actor(&self) -> Option<ActorIdx> {
         if self.is_root() {
             None
