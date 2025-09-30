@@ -10,6 +10,7 @@ import type {
   ChangeToEncode,
   LoadOptions,
   InitOptions,
+  DecodedBundle,
 } from "./wasm_types.js"
 export type { ChangeToEncode } from "./wasm_types.js"
 import { default as initWasm } from "./wasm_bindgen_output/web/automerge_wasm.js"
@@ -63,6 +64,9 @@ export const ApiHandler: API = {
   },
   importSyncState(state: JsSyncState): SyncState {
     throw new RangeError("Automerge.use() not called (importSyncState)")
+  },
+  readBundle(data: Uint8Array): DecodedBundle {
+    throw new RangeError("Automerge.use() not called (readBundle)")
   },
 }
 /* eslint-enable */

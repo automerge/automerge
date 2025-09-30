@@ -139,4 +139,8 @@ impl BundleStorage<'_, Verified> {
         let change_data = &self.bytes[self.changes_data.clone()];
         BundleChangeIter::new_from_verified(&self.changes_meta, change_data)
     }
+
+    pub(crate) fn deps(&self) -> &[ChangeHash] {
+        &self.deps
+    }
 }
