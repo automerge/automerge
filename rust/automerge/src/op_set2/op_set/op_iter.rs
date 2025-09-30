@@ -762,21 +762,22 @@ impl<'a> SuccIterIter<'a> {
         let num_succ = *self.count.shift_next(range.clone()).flatten()? as usize;
         let sub_pos = self.count.calculate_acc().as_usize();
 
-        self.actor.set_max(range.end);
         self.actor.advance_to(sub_pos - num_succ);
-
-        self.ctr.set_max(range.end);
         self.ctr.advance_to(sub_pos - num_succ);
-
-        self.incs.set_max(range.end);
         self.incs.advance_to(sub_pos - num_succ);
 
-        Some(SuccCursors {
+        let iter = SuccCursors {
             len: num_succ,
             succ_actor: self.actor.clone(),
             succ_counter: self.ctr.clone(),
             inc_values: self.incs.clone(),
-        })
+        };
+
+        self.actor.advance_by(num_succ);
+        self.ctr.advance_by(num_succ);
+        self.incs.advance_by(num_succ);
+
+        Some(iter)
     }
 
     pub(crate) fn new(

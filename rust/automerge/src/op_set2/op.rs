@@ -1,8 +1,6 @@
 use super::hexane::{ColumnDataIter, DeltaCursor, IntCursor};
 use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction};
-use super::types::{
-    Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, PropRef2, ScalarValue,
-};
+use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
 use super::{ValueMeta, ValueRef};
 
 use crate::clock::Clock;
@@ -60,17 +58,17 @@ pub(crate) struct ChangeOp {
 }
 
 impl ChangeOp {
-    pub(crate) fn prop2_static(&self) -> Option<PropRef2<'static>> {
+    pub(crate) fn prop_static(&self) -> Option<PropRef<'static>> {
         match &self.bld.key {
-            KeyRef::Map(s) => Some(PropRef2::Map(Cow::Owned(String::from(s.as_ref())))),
+            KeyRef::Map(s) => Some(PropRef::Map(Cow::Owned(String::from(s.as_ref())))),
             _ => None,
         }
     }
 
-    pub(crate) fn prop2(&self) -> Option<PropRef2<'_>> {
+    pub(crate) fn prop(&self) -> Option<PropRef<'_>> {
         match &self.bld.key {
-            KeyRef::Map(Cow::Owned(s)) => Some(PropRef2::Map(Cow::Borrowed(s))),
-            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef2::Map(Cow::Borrowed(s))),
+            KeyRef::Map(Cow::Owned(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
+            KeyRef::Map(Cow::Borrowed(s)) => Some(PropRef::Map(Cow::Borrowed(s))),
             _ => None,
         }
     }
@@ -190,7 +188,7 @@ impl OpBuilder<'_> {
         match (self.action, &self.mark_name) {
             (Action::Mark, Some(name)) => {
                 let name = Cow::Owned(name.to_string());
-                let value = self.value.clone().into_owned2();
+                let value = self.value.clone().into_owned();
                 let data = MarkData { name, value };
                 Some(MarkIndexBuilder::Start(self.id, data))
             }
@@ -436,7 +434,7 @@ impl TxOp {
 
     pub(crate) fn prop(&self) -> PropRef<'_> {
         if let KeyRef::Map(s) = &self.bld.key {
-            PropRef::Map(s)
+            PropRef::Map(s.clone())
         } else {
             PropRef::Seq(self.index)
         }
@@ -855,6 +853,7 @@ impl std::fmt::Debug for SuccCursors<'_> {
 }
 
 pub(crate) struct SuccIncCursors<'a>(SuccCursors<'a>);
+
 struct IncCursors<'a>(SuccCursors<'a>);
 
 impl Iterator for SuccCursors<'_> {
@@ -929,7 +928,7 @@ impl<'a> Op<'a> {
         match (&self.action, &self.mark_name) {
             (Action::Mark, Some(name)) => {
                 let name = Cow::Owned(name.to_string());
-                let value = self.value.clone().into_owned2();
+                let value = self.value.clone().into_owned();
                 let data = MarkData { name, value };
                 Some(MarkIndexBuilder::Start(self.id, data))
             }
@@ -1078,17 +1077,6 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn is_put(&self) -> bool {
-        self.action == Action::Set
-    }
-
-    pub(crate) fn is_make(&self) -> bool {
-        matches!(
-            self.action,
-            Action::MakeMap | Action::MakeList | Action::MakeText | Action::MakeTable
-        )
-    }
-
     pub(crate) fn value(&self) -> ValueRef<'a> {
         match &self.action() {
             OpType::Make(obj_type) => ValueRef::Object(*obj_type),
@@ -1127,7 +1115,7 @@ impl<'a> Op<'a> {
         self.action == Action::Mark
     }
 
-    pub(crate) fn build3(self, pred: Vec<OpId>) -> OpBuilder<'a> {
+    pub(crate) fn build(self, pred: Vec<OpId>) -> OpBuilder<'a> {
         OpBuilder {
             id: self.id,
             obj: self.obj,
@@ -1167,9 +1155,9 @@ impl<'a> Op<'a> {
         }
     }
 
-    pub(crate) fn prop2(&self) -> Option<PropRef2<'a>> {
+    pub(crate) fn prop(&self) -> Option<PropRef<'a>> {
         let key_str = self.key.key_str()?;
-        Some(PropRef2::Map(key_str))
+        Some(PropRef::Map(key_str))
     }
 }
 

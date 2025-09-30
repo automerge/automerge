@@ -363,7 +363,7 @@ impl<'a> ChangeCollector<'a> {
 
         let pred = self.preds.remove(&op.id).unwrap_or_default();
 
-        let op = op.build3(pred);
+        let op = op.build(pred);
 
         if let Some(index) = self.builders_index(op.id) {
             self.builders[index].add(op);
@@ -389,7 +389,7 @@ impl<'a> ChangeCollector<'a> {
         if let Some((obj, key)) = self.last.take() {
             for (id, pred) in &self.preds {
                 let op = Op::del(*id, obj, key.clone());
-                let op = op.build3(pred.to_vec());
+                let op = op.build(pred.to_vec());
                 if let Some(index) = self.builders_index(op.id) {
                     self.builders[index].add(op);
                 }

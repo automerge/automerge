@@ -1,17 +1,18 @@
 use super::parents::Parents;
+use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
 use crate::types::{
-    ActorId, Clock, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
+    ActorId, ElemId, Export, Exportable, ObjId, ObjMeta, ObjType, OpId, Prop, SequenceType,
     TextEncoding,
 };
 use crate::AutomergeError;
 
 use super::hexane::{BooleanCursor, ColumnDataIter, PackError, Run, StrCursor, UIntCursor};
-use super::op::{Op, OpLike, SuccInsert};
+use super::op::{Op, OpLike, SuccCursors, SuccInsert};
 
 use super::columns::Columns;
 
@@ -47,7 +48,7 @@ pub(crate) use op_iter::{
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
-pub(crate) use visible::{DiffOp, DiffOpIter, VisIter, VisibleOpIter};
+pub(crate) use visible::{VisIter, VisibleOpIter};
 
 pub(crate) type InsertAcc<'a> = super::hexane::ColAccIter<'a, BooleanCursor>;
 
@@ -79,13 +80,8 @@ impl OpSet {
     #[cfg(test)]
     pub(crate) fn from_actors(actors: Vec<ActorId>, encoding: TextEncoding) -> Self {
         OpSet {
-            //len: 0,
             actors,
             cols: Columns::default(),
-            //text_index: ColumnData::new(),
-            //visible_index: ColumnData::new(),
-            //inc_index: ColumnData::new(),
-            //mark_index: MarkIndexColumn::new(),
             obj_info: ObjIndex::default(),
             text_encoding: encoding,
         }
@@ -285,7 +281,7 @@ impl OpSet {
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
-        let iter = self.iter_obj(obj).visible(clock).top_ops();
+        let iter = self.iter_obj(obj).visible_slow(clock).top_ops();
         Keys::new(self, iter)
     }
 
@@ -366,6 +362,7 @@ impl OpSet {
         let typ = self.object_type(obj).unwrap_or(ObjType::Map);
         if typ == ObjType::Text {
             if clock.is_none() {
+                // TODO - this could be done faster with the index
                 let text = self.cols.index.text.iter_range(range.clone());
                 let iter = SkipIter::new(text.clone(), vis.clone());
                 iter.filter_map(|n| n.as_deref().copied()).sum::<u64>() as usize
@@ -494,7 +491,7 @@ impl OpSet {
         let range = self.prop_range(obj, key);
         let iter = self.iter_range(&range);
         let end_pos = iter.end_pos();
-        let ops = iter.visible2(self, clock).collect::<Vec<_>>();
+        let ops = iter.visible(self, clock).collect::<Vec<_>>();
         assert_eq!(end_pos, range.end);
         OpsFound {
             index: 0,
@@ -595,7 +592,7 @@ impl OpSet {
         if iter.next().is_some() {
             let range = self.list_register_at_pos(tx_pos, range);
             let end_pos = range.end;
-            let ops = self.iter_range(&range).visible2(self, None).collect();
+            let ops = self.iter_range(&range).visible(self, None).collect();
             OpsFound {
                 index,
                 ops,
@@ -810,7 +807,7 @@ impl OpSet {
         obj: &ObjId,
         clock: Option<Clock>,
     ) -> TopOpIter<'a, VisibleOpIter<'a, OpIter<'a>>> {
-        self.iter_obj(obj).visible(clock).top_ops()
+        self.iter_obj(obj).visible_slow(clock).top_ops()
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -870,19 +867,32 @@ impl OpSet {
         Some((o1, vis))
     }
 
-    pub(crate) fn get_increment_at_pos(&self, pos: usize, _clock: Option<&Clock>) -> i64 {
-        // FIXME clock is ignored
+    pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
         if let Some(val) = self.cols.succ_count.get_with_acc(pos) {
             let start = val.acc.as_usize();
-            let end = start + *val.item.unwrap_or_default() as usize;
-            self.cols
-                .index
-                .inc
-                .iter_range(start..end)
-                .map(|v| *v.unwrap_or_default())
-                .sum()
+            let len = *val.item.unwrap_or_default() as usize;
+            let end = start + len;
+            let succ = SuccCursors {
+                len,
+                succ_actor: self.cols.succ_actor.iter_range(start..end),
+                succ_counter: self.cols.succ_ctr.iter_range(start..end),
+                inc_values: self.cols.index.inc.iter_range(start..end),
+            };
+            let mut inc1 = 0;
+            let mut inc2 = 0;
+            for (id, value) in succ.with_inc() {
+                if let Some(i) = value {
+                    if clock.visible_before(&id) {
+                        inc1 += i;
+                    }
+                    if clock.visible_after(&id) {
+                        inc2 += i;
+                    }
+                }
+            }
+            (inc1, inc2)
         } else {
-            0
+            (0, 0)
         }
     }
 
@@ -1696,7 +1706,7 @@ mod tests {
 
             let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
             let ops = iter
-                .visible(None)
+                .visible_slow(None)
                 .key_ops()
                 .map(|n| n.collect::<Vec<_>>())
                 .collect::<Vec<_>>();
@@ -1711,7 +1721,7 @@ mod tests {
             assert!(key4.is_none());
 
             let iter = opset.iter_obj(&ObjId(OpId::new(1, 1)));
-            let ops = iter.visible(None).top_ops().collect::<Vec<_>>();
+            let ops = iter.visible_slow(None).top_ops().collect::<Vec<_>>();
             assert_eq!(&test_ops[2], &ops[0]);
             assert_eq!(&test_ops[5], &ops[1]);
             assert_eq!(&test_ops[7], &ops[2]);

@@ -1,65 +1,16 @@
 use crate::types::OpId;
 
-use std::cmp::Ordering;
-
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ClockData {
-    /// Maximum operation counter of the actor at the point in time.
-    pub(crate) max_op: u32,
-    /// Sequence number of the change from this actor.
-    pub(crate) seq: u32,
-}
-
-impl PartialOrd for ClockData {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Eq for ClockData {}
-
-impl Ord for ClockData {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.max_op.cmp(&other.max_op)
-    }
-}
-
-impl ClockData {
-    pub(crate) fn new(max_op: u32, seq: u32) -> Self {
-        ClockData { max_op, seq }
-    }
-
-    fn max() -> Self {
-        ClockData {
-            max_op: u32::MAX,
-            seq: u32::MAX,
-        }
-    }
-}
+use std::num::NonZeroU32;
 
 #[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct Clock(pub(crate) Vec<ClockData>);
+pub(crate) struct Clock(pub(crate) Vec<u32>);
 
-#[cfg(test)]
-impl PartialOrd for Clock {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0 == other.0 {
-            Some(Ordering::Equal)
-        } else if self.is_greater(other) {
-            Some(Ordering::Greater)
-        } else if other.is_greater(self) {
-            Some(Ordering::Less)
-        } else {
-            // concurrent
-            None
-        }
-    }
-}
+#[derive(Default, Debug, Clone, PartialEq)]
+pub(crate) struct SeqClock(pub(crate) Vec<Option<NonZeroU32>>);
 
-impl Clock {
-    pub(crate) fn new(size: usize) -> Self {
-        //Self(vec![size; ClockData::new()])
-        Self(vec![ClockData::new(0, 0); size])
+impl SeqClock {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, Option<NonZeroU32>)> + '_ {
+        self.0.iter().copied().enumerate()
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
@@ -67,64 +18,149 @@ impl Clock {
     }
 
     pub(crate) fn rewrite_with_new_actor(&mut self, idx: usize) {
-        self.0.insert(idx, ClockData::new(0, 0))
+        self.0.insert(idx, None)
+    }
+
+    pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<NonZeroU32> {
+        self.0.get(*actor_index).copied().flatten()
+    }
+
+    pub(crate) fn new(size: usize) -> Self {
+        Self(vec![None; size])
+    }
+
+    pub(crate) fn include(&mut self, actor_idx: usize, data: Option<u32>) -> bool {
+        if let Some(data) = data {
+            match self.0[actor_idx] {
+                None => {
+                    self.0[actor_idx] = NonZeroU32::try_from(data).ok();
+                    true
+                }
+                Some(old_data) if old_data.get() < data => {
+                    self.0[actor_idx] = NonZeroU32::try_from(data).ok();
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 
     pub(crate) fn merge(a: &mut Self, b: &Self) {
         for (a, b) in std::iter::zip(a.0.iter_mut(), b.0.iter()) {
-            if a.max_op < b.max_op {
+            if *a < *b {
                 *a = *b;
             }
         }
     }
+}
 
-    pub(crate) fn include(&mut self, actor_idx: usize, data: ClockData) -> bool {
-        match data.max_op.cmp(&self.0[actor_idx].max_op) {
-            Ordering::Less => {
-                // Nothing to do
-                false
-            }
-            Ordering::Equal => {
-                // This can occur if the actor has produced an empty change, their
-                // max_op won't have increased but their seq will have
-                self.0[actor_idx].seq = self.0[actor_idx].seq.max(data.seq);
-                true
-            }
-            Ordering::Greater => {
-                self.0[actor_idx] = data;
-                true
-            }
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClockRange {
+    Current(Option<Clock>),
+    Diff(Clock, Clock),
+}
+
+impl Default for ClockRange {
+    fn default() -> Self {
+        Self::Current(None)
+    }
+}
+
+impl ClockRange {
+    pub(crate) fn current(clock: Option<Clock>) -> Self {
+        Self::Current(clock)
+    }
+
+    pub(crate) fn after(&self) -> Option<&Clock> {
+        match self {
+            Self::Diff(_, after) => Some(after),
+            Self::Current(Some(after)) => Some(after),
+            _ => None,
         }
     }
 
+    pub(crate) fn visible_after(&self, id: &OpId) -> bool {
+        match self {
+            Self::Current(Some(after)) => after.covers(id),
+            Self::Diff(_, after) => after.covers(id),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn visible_before(&self, id: &OpId) -> bool {
+        self.predates(id)
+    }
+
+    pub(crate) fn predates(&self, id: &OpId) -> bool {
+        match self {
+            Self::Diff(before, _) => before.covers(id),
+            _ => false,
+        }
+    }
+}
+
+impl Clock {
     pub(crate) fn isolate(&mut self, actor_index: usize) {
-        self.0[actor_index] = ClockData::max()
+        self.0[actor_index] = u32::MAX
     }
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {
-        self.0[id.actor()].max_op as u64 >= id.counter()
+        self.0[id.actor()] as u64 >= id.counter()
     }
+}
 
-    pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<&ClockData> {
-        self.0.get(*actor_index)
-    }
-
-    #[cfg(test)]
-    fn is_greater(&self, other: &Self) -> bool {
-        !std::iter::zip(self.0.iter(), other.0.iter()).any(|(a, b)| a.max_op < b.max_op)
+impl std::iter::FromIterator<Option<u32>> for Clock {
+    fn from_iter<I: IntoIterator<Item = Option<u32>>>(iter: I) -> Self {
+        Clock(iter.into_iter().map(|i| i.unwrap_or(0)).collect())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
+
+    impl Clock {
+        pub(crate) fn new(size: usize) -> Self {
+            Self(vec![0; size])
+        }
+
+        pub(crate) fn include(&mut self, actor_idx: usize, data: u32) -> bool {
+            if data > self.0[actor_idx] {
+                self.0[actor_idx] = data;
+                true
+            } else {
+                false
+            }
+        }
+
+        fn is_greater(&self, other: &Self) -> bool {
+            !std::iter::zip(self.0.iter(), other.0.iter()).any(|(a, b)| a < b)
+        }
+    }
+
+    impl PartialOrd for Clock {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            if self.0 == other.0 {
+                Some(Ordering::Equal)
+            } else if self.is_greater(other) {
+                Some(Ordering::Greater)
+            } else if other.is_greater(self) {
+                Some(Ordering::Less)
+            } else {
+                None
+            }
+        }
+    }
 
     #[test]
     fn covers() {
         let mut clock = Clock::new(4);
 
-        clock.include(1, ClockData { max_op: 20, seq: 1 });
-        clock.include(2, ClockData { max_op: 10, seq: 2 });
+        clock.include(1, 20);
+        clock.include(2, 10);
 
         assert!(clock.covers(&OpId::new(10, 1)));
         assert!(clock.covers(&OpId::new(20, 1)));
@@ -141,11 +177,11 @@ mod tests {
     #[test]
     fn comparison() {
         let mut base_clock = Clock::new(4);
-        base_clock.include(1, ClockData { max_op: 1, seq: 1 });
-        base_clock.include(2, ClockData { max_op: 1, seq: 1 });
+        base_clock.include(1, 1);
+        base_clock.include(2, 1);
 
         let mut after_clock = base_clock.clone();
-        after_clock.include(1, ClockData { max_op: 2, seq: 2 });
+        after_clock.include(1, 2);
 
         assert!(after_clock > base_clock);
         assert!(base_clock < after_clock);
@@ -153,7 +189,7 @@ mod tests {
         assert!(base_clock == base_clock);
 
         let mut new_actor_clock = base_clock.clone();
-        new_actor_clock.include(3, ClockData { max_op: 1, seq: 1 });
+        new_actor_clock.include(3, 1);
 
         assert_eq!(
             base_clock.partial_cmp(&new_actor_clock),

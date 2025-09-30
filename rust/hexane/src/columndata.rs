@@ -534,7 +534,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ColAccIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
 }

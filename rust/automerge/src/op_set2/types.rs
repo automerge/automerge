@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::error::AutomergeError;
 use crate::types;
-use crate::types::{ActorId, ChangeHash, ElemId, ObjType, Prop};
+use crate::types::{ActorId, ChangeHash, ElemId, ObjType};
 use crate::value;
 use crate::{hydrate, TextEncoding};
 
@@ -229,7 +229,7 @@ impl fmt::Display for ScalarValue<'_> {
 
 impl<'a> From<ScalarValue<'a>> for types::ScalarValue {
     fn from(s: ScalarValue<'a>) -> Self {
-        s.into_owned()
+        s.into_legacy()
     }
 }
 
@@ -283,7 +283,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(crate) fn into_owned(self) -> types::ScalarValue {
+    pub(crate) fn into_legacy(self) -> types::ScalarValue {
         match self {
             Self::Bytes(b) => types::ScalarValue::Bytes(b.to_vec()),
             Self::Str(s) => types::ScalarValue::Str(s.to_string().into()),
@@ -301,7 +301,7 @@ impl<'a> ScalarValue<'a> {
         }
     }
 
-    pub(crate) fn into_owned2(self) -> ScalarValue<'static> {
+    pub(crate) fn into_owned(self) -> ScalarValue<'static> {
         match self {
             Self::Bytes(b) => ScalarValue::Bytes(Cow::Owned(b.into_owned())),
             Self::Str(s) => ScalarValue::Str(Cow::Owned(s.into_owned())),
@@ -599,23 +599,8 @@ impl<'a> From<&'a str> for ScalarValue<'a> {
     }
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
-pub(crate) enum PropRef<'a> {
-    Map(&'a str),
-    Seq(usize),
-}
-
-impl From<&PropRef<'_>> for Prop {
-    fn from(p: &PropRef<'_>) -> Prop {
-        match p {
-            PropRef::Map(s) => Prop::Map(s.to_string()),
-            PropRef::Seq(i) => Prop::Seq(*i),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum PropRef2<'a> {
+pub(crate) enum PropRef<'a> {
     Map(Cow<'a, str>),
     Seq(usize),
 }
@@ -732,14 +717,14 @@ impl<'a> ValueRef<'a> {
     pub(crate) fn into_owned(self) -> ValueRef<'static> {
         match self {
             Self::Object(o) => ValueRef::Object(o),
-            Self::Scalar(s) => ValueRef::Scalar(s.into_owned2()),
+            Self::Scalar(s) => ValueRef::Scalar(s.into_owned()),
         }
     }
 
     pub fn into_value(self) -> value::Value<'static> {
         match self {
             Self::Object(o) => value::Value::Object(o),
-            Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_owned())),
+            Self::Scalar(s) => value::Value::Scalar(Cow::Owned(s.into_legacy())),
         }
     }
 

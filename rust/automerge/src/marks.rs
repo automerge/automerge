@@ -46,9 +46,6 @@ impl Mark {
 
     pub(crate) fn into_mark_set(self) -> Arc<MarkSet> {
         let mut m = MarkSet::default();
-        //let data = self.data.into_owned();
-        //let name = self.name;
-        //m.insert(data.name, data.value);
         m.insert(self.name, self.value);
         Arc::new(m)
     }
@@ -109,11 +106,35 @@ pub struct MarkSet {
     marks: BTreeMap<SmolStr, ScalarValue>,
 }
 
-impl MarkSet {
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &ScalarValue)> {
-        self.marks
-            .iter()
+use std::collections::btree_map;
+
+#[derive(Debug, Clone, Default)]
+pub struct MarkSetIter<'a> {
+    set: Option<btree_map::Iter<'a, SmolStr, ScalarValue>>,
+}
+
+impl<'a> MarkSetIter<'a> {
+    fn new(set: &'a MarkSet) -> Self {
+        Self {
+            set: Some(set.marks.iter()),
+        }
+    }
+}
+
+impl<'a> Iterator for MarkSetIter<'a> {
+    type Item = (&'a str, &'a ScalarValue);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.set
+            .as_mut()?
+            .next()
             .map(|(name, value)| (name.as_str(), value))
+    }
+}
+
+impl MarkSet {
+    pub fn iter(&self) -> MarkSetIter<'_> {
+        MarkSetIter::new(self)
     }
 
     pub fn num_marks(&self) -> usize {
@@ -140,27 +161,6 @@ impl MarkSet {
         self.inner().is_empty()
     }
 
-    pub(crate) fn diff(&self, other: &Self) -> Self {
-        let mut diff = BTreeMap::default();
-        for (name, value) in self.marks.iter() {
-            match other.marks.get(name) {
-                Some(v) if v != value => {
-                    diff.insert(name.clone(), v.clone());
-                }
-                None => {
-                    diff.insert(name.clone(), ScalarValue::Null);
-                }
-                _ => {}
-            }
-        }
-        for (name, value) in other.marks.iter() {
-            if !self.marks.contains_key(name) {
-                diff.insert(name.clone(), value.clone());
-            }
-        }
-        MarkSet { marks: diff }
-    }
-
     pub(crate) fn from_query_state(q: &RichTextQueryState<'_>) -> Option<Arc<Self>> {
         let mut marks = MarkStateMachine::default();
         for (id, mark_data) in q.iter() {
@@ -172,6 +172,7 @@ impl MarkSet {
     /// Return this MarkSet without any marks which have a value of Null, i.e.
     /// marks which have been removed.
     pub(crate) fn without_unmarks(self) -> Self {
+        // FIXME - do I need this clone?
         let mut marks = self.marks.clone();
         marks.retain(|_, value| !matches!(value, ScalarValue::Null));
         MarkSet { marks }
@@ -201,7 +202,6 @@ impl MarkSet {
     }
 }
 
-// FromIterator implementation for an iterator of (String, ScalarValue) tuples
 impl std::iter::FromIterator<(String, ScalarValue)> for MarkSet {
     fn from_iter<I: IntoIterator<Item = (String, ScalarValue)>>(iter: I) -> Self {
         let mut marks = BTreeMap::new();
@@ -421,16 +421,6 @@ impl<'a> RichTextQueryState<'a> {
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&OpId, &MarkData<'a>)> {
         self.map.iter()
     }
-
-    /*
-        pub(crate) fn insert(&mut self, op: OpId, data: MarkData<'a>) {
-            self.map.insert(op, data);
-        }
-
-        pub(crate) fn remove(&mut self, op: &OpId) {
-            self.map.remove(op);
-        }
-    */
 }
 
 // Useful for comparing MarkSets while ignoring marks that have been deleted (i.e. have a value of Null).

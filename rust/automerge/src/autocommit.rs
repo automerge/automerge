@@ -1,18 +1,17 @@
 use std::ops::RangeBounds;
 
-use crate::automerge::diff;
 use crate::automerge::SaveOptions;
+use crate::clock::Clock;
 use crate::cursor::{CursorPosition, MoveCursor};
 use crate::exid::ExId;
-use crate::iter::Span;
-use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Span, Spans, Values};
 use crate::marks::UpdateSpansConfig;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::Clock;
+use crate::types::ObjMeta;
 use crate::{hydrate, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -257,11 +256,10 @@ impl AutoCommit {
             self.doc.log_current_state(&mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
-            let before_clock = self.doc.clock_at(range.before());
-            let after_clock = self.doc.clock_at(range.after());
+            let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
-            diff::log_diff(&self.doc, &before_clock, &after_clock, &mut patch_log);
+            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
         };
         self.diff_cache = Some((range, patches));
@@ -656,9 +654,8 @@ impl AutoCommit {
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {
-            let before_clock = self.doc.clock_at(&before);
-            let after_clock = self.doc.clock_at(after);
-            diff::log_diff(&self.doc, &before_clock, &after_clock, &mut self.patch_log);
+            let clock = self.doc.clock_range(&before, after);
+            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log);
         }
     }
 

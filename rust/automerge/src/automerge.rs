@@ -17,7 +17,7 @@ pub(crate) use crate::read::ReadDoc;
 use crate::change_graph::ChangeGraph;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
-use crate::iter::{DocIter, Keys, ListRange, MapRange, Spans, Values};
+use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
 use crate::storage::{self, change, load, CompressConfig, Document, VerificationMode};
@@ -25,14 +25,12 @@ use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 
+use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
-use crate::types::{
-    ActorId, ChangeHash, Clock, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value,
-};
+use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
-pub(crate) mod diff;
 
 // FIXME
 //#[cfg(test)]
@@ -826,13 +824,9 @@ impl Automerge {
     }
 
     pub(crate) fn log_current_state(&self, patch_log: &mut PatchLog) {
-        let mut iter = self.iter().internal();
-
-        for item in iter.by_ref() {
-            item.log(patch_log, self.text_encoding());
-        }
-
-        patch_log.path_hint(iter.path_map);
+        let clock = ClockRange::default();
+        let path_map = DiffIter::log(self, ObjMeta::root(), clock, patch_log);
+        patch_log.path_hint(path_map);
     }
 
     fn seq_for_actor(&self, actor: &ActorId) -> u64 {
@@ -966,6 +960,12 @@ impl Automerge {
         let seq = self.change_graph.seq_for_actor(actor);
         let hash = self.change_graph.get_hash_for_actor_seq(actor, seq).ok()?;
         self.get_change_by_hash(&hash)
+    }
+
+    pub(crate) fn clock_range(&self, before: &[ChangeHash], after: &[ChangeHash]) -> ClockRange {
+        let before = self.clock_at(before);
+        let after = self.clock_at(after);
+        ClockRange::Diff(before, after)
     }
 
     pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
@@ -1143,10 +1143,9 @@ impl Automerge {
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
-        let before = self.clock_at(before_heads);
-        let after = self.clock_at(after_heads);
+        let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
-        diff::log_diff(self, &before, &after, &mut patch_log);
+        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log);
         patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)
     }
@@ -1219,7 +1218,7 @@ impl Automerge {
         let mut top_ops = self
             .ops()
             .iter_obj(&obj.id)
-            .visible(clock)
+            .visible_slow(clock)
             .top_ops()
             .marks();
 
@@ -1559,7 +1558,12 @@ impl Automerge {
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut iter = self.ops.iter_obj(&obj.id).visible(clock).top_ops().marks();
+        let mut iter = self
+            .ops
+            .iter_obj(&obj.id)
+            .visible_slow(clock)
+            .top_ops()
+            .marks();
         iter.nth(index);
         match iter.get_marks() {
             Some(arc) => Ok(arc.as_ref().clone().without_unmarks()),
@@ -1577,7 +1581,7 @@ impl Automerge {
         for (obj, ops) in self.ops.iter_objs() {
             match obj.typ {
                 ObjType::Map | ObjType::List => {
-                    for op in ops.visible(None) {
+                    for op in ops.visible_slow(None) {
                         //if !op.visible() {
                         //    continue;
                         //}
