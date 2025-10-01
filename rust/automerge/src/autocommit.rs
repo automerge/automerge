@@ -11,7 +11,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::ObjMeta;
+use crate::types::{ObjId, ObjMeta};
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -61,7 +61,7 @@ pub struct AutoCommit {
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
-    diff_cache: Option<(OpRange, Vec<Patch>)>,
+    diff_cache: Option<(OpRange, ObjId, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
@@ -233,10 +233,20 @@ impl AutoCommit {
     ///
     /// See [`Self::diff_incremental()`] for encapsulating this pattern.
     pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
+        self.diff_inner(&ExId::Root, ObjMeta::root(), before, after)
+    }
+
+    fn diff_inner(
+        &mut self,
+        exid: &ExId,
+        obj: ObjMeta,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let range = OpRange::new(before, after);
-        if let Some((r, patches)) = &self.diff_cache {
-            if r == &range {
+        if let Some((r, id, patches)) = &self.diff_cache {
+            if r == &range && id == &obj.id {
                 // we could skip this clone and return &[Patch]
                 return patches.clone();
             }
@@ -246,24 +256,42 @@ impl AutoCommit {
             && range.before() == self.diff_cursor
             && self.patch_log.is_active()
         {
-            self.patch_log.make_patches(&self.doc)
+            if obj.id.is_root() {
+                self.patch_log.make_patches(&self.doc)
+            } else {
+                self.patch_log
+                    .make_patches(&self.doc)
+                    .into_iter()
+                    .filter(|p| p.has(exid))
+                    .collect()
+            }
         } else if range.before().is_empty() && range.after() == heads {
             let mut patch_log = PatchLog::active();
             // This if statement is only active if the current heads are the same as `after`
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
             patch_log.heads = None;
-            self.doc.log_current_state(&mut patch_log);
+            self.doc.log_current_state(obj, &mut patch_log);
             patch_log.make_patches(&self.doc)
         } else {
             let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
-            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut patch_log);
+            DiffIter::log(&self.doc, obj, clock, &mut patch_log);
             patch_log.make_patches(&self.doc)
         };
-        self.diff_cache = Some((range, patches));
-        self.diff_cache.as_ref().unwrap().1.clone()
+        self.diff_cache = Some((range, obj.id, patches.clone()));
+        patches
+    }
+
+    pub fn diff_obj(
+        &mut self,
+        exid: &ExId,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        let obj = self.doc.exid_to_obj(exid)?;
+        Ok(self.diff_inner(exid, obj, before, after))
     }
 
     /// This is a convience function that encapsulates the following common pattern

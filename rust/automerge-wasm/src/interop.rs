@@ -1447,24 +1447,28 @@ impl Automerge {
 
     pub(crate) fn import(&self, id: JsValue) -> Result<(ObjId, am::ObjType), error::ImportObj> {
         if let Some(s) = id.as_string() {
-            // valid formats are
-            // 123@aabbcc
-            // 123@aabccc/prop1/prop2/prop3
-            // /prop1/prop2/prop3
-            let mut components = s.split('/');
-            let obj = components.next();
-            let (id, obj_type) = if obj == Some("") {
-                (ROOT, am::ObjType::Map)
-            } else {
-                self.doc
-                    .import(obj.unwrap_or_default())
-                    .map_err(error::ImportObj::BadImport)?
-            };
-            self.import_path(id, obj_type, components)
-                .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), Box::new(e)))
+            self.import_str(&s)
         } else {
             Err(error::ImportObj::NotString)
         }
+    }
+
+    pub(crate) fn import_str(&self, s: &str) -> Result<(ObjId, am::ObjType), error::ImportObj> {
+        // valid formats are
+        // 123@aabbcc
+        // 123@aabccc/prop1/prop2/prop3
+        // /prop1/prop2/prop3
+        let mut components = s.split('/');
+        let obj = components.next();
+        let (id, obj_type) = if obj == Some("") {
+            (ROOT, am::ObjType::Map)
+        } else {
+            self.doc
+                .import(obj.unwrap_or_default())
+                .map_err(error::ImportObj::BadImport)?
+        };
+        self.import_path(id, obj_type, components)
+            .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), Box::new(e)))
     }
 
     pub(crate) fn import_path<'a, I: Iterator<Item = &'a str>>(

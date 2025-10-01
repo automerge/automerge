@@ -1006,18 +1006,24 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  *
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
-export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
+export function diff(doc: Doc<unknown>, before: Heads, after: Heads, path?: Prop[] | undefined): Patch[] {
   checkHeads(before, "before heads")
   checkHeads(after, "after heads")
   const state = _state(doc)
   if (
     state.mostRecentPatch &&
     equals(state.mostRecentPatch.before, before) &&
-    equals(state.mostRecentPatch.after, after)
+    equals(state.mostRecentPatch.after, after) &&
+    path == undefined
   ) {
     return state.mostRecentPatch.patches
   }
-  return state.handle.diff(before, after)
+  if (path != undefined) {
+    const objPath = absoluteObjPath(doc, path, "diff")
+    return state.handle.diff(before, after, objPath)
+  } else {
+    return state.handle.diff(before, after)
+  }
 }
 
 function headsEqual(heads1: Heads, heads2: Heads): boolean {
