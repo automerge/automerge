@@ -257,13 +257,13 @@ impl AutoCommit {
             && range.before() == self.diff_cursor
             && self.patch_log.is_active()
         {
-            if obj.id.is_root() {
+            if obj.id.is_root() && recursive {
                 self.patch_log.make_patches(&self.doc)
             } else {
                 self.patch_log
                     .make_patches(&self.doc)
                     .into_iter()
-                    .filter(|p| p.has(exid))
+                    .filter(|p| p.has(exid, recursive))
                     .collect()
             }
         } else if range.before().is_empty() && range.after() == heads {

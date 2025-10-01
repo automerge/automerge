@@ -181,6 +181,15 @@ describe("patches", () => {
         { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
       ]);
+      const patches7 = Automerge.diffPath(doc, ["foo","bar"], h3, h4, true)
+      assert.deepEqual(patches7, [
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches7_shallow = Automerge.diffPath(doc, ["foo","bar"], h3, h4, false)
+      assert.deepEqual(patches7_shallow, [
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+      ]);
     })
   })
 
