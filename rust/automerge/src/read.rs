@@ -54,8 +54,23 @@ pub trait ReadDoc {
     /// See [`Self::keys()`]
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
+    /// Iterate over the object `obj` as at `heads`
+    ///
+    /// See [`Self::iter()`]
     fn iter_at<O: AsRef<ExId>>(&self, obj: O, heads: Option<&[ChangeHash]>) -> DocIter<'_>;
 
+    /// Iterate over all the objects in the document
+    ///
+    /// The returned iterator will iterate over
+    /// [`DocObjItem`](crate::iter::DocObjItem)s, which are basically an (object
+    /// ID, property) pair. The property is represented by either a
+    /// [`MapRangeItem`](crate::iter::MapRangeItem),
+    /// [`ListRangeItem`](crate::iter::ListRangeItem), or a text span
+    /// represented by a [`ValueRef`](crate::ValueRef) depending on the type of
+    /// the object. The iterator iterates in "causal" order, which means that
+    /// objects which were created "first" in the documents history are visited
+    /// first, which in turn means that parent objects are visited before their
+    /// children.
     fn iter(&self) -> DocIter<'_> {
         self.iter_at(&ROOT, None)
     }
