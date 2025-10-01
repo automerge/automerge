@@ -1006,24 +1006,31 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  *
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
-export function diff(doc: Doc<unknown>, before: Heads, after: Heads, path?: Prop[] | undefined): Patch[] {
+export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
   checkHeads(before, "before heads")
   checkHeads(after, "after heads")
   const state = _state(doc)
   if (
     state.mostRecentPatch &&
     equals(state.mostRecentPatch.before, before) &&
-    equals(state.mostRecentPatch.after, after) &&
-    path == undefined
+    equals(state.mostRecentPatch.after, after)
   ) {
     return state.mostRecentPatch.patches
   }
-  if (path != undefined) {
-    const objPath = absoluteObjPath(doc, path, "diff")
-    return state.handle.diff(before, after, objPath)
-  } else {
-    return state.handle.diff(before, after)
-  }
+  return state.handle.diff(before, after)
+}
+
+/**
+ * Create a set of patches representing the change from one set of heads to another at a given path
+ *
+ * This is an experimental API
+ */
+export function diffPath(doc: Doc<unknown>, path: Prop[], before: Heads, after: Heads, recursive: boolean): Patch[] {
+  checkHeads(before, "before")
+  checkHeads(after, "after")
+  const state = _state(doc)
+  const objPath = absoluteObjPath(doc, path, "diff")
+  return state.handle.diff_path(objPath, before, after, recursive)
 }
 
 function headsEqual(heads1: Heads, heads2: Heads): boolean {

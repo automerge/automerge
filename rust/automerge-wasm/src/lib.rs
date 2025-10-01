@@ -1092,12 +1092,7 @@ impl Automerge {
         &mut self,
         #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
-        path: Option<String>,
     ) -> Result<Array, error::Diff> {
-        let obj = match path {
-            Some(p) => self.import_str(&p)?.0,
-            None => ROOT,
-        };
         let before = get_heads(before)
             .map_err(error::Diff::InvalidBeforeHeads)?
             .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
@@ -1105,7 +1100,29 @@ impl Automerge {
             .map_err(error::Diff::InvalidAfterHeads)?
             .ok_or_else(|| error::Diff::MissingAfterHeads)?;
 
-        let patches = self.doc.diff_obj(&obj, &before, &after)?;
+        let patches = self.doc.diff(&before, &after);
+
+        Ok(interop::export_patches(&self.external_types, patches)?)
+    }
+
+    #[wasm_bindgen(unchecked_return_type = "Patch[]")]
+    pub fn diff_path(
+        &mut self,
+        path: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
+        recursive: bool,
+    ) -> Result<Array, error::Diff> {
+        let obj = self.import(path)?.0;
+
+        let before = get_heads(before)
+            .map_err(error::Diff::InvalidBeforeHeads)?
+            .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
+        let after = get_heads(after)
+            .map_err(error::Diff::InvalidBeforeHeads)?
+            .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
+
+        let patches = self.doc.diff_obj(&obj, &before, &after, recursive)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
     }

@@ -61,7 +61,7 @@ pub struct AutoCommit {
     transaction: Option<(PatchLog, TransactionInner)>,
     patch_log: PatchLog,
     diff_cursor: Vec<ChangeHash>,
-    diff_cache: Option<(OpRange, ObjId, Vec<Patch>)>,
+    diff_cache: Option<(OpRange, ObjId, bool, Vec<Patch>)>,
     save_cursor: Vec<ChangeHash>,
     isolation: Option<Vec<ChangeHash>>,
 }
@@ -233,7 +233,7 @@ impl AutoCommit {
     ///
     /// See [`Self::diff_incremental()`] for encapsulating this pattern.
     pub fn diff(&mut self, before: &[ChangeHash], after: &[ChangeHash]) -> Vec<Patch> {
-        self.diff_inner(&ExId::Root, ObjMeta::root(), before, after)
+        self.diff_inner(&ExId::Root, ObjMeta::root(), before, after, true)
     }
 
     fn diff_inner(
@@ -242,11 +242,12 @@ impl AutoCommit {
         obj: ObjMeta,
         before: &[ChangeHash],
         after: &[ChangeHash],
+        recursive: bool,
     ) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let range = OpRange::new(before, after);
-        if let Some((r, id, patches)) = &self.diff_cache {
-            if r == &range && id == &obj.id {
+        if let Some((r, id, rec, patches)) = &self.diff_cache {
+            if r == &range && id == &obj.id && *rec == recursive {
                 // we could skip this clone and return &[Patch]
                 return patches.clone();
             }
@@ -271,16 +272,16 @@ impl AutoCommit {
             // so we don't need to tell the patch log to target a specific heads and consequently
             // it wll be able to generate patches very fast as it doesn't need to make any clocks
             patch_log.heads = None;
-            self.doc.log_current_state(obj, &mut patch_log);
+            self.doc.log_current_state(obj, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         } else {
             let clock = self.doc.clock_range(range.before(), range.after());
             let mut patch_log = PatchLog::active();
             patch_log.heads = Some(range.after().to_vec());
-            DiffIter::log(&self.doc, obj, clock, &mut patch_log);
+            DiffIter::log(&self.doc, obj, clock, &mut patch_log, recursive);
             patch_log.make_patches(&self.doc)
         };
-        self.diff_cache = Some((range, obj.id, patches.clone()));
+        self.diff_cache = Some((range, obj.id, recursive, patches.clone()));
         patches
     }
 
@@ -289,9 +290,10 @@ impl AutoCommit {
         exid: &ExId,
         before: &[ChangeHash],
         after: &[ChangeHash],
+        recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
         let obj = self.doc.exid_to_obj(exid)?;
-        Ok(self.diff_inner(exid, obj, before, after))
+        Ok(self.diff_inner(exid, obj, before, after, recursive))
     }
 
     /// This is a convience function that encapsulates the following common pattern
@@ -698,7 +700,7 @@ impl AutoCommit {
         let before = self.get_heads();
         if before.as_slice() != after {
             let clock = self.doc.clock_range(&before, after);
-            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log);
+            DiffIter::log(&self.doc, ObjMeta::root(), clock, &mut self.patch_log, true);
         }
     }
 

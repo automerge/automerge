@@ -47,66 +47,66 @@ impl<'a> PatchBuilder<'a> {
 
 impl PatchBuilder<'_> {
     pub(crate) fn log_event(&mut self, doc: &Automerge, exid: ExId, event: &Event) {
-            match event {
-                Event::PutMap {
-                    key,
-                    value,
-                    id,
-                    conflict,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    self.put(exid, key.into(), (value.into(), opid), *conflict);
-                }
-                Event::DeleteMap { key } => {
-                    self.delete_map(exid, key);
-                }
-                Event::IncrementMap { key, n, id } => {
-                    let opid = doc.id_to_exid(*id);
-                    self.increment(exid, key.into(), (*n, opid));
-                }
-                Event::FlagConflictMap { key } => {
-                    self.flag_conflict(exid, key.into());
-                }
-                Event::PutSeq {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    self.put(exid, index.into(), (value.into(), opid), *conflict);
-                }
-                Event::Insert {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                    //marks,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    self.insert(
-                        exid,
-                        *index,
-                        (value.into(), opid),
-                        *conflict,
-                        //marks.clone(),
-                    );
-                }
-                Event::DeleteSeq { index, num } => {
-                    self.delete_seq(exid, *index, *num);
-                }
-                Event::IncrementSeq { index, n, id } => {
-                    let opid = doc.id_to_exid(*id);
-                    self.increment(exid, index.into(), (*n, opid));
-                }
-                Event::FlagConflictSeq { index } => {
-                    self.flag_conflict(exid, index.into());
-                }
-                Event::Splice { index, text, marks } => {
-                    self.splice_text(exid, *index, text, marks.clone());
-                }
-                Event::Mark { marks } => self.mark(exid, marks.clone().into_iter()),
-          }
+        match event {
+            Event::PutMap {
+                key,
+                value,
+                id,
+                conflict,
+            } => {
+                let opid = doc.id_to_exid(*id);
+                self.put(exid, key.into(), (value.into(), opid), *conflict);
+            }
+            Event::DeleteMap { key } => {
+                self.delete_map(exid, key);
+            }
+            Event::IncrementMap { key, n, id } => {
+                let opid = doc.id_to_exid(*id);
+                self.increment(exid, key.into(), (*n, opid));
+            }
+            Event::FlagConflictMap { key } => {
+                self.flag_conflict(exid, key.into());
+            }
+            Event::PutSeq {
+                index,
+                value,
+                id,
+                conflict,
+            } => {
+                let opid = doc.id_to_exid(*id);
+                self.put(exid, index.into(), (value.into(), opid), *conflict);
+            }
+            Event::Insert {
+                index,
+                value,
+                id,
+                conflict,
+                //marks,
+            } => {
+                let opid = doc.id_to_exid(*id);
+                self.insert(
+                    exid,
+                    *index,
+                    (value.into(), opid),
+                    *conflict,
+                    //marks.clone(),
+                );
+            }
+            Event::DeleteSeq { index, num } => {
+                self.delete_seq(exid, *index, *num);
+            }
+            Event::IncrementSeq { index, n, id } => {
+                let opid = doc.id_to_exid(*id);
+                self.increment(exid, index.into(), (*n, opid));
+            }
+            Event::FlagConflictSeq { index } => {
+                self.flag_conflict(exid, index.into());
+            }
+            Event::Splice { index, text, marks } => {
+                self.splice_text(exid, *index, text, marks.clone());
+            }
+            Event::Mark { marks } => self.mark(exid, marks.clone().into_iter()),
+        }
     }
 
     fn update_path_map(&mut self, parent_id: ObjId, parent_type: ObjType) {
