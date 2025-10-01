@@ -375,43 +375,11 @@ impl From<f64> for Prop {
     }
 }
 
-/*
-impl From<OpId> for Key {
-    fn from(id: OpId) -> Self {
-        Key::Seq(ElemId(id))
-    }
-}
-*/
-
-/*
-impl From<ElemId> for Key {
-    fn from(e: ElemId) -> Self {
-        Key::Seq(e)
-    }
-}
-*/
-
 impl From<Option<ElemId>> for ElemId {
     fn from(e: Option<ElemId>) -> Self {
         e.unwrap_or(HEAD)
     }
 }
-
-/*
-impl From<Option<ElemId>> for Key {
-    fn from(e: Option<ElemId>) -> Self {
-        Key::Seq(e.into())
-    }
-}
-*/
-
-/*
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
-pub(crate) enum Key {
-    Map(usize),
-    Seq(ElemId),
-}
-*/
 
 /// A property of an object
 ///
@@ -449,24 +417,6 @@ impl Display for Prop {
         }
     }
 }
-
-/*
-impl Key {
-    pub(crate) fn prop_index(&self) -> Option<usize> {
-        match self {
-            Key::Map(n) => Some(*n),
-            Key::Seq(_) => None,
-        }
-    }
-
-    pub(crate) fn elemid(&self) -> Option<ElemId> {
-        match self {
-            Key::Map(_) => None,
-            Key::Seq(id) => Some(*id),
-        }
-    }
-}
-*/
 
 // FIXME - isn't having ord and partial ord here dangerous?
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
@@ -794,85 +744,4 @@ impl From<Prop> for wasm_bindgen::JsValue {
             Prop::Seq(index) => (index as f64).into(),
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) mod gen {
-    //use super::{ChangeHash, ElemId, ObjType, OpId, OpType, ScalarValue, HASH_SIZE};
-    //use crate::value::Counter;
-
-    //use proptest::prelude::*;
-
-    /*
-        pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
-            proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
-                .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
-        }
-
-        pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
-            prop_oneof![
-                proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
-                "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
-                any::<i64>().prop_map(ScalarValue::Int),
-                any::<u64>().prop_map(ScalarValue::Uint),
-                any::<f64>().prop_map(ScalarValue::F64),
-                any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
-                any::<i64>().prop_map(ScalarValue::Timestamp),
-                any::<bool>().prop_map(ScalarValue::Boolean),
-                Just(ScalarValue::Null),
-            ]
-        }
-
-        pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
-            prop_oneof![
-                Just(ObjType::Map),
-                Just(ObjType::Table),
-                Just(ObjType::List),
-                Just(ObjType::Text),
-            ]
-        }
-
-        pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
-            prop_oneof![
-                Just(OpType::Delete),
-                any::<i64>().prop_map(OpType::Increment),
-                gen_scalar_value().prop_map(OpType::Put),
-                gen_objtype().prop_map(OpType::Make)
-            ]
-        }
-    */
-
-    /*
-        pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
-            prop_oneof![
-                proptest::sample::select(key_indices).prop_map(Key::Map),
-                Just(Key::Seq(ElemId(OpId::new(0, 0)))),
-            ]
-        }
-    */
-
-    /*
-        /// Generate an arbitrary op
-        ///
-        /// The generated op will have no preds or succs
-        ///
-        /// # Arguments
-        ///
-        /// * `id` - the OpId this op will be given
-        /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
-        ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
-        pub(crate) fn gen_op(
-            id: OpId,
-            key_prop_indices: Vec<usize>,
-        ) -> impl Strategy<Value = OpBuilder> {
-            (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
-                move |(key, insert, action)| OpBuilder {
-                    id,
-                    key,
-                    insert,
-                    action,
-                },
-            )
-        }
-    */
 }
