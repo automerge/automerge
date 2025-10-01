@@ -88,23 +88,6 @@ impl fmt::Display for Action {
     }
 }
 
-impl crate::types::OpType {
-    /*
-        pub(crate) fn action(&self) -> Action {
-            match self {
-                Self::Make(ObjType::Map) => Action::MakeMap,
-                Self::Put(_) => Action::Set,
-                Self::Make(ObjType::List) => Action::MakeList,
-                Self::Delete => Action::Delete,
-                Self::Make(ObjType::Text) => Action::MakeText,
-                Self::Increment(_) => Action::Increment,
-                Self::Make(ObjType::Table) => Action::MakeTable,
-                Self::MarkBegin(_, _) | Self::MarkEnd(_) => Action::Mark,
-            }
-        }
-    */
-}
-
 impl From<Action> for u64 {
     fn from(val: Action) -> Self {
         match val {
@@ -193,7 +176,6 @@ impl<'a> OpType<'a> {
                 ),
                 None => Self::MarkEnd(expand),
             },
-            //_ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
 }
@@ -457,41 +439,6 @@ impl crate::types::ScalarValue {
             },
         }
     }
-
-    /*
-        pub(super) fn to_raw(&self) -> Option<Cow<'_, [u8]>> {
-            match self {
-                Self::Bytes(b) => Some(Cow::Borrowed(b)),
-                Self::Str(s) => Some(Cow::Borrowed(s.as_bytes())),
-                Self::Null => None,
-                Self::Boolean(_) => None,
-                Self::Uint(i) => {
-                    let mut out = Vec::new();
-                    leb128::write::unsigned(&mut out, *i).unwrap();
-                    Some(Cow::Owned(out))
-                }
-                Self::Counter(i) => {
-                    let mut out = Vec::new();
-                    leb128::write::signed(&mut out, i.start).unwrap();
-                    Some(Cow::Owned(out))
-                }
-                Self::Int(i) | Self::Timestamp(i) => {
-                    let mut out = Vec::new();
-                    leb128::write::signed(&mut out, *i).unwrap();
-                    Some(Cow::Owned(out))
-                }
-                Self::F64(f) => {
-                    let mut out = Vec::new();
-                    out.extend_from_slice(&f.to_le_bytes());
-                    Some(Cow::Owned(out))
-                }
-                Self::Unknown {
-                    type_code: _,
-                    bytes,
-                } => Some(Cow::Borrowed(bytes)),
-            }
-        }
-    */
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -523,24 +470,6 @@ fn parse_leb128(input: &[u8]) -> Result<i64, ReadScalarError> {
         .map(|(_, v)| v)
         .map_err(|_| ReadScalarError::Leb)
 }
-
-/*
-impl PartialEq<ValueRef<'_>> for types::Value<'_> {
-    fn eq(&self, other: &ValueRef<'_>) -> bool {
-      other.eq(self)
-    }
-}
-
-impl PartialEq<types::Value<'_>> for ValueRef<'_> {
-    fn eq(&self, other: &types::Value<'_>) -> bool {
-        match (self, other) {
-            (ValueRef::Object(a), types::Value::Object(b)) => *a == *b,
-            (ValueRef::Scalar(a), types::Value::Scalar(b)) => *a == **b,
-            _ => false,
-        }
-    }
-}
-*/
 
 impl PartialEq<ScalarValue<'_>> for types::ScalarValue {
     fn eq(&self, other: &ScalarValue<'_>) -> bool {
