@@ -63,10 +63,7 @@ impl Distribution<ActorId> for StandardUniform {
 impl ActorId {
     pub fn random() -> ActorId {
         let mut buf = [0u8; 16];
-        // getrandom 0.3 breaks node v18
-        // keep using 0.2 until we stop supporting v18
-        //getrandom::fill(&mut buf).expect("random number generator failed"); // 0.3 interface
-        getrandom::fill(&mut buf).expect("random number generator failed"); // 0.2 interface
+        getrandom::fill(&mut buf).expect("random number generator failed");
         ActorId(TinyVec::from(buf))
     }
 
