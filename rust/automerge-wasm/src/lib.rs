@@ -329,6 +329,8 @@ interface Automerge {
     getMissingDeps(heads?: Heads): Heads;
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
+
+    diffPath(path: any, before: Heads, after: Heads, options?: DiffOptions): Patch[];
 }
 
 
@@ -337,6 +339,10 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+};
+
+export type DiffOptions = {
+  recursive?: boolean;
 };
 
 export type InitOptions = {
@@ -1105,15 +1111,19 @@ impl Automerge {
         Ok(interop::export_patches(&self.external_types, patches)?)
     }
 
-    #[wasm_bindgen(unchecked_return_type = "Patch[]")]
+    #[wasm_bindgen(js_name = diffPath, skip_typescript)]
     pub fn diff_path(
         &mut self,
         path: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
-        recursive: bool,
+        options: JsValue,
     ) -> Result<Array, error::Diff> {
         let obj = self.import(path)?.0;
+        let recursive = js_get(&options, "recursive")
+            .ok()
+            .and_then(|a| a.as_bool())
+            .unwrap_or(true);
 
         let before = get_heads(before)
             .map_err(error::Diff::InvalidBeforeHeads)?

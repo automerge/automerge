@@ -49,6 +49,7 @@ import type {
   Change,
   ChangeMetadata,
   DecodedChange,
+  DiffOptions,
   Heads,
   MaterializeValue,
   JsSyncState,
@@ -61,6 +62,7 @@ export type {
   ChangeMetadata,
   PutPatch,
   DelPatch,
+  DiffOptions,
   SpliceTextPatch,
   InsertPatch,
   IncPatch,
@@ -1025,12 +1027,12 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
  *
  * This is an experimental API
  */
-export function diffPath(doc: Doc<unknown>, path: Prop[], before: Heads, after: Heads, recursive: boolean): Patch[] {
+export function diffPath(doc: Doc<unknown>, path: Prop[], before: Heads, after: Heads, opts?: DiffOptions): Patch[] {
   checkHeads(before, "before")
   checkHeads(after, "after")
   const state = _state(doc)
   const objPath = absoluteObjPath(doc, path, "diff")
-  return state.handle.diff_path(objPath, before, after, recursive)
+  return state.handle.diffPath(objPath, before, after, opts)
 }
 
 function headsEqual(heads1: Heads, heads2: Heads): boolean {
