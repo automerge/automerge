@@ -23,6 +23,12 @@ pub struct Patch {
     pub action: PatchAction,
 }
 
+impl Patch {
+    pub(crate) fn has(&self, obj: &ObjId, recursive: bool) -> bool {
+        &self.obj == obj || (recursive && self.path.iter().any(|(o, _)| o == obj))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatchAction {
     /// A key was created or updated in a map

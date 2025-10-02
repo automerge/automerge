@@ -408,66 +408,8 @@ impl PatchLog {
             }
             // any objects exposed BEFORE exid get observed here
             expose_queue.pump_queue(&exid, &mut patch_builder, doc, clock.as_ref());
-            match event {
-                Event::PutMap {
-                    key,
-                    value,
-                    id,
-                    conflict,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    patch_builder.put(exid, key.into(), (value.into(), opid), *conflict);
-                }
-                Event::DeleteMap { key } => {
-                    patch_builder.delete_map(exid, key);
-                }
-                Event::IncrementMap { key, n, id } => {
-                    let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(exid, key.into(), (*n, opid));
-                }
-                Event::FlagConflictMap { key } => {
-                    patch_builder.flag_conflict(exid, key.into());
-                }
-                Event::PutSeq {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    patch_builder.put(exid, index.into(), (value.into(), opid), *conflict);
-                }
-                Event::Insert {
-                    index,
-                    value,
-                    id,
-                    conflict,
-                    //marks,
-                } => {
-                    let opid = doc.id_to_exid(*id);
-                    patch_builder.insert(
-                        exid,
-                        *index,
-                        (value.into(), opid),
-                        *conflict,
-                        //marks.clone(),
-                    );
-                }
-                Event::DeleteSeq { index, num } => {
-                    patch_builder.delete_seq(exid, *index, *num);
-                }
-                Event::IncrementSeq { index, n, id } => {
-                    let opid = doc.id_to_exid(*id);
-                    patch_builder.increment(exid, index.into(), (*n, opid));
-                }
-                Event::FlagConflictSeq { index } => {
-                    patch_builder.flag_conflict(exid, index.into());
-                }
-                Event::Splice { index, text, marks } => {
-                    patch_builder.splice_text(exid, *index, text, marks.clone());
-                }
-                Event::Mark { marks } => patch_builder.mark(exid, marks.clone().into_iter()),
-            }
+
+            patch_builder.log_event(doc, exid, event);
         }
         // any objects exposed AFTER all other events get exposed here
         expose_queue.flush_queue(&mut patch_builder, doc, clock.as_ref());

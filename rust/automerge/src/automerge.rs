@@ -760,7 +760,7 @@ impl Automerge {
         }
         if let Some(patch_log) = options.patch_log {
             if patch_log.is_active() {
-                am.log_current_state(patch_log);
+                am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
         Ok(am)
@@ -780,7 +780,7 @@ impl Automerge {
     /// [diff]: Self::diff()
     pub fn current_state(&self) -> Vec<Patch> {
         let mut patch_log = PatchLog::active();
-        self.log_current_state(&mut patch_log);
+        self.log_current_state(ObjMeta::root(), &mut patch_log, true);
         patch_log.make_patches(self)
     }
 
@@ -811,7 +811,7 @@ impl Automerge {
             )?;
             doc = doc.with_actor(self.actor_id().clone());
             if patch_log.is_active() {
-                doc.log_current_state(patch_log);
+                doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -833,9 +833,14 @@ impl Automerge {
         Ok(delta)
     }
 
-    pub(crate) fn log_current_state(&self, patch_log: &mut PatchLog) {
+    pub(crate) fn log_current_state(
+        &self,
+        obj: ObjMeta,
+        patch_log: &mut PatchLog,
+        recursive: bool,
+    ) {
         let clock = ClockRange::default();
-        let path_map = DiffIter::log(self, ObjMeta::root(), clock, patch_log);
+        let path_map = DiffIter::log(self, obj, clock, patch_log, recursive);
         patch_log.path_hint(path_map);
     }
 
@@ -1170,9 +1175,27 @@ impl Automerge {
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let clock = self.clock_range(before_heads, after_heads);
         let mut patch_log = PatchLog::active();
-        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log);
+        DiffIter::log(self, ObjMeta::root(), clock, &mut patch_log, true);
         patch_log.heads = Some(after_heads.to_vec());
         patch_log.make_patches(self)
+    }
+
+    /// Create patches representing the change in the current state of an object in the document between the
+    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
+    /// in the opposite order.
+    pub fn diff_obj(
+        &self,
+        obj: &ExId,
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
+        recursive: bool,
+    ) -> Result<Vec<Patch>, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = self.clock_range(before_heads, after_heads);
+        let mut patch_log = PatchLog::active();
+        DiffIter::log(self, obj, clock, &mut patch_log, recursive);
+        patch_log.heads = Some(after_heads.to_vec());
+        Ok(patch_log.make_patches(self))
     }
 
     /// Get the heads of this document.

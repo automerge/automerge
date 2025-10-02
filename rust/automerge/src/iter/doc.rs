@@ -71,6 +71,7 @@ pub(crate) struct DiffIter<'a> {
     list_iter: ListDiff<'a>,
     span_iter: SpansDiff<'a>,
     iter_type: IterType,
+    recursive: bool,
     obj: ObjId,
 }
 
@@ -80,16 +81,22 @@ impl<'a> DiffIter<'a> {
         obj: ObjMeta,
         clock: ClockRange,
         log: &mut PatchLog,
+        recursive: bool,
     ) -> BTreeMap<ObjId, (Prop, ObjId)> {
         let encoding = doc.text_encoding();
-        let mut iter = DiffIter::new(doc, obj, clock);
+        let mut iter = DiffIter::new(doc, obj, clock, recursive);
         for item in iter.by_ref() {
             item.log(log, encoding);
         }
         iter.path_map
     }
 
-    pub(crate) fn new(doc: &'a Automerge, obj: ObjMeta, clock: ClockRange) -> Self {
+    pub(crate) fn new(
+        doc: &'a Automerge,
+        obj: ObjMeta,
+        clock: ClockRange,
+        recursive: bool,
+    ) -> Self {
         let op_set = doc.ops();
         let iter_type = IterType::new(obj.typ);
         let obj = obj.id;
@@ -109,13 +116,16 @@ impl<'a> DiffIter<'a> {
             obj_id_iter,
             next_objs,
             path_map,
+            recursive,
         }
     }
 
     fn process_item(&mut self, item: DocDiffItem<'a>) -> Option<DocObjDiffItem<'a>> {
         if let Some((next_obj, next_typ)) = item.make_obj() {
             let prop = item.prop();
-            self.next_objs.insert(next_obj, next_typ);
+            if self.recursive {
+                self.next_objs.insert(next_obj, next_typ);
+            }
             self.path_map.insert(next_obj, (prop, self.obj));
         }
         Some(DocObjDiffItem {

@@ -237,5 +237,35 @@ describe('Automerge', () => {
           conflicts: [ false, true, false ],
       }])
     })
+    it('it can diff a path, shallowly or deeply', () => {
+      let doc = create()
+      doc.putObject("/", "foo", { a: 1, bar: { b: 2 } });
+      let h1 = doc.getHeads();
+      doc.put("/foo", "a", 2);
+      doc.put("/foo/bar", "b", 2);
+      let h2 = doc.getHeads();
+      doc.updateDiffCursor();
+      doc.put("/foo", "a", 3);
+      doc.put("/foo/bar", "b", 3);
+      let h3 = doc.getHeads();
+      let p13 = doc.diffPath("/foo", h1, h3)
+      assert.deepStrictEqual(p13, [
+        { action: "put", path: ["foo","a"], value: 3 },
+        { action: "put", path: ["foo","bar","b"], value: 3 },
+      ])
+      let p13b = doc.diffPath("/foo", h1, h3, { recursive: false })
+      assert.deepStrictEqual(p13b, [
+        { action: "put", path: ["foo","a"], value: 3 },
+      ])
+      let p23 = doc.diffPath("/foo", h2, h3)
+      assert.deepStrictEqual(p23, [
+        { action: "put", path: ["foo","a"], value: 3 },
+        { action: "put", path: ["foo","bar","b"], value: 3 },
+      ])
+      let p23b = doc.diffPath("/foo", h2, h3, { recursive: false })
+      assert.deepStrictEqual(p23b, [
+        { action: "put", path: ["foo","a"], value: 3 },
+      ])
+    })
   })
 })
