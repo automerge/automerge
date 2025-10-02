@@ -25,7 +25,7 @@ pub struct Patch {
 
 impl Patch {
     pub(crate) fn has(&self, obj: &ObjId, recursive: bool) -> bool {
-        &self.obj == obj && (recursive || self.path.iter().any(|(o, _)| o == obj))
+        &self.obj == obj || (recursive && self.path.iter().any(|(o, _)| o == obj))
     }
 }
 
