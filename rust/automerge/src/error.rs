@@ -153,3 +153,7 @@ pub enum UpdateObjectError {
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
 }
+
+#[derive(Debug, Clone, Copy, Error)]
+#[error("unable to resolve all dependencies")]
+pub struct UnableToResolveAllDependencies;

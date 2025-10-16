@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 
 use itertools::Itertools;
 
+use crate::error::UnableToResolveAllDependencies;
 pub(crate) use crate::op_set2::change::ChangeCollector;
 pub(crate) use crate::op_set2::types::ScalarValue;
 pub(crate) use crate::op_set2::{
@@ -17,6 +18,7 @@ pub(crate) use crate::read::ReadDoc;
 use crate::change_graph::ChangeGraph;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
+use crate::fragment::Fragment;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
@@ -903,6 +905,76 @@ impl Automerge {
         I: IntoIterator<Item = ChangeHash>,
     {
         Bundle::for_hashes(&self.ops, &self.change_graph, hashes)
+    }
+
+    /// EXPERIMENTAL: Break the history into consistent fragments.
+    pub fn consistent_history_fragment<F: Fn(&Change) -> bool>(
+        &self,
+        head_hash: ChangeHash,
+        is_boundary: F,
+    ) -> Result<Fragment, UnableToResolveAllDependencies> {
+        let mut horizon: HashSet<ChangeHash> = HashSet::from_iter([head_hash]);
+        let mut boundary: HashMap<ChangeHash, Change> = HashMap::new();
+
+        let mut visited: HashSet<ChangeHash> = HashSet::new();
+        let mut members: HashSet<ChangeHash> = HashSet::new();
+
+        while !horizon.is_empty() {
+            let (expected_len, horizon_changes) = {
+                let horizon_hashes = horizon.iter().copied().collect::<Vec<_>>();
+                (horizon_hashes.len(), self.get_changes(&horizon_hashes))
+            };
+            if expected_len != horizon_changes.len() {
+                Err(UnableToResolveAllDependencies)?
+            }
+            horizon.clear();
+
+            for change in &horizon_changes {
+                let digest = change.hash();
+
+                let is_newly_visited = visited.insert(digest);
+                if !is_newly_visited {
+                    continue;
+                }
+
+                members.insert(digest);
+
+                if is_boundary(change) {
+                    boundary.insert(digest, change.clone());
+                } else {
+                    let unexplored = change.deps().iter().filter(|&d| !visited.contains(d));
+                    horizon.extend(unexplored);
+                }
+            }
+        }
+
+        // Cleanup
+
+        let mut cleanup_horizon = boundary.keys().copied().collect::<Vec<_>>();
+        while !cleanup_horizon.is_empty() {
+            let cleanup_horizon_changes = self.get_changes(&cleanup_horizon);
+            if cleanup_horizon.len() != cleanup_horizon_changes.len() {
+                Err(UnableToResolveAllDependencies)?
+            }
+            cleanup_horizon.clear();
+
+            for change in cleanup_horizon_changes {
+                let change_hash = change.hash();
+
+                members.remove(&change_hash);
+                boundary.remove(&change_hash); // NOTE if one boundary covers another
+
+                let is_newly_visited = visited.insert(change_hash);
+                if !is_newly_visited {
+                    continue;
+                }
+
+                let unexplored = change.deps().iter().filter(|&d| !visited.contains(d));
+                cleanup_horizon.extend(unexplored);
+            }
+        }
+
+        Ok(Fragment::new(head_hash, members, boundary))
     }
 
     /// Save the entirety of this document in a compact form.

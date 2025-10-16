@@ -9,6 +9,13 @@ use crate::{
     types::{ActorId, ChangeHash, ElemId},
 };
 
+/// A collection of operations ([`Op`]s) made in a linear run.
+///
+/// This is conceptually equivalent to a "commit" in Git:
+/// many operations made by a single actor at a single point in time.
+///
+/// This struct also uses caching of the compressed bytes of the change,
+/// so many operations are more efficient than they would be otherwise.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Change {
     stored: StoredChange<'static, Verified>,

@@ -2,7 +2,7 @@
   description = "automerge";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-24.11";
+    nixpkgs.url = "nixpkgs/nixos-25.05";
     nixos-unstable.url = "nixpkgs/nixos-unstable-small";
 
     command-utils.url = "github:expede/nix-command-utils";
@@ -59,12 +59,6 @@
         taplo
       ];
 
-      darwin-installs = with pkgs.darwin.apple_sdk.frameworks; [
-        Security
-        CoreFoundation
-        Foundation
-      ];
-
       cargo-installs = with pkgs; [
         cargo-criterion
         unstable.cargo-deny
@@ -82,7 +76,7 @@
 
       cargo = "${pkgs.cargo}/bin/cargo";
       deno = "${unstable.deno}/bin/deno";
-      node = "${unstable.nodejs_20}/bin/node";
+      node = "${unstable.nodejs_22}/bin/node";
       wasm-opt = "${pkgs.binaryen}/bin/wasm-opt";
       wasm-pack = "${unstable.wasm-pack}/bin/wasm-pack";
       yarn = "${pkgs.yarn}/bin/yarn";
@@ -243,8 +237,7 @@
             command_menu
           ]
           ++ format-pkgs
-          ++ cargo-installs
-          ++ lib.optionals stdenv.isDarwin darwin-installs;
+          ++ cargo-installs;
 
         shellHook = "menu";
       };
