@@ -369,7 +369,7 @@ pub(crate) mod tests {
         // empty data
         let col5: ColumnData<BooleanCursor> = ColumnData::new();
         assert_eq!(col5.test_dump(), vec![vec![]]);
-        assert_eq!(col5.save(), vec![0]);
+        assert_eq!(col5.save(), vec![]);
     }
 
     #[test]

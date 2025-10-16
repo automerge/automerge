@@ -2,7 +2,7 @@ use std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Ran
 
 use crate::{convert, ActorId, ChangeHash, ScalarValue};
 
-use super::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
+use super::{parse, shift_range, CheckSum, ChunkType, Header, RawColumns};
 
 mod change_op_columns;
 pub(crate) use change_op_columns::ChangeOpsColumns;
@@ -128,10 +128,7 @@ impl<'a> Change<'a, Unverified> {
             .uncompressed()
             .ok_or(parse::ParseError::Error(ParseError::CompressedChangeCols))?;
 
-        let col_layout = Columns::parse2(ops_data.len(), ops_meta.iter())
-            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
-        let ops_meta = ChangeOpsColumns::try_from(col_layout)
-            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+        let ops_meta = ChangeOpsColumns::try_from(ops_meta)?;
 
         Ok((
             parse::Input::empty(),
