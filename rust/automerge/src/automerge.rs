@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
+use std::mem::take;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
@@ -908,26 +909,25 @@ impl Automerge {
     }
 
     /// EXPERIMENTAL: Break the history into consistent fragments.
-    pub fn consistent_history_fragment<F: Fn(&Change) -> bool>(
+    pub fn fragment<F: Fn(&Change) -> bool>(
         &self,
         head_hash: ChangeHash,
         is_boundary: F,
     ) -> Result<Fragment, UnableToResolveAllDependencies> {
-        let mut horizon: HashSet<ChangeHash> = HashSet::from_iter([head_hash]);
         let mut boundary: HashMap<ChangeHash, Change> = HashMap::new();
+        let mut visited: HashSet<ChangeHash> = HashSet::from([head_hash]);
+        let mut members: HashSet<ChangeHash> = HashSet::from([head_hash]);
 
-        let mut visited: HashSet<ChangeHash> = HashSet::new();
-        let mut members: HashSet<ChangeHash> = HashSet::new();
+        let head_change = self
+            .get_changes_by_hashes(vec![head_hash])
+            .map_err(|_| UnableToResolveAllDependencies)?;
+        let mut horizon: Vec<ChangeHash> = Vec::from(head_change[0].deps().to_vec()); // FIXME uglu
 
         while !horizon.is_empty() {
-            let (expected_len, horizon_changes) = {
-                let horizon_hashes = horizon.iter().copied().collect::<Vec<_>>();
-                (horizon_hashes.len(), self.get_changes(&horizon_hashes))
-            };
-            if expected_len != horizon_changes.len() {
-                Err(UnableToResolveAllDependencies)?
-            }
-            horizon.clear();
+            let local_horizon = take(&mut horizon);
+            let horizon_changes = self
+                .get_changes_by_hashes(local_horizon)
+                .map_err(|_| UnableToResolveAllDependencies)?;
 
             for change in &horizon_changes {
                 let digest = change.hash();
@@ -950,12 +950,16 @@ impl Automerge {
 
         // Cleanup
 
-        let mut cleanup_horizon = boundary.keys().copied().collect::<Vec<_>>();
+        let mut cleanup_horizon = Vec::new(); // boundary.keys().copied().collect::<Vec<_>>();
+        for (boundary_hash, boundary_change) in boundary.iter() {
+            members.remove(boundary_hash);
+            let deps = boundary_change.deps();
+            cleanup_horizon.extend(deps);
+        }
         while !cleanup_horizon.is_empty() {
-            let cleanup_horizon_changes = self.get_changes(&cleanup_horizon);
-            if cleanup_horizon.len() != cleanup_horizon_changes.len() {
-                Err(UnableToResolveAllDependencies)?
-            }
+            let cleanup_horizon_changes = self
+                .get_changes_by_hashes(cleanup_horizon.clone())
+                .map_err(|_| UnableToResolveAllDependencies)?;
             cleanup_horizon.clear();
 
             for change in cleanup_horizon_changes {
