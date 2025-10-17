@@ -57,6 +57,7 @@ test-log = { version = "0.2.10", features = [
 tracing-subscriber = { version = "^0.3", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
+testresult = "0.4.1"
 
 [[bench]]
 name = "range"
