@@ -329,6 +329,8 @@ interface Automerge {
     getMissingDeps(heads?: Heads): Heads;
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
+
+    diffPath(path: any, before: Heads, after: Heads, options?: DiffOptions): Patch[];
 }
 
 
@@ -337,6 +339,10 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+};
+
+export type DiffOptions = {
+  recursive?: boolean;
 };
 
 export type InitOptions = {
@@ -1107,6 +1113,28 @@ impl Automerge {
         let after = get_heads(Some(after))?.unwrap();
 
         let patches = self.doc.diff(&before, &after);
+
+        Ok(interop::export_patches(&self.external_types, patches)?)
+    }
+
+    #[wasm_bindgen(js_name = diffPath, skip_typescript)]
+    pub fn diff_path(
+        &mut self,
+        path: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] before: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] after: Array,
+        options: JsValue,
+    ) -> Result<Array, error::Diff> {
+        let obj = self.import(path)?.0;
+        let recursive = js_get(&options, "recursive")
+            .ok()
+            .and_then(|a| a.as_bool())
+            .unwrap_or(true);
+
+        let before = get_heads(Some(before))?.unwrap();
+        let after = get_heads(Some(after))?.unwrap();
+
+        let patches = self.doc.diff_obj(&obj, &before, &after, recursive)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
     }
@@ -2033,6 +2061,8 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum Diff {
+        #[error(transparent)]
+        Import(#[from] interop::error::ImportObj),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error("bad heads: {0}")]
