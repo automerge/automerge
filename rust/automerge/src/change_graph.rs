@@ -676,10 +676,11 @@ impl ChangeGraph {
 
             if let Some(cached) = self.clock_cache.get(&idx) {
                 SeqClock::merge(clock, cached);
-            } else if visited.len() <= limit {
-                to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
             } else {
-                break;
+                to_visit.extend(self.parents(idx).filter(|p| !visited.contains(p)));
+                if visited.len() > limit {
+                    break;
+                }
             }
         }
     }
