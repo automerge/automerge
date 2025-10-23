@@ -2447,3 +2447,151 @@ fn get_changes_with_hash_of_empty_change_produces_correct_result() {
     let changes = doc.get_changes(&[head]);
     assert!(changes.is_empty());
 }
+
+#[test]
+fn reproduce_clock_cache_bug() {
+    // This test exercises an issue with clock caching. The problem manifested
+    // as two documents which have common history returning different results
+    // for `Automerge::get_changes(&common_heads)` where `common_heads` is a
+    // set of change hashes which are in both documents.
+    // `Automerge::get_changes(&heads)` returns everything in a document which
+    // is _not_ an ancestor of the heads specified. In two documents which
+    // contain `heads`, `get_changes(&heads)` should therefore return the same
+    // thing.
+    //
+    // In order to compute the ancestors of the common heads, automerge converts
+    // the heads to a vector clock. Every commit in an Automerge document has an
+    // (actor ID, sequence number) pair (a lamport timestamp) which identifies
+    // the commit. We can walk the commit graph accumulating these pairs to form
+    // a vector clock. This vector clock can then be used to determine if any
+    // given commit is an ancestor of the given heads.
+    //
+    // E.g. imagine this graph where I denote the lamport timestamp as (actor
+    // ID, sequence number):
+    //
+    //                       * (a, 1)
+    //                       |
+    //                       * (a, 2)
+    //                     /   \
+    //                    /      \
+    //                   * (b, 1) * (c, 1)
+    //                    \      /
+    //                     \   /
+    //                       * (d, 1)
+    //
+    // Then say we have the heads for (b, 1), we can walk from (b,1) to the root
+    // and we will end up with a vector clock of [(a, 2), (b, 1)]. We can then
+    // use this vector clock to determine that (b,1) is an ancestor of (a,1)
+    // because the clock for (b,1) contains (a,2), which is greater than (a,1)
+    //
+    // Creating these clocks for large documents is expensive, so we cache
+    // clocks for every 16 commits in the document. The problem this test
+    // exposes is that the logic for the clock caching was incorrect. When
+    // walking the graph, the cache logic could accidentally omit some
+    // commits from the cached clock.
+    //
+    // The caching logic was expressed by starting with the end node and then
+    // walking backwards in a depth first search until the cache limit is
+    // reached, it looked something like this:
+    //
+    // let limit = CACHE_STEP * 2
+    // let clock = new_clock()
+    // let to_visit = [start node]
+    // let visited = []
+    // while let Some(node) = to_visit.pop() {
+    //     // Process node
+    //     if let Some(cached) = get_cache(node) {
+    //         merge(cached, clock)
+    //     } else if visited.len() <= limit {
+    //         to_visit.extend(parents_of(node))
+    //     } else {
+    //         break;
+    //     }
+    // }
+    //
+    // The logic would then restart from the remaining nodes in the to_visit queue.
+    //
+    // The bug is that in some scenarios we would not add the parents of the
+    // node which causes us to reach the cache limit to the to_visit queue.
+    //
+    // The easiest way to observe this bug is to create a document where there
+    // is a commit which has a large number of parents (i.e. a merge commit
+    // from many branches). E.g imagine a document like this:
+    //
+    //                     A
+    //                     |
+    //         .--.--.--.--.--.--.--.--.
+    //         B  C  D  E  F  G  H  I  J
+    //         |  |  |  |  |  |  |  |  |
+    //         K  L  M  N  O  P  Q  R  S
+    //         '--'--'--'--'--'--'--'--'
+    //                    |
+    //                    T
+    //                    |
+    //                    U
+    //
+    // Now, let's say our CACHE_STEP is 3. Then every third change which is
+    // applied is cached. U is the 21st change and so it will be cached. The
+    // cache logic will now step backwards through the graph until 6 (CACHE_STEP
+    // * 2) nodes have been visited, and then it will stop. In this case that
+    // would mean that we add T to the list of nodes to visit, then pop it and
+    // process it, adding all of T's parents to the list of nodes to visit.
+    // Then we continue processing until we reach O so the final order is
+    // T, K, L, M, N, O. Here's where the bug is, the cache logic now returns
+    // and says "now keep going with the rest of the to_visit list", but it
+    // didn't add the parents of O to the list and so F never gets processed.
+    //
+    // This is only a problem if F is a commit with a different actor ID then
+    // O, otherwise the (actor_id, seq) if O covers F.
+    //
+    // So, to reproduce this error, we create a lot of branches, and on each
+    // branch make a lot of commits - each commit with a different actor.
+    // Then we merge the branches together and observe that `get_changes(&heads)`
+    // returns empty. If the caching logic is incorrect the heads will be
+    // converted into a clock which doesn't cover commits like F and then
+    // `get_changes(&heads)` will be non empty.
+
+    let mut base = AutoCommit::new();
+
+    // Add some number of initial commits
+    for i in 0..100 {
+        base.put(ROOT, format!("initial_commit_{}", i), true)
+            .unwrap();
+        base.commit();
+    }
+
+    const NUM_BRANCHES: usize = 20;
+    const COMMITS_PER_BRANCH: usize = 2;
+
+    let mut branches = (0..NUM_BRANCHES - 1)
+        .map(|_| base.fork())
+        .collect::<Vec<_>>();
+    branches.push(base);
+
+    for (branch_no, branch) in branches.iter_mut().enumerate() {
+        for commit_no in 0..COMMITS_PER_BRANCH {
+            branch
+                .put(ROOT, format!("branch_{}-{}", branch_no, commit_no), true)
+                .unwrap();
+            branch.commit();
+            // Make a new actor for the next commit
+            *branch = branch.fork();
+        }
+    }
+
+    let mut base = branches.pop().unwrap();
+
+    for branch in &mut branches {
+        base.merge(branch).unwrap();
+    }
+
+    // Create a bunch of commits after the merge to ensure a clock is cached
+    // between the document heads and the branches
+    for i in 0..100 {
+        base.put(ROOT, format!("after-merge-{}", i), true).unwrap();
+        base.commit();
+    }
+    let heads = base.get_heads();
+
+    assert!(base.get_changes(&heads).is_empty());
+}
