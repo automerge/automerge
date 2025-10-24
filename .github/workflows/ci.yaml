@@ -14,7 +14,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86
+          toolchain: 1.89
           default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -28,7 +28,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86
+          toolchain: 1.89
           default: true
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -42,7 +42,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86
+          toolchain: 1.89
           default: true
       - uses: Swatinem/rust-cache@v2
       - name: Build rust docs
@@ -128,7 +128,7 @@ jobs:
     strategy:
       matrix:
         toolchain:
-          - 1.86
+          - 1.89
     steps:
       - uses: actions/checkout@v5
       - uses: actions-rs/toolchain@v1
@@ -147,7 +147,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86
+          toolchain: 1.89
           default: true
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/ci/build-test
@@ -160,7 +160,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.86
+          toolchain: 1.89
           default: true
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/ci/build-test

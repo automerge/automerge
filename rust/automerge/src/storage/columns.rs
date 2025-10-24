@@ -261,7 +261,7 @@ impl ColumnLayoutParser {
                         GroupParseState::Ready(b) => self.columns.push(b.finish()),
                         GroupParseState::InValue(b) => self.columns.push(b.finish_empty().finish()),
                     };
-                    std::mem::swap(&mut self.state, &mut LayoutParserState::Ready);
+                    self.state = LayoutParserState::Ready;
                     self.add_column(column, range)
                 } else {
                     match group_state {

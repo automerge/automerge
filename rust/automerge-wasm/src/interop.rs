@@ -1459,7 +1459,7 @@ impl Automerge {
                     .map_err(error::ImportObj::BadImport)?
             };
             self.import_path(id, obj_type, components)
-                .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), e))
+                .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), Box::new(e)))
         } else {
             Err(error::ImportObj::NotString)
         }
@@ -2144,7 +2144,7 @@ pub(crate) mod error {
         #[error("obj id was not a string")]
         NotString,
         #[error("invalid path {0}: {1}")]
-        InvalidPath(String, ImportPath),
+        InvalidPath(String, Box<ImportPath>),
         #[error("unable to import object id: {0}")]
         BadImport(AutomergeError),
         #[error("error calling data handler for type {0}: {1:?}")]

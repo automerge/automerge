@@ -29,6 +29,7 @@ pub struct AMunknownValue {
     type_code: u8,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum Value {
     ActorId(am::ActorId, UnsafeCell<Option<AMactorId>>),
     Change(Box<am::Change>, UnsafeCell<Option<AMchange>>),

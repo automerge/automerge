@@ -507,8 +507,7 @@ impl ChangeGraph {
             .extend(iter.clone().map(|(c, _)| c.message().cloned()));
         self.extra_bytes_meta
             .extend(iter.clone().map(|(c, _)| ValueMeta::from(c.extra_bytes())));
-        self.parents
-            .extend(std::iter::repeat(None).take(iter.len()));
+        self.parents.extend(std::iter::repeat_n(None, iter.len()));
         for (c, _) in iter {
             self.extra_bytes_raw.extend_from_slice(c.extra_bytes());
         }
