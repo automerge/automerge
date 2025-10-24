@@ -101,7 +101,7 @@ mod tests {
     use super::*;
     use std::num::NonZeroUsize;
 
-    const NEED_ONE: Needed = Needed::Size(unsafe { NonZeroUsize::new_unchecked(1) });
+    const NEED_ONE: Needed = Needed::Size(NonZeroUsize::new(1).unwrap());
 
     #[test]
     fn leb_128_u64() {

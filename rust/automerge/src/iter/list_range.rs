@@ -162,8 +162,7 @@ impl<'a> Iterator for ListDiff<'a> {
                 }
             }
 
-            if diff.is_del() && last_visible.is_some() {
-                let mut last = last_visible.unwrap();
+            if let Some(mut last) = last_visible {
                 last.update(state.expose);
                 if last.diff.is_visible() {
                     self.index += 1;

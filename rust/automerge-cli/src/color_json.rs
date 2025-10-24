@@ -55,7 +55,7 @@ pub(crate) fn print_colored_json(value: &serde_json::Value) -> std::io::Result<(
     let mut ser = serde_json::Serializer::with_formatter(&mut ignored_writer, formatter);
     value
         .serialize(&mut ser)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 struct ColoredFormatter<F: Formatter> {
