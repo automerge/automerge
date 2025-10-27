@@ -498,7 +498,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(skip_typescript)]
-    pub fn keys(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
+    pub fn keys(&self, obj: JsValue, heads: JsValue) -> Result<Array, error::Get> {
         let (obj, _) = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads)? {
             self.doc
@@ -513,7 +513,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(skip_typescript)]
-    pub fn text(&self, obj: JsValue, heads: Option<Array>) -> Result<String, error::Get> {
+    pub fn text(&self, obj: JsValue, heads: JsValue) -> Result<String, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
             Ok(self.doc.text_at(&obj, &heads)?)
@@ -524,7 +524,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(skip_typescript)]
-    pub fn spans(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::GetSpans> {
+    pub fn spans(&self, obj: JsValue, heads: JsValue) -> Result<Array, error::GetSpans> {
         let (obj, _) = self.import(obj)?;
         let spans = if let Some(heads) = get_heads(heads)? {
             self.doc.spans_at(&obj, &heads)?
@@ -727,7 +727,7 @@ impl Automerge {
         &mut self,
         text: JsValue,
         index: usize,
-        heads: Option<Array>,
+        heads: JsValue,
     ) -> Result<JsValue, error::GetBlock> {
         let (text, _) = self.import(text)?;
         let Some((Value::Object(am::ObjType::Map), id)) = self.doc.get(&text, index)? else {
@@ -853,12 +853,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed here
     #[wasm_bindgen(js_name = get, skip_typescript)]
-    pub fn get(
-        &self,
-        obj: JsValue,
-        prop: JsValue,
-        heads: Option<Array>,
-    ) -> Result<JsValue, error::Get> {
+    pub fn get(&self, obj: JsValue, prop: JsValue, heads: JsValue) -> Result<JsValue, error::Get> {
         let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop);
         let heads = get_heads(heads)?;
@@ -887,7 +882,7 @@ impl Automerge {
         &self,
         obj: JsValue,
         prop: JsValue,
-        heads: Option<Array>,
+        heads: JsValue,
     ) -> Result<JsValue, error::Get> {
         let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop);
@@ -924,7 +919,7 @@ impl Automerge {
 
     // skip_typescript as we can't type the optional heads parameter
     #[wasm_bindgen(js_name = objInfo, skip_typescript)]
-    pub fn obj_info(&self, obj: JsValue, heads: Option<Array>) -> Result<Object, error::Get> {
+    pub fn obj_info(&self, obj: JsValue, heads: JsValue) -> Result<Object, error::Get> {
         // fixme - import takes a path - needs heads to be accurate
         let (obj, _) = self.import(obj)?;
         let typ = self.doc.object_type(&obj)?;
@@ -945,12 +940,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed here
     #[wasm_bindgen(js_name = getAll, skip_typescript)]
-    pub fn get_all(
-        &self,
-        obj: JsValue,
-        arg: JsValue,
-        heads: Option<Array>,
-    ) -> Result<Array, error::Get> {
+    pub fn get_all(&self, obj: JsValue, arg: JsValue, heads: JsValue) -> Result<Array, error::Get> {
         let (obj, _) = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(arg);
@@ -1100,11 +1090,15 @@ impl Automerge {
     #[wasm_bindgen(unchecked_return_type = "Patch[]")]
     pub fn diff(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "Heads")] before: Array,
-        #[wasm_bindgen(unchecked_param_type = "Heads")] after: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
     ) -> Result<Array, error::Diff> {
-        let before = get_heads(Some(before))?.unwrap();
-        let after = get_heads(Some(after))?.unwrap();
+        let before = get_heads(before)
+            .map_err(error::Diff::InvalidBeforeHeads)?
+            .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
+        let after = get_heads(after)
+            .map_err(error::Diff::InvalidAfterHeads)?
+            .ok_or_else(|| error::Diff::MissingAfterHeads)?;
 
         let patches = self.doc.diff(&before, &after);
 
@@ -1113,9 +1107,12 @@ impl Automerge {
 
     pub fn isolate(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<(), error::Isolate> {
-        let heads = get_heads(Some(heads))?.unwrap();
+        let Some(heads) = get_heads(heads)? else {
+            return Err(error::Isolate::NoHeads);
+        };
+
         self.doc.isolate(&heads);
         Ok(())
     }
@@ -1126,7 +1123,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(skip_typescript)]
-    pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
+    pub fn length(&self, obj: JsValue, heads: JsValue) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
             Ok(self.doc.length_at(&obj, &heads) as f64)
@@ -1159,9 +1156,9 @@ impl Automerge {
     #[wasm_bindgen(js_name=saveSince)]
     pub fn save_since(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: Array,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] heads: JsValue,
     ) -> Result<Uint8Array, interop::error::BadChangeHashes> {
-        let heads = get_heads(Some(heads))?.unwrap_or(Vec::new());
+        let heads = get_heads(heads)?.unwrap_or(Vec::new());
         let bytes = self.doc.save_after(&heads);
         Ok(Uint8Array::from(bytes.as_slice()))
     }
@@ -1304,7 +1301,7 @@ impl Automerge {
 
     // skip_typescript as the optional heads parameter can't be typed
     #[wasm_bindgen(js_name = getMissingDeps, skip_typescript)]
-    pub fn get_missing_deps(&mut self, heads: Option<Array>) -> Result<Array, error::Get> {
+    pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, error::Get> {
         let heads = get_heads(heads)?.unwrap_or_default();
         let deps = self.doc.get_missing_deps(&heads);
         let deps: Array = deps
@@ -1352,7 +1349,7 @@ impl Automerge {
     pub fn materialize(
         &mut self,
         obj: JsValue,
-        heads: Option<Array>,
+        heads: JsValue,
         meta: JsValue,
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
@@ -1369,7 +1366,7 @@ impl Automerge {
         &mut self,
         obj: JsValue,
         position: JsValue,
-        heads: Option<Array>,
+        heads: JsValue,
         move_cursor: JsValue,
     ) -> Result<String, error::Cursor> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
@@ -1418,7 +1415,7 @@ impl Automerge {
         &mut self,
         obj: JsValue,
         cursor: JsValue,
-        heads: Option<Array>,
+        heads: JsValue,
     ) -> Result<f64, error::Cursor> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         if obj_type != am::ObjType::Text {
@@ -1489,7 +1486,7 @@ impl Automerge {
 
     // skip_typescript as we can't type the optional heads paramater
     #[wasm_bindgen(skip_typescript)]
-    pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
+    pub fn marks(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
         let marks = if let Some(heads) = heads {
@@ -1516,7 +1513,7 @@ impl Automerge {
         &mut self,
         obj: JsValue,
         index: f64,
-        heads: Option<Array>,
+        heads: JsValue,
     ) -> Result<Object, JsValue> {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
@@ -2035,10 +2032,16 @@ pub mod error {
     pub enum Diff {
         #[error(transparent)]
         Export(#[from] interop::error::Export),
-        #[error("bad heads: {0}")]
-        Heads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error("invalid before heads: {0}")]
+        InvalidBeforeHeads(interop::error::BadChangeHashes),
+        #[error("before heads were null or undefined")]
+        MissingBeforeHeads,
+        #[error("invalid after heads: {0}")]
+        InvalidAfterHeads(interop::error::BadChangeHashes),
+        #[error("after heads were null or undefined")]
+        MissingAfterHeads,
     }
 
     impl From<Diff> for JsValue {
@@ -2051,6 +2054,8 @@ pub mod error {
     pub enum Isolate {
         #[error("bad heads: {0}")]
         Heads(#[from] interop::error::BadChangeHashes),
+        #[error("no heads specified")]
+        NoHeads,
     }
 
     impl From<Isolate> for JsValue {
