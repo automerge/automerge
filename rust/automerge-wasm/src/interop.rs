@@ -943,19 +943,21 @@ pub(crate) fn import_obj(
     }
 }
 
-pub(crate) fn get_heads(
-    heads: Option<Array>,
-) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
+pub(crate) fn get_heads(heads: JsValue) -> Result<Option<Vec<ChangeHash>>, error::BadChangeHashes> {
+    if heads.is_undefined() || heads.is_null() {
+        return Ok(None);
+    }
+    let Ok(heads) = heads.dyn_into::<js_sys::Array>() else {
+        return Err(error::BadChangeHashes::NotArray);
+    };
     heads
-        .map(|h| {
-            h.iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    ChangeHash::try_from(JS(v)).map_err(|e| error::BadChangeHashes::BadElem(i, e))
-                })
-                .collect()
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            ChangeHash::try_from(JS(v)).map_err(|e| error::BadChangeHashes::BadElem(i, e))
         })
-        .transpose()
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 #[derive(Clone, Debug)]

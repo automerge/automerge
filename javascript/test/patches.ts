@@ -103,14 +103,18 @@ describe("patches", () => {
 
       const goodAfter = Automerge.getHeads(doc)
 
-      assert.throws(
-        () => Automerge.diff(doc, null as any, goodAfter),
-        /before must be an array/,
-      )
-      assert.throws(
-        () => Automerge.diff(doc, goodBefore, null as any),
-        /after must be an array/,
-      )
+      let invalidInputs = [null, "", "ab", ["ab"]]
+
+      for (const invalidInput of invalidInputs) {
+        assert.throws(
+          () => Automerge.diff(doc, invalidInput as any, goodAfter),
+          /invalid before heads/,
+        )
+        assert.throws(
+          () => Automerge.diff(doc, goodBefore, invalidInput as any),
+          /invalid after heads/,
+        )
+      }
     })
   })
 

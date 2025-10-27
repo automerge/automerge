@@ -1007,8 +1007,8 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
  * If either of the heads are missing from the document the returned set of patches will be empty
  */
 export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
-  checkHeads(before, "before")
-  checkHeads(after, "after")
+  checkHeads(before, "before heads")
+  checkHeads(after, "after heads")
   const state = _state(doc)
   if (
     state.mostRecentPatch &&
@@ -1034,7 +1034,7 @@ function headsEqual(heads1: Heads, heads2: Heads): boolean {
 
 function checkHeads(heads: Heads, fieldname: string) {
   if (!Array.isArray(heads)) {
-    throw new Error(`${fieldname} must be an array`)
+    throw new Error(`invalid ${fieldname}: must be an array`)
   }
 }
 
