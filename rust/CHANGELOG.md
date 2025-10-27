@@ -1,3 +1,11 @@
+# 0.7.1
+
+* Fix a bug which could cause sync loops (and other misbehviours, see #3df5fb63)
+* Update minimum supported Rust version to 1.89. We actually already required
+  this due to `smol` requiring it, but `smol` didn't document this fact until
+  `0.3.4` (see
+  https://github.com/rust-analyzer/smol_str/commit/02336c59bed57d292997c0b5a69e436785aa3be3)
+
 # 0.7.0
 
 This is a big change since the last rust release. The major addition is that
