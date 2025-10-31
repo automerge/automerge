@@ -245,6 +245,7 @@ where
 // this structure allows for the vectors to be allocated
 // once and reused (via trucate()) when creating a large number
 // of changes (like on load)
+#[derive(Debug, PartialEq)]
 pub(crate) struct ActorMapper<'a> {
     seen_actors: Vec<bool>,
     pub(crate) mapping: Vec<Option<ActorIdx>>,

@@ -153,6 +153,11 @@ impl AsRef<StoredChange<'static, Verified>> for Change {
     }
 }
 
+impl From<StoredChange<'static, Verified>> for Change {
+    fn from(s: StoredChange<'static, Verified>) -> Self {
+        Change::new(s)
+    }
+}
 impl From<Change> for StoredChange<'static, Verified> {
     fn from(c: Change) -> Self {
         c.stored

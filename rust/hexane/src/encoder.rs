@@ -486,7 +486,9 @@ where
         assert!(self.writer.is_locked());
         self.state.flush(&mut self.writer);
         let start = out.len();
-        self.writer.write(out);
+        if self.len > 0 {
+            self.writer.write(out);
+        }
         let end = out.len();
         start..end
     }
@@ -580,8 +582,17 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::super::boolean::BooleanCursor;
     use super::super::rle::UIntCursor;
     use super::*;
+
+    #[test]
+    fn test_empty_bool() {
+        let encoder = Encoder::<BooleanCursor>::new(true); // locked
+        let mut data = vec![];
+        let range = encoder.save_to(&mut data);
+        assert_eq!(range, 0..0);
+    }
 
     #[test]
     fn test_encoding_large_lit_runs() {

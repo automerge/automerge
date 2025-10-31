@@ -457,6 +457,21 @@ impl From<MismatchingColumn> for ParseChangeColumnsError {
     }
 }
 
+use super::super::parse;
+use super::ParseError;
+
+impl TryFrom<RawColumns<compression::Uncompressed>> for ChangeOpsColumns {
+    type Error = parse::ParseError<ParseError>;
+
+    fn try_from(raw: RawColumns<compression::Uncompressed>) -> Result<Self, Self::Error> {
+        let len = raw.total_column_len();
+        let col_layout = Columns::parse2(len, raw.iter())
+            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))?;
+        ChangeOpsColumns::try_from(col_layout)
+            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))
+    }
+}
+
 impl TryFrom<Columns> for ChangeOpsColumns {
     type Error = ParseChangeColumnsError;
 

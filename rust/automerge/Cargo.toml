@@ -15,7 +15,7 @@ utf8-indexing = []
 utf16-indexing = []
 
 [dependencies]
-hexane = { version = "0.1.5", path = "../hexane" }
+hexane = { version = "0.1.6", path = "../hexane" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
 sha2 = "0.11.0-pre.5"

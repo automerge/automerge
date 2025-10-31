@@ -127,6 +127,11 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
+        #[allow(clippy::len_zero)]
+        if self.len() == 0 {
+            // is_empty() considers all false to be empty
+            return start..start;
+        }
         if self.slabs.len() == 1 {
             let slab = self.slabs.get(0).unwrap();
             if slab.is_empty() {

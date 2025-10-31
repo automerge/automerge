@@ -5,6 +5,8 @@ pub(crate) enum Error {
     #[error("changes out of order")]
     ChangesOutOfOrder,
     #[error("incorrect max op")]
+    InvalidState,
+    #[error("invalid internal state")]
     IncorrectMaxOp,
     #[error("missing ops")]
     MissingOps,
