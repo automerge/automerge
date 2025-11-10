@@ -163,7 +163,7 @@ impl<'a> OpEncoderStrategy<'a> {
         mapper.reset();
         match self {
             Self::Ops(mut v) => v.finish(change, mapper),
-            Self::Enc(e) => e.finish(change, mapper),
+            Self::Enc(e) => Ok(e.finish(change, mapper)),
             Self::Null => Err(Error::InvalidState),
         }
     }
@@ -269,6 +269,7 @@ impl<'a> VecEncoder<'a> {
     }
 
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
+        assert!(self.ops[index].is_none());
         self.data[index] = Some(op);
     }
 
@@ -478,7 +479,7 @@ impl<'a> ProgressiveEncoder<'a> {
         mut self,
         change: &BuildChangeMetadata<'_>,
         mapper: &mut ActorMapper<'_>,
-    ) -> Result<ChangeCols, Error> {
+    ) -> ChangeCols {
         self.flush();
 
         let mut data = vec![];
@@ -488,14 +489,14 @@ impl<'a> ProgressiveEncoder<'a> {
         let actor = mapper.actors[change.actor].clone();
         let other_actors = mapper.iter().collect();
 
-        Ok(ChangeCols {
+        ChangeCols {
             actor,
             other_actors,
             start_op,
             num_ops,
             data,
             meta,
-        })
+        }
     }
 }
 
