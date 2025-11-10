@@ -120,7 +120,7 @@ impl<'a> BundleStorage<'a, Unverified> {
 impl BundleStorage<'_, Verified> {
     pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
         let change_meta = self.iter_change_meta().collect();
-        let mut collector = ChangeCollector::from_bundle_changes(change_meta);
+        let mut collector = ChangeCollector::from_bundle_changes(change_meta, &self.actors);
         for op in self.iter_ops() {
             collector.add(op);
         }
