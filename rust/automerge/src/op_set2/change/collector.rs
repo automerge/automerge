@@ -269,7 +269,7 @@ impl<'a> VecEncoder<'a> {
     }
 
     fn add(&mut self, index: usize, op: OpBuilder<'a>) {
-        assert!(self.ops[index].is_none());
+        assert!(self.data[index].is_none());
         self.data[index] = Some(op);
     }
 
