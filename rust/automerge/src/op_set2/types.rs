@@ -9,8 +9,8 @@ use crate::{hydrate, TextEncoding};
 use std::cmp::Ordering;
 use std::fmt;
 
-use super::hexane::{PackError, Packable, RleCursor, ScanMeta};
 use super::meta::{ValueMeta, ValueType};
+use hexane::{PackError, Packable, RleCursor};
 
 pub(crate) use super::meta::MetaCursor;
 
@@ -116,10 +116,10 @@ impl TryFrom<u64> for Action {
             5 => Ok(Action::Increment),
             6 => Ok(Action::MakeTable),
             7 => Ok(Action::Mark),
-            other => Err(PackError::invalid_value(
-                "valid action (integer between 0 and 7)",
-                format!("unexpected integer: {}", other),
-            )),
+            other => Err(PackError::InvalidValue(format!(
+                "valid action (integer between 0 and 7), unexpected integer: {}",
+                other
+            ))),
         }
     }
 }
@@ -728,16 +728,6 @@ impl Packable for ActorIdx {
 
     fn pack(item: &ActorIdx, out: &mut Vec<u8>) {
         leb128::write::unsigned(out, u64::from(*item)).unwrap();
-    }
-
-    fn validate(val: Option<&Self>, m: &ScanMeta) -> Result<(), PackError> {
-        if let Some(&ActorIdx(a)) = val {
-            if a >= m.actors as u32 {
-                // FIXME - PackError shouldnt know about Actors
-                return Err(PackError::ActorIndexOutOfRange(a as u64, m.actors));
-            }
-        }
-        Ok(())
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'static, Self>), PackError> {

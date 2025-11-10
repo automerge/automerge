@@ -15,8 +15,8 @@ pub(crate) use {
     bundle::{BundleMetadata, BundleStorage},
     change::{AsChangeOp, Change, ChangeOp, Compressed, ReadChangeOpError},
     chunk::{CheckSum, Chunk, ChunkType, Header},
-    columns::{ColumnSpec, Columns, MismatchingColumn, RawColumn, RawColumns},
-    document::{CompressConfig, DocChangeColumns, DocChangeMetadata, Document},
+    columns::{ColumnSpec, Columns, RawColumn, RawColumns},
+    document::{CompressConfig, Document},
 };
 
 fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {

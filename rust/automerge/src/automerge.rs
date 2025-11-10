@@ -208,8 +208,6 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
-    /// The maximum operation counter this document has seen.
-    max_op: u64,
 }
 
 impl Automerge {
@@ -221,7 +219,6 @@ impl Automerge {
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
-            max_op: 0,
         }
     }
 
@@ -232,8 +229,20 @@ impl Automerge {
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
-            max_op: 0,
         }
+    }
+
+    pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
+        let deps = change_graph.heads().collect();
+        let mut doc = Automerge {
+            queue: vec![],
+            change_graph,
+            ops,
+            deps,
+            actor: Actor::Unused(ActorId::random()),
+        };
+        doc.remove_unused_actors(false);
+        doc
     }
 
     pub(crate) fn ops_mut(&mut self) -> &mut OpSet {
@@ -376,7 +385,7 @@ impl Automerge {
         }
 
         // SAFETY: this unwrap is safe as we always add 1
-        let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
+        let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
         let checkpoint = self.ops.save_checkpoint();
         TransactionArgs {
             actor_index,
@@ -704,7 +713,8 @@ impl Automerge {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
                 first_chunk_was_doc = true;
-                reconstruct_document(&d, options.verification_mode, options.text_encoding)?
+                d.reconstruct(options.verification_mode, options.text_encoding)
+                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -1034,9 +1044,7 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
-    pub(crate) fn update_history(&mut self, change: &Change, num_ops: usize) {
-        self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
-
+    pub(crate) fn update_history(&mut self, change: &Change, _num_ops: usize) {
         self.update_deps(change);
 
         let actor_index = self
@@ -1972,32 +1980,4 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
-}
-
-pub(crate) fn reconstruct_document<'a>(
-    doc: &'a storage::Document<'a>,
-    mode: VerificationMode,
-    text_encoding: TextEncoding,
-) -> Result<Automerge, AutomergeError> {
-    let storage::load::ReconOpSet {
-        op_set,
-        heads,
-        max_op,
-        change_graph,
-        ..
-    } = storage::load::reconstruct_opset(doc, mode, text_encoding)
-        .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
-
-    let mut doc = Automerge {
-        queue: vec![],
-        change_graph,
-        ops: op_set,
-        deps: heads.into_iter().collect(),
-        actor: Actor::Unused(ActorId::random()),
-        max_op,
-    };
-
-    doc.remove_unused_actors(false);
-
-    Ok(doc)
 }

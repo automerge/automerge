@@ -1,6 +1,6 @@
 use super::aggregate::{Acc, Agg};
 use super::columndata::ColumnData;
-use super::cursor::{ColumnCursor, HasAcc, HasPos, Run, ScanMeta, SpliceDel};
+use super::cursor::{ColumnCursor, HasAcc, HasPos, Run, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder};
 use super::leb128::lebsize;
 use super::pack::{PackError, Packable};
@@ -511,12 +511,15 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         self.offset
     }
 
-    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+    fn load_with<F>(data: &[u8], test: &F) -> Result<ColumnData<Self>, PackError>
+    where
+        F: Fn(Option<&Self::Item>) -> Option<String>,
+    {
         let mut cursor = Self::empty();
         let mut writer = SlabWriter::<P>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
-            P::validate(run.value.as_deref(), m)?;
+            P::validate(run.value.as_deref(), test)?;
             if cursor.offset - last_copy.offset >= B {
                 Self::load_copy(data, &mut writer, &last_copy, &cursor);
                 writer.manual_slab_break();

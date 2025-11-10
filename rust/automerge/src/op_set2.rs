@@ -1,6 +1,3 @@
-pub(crate) use hexane;
-pub(crate) use hexane::PackError;
-
 pub(crate) mod change;
 pub(crate) mod columns;
 pub(crate) mod meta;

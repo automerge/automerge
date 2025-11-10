@@ -1,5 +1,4 @@
 use super::aggregate::Agg;
-use super::cursor::ScanMeta;
 use super::Cow;
 use super::{lebsize, ulebsize};
 
@@ -11,25 +10,14 @@ pub enum PackError {
     InvalidNumber(#[from] leb128::read::Error),
     #[error("invalid utf8")]
     InvalidUtf8,
-    #[error("actor index out of range {0}/{1}")]
-    ActorIndexOutOfRange(u64, usize),
-    #[error("counter out of range {0}")]
-    CounterOutOfRange(u64),
-    #[error("invalid value for {typ}: {error}")]
-    InvalidValue { typ: &'static str, error: String },
+    #[error("invalid value: {0}")]
+    InvalidValue(String),
+    #[error("invalid load length len={0}, expected={0}")]
+    InvalidLength(usize, usize),
     #[error("malformed leb encoding")]
     BadFormat,
     #[error("invalid resume")]
     InvalidResume,
-}
-
-impl PackError {
-    pub fn invalid_value(expected: &'static str, error: impl std::fmt::Display) -> Self {
-        PackError::InvalidValue {
-            typ: expected,
-            error: error.to_string(),
-        }
-    }
 }
 
 pub trait Packable:
@@ -47,12 +35,24 @@ pub trait Packable:
 
     fn pack(item: &Self, out: &mut Vec<u8>);
 
+    fn save(item: &Self) -> Vec<u8> {
+        let mut bytes = vec![];
+        Self::pack(item, &mut bytes);
+        bytes
+    }
+
     fn maybe_agg(_item: &Option<Cow<'_, Self>>) -> Agg {
         Agg::default()
     }
 
-    fn validate(_val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
-        Ok(())
+    fn validate<F>(val: Option<&Self>, validate: &F) -> Result<(), PackError>
+    where
+        F: Fn(Option<&Self>) -> Option<String>,
+    {
+        match validate(val) {
+            Some(msg) => Err(PackError::InvalidValue(msg)),
+            None => Ok(()),
+        }
     }
 
     fn unpack(buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError>;
@@ -62,22 +62,6 @@ impl Packable for i64 {
     fn abs(item: &Self) -> i64 {
         *item
     }
-    fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
-        if let Some(a) = val {
-            if *a >= u32::MAX as Self {
-                return Err(PackError::CounterOutOfRange(*a as u64));
-            }
-        }
-        Ok(())
-    }
-
-    //    fn own(item: i64) -> i64 { item }
-
-    /*
-        fn agg(item: &i64) -> Agg {
-            Agg::from(*item)
-        }
-    */
 
     fn maybe_agg(item: &Option<Cow<'_, i64>>) -> Agg {
         Agg::from(item.as_deref().cloned().unwrap_or(0))
@@ -99,15 +83,6 @@ impl Packable for i64 {
 }
 
 impl Packable for u32 {
-    fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
-        if let Some(a) = val {
-            if *a >= u32::MAX as Self {
-                return Err(PackError::CounterOutOfRange(*a as u64));
-            }
-        }
-        Ok(())
-    }
-
     fn agg(item: &u32) -> Agg {
         Agg::from(*item)
     }
@@ -123,7 +98,12 @@ impl Packable for u32 {
     fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'static, u32>), PackError> {
         let start_len = buff.len();
         let val64 = leb128::read::unsigned(&mut buff)?;
-        let val32 = u32::try_from(val64).map_err(|_| PackError::CounterOutOfRange(val64))?;
+        let val32 = u32::try_from(val64).map_err(|_| {
+            PackError::InvalidValue(format!(
+                "unpacked value '{}' too large for u32 column",
+                val64
+            ))
+        })?;
         Ok((start_len - buff.len(), Cow::Owned(val32)))
     }
 }
@@ -131,15 +111,6 @@ impl Packable for u32 {
 impl Packable for u64 {
     fn maybe_agg(item: &Option<Cow<'_, u64>>) -> Agg {
         Agg::from(item.as_deref().cloned().unwrap_or(0))
-    }
-
-    fn validate(val: Option<&Self>, _m: &ScanMeta) -> Result<(), PackError> {
-        if let Some(a) = val {
-            if *a >= u32::MAX as Self {
-                return Err(PackError::CounterOutOfRange(*a));
-            }
-        }
-        Ok(())
     }
 
     fn agg(item: &u64) -> Agg {

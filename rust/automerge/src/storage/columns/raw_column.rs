@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::{io::Read, marker::PhantomData, ops::Range};
 
 use crate::storage::parse;
@@ -253,6 +254,19 @@ impl<T: compression::ColumnCompression> RawColumns<T> {
 
     pub(crate) fn total_column_len(&self) -> usize {
         self.0.iter().map(|c| c.data.len()).sum()
+    }
+
+    pub(crate) fn as_map(&self) -> BTreeMap<ColumnSpec, Range<usize>> {
+        self.0.iter().map(|c| (c.spec(), c.data())).collect()
+    }
+
+    pub(crate) fn bytes<'a>(&self, c: ColumnSpec, data: &'a [u8]) -> &'a [u8] {
+        debug_assert!(self.0.iter().map(|i| i.spec()).is_sorted());
+        if let Ok(index) = self.0.binary_search_by(|col| col.spec().cmp(&c)) {
+            &data[self.0[index].data().clone()]
+        } else {
+            &[]
+        }
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &RawColumn<T>> + '_ {

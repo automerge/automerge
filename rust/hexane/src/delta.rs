@@ -1,6 +1,6 @@
 use super::aggregate::Agg;
 use super::columndata::ColumnData;
-use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceDel};
+use super::cursor::{ColumnCursor, Run, SpliceDel};
 use super::encoder::{Encoder, SpliceEncoder};
 use super::pack::{PackError, Packable};
 use super::rle::{RleCursor, RleState};
@@ -275,12 +275,15 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         self.rle.offset()
     }
 
-    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+    fn load_with<F>(data: &[u8], test: &F) -> Result<ColumnData<Self>, PackError>
+    where
+        F: Fn(Option<&Self::Item>) -> Option<String>,
+    {
         let mut cursor = Self::empty();
         let mut writer = SlabWriter::<i64>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
-            i64::validate(run.value.as_deref(), m)?;
+            i64::validate(run.value.as_deref(), test)?;
             if cursor.rle.offset - last_copy.rle.offset >= B {
                 SubCursor::load_copy(data, &mut writer, &last_copy.rle, &cursor.rle);
                 writer.set_abs(cursor.abs);

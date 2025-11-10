@@ -1,5 +1,5 @@
-use super::hexane::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
 use super::types::ScalarValue;
+use hexane::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
 use std::borrow::Cow;
 
 #[derive(Debug)]
@@ -125,8 +125,8 @@ pub(crate) type MetaCursor = RleCursor<64, ValueMeta>;
 
 #[cfg(test)]
 mod tests {
-    use super::super::hexane::ColumnData;
     use super::*;
+    use hexane::ColumnData;
 
     #[test]
     fn column_data_meta_group() {

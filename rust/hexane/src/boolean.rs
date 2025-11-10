@@ -1,6 +1,6 @@
 use super::aggregate::Acc;
 use super::columndata::ColumnData;
-use super::cursor::{ColumnCursor, Run, ScanMeta, SpliceDel};
+use super::cursor::{ColumnCursor, Run, SpliceDel};
 use super::encoder::{Encoder, EncoderState, SpliceEncoder, Writer};
 use super::pack::{PackError, Packable};
 use super::slab::{Slab, SlabWeight, SlabWriter};
@@ -60,13 +60,16 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Self::default()
     }
 
-    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError> {
+    fn load_with<F>(data: &[u8], test: &F) -> Result<ColumnData<Self>, PackError>
+    where
+        F: Fn(Option<&Self::Item>) -> Option<String>,
+    {
         let mut cursor = Self::empty();
         let mut last_cursor = Self::empty();
         let mut writer = SlabWriter::<bool>::new(B, true);
         let mut last_copy = Self::empty();
         while let Some(run) = cursor.try_next(data)? {
-            bool::validate(run.value.as_deref(), m)?;
+            bool::validate(run.value.as_deref(), test)?;
             if cursor.offset - last_copy.offset >= B {
                 if !cursor.value {
                     cursor_copy(data, &mut writer, &last_copy, &cursor);
