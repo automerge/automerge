@@ -3,6 +3,7 @@ use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
+use crate::op_set2::op_set::op_iter::{InsertIter, KeyIter};
 use crate::storage::columns::BadColumnLayout;
 use crate::storage::{columns::compression::Uncompressed, ColumnSpec, Document, RawColumns};
 use crate::types;
@@ -45,8 +46,8 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, MarkInfoIter, ObjIdIter, OpIdIter, OpIter, ReadOpError,
+    SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
@@ -1040,9 +1041,6 @@ impl OpSet {
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value = self.value_iter_range(range);
-        let succ = self.succ_iter_range(range);
-
         OpIter {
             pos: range.start,
             id: self.id_iter_range(range),
@@ -1055,10 +1053,10 @@ impl OpSet {
                 self.cols.key_actor.iter_range(range.clone()),
                 self.cols.key_ctr.iter_range(range.clone()),
             ),
-            succ,
+            succ: self.cols.succ_iter_range(range),
             insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
             action: ActionIter::new(self.cols.action.iter_range(range.clone())),
-            value,
+            value: self.cols.value_iter_range(range),
             marks: self.mark_info_iter_range(range),
             range: range.clone(),
             op_set: self,

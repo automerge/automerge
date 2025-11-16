@@ -36,3 +36,9 @@ impl From<RawRange> for Range<usize> {
         r.0
     }
 }
+
+impl<'a> From<&'a RawRange> for Range<usize> {
+    fn from(r: &'a RawRange) -> Range<usize> {
+        r.0.clone()
+    }
+}
