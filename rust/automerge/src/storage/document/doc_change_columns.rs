@@ -1,20 +1,16 @@
-use std::{borrow::Cow, convert::TryFrom};
+use std::{borrow::Cow, convert::TryFrom, ops::Range};
 
-use hexane::{ColumnCursor, CursorIter, StrCursor};
+use hexane::{ColumnCursor, CursorIter, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 
 use crate::{
-    columnar::{
-        column_range::{
-            generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
-            DeltaRange, DepsIter, DepsRange, RleRange, ValueIter, ValueRange,
-        },
-        encoding::{ColumnDecoder, DecodeColumnError, DeltaDecoder, RleDecoder},
+    columnar::column_range::generic::{
+        GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange,
     },
+    op_set2::ActorCursor,
     storage::{
         columns::{compression, ColumnId, ColumnSpec, ColumnType},
         Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    types::ScalarValue,
 };
 
 const ACTOR_COL_ID: ColumnId = ColumnId::new(0);
@@ -39,13 +35,15 @@ pub(crate) struct DocChangeMetadata<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DocChangeColumns {
-    pub(crate) actor: RleRange<u64>,
-    pub(crate) seq: DeltaRange,
-    pub(crate) max_op: DeltaRange,
-    pub(crate) time: DeltaRange,
-    pub(crate) message: RleRange<smol_str::SmolStr>,
-    pub(crate) deps: DepsRange,
-    pub(crate) extra: ValueRange,
+    pub(crate) actor: Range<usize>,
+    pub(crate) seq: Range<usize>,
+    pub(crate) max_op: Range<usize>,
+    pub(crate) time: Range<usize>,
+    pub(crate) message: Range<usize>,
+    pub(crate) deps_num: Range<usize>,
+    pub(crate) deps: Range<usize>,
+    pub(crate) extra_meta: Range<usize>,
+    pub(crate) extra_raw: Range<usize>,
     #[allow(dead_code)]
     pub(crate) other: Columns,
 }
@@ -53,22 +51,14 @@ pub(crate) struct DocChangeColumns {
 impl DocChangeColumns {
     pub(crate) fn iter<'a>(&self, data: &'a [u8]) -> DocChangeColumnIter<'a> {
         DocChangeColumnIter {
-            actors: self.actor.decoder(data),
-            seq: self.seq.decoder(data),
-            max_op: self.max_op.decoder(data),
-            time: self.time.decoder(data),
-            /*
-                        message: if self.message.is_empty() {
-                            None
-                        } else {
-                            Some(self.message.decoder(data))
-                        },
-            */
-            message: hexane::StrCursor::iter(&data[self.message.as_ref().clone()]),
-            deps: self.deps.iter(data),
-            extra: ExtraDecoder {
-                val: self.extra.iter(data),
-            },
+            actors: ActorCursor::iter(&data[self.actor.clone()]),
+            seq: DeltaCursor::iter(&data[self.seq.clone()]),
+            max_op: DeltaCursor::iter(&data[self.max_op.clone()]),
+            time: DeltaCursor::iter(&data[self.time.clone()]),
+            message: StrCursor::iter(&data[self.message.clone()]),
+            deps: DeltaCursor::iter(&data[self.deps.clone()]),
+            deps_num: UIntCursor::iter(&data[self.deps_num.clone()]),
+            extra: RawCursor::iter(&data[self.extra_raw.clone()]),
         }
     }
 
@@ -76,43 +66,43 @@ impl DocChangeColumns {
         let mut cols = vec![
             RawColumn::new(
                 ColumnSpec::new(ACTOR_COL_ID, ColumnType::Actor, false),
-                self.actor.clone().into(),
+                self.actor.clone(),
             ),
             RawColumn::new(
                 ColumnSpec::new(SEQ_COL_ID, ColumnType::DeltaInteger, false),
-                self.seq.clone().into(),
+                self.seq.clone(),
             ),
             RawColumn::new(
                 ColumnSpec::new(MAX_OP_COL_ID, ColumnType::DeltaInteger, false),
-                self.max_op.clone().into(),
+                self.max_op.clone(),
             ),
             RawColumn::new(
                 ColumnSpec::new(TIME_COL_ID, ColumnType::DeltaInteger, false),
-                self.time.clone().into(),
+                self.time.clone(),
             ),
             RawColumn::new(
                 ColumnSpec::new(MESSAGE_COL_ID, ColumnType::String, false),
-                self.message.clone().into(),
+                self.message.clone(),
             ),
             RawColumn::new(
                 ColumnSpec::new(DEPS_COL_ID, ColumnType::Group, false),
-                self.deps.num_range().clone().into(),
+                self.deps_num.clone(),
             ),
         ];
-        if self.deps.deps_range().len() > 0 {
+        if !self.deps.is_empty() {
             cols.push(RawColumn::new(
                 ColumnSpec::new(DEPS_COL_ID, ColumnType::DeltaInteger, false),
-                self.deps.deps_range().clone().into(),
+                self.deps.clone(),
             ))
         }
         cols.push(RawColumn::new(
             ColumnSpec::new(EXTRA_COL_ID, ColumnType::ValueMetadata, false),
-            self.extra.meta_range().clone().into(),
+            self.extra_meta.clone(),
         ));
-        if !self.extra.raw_range().is_empty() {
+        if !self.extra_raw.is_empty() {
             cols.push(RawColumn::new(
                 ColumnSpec::new(EXTRA_COL_ID, ColumnType::Value, false),
-                self.extra.raw_range().clone().into(),
+                self.extra_raw.clone(),
             ))
         }
         cols.into_iter().collect()
@@ -125,12 +115,10 @@ pub(crate) enum ReadChangeError {
     UnexpectedNull(String),
     #[error("mismatching column types for column {index}")]
     MismatchingColumn { index: usize },
-    #[error("incorrect value in extra bytes column")]
-    InvalidExtraBytes,
     #[error("max_op is lower than start_op")]
     InvalidMaxOp,
-    #[error(transparent)]
-    ReadColumn(#[from] DecodeColumnError),
+    #[error("error reading column: {0}")]
+    ReadColumn(String),
     #[error(transparent)]
     PackError(#[from] hexane::PackError),
 }
@@ -143,20 +131,40 @@ impl From<MismatchingColumn> for ReadChangeError {
 
 #[derive(Clone)]
 pub(crate) struct DocChangeColumnIter<'a> {
-    actors: RleDecoder<'a, u64>,
-    seq: DeltaDecoder<'a>,
-    max_op: DeltaDecoder<'a>,
-    time: DeltaDecoder<'a>,
-    //message: Option<RleDecoder<'a, smol_str::SmolStr>>,
+    actors: CursorIter<'a, ActorCursor>,
+    seq: CursorIter<'a, DeltaCursor>,
+    max_op: CursorIter<'a, DeltaCursor>,
+    time: CursorIter<'a, DeltaCursor>,
     message: CursorIter<'a, StrCursor>,
-    deps: DepsIter<'a>,
-    extra: ExtraDecoder<'a>,
+    deps_num: CursorIter<'a, UIntCursor>,
+    deps: CursorIter<'a, DeltaCursor>,
+    extra: CursorIter<'a, RawCursor>,
+}
+
+fn maybe_next_in_col<'a, C: ColumnCursor>(
+    iter: &mut CursorIter<'a, C>,
+    col_name: &str,
+) -> Result<Option<Cow<'a, C::Item>>, ReadChangeError> {
+    let Some(next) = iter.next() else {
+        return Ok(None);
+    };
+    next.map_err(|e| {
+        ReadChangeError::ReadColumn(format!("error reading column {}: {}", col_name, e))
+    })
+}
+
+fn next_in_col<'a, C: ColumnCursor>(
+    iter: &mut CursorIter<'a, C>,
+    col_name: &str,
+) -> Result<Cow<'a, C::Item>, ReadChangeError> {
+    maybe_next_in_col(iter, col_name)?
+        .ok_or_else(|| ReadChangeError::UnexpectedNull(col_name.to_string()))
 }
 
 impl<'a> DocChangeColumnIter<'a> {
     fn try_next(&mut self) -> Result<Option<DocChangeMetadata<'a>>, ReadChangeError> {
-        let actor = match self.actors.maybe_next_in_col("actor")? {
-            Some(actor) => actor as usize,
+        let actor = match maybe_next_in_col(&mut self.actors, "actor")? {
+            Some(actor) => actor.0 as usize,
             None => {
                 // The actor column should always have a value so if the actor iterator returns None that
                 // means we should be done, we check by asserting that all the other iterators
@@ -168,17 +176,29 @@ impl<'a> DocChangeColumnIter<'a> {
                 }
             }
         };
-        let seq = self.seq.next_in_col("seq").and_then(|seq| {
-            u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value("seq", e.to_string()))
+        let seq = next_in_col(&mut self.seq, "seq").and_then(|seq| {
+            u64::try_from(*seq)
+                .map_err(|e| ReadChangeError::ReadColumn(format!("invalid seq {}: {}", *seq, e)))
         })?;
-        let max_op = self.max_op.next_in_col("max_op").and_then(|seq| {
-            u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value("seq", e.to_string()))
+        let max_op = next_in_col(&mut self.max_op, "max_op").and_then(|seq| {
+            u64::try_from(*seq)
+                .map_err(|e| ReadChangeError::ReadColumn(format!("invalid max_op {}: {}", *seq, e)))
         })?;
-        let time = self.time.next_in_col("time")?;
-        // would be nice if this had per column error handling too
+        let time = next_in_col(&mut self.time, "time")?.into_owned();
         let message = self.message.next().transpose()?.flatten();
-        let deps = self.deps.next_in_col("deps")?;
-        let extra = self.extra.next().transpose()?.unwrap_or(Cow::Borrowed(&[]));
+        let deps_count = maybe_next_in_col(&mut self.deps_num, "deps_num")?
+            .unwrap_or(Cow::Owned(0))
+            .into_owned() as usize;
+        let deps = (0..deps_count)
+            .map(|_| {
+                next_in_col(&mut self.deps, "deps").and_then(|dep| {
+                    u64::try_from(*dep).map_err(|e| {
+                        ReadChangeError::ReadColumn(format!("invalid dep {}: {}", *dep, e))
+                    })
+                })
+            })
+            .collect::<Result<Vec<u64>, ReadChangeError>>()?;
+        let extra = maybe_next_in_col(&mut self.extra, "extra")?.unwrap_or(Cow::Borrowed(&[]));
         Ok(Some(DocChangeMetadata {
             actor,
             seq,
@@ -211,70 +231,55 @@ impl DocChangeColumnIter<'_> {
     }
 }
 
-#[derive(Clone)]
-struct ExtraDecoder<'a> {
-    val: ValueIter<'a>,
-}
-
-impl<'a> Iterator for ExtraDecoder<'a> {
-    type Item = Result<Cow<'a, [u8]>, ReadChangeError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.val.next() {
-            Some(Ok(ScalarValue::Bytes(b))) => Some(Ok(Cow::Owned(b))),
-            Some(Ok(_)) => Some(Err(ReadChangeError::InvalidExtraBytes)),
-            Some(Err(e)) => Some(Err(e.into())),
-            None => None,
-        }
-    }
-}
-
 impl TryFrom<Columns> for DocChangeColumns {
     type Error = ReadChangeError;
 
     fn try_from(columns: Columns) -> Result<Self, Self::Error> {
-        let mut actor: Option<RleRange<u64>> = None;
-        let mut seq: Option<DeltaRange> = None;
-        let mut max_op: Option<DeltaRange> = None;
-        let mut time: Option<DeltaRange> = None;
-        let mut message: Option<RleRange<smol_str::SmolStr>> = None;
-        let mut deps: Option<DepsRange> = None;
-        let mut extra: Option<ValueRange> = None;
+        let mut actor: Option<Range<usize>> = None;
+        let mut seq: Option<Range<usize>> = None;
+        let mut max_op: Option<Range<usize>> = None;
+        let mut time: Option<Range<usize>> = None;
+        let mut message: Option<Range<usize>> = None;
+        let mut deps: Option<Range<usize>> = None;
+        let mut deps_count: Option<Range<usize>> = None;
+        let mut extra_meta: Option<Range<usize>> = None;
+        let mut extra_raw: Option<Range<usize>> = None;
         let mut other = Columns::empty();
 
         for (index, col) in columns.into_iter().enumerate() {
             match (col.id(), col.col_type()) {
-                (ACTOR_COL_ID, ColumnType::Actor) => actor = Some(col.range().into()),
-                (SEQ_COL_ID, ColumnType::DeltaInteger) => seq = Some(col.range().into()),
-                (MAX_OP_COL_ID, ColumnType::DeltaInteger) => max_op = Some(col.range().into()),
-                (TIME_COL_ID, ColumnType::DeltaInteger) => time = Some(col.range().into()),
-                (MESSAGE_COL_ID, ColumnType::String) => message = Some(col.range().into()),
+                (ACTOR_COL_ID, ColumnType::Actor) => actor = Some(col.range()),
+                (SEQ_COL_ID, ColumnType::DeltaInteger) => seq = Some(col.range()),
+                (MAX_OP_COL_ID, ColumnType::DeltaInteger) => max_op = Some(col.range()),
+                (TIME_COL_ID, ColumnType::DeltaInteger) => time = Some(col.range()),
+                (MESSAGE_COL_ID, ColumnType::String) => message = Some(col.range()),
                 (DEPS_COL_ID, ColumnType::Group) => match col.into_ranges() {
                     GenericColumnRange::Group(GroupRange { num, values }) => {
                         let mut cols = values.into_iter();
-                        let deps_group = num;
+                        deps_count = Some(num.into());
                         let first = cols.next();
-                        let deps_index = match first {
+                        deps = match first {
                             Some(GroupedColumnRange::Simple(SimpleColRange::Delta(
                                 index_range,
-                            ))) => index_range,
+                            ))) => Some(index_range.into()),
                             Some(_) => {
                                 tracing::error!(
                                     "deps column contained more than one grouped column"
                                 );
                                 return Err(ReadChangeError::MismatchingColumn { index: 5 });
                             }
-                            None => (0..0).into(),
+                            None => Some(0..0),
                         };
                         if cols.next().is_some() {
                             return Err(ReadChangeError::MismatchingColumn { index });
                         }
-                        deps = Some(DepsRange::new(deps_group, deps_index));
                     }
                     _ => return Err(ReadChangeError::MismatchingColumn { index }),
                 },
                 (EXTRA_COL_ID, ColumnType::ValueMetadata) => match col.into_ranges() {
                     GenericColumnRange::Value(val) => {
-                        extra = Some(val);
+                        extra_meta = Some(val.meta_range().clone().into());
+                        extra_raw = Some(val.raw_range().clone().into());
                     }
                     _ => return Err(ReadChangeError::MismatchingColumn { index }),
                 },
@@ -285,13 +290,15 @@ impl TryFrom<Columns> for DocChangeColumns {
             }
         }
         Ok(DocChangeColumns {
-            actor: actor.unwrap_or_else(|| (0..0).into()),
-            seq: seq.unwrap_or_else(|| (0..0).into()),
-            max_op: max_op.unwrap_or_else(|| (0..0).into()),
-            time: time.unwrap_or_else(|| (0..0).into()),
-            message: message.unwrap_or_else(|| (0..0).into()),
-            deps: deps.unwrap_or_else(|| DepsRange::new((0..0).into(), (0..0).into())),
-            extra: extra.unwrap_or_else(|| ValueRange::new((0..0).into(), (0..0).into())),
+            actor: actor.unwrap_or_else(|| (0..0)),
+            seq: seq.unwrap_or_else(|| (0..0)),
+            max_op: max_op.unwrap_or_else(|| (0..0)),
+            time: time.unwrap_or_else(|| (0..0)),
+            message: message.unwrap_or_else(|| (0..0)),
+            deps: deps.unwrap_or_else(|| (0..0)),
+            deps_num: deps_count.unwrap_or_else(|| (0..0)),
+            extra_meta: extra_meta.unwrap_or_else(|| (0..0)),
+            extra_raw: extra_raw.unwrap_or_else(|| (0..0)),
             other,
         })
     }
