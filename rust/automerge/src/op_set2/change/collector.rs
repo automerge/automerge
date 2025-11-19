@@ -534,29 +534,24 @@ impl<'a> ChangeCollector<'a> {
         }
     }
 
-    pub(crate) fn new<I>(
-        changes: I,
+    pub(crate) fn new(
+        changes: Vec<DocChangeMetadata<'a>>,
         actors: &'a [ActorId],
-    ) -> Result<ChangeCollector<'a>, ReadChangeError>
-    where
-        I: Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>>,
-    {
-        let mut num_deps = 0;
+    ) -> Result<ChangeCollector<'a>, ReadChangeError> {
         let mut changes: Vec<_> = changes
-            .map(|m| {
-                m.map(|meta| BuildChangeMetadata {
-                    actor: meta.actor,
-                    seq: meta.seq,
-                    max_op: meta.max_op,
-                    timestamp: meta.timestamp,
-                    message: meta.message,
-                    deps: meta.deps,
-                    extra: meta.extra,
-                    start_op: 0,
-                    builder: 0,
-                })
+            .into_iter()
+            .map(|meta| BuildChangeMetadata {
+                actor: meta.actor,
+                seq: meta.seq,
+                max_op: meta.max_op,
+                timestamp: meta.timestamp,
+                message: meta.message,
+                deps: meta.deps,
+                extra: meta.extra,
+                start_op: 0,
+                builder: 0,
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         for i in 0..changes.len() {
             changes[i].start_op = changes[i]
@@ -569,9 +564,8 @@ impl<'a> ChangeCollector<'a> {
             if changes[i].start_op > changes[i].max_op + 1 {
                 return Err(ReadChangeError::InvalidMaxOp);
             }
-            num_deps += changes[i].deps.len();
         }
-        Ok(Self::from_change_meta(changes, num_deps, actors))
+        Ok(Self::from_change_meta(changes, actors))
     }
 
     pub(crate) fn from_bundle_changes(
@@ -579,23 +573,27 @@ impl<'a> ChangeCollector<'a> {
         actors: &'a [ActorId],
     ) -> ChangeCollector<'a> {
         let changes = changes.into_iter().map(|c| c.into()).collect();
-        Self::from_change_meta(changes, 0, actors)
+        Self::from_change_meta(changes, actors)
     }
 
     pub(crate) fn from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
-        num_deps: usize,
         actors: &'a [ActorId],
     ) -> ChangeCollector<'a> {
+        let mut num_deps = 0;
+
         let mut builders: Vec<_> = changes
             .iter()
             .enumerate()
-            .map(|(index, e)| ChangeBuilder {
-                actor: e.actor,
-                seq: e.seq,
-                change: index,
-                start_op: e.start_op,
-                encoder: OpEncoderStrategy::new(e.num_ops()),
+            .map(|(index, e)| {
+                num_deps += e.deps.len();
+                ChangeBuilder {
+                    actor: e.actor,
+                    seq: e.seq,
+                    change: index,
+                    start_op: e.start_op,
+                    encoder: OpEncoderStrategy::new(e.num_ops()),
+                }
             })
             .collect();
 
@@ -624,8 +622,8 @@ impl<'a> ChangeCollector<'a> {
         change_graph: &'a ChangeGraph,
         have_deps: &[ChangeHash],
     ) -> Vec<Change> {
-        let (changes, num_deps) = change_graph.get_build_metadata_clock(have_deps);
-        Self::from_build_meta(op_set, change_graph, changes, num_deps)
+        let (changes, _num_deps) = change_graph.get_build_metadata_clock(have_deps);
+        Self::from_build_meta(op_set, change_graph, changes)
     }
 
     pub(crate) fn exclude_hashes_meta(
@@ -691,22 +689,16 @@ impl<'a> ChangeCollector<'a> {
     where
         I: IntoIterator<Item = ChangeHash>,
     {
-        let (changes, num_deps) = change_graph.get_build_metadata(hashes)?;
-        Ok(Self::from_build_meta(
-            op_set,
-            change_graph,
-            changes,
-            num_deps,
-        ))
+        let (changes, _num_deps) = change_graph.get_build_metadata(hashes)?;
+        Ok(Self::from_build_meta(op_set, change_graph, changes))
     }
 
     fn from_build_meta(
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
-        num_deps: usize,
     ) -> Vec<Change> {
-        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone(), num_deps);
+        let r1 = Self::from_build_meta_inner(op_set, change_graph, changes.clone());
         debug_assert_eq!(
             r1,
             crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
@@ -721,7 +713,6 @@ impl<'a> ChangeCollector<'a> {
         op_set: &'a OpSet,
         change_graph: &'a ChangeGraph,
         changes: Vec<BuildChangeMetadata<'a>>,
-        num_deps: usize,
     ) -> Vec<Change> {
         let min = changes
             .iter()
@@ -730,7 +721,7 @@ impl<'a> ChangeCollector<'a> {
             .unwrap_or(0);
         let max = changes.iter().map(|c| c.max_op as usize).max().unwrap_or(0) + 1;
 
-        let mut collector = Self::from_change_meta(changes, num_deps, &op_set.actors);
+        let mut collector = Self::from_change_meta(changes, &op_set.actors);
 
         for op in op_set.iter_ctr_range(min..max) {
             let op_id = op.id;
