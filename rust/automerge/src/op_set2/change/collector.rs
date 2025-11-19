@@ -17,7 +17,6 @@ use crate::change_graph::ChangeGraph;
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
 use crate::op_set2::op_set::IndexBuilder;
-use crate::storage::bundle::BundleChange;
 use crate::storage::change::{Change as StoredChange, Verified};
 use crate::storage::document::ReadChangeError;
 use crate::storage::load::change_collector::Error;
@@ -568,14 +567,6 @@ impl<'a> ChangeCollector<'a> {
         Ok(Self::from_change_meta(changes, actors))
     }
 
-    pub(crate) fn from_bundle_changes(
-        changes: Vec<BundleChange<'a>>,
-        actors: &'a [ActorId],
-    ) -> ChangeCollector<'a> {
-        let changes = changes.into_iter().map(|c| c.into()).collect();
-        Self::from_change_meta(changes, actors)
-    }
-
     pub(crate) fn from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
         actors: &'a [ActorId],
@@ -703,7 +694,7 @@ impl<'a> ChangeCollector<'a> {
             r1,
             crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
                 .unwrap()
-                .to_changes()
+                .into_changes()
                 .unwrap()
         );
         r1

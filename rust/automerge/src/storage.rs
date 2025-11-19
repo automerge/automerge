@@ -9,7 +9,7 @@ pub(crate) mod load;
 pub(crate) mod parse;
 
 pub use bundle::{Bundle, BundleChange, BundleChangeIter};
-pub use load::VerificationMode;
+pub use load::{LoadState, StepResult, VerificationMode};
 
 pub(crate) use {
     bundle::{BundleMetadata, BundleStorage},

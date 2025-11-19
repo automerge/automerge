@@ -10,7 +10,7 @@ use crate::{ActorId, ChangeHash};
 mod doc_op_columns;
 pub(crate) use doc_op_columns::DocOpColumns;
 mod doc_change_columns;
-pub(crate) use doc_change_columns::DocChangeColumns;
+pub(crate) use doc_change_columns::{DocChangeColumnIter, DocChangeColumns};
 pub(crate) use doc_change_columns::{DocChangeMetadata, ReadChangeError};
 mod compression;
 
@@ -290,9 +290,7 @@ impl<'a> Document<'a> {
         &self.bytes[self.op_bytes.clone()]
     }
 
-    pub(crate) fn iter_changes(
-        &'a self,
-    ) -> impl Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>> + Clone + 'a {
+    pub(crate) fn iter_changes(&'a self) -> DocChangeColumnIter<'a> {
         self.change_metadata
             .iter(&self.bytes[self.change_bytes.clone()])
     }

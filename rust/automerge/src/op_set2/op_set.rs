@@ -103,7 +103,7 @@ impl OpSet {
     }
 
     pub(crate) fn index_builder(&self) -> IndexBuilder {
-        IndexBuilder::new(self, self.text_encoding)
+        IndexBuilder::new(&self.cols, self.text_encoding)
     }
 
     pub(crate) fn reset_top(&mut self, range: Range<usize>) {
@@ -345,10 +345,6 @@ impl OpSet {
 
     pub(crate) fn len(&self) -> usize {
         self.cols.len()
-    }
-
-    pub(crate) fn sub_len(&self) -> usize {
-        self.cols.sub_len()
     }
 
     pub(crate) fn seq_length(
@@ -932,7 +928,8 @@ impl OpSet {
         // FIXME - shouldn't need to clone bytes here (eventually)
         let data = doc.op_raw_bytes();
         let actors = doc.actors().to_vec();
-        Self::from_parts(doc.op_metadata.clone(), data, actors, text_encoding)
+        let cols = Columns::load(doc.op_metadata.clone().iter(), data, &actors)?;
+        Ok(Self::from_parts(cols, actors, text_encoding))
     }
 
     #[cfg(test)]
@@ -952,22 +949,17 @@ impl OpSet {
         }
     }
 
-    fn from_parts(
-        cols: RawColumns<Uncompressed>,
-        data: &[u8],
+    pub(crate) fn from_parts(
+        cols: Columns,
         actors: Vec<ActorId>,
         text_encoding: TextEncoding,
-    ) -> Result<Self, PackError> {
-        let cols = Columns::load(cols.iter(), data, &actors)?;
-
-        let op_set = OpSet {
+    ) -> Self {
+        OpSet {
             actors,
             cols,
             obj_info: ObjIndex::default(),
             text_encoding,
-        };
-
-        Ok(op_set)
+        }
     }
 
     pub(crate) fn export(&self) -> (RawColumns<Uncompressed>, Vec<u8>) {

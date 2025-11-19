@@ -102,7 +102,7 @@ pub(crate) fn reconstruct_opset<'a>(
 // create all binary changes
 // look for mismatched heads
 
-fn verify_changes(
+pub(crate) fn verify_changes(
     cc: &CollectedChanges,
     doc: &Document<'_>,
     mode: VerificationMode,

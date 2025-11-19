@@ -1740,8 +1740,9 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     let bundle_bytes = bundle.to_vec();
     let bundle = automerge::Bundle::try_from(bundle_bytes.as_slice())
         .map_err(|e| error::ReadBundle(e.to_string()))?;
+    let deps = bundle.deps().to_vec();
     let changes = bundle
-        .to_changes()
+        .into_changes()
         .map_err(|e| error::ReadBundle(e.to_string()))?;
     let js_changes = changes
         .iter()
@@ -1761,7 +1762,6 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     )
     .unwrap();
 
-    let deps = bundle.deps().to_vec();
     Reflect::set(&result, &("deps").into(), &JS::from(deps).0).unwrap();
     Ok(result.into())
 }

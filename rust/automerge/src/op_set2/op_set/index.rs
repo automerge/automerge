@@ -1,5 +1,6 @@
+use crate::op_set2::columns::Columns;
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
-use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
+use crate::op_set2::{ChangeOp, Op, OpBuilder};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
 use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
@@ -98,14 +99,14 @@ pub(crate) struct Indexes {
 }
 
 impl IndexBuilder {
-    pub(crate) fn new(op_set: &OpSet, encoding: TextEncoding) -> Self {
+    pub(crate) fn new(cols: &Columns, encoding: TextEncoding) -> Self {
         Self {
             counters: HashMap::new(),
-            succ: Vec::with_capacity(op_set.len()),
-            top: Vec::with_capacity(op_set.len()),
-            widths: Vec::with_capacity(op_set.len()),
-            incs: Vec::with_capacity(op_set.sub_len()),
-            marks: Vec::with_capacity(op_set.len()),
+            succ: Vec::with_capacity(cols.len()),
+            top: Vec::with_capacity(cols.len()),
+            widths: Vec::with_capacity(cols.len()),
+            incs: Vec::with_capacity(cols.sub_len()),
+            marks: Vec::with_capacity(cols.len()),
             obj_info: ObjIndex::default(),
             last_flush: 0,
             text_encoding: encoding,
