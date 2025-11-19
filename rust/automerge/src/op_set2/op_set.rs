@@ -43,8 +43,8 @@ pub(crate) use insert::InsertQuery;
 pub(crate) use mark_index::{MarkIndexBuilder, MarkIndexColumn};
 pub(crate) use marks::{MarkIter, NoMarkIter};
 pub(crate) use op_iter::{
-    ActionIter, ActionValueIter, CtrWalker, InsertIter, KeyIter, MarkInfoIter, ObjIdIter, OpIdIter,
-    OpIter, ReadOpError, SuccIterIter, SuccWalker, ValueIter,
+    ActionIter, ActionValueIter, CtrWalker, MarkInfoIter, ObjIdIter, OpIdIter, OpIter, ReadOpError,
+    SuccIterIter, SuccWalker, ValueIter,
 };
 pub(crate) use op_query::{OpQuery, OpQueryTerm};
 pub(crate) use top_op::TopOpIter;
@@ -1034,29 +1034,7 @@ impl OpSet {
     }
 
     pub(crate) fn iter_range(&self, range: &Range<usize>) -> OpIter<'_> {
-        let value = self.value_iter_range(range);
-        let succ = self.succ_iter_range(range);
-
-        OpIter {
-            pos: range.start,
-            id: self.id_iter_range(range),
-            obj: ObjIdIter::new(
-                self.cols.obj_actor.iter_range(range.clone()),
-                self.cols.obj_ctr.iter_range(range.clone()),
-            ),
-            key: KeyIter::new(
-                self.cols.key_str.iter_range(range.clone()),
-                self.cols.key_actor.iter_range(range.clone()),
-                self.cols.key_ctr.iter_range(range.clone()),
-            ),
-            succ,
-            insert: InsertIter::new(self.cols.insert.iter_range(range.clone())),
-            action: ActionIter::new(self.cols.action.iter_range(range.clone())),
-            value,
-            marks: self.mark_info_iter_range(range),
-            op_set: self,
-            range: range.clone(),
-        }
+        OpIter::from_columns(&self.cols, range)
     }
 
     pub(crate) fn obj_id_iter(&self) -> ObjIdIter<'_> {
@@ -1064,28 +1042,7 @@ impl OpSet {
     }
 
     pub(crate) fn iter(&self) -> OpIter<'_> {
-        OpIter {
-            pos: 0,
-            id: OpIdIter::new(self.cols.id_actor.iter(), self.cols.id_ctr.iter()),
-            obj: ObjIdIter::new(self.cols.obj_actor.iter(), self.cols.obj_ctr.iter()),
-            key: KeyIter::new(
-                self.cols.key_str.iter(),
-                self.cols.key_actor.iter(),
-                self.cols.key_ctr.iter(),
-            ),
-            succ: SuccIterIter::new(
-                self.cols.succ_count.iter(),
-                self.cols.succ_actor.iter(),
-                self.cols.succ_ctr.iter(),
-                self.cols.index.inc.iter(),
-            ),
-            insert: InsertIter::new(self.cols.insert.iter()),
-            action: ActionIter::new(self.cols.action.iter()),
-            value: ValueIter::new(self.cols.value_meta.iter(), self.cols.value.raw_reader(0)),
-            marks: MarkInfoIter::new(self.cols.mark_name.iter(), self.cols.expand.iter()),
-            op_set: self,
-            range: 0..self.len(),
-        }
+        OpIter::from_columns(&self.cols, &(0..self.len()))
     }
 
     // iter ops

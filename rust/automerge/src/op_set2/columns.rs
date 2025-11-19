@@ -6,6 +6,7 @@ use super::meta::MetaCursor;
 use super::op::OpLike;
 use super::op_set::MarkIndexColumn;
 use super::types::{Action, ActionCursor, ActorCursor, ActorIdx, ScalarValue};
+use crate::op_set2::op_set::{MarkInfoIter, OpIdIter, SuccIterIter, ValueIter};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::ColumnId;
 use crate::storage::ColumnSpec;
@@ -18,7 +19,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 #[derive(Debug, Clone)]
-pub(super) struct Columns {
+pub(crate) struct Columns {
     pub(super) id_actor: ColumnData<ActorCursor>,
     pub(super) id_ctr: ColumnData<DeltaCursor>,
     pub(super) obj_actor: ColumnData<ActorCursor>,
@@ -36,6 +37,38 @@ pub(super) struct Columns {
     pub(super) mark_name: ColumnData<StrCursor>,
     pub(super) expand: ColumnData<BooleanCursor>,
     pub(super) index: Indexes,
+}
+
+impl Columns {
+    pub(crate) fn id_iter_range(&self, range: &Range<usize>) -> OpIdIter<'_> {
+        OpIdIter::new(
+            self.id_actor.iter_range(range.clone()),
+            self.id_ctr.iter_range(range.clone()),
+        )
+    }
+
+    pub(crate) fn mark_info_iter_range(&self, range: &Range<usize>) -> MarkInfoIter<'_> {
+        MarkInfoIter::new(
+            self.mark_name.iter_range(range.clone()),
+            self.expand.iter_range(range.clone()),
+        )
+    }
+
+    pub(crate) fn value_iter_range(&self, range: &Range<usize>) -> ValueIter<'_> {
+        let value_meta = self.value_meta.iter_range(range.clone());
+        let value_advance = value_meta.calculate_acc().as_usize();
+        let value_raw = self.value.raw_reader(value_advance);
+        ValueIter::new(value_meta, value_raw)
+    }
+
+    pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
+        let succ_count = self.succ_count.iter_range(range.clone());
+        let succ_range = succ_count.calculate_acc().as_usize()..usize::MAX;
+        let succ_actor = self.succ_actor.iter_range(succ_range.clone());
+        let succ_counter = self.succ_ctr.iter_range(succ_range.clone());
+        let inc_values = self.index.inc.iter_range(succ_range);
+        SuccIterIter::new(succ_count, succ_actor, succ_counter, inc_values)
+    }
 }
 
 #[derive(Debug, Clone)]
