@@ -9,7 +9,7 @@ use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::ColumnSpec;
-use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
+use crate::{ActorId, Change, ChangeHash, TextEncoding};
 
 mod compression;
 
@@ -301,7 +301,7 @@ impl<'a> Document<'a> {
         &self.heads
     }
 
-    fn verify_changes(
+    pub(crate) fn verify_changes(
         &self,
         cc: &CollectedChanges,
         mode: VerificationMode,
@@ -317,36 +317,6 @@ impl<'a> Document<'a> {
         } else {
             Ok(())
         }
-    }
-
-    pub(crate) fn reconstruct(
-        &self,
-        mode: VerificationMode,
-        text_encoding: TextEncoding,
-    ) -> Result<Automerge, ReconstructError> {
-        let mut op_set = OpSet::load(self, text_encoding)?;
-        let change_cols = ChangeGraphCols::load(self)?;
-
-        let mut index = op_set.index_builder();
-
-        let change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
-        let mut change_collector = change_collector.with_index(&mut index);
-
-        change_collector.process_ops(&op_set)?;
-
-        let changes = change_collector.collect(&op_set)?;
-
-        self.verify_changes(&changes, mode)?;
-
-        op_set.set_indexes(index);
-
-        let change_graph = change_cols.finalize(&changes.changes);
-
-        debug_assert_eq!(changes.changes.len(), change_graph.len());
-
-        debug_assert!(op_set.validate_top_index());
-
-        Ok(Automerge::from_parts(op_set, change_graph))
     }
 
     pub(crate) fn reconstruct_changes(

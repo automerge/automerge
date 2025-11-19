@@ -10,13 +10,15 @@ use std::borrow::Cow;
 
 mod builder;
 mod error;
+mod loading_bundle;
 mod meta;
 mod storage;
 
 pub use builder::BundleChangeIter;
 
-pub(crate) use builder::{BundleBuilder, BundleChangeIterUnverified, OpIter, OpIterUnverified};
+pub(crate) use builder::{BundleBuilder, BundleChangeIterUnverified, OpIterUnverified};
 pub(crate) use error::ParseError;
+pub(crate) use loading_bundle::LoadingBundleChanges;
 pub(crate) use meta::BundleMetadata;
 pub(crate) use storage::BundleStorage;
 
@@ -31,7 +33,7 @@ pub(crate) use storage::BundleStorage;
 ///
 /// This feature is experimental, the file format for bundles may still change
 /// so do not use this feature in systems where you expect data to stick around
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Bundle {
     pub(crate) storage: BundleStorage<'static, Verified>,
 }
@@ -96,9 +98,9 @@ impl Bundle {
         self.storage.iter_change_meta()
     }
 
-    pub fn to_changes(&self) -> Result<Vec<Change>, AutomergeError> {
+    pub fn into_changes(self) -> Result<Vec<Change>, AutomergeError> {
         self.storage
-            .to_changes()
+            .into_changes()
             .map_err(|e| AutomergeError::Unbundle(Box::new(e)))
     }
 
@@ -186,7 +188,7 @@ mod test {
         let (Some(h2), _) = tx.commit() else { panic!() };
 
         let bundle = doc.bundle([h0, h1, h2]).unwrap();
-        let changes = bundle.to_changes().unwrap();
+        let changes = bundle.clone().into_changes().unwrap();
         assert_eq!(changes.len(), 3);
         assert_eq!(changes[0].max_op(), 1);
         assert_eq!(changes[0].hash(), h0);
@@ -200,7 +202,7 @@ mod test {
         assert_eq!(doc.save(), d2.save());
 
         let bundle = doc.bundle([h0, h2]).unwrap();
-        let changes = bundle.to_changes().unwrap();
+        let changes = bundle.into_changes().unwrap();
         assert_eq!(changes.len(), 2);
         assert_eq!(changes[0].max_op(), 1);
         assert_eq!(changes[0].hash(), h0);

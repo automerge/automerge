@@ -17,7 +17,6 @@ use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
 use crate::op_set2::op_set::IndexBuilder;
-use crate::storage::bundle::BundleChange;
 use crate::storage::change::{Change as StoredChange, Verified};
 use crate::storage::load::change_collector::Error;
 use crate::storage::{ChunkType, Header};
@@ -37,24 +36,6 @@ pub(crate) struct IndexedChangeCollector<'a> {
 }
 
 impl<'a> IndexedChangeCollector<'a> {
-    pub(crate) fn process_ops(&mut self, op_set: &'a OpSet) -> Result<(), ReadOpError> {
-        let mut iter = op_set.iter();
-
-        while let Some(op) = iter.try_next()? {
-            let op_id = op.id;
-            let op_is_counter = op.is_counter();
-            let op_succ = op.succ();
-
-            self.process_op(op);
-
-            for id in op_succ {
-                self.index.process_succ(op_is_counter, id);
-                self.collector.process_succ(op_id, id);
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn collect(self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
         self.collector.collect(op_set)
     }
@@ -591,14 +572,6 @@ impl<'a> ChangeCollector<'a> {
         Ok(())
     }
 
-    pub(crate) fn from_bundle_changes(
-        changes: Vec<BundleChange<'a>>,
-        actors: &'a [ActorId],
-    ) -> ChangeCollector<'a> {
-        let changes = changes.into_iter().map(|c| c.into()).collect();
-        Self::from_change_meta(changes, actors)
-    }
-
     pub(crate) fn try_from_change_meta(
         mut changes: Vec<BuildChangeMetadata<'a>>,
         actors: &'a [ActorId],
@@ -728,7 +701,7 @@ impl<'a> ChangeCollector<'a> {
             r1,
             crate::storage::Bundle::for_hashes(op_set, change_graph, r1.iter().map(|c| c.hash()))
                 .unwrap()
-                .to_changes()
+                .into_changes()
                 .unwrap()
         );
         r1
