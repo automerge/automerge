@@ -11,7 +11,7 @@ jobs:
           - advisories
           - bans licenses sources
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: './rust/Cargo.toml'
