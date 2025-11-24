@@ -10,7 +10,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -24,7 +24,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -38,7 +38,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -61,7 +61,7 @@ jobs:
           - bans licenses sources
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: "./rust/Cargo.toml"
@@ -70,7 +70,7 @@ jobs:
   build_wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
@@ -87,7 +87,7 @@ jobs:
       - build_wasm
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -109,7 +109,7 @@ jobs:
       - build_wasm
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "18"
@@ -130,7 +130,7 @@ jobs:
         toolchain:
           - 1.89
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -143,7 +143,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -156,7 +156,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
