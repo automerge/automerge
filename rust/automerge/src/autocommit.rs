@@ -83,6 +83,20 @@ impl Default for AutoCommit {
     }
 }
 
+impl From<Automerge> for AutoCommit {
+    fn from(doc: Automerge) -> Self {
+        Self {
+            doc,
+            transaction: None,
+            patch_log: PatchLog::inactive(),
+            diff_cursor: Vec::new(),
+            diff_cache: None,
+            save_cursor: Vec::new(),
+            isolation: None,
+        }
+    }
+}
+
 impl AutoCommit {
     pub fn new() -> AutoCommit {
         AutoCommit::default()
