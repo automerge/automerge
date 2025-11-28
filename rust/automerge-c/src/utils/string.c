@@ -13,7 +13,7 @@ char* AMstrdup(AMbyteSpan const str, char const* nul) {
     size_t const nul_len = strlen(nul);
     char* dup = NULL;
     size_t dup_len = 0;
-    char const* begin = str.src;
+    char const* begin = (char const*) str.src;
     char const* end = begin;
     for (size_t i = 0; i != str.count; ++i, ++end) {
         if (!*end) {
