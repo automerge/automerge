@@ -50,7 +50,7 @@ serde_json = { version = "^1.0.73", features = [
     "float_roundtrip",
 ], default-features = true }
 maplit = { version = "^1.0" }
-criterion = "0.7"
+criterion = "0.8"
 test-log = { version = "0.2.10", features = [
     "trace",
 ], default-features = false }
