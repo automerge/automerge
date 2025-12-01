@@ -4,7 +4,7 @@ use automerge::AutomergeError;
 use automerge::ObjType;
 use automerge::{Automerge, ReadDoc, ROOT};
 
-// Based on https://automerge.github.io/docs/quickstart
+// Based on https://automerge.org/docs/reference/documents/lists/
 fn main() {
     let mut doc1 = Automerge::new();
     let (cards, card1) = doc1
