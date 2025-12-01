@@ -374,5 +374,281 @@ receive_remote_changes(&mut doc);
 
 let opset_patch = doc.view_patch(&watermark);
 
-let watermark = view.apply_patch(&opest_patch);
+let watermark = view.apply_patch(&opset_patch);
 ```
+
+## The View's Internal Structure
+
+We've established that the view needs to retain information until the OpSet confirms
+it has been incorporated. But what exactly should the view's internal data structure
+look like? One tempting approach would be to design a new, simpler data structure
+optimized for the view's specific needs. However, there's a much better option: use
+the OpSet itself.
+
+This might seem counterintuitive at first. Wasn't the whole point of views to avoid
+the performance problems of the OpSet? The key insight is that the OpSet's performance
+problems stem from the _size_ of the history it contains, not from the data structure
+itself. A view's OpSet would contain only the operations necessary to represent the
+current materialized state plus any pending changes not yet confirmed by the source
+document. This is a much smaller set of operations than the full history.
+
+Using the same data structure has significant advantages. First, it means we can reuse
+all the existing machinery for reading and writing documents. The view can implement
+`Transactable` by delegating to its internal OpSet, which already knows how to handle
+all the edge cases around concurrent modifications, list ordering, and so on. Second,
+it means the logic for applying patches and generating diffs is already written and
+tested. Third, it dramatically simplifies the codebase because we don't have two
+parallel implementations of document semantics that could drift apart.
+
+### Creating a View
+
+If the view contains an OpSet, how do we create one? The answer is straightforward:
+we clone the source document's OpSet and then garbage collect it down to the current
+heads. The source OpSet contains the full history, but we only need the operations
+that contribute to the current visible state. This "GC to heads" operation removes
+all the historical cruft while preserving exactly the information needed to read
+the current state and create new operations.
+
+After this cloning and garbage collection, the view's OpSet is much smaller than the
+source. For a document with millions of historical operations but only a few thousand
+visible values, the view might be several orders of magnitude smaller. This is where
+the performance win comes from: not from a different data structure, but from
+operating on a much smaller instance of the same data structure.
+
+### Patches as OpSet Deltas
+
+Now we come to a crucial question: what should patches look like? When the source
+OpSet needs to send updates to a view, what form should those updates take?
+
+One approach would be to send patches in terms of the materialized state, something
+like "set key 'name' to 'Alice'" or "insert 'foo' at index 3". But this approach has
+problems. The view needs to maintain its OpSet in a consistent state, which means it
+needs to know the operation IDs, reference elements, and causal relationships of
+the operations it contains. A high-level patch doesn't provide this information.
+
+A better approach is to send patches as deltas to the OpSet itself. Rather than
+describing changes to the materialized state, we describe changes to the set of
+operations. A patch says "here are the new operations to insert into your OpSet"
+and the view inserts them in the appropriate positions according to document order.
+Once the operations are inserted, the view can use the existing diff machinery to
+determine what changed in the materialized state.
+
+This approach has a pleasing symmetry. The view sends operations to the source OpSet
+(the pending changes), and the source OpSet sends operations back to the view (the
+patches). Both directions use the same currency: operations.
+
+### The Watermark
+
+The view and source OpSet need to coordinate so that the source knows which operations
+the view already has. This is the purpose of the watermark. The watermark is essentially
+a clock, a vector of counters indicating the latest operation from each actor that
+the view has incorporated into its OpSet.
+
+When the source OpSet generates a patch for a view, it looks at the view's watermark
+and includes only operations that are newer than that watermark. When the view applies
+a patch, it updates its watermark to reflect the new operations it has received. This
+way, each patch contains only the delta since the last patch, and no operation is
+sent twice.
+
+The watermark also serves another purpose: it tells the view what it can safely forget.
+Operations older than the watermark have been incorporated into the source OpSet,
+which means the source has all the information it needs. The view can garbage collect
+operations that are both older than the watermark and no longer needed for the current
+materialized state.
+
+## Patch Scenarios
+
+To make this concrete, let's walk through several scenarios showing how patches flow
+between the source OpSet and a view. In each case we'll see what operations exist,
+what patch is generated, and how the view's state changes.
+
+### Simple Map Update
+
+Consider a document with a single key:
+
+```json
+{"name": "Alice"}
+```
+
+The view's OpSet contains one operation: `Op(A, 1, Put, root, "name", "Alice")`. Now
+suppose a remote actor updates the name. The source OpSet receives and incorporates
+`Op(B, 5, Put, root, "name", "Bob", pred=[A:1])`. This operation supersedes the
+original because it lists `A:1` in its predecessors.
+
+The source generates a patch for the view containing this single operation. The view
+inserts it into its OpSet at the appropriate position under the root object's "name"
+key. Now the view's OpSet has both operations for that key, with `B:5` superseding
+`A:1`. The existing diff machinery determines that the materialized value changed
+from "Alice" to "Bob".
+
+### Concurrent Map Updates
+
+Now suppose instead that while the remote actor was setting the name to "Bob", the
+local user was setting it to "Carol" through the view. The view creates
+`Op(V, 1, Put, root, "name", "Carol", pred=[A:1])` and queues it as a pending change.
+The view's OpSet already contains this operation because local changes are applied
+immediately to the view.
+
+When the source OpSet processes both the remote change and the pending local change,
+it ends up with three operations for the "name" key: the original `A:1`, the remote
+`B:5`, and the local `V:1`. Both `B:5` and `V:1` have `pred=[A:1]`, indicating they
+were concurrent modifications.
+
+The patch sent to the view contains only `B:5` because the view already has `A:1`
+and `V:1`. After applying the patch, the view's OpSet matches the source's for this
+key. The diff machinery recognizes this as a conflict and reports whichever value
+wins according to the deterministic conflict resolution rules, along with a flag
+indicating a conflict exists.
+
+### List Insertion
+
+Lists are more interesting because operations reference other operations to determine
+their position. Consider a list `["X", "Y", "Z"]` represented by these operations:
+
+```
+Op(A, 1, MakeList, root, "items") -> creates list object @A:1
+Op(A, 2, Insert, @A:1, HEAD, "X")
+Op(A, 3, Insert, @A:1, @A:2, "Y")
+Op(A, 4, Insert, @A:1, @A:3, "Z")
+```
+
+Each insert operation specifies a reference element: the operation ID of the element
+it should follow. `A:2` follows HEAD (the beginning of the list), `A:3` follows `A:2`,
+and `A:4` follows `A:3`.
+
+Now suppose a remote actor inserts "W" between "X" and "Y". They create
+`Op(B, 7, Insert, @A:1, @A:2, "W")`, which references `A:2` (the "X" element) as
+its predecessor. The patch contains this operation, and the view inserts it into
+its OpSet. The document order places `B:7` after `A:2` but before `A:3` because
+that's where operations referencing `A:2` belong. The resulting list is
+`["X", "W", "Y", "Z"]`.
+
+### Concurrent List Insertions
+
+What happens when two actors insert at the same position concurrently? Suppose both
+the view and a remote actor insert after "X". The view creates
+`Op(V, 1, Insert, @A:1, @A:2, "Local")` and the remote creates
+`Op(R, 5, Insert, @A:1, @A:2, "Remote")`. Both reference the same predecessor.
+
+The OpSet handles this by sorting concurrent operations with the same reference
+element by their operation IDs. This is deterministic: everyone agrees on the order
+regardless of when they received the operations. If `R:5` sorts before `V:1`, the
+list becomes `["X", "Remote", "Local", "Y", "Z"]`. The patch to the view contains
+only `R:5`, and after applying it, the view's diff machinery reports that "Remote"
+was inserted at index 1, shifting "Local" to index 2.
+
+### Deletion and Concurrent Insertion
+
+This scenario illustrates why tombstone retention matters. The view has `["X", "Y", "Z"]`
+and locally deletes "Y" by creating `Op(V, 1, Delete, @A:1, @A:3)`. The view's OpSet
+still contains the insert operation for "Y" (`A:3`) but now also has a delete
+operation targeting it. The materialized list shows `["X", "Z"]`.
+
+Meanwhile, a remote actor who hasn't seen the deletion inserts "W" after "Y":
+`Op(R, 5, Insert, @A:1, @A:3, "W")`. This operation references `A:3`, which is the
+"Y" that the view has locally deleted.
+
+When the patch arrives containing `R:5`, the view can still process it correctly
+because it retained the tombstone for "Y". The operation `A:3` is still in the
+view's OpSet, just marked as deleted. The new operation `R:5` is inserted after
+`A:3` in document order. The resulting list is `["X", "W", "Z"]` because "W" comes
+after the deleted "Y" position but before "Z".
+
+If the view had eagerly garbage collected the "Y" operation when it was deleted,
+it wouldn't know where to place "W". This is why views must retain tombstones
+until the source OpSet confirms it has processed all operations that might
+reference them.
+
+### Counter Increments
+
+Counters deserve special mention because they merge differently than other values.
+A counter with value 5 might be represented as `Op(A, 1, Put, root, "count", Counter(5))`.
+When actors increment it concurrently, they create increment operations:
+`Op(V, 1, Inc, root, "count", 2)` and `Op(R, 7, Inc, root, "count", 3)`.
+
+Unlike puts where concurrent operations conflict, increment operations combine
+additively. The final counter value is 5 + 2 + 3 = 10. The patch to the view
+contains the remote increment operation, and the diff reports the counter increased
+by 3 (the remote delta). The view doesn't need to know the final value because
+it can compute it from the operations in its OpSet.
+
+## Garbage Collection
+
+The view's OpSet grows as patches arrive and local changes are made. Without garbage
+collection, it would eventually become as large as the source OpSet, defeating the
+purpose of views. We need a strategy for removing operations that are no longer needed.
+
+### What Can Be Collected
+
+For map keys, garbage collection is straightforward. When a key has multiple operations
+and one clearly supersedes the others (it lists them in its predecessors and there are
+no concurrent operations), the superseded operations can be removed. Only the winning
+operation, or operations in the case of an unresolved conflict, needs to be retained.
+
+For lists, the situation is more nuanced. Deleted elements cannot be immediately
+garbage collected because other operations might reference them. In the scenario above,
+if we garbage collected the "Y" operation after deleting it, we wouldn't be able to
+process the concurrent "W" insertion that referenced "Y".
+
+### Conservative Tombstone Retention
+
+The simplest correct approach is to retain all tombstones, which are list element
+operations that have been deleted. This ensures that any future operation referencing
+a deleted element can still be placed correctly. The trade-off is that the view's
+OpSet may contain more operations than strictly necessary.
+
+In practice, this trade-off is acceptable for most applications. The pathological case
+would be a list with maximally interleaved insertions and deletions, where elements
+are repeatedly inserted and then deleted such that every remaining element references
+a deleted predecessor. This pattern is unusual in real applications. More common
+patterns like appending to lists, editing text sequentially, or updating map keys
+don't generate long chains of tombstones.
+
+If tombstone accumulation becomes a problem for specific use cases, more aggressive
+garbage collection strategies are possible. One could rewrite reference elements to
+skip over tombstones, or periodically rebuild the view from scratch by re-cloning
+and garbage collecting the source OpSet. But starting with conservative tombstone
+retention keeps the implementation simple and handles the common cases well.
+
+### When to Collect
+
+Garbage collection happens when the watermark advances. The watermark represents
+the point up to which the source OpSet has incorporated the view's changes. Once
+the watermark advances past an operation, the view knows that:
+
+1. The source OpSet has seen this operation
+2. Any future patches will be based on state that includes this operation
+3. No future patch will contain operations that are concurrent with this operation
+
+At this point, superseded map operations can be collected. Tombstones are retained
+per the conservative strategy, but operations that are strictly superseded, with
+no possibility of concurrent operations arriving, can be removed.
+
+The view might also periodically perform compaction by regenerating itself from
+the source OpSet. This is equivalent to creating a fresh view: clone the source
+OpSet and garbage collect to the current heads. This eliminates any accumulated
+tombstones and resets the view to minimal size. Applications can trigger compaction
+during idle periods or when the view's size exceeds some threshold.
+
+## Multiple Views
+
+A single source document can have multiple views, each with its own OpSet and
+watermark. This is useful when different parts of an application need to read and
+write to the document independently. For example, a document editor might have one
+view for the main editing surface and another for a sidebar that shows metadata.
+
+Each view operates independently. It receives patches from the source OpSet based
+on its own watermark, and it sends its pending changes to the source OpSet
+independently. The source OpSet doesn't need to know how many views exist or
+coordinate between them. It simply responds to patch requests based on the
+watermark it receives.
+
+When one view's pending changes are applied to the source OpSet, other views learn
+about those changes through the normal patch mechanism. From view B's perspective,
+changes made by view A look like any other remote changes: they arrive in a patch
+from the source OpSet and are incorporated into view B's OpSet.
+
+This design keeps the views loosely coupled. They don't need to communicate with
+each other directly, and the source OpSet doesn't need special logic to handle
+multiple views. The watermark mechanism ensures each view receives exactly the
+operations it needs, regardless of what other views are doing.
