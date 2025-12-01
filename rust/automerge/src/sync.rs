@@ -396,9 +396,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            for change in &message_changes.0 {
-                self.load_incremental_log_patches(change, patch_log)?;
-            }
+            self.load_incremental_log_patches(&message_changes.join(), patch_log)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -565,6 +563,17 @@ impl ChunkList {
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &[u8]> {
         self.0.iter().map(|v| v.as_slice())
+    }
+
+    pub(crate) fn join(&self) -> Vec<u8> {
+        let total: usize = self.0.iter().map(Vec::len).sum();
+        let mut result = Vec::with_capacity(total);
+
+        for v in &self.0 {
+            result.extend(v);
+        }
+
+        result
     }
 }
 
