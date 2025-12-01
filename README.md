@@ -91,7 +91,7 @@ The various subprojects (the rust code, the wrapper projects) have their own
 build instructions, but to run the tests that will be run in CI you can run
 `./scripts/ci/run`.
 
-### For macOS
+### CPATH
 
 These instructions worked to build locally on macOS 13.1 (arm64) as of
 Nov 29th 2022.
@@ -130,7 +130,7 @@ rustup target add wasm32-unknown-unknown
 ./scripts/ci/run
 ```
 
-If your build fails to find `cmocka.h` you may need to teach it about homebrew's
+If your build fails to find `cmocka.h` you may need to teach it about Homebrew's
 installation location:
 
 ```
