@@ -1,3 +1,9 @@
+# 0.7.2
+
+* Fix a bug which could cause sync messages to take a long time to process
+  (#1218)
+* Reduce peak memory usage when loading (#1184)
+
 # 0.7.1
 
 * Fix a bug which could cause sync loops (and other misbehviours, see #3df5fb63)
