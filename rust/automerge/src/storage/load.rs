@@ -8,9 +8,12 @@ use crate::{
 };
 
 pub(crate) mod change_collector;
-mod reconstruct_document;
-pub use reconstruct_document::VerificationMode;
-pub(crate) use reconstruct_document::{reconstruct_opset, ReconOpSet};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum VerificationMode {
+    Check,
+    DontCheck,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[allow(unreachable_pub)]
@@ -93,9 +96,9 @@ fn load_next_change<'a>(
         storage::Chunk::Document(d) => {
             tracing::trace!("loading document chunk");
             if !d.heads().iter().all(|h| current.has_change(h)) {
-                let new_changes = reconstruct_opset(&d, VerificationMode::DontCheck, text_encoding)
-                    .map_err(|e| Error::InflateDocument(Box::new(e)))?
-                    .changes;
+                let new_changes = d
+                    .reconstruct_changes(text_encoding)
+                    .map_err(|e| Error::InflateDocument(Box::new(e)))?;
                 changes.extend(new_changes);
             }
         }

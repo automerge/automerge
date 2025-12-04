@@ -1,4 +1,3 @@
-use super::hexane::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use super::meta::MetaCursor;
 use super::op::{AsChangeOp, OpBuilder};
 use super::types::{ActionCursor, ActorCursor, ActorIdx};
@@ -6,6 +5,7 @@ use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};
 use crate::storage::{Change, ChunkType, Header};
 use crate::types::{ActorId, ChangeHash};
+use hexane::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::Write;
@@ -16,7 +16,7 @@ use std::ops::Range;
 pub(crate) mod batch;
 pub(crate) mod collector;
 
-pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges};
+pub(crate) use collector::{BuildChangeMetadata, ChangeCollector, CollectedChanges, OutOfMemory};
 
 pub(crate) trait GetHash {
     fn get_hash(&self, index: usize) -> Option<ChangeHash>;

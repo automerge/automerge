@@ -1,11 +1,12 @@
 use super::tools::{Diff, DiffIter, ExIdPromise, Shiftable, Unshift};
 use crate::clock::{Clock, ClockRange};
 use crate::exid::ExId;
-use crate::op_set2::hexane::{ColumnDataIter, StrCursor};
 use crate::op_set2::op_set::{ActionIter, OpIdIter, OpSet, ValueIter};
 use crate::op_set2::types::{Action, ScalarValue, ValueRef};
 use crate::patches::PatchLog;
 use crate::types::{ObjId, OpId, TextEncoding};
+
+use hexane::{ColumnDataIter, StrCursor};
 
 use std::borrow::Cow;
 use std::fmt::Debug;

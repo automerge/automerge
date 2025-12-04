@@ -1,17 +1,16 @@
+use hexane::PackError;
+use std::collections::BTreeSet;
 use std::{borrow::Cow, ops::Range};
 
-use super::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
+use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
 use crate::change_graph::ChangeGraph;
-use crate::op_set2::OpSet;
+use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
+use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
-use crate::{ActorId, ChangeHash};
+use crate::storage::ColumnSpec;
+use crate::{ActorId, Automerge, Change, ChangeHash, TextEncoding};
 
-mod doc_op_columns;
-pub(crate) use doc_op_columns::DocOpColumns;
-mod doc_change_columns;
-pub(crate) use doc_change_columns::DocChangeColumns;
-pub(crate) use doc_change_columns::{DocChangeMetadata, ReadChangeError};
 mod compression;
 
 #[allow(dead_code)]
@@ -28,10 +27,9 @@ pub(crate) struct Document<'a> {
     header: Header,
     actors: Vec<ActorId>,
     heads: Vec<ChangeHash>,
-    //pub(crate) op_metadata: DocOpColumns,
     pub(crate) op_metadata: RawColumns<Uncompressed>,
     op_bytes: Range<usize>,
-    change_metadata: DocChangeColumns,
+    change_metadata: RawColumns<Uncompressed>,
     change_bytes: Range<usize>,
 }
 
@@ -46,10 +44,6 @@ pub(crate) enum ParseError {
         column_type: &'static str,
         error: super::columns::BadColumnLayout,
     },
-    #[error(transparent)]
-    BadDocOps(#[from] doc_op_columns::Error),
-    #[error(transparent)]
-    BadDocChanges(#[from] doc_change_columns::ReadChangeError),
 }
 
 impl<'a> Document<'a> {
@@ -156,23 +150,20 @@ impl<'a> Document<'a> {
         })
         .map_err(|e| parse::ParseError::Error(ParseError::RawColumns(e)))?;
 
-        let ops_layout = Columns::parse2(op_bytes.len(), ops.iter()).map_err(|e| {
+        let op_metadata = OpSet::validate(op_bytes.len(), &ops).map_err(|error| {
             parse::ParseError::Error(ParseError::BadColumnLayout {
                 column_type: "ops",
-                error: e,
+                error,
             })
         })?;
-        let ops_cols =
-            DocOpColumns::try_from(ops_layout).map_err(|e| parse::ParseError::Error(e.into()))?;
 
-        let change_layout = Columns::parse2(change_bytes.len(), changes.iter()).map_err(|e| {
-            parse::ParseError::Error(ParseError::BadColumnLayout {
-                column_type: "changes",
-                error: e,
-            })
-        })?;
-        let change_cols = DocChangeColumns::try_from(change_layout)
-            .map_err(|e| parse::ParseError::Error(e.into()))?;
+        let change_metadata =
+            ChangeGraph::validate(change_bytes.len(), &changes).map_err(|error| {
+                parse::ParseError::Error(ParseError::BadColumnLayout {
+                    column_type: "changes",
+                    error,
+                })
+            })?;
 
         Ok((
             i,
@@ -182,12 +173,20 @@ impl<'a> Document<'a> {
                 header,
                 actors,
                 heads,
-                op_metadata: ops_cols.raw_columns(),
+                op_metadata,
                 op_bytes,
-                change_metadata: change_cols,
+                change_metadata,
                 change_bytes,
             },
         ))
+    }
+
+    pub(crate) fn change_meta(&self) -> &RawColumns<Uncompressed> {
+        &self.change_metadata
+    }
+
+    pub(crate) fn change_bytes(&self) -> &[u8] {
+        &self.bytes[self.change_bytes.clone()]
     }
 
     pub(crate) fn new(
@@ -198,7 +197,7 @@ impl<'a> Document<'a> {
         let (op_metadata, ops_out_b) = op_set.export();
 
         let mut change_out = Vec::new();
-        let change_meta = change_graph.encode(&mut change_out);
+        let change_metadata = change_graph.encode(&mut change_out);
 
         // actors already sorted
         let actors = op_set.actors.clone();
@@ -219,7 +218,7 @@ impl<'a> Document<'a> {
         }
         let prefix_len = data.len();
 
-        change_meta.raw_columns().write(&mut data);
+        change_metadata.write(&mut data);
         op_metadata.write(&mut data);
         let change_start = data.len();
         let change_end = change_start + change_out.len();
@@ -251,7 +250,7 @@ impl<'a> Document<'a> {
                     data: op_bytes.clone(),
                 },
                 changes: compression::Cols {
-                    raw_columns: change_meta.raw_columns(),
+                    raw_columns: change_metadata.clone(),
                     data: change_bytes.clone(),
                 },
                 original: Cow::Borrowed(&bytes),
@@ -273,28 +272,13 @@ impl<'a> Document<'a> {
             heads,
             op_metadata,
             op_bytes,
-            change_metadata: change_meta,
+            change_metadata,
             change_bytes,
         }
     }
 
-    /*
-        pub(crate) fn iter_ops(
-            &'a self,
-        ) -> impl Iterator<Item = Result<DocOp, ReadDocOpError>> + Clone + 'a {
-            self.op_metadata.iter(&self.bytes[self.op_bytes.clone()])
-        }
-    */
-
     pub(crate) fn op_raw_bytes(&self) -> &[u8] {
         &self.bytes[self.op_bytes.clone()]
-    }
-
-    pub(crate) fn iter_changes(
-        &'a self,
-    ) -> impl Iterator<Item = Result<DocChangeMetadata<'a>, ReadChangeError>> + Clone + 'a {
-        self.change_metadata
-            .iter(&self.bytes[self.change_bytes.clone()])
     }
 
     pub(crate) fn into_bytes(self) -> Vec<u8> {
@@ -316,18 +300,112 @@ impl<'a> Document<'a> {
     pub(crate) fn heads(&self) -> &[ChangeHash] {
         &self.heads
     }
+
+    fn verify_changes(
+        &self,
+        cc: &CollectedChanges,
+        mode: VerificationMode,
+    ) -> Result<(), ReconstructError> {
+        if mode == VerificationMode::Check && !self.heads().iter().eq(cc.heads.iter()) {
+            let expected_heads: BTreeSet<_> = self.heads().iter().cloned().collect();
+            tracing::error!(?expected_heads, ?cc.heads, "mismatching heads");
+            Err(ReconstructError::MismatchingHeads(MismatchedHeads {
+                changes: cc.changes.clone(),
+                expected_heads,
+                derived_heads: cc.heads.clone(),
+            }))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn reconstruct(
+        &self,
+        mode: VerificationMode,
+        text_encoding: TextEncoding,
+    ) -> Result<Automerge, ReconstructError> {
+        let mut op_set = OpSet::load(self, text_encoding)?;
+        let mut change_graph = ChangeGraph::load(self)?;
+
+        let mut index = op_set.index_builder();
+
+        let change_collector = ChangeCollector::try_new(&change_graph, &op_set)?;
+        let mut change_collector = change_collector.with_index(&mut index);
+
+        change_collector.process_ops(&op_set)?;
+
+        let changes = change_collector.build_changegraph(&op_set)?;
+
+        self.verify_changes(&changes, mode)?;
+
+        op_set.set_indexes(index);
+
+        change_graph.set_hashes(&changes.changes);
+
+        debug_assert_eq!(changes.changes.len(), change_graph.len());
+
+        debug_assert!(op_set.validate_top_index());
+
+        Ok(Automerge::from_parts(op_set, change_graph))
+    }
+
+    pub(crate) fn reconstruct_changes(
+        &self,
+        text_encoding: TextEncoding,
+    ) -> Result<Vec<Change>, ReconstructError> {
+        let op_set = OpSet::load(self, text_encoding)?;
+        let change_graph = ChangeGraph::load(self)?;
+
+        let mut change_collector = ChangeCollector::try_new(&change_graph, &op_set)?;
+
+        change_collector.process_ops(&op_set)?;
+
+        Ok(change_collector.build_changegraph(&op_set)?.changes)
+    }
 }
 
-/*
-                if ops_meta.raw_columns() != ops_meta_b {
-                  log!("OLD");
-                  for c in ops_meta.raw_columns().iter() {
-                    log!(" :: col={:?}:{:?} data={:?}",c.spec().id(), c.spec().col_type(), c.data());
-                  }
-                  log!("NEW");
-                  for c in ops_meta_b.iter() {
-                    log!(" :: col={:?}:{:?} data={:?}",c.spec().id(), c.spec().col_type(), c.data());
-                  }
-                  panic!();
-                }
-*/
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ReconstructError {
+    // FIXME - I need to do this check
+    //#[error("the document contained ops which were out of order")]
+    //OpsOutOfOrder,
+    #[error("invalid changes: {0}")]
+    InvalidChanges(#[from] crate::storage::load::change_collector::Error),
+    #[error("mismatching heads")]
+    MismatchingHeads(MismatchedHeads),
+    // FIXME - i need to do this check
+    //#[error("succ out of order")]
+    //SuccOutOfOrder,
+    #[error(transparent)]
+    InvalidOp(#[from] crate::error::InvalidOpType),
+    #[error(transparent)]
+    PackErr(#[from] PackError),
+    #[error(transparent)]
+    ReadOpErr(#[from] ReadOpError),
+    #[error("invalid actor id {0}")]
+    InvalidActorId(usize),
+    #[error("invalid column length {0:?}")]
+    InvalidColumnLength(ColumnSpec),
+    #[error("max_op is lower than start_op")]
+    InvalidMaxOp,
+    #[error(transparent)]
+    OutOfMemory(#[from] OutOfMemory),
+}
+
+pub(crate) struct MismatchedHeads {
+    changes: Vec<Change>,
+    expected_heads: BTreeSet<ChangeHash>,
+    derived_heads: BTreeSet<ChangeHash>,
+}
+
+impl std::fmt::Debug for MismatchedHeads {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MismatchedHeads")
+            .field("changes", &self.changes.len())
+            .field("expected_heads", &self.expected_heads)
+            .field("derived_heads", &self.derived_heads)
+            .finish()
+    }
+}
+
+use super::load::VerificationMode;
