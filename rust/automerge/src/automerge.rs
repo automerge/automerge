@@ -539,16 +539,16 @@ impl Automerge {
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
-        let changes = self.get_changes_by_hashes(hashes.into_iter().rev().collect())?;
+        let changes = self.get_changes_by_hashes(hashes.into_iter().rev())?;
         f.apply_changes(changes)?;
         Ok(f)
     }
 
-    pub(crate) fn get_changes_by_hashes(
-        &self,
-        hashes: Vec<ChangeHash>,
-    ) -> Result<Vec<Change>, AutomergeError> {
-        ChangeCollector::for_hashes(&self.ops, &self.change_graph, hashes.clone())
+    pub(crate) fn get_changes_by_hashes<I>(&self, hashes: I) -> Result<Vec<Change>, AutomergeError>
+    where
+        I: IntoIterator<Item = ChangeHash>,
+    {
+        ChangeCollector::for_hashes(&self.ops, &self.change_graph, hashes)
     }
 
     pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {

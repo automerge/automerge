@@ -460,14 +460,19 @@ impl ChangeGraph {
         change_indexes
     }
 
-    #[inline(never)]
-    pub(crate) fn get_hashes(&self, have_deps: &[ChangeHash]) -> Vec<ChangeHash> {
-        let clock = self.seq_clock_for_heads(have_deps);
-        self.get_build_indexes(clock)
-            .into_iter()
-            .filter_map(|node| self.hashes.get(node.0 as usize))
-            .copied()
-            .collect()
+    pub(crate) fn get_hashes(&self, have_deps: &[ChangeHash]) -> Cow<'_, [ChangeHash]> {
+        if have_deps.is_empty() {
+            Cow::Borrowed(&self.hashes)
+        } else {
+            let clock = self.seq_clock_for_heads(have_deps);
+            Cow::Owned(
+                self.get_build_indexes(clock)
+                    .into_iter()
+                    .filter_map(|node| self.hashes.get(node.0 as usize))
+                    .copied()
+                    .collect(),
+            )
+        }
     }
 
     pub(crate) fn get_build_metadata_clock(

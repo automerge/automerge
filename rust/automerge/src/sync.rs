@@ -185,32 +185,15 @@ impl SyncDoc for Automerge {
                     .iter()
                     .all(|hash| self.has_change(hash))
                 {
-                    let reset_msg = Message {
-                        heads: our_heads,
-                        need: Vec::new(),
-                        have: vec![Have::default()],
-                        changes: ChunkList::empty(),
-                        supported_capabilities: Some(vec![
-                            Capability::MessageV1,
-                            Capability::MessageV2,
-                        ]),
-                        version: MessageVersion::V1,
-                    };
-                    return Some(reset_msg);
+                    return Some(Message::reset(our_heads));
                 }
             }
         }
 
-        let (message_builder, sent_hashes) = if let (Some(their_have), Some(their_need)) = (
-            sync_state.their_have.as_ref(),
-            sync_state.their_need.as_ref(),
-        ) {
-            let send_doc =
-                sync_state.their_heads == Some(vec![]) && sync_state.supports_v2_messages();
-
-            if send_doc {
+        let message_builder = if let Some((their_have, their_need)) = sync_state.their() {
+            if sync_state.send_doc() {
                 let hashes = self.change_graph.get_hashes(&[]);
-                (MessageBuilder::new_v2(self.save()), hashes)
+                MessageBuilder::new_v2(self.save(), hashes)
             } else {
                 let all_hashes = self
                     .get_hashes_to_send(their_have, their_need)
@@ -220,34 +203,25 @@ impl SyncDoc for Automerge {
                     .into_iter()
                     .filter(|hash| !sync_state.sent_hashes.contains(hash))
                     .collect();
-                let changes = self.get_changes_by_hashes(hashes.clone()).ok()?;
-
-                if sync_state.supports_v2_messages() {
-                    let encoded = changes
-                        .into_iter()
-                        .flat_map(|c| c.raw_bytes().to_vec())
-                        .collect::<Vec<_>>();
-                    (MessageBuilder::new_v2(encoded), hashes)
+                if hashes.len() > self.change_graph.len() / 3 && sync_state.supports_v2_messages() {
+                    // sending more than a 1/3 of the document?  send everything
+                    let all_hashes = self.change_graph.get_hashes(&[]);
+                    MessageBuilder::new_v2(self.save(), all_hashes)
                 } else {
-                    (MessageBuilder::new_v1(changes.into_iter()), hashes)
+                    let changes = self.get_changes_by_hashes(hashes.iter().copied()).ok()?;
+                    MessageBuilder::new(changes, sync_state)
                 }
             }
-        } else if sync_state.supports_v2_messages() {
-            (MessageBuilder::new_v2(Vec::new()), Vec::new())
         } else {
-            (MessageBuilder::new_v1(std::iter::empty()), Vec::new())
+            MessageBuilder::new(vec![], sync_state)
         };
 
         let heads_unchanged = sync_state.last_sent_heads == our_heads;
 
-        let heads_equal = if let Some(their_heads) = sync_state.their_heads.as_ref() {
-            their_heads == &our_heads
-        } else {
-            false
-        };
+        let heads_equal = sync_state.their_heads.as_ref() == Some(&our_heads);
 
         if heads_unchanged && sync_state.have_responded {
-            if heads_equal && sent_hashes.is_empty() {
+            if heads_equal && message_builder.is_empty() {
                 return None;
             }
             if sync_state.in_flight {
@@ -257,15 +231,12 @@ impl SyncDoc for Automerge {
 
         // Only send the supported capabilities in the first message, the other end will store them
         // in it's sync state and use them for subsequent messages
-        let supported_capabilities = if sync_state.have_responded {
-            None
-        } else {
-            Some(vec![Capability::MessageV1, Capability::MessageV2])
-        };
+
+        let supported_capabilities = sync_state.make_supported_capabilities();
 
         sync_state.have_responded = true;
         sync_state.last_sent_heads.clone_from(&our_heads);
-        sync_state.sent_hashes.extend(sent_hashes);
+        sync_state.sent_hashes.extend(message_builder.hashes());
 
         let sync_message = message_builder
             .heads(our_heads)
@@ -303,7 +274,7 @@ impl Automerge {
         let hashes = self.change_graph.get_hashes(&last_sync);
         Have {
             last_sync,
-            bloom: BloomFilter::from_hashes(hashes.into_iter()),
+            bloom: BloomFilter::from_hashes(hashes.iter()),
         }
     }
 
@@ -332,7 +303,7 @@ impl Automerge {
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
             let mut hashes_to_send = HashSet::new();
 
-            for hash in &hashes {
+            for hash in &*hashes {
                 change_hashes.insert(*hash);
 
                 for dep in self.change_graph.deps(hash) {
@@ -362,9 +333,9 @@ impl Automerge {
                 }
             }
 
-            for hash in hashes {
-                if hashes_to_send.contains(&hash) {
-                    final_hashes.push(hash);
+            for hash in &*hashes {
+                if hashes_to_send.contains(hash) {
+                    final_hashes.push(*hash);
                 }
             }
             Ok(final_hashes)
@@ -599,6 +570,17 @@ fn parse_have(input: parse::Input<'_>) -> parse::ParseResult<'_, Have, ReadMessa
 }
 
 impl Message {
+    pub(crate) fn reset(our_heads: Vec<ChangeHash>) -> Message {
+        Message {
+            heads: our_heads,
+            need: Vec::new(),
+            have: vec![Have::default()],
+            changes: ChunkList::empty(),
+            supported_capabilities: Some(vec![Capability::MessageV1, Capability::MessageV2]),
+            version: MessageVersion::V1,
+        }
+    }
+
     pub fn decode(input: &[u8]) -> Result<Self, ReadMessageError> {
         let input = parse::Input::new(input);
         match Self::parse(input) {
@@ -661,9 +643,9 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
-    #[default]
+    Request,
     MessageV1,
     MessageV2,
     Unknown(u8),
@@ -672,6 +654,7 @@ pub enum Capability {
 impl Capability {
     fn encode(&self, out: &mut Vec<u8>) {
         match self {
+            Capability::Request => out.push(0x00),
             Capability::MessageV1 => out.push(0x01),
             Capability::MessageV2 => out.push(0x02),
             Capability::Unknown(v) => out.push(*v),
@@ -681,6 +664,7 @@ impl Capability {
     fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
         let (i, v) = parse::take1(input)?;
         match v {
+            0x00 => Ok((i, Self::Request)),
             0x01 => Ok((i, Self::MessageV1)),
             0x02 => Ok((i, Self::MessageV2)),
             _ => Ok((i, Self::Unknown(v))),
