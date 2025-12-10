@@ -1,8 +1,6 @@
 use super::aggregate::Acc;
 use super::aggregate::Agg;
-use super::cursor::{
-    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, ScanMeta, SpliceResult,
-};
+use super::cursor::{ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, SpliceResult};
 use super::encoder::Encoder;
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
@@ -872,12 +870,44 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::init(len, slabs)
     }
 
-    pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_with(data, &ScanMeta::default())
+    pub fn load_unless_empty(data: &[u8], len: usize) -> Result<Self, PackError> {
+        if data.is_empty() {
+            Ok(ColumnData::init_empty(len))
+        } else {
+            let c = ColumnData::load(data)?;
+            if c.len() == len {
+                Ok(c)
+            } else {
+                Err(PackError::InvalidLength(c.len(), len))
+            }
+        }
     }
 
-    pub fn load_with(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
-        let col = C::load_with(data, m)?;
+    pub fn load_with_unless_empty<F>(data: &[u8], len: usize, test: &F) -> Result<Self, PackError>
+    where
+        F: Fn(Option<&C::Item>) -> Option<String>,
+    {
+        if data.is_empty() {
+            Ok(ColumnData::init_empty(len))
+        } else {
+            let c = ColumnData::load_with(data, test)?;
+            if c.len() == len {
+                Ok(c)
+            } else {
+                Err(PackError::InvalidLength(c.len(), len))
+            }
+        }
+    }
+
+    pub fn load(data: &[u8]) -> Result<Self, PackError> {
+        Self::load_with(data, &|_| None)
+    }
+
+    pub fn load_with<F>(data: &[u8], test: &F) -> Result<Self, PackError>
+    where
+        F: Fn(Option<&C::Item>) -> Option<String>,
+    {
+        let col = C::load_with(data, test)?;
         debug_assert_eq!(
             col.iter()
                 .map(|i| i.as_deref().map(<C::Item>::agg).unwrap_or_default())

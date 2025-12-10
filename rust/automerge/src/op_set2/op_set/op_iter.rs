@@ -1,8 +1,4 @@
 use crate::iter::tools::Shiftable;
-use crate::op_set2::hexane::{
-    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
-    SlabWeight, StrCursor, UIntCursor,
-};
 use crate::{
     op_set2,
     op_set2::{
@@ -12,6 +8,10 @@ use crate::{
         OpSet,
     },
     types::{ElemId, ObjId, OpId},
+};
+use hexane::{
+    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
+    SlabWeight, StrCursor, UIntCursor,
 };
 
 use super::Op;
@@ -47,7 +47,7 @@ pub(crate) enum ReadOpError {
     #[error("missing value: {0}")]
     MissingValue(&'static str),
     #[error("error reading value column: {0}")]
-    ReadValue(#[from] op_set2::hexane::ReadRawError),
+    ReadValue(#[from] hexane::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }

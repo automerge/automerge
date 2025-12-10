@@ -1,16 +1,17 @@
-use super::hexane::{
-    BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor,
-    ScanMeta, StrCursor, UIntCursor,
-};
 use super::meta::MetaCursor;
 use super::op::OpLike;
 use super::op_set::MarkIndexColumn;
 use super::types::{Action, ActionCursor, ActorCursor, ActorIdx, ScalarValue};
 use crate::storage::columns::compression::Uncompressed;
 use crate::storage::columns::ColumnId;
+use crate::storage::columns::{BadColumnLayout, Columns as ColumnFormat};
 use crate::storage::ColumnSpec;
 use crate::storage::{RawColumn, RawColumns};
 use crate::types::{ActorId, SequenceType, TextEncoding};
+use hexane::{
+    BooleanCursor, ColumnCursor, ColumnData, DeltaCursor, IntCursor, PackError, RawCursor,
+    StrCursor, UIntCursor,
+};
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -187,58 +188,87 @@ impl Columns {
         (raw, data)
     }
 
-    fn load_column<C: ColumnCursor>(
+    pub(crate) fn validate(
+        bytes: usize,
+        cols: &RawColumns<Uncompressed>,
+    ) -> Result<RawColumns<Uncompressed>, BadColumnLayout> {
+        use ids::*;
+        let _ = ColumnFormat::parse2(bytes, cols.iter())?;
+        Ok(cols
+            .iter()
+            .filter(|col| {
+                matches!(
+                    col.spec(),
+                    ID_ACTOR_COL_SPEC
+                        | ID_COUNTER_COL_SPEC
+                        | OBJ_ID_ACTOR_COL_SPEC
+                        | OBJ_ID_COUNTER_COL_SPEC
+                        | KEY_ACTOR_COL_SPEC
+                        | KEY_COUNTER_COL_SPEC
+                        | KEY_STR_COL_SPEC
+                        | SUCC_COUNT_COL_SPEC
+                        | SUCC_ACTOR_COL_SPEC
+                        | SUCC_COUNTER_COL_SPEC
+                        | INSERT_COL_SPEC
+                        | ACTION_COL_SPEC
+                        | VALUE_META_COL_SPEC
+                        | VALUE_COL_SPEC
+                        | MARK_NAME_COL_SPEC
+                        | EXPAND_COL_SPEC
+                )
+            })
+            .cloned()
+            .collect())
+    }
+
+    fn load_column<C, T>(
         spec: ColumnSpec,
         cols: &BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
-        m: &ScanMeta,
+        test: &T,
         len: usize,
-    ) -> Result<ColumnData<C>, PackError> {
+    ) -> Result<ColumnData<C>, PackError>
+    where
+        C: ColumnCursor,
+        T: Fn(Option<&C::Item>) -> Option<String>,
+    {
         if let Some(range) = cols.get(&spec) {
-            //let c1 : ColumnData<C> = ColumnData::external(data.clone(), range.clone(), m)?;
-            let c2: ColumnData<C> = ColumnData::load_with(&data[range.clone()], m)?;
-            //assert_eq!(c1.to_vec(), c2.to_vec());
-            //assert_eq!(c1.export(), c2.export());
-            //assert_eq!(c1.len(), c2.len());
-            Ok(c2)
-            //Ok(c1)
+            ColumnData::load_with(&data[range.clone()], test)
         } else {
             Ok(ColumnData::init_empty(len))
         }
     }
 
-    pub(crate) fn load<'a, I: Iterator<Item = &'a RawColumn<Uncompressed>>>(
-        iter: I,
+    pub(crate) fn load(
+        cols: BTreeMap<ColumnSpec, Range<usize>>,
         data: &[u8],
         actors: &[ActorId],
     ) -> Result<Self, PackError> {
-        let m = ScanMeta {
-            actors: actors.len(),
-        };
-        let cols = iter.map(|c| (c.spec(), c.data())).collect();
+        use crate::validation::{ivalid_u32 as ictr, nil, valid_actors, valid_u32 as ctr};
+        let act = valid_actors(actors.len());
 
-        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, data, &m, 0)?;
+        let id_actor = Self::load_column(ID_ACTOR_COL_SPEC, &cols, data, &act, 0)?;
         let len = id_actor.len();
 
-        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, data, &m, len)?;
-        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, data, &m, len)?;
-        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, data, &m, len)?;
-        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, data, &m, len)?;
-        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, data, &m, len)?;
-        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, data, &m, len)?;
-        let insert = Self::load_column(INSERT_COL_SPEC, &cols, data, &m, len)?;
-        let action = Self::load_column(ACTION_COL_SPEC, &cols, data, &m, len)?;
-        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, data, &m, len)?;
-        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, data, &m, len)?;
+        let id_ctr = Self::load_column(ID_COUNTER_COL_SPEC, &cols, data, &ictr, len)?;
+        let obj_actor = Self::load_column(OBJ_ID_ACTOR_COL_SPEC, &cols, data, &act, len)?;
+        let obj_ctr = Self::load_column(OBJ_ID_COUNTER_COL_SPEC, &cols, data, &ctr, len)?;
+        let key_actor = Self::load_column(KEY_ACTOR_COL_SPEC, &cols, data, &act, len)?;
+        let key_ctr = Self::load_column(KEY_COUNTER_COL_SPEC, &cols, data, &ictr, len)?;
+        let key_str = Self::load_column(KEY_STR_COL_SPEC, &cols, data, &nil, len)?;
+        let insert = Self::load_column(INSERT_COL_SPEC, &cols, data, &nil, len)?;
+        let action = Self::load_column(ACTION_COL_SPEC, &cols, data, &nil, len)?;
+        let mark_name = Self::load_column(MARK_NAME_COL_SPEC, &cols, data, &nil, len)?;
+        let expand = Self::load_column(EXPAND_COL_SPEC, &cols, data, &nil, len)?;
 
-        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, data, &m, len)?;
+        let succ_count = Self::load_column(SUCC_COUNT_COL_SPEC, &cols, data, &nil, len)?;
         let succ_len = succ_count.acc().as_usize();
-        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, data, &m, succ_len)?;
-        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, data, &m, succ_len)?;
+        let succ_actor = Self::load_column(SUCC_ACTOR_COL_SPEC, &cols, data, &act, succ_len)?;
+        let succ_ctr = Self::load_column(SUCC_COUNTER_COL_SPEC, &cols, data, &ictr, succ_len)?;
 
-        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, data, &m, len)?;
+        let value_meta = Self::load_column(VALUE_META_COL_SPEC, &cols, data, &nil, len)?;
         let value_len = value_meta.acc().as_usize();
-        let value = Self::load_column(VALUE_COL_SPEC, &cols, data, &m, value_len)?;
+        let value = Self::load_column(VALUE_COL_SPEC, &cols, data, &nil, value_len)?;
 
         let index = Indexes::default();
 
@@ -680,4 +710,5 @@ pub(crate) mod ids {
         EXPAND_COL_SPEC,
     ];
 }
+
 pub(super) use ids::*;

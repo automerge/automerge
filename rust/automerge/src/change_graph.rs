@@ -1,18 +1,23 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
 use std::ops::Add;
 
-use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
+use hexane::{
+    ColGroupIter, ColumnCursor, ColumnData, ColumnDataIter, DeltaCursor, PackError, StrCursor,
+    UIntCursor,
+};
 
 use crate::storage::BundleMetadata;
 use crate::{
     clock::{Clock, SeqClock},
-    columnar::column_range::{DepsRange, ValueRange},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
-    storage::{Columns, DocChangeColumns},
+    storage::columns::compression::Uncompressed,
+    storage::columns::BadColumnLayout,
+    storage::document::ReconstructError as LoadError,
+    storage::{Columns, Document, RawColumn, RawColumns},
     types::OpId,
     Change, ChangeHash,
 };
@@ -31,6 +36,7 @@ pub(crate) struct ChangeGraph {
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
     max_ops: Vec<u32>,
+    max_op: u32,
     num_ops: ColumnData<UIntCursor>,
     timestamps: ColumnData<DeltaCursor>,
     messages: ColumnData<StrCursor>,
@@ -83,29 +89,10 @@ impl ChangeGraph {
             hashes: Vec::new(),
             actors: Vec::new(),
             max_ops: Vec::new(),
+            max_op: 0,
             num_ops: ColumnData::new(),
             seq: Vec::new(),
             parents: Vec::new(),
-            messages: ColumnData::new(),
-            timestamps: ColumnData::new(),
-            extra_bytes_meta: ColumnData::new(),
-            extra_bytes_raw: Vec::new(),
-            heads: BTreeSet::new(),
-            clock_cache: HashMap::new(),
-            seq_index: vec![vec![]; num_actors],
-        }
-    }
-
-    pub(crate) fn with_capacity(changes: usize, deps: usize, num_actors: usize) -> Self {
-        Self {
-            edges: Vec::with_capacity(deps),
-            nodes_by_hash: HashMap::new(),
-            hashes: Vec::with_capacity(changes),
-            actors: Vec::with_capacity(changes),
-            max_ops: Vec::with_capacity(changes),
-            num_ops: ColumnData::new(),
-            seq: Vec::with_capacity(changes),
-            parents: Vec::with_capacity(changes),
             messages: ColumnData::new(),
             timestamps: ColumnData::new(),
             extra_bytes_meta: ColumnData::new(),
@@ -178,11 +165,11 @@ impl ChangeGraph {
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.hashes.len()
+        self.actors.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.hashes.is_empty()
+        self.actors.is_empty()
     }
 
     pub(crate) fn hash_to_index(&self, hash: &ChangeHash) -> Option<usize> {
@@ -191,6 +178,10 @@ impl ChangeGraph {
 
     pub(crate) fn index_to_hash(&self, index: usize) -> Option<&ChangeHash> {
         self.hashes.get(index)
+    }
+
+    pub(crate) fn max_op(&self) -> u64 {
+        self.max_op as u64
     }
 
     pub(crate) fn max_op_for_actor(&mut self, actor_index: usize) -> u64 {
@@ -221,41 +212,208 @@ impl ChangeGraph {
         (0..end).map(NodeIdx)
     }
 
-    pub(crate) fn encode(&self, out: &mut Vec<u8>) -> DocChangeColumns {
+    pub(crate) fn set_hashes(&mut self, changes: &[Change]) {
+        debug_assert_eq!(changes.len(), self.len());
+        debug_assert!(self.hashes.is_empty());
+
+        for c in changes {
+            let hash = c.hash();
+            let node_idx = NodeIdx(self.hashes.len() as u32);
+            self.nodes_by_hash.insert(hash, node_idx);
+            self.hashes.push(hash)
+        }
+
+        for n in 0..(self.len() as u32) {
+            if (n + 1) % CACHE_STEP == 0 {
+                self.cache_clock(NodeIdx(n));
+            }
+        }
+    }
+
+    pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
+        use ids::*;
+
+        let num_actors = doc.actors().len();
+        let meta = doc.change_meta();
+        let bytes = doc.change_bytes();
+
+        let actor_bytes = meta.bytes(ACTOR_COL_SPEC, bytes);
+        let seq_bytes = meta.bytes(SEQ_COL_SPEC, bytes);
+        let max_op_bytes = meta.bytes(MAX_OP_COL_SPEC, bytes);
+        let time_bytes = meta.bytes(TIME_COL_SPEC, bytes);
+        let message_bytes = meta.bytes(MESSAGE_COL_SPEC, bytes);
+        let deps_count_bytes = meta.bytes(DEPS_COUNT_COL_SPEC, bytes);
+        let deps_val_bytes = meta.bytes(DEPS_VAL_COL_SPEC, bytes);
+        let extra_meta_bytes = meta.bytes(EXTRA_META_COL_SPEC, bytes);
+
+        let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
+
+        let actors = to_vec(ActorCursor::iter(actor_bytes))?;
+        let max_ops = to_u32_vec(DeltaCursor::iter(max_op_bytes))?;
+        let max_op = max_ops.iter().copied().max().unwrap_or(0);
+        let seq = to_u32_vec(DeltaCursor::iter(seq_bytes))?;
+
+        if let Some(a) = actors.iter().copied().map(usize::from).max() {
+            if a >= num_actors {
+                return Err(LoadError::InvalidActorId(a));
+            }
+        }
+
+        let len = actors.len();
+
+        let timestamps = ColumnData::load_unless_empty(time_bytes, len)?;
+        let messages = ColumnData::load_unless_empty(message_bytes, len)?;
+        let extra_bytes_meta = ColumnData::load_unless_empty(extra_meta_bytes, len)?;
+
+        if max_ops.len() != len {
+            return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
+        }
+        if seq.len() != len {
+            return Err(LoadError::InvalidColumnLength(SEQ_COL_SPEC));
+        }
+        if timestamps.len() != len {
+            return Err(LoadError::InvalidColumnLength(TIME_COL_SPEC));
+        }
+        if messages.len() != len {
+            return Err(LoadError::InvalidColumnLength(MESSAGE_COL_SPEC));
+        }
+
+        let mut seq_index = vec![vec![]; num_actors];
+        for (i, actor) in actors.iter().enumerate() {
+            let actor = actor.0 as usize;
+            seq_index[actor].push(NodeIdx(i as u32));
+        }
+
+        let mut parents = Vec::with_capacity(len);
+        let mut edges = vec![];
+
+        let deps_count = UIntCursor::iter(deps_count_bytes).map(to_u32);
+        let mut deps_val = DeltaCursor::iter(deps_val_bytes).map(to_u32);
+
+        let mut num_ops = Vec::with_capacity(len);
+        for (i, d) in deps_count.enumerate() {
+            let d = d? as usize;
+            if d == 0 {
+                num_ops.push(max_ops[i] as u64);
+                parents.push(None);
+                continue;
+            }
+
+            parents.push(Some(EdgeIdx::new(edges.len())));
+            let mut last_max_op = 0;
+            for e in 0..d {
+                let dep = deps_val.next();
+                let dep = dep.ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))??;
+                let target = NodeIdx(dep);
+                let next = EdgeIdx::new(edges.len() + 1);
+                let next = if e + 1 == d { None } else { Some(next) };
+                last_max_op = std::cmp::max(last_max_op, max_ops[dep as usize]);
+                edges.push(Edge { target, next })
+            }
+            if last_max_op > max_ops[i] {
+                return Err(LoadError::InvalidMaxOp);
+            }
+            num_ops.push(max_ops[i] as u64 - last_max_op as u64);
+        }
+        let num_ops = num_ops.into_iter().collect();
+
+        let heads = doc.heads().iter().copied().collect();
+
+        if parents.len() != len {
+            return Err(LoadError::InvalidColumnLength(DEPS_COUNT_COL_SPEC));
+        }
+
+        // blank - to be filled out later
+        let clock_cache = HashMap::default();
+        let hashes = vec![];
+        let nodes_by_hash = HashMap::new();
+
+        Ok(Self {
+            edges,
+            hashes,
+            actors,
+            parents,
+            seq,
+            max_ops,
+            max_op,
+            num_ops,
+            timestamps,
+            messages,
+            extra_bytes_meta,
+            extra_bytes_raw,
+            heads,
+            nodes_by_hash,
+            clock_cache,
+            seq_index,
+        })
+    }
+
+    pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
+        use ids::*;
+
         let actor_iter = self.actors.iter().map(as_actor);
-        let actor = ActorCursor::encode(out, actor_iter, false).into();
+        let actor = ActorCursor::encode(out, actor_iter, false);
 
         let seq_iter = self.seq.iter().map(as_seq);
-        let seq = DeltaCursor::encode(out, seq_iter, false).into();
+        let seq = DeltaCursor::encode(out, seq_iter, false);
 
         let max_op_iter = self.max_ops.iter().map(as_max_op);
-        let max_op = DeltaCursor::encode(out, max_op_iter, false).into();
+        let max_op = DeltaCursor::encode(out, max_op_iter, false);
 
-        let time = self.timestamps.save_to_unless_empty(out).into();
+        let time = self.timestamps.save_to_unless_empty(out);
 
-        let message = self.messages.save_to_unless_empty(out).into();
+        let message = self.messages.save_to_unless_empty(out);
 
         let num_deps_iter = self.num_deps().map(as_num_deps);
-        let num_deps = UIntCursor::encode(out, num_deps_iter, false).into();
+        let num_deps = UIntCursor::encode(out, num_deps_iter, false);
 
         let deps_iter = self.deps_iter().map(as_deps);
-        let deps = DeltaCursor::encode(out, deps_iter, false).into();
+        let deps = DeltaCursor::encode(out, deps_iter, false);
 
         // FIXME - we could eliminate this column if empty but meta isnt all null
-        let meta = self.extra_bytes_meta.save_to_unless_empty(out).into();
-        let raw = (out.len()..out.len() + self.extra_bytes_raw.len()).into();
+        let meta = self.extra_bytes_meta.save_to_unless_empty(out);
+        let raw = out.len()..out.len() + self.extra_bytes_raw.len();
         out.extend(&self.extra_bytes_raw);
 
-        DocChangeColumns {
-            actor,
-            seq,
-            max_op,
-            time,
-            message,
-            deps: DepsRange::new(num_deps, deps),
-            extra: ValueRange::new(meta, raw),
-            other: Columns::empty(),
-        }
+        [
+            RawColumn::new(ACTOR_COL_SPEC, actor),
+            RawColumn::new(SEQ_COL_SPEC, seq),
+            RawColumn::new(MAX_OP_COL_SPEC, max_op),
+            RawColumn::new(TIME_COL_SPEC, time),
+            RawColumn::new(MESSAGE_COL_SPEC, message),
+            RawColumn::new(DEPS_COUNT_COL_SPEC, num_deps),
+            RawColumn::new(DEPS_VAL_COL_SPEC, deps),
+            RawColumn::new(EXTRA_META_COL_SPEC, meta),
+            RawColumn::new(EXTRA_VAL_COL_SPEC, raw),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    pub(crate) fn validate(
+        bytes: usize,
+        cols: &RawColumns<Uncompressed>,
+    ) -> Result<RawColumns<Uncompressed>, BadColumnLayout> {
+        use ids::*;
+        let _ = Columns::parse2(bytes, cols.iter())?;
+        Ok(cols
+            .iter()
+            .filter(|col| {
+                matches!(
+                    col.spec(),
+                    ACTOR_COL_SPEC
+                        | SEQ_COL_SPEC
+                        | MAX_OP_COL_SPEC
+                        | TIME_COL_SPEC
+                        | MESSAGE_COL_SPEC
+                        | DEPS_COUNT_COL_SPEC
+                        | DEPS_VAL_COL_SPEC
+                        | EXTRA_META_COL_SPEC
+                        | EXTRA_VAL_COL_SPEC
+                )
+            })
+            .cloned()
+            .collect())
     }
 
     pub(crate) fn opid_to_hash(&self, id: OpId) -> Option<ChangeHash> {
@@ -327,7 +485,6 @@ impl ChangeGraph {
                 .map(|p| self.hashes[p.0 as usize])
                 .collect::<Vec<_>>();
 
-            //num_deps += deps.len();
             let start_op = max_op - num_ops + 1;
             let seq = self.seq[i] as u64;
             Ok(BundleMetadata {
@@ -348,7 +505,7 @@ impl ChangeGraph {
     pub(crate) fn get_build_metadata<I>(
         &self,
         hashes: I,
-    ) -> Result<(Vec<BuildChangeMetadata<'_>>, usize), MissingDep>
+    ) -> Result<Vec<BuildChangeMetadata<'_>>, MissingDep>
     where
         I: IntoIterator<Item = ChangeHash>,
     {
@@ -365,11 +522,24 @@ impl ChangeGraph {
         Ok(self.get_build_metadata_for_indexes(indexes))
     }
 
-    fn get_build_metadata_for_indexes<I>(&self, indexes: I) -> (Vec<BuildChangeMetadata<'_>>, usize)
+    pub(crate) fn iter(&self) -> ChangeIter<'_> {
+        ChangeIter {
+            index: 0,
+            actors: self.actors.iter(),
+            seq: self.seq.iter(),
+            max_ops: self.max_ops.iter(),
+            num_ops: self.num_ops.iter(),
+            timestamps: self.timestamps.iter(),
+            messages: self.messages.iter(),
+            extra_bytes_meta: self.extra_bytes_meta.iter().with_acc(),
+            graph: self,
+        }
+    }
+
+    fn get_build_metadata_for_indexes<I>(&self, indexes: I) -> Vec<BuildChangeMetadata<'_>>
     where
         I: IntoIterator<Item = NodeIdx>,
     {
-        let mut num_deps = 0;
         let changes = indexes
             .into_iter()
             .map(|index| {
@@ -387,7 +557,6 @@ impl ChangeGraph {
                 let extra = Cow::Borrowed(&self.extra_bytes_raw[meta_range]);
 
                 let deps = self.parents(index).map(|p| p.0 as u64).collect::<Vec<_>>();
-                num_deps += deps.len();
                 let start_op = max_op - num_ops + 1;
                 let seq = self.seq[i] as u64;
                 BuildChangeMetadata {
@@ -403,7 +572,7 @@ impl ChangeGraph {
                 }
             })
             .collect();
-        (changes, num_deps)
+        changes
     }
 
     fn get_build_indexes(&self, clock: SeqClock) -> Vec<NodeIdx> {
@@ -438,7 +607,7 @@ impl ChangeGraph {
     pub(crate) fn get_build_metadata_clock(
         &self,
         have_deps: &[ChangeHash],
-    ) -> (Vec<BuildChangeMetadata<'_>>, usize) {
+    ) -> Vec<BuildChangeMetadata<'_>> {
         let clock = self.seq_clock_for_heads(have_deps);
         let change_indexes = self.get_build_indexes(clock);
         self.get_build_metadata_for_indexes(change_indexes)
@@ -462,29 +631,6 @@ impl ChangeGraph {
             self.heads.remove(d);
         }
         self.heads.insert(change.hash());
-    }
-
-    pub(crate) fn from_iter<
-        'a,
-        I: Iterator<Item = (&'a Change, usize)> + ExactSizeIterator + Clone,
-    >(
-        iter: I,
-        deps: usize,
-        num_actors: usize,
-    ) -> Result<Self, MissingDep> {
-        let mut seen = HashSet::new();
-        for (change, _) in iter.clone() {
-            for h in change.deps().iter() {
-                if !seen.contains(h) {
-                    return Err(MissingDep(*h));
-                }
-            }
-            seen.insert(change.hash());
-        }
-
-        let mut graph = ChangeGraph::with_capacity(iter.len(), deps, num_actors);
-        graph.add_changes(iter)?;
-        Ok(graph)
     }
 
     pub(crate) fn add_nodes<
@@ -524,6 +670,7 @@ impl ChangeGraph {
         for (i, (change, actor)) in iter.enumerate() {
             let node_idx = node + i;
             let hash = change.hash();
+            self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
             self.hashes.push(hash);
             debug_assert!(!self.nodes_by_hash.contains_key(&hash));
             self.nodes_by_hash.insert(hash, node_idx);
@@ -901,4 +1048,172 @@ mod tests {
             graph
         }
     }
+}
+
+fn to_vec<'a, I, T>(iter: I) -> Result<Vec<T>, PackError>
+where
+    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
+    T: Copy + Default + 'a,
+{
+    iter.map(squish).collect()
+}
+
+fn squish<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<T, PackError>
+where
+    T: Copy + Default,
+{
+    match i {
+        Err(e) => Err(e),
+        Ok(Some(i)) => Ok(*i),
+        Ok(None) => Ok(T::default()),
+    }
+}
+
+fn to_u32<T>(i: Result<Option<Cow<'_, T>>, PackError>) -> Result<u32, PackError>
+where
+    T: TryInto<u32> + Copy + Default,
+{
+    match i {
+        Err(e) => Err(e),
+        Ok(Some(i)) => Ok((*i).try_into().unwrap_or(0)),
+        Ok(None) => Ok(0),
+    }
+}
+
+/*
+fn to_u32(i: Result<Option<Cow<'_, i64>>, PackError>) -> Result<u32, PackError> {
+    match i {
+        Err(e) => Err(e),
+        Ok(Some(i)) => Ok((*i).try_into().unwrap_or(0)),
+        Ok(None) => Ok(0),
+    }
+}
+*/
+
+fn to_u32_vec<'a, I, T>(iter: I) -> Result<Vec<u32>, PackError>
+where
+    I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
+    T: TryInto<u32> + Copy + Default + 'a,
+{
+    iter.map(to_u32).collect()
+}
+
+pub(crate) struct ChangeIter<'a> {
+    index: usize,
+    actors: std::slice::Iter<'a, ActorIdx>,
+    seq: std::slice::Iter<'a, u32>,
+    max_ops: std::slice::Iter<'a, u32>,
+    num_ops: ColumnDataIter<'a, UIntCursor>,
+    timestamps: ColumnDataIter<'a, DeltaCursor>,
+    messages: ColumnDataIter<'a, StrCursor>,
+    extra_bytes_meta: ColGroupIter<'a, MetaCursor>,
+    graph: &'a ChangeGraph,
+}
+
+impl<'a> Iterator for ChangeIter<'a> {
+    type Item = BuildChangeMetadata<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.index;
+        self.index += 1;
+        let actor = (*self.actors.next()?).into();
+        let seq = *self.seq.next()? as u64;
+        let max_op = *self.max_ops.next()? as u64;
+        let num_ops = *self.num_ops.next().flatten().unwrap_or_default();
+        let timestamp = *self.timestamps.next().flatten().unwrap_or_default();
+        let message = self.messages.next().flatten();
+        let start_op = max_op - num_ops + 1;
+
+        let meta = self.extra_bytes_meta.next()?;
+        let meta_range = meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+        let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
+        let deps = self
+            .graph
+            .parents(NodeIdx(i as u32))
+            .map(|n| n.0 as u64)
+            .collect();
+        Some(BuildChangeMetadata {
+            actor,
+            seq,
+            start_op,
+            max_op,
+            timestamp,
+            message,
+            extra,
+            deps,
+            builder: 0,
+        })
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let i = self.index + n;
+        self.index += n + 1;
+
+        let actor = (*self.actors.nth(n)?).into();
+        let seq = *self.seq.nth(n)? as u64;
+        let max_op = *self.max_ops.nth(0)? as u64;
+        let num_ops = *self.num_ops.nth(0).flatten().unwrap_or_default();
+        let timestamp = *self.timestamps.nth(0).flatten().unwrap_or_default();
+        let message = self.messages.nth(0).flatten();
+        let start_op = max_op - num_ops + 1;
+
+        let meta = self.extra_bytes_meta.nth(0)?;
+        let meta_range = meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
+        let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
+
+        let deps = self
+            .graph
+            .parents(NodeIdx(i as u32))
+            .map(|n| n.0 as u64)
+            .collect();
+
+        Some(BuildChangeMetadata {
+            actor,
+            seq,
+            start_op,
+            max_op,
+            timestamp,
+            message,
+            extra,
+            deps,
+            builder: 0,
+        })
+    }
+}
+
+#[rustfmt::skip]
+pub(crate) mod ids {
+    use crate::storage::{columns::ColumnId, ColumnSpec};
+
+    const ACTOR_COL_ID: ColumnId = ColumnId::new(0);
+    const SEQ_COL_ID: ColumnId = ColumnId::new(0);
+    const MAX_OP_COL_ID: ColumnId = ColumnId::new(1);
+    const TIME_COL_ID: ColumnId = ColumnId::new(2);
+    const MESSAGE_COL_ID: ColumnId = ColumnId::new(3);
+    const DEPS_COL_ID: ColumnId = ColumnId::new(4);
+    const EXTRA_COL_ID: ColumnId = ColumnId::new(5);
+
+    pub(super) const ACTOR_COL_SPEC:      ColumnSpec = ColumnSpec::new_actor(ACTOR_COL_ID);
+    pub(super) const SEQ_COL_SPEC:        ColumnSpec = ColumnSpec::new_delta(SEQ_COL_ID);
+    pub(super) const MAX_OP_COL_SPEC:     ColumnSpec = ColumnSpec::new_delta(MAX_OP_COL_ID);
+    pub(super) const TIME_COL_SPEC:       ColumnSpec = ColumnSpec::new_delta(TIME_COL_ID);
+    pub(super) const MESSAGE_COL_SPEC:    ColumnSpec = ColumnSpec::new_string(MESSAGE_COL_ID);
+    pub(super) const DEPS_COUNT_COL_SPEC: ColumnSpec = ColumnSpec::new_group(DEPS_COL_ID);
+    pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
+    pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
+    pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
+
+/*
+    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 9] = [
+      ACTOR_COL_SPEC,
+      SEQ_COL_SPEC,
+      MAX_OP_COL_SPEC,
+      TIME_COL_SPEC,
+      MESSAGE_COL_SPEC,
+      DEPS_COUNT_COL_SPEC,
+      DEPS_VAL_COL_SPEC,
+      EXTRA_META_COL_SPEC,
+      EXTRA_VAL_COL_SPEC,
+    ];
+*/
 }

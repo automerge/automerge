@@ -17,10 +17,6 @@ impl DeltaRange {
         DeltaEncoder::from(output)
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.0.len()
-    }
-
     pub(crate) fn encode<I: Iterator<Item = Option<i64>>>(items: I, out: &mut Vec<u8>) -> Self {
         // SAFETY: The incoming iterator is infallible and there are no existing items
         Self::from(0..0)
