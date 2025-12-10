@@ -38,7 +38,7 @@ thiserror = "^2.0.12"
 rustc-hash = "^2.1.1"
 
 [dependencies.wasm-bindgen]
-version = "= 0.2.104"
+version = "= 0.2.106"
 features = ["serde-serialize", "std"]
 
 [package.metadata.wasm-pack.profile.release]
