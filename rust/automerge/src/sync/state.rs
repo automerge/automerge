@@ -120,6 +120,36 @@ impl State {
         ))
     }
 
+    pub(crate) fn send_doc(&self) -> bool {
+        self.their_heads == Some(vec![]) && self.supports_v2_messages()
+    }
+
+    pub(crate) fn their(&self) -> Option<(&[Have], &[ChangeHash])> {
+        let have = self.their_have.as_ref()?;
+        let need = self.their_need.as_ref()?;
+        Some((have.as_slice(), need.as_slice()))
+    }
+
+    pub(crate) fn make_supported_capabilities(&mut self) -> Option<Vec<Capability>> {
+        if let Some(cap) = self.their_capabilities.as_mut() {
+            if let Some(pos) = cap.iter().position(|c| *c == Capability::Request) {
+                cap.remove(pos);
+                Some(vec![Capability::MessageV1, Capability::MessageV2])
+            } else if self.have_responded {
+                // backward compat with pre-patch
+                Some(vec![Capability::MessageV1, Capability::MessageV2])
+            } else {
+                None
+            }
+        } else {
+            Some(vec![
+                Capability::Request,
+                Capability::MessageV1,
+                Capability::MessageV2,
+            ])
+        }
+    }
+
     pub(crate) fn supports_v2_messages(&self) -> bool {
         self.their_capabilities
             .as_ref()
