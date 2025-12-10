@@ -707,26 +707,6 @@ struct OpIterInner<'a> {
     mark_name: CursorIter<'a, StrCursor>,
 }
 
-pub(crate) struct OpIter<'a> {
-    iter: OpIterUnverified<'a>,
-}
-
-impl<'a> OpIter<'a> {
-    pub(crate) fn new(columns: &RawColumns<compression::Uncompressed>, data: &'a [u8]) -> Self {
-        Self {
-            iter: OpIterUnverified::new(columns, data),
-        }
-    }
-}
-
-impl<'a> Iterator for OpIter<'a> {
-    type Item = OpBuilder<'a>;
-
-    fn next(&mut self) -> Option<OpBuilder<'a>> {
-        self.iter.next().map(|v| v.unwrap())
-    }
-}
-
 impl<'a> Iterator for OpIterUnverified<'a> {
     type Item = Result<OpBuilder<'a>, ParseError>;
 

@@ -41,6 +41,7 @@ use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::pin::Pin;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -345,6 +346,13 @@ export type InitOptions = {
 
 export function create(options?: InitOptions): Automerge;
 export function load(data: Uint8Array, options?: LoadOptions): Automerge;
+export function loadInterruptible(data: Uint8Array, options?: LoadOptions): AutomergeLoadState;
+
+export type LoadStateResult = { done: false } | { done: true, value: Automerge };
+
+export interface AutomergeLoadState {
+    step(): LoadStateResult;
+}
 
 export interface JsSyncState {
   sharedHeads: Heads;
@@ -363,6 +371,7 @@ export interface DecodedBundle {
 export interface API {
   create(options?: InitOptions): Automerge;
   load(data: Uint8Array, options?: LoadOptions): Automerge;
+  loadInterruptible(data: Uint8Array, options?: LoadOptions): AutomergeLoadState;
   encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;
@@ -1649,6 +1658,112 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
     })
 }
 
+#[wasm_bindgen(js_name = loadInterruptible, skip_typescript)]
+pub fn load_interruptible(
+    data: Uint8Array,
+    options: JsValue,
+) -> Result<AutomergeLoadState, error::Load> {
+    let data = data.to_vec();
+    let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let actor = if let Some(s) = actor {
+        Some(automerge::ActorId::from(
+            hex::decode(s).map_err(error::BadActorId::from)?.to_vec(),
+        ))
+    } else {
+        None
+    };
+
+    let unchecked = js_get(&options, "unchecked")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let verification_mode = if unchecked {
+        VerificationMode::DontCheck
+    } else {
+        VerificationMode::Check
+    };
+    let allow_missing_deps = js_get(&options, "allowMissingDeps")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let on_partial_load = if allow_missing_deps {
+        OnPartialLoad::Ignore
+    } else {
+        OnPartialLoad::Error
+    };
+    let string_migration = if js_get(&options, "convertImmutableStringsToText")
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        StringMigration::ConvertToText
+    } else {
+        StringMigration::NoMigration
+    };
+
+    let load_options = am::LoadOptions::new()
+        .on_partial_load(on_partial_load)
+        .verification_mode(verification_mode)
+        .migrate_strings(string_migration)
+        .text_encoding(TextEncoding::Utf16CodeUnit);
+
+    let data_pin: Pin<Box<[u8]>> = Pin::new(data.into_boxed_slice());
+    let data_ref: &'static [u8] = unsafe { std::mem::transmute(data_pin.as_ref().get_ref()) };
+
+    let inner = am::Automerge::load_interruptible(data_ref, load_options);
+
+    Ok(AutomergeLoadState {
+        inner: Some(inner),
+        data: data_pin,
+        actor,
+    })
+}
+
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct AutomergeLoadState {
+    inner: Option<am::LoadState<'static, 'static>>,
+    #[allow(dead_code)]
+    data: Pin<Box<[u8]>>,
+    actor: Option<am::ActorId>,
+}
+
+#[wasm_bindgen]
+impl AutomergeLoadState {
+    #[wasm_bindgen]
+    pub fn step(&mut self) -> Result<JsValue, JsValue> {
+        let inner = self
+            .inner
+            .take()
+            .ok_or_else(|| to_js_err("state consumed"))?;
+        match inner.step() {
+            Ok(am::StepResult::Loading(state)) => {
+                self.inner = Some(state);
+                let result = Object::new();
+                js_set(&result, "done", false)?;
+                Ok(result.into())
+            }
+            Ok(am::StepResult::Ready(doc)) => {
+                self.inner = None;
+                let mut doc: am::AutoCommit = doc.into();
+                if let Some(actor) = self.actor.take() {
+                    doc.set_actor(actor);
+                }
+                let result = Object::new();
+                js_set(&result, "done", true)?;
+                let am = Automerge {
+                    doc,
+                    freeze: false,
+                    external_types: HashMap::default(),
+                };
+                js_set(&result, "value", am)?;
+                Ok(result.into())
+            }
+            Err(e) => Err(error::Load::from(e).into()),
+        }
+    }
+}
+
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, error::EncodeChange> {
     // Alex: Technically we should be using serde_wasm_bindgen::from_value instead of into_serde.
@@ -1740,8 +1855,9 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     let bundle_bytes = bundle.to_vec();
     let bundle = automerge::Bundle::try_from(bundle_bytes.as_slice())
         .map_err(|e| error::ReadBundle(e.to_string()))?;
+    let deps = bundle.deps().to_vec();
     let changes = bundle
-        .to_changes()
+        .into_changes()
         .map_err(|e| error::ReadBundle(e.to_string()))?;
     let js_changes = changes
         .iter()
@@ -1761,7 +1877,6 @@ pub fn read_bundle(bundle: Uint8Array) -> Result<JsValue, error::ReadBundle> {
     )
     .unwrap();
 
-    let deps = bundle.deps().to_vec();
     Reflect::set(&result, &("deps").into(), &JS::from(deps).0).unwrap();
     Ok(result.into())
 }

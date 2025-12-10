@@ -9,7 +9,6 @@ use hexane::{ColumnCursor, ColumnData, DeltaCursor, StrCursor, UIntCursor};
 use crate::storage::BundleMetadata;
 use crate::{
     clock::{Clock, SeqClock},
-    columnar::column_range::{DepsRange, ValueRange},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
     storage::{Columns, DocChangeColumns},
@@ -223,27 +222,29 @@ impl ChangeGraph {
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> DocChangeColumns {
         let actor_iter = self.actors.iter().map(as_actor);
-        let actor = ActorCursor::encode(out, actor_iter, false).into();
+        let actor = ActorCursor::encode(out, actor_iter, false);
 
         let seq_iter = self.seq.iter().map(as_seq);
-        let seq = DeltaCursor::encode(out, seq_iter, false).into();
+        let seq = DeltaCursor::encode(out, seq_iter, false);
 
         let max_op_iter = self.max_ops.iter().map(as_max_op);
-        let max_op = DeltaCursor::encode(out, max_op_iter, false).into();
+        let max_op = DeltaCursor::encode(out, max_op_iter, false);
 
-        let time = self.timestamps.save_to_unless_empty(out).into();
+        let time = self.timestamps.save_to_unless_empty(out);
 
-        let message = self.messages.save_to_unless_empty(out).into();
+        let message = self.messages.save_to_unless_empty(out);
 
         let num_deps_iter = self.num_deps().map(as_num_deps);
-        let num_deps = UIntCursor::encode(out, num_deps_iter, false).into();
+        let num_deps = UIntCursor::encode(out, num_deps_iter, false);
 
         let deps_iter = self.deps_iter().map(as_deps);
-        let deps = DeltaCursor::encode(out, deps_iter, false).into();
+        let deps = DeltaCursor::encode(out, deps_iter, false);
 
         // FIXME - we could eliminate this column if empty but meta isnt all null
-        let meta = self.extra_bytes_meta.save_to_unless_empty(out).into();
-        let raw = (out.len()..out.len() + self.extra_bytes_raw.len()).into();
+        let meta_start = out.len();
+        self.extra_bytes_meta.save_to_unless_empty(out);
+        let extra_meta = meta_start..out.len();
+        let raw = out.len()..out.len() + self.extra_bytes_raw.len();
         out.extend(&self.extra_bytes_raw);
 
         DocChangeColumns {
@@ -252,8 +253,10 @@ impl ChangeGraph {
             max_op,
             time,
             message,
-            deps: DepsRange::new(num_deps, deps),
-            extra: ValueRange::new(meta, raw),
+            deps_num: num_deps,
+            deps,
+            extra_meta,
+            extra_raw: raw,
             other: Columns::empty(),
         }
     }

@@ -20,14 +20,15 @@ use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
 use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
+use crate::storage::load::ReconOpSet;
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
 };
 
 use crate::clock::{Clock, ClockRange};
-use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
+use crate::{hydrate, StepResult};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -82,11 +83,11 @@ pub enum StringMigration {
 
 #[derive(Debug)]
 pub struct LoadOptions<'a> {
-    on_partial_load: OnPartialLoad,
-    verification_mode: VerificationMode,
-    string_migration: StringMigration,
-    patch_log: Option<&'a mut PatchLog>,
-    text_encoding: TextEncoding,
+    pub(crate) on_partial_load: OnPartialLoad,
+    pub(crate) verification_mode: VerificationMode,
+    pub(crate) string_migration: StringMigration,
+    pub(crate) patch_log: Option<&'a mut PatchLog>,
+    pub(crate) text_encoding: TextEncoding,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -677,6 +678,14 @@ impl Automerge {
         )
     }
 
+    #[tracing::instrument(skip(data))]
+    pub fn load_interruptible<'a, 'b>(
+        data: &'a [u8],
+        options: LoadOptions<'b>,
+    ) -> crate::storage::load::LoadState<'a, 'b> {
+        load::LoadState::new(options, data)
+    }
+
     /// Load a document, with options
     ///
     /// # Arguments
@@ -687,83 +696,13 @@ impl Automerge {
         data: &[u8],
         options: LoadOptions<'_>,
     ) -> Result<Self, AutomergeError> {
-        if data.is_empty() {
-            tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
-        }
-        tracing::trace!("loading first chunk");
-        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
-            .map_err(|e| load::Error::Parse(Box::new(e)))?;
-        if !first_chunk.checksum_valid() {
-            return Err(load::Error::BadChecksum.into());
-        }
-
-        let mut changes = vec![];
-        let mut first_chunk_was_doc = false;
-        let mut am = match first_chunk {
-            storage::Chunk::Document(d) => {
-                tracing::trace!("first chunk is document chunk, inflating");
-                first_chunk_was_doc = true;
-                reconstruct_document(&d, options.verification_mode, options.text_encoding)?
-            }
-            storage::Chunk::Change(stored_change) => {
-                tracing::trace!("first chunk is change chunk");
-                changes.push(
-                    Change::new_from_unverified(stored_change.into_owned(), None)
-                        .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
-                Self::new()
-            }
-            storage::Chunk::Bundle(bundle) => {
-                tracing::trace!("first chunk is change chunk");
-                let bundle = Bundle::new_from_unverified(bundle.into_owned())
-                    .map_err(|e| load::Error::InvalidBundleColumn(Box::new(e)))?;
-                let bundle_changes = bundle
-                    .to_changes()
-                    .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
-                changes.extend(bundle_changes);
-                Self::new()
-            }
-            storage::Chunk::CompressedChange(stored_change, compressed) => {
-                tracing::trace!("first chunk is compressed change");
-                changes.push(
-                    Change::new_from_unverified(
-                        stored_change.into_owned(),
-                        Some(compressed.into_owned()),
-                    )
-                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
-                );
-                Self::new()
-            }
-        };
-        tracing::trace!("loading change chunks");
-        match load::load_changes(remaining.reset(), options.text_encoding, &am.change_graph) {
-            load::LoadedChanges::Complete(c) => {
-                am.apply_changes(changes.into_iter().chain(c))?;
-                // Only allow missing deps if the first chunk was a document chunk
-                // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
-                if !am.queue.is_empty()
-                    && !first_chunk_was_doc
-                    && options.on_partial_load == OnPartialLoad::Error
-                {
-                    return Err(AutomergeError::MissingDeps);
-                }
-            }
-            load::LoadedChanges::Partial { error, .. } => {
-                if options.on_partial_load == OnPartialLoad::Error {
-                    return Err(error.into());
-                }
+        let mut state = Self::load_interruptible(data, options);
+        loop {
+            match state.step()? {
+                StepResult::Ready(doc) => return Ok(doc),
+                StepResult::Loading(l) => state = l,
             }
         }
-        if let StringMigration::ConvertToText = options.string_migration {
-            am.convert_scalar_strings_to_text()?;
-        }
-        if let Some(patch_log) = options.patch_log {
-            if patch_log.is_active() {
-                am.log_current_state(patch_log);
-            }
-        }
-        Ok(am)
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -1596,7 +1535,7 @@ impl Automerge {
         }
     }
 
-    fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
+    pub(crate) fn convert_scalar_strings_to_text(&mut self) -> Result<(), AutomergeError> {
         struct Conversion {
             obj_id: ExId,
             prop: Prop,
@@ -1660,6 +1599,29 @@ impl Automerge {
 
     pub fn text_encoding(&self) -> TextEncoding {
         self.ops.text_encoding
+    }
+
+    pub(crate) fn from_recon_opset(recon: ReconOpSet) -> Self {
+        let storage::load::ReconOpSet {
+            op_set,
+            heads,
+            max_op,
+            change_graph,
+            ..
+        } = recon;
+
+        let mut doc = Automerge {
+            queue: vec![],
+            change_graph,
+            ops: op_set,
+            deps: heads.into_iter().collect(),
+            actor: Actor::Unused(ActorId::random()),
+            max_op,
+        };
+
+        doc.remove_unused_actors(false);
+
+        doc
     }
 }
 
@@ -1972,32 +1934,4 @@ pub(crate) struct Isolation {
     actor_index: usize,
     seq: u64,
     clock: Clock,
-}
-
-pub(crate) fn reconstruct_document<'a>(
-    doc: &'a storage::Document<'a>,
-    mode: VerificationMode,
-    text_encoding: TextEncoding,
-) -> Result<Automerge, AutomergeError> {
-    let storage::load::ReconOpSet {
-        op_set,
-        heads,
-        max_op,
-        change_graph,
-        ..
-    } = storage::load::reconstruct_opset(doc, mode, text_encoding)
-        .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
-
-    let mut doc = Automerge {
-        queue: vec![],
-        change_graph,
-        ops: op_set,
-        deps: heads.into_iter().collect(),
-        actor: Actor::Unused(ActorId::random()),
-        max_op,
-    };
-
-    doc.remove_unused_actors(false);
-
-    Ok(doc)
 }

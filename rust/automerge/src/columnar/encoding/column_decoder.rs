@@ -1,6 +1,6 @@
 use crate::{
     columnar::{
-        column_range::{DepsIter, KeyIter, ObjIdIter, OpIdListIter, ValueIter},
+        column_range::{KeyIter, ObjIdIter, OpIdListIter, ValueIter},
         encoding, Key,
     },
     types::{ObjId, OpId},
@@ -122,18 +122,6 @@ impl ColumnDecoder<Key> for KeyIter<'_> {
 
 impl ColumnDecoder<ObjId> for ObjIdIter<'_> {
     type Value = ObjId;
-    type Error = encoding::DecodeColumnError;
-
-    fn maybe_next_in_col<S: AsRef<str>>(
-        &mut self,
-        col_name: S,
-    ) -> Result<Option<Self::Value>, encoding::DecodeColumnError> {
-        self.next().transpose().map_err(|e| e.in_column(col_name))
-    }
-}
-
-impl ColumnDecoder<Vec<u64>> for DepsIter<'_> {
-    type Value = Vec<u64>;
     type Error = encoding::DecodeColumnError;
 
     fn maybe_next_in_col<S: AsRef<str>>(

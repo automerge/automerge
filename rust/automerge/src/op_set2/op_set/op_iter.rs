@@ -1,4 +1,5 @@
 use crate::iter::tools::Shiftable;
+use crate::op_set2::columns::Columns;
 use crate::op_set2::hexane::{
     BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
     SlabWeight, StrCursor, UIntCursor,
@@ -32,7 +33,6 @@ pub(crate) struct OpIter<'a> {
     pub(super) action: ActionIter<'a>,
     pub(super) value: ValueIter<'a>,
     pub(super) marks: MarkInfoIter<'a>,
-    pub(super) op_set: &'a OpSet,
     pub(super) range: Range<usize>,
 }
 
@@ -69,6 +69,31 @@ impl<'a> OpIter<'a> {
 
     pub(crate) fn pos(&self) -> usize {
         self.pos
+    }
+
+    pub(crate) fn from_columns(cols: &'a Columns, range: &Range<usize>) -> Self {
+        let value = cols.value_iter_range(range);
+        let succ = cols.succ_iter_range(range);
+
+        Self {
+            pos: range.start,
+            id: cols.id_iter_range(range),
+            obj: ObjIdIter::new(
+                cols.obj_actor.iter_range(range.clone()),
+                cols.obj_ctr.iter_range(range.clone()),
+            ),
+            key: KeyIter::new(
+                cols.key_str.iter_range(range.clone()),
+                cols.key_actor.iter_range(range.clone()),
+                cols.key_ctr.iter_range(range.clone()),
+            ),
+            succ,
+            insert: InsertIter::new(cols.insert.iter_range(range.clone())),
+            action: ActionIter::new(cols.action.iter_range(range.clone())),
+            value,
+            marks: cols.mark_info_iter_range(range),
+            range: range.clone(),
+        }
     }
 
     pub(crate) fn try_next(&mut self) -> Result<Option<Op<'a>>, ReadOpError> {
@@ -134,17 +159,7 @@ impl<'a> Iterator for OpIter<'a> {
     type Item = Op<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = self.try_next();
-        if result.is_err() {
-            log!("Key ERR!");
-            let key_str = self.op_set.cols.key_str.save();
-            let key_actor = self.op_set.cols.key_actor.save();
-            let key_ctr = self.op_set.cols.key_ctr.save();
-            log!(" :: key_str = {:?}", key_str.as_slice());
-            log!(" :: key_actor = {:?}", key_actor.as_slice());
-            log!(" :: key_ctr = {:?}", key_ctr.as_slice());
-        }
-        result.unwrap()
+        self.try_next().unwrap()
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {

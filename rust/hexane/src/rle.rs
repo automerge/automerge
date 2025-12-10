@@ -424,7 +424,9 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
                 }
                 count if *count < 0 => {
                     let (value_bytes, value) = P::unpack(data)?;
-                    assert!(-*count < slab.len() as i64);
+                    if -*count >= slab.len() as i64 {
+                        return Err(PackError::BadFormat);
+                    }
                     self.lit = Some(LitRunCursor::new(
                         self.offset + count_bytes,
                         *count,

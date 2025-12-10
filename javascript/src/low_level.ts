@@ -1,6 +1,7 @@
 import type {
   API,
   Automerge,
+  AutomergeLoadState,
   Change,
   DecodedChange,
   SyncMessage,
@@ -37,6 +38,9 @@ export const ApiHandler: API = {
   },
   load(data: Uint8Array, options?: LoadOptions): Automerge {
     throw new RangeError("Automerge.use() not called (load)")
+  },
+  loadInterruptible(data: Uint8Array, options?: LoadOptions): AutomergeLoadState {
+    throw new RangeError("Automerge.use() not called (loadInterruptible)")
   },
   encodeChange(change: ChangeToEncode): Change {
     throw new RangeError("Automerge.use() not called (encodeChange)")

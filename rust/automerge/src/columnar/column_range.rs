@@ -10,8 +10,6 @@ mod opid;
 pub(crate) use opid::OpIdRange;
 mod opid_list;
 pub(crate) use opid_list::{OpIdListEncoder, OpIdListIter, OpIdListRange};
-mod deps;
-pub(crate) use deps::{DepsIter, DepsRange};
 mod value;
 pub(crate) use value::{ValueEncoder, ValueIter, ValueRange};
 pub(crate) mod generic;

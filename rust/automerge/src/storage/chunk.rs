@@ -121,6 +121,15 @@ impl<'a> Chunk<'a> {
             Self::Bundle(b) => b.checksum_valid(),
         }
     }
+
+    pub(crate) fn chunk_type(&self) -> ChunkType {
+        match self {
+            Self::Document(_) => ChunkType::Document,
+            Self::Change(_) => ChunkType::Change,
+            Self::CompressedChange(_, _) => ChunkType::Compressed,
+            Self::Bundle(_) => ChunkType::Bundle,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

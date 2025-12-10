@@ -56,6 +56,8 @@ import type {
   Span,
   DecodedSyncMessage,
   UpdateSpansConfig,
+  AutomergeLoadState,
+  LoadStateResult,
 } from "./wasm_types.js"
 export type {
   ChangeMetadata,
@@ -105,6 +107,33 @@ import {
 export { applyPatch, applyPatches } from "./apply_patches.js"
 
 import { conflictAt } from "./conflicts.js"
+
+export class LoadState<T> {
+  private _state: AutomergeLoadState
+  private _opts: InitOptions<T>
+
+  constructor(state: AutomergeLoadState, opts: InitOptions<T>) {
+    this._state = state
+    this._opts = opts
+  }
+
+  step(): { done: false } | { done: true; doc: Doc<T> } {
+    const result = this._state.step()
+    if (result.done) {
+      const handle = result.value
+      handle.enableFreeze(!!this._opts.freeze)
+      registerDatatypes(handle)
+      const doc = handle.materialize("/", undefined, {
+        handle,
+        heads: undefined,
+        patchCallback: this._opts.patchCallback,
+      }) as Doc<T>
+      return { done: true, doc }
+    } else {
+      return { done: false }
+    }
+  }
+}
 
 /** Options passed to {@link change}, and {@link emptyChange}
  * @typeParam T - The type of value contained in the document
@@ -702,6 +731,25 @@ export function load<T>(
     patchCallback,
   }) as Doc<T>
   return doc
+}
+
+export function loadInterruptible<T>(
+  data: Uint8Array,
+  _opts?: ActorId | InitOptions<T>,
+): LoadState<T> {
+  const opts = importOpts(_opts)
+  const actor = opts.actor
+  const unchecked = opts.unchecked || false
+  const allowMissingDeps = opts.allowMissingChanges || false
+  const convertImmutableStringsToText =
+    opts.convertImmutableStringsToText || false
+  const state = ApiHandler.loadInterruptible(data, {
+    actor,
+    unchecked,
+    allowMissingDeps,
+    convertImmutableStringsToText,
+  })
+  return new LoadState(state, opts)
 }
 
 /**

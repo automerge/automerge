@@ -2,14 +2,14 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::ops::Range;
 
-use crate::op_set2::change::ChangeCollector;
+use crate::storage::bundle::LoadingBundleChanges;
 use crate::storage::change::{OpReadState, Unverified, Verified};
-use crate::storage::columns::compression;
+use crate::storage::columns::compression::{self};
 use crate::storage::{parse, Header, RawColumns};
 use crate::types::{ActorId, ChangeHash};
-use crate::Change;
+use crate::{Change, StepResult};
 
-use super::{BundleChangeIter, BundleChangeIterUnverified, OpIter, OpIterUnverified, ParseError};
+use super::{BundleChangeIter, BundleChangeIterUnverified, OpIterUnverified, ParseError};
 
 #[derive(Clone, Debug)]
 pub(crate) struct BundleStorage<'a, OpReadState> {
@@ -88,10 +88,10 @@ impl<'a> BundleStorage<'a, Unverified> {
 
     pub(crate) fn verify(self) -> Result<BundleStorage<'a, Verified>, ParseError> {
         for c in self.iter_change_meta() {
-            let _ = c?;
+            c?;
         }
         for o in self.iter_ops() {
-            let _ = o?;
+            o?;
         }
         Ok(BundleStorage {
             bytes: self.bytes,
@@ -106,6 +106,20 @@ impl<'a> BundleStorage<'a, Unverified> {
         })
     }
 
+    pub(crate) fn into_changes(self) -> Result<Vec<Change>, ParseError> {
+        let mut loading = self.begin_loading_changes();
+        loop {
+            match loading.step()? {
+                StepResult::Loading(v) => loading = v,
+                StepResult::Ready(r) => return Ok(r),
+            }
+        }
+    }
+
+    pub(crate) fn begin_loading_changes(self) -> LoadingBundleChanges<'a> {
+        LoadingBundleChanges::new(self, None, None)
+    }
+
     pub(crate) fn iter_ops(&self) -> OpIterUnverified<'_> {
         let bytes = &self.bytes[self.ops_data.clone()];
         OpIterUnverified::new(&self.ops_meta, bytes)
@@ -117,22 +131,22 @@ impl<'a> BundleStorage<'a, Unverified> {
     }
 }
 
-impl BundleStorage<'_, Verified> {
-    pub(crate) fn to_changes(&self) -> Result<Vec<Change>, ParseError> {
-        let change_meta = self.iter_change_meta().collect();
-        let mut collector = ChangeCollector::from_bundle_changes(change_meta, &self.actors);
-        for op in self.iter_ops() {
-            collector.add(op);
-        }
-        let bundle = collector
-            .unbundle(&self.actors, &self.deps)
-            .map_err(|e| ParseError::Unbundle(Box::new(e)))?;
-        Ok(bundle)
-    }
-
-    pub(crate) fn iter_ops(&self) -> OpIter<'_> {
-        let bytes = &self.bytes[self.ops_data.clone()];
-        OpIter::new(&self.ops_meta, bytes)
+impl<'a> BundleStorage<'a, Verified> {
+    pub(crate) fn into_changes(self) -> Result<Vec<Change>, ParseError> {
+        // Convert to unverified and load - the data is already verified,
+        // so iteration won't produce errors, but we reuse the same code path
+        let unverified = BundleStorage {
+            bytes: self.bytes,
+            header: self.header,
+            deps: self.deps,
+            actors: self.actors,
+            ops_meta: self.ops_meta,
+            ops_data: self.ops_data,
+            changes_meta: self.changes_meta,
+            changes_data: self.changes_data,
+            _phantom: PhantomData::<Unverified>,
+        };
+        unverified.into_changes()
     }
 
     pub(crate) fn iter_change_meta(&self) -> BundleChangeIter<'_> {
