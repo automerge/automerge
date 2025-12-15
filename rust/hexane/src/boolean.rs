@@ -249,6 +249,17 @@ impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
         Ok(Some(run))
     }
 
+    fn try_again<'a>(&self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
+        let data = &slab[self.last_offset..self.offset];
+        if data.is_empty() {
+            return Ok(None);
+        }
+        let (_bytes, count) = u64::unpack(data)?;
+        let count = *count as usize;
+        let value = Some(Cow::Owned(!self.value));
+        Ok(Some(Run { count, value }))
+    }
+
     fn index(&self) -> usize {
         self.index
     }

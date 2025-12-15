@@ -240,6 +240,14 @@ impl<const B: usize> ColumnCursor for DeltaCursorInternal<B> {
         }
     }
 
+    fn try_again<'a>(&self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
+        if let Some(run) = self.rle.try_again(slab)? {
+            Ok(Some(run))
+        } else {
+            Ok(None)
+        }
+    }
+
     // FIXME - this only saves min/max >= 1
     // you will get strange results in searches if looking for zero or negative
     fn compute_min_max(slabs: &mut [Slab]) {

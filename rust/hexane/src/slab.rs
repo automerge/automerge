@@ -6,6 +6,7 @@ pub mod tree;
 pub(crate) mod writer;
 
 pub(crate) use super::columndata::normalize_range;
+pub(crate) use tree::SpanTreeIterState;
 pub use tree::{SpanTree, SpanTreeIter, SpanWeight};
 pub use writer::{SlabWriter, WriteOp};
 
