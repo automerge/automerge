@@ -1,13 +1,13 @@
 use super::aggregate::Acc;
 use super::aggregate::Agg;
 use super::cursor::{
-    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, ScanMeta, SpliceResult,
+    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, RunIterState, ScanMeta, SpliceResult,
 };
 use super::encoder::Encoder;
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
 use super::slab;
-use super::slab::{Slab, SlabTree, SpanTree};
+use super::slab::{Slab, SlabTree, SpanTree, SpanTreeIterState};
 use super::Cow;
 
 use std::borrow::Borrow;
@@ -22,6 +22,7 @@ pub struct ColumnData<C: ColumnCursor> {
     pub slabs: SpanTree<Slab, C::SlabIndex>,
     #[cfg(debug_assertions)]
     pub debug: Vec<C::Export>,
+    counter: usize,
     _phantom: PhantomData<C>,
 }
 
@@ -165,6 +166,7 @@ impl<C: ColumnCursor> ColumnData<C> {
 
 #[derive(Debug)]
 pub struct ColumnDataIter<'a, C: ColumnCursor> {
+    counter: usize,
     pos: usize,
     max: usize,
     slabs: slab::SpanTreeIter<'a, Slab, C::SlabIndex>,
@@ -175,6 +177,7 @@ pub struct ColumnDataIter<'a, C: ColumnCursor> {
 impl<C: ColumnCursor> Default for ColumnDataIter<'_, C> {
     fn default() -> Self {
         Self {
+            counter: 0,
             pos: 0,
             max: 0,
             slabs: slab::SpanTreeIter::default(),
@@ -187,6 +190,7 @@ impl<C: ColumnCursor> Default for ColumnDataIter<'_, C> {
 impl<C: ColumnCursor> Clone for ColumnDataIter<'_, C> {
     fn clone(&self) -> Self {
         Self {
+            counter: self.counter,
             pos: self.pos,
             max: self.max,
             slabs: self.slabs.clone(),
@@ -197,7 +201,12 @@ impl<C: ColumnCursor> Clone for ColumnDataIter<'_, C> {
 }
 
 impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
-    pub(crate) fn new(slabs: &'a SlabTree<C::SlabIndex>, pos: usize, max: usize) -> Self {
+    pub(crate) fn new(
+        slabs: &'a SlabTree<C::SlabIndex>,
+        pos: usize,
+        max: usize,
+        counter: usize,
+    ) -> Self {
         let cursor = slabs.get_where_or_last(|acc, next| pos < acc.pos() + next.pos());
         let mut slab = cursor.element.run_iter::<C>();
         let slabs = slab::SpanTreeIter::new(slabs, cursor);
@@ -205,6 +214,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let advance = pos - iter_pos;
         let run = slab.sub_advance(advance);
         ColumnDataIter {
+            counter,
             pos,
             max,
             slabs,
@@ -213,10 +223,42 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
+    pub(crate) fn try_resume(
+        slab_tree: &'a SlabTree<C::SlabIndex>,
+        state: ColumnDataIterState<C>,
+        counter: usize,
+    ) -> Result<Self, PackError> {
+        if counter != state.counter {
+            return Err(PackError::InvalidResume);
+        }
+        if slab_tree.len() != state.num_slabs {
+            return Err(PackError::InvalidResume);
+        }
+        let counter = state.counter;
+        let pos = state.pos;
+        let max = state.max;
+        let slabs = slab_tree.resume(state.slabs_state);
+        let s = slabs.current().unwrap();
+        let slab = RunIter::resume(s.as_slice(), state.run_state);
+        let run = slab.current().map(|r| Run {
+            count: state.run.unwrap(),
+            value: r.value,
+        });
+        Ok(ColumnDataIter {
+            counter,
+            pos,
+            max,
+            slabs,
+            slab,
+            run,
+        })
+    }
+
     pub(crate) fn new_at_index(
         slabs: &'a SlabTree<C::SlabIndex>,
         index: usize,
         max: usize,
+        counter: usize,
     ) -> Self {
         let cursor = slabs.get_cursor(index).unwrap();
         let mut slab = cursor.element.run_iter::<C>();
@@ -225,6 +267,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let run = slab.sub_advance(0);
         assert!(pos < max);
         ColumnDataIter {
+            counter,
             pos,
             max,
             slabs,
@@ -233,28 +276,24 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    pub(crate) fn new_at_acc(slabs: &'a SlabTree<C::SlabIndex>, acc: Acc, max: usize) -> Self {
+    pub(crate) fn new_at_acc(
+        slabs: &'a SlabTree<C::SlabIndex>,
+        acc: Acc,
+        max: usize,
+        counter: usize,
+    ) -> Self {
         let cursor = slabs.get_where_or_last(|a, next| acc < a.acc() + next.acc());
         let mut slab = cursor.element.run_iter();
         let pos = cursor.weight.pos();
         let slabs = slab::SpanTreeIter::new(slabs, cursor);
         let run = slab.sub_advance(0);
         ColumnDataIter {
+            counter,
             pos,
             max,
             slabs,
             slab,
             run,
-        }
-    }
-
-    pub fn empty() -> Self {
-        Self {
-            pos: 0,
-            max: 0,
-            slabs: Default::default(),
-            slab: RunIter::empty(),
-            run: None,
         }
     }
 
@@ -473,19 +512,21 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     fn reset_iter_to_pos(&mut self, pos: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
         let pos = std::cmp::min(pos, self.max);
-        let _ = std::mem::replace(self, Self::new(tree, pos, self.max));
+        let new_iter = Self::new(tree, pos, self.max, self.counter);
+        let _ = std::mem::replace(self, new_iter);
         Some(())
     }
 
     fn reset_iter_to_slab_index(&mut self, index: usize) -> Option<()> {
         let tree = self.slabs.span_tree()?;
-        let _ = std::mem::replace(self, Self::new_at_index(tree, index, self.max));
+        let new_iter = Self::new_at_index(tree, index, self.max, self.counter);
+        let _ = std::mem::replace(self, new_iter);
         Some(())
     }
 
     fn reset_iter_to_acc(&mut self, acc: Acc) -> Acc {
         if let Some(tree) = self.slabs.span_tree() {
-            let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max));
+            let _ = std::mem::replace(self, Self::new_at_acc(tree, acc, self.max, self.counter));
             let new_acc = self.calculate_acc();
             acc - new_acc
         } else {
@@ -537,6 +578,28 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
         self.pos() - start_pos
     }
+
+    pub fn suspend(&self) -> ColumnDataIterState<C> {
+        ColumnDataIterState {
+            counter: self.counter,
+            pos: self.pos,
+            max: self.max,
+            run_state: self.slab.suspend(),
+            slabs_state: self.slabs.suspend(),
+            num_slabs: self.slabs.span_tree().map_or(0, |t| t.len()),
+            run: self.run.as_ref().map(|r| r.count),
+        }
+    }
+}
+
+pub struct ColumnDataIterState<C: ColumnCursor> {
+    counter: usize,
+    pos: usize,
+    max: usize,
+    run_state: RunIterState<C>,
+    slabs_state: SpanTreeIterState<C::SlabIndex>,
+    num_slabs: usize,
+    run: Option<usize>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -706,7 +769,14 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 
     pub fn iter(&self) -> ColumnDataIter<'_, C> {
-        ColumnDataIter::new(&self.slabs, 0, self.len)
+        ColumnDataIter::new(&self.slabs, 0, self.len, self.counter)
+    }
+
+    pub fn try_resume_iter(
+        &self,
+        state: ColumnDataIterState<C>,
+    ) -> Result<ColumnDataIter<'_, C>, PackError> {
+        ColumnDataIter::try_resume(&self.slabs, state, self.counter)
     }
 
     pub fn scope_to_value<B, R>(&self, value: Option<B>, range: R) -> Range<usize>
@@ -723,7 +793,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub fn iter_range(&self, range: Range<usize>) -> ColumnDataIter<'_, C> {
         let start = std::cmp::min(self.len, range.start);
         let end = std::cmp::min(self.len, range.end);
-        ColumnDataIter::new(&self.slabs, start, end)
+        ColumnDataIter::new(&self.slabs, start, end, self.counter)
     }
 
     #[cfg(debug_assertions)]
@@ -737,6 +807,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub(crate) fn init(len: usize, slabs: SlabTree<C::SlabIndex>) -> Self {
         debug_assert_eq!(len, slabs.iter().map(|s| s.len()).sum::<usize>());
         let col = ColumnData {
+            counter: 0,
             len,
             slabs,
             _phantom: PhantomData,
@@ -751,6 +822,7 @@ impl<C: ColumnCursor> ColumnData<C> {
     pub fn new() -> Self {
         ColumnData {
             len: 0,
+            counter: 0,
             slabs: SlabTree::new2(Slab::default()),
             _phantom: PhantomData,
             #[cfg(debug_assertions)]
@@ -829,6 +901,7 @@ impl<C: ColumnCursor> ColumnData<C> {
                 C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
                 self.len = self.len + add - del;
                 self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
+                self.counter += 1;
                 assert!(!self.slabs.is_empty());
             }
             SpliceResult::Noop => {}
@@ -985,7 +1058,7 @@ where
 pub(crate) mod tests {
     use super::super::boolean::BooleanCursor;
     use super::super::delta::{DeltaCursor, DeltaCursorInternal};
-    use super::super::rle::{ByteCursor, RleCursor, StrCursor, UIntCursor};
+    use super::super::rle::{ByteCursor, IntCursor, RleCursor, StrCursor, UIntCursor};
     use super::super::test::ColExport;
     use super::*;
     use rand::prelude::*;
@@ -1367,6 +1440,12 @@ pub(crate) mod tests {
         }
         fn null() -> Self;
         fn rand(rng: &mut SmallRng) -> Self;
+        fn maybe_rand(rng: &mut SmallRng) -> Self {
+            match rng.random::<u64>() as i64 % 10 {
+                0 => Self::null(),
+                _ => Self::rand(rng),
+            }
+        }
         fn plus(&self, index: usize) -> Self;
         fn rand_vec(rng: &mut SmallRng) -> Vec<Self>
         where
@@ -1391,7 +1470,7 @@ pub(crate) mod tests {
         }
 
         fn rand(rng: &mut SmallRng) -> Option<i64> {
-            Some((rng.random::<u64>() % 10) as i64)
+            Some((rng.random::<u64>() % 3) as i64)
         }
 
         fn plus(&self, index: usize) -> Option<i64> {
@@ -1416,7 +1495,7 @@ pub(crate) mod tests {
             None
         }
         fn rand(rng: &mut SmallRng) -> Option<u64> {
-            Some(rng.random::<u64>() % 10)
+            Some(rng.random::<u64>() % 3)
         }
         fn plus(&self, index: usize) -> Option<u64> {
             self.map(|i| i + index as u64)
@@ -1472,6 +1551,56 @@ pub(crate) mod tests {
         }
         let export = ColumnData::<RleCursor<64, u64>>::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
+    }
+
+    #[test]
+    fn column_data_fuzz_test_suspend_resume() {
+        let mut rng = make_rng();
+        test_suspend_resume::<UIntCursor, Option<u64>>(&mut rng);
+        test_suspend_resume::<IntCursor, Option<i64>>(&mut rng);
+        test_suspend_resume::<DeltaCursor, Option<i64>>(&mut rng);
+        test_suspend_resume::<StrCursor, Option<String>>(&mut rng);
+        test_suspend_resume::<BooleanCursor, bool>(&mut rng);
+    }
+
+    fn test_suspend_resume<'a, C: ColumnCursor, M: MaybePackable<'a, C::Item> + TestRand>(
+        rng: &mut SmallRng,
+    ) where
+        C::Item: 'a,
+    {
+        const LEN: usize = 100;
+        let col: ColumnData<C> = ((0..LEN).map(|_| M::maybe_rand(rng))).collect();
+        log!("COL = {:?}", col.to_vec());
+        for _ in 0..1000 {
+            let index = M::index(LEN, rng);
+            let mut iter1 = col.iter();
+            iter1.nth(index);
+            let cursor = iter1.suspend();
+            let iter2 = col.try_resume_iter(cursor).unwrap();
+            let v1: Vec<_> = iter1.collect();
+            let v2: Vec<_> = iter2.collect();
+            assert_eq!(v1, v2);
+        }
+    }
+
+    #[test]
+    fn column_data_fuzz_test_suspend_resume_error() {
+        let mut rng = make_rng();
+
+        const LEN: usize = 100;
+        let mut col: ColumnData<UIntCursor> =
+            ((0..LEN).map(|_| Option::<u64>::maybe_rand(&mut rng))).collect();
+        for _ in 0..10 {
+            let index1 = Option::<u64>::index(LEN, &mut rng);
+            let index2 = Option::<u64>::index(LEN, &mut rng);
+            let mut iter1 = col.iter();
+            iter1.nth(index1);
+            let cursor = iter1.suspend();
+
+            col.splice(index2, 0, vec![Option::<u64>::maybe_rand(&mut rng)]);
+
+            assert!(col.try_resume_iter(cursor).is_err());
+        }
     }
 
     #[test]

@@ -58,6 +58,19 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
         }
     }
 
+    fn lit_offset_bytes(&self) -> Option<usize> {
+        match &self.lit {
+            Some(lit) if lit.index <= lit.len => {
+                if self.last_offset < lit.offset {
+                    Some(lit.offset - self.last_offset)
+                } else {
+                    Some(0)
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn next_lit(&mut self, count: usize) {
         if let Some(lit) = &mut self.lit {
             if lit.index > lit.len {
@@ -445,6 +458,46 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
                     self.progress(count, count_bytes + null_bytes, Agg::default());
                     let value = Run { count, value: None };
                     Ok(Some(value))
+                }
+            }
+        }
+    }
+
+    fn try_again<'a>(&self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
+        let data = &slab[self.last_offset..self.offset];
+        if data.is_empty() {
+            return Ok(None);
+        }
+        if let Some(count_bytes) = self.lit_offset_bytes() {
+            let data = &data[count_bytes..];
+            let (_value_bytes, value) = P::unpack(data)?;
+            Ok(Some(Run {
+                count: 1,
+                value: Some(value),
+            }))
+        } else {
+            let (count_bytes, count) = i64::unpack(data)?;
+            let data = &data[count_bytes..];
+            match count {
+                count if *count > 0 => {
+                    let count = *count as usize;
+                    let (_value_bytes, value) = P::unpack(data)?;
+                    Ok(Some(Run {
+                        count,
+                        value: Some(value),
+                    }))
+                }
+                count if *count < 0 => {
+                    let (_value_bytes, value) = P::unpack(data)?;
+                    Ok(Some(Run {
+                        count: 1,
+                        value: Some(value),
+                    }))
+                }
+                _ => {
+                    let (_null_bytes, count) = u64::unpack(data)?;
+                    let count = *count as usize;
+                    Ok(Some(Run { count, value: None }))
                 }
             }
         }

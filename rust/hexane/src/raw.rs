@@ -115,6 +115,18 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
         }))
     }
 
+    fn try_again<'a>(&self, slab: &'a [u8]) -> Result<Option<Run<'a, Self::Item>>, PackError> {
+        if self.offset == 0 {
+            Ok(None)
+        } else {
+            let data = &slab[(self.offset - 1)..self.offset];
+            Ok(Some(Run {
+                count: 1,
+                value: Some(Cow::Borrowed(data)),
+            }))
+        }
+    }
+
     fn index(&self) -> usize {
         self.offset
     }

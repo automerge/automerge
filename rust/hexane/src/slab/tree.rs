@@ -77,6 +77,13 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         t
     }
 
+    pub(crate) fn resume(&self, state: SpanTreeIterState<W>) -> SpanTreeIter<'_, T, W> {
+        SpanTreeIter {
+            inner: Some(self),
+            state,
+        }
+    }
+
     pub fn weight(&self) -> Option<&W> {
         self.root_node.as_ref().map(|n| n.weight())
     }
@@ -105,8 +112,10 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
     pub fn iter(&self) -> SpanTreeIter<'_, T, W> {
         SpanTreeIter {
             inner: Some(self),
-            index: 0,
-            weight: Default::default(),
+            state: SpanTreeIterState {
+                index: 0,
+                weight: Default::default(),
+            },
         }
     }
 
@@ -825,8 +834,10 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> IntoIterator for &'a Span
     fn into_iter(self) -> Self::IntoIter {
         SpanTreeIter {
             inner: Some(self),
-            index: 0,
-            weight: Default::default(),
+            state: SpanTreeIterState {
+                index: 0,
+                weight: Default::default(),
+            },
         }
     }
 }
@@ -834,6 +845,11 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> IntoIterator for &'a Span
 #[derive(Debug, Clone, Default)]
 pub struct SpanTreeIter<'a, T: Clone + Debug + Default, W: SpanWeight<T>> {
     inner: Option<&'a SpanTree<T, W>>,
+    state: SpanTreeIterState<W>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SpanTreeIterState<W> {
     index: usize,
     weight: W,
 }
@@ -846,13 +862,19 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
         // make a cursor that's already pop'ed the element
         Self {
             inner: Some(tree),
-            index: cursor.index + 1,
-            weight: cursor.weight.and(&W::alloc(cursor.element)),
+            state: SpanTreeIterState {
+                index: cursor.index + 1,
+                weight: cursor.weight.and(&W::alloc(cursor.element)),
+            },
         }
     }
 
+    pub(crate) fn suspend(&self) -> SpanTreeIterState<W> {
+        self.state.clone()
+    }
+
     pub fn weight(&self) -> &W {
-        &self.weight
+        &self.state.weight
     }
 
     pub fn total_weight(&self) -> Option<&W> {
@@ -860,7 +882,7 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
     }
 
     pub fn index(&self) -> usize {
-        self.index
+        self.state.index
     }
 
     pub(crate) fn span_tree(&self) -> Option<&'a SpanTree<T, W>> {
@@ -868,19 +890,29 @@ impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> SpanTreeIter<'a, T, W> {
     }
 
     pub(crate) fn peek(&self) -> Option<&'a T> {
-        self.inner?.get(self.index + 1)
+        self.inner?.get(self.state.index + 1)
+    }
+
+    pub(crate) fn current(&self) -> Option<&'a T> {
+        if self.state.index > 0 {
+            Some(self.inner?.get(self.state.index - 1)?)
+        } else {
+            None
+        }
     }
 }
 
 impl<T: Clone + Debug + Default, W: SpanWeight<T> + Copy> Copy for SpanTreeIter<'_, T, W> {}
 
+impl<W: Copy> Copy for SpanTreeIterState<W> {}
+
 impl<'a, T: Clone + Debug + Default, W: SpanWeight<T>> Iterator for SpanTreeIter<'a, T, W> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let element = self.inner?.get(self.index)?;
-        self.index += 1;
-        self.weight.union(&W::alloc(element)); //.weight();
+        let element = self.inner?.get(self.state.index)?;
+        self.state.index += 1;
+        self.state.weight.union(&W::alloc(element)); //.weight();
         Some(element)
     }
 

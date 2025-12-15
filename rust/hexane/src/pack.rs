@@ -19,6 +19,8 @@ pub enum PackError {
     InvalidValue { typ: &'static str, error: String },
     #[error("malformed leb encoding")]
     BadFormat,
+    #[error("invalid resume")]
+    InvalidResume,
 }
 
 impl PackError {
