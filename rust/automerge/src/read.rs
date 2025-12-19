@@ -1,6 +1,6 @@
 use crate::{
     cursor::{CursorPosition, MoveCursor},
-    error::AutomergeError,
+    error::{AutomergeError, ViewAtError},
     exid::ExId,
     hydrate,
     marks::{Mark, MarkSet},
@@ -18,7 +18,49 @@ use std::ops::RangeBounds;
 /// takes an additional argument of `&[ChangeHash]`. This allows you to retrieve
 /// the value at a particular point in the document history identified by the
 /// given change hashes.
+///
+/// Alternatively, you can use [`view_at`](Self::view_at) to create a view of
+/// the document at a specific point in history, and then use the normal methods
+/// on that view.
 pub trait ReadDoc {
+    /// The type returned by [`view_at`](Self::view_at).
+    type ViewAt<'a>: ReadDoc
+    where
+        Self: 'a;
+
+    /// Returns a view of this document at the given heads.
+    ///
+    /// The returned view implements [`ReadDoc`], so you can use all the normal
+    /// read methods on it. Each method will return values as they existed at
+    /// the point in history identified by `heads`.
+    ///
+    /// This is more ergonomic than using the `*_at` methods when you need to
+    /// perform multiple reads at the same point in history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the provided heads do not exist in the
+    /// document's change graph.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use automerge::{AutoCommit, ReadDoc, ROOT};
+    /// use automerge::transaction::Transactable;
+    ///
+    /// let mut doc = AutoCommit::new();
+    /// doc.put(&ROOT, "key", "value1").unwrap();
+    /// let heads1 = doc.get_heads();
+    ///
+    /// doc.put(&ROOT, "key", "value2").unwrap();
+    ///
+    /// // View the document at the earlier point in history
+    /// let view = doc.view_at(&heads1).unwrap();
+    /// let (value, _) = view.get(&ROOT, "key").unwrap().unwrap();
+    /// // value is "value1", not "value2"
+    /// ```
+    fn view_at(&self, heads: &[ChangeHash]) -> Result<Self::ViewAt<'_>, ViewAtError>;
+
     /// Get the parents of an object in the document tree.
     ///
     /// See the documentation for [`Parents`] for more details.

@@ -682,6 +682,13 @@ impl AutoCommit {
 }
 
 impl ReadDoc for AutoCommit {
+    type ViewAt<'a> = crate::view_at::AutomergeAt<'a>;
+
+    fn view_at(&self, heads: &[ChangeHash]) -> Result<Self::ViewAt<'_>, crate::error::ViewAtError> {
+        // Note: view_at ignores isolation and operates on the full document
+        crate::view_at::AutomergeAt::new(&self.doc, heads)
+    }
+
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_for(obj.as_ref(), self.get_scope(None))
     }
