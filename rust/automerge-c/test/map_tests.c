@@ -172,7 +172,7 @@ static void test_get_NUL_key(void** state) {
     import * as Automerge from "@automerge/automerge";
     let doc = Automerge.init();
     doc = Automerge.change(doc, doc => {
-    doc['o\0ps'] = 'oops';
+    doc["o\0ps"] = new Automerge.ImmutableString("oops");
     });
     const bytes = Automerge.save(doc);
     console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([],
@@ -182,12 +182,12 @@ static void test_get_NUL_key(void** state) {
     static AMbyteSpan const OOPS_KEY = {.src = OOPS_SRC, .count = sizeof(OOPS_SRC) / sizeof(uint8_t)};
 
     static uint8_t const SAVED_DOC[] = {
-        133, 111, 74,  131, 233, 150, 60, 244, 0,   116, 1,   16,  223, 253, 146, 193, 58,  122, 66,  134, 151,
-        225, 210, 51,  58,  86,  247, 8,  1,   49,  118, 234, 228, 42,  116, 171, 13,  164, 99,  244, 27,  19,
-        150, 44,  201, 136, 222, 219, 90, 246, 226, 123, 77,  120, 157, 155, 55,  182, 2,   178, 64,  6,   1,
-        2,   3,   2,   19,  2,   35,  2,  64,  2,   86,  2,   8,   21,  6,   33,  2,   35,  2,   52,  1,   66,
-        2,   86,  2,   87,  4,   128, 1,  2,   127, 0,   127, 1,   127, 1,   127, 0,   127, 0,   127, 7,   127,
-        4,   111, 0,   112, 115, 127, 0,  127, 1,   1,   127, 1,   127, 70,  111, 111, 112, 115, 127, 0,   0};
+        133, 111, 74,  131, 110, 155, 35,  240, 0,   120, 1,   16,  164, 38,  139, 113, 113, 59,  164, 141, 163, 156,
+        179, 158, 109, 96,  91,  206, 1,   74,  47,  217, 16,  74,  109, 148, 185, 167, 3,   40,  227, 237, 41,  15,
+        120, 225, 23,  48,  252, 201, 166, 102, 103, 156, 240, 7,   40,  225, 131, 39,  109, 6,   1,   2,   3,   2,
+        19,  2,   35,  6,   64,  2,   86,  2,   8,   21,  6,   33,  2,   35,  2,   52,  1,   66,  2,   86,  2,   87,
+        4,   128, 1,   2,   127, 0,   127, 1,   127, 1,   127, 228, 213, 160, 202, 6,   127, 0,   127, 7,   127, 4,
+        111, 0,   112, 115, 127, 0,   127, 1,   1,   127, 1,   127, 70,  111, 111, 112, 115, 127, 0,   0};
     static size_t const SAVED_DOC_SIZE = sizeof(SAVED_DOC) / sizeof(uint8_t);
 
     BaseState* base_state = *state;
@@ -212,7 +212,7 @@ static void test_get_NUL_string_value(void** state) {
     import * as Automerge from "@automerge/automerge";
     let doc = Automerge.init();
     doc = Automerge.change(doc, doc => {
-        doc.oops = 'o\0ps';
+        doc.oops = new Automerge.ImmutableString("o\0ps");
     });
     const bytes = Automerge.save(doc);
     console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([],
@@ -222,12 +222,12 @@ static void test_get_NUL_string_value(void** state) {
     static size_t const OOPS_SIZE = sizeof(OOPS_VALUE) / sizeof(uint8_t);
 
     static uint8_t const SAVED_DOC[] = {
-        133, 111, 74,  131, 63,  94,  151, 29,  0,   116, 1,   16,  156, 159, 189, 12,  125, 55,  71,  154, 136,
-        104, 237, 186, 45,  224, 32,  22,  1,   36,  163, 164, 222, 81,  42,  1,   247, 231, 156, 54,  222, 76,
-        6,   109, 18,  172, 75,  36,  118, 120, 68,  73,  87,  186, 230, 127, 68,  19,  81,  149, 185, 6,   1,
-        2,   3,   2,   19,  2,   35,  2,   64,  2,   86,  2,   8,   21,  6,   33,  2,   35,  2,   52,  1,   66,
-        2,   86,  2,   87,  4,   128, 1,   2,   127, 0,   127, 1,   127, 1,   127, 0,   127, 0,   127, 7,   127,
-        4,   111, 111, 112, 115, 127, 0,   127, 1,   1,   127, 1,   127, 70,  111, 0,   112, 115, 127, 0,   0};
+        133, 111, 74,  131, 146, 42,  182, 118, 0,   120, 1,   16,  195, 194, 221, 90,  52,  205, 111, 6,   76,  161,
+        190, 122, 213, 5,   24,  103, 1,   55,  70,  164, 59,  181, 211, 189, 240, 6,   232, 188, 67,  103, 55,  124,
+        47,  38,  91,  202, 50,  78,  95,  180, 18,  9,   106, 91,  238, 64,  109, 145, 18,  6,   1,   2,   3,   2,
+        19,  2,   35,  6,   64,  2,   86,  2,   8,   21,  6,   33,  2,   35,  2,   52,  1,   66,  2,   86,  2,   87,
+        4,   128, 1,   2,   127, 0,   127, 1,   127, 1,   127, 133, 216, 160, 202, 6,   127, 0,   127, 7,   127, 4,
+        111, 111, 112, 115, 127, 0,   127, 1,   1,   127, 1,   127, 70,  111, 0,   112, 115, 127, 0,   0};
     static size_t const SAVED_DOC_SIZE = sizeof(SAVED_DOC) / sizeof(uint8_t);
 
     BaseState* base_state = *state;

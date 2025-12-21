@@ -454,7 +454,7 @@ static void test_get_NUL_string_value(void** state) {
     import * as Automerge from "@automerge/automerge";
     let doc = Automerge.init();
     doc = Automerge.change(doc, doc => {
-        doc[0] = 'o\0ps';
+        doc.list = [new Automerge.ImmutableString("o\0ps")];
     });
     const bytes = Automerge.save(doc);
     console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([],
@@ -464,12 +464,13 @@ static void test_get_NUL_string_value(void** state) {
     static size_t const OOPS_SIZE = sizeof(OOPS_VALUE) / sizeof(uint8_t);
 
     static uint8_t const SAVED_DOC[] = {
-        133, 111, 74,  131, 224, 28,  197, 17,  0,   113, 1,   16,  246, 137, 63,  193, 255, 181, 76,  79,  129,
-        213, 133, 29,  214, 158, 164, 15,  1,   207, 184, 14,  57,  1,   194, 79,  247, 82,  160, 134, 227, 144,
-        5,   241, 136, 205, 238, 250, 251, 54,  34,  250, 210, 96,  204, 132, 153, 203, 110, 109, 6,   6,   1,
-        2,   3,   2,   19,  2,   35,  2,   64,  2,   86,  2,   8,   21,  3,   33,  2,   35,  2,   52,  1,   66,
-        2,   86,  2,   87,  4,   128, 1,   2,   127, 0,   127, 1,   127, 1,   127, 0,   127, 0,   127, 7,   127,
-        1,   48,  127, 0,   127, 1,   1,   127, 1,   127, 70,  111, 0,   112, 115, 127, 0,   0};
+        133, 111, 74, 131, 234, 84,  17,  185, 0,   143, 1,   1,   16,  210, 154, 229, 127, 245, 12,  121, 118, 197,
+        1,   61,  77, 57,  197, 134, 224, 1,   137, 202, 7,   230, 81,  66,  74,  151, 240, 74,  118, 112, 116, 63,
+        87,  118, 0,  50,  14,  111, 33,  70,  123, 152, 248, 67,  235, 239, 164, 41,  255, 42,  6,   1,   2,   3,
+        2,   19,  2,  35,  6,   64,  2,   86,  2,   11,  1,   4,   2,   4,   19,  4,   21,  8,   33,  2,   35,  2,
+        52,  2,   66, 3,   86,  3,   87,  4,   128, 1,   2,   127, 0,   127, 1,   127, 2,   127, 159, 212, 158, 202,
+        6,   127, 0,  127, 7,   0,   1,   127, 0,   0,   1,   127, 1,   0,   1,   127, 0,   127, 4,   108, 105, 115,
+        116, 0,   1,  2,   0,   2,   1,   1,   1,   126, 2,   1,   126, 0,   70,  111, 0,   112, 115, 2,   0,   0};
     static size_t const SAVED_DOC_SIZE = sizeof(SAVED_DOC) / sizeof(uint8_t);
 
     BaseState* base_state = *state;
@@ -477,9 +478,11 @@ static void test_get_NUL_string_value(void** state) {
     AMdoc* doc;
     assert_true(AMitemToDoc(
         AMstackItem(stack_ptr, AMload(SAVED_DOC, SAVED_DOC_SIZE), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
+    AMobjId const* const list = AMitemObjId(
+        AMstackItem(stack_ptr, AMmapGet(doc, AM_ROOT, AMstr("list"), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMbyteSpan str;
-    assert_true(AMitemToStr(
-        AMstackItem(stack_ptr, AMlistGet(doc, AM_ROOT, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMlistGet(doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
     assert_int_not_equal(str.count, strlen(OOPS_VALUE));
     assert_int_equal(str.count, OOPS_SIZE);
     assert_memory_equal(str.src, OOPS_VALUE, str.count);
