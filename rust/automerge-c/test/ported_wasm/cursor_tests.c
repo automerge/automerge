@@ -88,7 +88,7 @@ static void test_make_cursor_from_position_and_use_it(void** state) {
     /*
        // cursor works at the heads
        let cursor4 = doc1.getCursor("/text", 0);                                                                      */
-    AMcursor* cursor4;
+    AMcursor const* cursor4;
     assert_true(AMitemToCursor(
         AMstackItem(stack_ptr, AMgetCursor(doc1, text, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_CURSOR)), &cursor4));
     /* let index4 = doc1.getCursorPosition("/text", cursor4);                                                         */
