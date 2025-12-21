@@ -60,7 +60,7 @@ add_custom_command(
     TARGET ${LIBRARY_NAME}_test
     POST_BUILD
     COMMAND
-        ${CMAKE_CTEST_COMMAND} --config $<CONFIG> --output-on-failure
+        ${CMAKE_CTEST_COMMAND} --build-config $<CONFIG> --output-on-failure
     COMMENT
         "Running the test(s)..."
     VERBATIM
