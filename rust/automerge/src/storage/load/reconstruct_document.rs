@@ -63,8 +63,11 @@ pub(crate) fn reconstruct_opset<'a>(
 ) -> Result<ReconOpSet, Error> {
     let mut op_set = OpSet::from_doc(doc, text_encoding)?;
     let index_builder2 = op_set.index_builder();
-    let mut change_collector =
-        ChangeCollector::new(doc.iter_changes(), &op_set.actors)?.with_index(index_builder2);
+    let mut change_collector = ChangeCollector::new(
+        doc.iter_changes().collect::<Result<Vec<_>, _>>()?,
+        &op_set.actors,
+    )?
+    .with_index(index_builder2);
     let mut iter = op_set.iter();
 
     while let Some(op) = iter.try_next()? {
@@ -99,7 +102,7 @@ pub(crate) fn reconstruct_opset<'a>(
 // create all binary changes
 // look for mismatched heads
 
-fn verify_changes(
+pub(crate) fn verify_changes(
     cc: &CollectedChanges,
     doc: &Document<'_>,
     mode: VerificationMode,
