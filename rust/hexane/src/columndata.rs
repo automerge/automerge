@@ -160,7 +160,12 @@ impl<C: ColumnCursor> ColumnData<C> {
             .get_where_or_last(|acc, next| advance < acc.pos() + next.pos());
         let current = Some((cursor.element, advance - cursor.weight.pos()));
         let slabs = slab::SpanTreeIter::new(&self.slabs, cursor);
-        RawReader { slabs, current }
+        let pos = advance;
+        RawReader {
+            pos,
+            slabs,
+            current,
+        }
     }
 }
 
@@ -225,7 +230,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
 
     pub(crate) fn try_resume(
         slab_tree: &'a SlabTree<C::SlabIndex>,
-        state: ColumnDataIterState<C>,
+        state: &ColumnDataIterState<C>,
         counter: usize,
     ) -> Result<Self, PackError> {
         if counter != state.counter {
@@ -237,7 +242,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         let counter = state.counter;
         let pos = state.pos;
         let max = state.max;
-        let slabs = slab_tree.resume(state.slabs_state);
+        let slabs = slab_tree.resume(state.slabs_state.clone());
         let s = slabs.current().unwrap();
         let slab = RunIter::resume(s.as_slice(), state.run_state);
         let run = slab.current().map(|r| Run {
@@ -602,6 +607,15 @@ pub struct ColumnDataIterState<C: ColumnCursor> {
     run: Option<usize>,
 }
 
+impl<C: ColumnCursor> ColumnDataIterState<C> {
+    pub fn try_resume<'a>(
+        &self,
+        column: &'a ColumnData<C>,
+    ) -> Result<ColumnDataIter<'a, C>, PackError> {
+        ColumnDataIter::try_resume(&column.slabs, self, column.counter)
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct ColAccIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
@@ -770,13 +784,6 @@ impl<C: ColumnCursor> ColumnData<C> {
 
     pub fn iter(&self) -> ColumnDataIter<'_, C> {
         ColumnDataIter::new(&self.slabs, 0, self.len, self.counter)
-    }
-
-    pub fn try_resume_iter(
-        &self,
-        state: ColumnDataIterState<C>,
-    ) -> Result<ColumnDataIter<'_, C>, PackError> {
-        ColumnDataIter::try_resume(&self.slabs, state, self.counter)
     }
 
     pub fn scope_to_value<B, R>(&self, value: Option<B>, range: R) -> Range<usize>
@@ -1576,7 +1583,7 @@ pub(crate) mod tests {
             let mut iter1 = col.iter();
             iter1.nth(index);
             let cursor = iter1.suspend();
-            let iter2 = col.try_resume_iter(cursor).unwrap();
+            let iter2 = cursor.try_resume(&col).unwrap();
             let v1: Vec<_> = iter1.collect();
             let v2: Vec<_> = iter2.collect();
             assert_eq!(v1, v2);
@@ -1599,7 +1606,7 @@ pub(crate) mod tests {
 
             col.splice(index2, 0, vec![Option::<u64>::maybe_rand(&mut rng)]);
 
-            assert!(col.try_resume_iter(cursor).is_err());
+            assert!(cursor.try_resume(&col).is_err());
         }
     }
 

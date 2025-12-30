@@ -144,6 +144,7 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
 
 #[derive(Debug, Clone, Default)]
 pub struct RawReader<'a, T: SpanWeight<Slab> + HasPos> {
+    pub(crate) pos: usize,
     pub(crate) slabs: slab::tree::SpanTreeIter<'a, Slab, T>,
     pub(crate) current: Option<(&'a Slab, usize)>,
 }
@@ -151,6 +152,7 @@ pub struct RawReader<'a, T: SpanWeight<Slab> + HasPos> {
 impl<'a, T: SpanWeight<Slab> + HasPos> RawReader<'a, T> {
     pub fn empty() -> RawReader<'static, T> {
         RawReader {
+            pos: 0,
             slabs: slab::SpanTreeIter::default(),
             current: None,
         }
@@ -185,6 +187,7 @@ impl<'a, T: SpanWeight<Slab> + HasPos> RawReader<'a, T> {
         } else {
             self.current = Some((slab, new_offset));
         }
+        self.pos += length;
         Ok(result)
     }
 
@@ -193,8 +196,17 @@ impl<'a, T: SpanWeight<Slab> + HasPos> RawReader<'a, T> {
             let cursor = slabs.get_where_or_last(|acc, next| advance < acc.pos() + next.pos());
             let current = Some((cursor.element, advance - cursor.weight.pos()));
             let slabs = slab::SpanTreeIter::new(slabs, cursor);
-            *self = RawReader { slabs, current }
+            let pos = advance;
+            *self = RawReader {
+                pos,
+                slabs,
+                current,
+            }
         }
+    }
+
+    pub fn suspend(&self) -> usize {
+        self.pos
     }
 }
 

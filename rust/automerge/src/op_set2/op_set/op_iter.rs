@@ -1,9 +1,7 @@
+use super::Op;
 use crate::iter::tools::Shiftable;
-use crate::op_set2::hexane::{
-    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
-    SlabWeight, StrCursor, UIntCursor,
-};
 use crate::{
+    error::AutomergeError,
     op_set2,
     op_set2::{
         meta::MetaCursor,
@@ -14,7 +12,10 @@ use crate::{
     types::{ElemId, ObjId, OpId},
 };
 
-use super::Op;
+use hexane::{
+    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, ColumnDataIterState, DeltaCursor,
+    IntCursor, RawReader, SlabWeight, StrCursor, UIntCursor,
+};
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -32,8 +33,40 @@ pub(crate) struct OpIter<'a> {
     pub(super) action: ActionIter<'a>,
     pub(super) value: ValueIter<'a>,
     pub(super) marks: MarkInfoIter<'a>,
-    pub(super) op_set: &'a OpSet,
     pub(super) range: Range<usize>,
+    pub(super) op_set: &'a OpSet,
+}
+
+pub(crate) struct OpIterState {
+    pos: usize,
+    id: OpIdIterState,
+    obj: ObjIdIterState,
+    key: KeyIterState,
+    succ: SuccIterIterState,
+    insert: InsertIterState,
+    action: ActionIterState,
+    value: ValueIterState,
+    marks: MarkInfoIterState,
+    range: Range<usize>,
+}
+
+impl OpIterState {
+    #[allow(unused)]
+    pub(crate) fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIter<'a>, AutomergeError> {
+        Ok(OpIter {
+            pos: self.pos,
+            id: self.id.try_resume(op_set)?,
+            obj: self.obj.try_resume(op_set)?,
+            key: self.key.try_resume(op_set)?,
+            succ: self.succ.try_resume(op_set)?,
+            insert: self.insert.try_resume(op_set)?,
+            action: self.action.try_resume(op_set)?,
+            value: self.value.try_resume(op_set)?,
+            marks: self.marks.try_resume(op_set)?,
+            range: self.range.clone(),
+            op_set,
+        })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,6 +160,22 @@ impl<'a> OpIter<'a> {
             mark_name,
             succ_cursors,
         }))
+    }
+
+    #[allow(unused)]
+    pub(crate) fn suspend(&self) -> OpIterState {
+        OpIterState {
+            pos: self.pos,
+            id: self.id.suspend(),
+            obj: self.obj.suspend(),
+            key: self.key.suspend(),
+            succ: self.succ.suspend(),
+            insert: self.insert.suspend(),
+            action: self.action.suspend(),
+            value: self.value.suspend(),
+            marks: self.marks.suspend(),
+            range: self.range.clone(),
+        }
     }
 }
 
@@ -239,6 +288,20 @@ pub(crate) struct OpIdIter<'a> {
     ctr: ColumnDataIter<'a, DeltaCursor>,
 }
 
+impl OpIdIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<OpIdIter<'a>, AutomergeError> {
+        Ok(OpIdIter {
+            actor: self.actor.try_resume(&op_set.cols.id_actor)?,
+            ctr: self.ctr.try_resume(&op_set.cols.id_ctr)?,
+        })
+    }
+}
+
+pub(crate) struct OpIdIterState {
+    actor: ColumnDataIterState<ActorCursor>,
+    ctr: ColumnDataIterState<DeltaCursor>,
+}
+
 pub(crate) struct CtrWalker<'a> {
     ctr: Box<dyn Iterator<Item = usize> + 'a>,
 }
@@ -323,6 +386,13 @@ impl<'a> OpIdIter<'a> {
         self.actor.set_max(pos);
         self.ctr.set_max(pos);
     }
+
+    fn suspend(&self) -> OpIdIterState {
+        OpIdIterState {
+            actor: self.actor.suspend(),
+            ctr: self.ctr.suspend(),
+        }
+    }
 }
 
 impl Shiftable for OpIdIter<'_> {
@@ -350,6 +420,14 @@ pub(crate) struct InsertIter<'a> {
     iter: ColumnDataIter<'a, BooleanCursor>,
 }
 
+pub(crate) struct InsertIterState(ColumnDataIterState<BooleanCursor>);
+
+impl InsertIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<InsertIter<'a>, AutomergeError> {
+        Ok(InsertIter::new(self.0.try_resume(&op_set.cols.insert)?))
+    }
+}
+
 impl<'a> InsertIter<'a> {
     pub(crate) fn new(iter: ColumnDataIter<'a, BooleanCursor>) -> Self {
         Self { iter }
@@ -372,6 +450,10 @@ impl<'a> InsertIter<'a> {
             .copied()
             .ok_or(ReadOpError::MissingValue("insert"))
     }
+
+    fn suspend(&self) -> InsertIterState {
+        InsertIterState(self.iter.suspend())
+    }
 }
 
 impl Iterator for InsertIter<'_> {
@@ -391,6 +473,22 @@ pub(crate) struct KeyIter<'a> {
     key_str: ColumnDataIter<'a, StrCursor>,
     key_actor: ColumnDataIter<'a, ActorCursor>,
     key_ctr: ColumnDataIter<'a, DeltaCursor>,
+}
+
+pub(crate) struct KeyIterState {
+    key_str: ColumnDataIterState<StrCursor>,
+    key_actor: ColumnDataIterState<ActorCursor>,
+    key_ctr: ColumnDataIterState<DeltaCursor>,
+}
+
+impl KeyIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<KeyIter<'a>, AutomergeError> {
+        Ok(KeyIter {
+            key_str: self.key_str.try_resume(&op_set.cols.key_str)?,
+            key_actor: self.key_actor.try_resume(&op_set.cols.key_actor)?,
+            key_ctr: self.key_ctr.try_resume(&op_set.cols.key_ctr)?,
+        })
+    }
 }
 
 impl<'a> KeyIter<'a> {
@@ -452,6 +550,14 @@ impl<'a> KeyIter<'a> {
             .ok_or(ReadOpError::MissingValue("key_ctr"))?;
         KeyRef::try_load(key_str, key_actor, key_ctr)
     }
+
+    fn suspend(&self) -> KeyIterState {
+        KeyIterState {
+            key_str: self.key_str.suspend(),
+            key_actor: self.key_actor.suspend(),
+            key_ctr: self.key_ctr.suspend(),
+        }
+    }
 }
 
 impl<'a> Iterator for KeyIter<'a> {
@@ -470,6 +576,20 @@ impl<'a> Iterator for KeyIter<'a> {
 pub(crate) struct ObjIdIter<'a> {
     actor: ColumnDataIter<'a, ActorCursor>,
     ctr: ColumnDataIter<'a, UIntCursor>,
+}
+
+pub(crate) struct ObjIdIterState {
+    actor: ColumnDataIterState<ActorCursor>,
+    ctr: ColumnDataIterState<UIntCursor>,
+}
+
+impl ObjIdIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ObjIdIter<'a>, AutomergeError> {
+        Ok(ObjIdIter {
+            actor: self.actor.try_resume(&op_set.cols.obj_actor)?,
+            ctr: self.ctr.try_resume(&op_set.cols.obj_ctr)?,
+        })
+    }
 }
 
 impl<'a> ObjIdIter<'a> {
@@ -516,6 +636,13 @@ impl<'a> ObjIdIter<'a> {
             .ok_or(ReadOpError::MissingValue("obj_ctr"))?;
         ObjId::try_load(actor, ctr)
     }
+
+    fn suspend(&self) -> ObjIdIterState {
+        ObjIdIterState {
+            actor: self.actor.suspend(),
+            ctr: self.ctr.suspend(),
+        }
+    }
 }
 
 impl Iterator for ObjIdIter<'_> {
@@ -534,6 +661,20 @@ impl Iterator for ObjIdIter<'_> {
 pub(crate) struct MarkInfoIter<'a> {
     name: ColumnDataIter<'a, StrCursor>,
     expand: ColumnDataIter<'a, BooleanCursor>,
+}
+
+pub(crate) struct MarkInfoIterState {
+    name: ColumnDataIterState<StrCursor>,
+    expand: ColumnDataIterState<BooleanCursor>,
+}
+
+impl MarkInfoIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<MarkInfoIter<'a>, AutomergeError> {
+        Ok(MarkInfoIter {
+            name: self.name.try_resume(&op_set.cols.mark_name)?,
+            expand: self.expand.try_resume(&op_set.cols.expand)?,
+        })
+    }
 }
 
 impl Shiftable for MarkInfoIter<'_> {
@@ -594,6 +735,13 @@ impl<'a> MarkInfoIter<'a> {
             .ok_or(ReadOpError::MissingValue("mark_name"))?;
         Ok((mark_name, expand))
     }
+
+    fn suspend(&self) -> MarkInfoIterState {
+        MarkInfoIterState {
+            name: self.name.suspend(),
+            expand: self.expand.suspend(),
+        }
+    }
 }
 
 impl<'a> Iterator for MarkInfoIter<'a> {
@@ -652,6 +800,14 @@ pub(crate) struct ActionIter<'a> {
     iter: ColumnDataIter<'a, ActionCursor>,
 }
 
+pub(crate) struct ActionIterState(ColumnDataIterState<ActionCursor>);
+
+impl ActionIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ActionIter<'a>, AutomergeError> {
+        Ok(ActionIter::new(self.0.try_resume(&op_set.cols.action)?))
+    }
+}
+
 impl Shiftable for ActionIter<'_> {
     fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         self.iter.shift_next(range).flatten().as_deref().copied()
@@ -680,6 +836,10 @@ impl<'a> ActionIter<'a> {
             .copied()
             .ok_or(ReadOpError::MissingValue("action"))
     }
+
+    fn suspend(&self) -> ActionIterState {
+        ActionIterState(self.iter.suspend())
+    }
 }
 
 impl Iterator for ActionIter<'_> {
@@ -698,6 +858,20 @@ impl Iterator for ActionIter<'_> {
 pub(crate) struct ValueIter<'a> {
     meta: ColumnDataIter<'a, MetaCursor>,
     raw: RawReader<'a, SlabWeight>,
+}
+
+pub(crate) struct ValueIterState {
+    meta: ColumnDataIterState<MetaCursor>,
+    raw: usize,
+}
+
+impl ValueIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<ValueIter<'a>, AutomergeError> {
+        Ok(ValueIter {
+            meta: self.meta.try_resume(&op_set.cols.value_meta)?,
+            raw: op_set.cols.value.raw_reader(self.raw),
+        })
+    }
 }
 
 impl Shiftable for ValueIter<'_> {
@@ -742,6 +916,13 @@ impl<'a> ValueIter<'a> {
             Ok(value)
         }
     }
+
+    fn suspend(&self) -> ValueIterState {
+        ValueIterState {
+            meta: self.meta.suspend(),
+            raw: self.raw.suspend(),
+        }
+    }
 }
 
 impl<'a> Iterator for ValueIter<'a> {
@@ -762,6 +943,24 @@ pub(crate) struct SuccIterIter<'a> {
     actor: ColumnDataIter<'a, ActorCursor>,
     ctr: ColumnDataIter<'a, DeltaCursor>,
     incs: ColumnDataIter<'a, IntCursor>,
+}
+
+pub(crate) struct SuccIterIterState {
+    count: ColumnDataIterState<UIntCursor>,
+    actor: ColumnDataIterState<ActorCursor>,
+    ctr: ColumnDataIterState<DeltaCursor>,
+    incs: ColumnDataIterState<IntCursor>,
+}
+
+impl SuccIterIterState {
+    fn try_resume<'a>(&self, op_set: &'a OpSet) -> Result<SuccIterIter<'a>, AutomergeError> {
+        Ok(SuccIterIter {
+            count: self.count.try_resume(&op_set.cols.succ_count)?,
+            actor: self.actor.try_resume(&op_set.cols.succ_actor)?,
+            ctr: self.ctr.try_resume(&op_set.cols.succ_ctr)?,
+            incs: self.incs.try_resume(&op_set.cols.index.inc)?,
+        })
+    }
 }
 
 impl<'a> SuccIterIter<'a> {
@@ -844,6 +1043,15 @@ impl<'a> SuccIterIter<'a> {
             self.incs.advance_by(num_succ as usize);
 
             Ok(result)
+        }
+    }
+
+    fn suspend(&self) -> SuccIterIterState {
+        SuccIterIterState {
+            count: self.count.suspend(),
+            actor: self.actor.suspend(),
+            ctr: self.ctr.suspend(),
+            incs: self.incs.suspend(),
         }
     }
 }
