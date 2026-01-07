@@ -330,7 +330,7 @@ interface Automerge {
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
 
-    diffPath(path: any, before: Heads, after: Heads, options?: DiffOptions): Patch[];
+    diffPath(path: Prop[] | string, before: Heads, after: Heads, options?: DiffOptions): Patch[];
 }
 
 
@@ -341,6 +341,7 @@ export type LoadOptions = {
   convertImmutableStringsToText?: boolean;
 };
 
+// if recursive is false do not diff child objects
 export type DiffOptions = {
   recursive?: boolean;
 };
@@ -1114,7 +1115,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = diffPath, skip_typescript)]
     pub fn diff_path(
         &mut self,
-        path: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Prop[] | string")] path: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
         #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
         options: JsValue,

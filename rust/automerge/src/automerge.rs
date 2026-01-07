@@ -1191,6 +1191,8 @@ impl Automerge {
     /// Create patches representing the change in the current state of an object in the document between the
     /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
     /// in the opposite order.
+    ///
+    /// if `recursive` is false the diff does not extend into child objects
     pub fn diff_obj(
         &self,
         obj: &ExId,

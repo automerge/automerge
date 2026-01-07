@@ -1024,6 +1024,12 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
 
 /**
  * Create a set of patches representing the change from one set of heads to another at a given path
+ * @experimental
+ * @param doc - The document to update
+ * @param path - path of the object to diff
+ * @param before - before Heads for the diff
+ * @param after - after Heads for the diff
+ * @param opts - Options is { recursive: bool } to diff sub objects as well.  Default is true
  *
  * This is an experimental API
  */

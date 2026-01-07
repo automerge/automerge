@@ -285,15 +285,34 @@ impl AutoCommit {
         patches
     }
 
+    /// Generates a diff from `before` to `after` for a given `object`
+    ///
+    /// By default the diff requires a sequental scan of all the ops in the doc.
+    ///
+    /// [Self::diff()] is the equivelent to [Self::diff_obj(&ROOT, before, after, true)]
+    ///
+    /// Managing the diff index has a small but non-zero overhead.  It should be
+    /// disabled if no longer needed.  If a signifigantly large change is applied
+    /// to the document it may be faster to reset the index before applying it,
+    /// doing an unindxed diff afterwards and then reenable the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `obj` - The object to start the diff at.
+    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
+    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
+    /// * `recursive` - if false, do not also diff child objects
+    ///
+    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
     pub fn diff_obj(
         &mut self,
-        exid: &ExId,
+        obj: &ExId,
         before: &[ChangeHash],
         after: &[ChangeHash],
         recursive: bool,
     ) -> Result<Vec<Patch>, AutomergeError> {
-        let obj = self.doc.exid_to_obj(exid)?;
-        Ok(self.diff_inner(exid, obj, before, after, recursive))
+        let meta = self.doc.exid_to_obj(obj)?;
+        Ok(self.diff_inner(obj, meta, before, after, recursive))
     }
 
     /// This is a convience function that encapsulates the following common pattern

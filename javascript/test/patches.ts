@@ -135,23 +135,26 @@ describe("patches", () => {
         d.a = 4;
         d.foo.b = 4;
         d.foo.bar.c = 4;
-        d.foo.bar.baz.d = 4;
+        d.foo.bar.baz = { d: 4 };
       })
       const h4 = Automerge.getHeads(doc)
       const patches1 = Automerge.diff(doc, h1, h4)
       assert.deepEqual(patches1, [
         { action: "put", path: ["a"], value: 4 },
         { action: "put", path: ["foo","b"], value: 4 },
+        { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
         { action: "put", path: ["foo","bar","baz","d"], value: 4 },
       ]);
       const patches2 = Automerge.diffPath(doc, ["foo","bar"], h1, h4)
       assert.deepEqual(patches2, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
         { action: "put", path: ["foo","bar","baz","d"], value: 4 },
       ]);
       const patches2_shallow = Automerge.diffPath(doc, ["foo","bar"], h1, h4, { recursive: false })
       assert.deepEqual(patches2_shallow, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
       ]);
       const patches3 = Automerge.diffPath(doc, ["foo","bar","baz"], h1, h4)
@@ -183,11 +186,13 @@ describe("patches", () => {
       ]);
       const patches7 = Automerge.diffPath(doc, ["foo","bar"], h3, h4)
       assert.deepEqual(patches7, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
         { action: "put", path: ["foo","bar","baz","d"], value: 4 },
       ]);
       const patches7_shallow = Automerge.diffPath(doc, ["foo","bar"], h3, h4, {recursive: false})
       assert.deepEqual(patches7_shallow, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
         { action: "put", path: ["foo","bar","c"], value: 4 },
       ]);
     })
