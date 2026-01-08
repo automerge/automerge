@@ -133,6 +133,8 @@ impl State {
     pub(crate) fn make_supported_capabilities(&mut self) -> Option<Vec<Capability>> {
         if let Some(cap) = self.their_capabilities.as_mut() {
             if let Some(pos) = cap.iter().position(|c| *c == Capability::Request) {
+                // they are requesting our caps - send and remove the request
+                // so we dont send it again next time
                 cap.remove(pos);
                 Some(vec![Capability::MessageV1, Capability::MessageV2])
             } else if self.have_responded {
