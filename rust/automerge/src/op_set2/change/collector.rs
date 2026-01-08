@@ -13,7 +13,7 @@ use super::{ActorMapper, ChangeOpsColumns};
 
 use hexane::{BooleanCursor, DeltaCursor, Encoder, StrCursor, UIntCursor};
 
-use crate::change_graph::ChangeGraph;
+use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::error::AutomergeError;
 use crate::op_set2::change::{write_change_ops, GetHash};
 use crate::op_set2::op_set::IndexBuilder;
@@ -55,8 +55,8 @@ impl<'a> IndexedChangeCollector<'a> {
         Ok(())
     }
 
-    pub(crate) fn build_changegraph(self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
-        self.collector.build_changegraph(op_set)
+    pub(crate) fn collect(self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
+        self.collector.collect(op_set)
     }
 
     pub(crate) fn process_op(&mut self, op: Op<'a>) {
@@ -563,13 +563,13 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn try_new(
-        change_graph: &'a ChangeGraph,
+        change_cols: &'a ChangeGraphCols,
         op_set: &'a OpSet,
     ) -> Result<ChangeCollector<'a>, OutOfMemory> {
         let mut meta = Vec::new();
-        meta.try_reserve(change_graph.len())
+        meta.try_reserve(change_cols.len())
             .map_err(|_| OutOfMemory)?;
-        for c in change_graph.iter() {
+        for c in change_cols.iter() {
             meta.push(c);
         }
         ChangeCollector::try_from_change_meta(meta, &op_set.actors)
@@ -636,37 +636,10 @@ impl<'a> ChangeCollector<'a> {
     }
 
     pub(crate) fn from_change_meta(
-        mut changes: Vec<BuildChangeMetadata<'a>>,
+        changes: Vec<BuildChangeMetadata<'a>>,
         actors: &'a [ActorId],
     ) -> ChangeCollector<'a> {
-        let mut builders: Vec<_> = changes
-            .iter()
-            .enumerate()
-            .map(|(index, e)| ChangeBuilder {
-                actor: e.actor,
-                seq: e.seq,
-                change: index,
-                start_op: e.start_op,
-                encoder: OpEncoderStrategy::new(e.num_ops()),
-            })
-            .collect();
-
-        builders.sort_unstable_by(|a, b| a.actor.cmp(&b.actor).then(a.seq.cmp(&b.seq)));
-
-        let mapper = ActorMapper::new(actors);
-
-        builders
-            .iter()
-            .enumerate()
-            .for_each(|(index, b)| changes[b.change].builder = index);
-
-        ChangeCollector {
-            mapper,
-            changes,
-            builders,
-            last: None,
-            preds: HashMap::default(),
-        }
+        Self::try_from_change_meta(changes, actors).unwrap()
     }
 
     pub(crate) fn exclude_hashes(
@@ -905,7 +878,7 @@ impl<'a> ChangeCollector<'a> {
         Ok(changes)
     }
 
-    pub(crate) fn build_changegraph(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
+    pub(crate) fn collect(mut self, op_set: &OpSet) -> Result<CollectedChanges, Error> {
         self.flush_deletes();
 
         let num_actors = op_set.actors.len();

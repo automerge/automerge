@@ -48,6 +48,8 @@ pub(crate) struct ChangeGraph {
     seq_index: Vec<Vec<NodeIdx>>,
 }
 
+pub(crate) struct ChangeGraphCols(ChangeGraph);
+
 const CACHE_STEP: u32 = 16;
 
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -210,142 +212,6 @@ impl ChangeGraph {
     fn node_ids(&self) -> impl Iterator<Item = NodeIdx> {
         let end = self.hashes.len() as u32;
         (0..end).map(NodeIdx)
-    }
-
-    pub(crate) fn set_hashes(&mut self, changes: &[Change]) {
-        debug_assert_eq!(changes.len(), self.len());
-        debug_assert!(self.hashes.is_empty());
-
-        for c in changes {
-            let hash = c.hash();
-            let node_idx = NodeIdx(self.hashes.len() as u32);
-            self.nodes_by_hash.insert(hash, node_idx);
-            self.hashes.push(hash)
-        }
-
-        for n in 0..(self.len() as u32) {
-            if (n + 1) % CACHE_STEP == 0 {
-                self.cache_clock(NodeIdx(n));
-            }
-        }
-    }
-
-    pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
-        use ids::*;
-
-        let num_actors = doc.actors().len();
-        let meta = doc.change_meta();
-        let bytes = doc.change_bytes();
-
-        let actor_bytes = meta.bytes(ACTOR_COL_SPEC, bytes);
-        let seq_bytes = meta.bytes(SEQ_COL_SPEC, bytes);
-        let max_op_bytes = meta.bytes(MAX_OP_COL_SPEC, bytes);
-        let time_bytes = meta.bytes(TIME_COL_SPEC, bytes);
-        let message_bytes = meta.bytes(MESSAGE_COL_SPEC, bytes);
-        let deps_count_bytes = meta.bytes(DEPS_COUNT_COL_SPEC, bytes);
-        let deps_val_bytes = meta.bytes(DEPS_VAL_COL_SPEC, bytes);
-        let extra_meta_bytes = meta.bytes(EXTRA_META_COL_SPEC, bytes);
-
-        let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
-
-        let actors = to_vec(ActorCursor::iter(actor_bytes))?;
-        let max_ops = to_u32_vec(DeltaCursor::iter(max_op_bytes))?;
-        let max_op = max_ops.iter().copied().max().unwrap_or(0);
-        let seq = to_u32_vec(DeltaCursor::iter(seq_bytes))?;
-
-        if let Some(a) = actors.iter().copied().map(usize::from).max() {
-            if a >= num_actors {
-                return Err(LoadError::InvalidActorId(a));
-            }
-        }
-
-        let len = actors.len();
-
-        let timestamps = ColumnData::load_unless_empty(time_bytes, len)?;
-        let messages = ColumnData::load_unless_empty(message_bytes, len)?;
-        let extra_bytes_meta = ColumnData::load_unless_empty(extra_meta_bytes, len)?;
-
-        if max_ops.len() != len {
-            return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
-        }
-        if seq.len() != len {
-            return Err(LoadError::InvalidColumnLength(SEQ_COL_SPEC));
-        }
-        if timestamps.len() != len {
-            return Err(LoadError::InvalidColumnLength(TIME_COL_SPEC));
-        }
-        if messages.len() != len {
-            return Err(LoadError::InvalidColumnLength(MESSAGE_COL_SPEC));
-        }
-
-        let mut seq_index = vec![vec![]; num_actors];
-        for (i, actor) in actors.iter().enumerate() {
-            let actor = actor.0 as usize;
-            seq_index[actor].push(NodeIdx(i as u32));
-        }
-
-        let mut parents = Vec::with_capacity(len);
-        let mut edges = vec![];
-
-        let deps_count = UIntCursor::iter(deps_count_bytes).map(to_u32);
-        let mut deps_val = DeltaCursor::iter(deps_val_bytes).map(to_u32);
-
-        let mut num_ops = Vec::with_capacity(len);
-        for (i, d) in deps_count.enumerate() {
-            let d = d? as usize;
-            if d == 0 {
-                num_ops.push(max_ops[i] as u64);
-                parents.push(None);
-                continue;
-            }
-
-            parents.push(Some(EdgeIdx::new(edges.len())));
-            let mut last_max_op = 0;
-            for e in 0..d {
-                let dep = deps_val.next();
-                let dep = dep.ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))??;
-                let target = NodeIdx(dep);
-                let next = EdgeIdx::new(edges.len() + 1);
-                let next = if e + 1 == d { None } else { Some(next) };
-                last_max_op = std::cmp::max(last_max_op, max_ops[dep as usize]);
-                edges.push(Edge { target, next })
-            }
-            if last_max_op > max_ops[i] {
-                return Err(LoadError::InvalidMaxOp);
-            }
-            num_ops.push(max_ops[i] as u64 - last_max_op as u64);
-        }
-        let num_ops = num_ops.into_iter().collect();
-
-        let heads = doc.heads().iter().copied().collect();
-
-        if parents.len() != len {
-            return Err(LoadError::InvalidColumnLength(DEPS_COUNT_COL_SPEC));
-        }
-
-        // blank - to be filled out later
-        let clock_cache = HashMap::default();
-        let hashes = vec![];
-        let nodes_by_hash = HashMap::new();
-
-        Ok(Self {
-            edges,
-            hashes,
-            actors,
-            parents,
-            seq,
-            max_ops,
-            max_op,
-            num_ops,
-            timestamps,
-            messages,
-            extra_bytes_meta,
-            extra_bytes_raw,
-            heads,
-            nodes_by_hash,
-            clock_cache,
-            seq_index,
-        })
     }
 
     pub(crate) fn encode(&self, out: &mut Vec<u8>) -> RawColumns<Uncompressed> {
@@ -861,6 +727,155 @@ impl ChangeGraph {
     }
 }
 
+impl ChangeGraphCols {
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(crate) fn iter(&self) -> ChangeIter<'_> {
+        self.0.iter()
+    }
+
+    pub(crate) fn finalize(self, changes: &[Change]) -> ChangeGraph {
+        let mut graph = self.0;
+        debug_assert_eq!(changes.len(), graph.len());
+        debug_assert!(graph.hashes.is_empty());
+
+        for c in changes {
+            let hash = c.hash();
+            let node_idx = NodeIdx(graph.hashes.len() as u32);
+            graph.nodes_by_hash.insert(hash, node_idx);
+            graph.hashes.push(hash)
+        }
+
+        for n in 0..(graph.len() as u32) {
+            if (n + 1) % CACHE_STEP == 0 {
+                graph.cache_clock(NodeIdx(n));
+            }
+        }
+
+        graph
+    }
+
+    pub(crate) fn load(doc: &Document<'_>) -> Result<Self, LoadError> {
+        use ids::*;
+
+        let num_actors = doc.actors().len();
+        let meta = doc.change_meta();
+        let bytes = doc.change_bytes();
+
+        let actor_bytes = meta.bytes(ACTOR_COL_SPEC, bytes);
+        let seq_bytes = meta.bytes(SEQ_COL_SPEC, bytes);
+        let max_op_bytes = meta.bytes(MAX_OP_COL_SPEC, bytes);
+        let time_bytes = meta.bytes(TIME_COL_SPEC, bytes);
+        let message_bytes = meta.bytes(MESSAGE_COL_SPEC, bytes);
+        let deps_count_bytes = meta.bytes(DEPS_COUNT_COL_SPEC, bytes);
+        let deps_val_bytes = meta.bytes(DEPS_VAL_COL_SPEC, bytes);
+        let extra_meta_bytes = meta.bytes(EXTRA_META_COL_SPEC, bytes);
+
+        let extra_bytes_raw = meta.bytes(EXTRA_VAL_COL_SPEC, bytes).to_vec();
+
+        let actors = to_vec(ActorCursor::iter(actor_bytes))?;
+        let max_ops = to_u32_vec(DeltaCursor::iter(max_op_bytes))?;
+        let max_op = max_ops.iter().copied().max().unwrap_or(0);
+        let seq = to_u32_vec(DeltaCursor::iter(seq_bytes))?;
+
+        if let Some(a) = actors.iter().copied().map(usize::from).max() {
+            if a >= num_actors {
+                return Err(LoadError::InvalidActorId(a));
+            }
+        }
+
+        let len = actors.len();
+
+        let timestamps = ColumnData::load_unless_empty(time_bytes, len)?;
+        let messages = ColumnData::load_unless_empty(message_bytes, len)?;
+        let extra_bytes_meta = ColumnData::load_unless_empty(extra_meta_bytes, len)?;
+
+        if max_ops.len() != len {
+            return Err(LoadError::InvalidColumnLength(MAX_OP_COL_SPEC));
+        }
+        if seq.len() != len {
+            return Err(LoadError::InvalidColumnLength(SEQ_COL_SPEC));
+        }
+        if timestamps.len() != len {
+            return Err(LoadError::InvalidColumnLength(TIME_COL_SPEC));
+        }
+        if messages.len() != len {
+            return Err(LoadError::InvalidColumnLength(MESSAGE_COL_SPEC));
+        }
+
+        let mut seq_index = vec![vec![]; num_actors];
+        for (i, actor) in actors.iter().enumerate() {
+            let actor = actor.0 as usize;
+            seq_index[actor].push(NodeIdx(i as u32));
+        }
+
+        let mut parents = Vec::with_capacity(len);
+        let mut edges = vec![];
+
+        let deps_count = UIntCursor::iter(deps_count_bytes).map(to_u32);
+        let mut deps_val = DeltaCursor::iter(deps_val_bytes).map(to_u32);
+
+        let mut num_ops = Vec::with_capacity(len);
+        for (i, d) in deps_count.enumerate() {
+            let d = d? as usize;
+            if d == 0 {
+                num_ops.push(max_ops[i] as u64);
+                parents.push(None);
+                continue;
+            }
+
+            parents.push(Some(EdgeIdx::new(edges.len())));
+            let mut last_max_op = 0;
+            for e in 0..d {
+                let dep = deps_val.next();
+                let dep = dep.ok_or(LoadError::InvalidColumnLength(DEPS_VAL_COL_SPEC))??;
+                let target = NodeIdx(dep);
+                let next = EdgeIdx::new(edges.len() + 1);
+                let next = if e + 1 == d { None } else { Some(next) };
+                last_max_op = std::cmp::max(last_max_op, max_ops[dep as usize]);
+                edges.push(Edge { target, next })
+            }
+            if last_max_op > max_ops[i] {
+                return Err(LoadError::InvalidMaxOp);
+            }
+            num_ops.push(max_ops[i] as u64 - last_max_op as u64);
+        }
+        let num_ops = num_ops.into_iter().collect();
+
+        let heads = doc.heads().iter().copied().collect();
+
+        if parents.len() != len {
+            return Err(LoadError::InvalidColumnLength(DEPS_COUNT_COL_SPEC));
+        }
+
+        // blank - to be filled out later
+        let clock_cache = HashMap::default();
+        let hashes = vec![];
+        let nodes_by_hash = HashMap::new();
+
+        Ok(ChangeGraphCols(ChangeGraph {
+            edges,
+            hashes,
+            actors,
+            parents,
+            seq,
+            max_ops,
+            max_op,
+            num_ops,
+            timestamps,
+            messages,
+            extra_bytes_meta,
+            extra_bytes_raw,
+            heads,
+            nodes_by_hash,
+            clock_cache,
+            seq_index,
+        }))
+    }
+}
+
 fn as_num_deps(num: usize) -> Option<Cow<'static, u64>> {
     Some(Cow::Owned(num as u64))
 }
@@ -1080,16 +1095,6 @@ where
     }
 }
 
-/*
-fn to_u32(i: Result<Option<Cow<'_, i64>>, PackError>) -> Result<u32, PackError> {
-    match i {
-        Err(e) => Err(e),
-        Ok(Some(i)) => Ok((*i).try_into().unwrap_or(0)),
-        Ok(None) => Ok(0),
-    }
-}
-*/
-
 fn to_u32_vec<'a, I, T>(iter: I) -> Result<Vec<u32>, PackError>
 where
     I: Iterator<Item = Result<Option<Cow<'a, T>>, PackError>>,
@@ -1202,18 +1207,4 @@ pub(crate) mod ids {
     pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
-
-/*
-    pub(super) const ALL_COLUMN_SPECS: [ColumnSpec; 9] = [
-      ACTOR_COL_SPEC,
-      SEQ_COL_SPEC,
-      MAX_OP_COL_SPEC,
-      TIME_COL_SPEC,
-      MESSAGE_COL_SPEC,
-      DEPS_COUNT_COL_SPEC,
-      DEPS_VAL_COL_SPEC,
-      EXTRA_META_COL_SPEC,
-      EXTRA_VAL_COL_SPEC,
-    ];
-*/
 }

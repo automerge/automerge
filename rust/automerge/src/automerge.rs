@@ -1044,7 +1044,7 @@ impl Automerge {
         self.change_graph.get_hash_for_actor_seq(actor, seq)
     }
 
-    pub(crate) fn update_history(&mut self, change: &Change, _num_ops: usize) {
+    pub(crate) fn update_history(&mut self, change: &Change) {
         self.update_deps(change);
 
         let actor_index = self

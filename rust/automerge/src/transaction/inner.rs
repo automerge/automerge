@@ -121,7 +121,6 @@ impl TransactionInner {
             self.time = t;
         }
 
-        let num_ops = self.pending_ops();
         let change = self.export(doc.ops(), doc.changes());
         let hash = change.hash();
         #[cfg(not(debug_assertions))]
@@ -131,7 +130,7 @@ impl TransactionInner {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
         }
-        doc.update_history(&change, num_ops);
+        doc.update_history(&change);
         doc.remove_unused_actors(true);
         hash
     }

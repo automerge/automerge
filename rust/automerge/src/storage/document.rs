@@ -4,7 +4,7 @@ use std::{borrow::Cow, ops::Range};
 
 use super::{parse, shift_range, ChunkType, Header, RawColumns};
 
-use crate::change_graph::ChangeGraph;
+use crate::change_graph::{ChangeGraph, ChangeGraphCols};
 use crate::op_set2::change::{ChangeCollector, CollectedChanges, OutOfMemory};
 use crate::op_set2::{OpSet, ReadOpError};
 use crate::storage::columns::compression::Uncompressed;
@@ -325,22 +325,22 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Automerge, ReconstructError> {
         let mut op_set = OpSet::load(self, text_encoding)?;
-        let mut change_graph = ChangeGraph::load(self)?;
+        let change_cols = ChangeGraphCols::load(self)?;
 
         let mut index = op_set.index_builder();
 
-        let change_collector = ChangeCollector::try_new(&change_graph, &op_set)?;
+        let change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
         let mut change_collector = change_collector.with_index(&mut index);
 
         change_collector.process_ops(&op_set)?;
 
-        let changes = change_collector.build_changegraph(&op_set)?;
+        let changes = change_collector.collect(&op_set)?;
 
         self.verify_changes(&changes, mode)?;
 
         op_set.set_indexes(index);
 
-        change_graph.set_hashes(&changes.changes);
+        let change_graph = change_cols.finalize(&changes.changes);
 
         debug_assert_eq!(changes.changes.len(), change_graph.len());
 
@@ -354,13 +354,13 @@ impl<'a> Document<'a> {
         text_encoding: TextEncoding,
     ) -> Result<Vec<Change>, ReconstructError> {
         let op_set = OpSet::load(self, text_encoding)?;
-        let change_graph = ChangeGraph::load(self)?;
+        let change_cols = ChangeGraphCols::load(self)?;
 
-        let mut change_collector = ChangeCollector::try_new(&change_graph, &op_set)?;
+        let mut change_collector = ChangeCollector::try_new(&change_cols, &op_set)?;
 
         change_collector.process_ops(&op_set)?;
 
-        Ok(change_collector.build_changegraph(&op_set)?.changes)
+        Ok(change_collector.collect(&op_set)?.changes)
     }
 }
 
