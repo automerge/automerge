@@ -12,11 +12,6 @@ use crate::{
     types::{ElemId, ObjId, OpId},
 };
 use hexane::{
-    BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, DeltaCursor, IntCursor, RawReader,
-    SlabWeight, StrCursor, UIntCursor,
-};
-
-use hexane::{
     BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, ColumnDataIterState, DeltaCursor,
     IntCursor, RawReader, SlabWeight, StrCursor, UIntCursor,
 };
