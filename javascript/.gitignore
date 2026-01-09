@@ -6,4 +6,5 @@ docs/
 deno_dist/
 src/wasm_bindgen_output/
 src/wasm_types.d.ts
+src/generated/
 *.tgz
