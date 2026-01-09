@@ -2558,7 +2558,7 @@ describe("Automerge", () => {
       assert.deepEqual(doc.text("/bad_text"), "ABBBBB\ufffcC");
       assert.deepEqual(doc.materialize("/bad_text"), "ABBBBB\ufffcC");
 
-      // deleting in the middle of a multi-byte character will delete after 
+      // deleting in the middle of a multi-byte character will delete after
       const doc1 = doc.fork();
       doc1.splice("/bad_text", 3, 3, "X");
       assert.deepEqual(doc1.text("/bad_text"), "ABBBBBX");
@@ -2670,9 +2670,6 @@ describe("Automerge", () => {
       assert.equal(stats.numChanges, 2);
       assert.equal(stats.numOps, 2);
       assert.equal(stats.numActors, 1);
-      assert.equal(typeof stats.rustcVersion, "string");
-      assert.equal(typeof stats.cargoPackageName, "string");
-      assert.equal(typeof stats.cargoPackageVersion, "string");
     });
   });
   describe("change metadata", () => {

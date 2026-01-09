@@ -380,12 +380,17 @@ export interface API {
   exportSyncState(state: SyncState): JsSyncState;
   importSyncState(state: JsSyncState): SyncState;
   readBundle(data: Uint8Array): DecodedBundle;
+  wasmReleaseInfo(): WasmReleaseInfo;
 }
 
 export interface Stats {
   numChanges: number;
   numOps: number;
   numActors: number;
+}
+
+export interface WasmReleaseInfo {
+  gitHead: string;
   cargoPackageName: string;
   cargoPackageVersion: string;
   rustcVersion: string;
@@ -1594,18 +1599,19 @@ impl Automerge {
     pub fn stats(&mut self) -> JsValue {
         let stats = self.doc.stats();
         let result = Object::new();
-        let num_changes = JsValue::from(stats.num_changes as usize);
-        let num_ops = JsValue::from(stats.num_ops as usize);
-        let num_actors = JsValue::from(stats.num_actors as usize);
-        let cargo_package_name = JsValue::from(stats.cargo_package_name);
-        let cargo_package_version = JsValue::from(stats.cargo_package_version);
-        let rustc_version = JsValue::from(stats.rustc_version);
-        js_set(&result, "numChanges", num_changes).unwrap();
-        js_set(&result, "numOps", num_ops).unwrap();
-        js_set(&result, "numActors", num_actors).unwrap();
-        js_set(&result, "cargoPackageName", cargo_package_name).unwrap();
-        js_set(&result, "cargoPackageVersion", cargo_package_version).unwrap();
-        js_set(&result, "rustcVersion", rustc_version).unwrap();
+        js_set(
+            &result,
+            "numChanges",
+            JsValue::from(stats.num_changes as usize),
+        )
+        .unwrap();
+        js_set(&result, "numOps", JsValue::from(stats.num_ops as usize)).unwrap();
+        js_set(
+            &result,
+            "numActors",
+            JsValue::from(stats.num_actors as usize),
+        )
+        .unwrap();
         result.into()
     }
 
@@ -1680,6 +1686,36 @@ pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load
         freeze: false,
         external_types: HashMap::default(),
     })
+}
+
+#[wasm_bindgen(js_name = wasmReleaseInfo, unchecked_return_type = "WasmReleaseInfo")]
+pub fn wasm_release_info() -> JsValue {
+    let result = Object::new();
+    js_set(
+        &result,
+        "gitHead",
+        JsValue::from_str(option_env!("GIT_HEAD").unwrap_or("unknown")),
+    )
+    .unwrap();
+    js_set(
+        &result,
+        "cargoPackageName",
+        JsValue::from_str(env!("CARGO_PKG_NAME")),
+    )
+    .unwrap();
+    js_set(
+        &result,
+        "cargoPackageVersion",
+        JsValue::from_str(env!("CARGO_PKG_VERSION")),
+    )
+    .unwrap();
+    js_set(
+        &result,
+        "rustcVersion",
+        JsValue::from_str(env!("CARGO_PKG_RUST_VERSION")),
+    )
+    .unwrap();
+    result.into()
 }
 
 #[wasm_bindgen(js_name = encodeChange)]

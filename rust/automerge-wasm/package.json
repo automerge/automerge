@@ -41,7 +41,7 @@
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
     "bindgen": "wasm-bindgen --omit-default-module-path --weak-refs --typescript --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
     "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
-    "test": "mocha --loader=ts-node/esm test/**/*.mts"
+    "test": "tsc --noEmit && mocha --loader=ts-node/esm test/**/*.mts"
   },
   "devDependencies": {
     "@types/assert": "^1.5.10",

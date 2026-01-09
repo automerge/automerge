@@ -85,6 +85,7 @@ type SyncState = JsSyncState & {
 }
 
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level.js"
+import { JS_GIT_HEAD } from "./generated/release-info.js"
 export {
   initializeWasm,
   initializeBase64Wasm,
@@ -1351,12 +1352,65 @@ export function inspectChange(
 export function stats(doc: Doc<unknown>): {
   numChanges: number
   numOps: number
+  numActors: number
+  /** @deprecated Use `releaseInfo().wasm.cargoPackageName` instead */
   cargoPackageName: string
+  /** @deprecated Use `releaseInfo().wasm.cargoPackageVersion` instead */
   cargoPackageVersion: string
+  /** @deprecated Use `releaseInfo().wasm.rustcVersion` instead */
   rustcVersion: string
 } {
   const state = _state(doc)
-  return state.handle.stats()
+  const wasmStats = state.handle.stats()
+  const release = releaseInfo()
+
+  return {
+    ...wasmStats,
+    cargoPackageName: release.wasm?.cargoPackageName ?? "unknown",
+    cargoPackageVersion: release.wasm?.cargoPackageVersion ?? "unknown",
+    rustcVersion: release.wasm?.rustcVersion ?? "unknown",
+  }
+}
+
+export type JsReleaseInfo = {
+  gitHead: string
+}
+
+export type WasmReleaseInfo = {
+  gitHead: string
+  cargoPackageName: string
+  cargoPackageVersion: string
+  rustcVersion: string
+}
+
+export type ReleaseInfo = {
+  js: JsReleaseInfo
+  wasm: WasmReleaseInfo | null
+}
+
+/**
+ * Get release information about the automerge library.
+ *
+ * Returns metadata about both the JavaScript wrapper and the WebAssembly
+ * module, including git commit hashes. If js.gitHead !== wasm.gitHead,
+ * the JS and WASM were built from different commits.
+ *
+ * If the WASM module has not been initialized, wasm will be null.
+ */
+export function releaseInfo(): ReleaseInfo {
+  let wasm: WasmReleaseInfo | null = null
+  try {
+    wasm = ApiHandler.wasmReleaseInfo()
+  } catch {
+    // WASM not initialized - leave as null
+  }
+
+  return {
+    js: {
+      gitHead: JS_GIT_HEAD,
+    },
+    wasm,
+  }
 }
 
 /**
