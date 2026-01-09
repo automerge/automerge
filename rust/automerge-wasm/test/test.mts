@@ -2593,7 +2593,7 @@ describe("Automerge", () => {
       const leftSync = initSyncState();
       const rightSync = initSyncState();
 
-      while (!left.hasOurChanges(leftSync) && !right.hasOurChanges(rightSync)) {
+      while (!left.hasOurChanges(leftSync) || !right.hasOurChanges(rightSync)) {
         let quiet = true;
         let msg = left.generateSyncMessage(leftSync);
         if (msg) {

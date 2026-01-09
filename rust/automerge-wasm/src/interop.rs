@@ -597,7 +597,6 @@ impl From<&[am::sync::Capability]> for AR {
         AR(value
             .iter()
             .filter_map(|c| match c {
-                am::sync::Capability::Request => Some(JsValue::from_str("request")),
                 am::sync::Capability::MessageV1 => Some(JsValue::from_str("message-v1")),
                 am::sync::Capability::MessageV2 => Some(JsValue::from_str("message-v2")),
                 am::sync::Capability::Unknown(_) => None,
@@ -656,7 +655,6 @@ impl TryFrom<JS> for Vec<Capability> {
                     .as_string()
                     .ok_or(error::BadCapabilities::ElemNotString(i))?;
                 match as_str.as_str() {
-                    "request" => Ok(Capability::Request),
                     "message-v1" => Ok(Capability::MessageV1),
                     "message-v2" => Ok(Capability::MessageV2),
                     other => Err(error::BadCapabilities::ElemNotValid(i, other.to_string())),

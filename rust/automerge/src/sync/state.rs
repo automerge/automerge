@@ -130,26 +130,10 @@ impl State {
         Some((have.as_slice(), need.as_slice()))
     }
 
-    pub(crate) fn make_supported_capabilities(&mut self) -> Option<Vec<Capability>> {
-        if let Some(cap) = self.their_capabilities.as_mut() {
-            if let Some(pos) = cap.iter().position(|c| *c == Capability::Request) {
-                // they are requesting our caps - send and remove the request
-                // so we dont send it again next time
-                cap.remove(pos);
-                Some(vec![Capability::MessageV1, Capability::MessageV2])
-            } else if self.have_responded {
-                // backward compat with pre-patch
-                Some(vec![Capability::MessageV1, Capability::MessageV2])
-            } else {
-                None
-            }
-        } else {
-            Some(vec![
-                Capability::Request,
-                Capability::MessageV1,
-                Capability::MessageV2,
-            ])
-        }
+    // in order to ensure that lost capabilities do not cause pathological behavior
+    // capabilites are now sent with every message
+    pub(crate) fn make_supported_capabilities(&self) -> Option<Vec<Capability>> {
+        Some(vec![Capability::MessageV1, Capability::MessageV2])
     }
 
     pub(crate) fn supports_v2_messages(&self) -> bool {

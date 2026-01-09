@@ -645,7 +645,6 @@ impl Message {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
-    Request,
     MessageV1,
     MessageV2,
     Unknown(u8),
@@ -654,7 +653,6 @@ pub enum Capability {
 impl Capability {
     fn encode(&self, out: &mut Vec<u8>) {
         match self {
-            Capability::Request => out.push(0x00),
             Capability::MessageV1 => out.push(0x01),
             Capability::MessageV2 => out.push(0x02),
             Capability::Unknown(v) => out.push(*v),
@@ -664,7 +662,6 @@ impl Capability {
     fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
         let (i, v) = parse::take1(input)?;
         match v {
-            0x00 => Ok((i, Self::Request)),
             0x01 => Ok((i, Self::MessageV1)),
             0x02 => Ok((i, Self::MessageV2)),
             _ => Ok((i, Self::Unknown(v))),
