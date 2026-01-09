@@ -1188,11 +1188,22 @@ impl Automerge {
         patch_log.make_patches(self)
     }
 
-    /// Create patches representing the change in the current state of an object in the document between the
-    /// `before` and `after` heads.  If the arguments are reverse it will observe the same changes
-    /// in the opposite order.
+    /// Create patches representing the change in the current state of an object
+    /// in the document between the `before_heads` and `after_heads` heads. If
+    /// the arguments are reverse it will observe the same changes in the
+    /// opposite order.
     ///
-    /// if `recursive` is false the diff does not extend into child objects
+    /// # Arguments
+    ///
+    /// * `obj` - The object to start the diff at.
+    /// * `before_heads` - heads from [`Self::get_heads()`] at beginning point
+    ///   in the documents history
+    /// * `after_heads` - heads from [`Self::get_heads()`] at ending point in
+    ///   the documents history.
+    /// * `recursive` - if false, do not also diff child objects
+    ///
+    /// Note: `before_heads` and `after_heads` do not have to be chronological.
+    /// Document state can move backward.
     pub fn diff_obj(
         &self,
         obj: &ExId,

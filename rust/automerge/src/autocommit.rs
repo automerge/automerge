@@ -289,7 +289,7 @@ impl AutoCommit {
     ///
     /// By default the diff requires a sequental scan of all the ops in the doc.
     ///
-    /// [Self::diff()] is the equivelent to [Self::diff_obj(&ROOT, before, after, true)]
+    /// [Self::diff()] is the equivelent to [Self::diff_obj(&ROOT, before, after)]
     ///
     /// Managing the diff index has a small but non-zero overhead.  It should be
     /// disabled if no longer needed.  If a signifigantly large change is applied
