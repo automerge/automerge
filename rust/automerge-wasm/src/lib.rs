@@ -329,6 +329,8 @@ interface Automerge {
     getMissingDeps(heads?: Heads): Heads;
 
     getCursorPosition(obj: ObjID, cursor: Cursor, heads?: Heads): number;
+
+    diffPath(path: Prop[] | string, before: Heads, after: Heads, options?: DiffOptions): Patch[];
 }
 
 
@@ -337,6 +339,11 @@ export type LoadOptions = {
   unchecked?: boolean;
   allowMissingDeps?: boolean;
   convertImmutableStringsToText?: boolean;
+};
+
+// if recursive is false do not diff child objects
+export type DiffOptions = {
+  recursive?: boolean;
 };
 
 export type InitOptions = {
@@ -1101,6 +1108,32 @@ impl Automerge {
             .ok_or_else(|| error::Diff::MissingAfterHeads)?;
 
         let patches = self.doc.diff(&before, &after);
+
+        Ok(interop::export_patches(&self.external_types, patches)?)
+    }
+
+    #[wasm_bindgen(js_name = diffPath, skip_typescript)]
+    pub fn diff_path(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Prop[] | string")] path: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] before: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Heads")] after: JsValue,
+        options: JsValue,
+    ) -> Result<Array, error::Diff> {
+        let obj = self.import(path)?.0;
+        let recursive = js_get(&options, "recursive")
+            .ok()
+            .and_then(|a| a.as_bool())
+            .unwrap_or(true);
+
+        let before = get_heads(before)
+            .map_err(error::Diff::InvalidBeforeHeads)?
+            .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
+        let after = get_heads(after)
+            .map_err(error::Diff::InvalidBeforeHeads)?
+            .ok_or_else(|| error::Diff::MissingBeforeHeads)?;
+
+        let patches = self.doc.diff_obj(&obj, &before, &after, recursive)?;
 
         Ok(interop::export_patches(&self.external_types, patches)?)
     }
@@ -2030,6 +2063,8 @@ pub mod error {
 
     #[derive(Debug, thiserror::Error)]
     pub enum Diff {
+        #[error(transparent)]
+        Import(#[from] interop::error::ImportObj),
         #[error(transparent)]
         Export(#[from] interop::error::Export),
         #[error(transparent)]

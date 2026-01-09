@@ -116,6 +116,86 @@ describe("patches", () => {
         )
       }
     })
+
+    it("should allow diffing a sub-object", () => {
+      let doc = Automerge.from({ a: 1, foo: { b: 1, bar: { c: 1, baz: { d: 1 } } } })
+      const h1 = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.a = 2;
+        d.foo.b = 2;
+        d.foo.bar.c = 2;
+        d.foo.bar.baz.d = 2;
+      })
+      const h2 = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.foo.bar.baz.d = 3;
+      })
+      const h3 = Automerge.getHeads(doc)
+      doc = Automerge.change(doc, d => {
+        d.a = 4;
+        d.foo.b = 4;
+        d.foo.bar.c = 4;
+        d.foo.bar.baz = { d: 4 };
+      })
+      const h4 = Automerge.getHeads(doc)
+      const patches1 = Automerge.diff(doc, h1, h4)
+      assert.deepEqual(patches1, [
+        { action: "put", path: ["a"], value: 4 },
+        { action: "put", path: ["foo","b"], value: 4 },
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches2 = Automerge.diffPath(doc, ["foo","bar"], h1, h4)
+      assert.deepEqual(patches2, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches2_shallow = Automerge.diffPath(doc, ["foo","bar"], h1, h4, { recursive: false })
+      assert.deepEqual(patches2_shallow, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+      ]);
+      const patches3 = Automerge.diffPath(doc, ["foo","bar","baz"], h1, h4)
+      assert.deepEqual(patches3, [
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches4 = Automerge.diffPath(doc, ["foo","bar"], h2, h3)
+      assert.deepEqual(patches4, [
+        { action: "put", path: ["foo","bar","baz","d"], value: 3 },
+      ]);
+      const patches5 = Automerge.diffPath(doc, ["foo","bar"], h3, h2)
+      assert.deepEqual(patches5, [
+        { action: "put", path: ["foo","bar","baz","d"], value: 2 },
+      ]);
+      const patches5_repeat = Automerge.diffPath(doc, ["foo","bar"], h3, h2)
+      assert.deepEqual(patches5_repeat, [
+        { action: "put", path: ["foo","bar","baz","d"], value: 2 },
+      ]);
+      const patches6 = Automerge.diffPath(doc, ["foo","bar"], [], h4)
+      assert.deepEqual(patches6, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches6_shallow = Automerge.diffPath(doc, ["foo","bar"], [], h4, {recursive: false})
+      assert.deepEqual(patches6_shallow, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+      ]);
+      const patches7 = Automerge.diffPath(doc, ["foo","bar"], h3, h4)
+      assert.deepEqual(patches7, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+        { action: "put", path: ["foo","bar","baz","d"], value: 4 },
+      ]);
+      const patches7_shallow = Automerge.diffPath(doc, ["foo","bar"], h3, h4, {recursive: false})
+      assert.deepEqual(patches7_shallow, [
+        { action: "put", path: ["foo","bar","baz"], value: {} },
+        { action: "put", path: ["foo","bar","c"], value: 4 },
+      ]);
+    })
   })
 
   it("should correctly diff the reverse of deleting a string value on next", () => {
