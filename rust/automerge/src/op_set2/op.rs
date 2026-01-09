@@ -1,7 +1,7 @@
-use super::hexane::{ColumnDataIter, DeltaCursor, IntCursor};
 use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction};
 use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
 use super::{ValueMeta, ValueRef};
+use hexane::{ColumnDataIter, DeltaCursor, IntCursor};
 
 use crate::clock::Clock;
 use crate::error::AutomergeError;

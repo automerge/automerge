@@ -8,12 +8,6 @@ use super::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 
-// this is just a hack - need a more generic validator
-#[derive(Debug, Default)]
-pub struct ScanMeta {
-    pub actors: usize,
-}
-
 pub trait HasMinMax {
     fn min(&self) -> Agg;
     fn max(&self) -> Agg;
@@ -321,18 +315,23 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
         panic!()
     }
 
-    fn debug_scan(data: &[u8], m: &ScanMeta) -> Result<Self, PackError> {
+    fn debug_scan<F>(data: &[u8], test: &F) -> Result<Self, PackError>
+    where
+        F: Fn(Option<&Self::Item>) -> Option<String>,
+    {
         let mut cursor = Self::empty();
         while let Some(val) = cursor.try_next(data)? {
-            Self::Item::validate(val.value.as_deref(), m)?;
+            Self::Item::validate(val.value.as_deref(), test)?;
         }
         Ok(cursor)
     }
 
-    fn load_with(data: &[u8], m: &ScanMeta) -> Result<ColumnData<Self>, PackError>;
+    fn load_with<F>(data: &[u8], test: &F) -> Result<ColumnData<Self>, PackError>
+    where
+        F: Fn(Option<&Self::Item>) -> Option<String>;
 
     fn load(data: &[u8]) -> Result<ColumnData<Self>, PackError> {
-        Self::load_with(data, &ScanMeta::default())
+        Self::load_with(data, &|_| None)
     }
 
     fn splice<'a, 'b, I, M>(

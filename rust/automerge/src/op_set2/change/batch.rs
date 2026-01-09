@@ -806,7 +806,7 @@ impl BatchApply {
     fn import_ops(&mut self, doc: &mut Automerge) {
         for c in &self.changes {
             doc.import_ops_to(c, &mut self.ops).unwrap();
-            doc.update_history(c, c.num_ops());
+            doc.update_history(c);
         }
         doc.remove_unused_actors(true);
     }

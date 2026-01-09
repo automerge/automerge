@@ -11,7 +11,6 @@ use crate::{
     },
     types::{ElemId, ObjId, OpId},
 };
-
 use hexane::{
     BooleanCursor, ColGroupIter, ColumnData, ColumnDataIter, ColumnDataIterState, DeltaCursor,
     IntCursor, RawReader, SlabWeight, StrCursor, UIntCursor,
@@ -80,7 +79,7 @@ pub(crate) enum ReadOpError {
     #[error("missing value: {0}")]
     MissingValue(&'static str),
     #[error("error reading value column: {0}")]
-    ReadValue(#[from] op_set2::hexane::ReadRawError),
+    ReadValue(#[from] hexane::ReadRawError),
     #[error("invalid value: {0}")]
     InvalidValue(#[from] op_set2::types::ReadScalarError),
 }
