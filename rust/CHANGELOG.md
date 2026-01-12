@@ -1,3 +1,10 @@
+# 0.7.3
+
+* Fix a bug in sync where peers which have lost their sync state would revert to
+  v1 sync which would result in very slow sync for large document histories.
+* Add `{Automerge, AutoCommit}::diff_obj` to get the patches for a specific
+  object rather than the entire document state
+
 # 0.7.2
 
 * Fix a bug which could cause sync messages to take a long time to process
