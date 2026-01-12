@@ -120,6 +120,16 @@ impl State {
         ))
     }
 
+    pub(crate) fn send_doc(&self) -> bool {
+        self.their_heads == Some(vec![]) && self.supports_v2_messages()
+    }
+
+    pub(crate) fn their(&self) -> Option<(&[Have], &[ChangeHash])> {
+        let have = self.their_have.as_ref()?;
+        let need = self.their_need.as_ref()?;
+        Some((have.as_slice(), need.as_slice()))
+    }
+
     pub(crate) fn supports_v2_messages(&self) -> bool {
         self.their_capabilities
             .as_ref()
