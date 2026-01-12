@@ -229,11 +229,6 @@ impl SyncDoc for Automerge {
             }
         }
 
-        // Only send the supported capabilities in the first message, the other end will store them
-        // in it's sync state and use them for subsequent messages
-
-        let supported_capabilities = sync_state.make_supported_capabilities();
-
         sync_state.have_responded = true;
         sync_state.last_sent_heads.clone_from(&our_heads);
         sync_state.sent_hashes.extend(message_builder.hashes());
@@ -242,7 +237,7 @@ impl SyncDoc for Automerge {
             .heads(our_heads)
             .have(our_have)
             .need(our_need)
-            .supported_capabilities(supported_capabilities)
+            .supported_capabilities(Some(vec![Capability::MessageV1, Capability::MessageV2]))
             .build();
 
         sync_state.in_flight = true;

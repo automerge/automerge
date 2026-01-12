@@ -130,12 +130,6 @@ impl State {
         Some((have.as_slice(), need.as_slice()))
     }
 
-    // in order to ensure that lost capabilities do not cause pathological behavior
-    // capabilites are now sent with every message
-    pub(crate) fn make_supported_capabilities(&self) -> Option<Vec<Capability>> {
-        Some(vec![Capability::MessageV1, Capability::MessageV2])
-    }
-
     pub(crate) fn supports_v2_messages(&self) -> bool {
         self.their_capabilities
             .as_ref()
