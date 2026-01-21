@@ -2595,3 +2595,82 @@ fn reproduce_clock_cache_bug() {
 
     assert!(base.get_changes(&heads).is_empty());
 }
+
+#[test]
+fn sync_with_nested_map_overwrite_doesnt_panic() {
+    // This test reproduces a panic that occurs when:
+    // 1. Actor 0 creates a map
+    // 2. Actor 1 (different actor) adds an item to the map
+    // 3. The document state is saved
+    // 4. Actor 1 overwrites the map with a nested map containing data
+    // 5. An empty commit is added
+    // 6. Sync is performed with a remote document loaded from the saved state
+    //
+    // The panic occurred in op_set2/change/collector.rs when calling .unwrap()
+    // on a Result that contained a ChangeGraph(MissingDep(...)) error during
+    // the third round of sync message exchange.
+    //
+    // The key to reproducing this bug is having different actors create the
+    // initial map vs adding the item to it.
+
+    let actor_0 = ActorId::from(vec![0; 16]);
+    let mut doc = Automerge::new();
+    doc.set_actor(actor_0);
+
+    // Actor 0: Create initial map structure
+    {
+        let mut tx = doc.transaction();
+        tx.put_object(ROOT, "map", ObjType::Map).unwrap();
+        tx.commit();
+    }
+
+    // Actor 1: Add an item to the map (different actor is important!)
+    {
+        let actor_1 = ActorId::from(vec![1; 16]);
+        doc.set_actor(actor_1);
+        let mut tx = doc.transaction();
+
+        if let Ok(Some((_, root_map))) = tx.get(ROOT, "map") {
+            tx.put_object(&root_map, "item", ObjType::Map).unwrap();
+        }
+        tx.commit();
+    }
+
+    // Save document state for later sync
+    let original_bytes = doc.save();
+
+    // Actor 1: Overwrite the map with a nested structure
+    {
+        let mut tx = doc.transaction();
+        let root_map = tx.put_object(ROOT, "map", ObjType::Map).unwrap();
+        let nested_map = tx.put_object(&root_map, "nested", ObjType::Map).unwrap();
+        tx.put(&nested_map, "key", "value").unwrap();
+        tx.commit();
+    }
+    doc.empty_commit(CommitOptions::default());
+
+    // Simulate sync with a remote document at the earlier state
+    let mut remote_doc = Automerge::load(&original_bytes).unwrap();
+    let mut local_sync_state = automerge::sync::State::default();
+    let mut remote_sync_state = automerge::sync::State::default();
+
+    // Round 1: Local -> Remote
+    if let Some(msg1) = doc.generate_sync_message(&mut local_sync_state) {
+        remote_doc
+            .receive_sync_message(&mut remote_sync_state, msg1)
+            .unwrap();
+    }
+
+    // Round 2: Remote -> Local
+    if let Some(msg2) = remote_doc.generate_sync_message(&mut remote_sync_state) {
+        doc.receive_sync_message(&mut local_sync_state, msg2)
+            .unwrap();
+    }
+
+    // Round 3: Local -> Remote (this previously caused a panic)
+    if let Some(msg3) = doc.generate_sync_message(&mut local_sync_state) {
+        remote_doc
+            .receive_sync_message(&mut remote_sync_state, msg3)
+            .unwrap();
+    }
+}
