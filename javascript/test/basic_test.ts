@@ -602,6 +602,24 @@ describe("Automerge", () => {
       ])
     })
   })
+  describe("cursor", () => {
+    it("should indicate that the op is not present when resolving a cursor in a previous version of the document", () => {
+      const doc = Automerge.from({
+        value: "world",
+      })
+
+      const doc1 = Automerge.change(doc, d => {
+        Automerge.splice(d, ["value"], 0, 0, "hello ")
+      })
+
+      assert.deepEqual(doc1.value, "hello world")
+
+      const cursor = Automerge.getCursor(doc1, ["value"], 0)
+      const index = Automerge.getCursorPosition(doc, ["value"], cursor)
+
+      assert.deepEqual(index, null)
+    })
+  })
   describe("saveSince", () => {
     it("should be the same as saveIncremental since heads of the last saveIncremental", () => {
       let doc = Automerge.init<any>()
