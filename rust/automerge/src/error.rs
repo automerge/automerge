@@ -1,7 +1,7 @@
 use crate::storage::load::Error as LoadError;
-use crate::types::{ActorId, ScalarValue};
+use crate::types::{ActorId, Author, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
+use crate::{Change, ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use hexane::PackError;
 use thiserror::Error;
 
@@ -13,6 +13,8 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
+    DuplicateAuthor(Author, ActorId, u64),
     #[error("duplicate actor {0}: possible document clone")]
     DuplicateActorId(ActorId),
     #[error("general failure")]
@@ -70,6 +72,20 @@ pub enum AutomergeError {
     EncodingError(#[from] PackError),
     #[error("failed to unbundle: {0}")]
     Unbundle(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl AutomergeError {
+    pub(crate) fn duplicate_seq(c: &Change) -> Self {
+        Self::DuplicateSeqNumber(c.seq(), c.actor_id().clone())
+    }
+
+    pub(crate) fn duplicate_author(c: &Change) -> Self {
+        Self::DuplicateAuthor(
+            c.author().unwrap_or_default().into(),
+            c.actor_id().clone(),
+            c.seq(),
+        )
+    }
 }
 
 impl PartialEq for AutomergeError {

@@ -29,7 +29,9 @@ use crate::transaction::{
 
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
-use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
+use crate::types::{
+    ActorId, Author, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value,
+};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -89,6 +91,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    author: Option<Author>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -156,6 +159,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn author(self, author: Author) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -166,6 +176,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            author: None,
         }
     }
 }
@@ -210,6 +221,8 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// The current author.
+    author: Option<Author>,
 }
 
 impl Automerge {
@@ -221,6 +234,7 @@ impl Automerge {
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
@@ -242,6 +256,7 @@ impl Automerge {
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
@@ -253,6 +268,7 @@ impl Automerge {
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         };
         doc.remove_unused_actors(false);
         doc
@@ -295,6 +311,43 @@ impl Automerge {
             Err(_) => self.actor = Actor::Unused(actor),
         }
         self
+    }
+
+    /// Set the actor id for this document.
+    pub fn with_author(mut self, author: Option<Author>) -> Self {
+        self.set_author(author);
+        self
+    }
+
+    /// Set the author for this document.
+    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+        if author.as_ref() != self.get_author() {
+            self.author = author;
+            // TODO: re-use old actors
+            self.actor = Actor::Unused(ActorId::random());
+        }
+        self
+    }
+
+    /// Get the current author of this document.
+    pub fn get_author(&self) -> Option<&Author> {
+        self.author.as_ref()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+        self.change_graph
+            .get_actors_for_author(author)
+            .filter_map(|idx| self.ops.actors.get(idx).cloned())
+            .collect()
+    }
+
+    pub fn get_authors(&self) -> Vec<Author> {
+        self.change_graph.get_authors().to_vec()
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        self.change_graph.get_author_for_actor(actor_index)
     }
 
     /// Get the current actor id of this document.
@@ -418,6 +471,7 @@ impl Automerge {
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
         let checkpoint = self.ops.save_checkpoint();
+        let author = if seq == 1 { self.author.clone() } else { None };
         TransactionArgs {
             actor_index,
             seq,
@@ -425,6 +479,7 @@ impl Automerge {
             deps,
             checkpoint,
             scope,
+            author,
         }
     }
 
@@ -729,7 +784,7 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
+            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -753,7 +808,7 @@ impl Automerge {
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::Bundle(bundle) => {
                 tracing::trace!("first chunk is change chunk");
@@ -763,7 +818,7 @@ impl Automerge {
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
                 changes.extend(bundle_changes);
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
@@ -774,7 +829,7 @@ impl Automerge {
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
         };
         tracing::trace!("loading change chunks");
@@ -804,7 +859,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am)
+        Ok(am.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -894,6 +949,10 @@ impl Automerge {
 
     pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
         self.seq_for_actor(change.actor_id()) >= change.seq()
+    }
+
+    pub(crate) fn has_actor_author(&self, change: &Change) -> bool {
+        change.author().is_some() && self.get_author_for_actor(change.actor_id()).is_some()
     }
 
     /// Apply changes to this document.
@@ -1100,6 +1159,7 @@ impl Automerge {
         self.actor.rewrite_with_new_actor(index);
         index
     }
+
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,
@@ -1107,7 +1167,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+    fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor),

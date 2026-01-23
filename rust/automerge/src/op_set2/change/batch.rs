@@ -22,8 +22,6 @@ type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
 struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
-    actor_seq: HashMap<ActorId, HashSet<u64>>,
-    hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
 }
@@ -762,29 +760,7 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 
 impl BatchApply {
     fn push(&mut self, c: Change) {
-        assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
-
-        assert!(!self.hashes.contains(&c.hash()));
-        self.hashes.insert(c.hash());
-
         self.changes.push(c);
-    }
-
-    fn record_actor_seq(&mut self, c: &Change) {
-        if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
-            set.insert(c.seq());
-        } else {
-            self.actor_seq
-                .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
-        }
-    }
-
-    fn has_actor_seq(&self, c: &Change) -> bool {
-        self.actor_seq
-            .get(c.actor_id())
-            .map(|set| set.contains(&c.seq()))
-            .unwrap_or(false)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -986,13 +962,20 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         // Pool all incoming changes together with any previously queued orphans.
         let mut pool: Vec<Change> = self.queue.take();
+        let queue_len = pool.len();
         let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
         let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+        let mut actor_author: HashSet<ActorId> = HashSet::new();
+        let mut err = None;
+
         for c in &pool {
             actor_seqs
                 .entry(c.actor_id().clone())
                 .or_default()
                 .insert(c.seq());
+            if c.author().is_some() {
+                actor_author.insert(c.actor_id().clone());
+            }
         }
 
         // Add new changes, deduplicating and checking for duplicate seq numbers.
@@ -1006,21 +989,32 @@ impl Automerge {
                     .get(c.actor_id())
                     .is_some_and(|s| s.contains(&c.seq()))
             {
-                // Put pool back as queue before returning error
-                for pc in pool {
-                    self.queue.push(pc);
-                }
-                return Err(AutomergeError::DuplicateSeqNumber(
-                    c.seq(),
-                    c.actor_id().clone(),
-                ));
+                err = Some(AutomergeError::duplicate_seq(&c));
+                break;
+            }
+            if c.author().is_some()
+                && (self.has_actor_author(&c) || actor_author.contains(c.actor_id()))
+            {
+                err = Some(AutomergeError::duplicate_author(&c));
+                break;
             }
             seen.insert(hash);
             actor_seqs
                 .entry(c.actor_id().clone())
                 .or_default()
                 .insert(c.seq());
+            if c.author().is_some() {
+                actor_author.insert(c.actor_id().clone());
+            }
             pool.push(c);
+        }
+
+        if let Some(e) = err {
+            // Put pool back as queue before returning error
+            for pc in pool.into_iter().take(queue_len) {
+                self.queue.push(pc);
+            }
+            return Err(e);
         }
 
         if pool.is_empty() {
@@ -1081,6 +1075,7 @@ impl Automerge {
         }
 
         chap.apply(self, log);
+
         Ok(())
     }
 
