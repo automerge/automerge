@@ -18,7 +18,7 @@ jobs:
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           # Optional version of wasm-bindgen to install(eg. '0.2.83', 'latest')
-          version: "0.2.106"
+          version: "0.2.108"
       - name: Install wasm32 target
         working-directory: rust
         run: rustup target add wasm32-unknown-unknown
