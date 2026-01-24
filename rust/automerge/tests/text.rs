@@ -875,7 +875,7 @@ fn incorrect_patches_produced_when_isolating_and_integrating() {
 
     // Hard code actor ID to avoid flakes in patch ordering
     let actor = ActorId::from_str("aaaaaa").unwrap();
-    let mut doc = AutoCommit::new().with_actor(actor);
+    let mut doc = AutoCommit::new_with_encoding(TextEncoding::UnicodeCodePoint).with_actor(actor);
 
     let beginning = doc.get_heads();
 
