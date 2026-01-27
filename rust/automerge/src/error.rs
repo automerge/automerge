@@ -153,3 +153,11 @@ pub enum UpdateObjectError {
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
 }
+
+/// Error returned when [`crate::ReadDoc::view_at`] is called with invalid heads.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[error("change hash not found in document: {missing}")]
+pub struct ViewAtError {
+    /// The change hash that was not found in the document.
+    pub missing: ChangeHash,
+}

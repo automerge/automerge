@@ -289,6 +289,7 @@ pub mod transaction;
 mod types;
 mod validation;
 mod value;
+mod view_at;
 
 pub use crate::automerge::{Automerge, LoadOptions, OnPartialLoad, SaveOptions, StringMigration};
 pub use autocommit::AutoCommit;
@@ -298,6 +299,7 @@ pub use cursor::{Cursor, CursorPosition, MoveCursor, OpCursor};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
+pub use error::ViewAtError;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
 pub use op_set2::{ChangeMetadata, Parent, Parents, ScalarValue as ScalarValueRef, ValueRef};
@@ -309,6 +311,7 @@ pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
+pub use view_at::AutomergeAt;
 
 /// The object ID for the root map of a document
 pub const ROOT: ObjId = ObjId::Root;
