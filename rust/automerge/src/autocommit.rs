@@ -403,6 +403,10 @@ impl AutoCommit {
         self.doc.get_author_for_actor(actor)
     }
 
+    pub fn get_author(&self) -> Option<&Author> {
+        self.doc.get_author()
+    }
+
     pub fn get_authors(&self) -> Vec<Author> {
         self.doc.get_authors()
     }

@@ -26,6 +26,7 @@
 use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::Author;
 use am::CursorPosition;
 use am::OnPartialLoad;
 use am::ScalarValue;
@@ -58,6 +59,7 @@ use crate::interop::SubValIter;
 #[wasm_bindgen(typescript_custom_section)]
 const TS: &'static str = r#"
 export type Actor = string;
+export type Author = string;
 export type ObjID = string;
 export type Change = Uint8Array;
 export type SyncMessage = Uint8Array;
@@ -146,6 +148,7 @@ export type DecodedSyncMessage = {
 
 export type DecodedChange = {
   actor: Actor;
+  author: Author | null;
   seq: number;
   startOp: number;
   time: number;
@@ -164,6 +167,7 @@ export type ChangeMetadata = {
   message: string | null;
   deps: Heads;
   hash: Hash;
+  extraBytes: string | null;
 };
 
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
@@ -1324,6 +1328,47 @@ impl Automerge {
         self.doc.get_actor().to_string()
     }
 
+    #[wasm_bindgen(js_name = getAuthor, unchecked_return_type="Author | null")]
+    pub fn get_author(&self) -> Option<String> {
+        Some(self.doc.get_author()?.to_string())
+    }
+
+    #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]
+    pub fn get_authors(&self) -> Array {
+        self.doc
+            .get_authors()
+            .iter()
+            .map(|a| JsValue::from_str(&a.to_string()))
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = getAuthorForActor, unchecked_return_type="Author | null")]
+    pub fn get_author_for_actor(&self, actor: String) -> Result<Option<String>, JsValue> {
+        let actor = am::ActorId::from(hex::decode(actor).map_err(error::BadActorId::from)?);
+        Ok(self.doc.get_author_for_actor(&actor).map(|a| a.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = getActorsForAuthor, unchecked_return_type="Actor[]")]
+    pub fn get_actors_for_author(&self, author: String) -> Result<Array, JsValue> {
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        Ok(self
+            .doc
+            .get_actors_for_author(&author)
+            .iter()
+            .map(|a| JsValue::from(a.to_string()))
+            .collect())
+    }
+
+    #[wasm_bindgen(js_name = setAuthor)]
+    pub fn set_author(&mut self, author: Option<String>) -> Result<(), JsValue> {
+        let author = author
+            .map(Author::try_from)
+            .transpose()
+            .map_err(error::BadAuthor::from)?;
+        self.doc.set_author(author);
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = getLastLocalChange, unchecked_return_type="Change | null")]
     pub fn get_last_local_change(&mut self) -> JsValue {
         if let Some(change) = self.doc.get_last_local_change() {
@@ -1851,6 +1896,16 @@ pub mod error {
 
     impl From<BadActorId> for JsValue {
         fn from(s: BadActorId) -> Self {
+            RangeError::new(&s.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("could not parse Actor ID as a hex string: {0}")]
+    pub struct BadAuthor(#[from] automerge::error::InvalidAuthor);
+
+    impl From<BadAuthor> for JsValue {
+        fn from(s: BadAuthor) -> Self {
             RangeError::new(&s.to_string()).into()
         }
     }

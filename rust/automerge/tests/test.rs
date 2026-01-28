@@ -2641,4 +2641,15 @@ fn authorship() {
     assert_eq!(actors2.len(), 1);
     assert_eq!(doc1.get_author_for_actor(&actors1[0]), Some(&author1));
     assert_eq!(doc1.get_author_for_actor(&actors2[0]), Some(&author2));
+
+    let doc3 = AutoCommit::load(&doc1.save()).unwrap();
+
+    let authors = doc3.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc3.get_actors_for_author(&author1);
+    let actors2 = doc3.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(doc3.get_author_for_actor(&actors1[0]), Some(&author1));
+    assert_eq!(doc3.get_author_for_actor(&actors2[0]), Some(&author2));
 }
