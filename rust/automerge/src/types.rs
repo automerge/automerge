@@ -44,7 +44,7 @@ const HEAD_STR: &str = "_head";
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
-#[derive(PartialEq, Debug, Clone, Ord, Eq, PartialOrd)]
+#[derive(PartialEq, Clone, Ord, Eq, PartialOrd)]
 pub struct Author(Vec<u8>);
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) struct AuthorIdx(usize);
@@ -101,6 +101,14 @@ impl fmt::Debug for ActorId {
     }
 }
 
+impl fmt::Debug for Author {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Author")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
 impl Distribution<ActorId> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ActorId {
         let mut bytes = [0u8; 16];
@@ -131,6 +139,26 @@ impl ActorId {
         leb128::write::unsigned(&mut bytes, level as u64).unwrap();
         bytes.extend(&self.0);
         ActorId(TinyVec::from(bytes.as_slice()))
+    }
+}
+
+impl TryFrom<&str> for Author {
+    type Error = error::InvalidAuthor;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        hex::decode(s)
+            .map(Author::from)
+            .map_err(|_| error::InvalidAuthor(s.into()))
+    }
+}
+
+impl TryFrom<String> for Author {
+    type Error = error::InvalidAuthor;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        hex::decode(&s)
+            .map(Author::from)
+            .map_err(|_| error::InvalidAuthor(s))
     }
 }
 
@@ -205,6 +233,14 @@ impl FromStr for ActorId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ActorId::try_from(s)
+    }
+}
+
+impl FromStr for Author {
+    type Err = error::InvalidAuthor;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Author::try_from(s)
     }
 }
 
