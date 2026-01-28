@@ -6,7 +6,7 @@ use crate::{
         change::{Unverified, Verified},
         parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
     },
-    types::{ActorId, ChangeHash, ElemId},
+    types::{ActorId, Author, ChangeHash, ElemId},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -356,6 +356,7 @@ impl From<&Change> for crate::ExpandedChange {
         crate::ExpandedChange {
             operations,
             actor_id: actors.get(&0).unwrap().clone(),
+            author: c.author().map(Author::from),
             hash: Some(c.hash()),
             time: c.timestamp(),
             deps: c.deps().to_vec(),

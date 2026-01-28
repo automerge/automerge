@@ -1066,6 +1066,7 @@ fn splicing_into_multibyte_characters() {
             },
         ],
         actor_id: weird_actor,
+        author: None,
         hash: None,
         seq: 1,
         start_op: std::num::NonZero::new(3).unwrap(),

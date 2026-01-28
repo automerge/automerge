@@ -4,6 +4,7 @@ use serde::{
 };
 
 mod actor_id;
+mod author;
 mod change_hash;
 mod element_id;
 mod object_id;

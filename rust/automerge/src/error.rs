@@ -21,6 +21,8 @@ pub enum AutomergeError {
     Fail,
     #[error("invalid actor ID `{0}`")]
     InvalidActorId(String),
+    #[error("invalid author `{0}`")]
+    InvalidAuthor(String),
     #[error("invalid actor index `{0}`")]
     InvalidActorIndex(usize),
     #[error(transparent)]
@@ -104,6 +106,10 @@ impl From<AutomergeError> for wasm_bindgen::JsValue {
 #[derive(Error, Debug)]
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorId(pub String);
+
+#[derive(Error, Debug)]
+#[error("Invalid author: {0}")]
+pub struct InvalidAuthor(pub String);
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]

@@ -74,6 +74,9 @@ impl<'a> From<&am::ChangeMetadata<'a>> for JS {
         js_set(&change, "message", message).unwrap();
         js_set(&change, "deps", AR::from(c.deps.as_slice())).unwrap();
         js_set(&change, "hash", c.hash.to_string()).unwrap();
+        if !c.extra.is_empty() {
+            js_set(&change, "extraBytes", hex::encode(&c.extra)).unwrap();
+        }
         JS(change.into())
     }
 }
