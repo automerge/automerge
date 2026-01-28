@@ -18,7 +18,7 @@ use crate::{
     storage::columns::BadColumnLayout,
     storage::document::ReconstructError as LoadError,
     storage::{Columns, Document, RawColumn, RawColumns},
-    types::OpId,
+    types::{Author, AuthorIdx, OpId},
     Change, ChangeHash,
 };
 
@@ -33,6 +33,9 @@ pub(crate) struct ChangeGraph {
     edges: Vec<Edge>,
     hashes: Vec<ChangeHash>,
     actors: Vec<ActorIdx>,
+    authors: Vec<Author>,
+    author: Option<AuthorIdx>,
+    actor_author: Vec<Option<AuthorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
     max_ops: Vec<u32>,
@@ -90,6 +93,9 @@ impl ChangeGraph {
             nodes_by_hash: HashMap::new(),
             hashes: Vec::new(),
             actors: Vec::new(),
+            authors: Vec::new(),
+            actor_author: Vec::new(),
+            author: None,
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: ColumnData::new(),
@@ -137,6 +143,54 @@ impl ChangeGraph {
         self.seq_index.len()
     }
 
+    pub(crate) fn get_authors(&self) -> &[Author] {
+        &self.authors
+    }
+
+    pub(crate) fn get_author_for_actor(&self, actor: usize) -> Option<&Author> {
+        let author = self.actor_author.get(actor)?.as_ref()?.as_usize();
+        self.authors.get(author)
+    }
+
+    pub(crate) fn get_actors_for_author(
+        &self,
+        author: &Author,
+    ) -> impl Iterator<Item = usize> + '_ {
+        self.authors
+            .binary_search(author)
+            .ok()
+            .map(|idx| {
+                let idx = AuthorIdx::from(idx);
+                self.actor_author
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(i, a)| if a.as_ref()? == &idx { Some(i) } else { None })
+            })
+            .into_iter()
+            .flatten()
+    }
+
+    pub(crate) fn assign_author(&mut self, author: Author, actor: usize) {
+        let author_id = self.put_author(author);
+        self.actor_author[actor] = Some(author_id);
+    }
+
+    pub(crate) fn put_author(&mut self, author: Author) -> AuthorIdx {
+        match self.authors.binary_search(&author) {
+            Err(index) => {
+                self.authors.insert(index, author);
+                for a in self.actor_author.iter_mut().flatten() {
+                    a.with_new_author(index)
+                }
+                if let Some(a) = self.author.as_mut() {
+                    a.with_new_author(index);
+                }
+                index.into()
+            }
+            Ok(index) => index.into(),
+        }
+    }
+
     pub(crate) fn insert_actor(&mut self, idx: usize) {
         if self.seq_index.len() != idx {
             for actor_index in &mut self.actors {
@@ -149,6 +203,7 @@ impl ChangeGraph {
             clock.rewrite_with_new_actor(idx)
         }
         self.seq_index.insert(idx, vec![]);
+        self.actor_author.insert(idx, None);
     }
 
     pub(crate) fn remove_actor(&mut self, idx: usize) {
@@ -160,6 +215,7 @@ impl ChangeGraph {
         if self.seq_index.get(idx).is_some() {
             assert!(self.seq_index[idx].is_empty());
             self.seq_index.remove(idx);
+            self.actor_author.remove(idx);
         }
         for clock in &mut self.clock_cache.values_mut() {
             clock.remove_actor(idx)
@@ -547,6 +603,11 @@ impl ChangeGraph {
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
+            if let Some(a) = change.author() {
+                assert!(change.seq() == 1);
+                self.assign_author(a.into(), actor)
+            }
+
             assert!(actor < self.seq_index.len());
             assert_eq!(self.seq_index[actor].len() + 1, change.seq() as usize);
             self.seq_index[actor].push(node_idx);
@@ -748,9 +809,13 @@ impl ChangeGraphCols {
 
         for c in changes {
             let hash = c.hash();
-            let node_idx = NodeIdx(graph.hashes.len() as u32);
+            let idx = graph.hashes.len();
+            let node_idx = NodeIdx(idx as u32);
             graph.nodes_by_hash.insert(hash, node_idx);
-            graph.hashes.push(hash)
+            graph.hashes.push(hash);
+            if let Some(author) = c.author() {
+                graph.assign_author(author.into(), graph.actors[idx].into())
+            }
         }
 
         for n in 0..(graph.len() as u32) {
@@ -859,11 +924,17 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
+        let author = None;
+        let authors = vec![];
+        let actor_author = vec![None; num_actors];
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
             hashes,
             actors,
+            authors,
+            author,
+            actor_author,
             parents,
             seq,
             max_ops,

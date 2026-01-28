@@ -44,6 +44,7 @@ import type {
   Automerge,
   API as WasmAPI,
   Actor as ActorId,
+  Author,
   Prop,
   ObjID,
   Change,
@@ -192,6 +193,8 @@ export function use(api: API) {
 export type InitOptions<T> = {
   /** The actor ID to use for this document, a random one will be generated if `null` is passed */
   actor?: ActorId
+  /** The author for this document */
+  author?: Author
   freeze?: boolean
   /** A callback which will be called with the initial patch once the document has finished loading */
   patchCallback?: PatchCallback<T>
@@ -260,6 +263,9 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const patchCallback = opts.patchCallback
   const actor = opts.actor
   const handle = ApiHandler.create({ actor })
+  if (typeof opts.author == "string") {
+    handle.setAuthor(opts.author)
+  }
   handle.enableFreeze(!!opts.freeze)
   registerDatatypes(handle)
   const doc = handle.materialize("/", undefined, {
@@ -319,6 +325,9 @@ export function clone<T>(
   const heads = state.heads
   const opts = importOpts(_opts)
   const handle = state.handle.fork(opts.actor, heads)
+  if (typeof opts.author == "string") {
+    handle.setAuthor(opts.author)
+  }
   handle.updateDiffCursor()
 
   // `change` uses the presence of state.heads to determine if we are in a view
@@ -822,6 +831,26 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T> {
 export function getActorId<T>(doc: Doc<T>): ActorId {
   const state = _state(doc)
   return state.handle.getActorId()
+}
+
+export function getAuthor<T>(doc: Doc<T>): Author | null {
+  const state = _state(doc)
+  return state.handle.getAuthor()
+}
+
+export function getAuthors<T>(doc: Doc<T>): Author[] {
+  const state = _state(doc)
+  return state.handle.getAuthors()
+}
+
+export function getAuthorForActor<T>(doc: Doc<T>, actor: ActorId): Author | null {
+  const state = _state(doc)
+  return state.handle.getAuthorForActor(actor)
+}
+
+export function getActorsForAuthor<T>(doc: Doc<T>, author: Author): ActorId[] {
+  const state = _state(doc)
+  return state.handle.getActorsForAuthor(author)
 }
 
 /**

@@ -11,7 +11,7 @@ use crate::op_set2::{ChangeMetadata, Parents};
 use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::{ObjId, ObjMeta};
+use crate::types::{Author, ObjId, ObjMeta};
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -379,8 +379,36 @@ impl AutoCommit {
         self
     }
 
+    pub fn with_author(mut self, author: Option<Author>) -> Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
+    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_author(author);
+        self
+    }
+
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+        self.doc.get_actors_for_author(author)
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+        self.doc.get_author_for_actor(actor)
+    }
+
+    pub fn get_author(&self) -> Option<&Author> {
+        self.doc.get_author()
+    }
+
+    pub fn get_authors(&self) -> Vec<Author> {
+        self.doc.get_authors()
     }
 
     pub fn isolate(&mut self, heads: &[ChangeHash]) {

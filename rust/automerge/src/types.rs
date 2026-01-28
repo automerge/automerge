@@ -44,9 +44,66 @@ const HEAD_STR: &str = "_head";
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
+#[derive(PartialEq, Clone, Ord, Eq, PartialOrd)]
+pub struct Author(Vec<u8>);
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub(crate) struct AuthorIdx(usize);
+
+impl AuthorIdx {
+    pub(crate) fn as_usize(&self) -> usize {
+        self.0
+    }
+    pub(crate) fn with_new_author(&mut self, idx: usize) {
+        if self.0 >= idx {
+            self.0 += 1;
+        }
+    }
+}
+
+impl Author {
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(&self.0)
+    }
+}
+
+impl fmt::Display for Author {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_hex_string())
+    }
+}
+
+impl From<usize> for AuthorIdx {
+    fn from(n: usize) -> Self {
+        AuthorIdx(n)
+    }
+}
+
+impl From<Vec<u8>> for Author {
+    fn from(v: Vec<u8>) -> Self {
+        Author(v)
+    }
+}
+
+impl<'a> From<&'a [u8]> for Author {
+    fn from(s: &'a [u8]) -> Self {
+        Author(s.to_vec())
+    }
+}
+
 impl fmt::Debug for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ActorID")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Author {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Author")
             .field(&hex::encode(&self.0))
             .finish()
     }
@@ -82,6 +139,26 @@ impl ActorId {
         leb128::write::unsigned(&mut bytes, level as u64).unwrap();
         bytes.extend(&self.0);
         ActorId(TinyVec::from(bytes.as_slice()))
+    }
+}
+
+impl TryFrom<&str> for Author {
+    type Error = error::InvalidAuthor;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        hex::decode(s)
+            .map(Author::from)
+            .map_err(|_| error::InvalidAuthor(s.into()))
+    }
+}
+
+impl TryFrom<String> for Author {
+    type Error = error::InvalidAuthor;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        hex::decode(&s)
+            .map(Author::from)
+            .map_err(|_| error::InvalidAuthor(s))
     }
 }
 
@@ -156,6 +233,14 @@ impl FromStr for ActorId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ActorId::try_from(s)
+    }
+}
+
+impl FromStr for Author {
+    type Err = error::InvalidAuthor;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Author::try_from(s)
     }
 }
 

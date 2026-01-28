@@ -3,7 +3,7 @@ mod utility_impls;
 
 use std::num::NonZeroU64;
 
-pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, ScalarValue};
+pub(crate) use crate::types::{ActorId, Author, ChangeHash, ObjType, ScalarValue};
 pub(crate) use crate::value::DataType;
 
 use serde::{Deserialize, Serialize};
@@ -347,6 +347,8 @@ pub struct Change {
     pub deps: Vec<ChangeHash>,
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none", default = "Default::default")]
+    pub author: Option<Author>,
 }
 
 impl PartialEq for Change {

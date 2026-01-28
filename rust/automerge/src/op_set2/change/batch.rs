@@ -23,6 +23,7 @@ struct BatchApply {
     ops: Vec<ChangeOp>,
     changes: Vec<Change>,
     actor_seq: HashMap<ActorId, HashSet<u64>>,
+    actor_author: HashSet<ActorId>,
     hashes: HashSet<ChangeHash>,
     pred: PredCache,
     obj_spans: Vec<ObjSpan>,
@@ -769,7 +770,8 @@ impl BatchApply {
 
     fn push(&mut self, c: Change) {
         assert!(!self.has_actor_seq(&c));
-        self.record_actor_seq(&c);
+        assert!(!self.has_actor_author(&c));
+        self.record_actor_author_seq(&c);
 
         assert!(!self.hashes.contains(&c.hash()));
         self.hashes.insert(c.hash());
@@ -777,12 +779,15 @@ impl BatchApply {
         self.changes.push(c);
     }
 
-    fn record_actor_seq(&mut self, c: &Change) {
+    fn record_actor_author_seq(&mut self, c: &Change) {
         if let Some(set) = self.actor_seq.get_mut(c.actor_id()) {
             set.insert(c.seq());
         } else {
             self.actor_seq
                 .insert(c.actor_id().clone(), HashSet::from([c.seq()]));
+        }
+        if c.author().is_some() {
+            self.actor_author.insert(c.actor_id().clone());
         }
     }
 
@@ -793,8 +798,16 @@ impl BatchApply {
             .unwrap_or(false)
     }
 
+    fn has_actor_author(&self, c: &Change) -> bool {
+        self.actor_author.contains(c.actor_id())
+    }
+
     fn duplicate_seq(&self, doc: &Automerge, c: &Change) -> bool {
-        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
+        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe_seq(c)
+    }
+
+    fn duplicate_author(&self, doc: &Automerge, c: &Change) -> bool {
+        doc.has_actor_author(c) || self.has_actor_author(c) || doc.ready_q_has_dupe_author(c)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -1005,6 +1018,14 @@ impl Automerge {
                     ));
                     break;
                 }
+                if chap.duplicate_author(self, &c) {
+                    result = Err(AutomergeError::DuplicateAuthor(
+                        c.author().unwrap_or_default().into(),
+                        c.actor_id().clone(),
+                        c.seq(),
+                    ));
+                    break;
+                }
                 if self.is_causally_ready(&c, &chap.hashes) {
                     chap.push(c);
                 } else {
@@ -1027,13 +1048,26 @@ impl Automerge {
         self.queue.iter().any(|c| &c.hash() == hash)
     }
 
-    fn ready_q_has_dupe(&self, change: &Change) -> bool {
+    fn ready_q_has_dupe_seq(&self, change: &Change) -> bool {
         // if the queue gets huge this could be slow - maybe add an index
         self.queue.iter().any(|c| {
             c.seq() == change.seq()
                 && c.actor_id() == change.actor_id()
                 && c.hash() != change.hash()
         })
+    }
+
+    fn ready_q_has_dupe_author(&self, change: &Change) -> bool {
+        // if the queue gets huge this could be slow - maybe add an index
+        if change.author().is_none() {
+            false
+        } else {
+            self.queue.iter().any(|c| {
+                c.author() == change.author()
+                    && c.actor_id() == change.actor_id()
+                    && c.hash() != change.hash()
+            })
+        }
     }
 
     fn is_causally_ready(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
