@@ -807,12 +807,6 @@ impl BatchApply {
     }
 
     fn duplicate_author(&self, doc: &Automerge, c: &Change) -> bool {
-        log!(" doc.has_actor_author(c) = {:?}", doc.has_actor_author(c));
-        log!(" self.has_actor_author(c) = {:?}", self.has_actor_author(c));
-        log!(
-            " doc.ready_q_has_dupe_author(c) = {:?}",
-            doc.ready_q_has_dupe_author(c)
-        );
         doc.has_actor_author(c) || self.has_actor_author(c) || doc.ready_q_has_dupe_author(c)
     }
 
@@ -1069,27 +1063,9 @@ impl Automerge {
             false
         } else {
             self.queue.iter().any(|c| {
-                let n = c.author() == change.author()
+                c.author() == change.author()
                     && c.actor_id() == change.actor_id()
-                    && c.hash() != change.hash();
-                if n {
-                    log!(
-                        "c.author={:?} change.author() = {:?}",
-                        c.author(),
-                        change.author()
-                    );
-                    log!(
-                        "&& c.actor_id() {:?} == change.actor_id() {:?}",
-                        c.actor_id(),
-                        change.actor_id()
-                    );
-                    log!(
-                        "&& c.hash() {:?} != change.hash() {:?};",
-                        c.hash(),
-                        change.hash()
-                    );
-                }
-                n
+                    && c.hash() != change.hash()
             })
         }
     }

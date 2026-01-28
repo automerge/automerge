@@ -2693,4 +2693,26 @@ describe("Automerge", () => {
       }
     });
   });
+  describe("author", () => {
+    it("author can be assigned", () => {
+      const doc = create();
+      doc.put("/", "key", "val1");
+      doc.commit();
+      const actor1 = doc.getActorId();
+      doc.setAuthor("ffff");
+      const actor2 = doc.getActorId();
+      assert.notEqual(actor1, actor2)
+      doc.put("/", "key", "val2");
+      doc.commit();
+      let change1 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change1.author, "ffff");
+      doc.put("/", "key", "val3");
+      doc.commit();
+      let change2 = decodeChange(doc.getLastLocalChange() as Uint8Array)
+      assert.equal(change2.author, undefined);
+      assert.deepEqual(doc.getAuthors(),["ffff"]);
+      assert.equal(doc.getAuthorForActor(actor2),"ffff");
+      assert.deepEqual(doc.getActorsForAuthor("ffff"),[actor2]);
+    });
+  });
 });
