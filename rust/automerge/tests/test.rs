@@ -1809,6 +1809,64 @@ fn can_isolate() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+// Regression test for issue #1270:
+// https://github.com/automerge/automerge/issues/1270
+// When clone() + changeAt() is used with a new actor ID that is lexicographically
+// smaller than the existing actor, the actor indices would shift during the
+// transaction, causing incorrect patches to be generated.
+#[test]
+fn isolate_with_new_lower_actor_does_not_produce_duplicate_patches() -> Result<(), AutomergeError> {
+    // Create a document with actor "2222"
+    let actor1 = ActorId::from(&b"2222"[..]);
+    let mut doc1 = AutoCommit::new().with_actor(actor1);
+
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text)?;
+    let heads = doc1.get_heads();
+
+    // Add some text
+    doc1.splice_text(&txt, 0, 0, "def")?;
+
+    // Fork with a new actor "1111" which is lexicographically smaller
+    // This will cause actor indices to shift when the actor is inserted
+    let actor2 = ActorId::from(&b"1111"[..]);
+    let mut doc2 = doc1.fork().with_actor(actor2);
+
+    // Isolate at the initial heads (before "def" was added)
+    doc2.isolate(&heads);
+
+    // Add text at the beginning in the isolated context
+    doc2.splice_text(&txt, 0, 0, "abc")?;
+
+    // Integrate to merge the changes
+    doc2.integrate();
+
+    // The result should be "abcdef" - the concurrent changes should merge correctly
+    // Before the fix, this would produce "abcdefdef" when actor2 < actor1
+    let text = doc2.text(&txt)?;
+    assert_eq!(text, "abcdef", "Expected 'abcdef' but got '{}'", text);
+
+    Ok(())
+}
+
+#[test]
+fn isolate_followed_by_integrate_does_not_introduce_unused_actors() -> Result<(), AutomergeError> {
+    let mut doc1 = AutoCommit::new();
+    doc1.put_object(&ROOT, "text", ObjType::Text)?;
+    let heads = doc1.get_heads();
+
+    let mut doc2 = doc1.fork();
+
+    let saved_before = doc2.save();
+
+    // Isolate then integrate with no changes should result in the same saved doc
+    doc2.isolate(&heads);
+    doc2.integrate();
+    let saved_after = doc2.save();
+    assert_eq!(saved_before, saved_after);
+
+    Ok(())
+}
+
 #[test]
 fn inserting_text_near_deleted_marks() {
     let mut doc = Automerge::new();

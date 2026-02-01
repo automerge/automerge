@@ -411,6 +411,9 @@ impl AutoCommit {
         if let Some((patch_log, tx)) = self.transaction.take() {
             self.patch_log.merge(patch_log);
             let hash = tx.commit(&mut self.doc, None, None);
+            self.patch_log
+                .migrate_actors(&self.doc.ops().actors)
+                .unwrap();
             if self.isolation.is_some() && hash.is_some() {
                 self.isolation = hash.map(|h| vec![h])
             }
