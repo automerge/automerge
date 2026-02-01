@@ -715,6 +715,11 @@ impl AutoCommit {
     }
 
     fn patch_to(&mut self, after: &[ChangeHash]) {
+        // Ensure the actor is in the actor table before computing diffs.
+        // If a new actor is inserted later, it would shift actor indices and
+        // cause the diff computation to be incorrect. See issue #1270.
+        self.doc.ensure_actor_in_table();
+
         // we may be isolated so we dont use self.doc.get_heads()
         let before = self.get_heads();
         if before.as_slice() != after {

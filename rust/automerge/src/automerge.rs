@@ -332,6 +332,15 @@ impl Automerge {
         }
     }
 
+    /// Ensure the actor is in the actor table.
+    ///
+    /// This is useful when you need to ensure the actor table is stable before
+    /// computing diffs that depend on actor indices. If the actor is already
+    /// in the table, this is a no-op.
+    pub(crate) fn ensure_actor_in_table(&mut self) {
+        let _ = self.get_or_create_actor_index();
+    }
+
     fn get_actor_index(&self) -> Option<usize> {
         match &self.actor {
             Actor::Unused(_) => None,
