@@ -1413,6 +1413,23 @@ impl Automerge {
         Some(self.doc.get_author()?.to_string())
     }
 
+    #[wasm_bindgen(js_name = revoke, unchecked_return_type="Patch[]")]
+    pub fn revoke(&mut self, author: String, heads: JsValue) -> Result<Array, JsValue> {
+        let heads = get_heads(heads)?.unwrap_or_default();
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        let patches = self.doc.revoke(&author, &heads)?;
+        let result = interop::export_patches(&self.external_types, patches)?;
+        Ok(result)
+    }
+
+    #[wasm_bindgen(js_name = unrevoke, unchecked_return_type="Patch[]")]
+    pub fn unrevoke(&mut self, author: String) -> Result<Array, JsValue> {
+        let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
+        let patches = self.doc.unrevoke(&author);
+        let result = interop::export_patches(&self.external_types, patches)?;
+        Ok(result)
+    }
+
     #[wasm_bindgen(js_name = getAuthors, unchecked_return_type="Author[]")]
     pub fn get_authors(&self) -> Array {
         self.doc

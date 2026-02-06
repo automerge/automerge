@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -313,7 +313,7 @@ impl Automerge {
         self
     }
 
-    /// Set the actor id for this document.
+    /// Set the author for this document.
     pub fn with_author(mut self, author: Option<Author>) -> Self {
         self.set_author(author);
         self
@@ -323,7 +323,6 @@ impl Automerge {
     pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
         if author.as_ref() != self.get_author() {
             self.author = author;
-            // TODO: re-use old actors
             self.actor = Actor::Unused(ActorId::random());
         }
         self
@@ -332,6 +331,38 @@ impl Automerge {
     /// Get the current author of this document.
     pub fn get_author(&self) -> Option<&Author> {
         self.author.as_ref()
+    }
+
+    /// Revoke all changes made by author after heads
+    /// Errors if given a heads not in the document yet
+    pub fn revoke(
+        &mut self,
+        author: &Author,
+        from: &[ChangeHash],
+        patch_log: &mut PatchLog,
+    ) -> Result<(), AutomergeError> {
+        let heads = self.get_heads();
+        let before = self.clock_at(&heads);
+        self.change_graph.revoke(author, from)?;
+        let after = self.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+        Ok(())
+    }
+
+    pub fn unrevoke(&mut self, author: &Author, patch_log: &mut PatchLog) {
+        let heads = self.get_heads();
+        let before = self.clock_at(&heads);
+        self.change_graph.unrevoke(author);
+        let after = self.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    pub fn get_revocations(&self) -> HashMap<Author, Vec<ChangeHash>> {
+        self.change_graph.get_revocations().clone()
     }
 
     pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
@@ -859,6 +890,7 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
+
         Ok(am.with_author(options.author))
     }
 
@@ -1374,6 +1406,18 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
+        // this function does not properly handle revocations
+        // because it does not use the index - no point in using
+        // the index b/c it does a full pass anyway
+        // so we hack the clock in to get the right results
+        // best option would be to rewrite this to use doc.iter() to build the result
+        let clock = match clock {
+            Some(c) => Some(c),
+            None if !self.change_graph.get_revocations().is_empty() => {
+                Some(self.clock_at(&self.get_heads()))
+            }
+            None => None,
+        };
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut top_ops = self
             .ops()
@@ -1717,6 +1761,18 @@ impl Automerge {
         index: usize,
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
+        // this function does not properly handle revocations
+        // because it does not use the index - no point in using
+        // the index b/c it does a full pass anyway
+        // so we hack the clock in to get the right results
+        // best option would be to rewrite this to use doc.iter() to build the result
+        let clock = match clock {
+            Some(c) => Some(c),
+            None if !self.change_graph.get_revocations().is_empty() => {
+                Some(self.clock_at(&self.get_heads()))
+            }
+            None => None,
+        };
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut iter = self
             .ops

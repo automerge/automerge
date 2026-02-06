@@ -11,7 +11,7 @@ use hexane::{
 
 use crate::storage::BundleMetadata;
 use crate::{
-    clock::{Clock, SeqClock},
+    clock::{Clock as OpClock, SeqClock},
     error::AutomergeError,
     op_set2::{change::BuildChangeMetadata, ActorCursor, ActorIdx, MetaCursor, ValueMeta},
     storage::columns::compression::Uncompressed,
@@ -35,6 +35,8 @@ pub(crate) struct ChangeGraph {
     actors: Vec<ActorIdx>,
     authors: Vec<Author>,
     author: Option<AuthorIdx>,
+    revocations: HashMap<Author, Vec<ChangeHash>>,
+    revocations_mask: HashMap<ActorIdx, Option<NonZeroU32>>,
     actor_author: Vec<Option<AuthorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
@@ -96,6 +98,8 @@ impl ChangeGraph {
             authors: Vec::new(),
             actor_author: Vec::new(),
             author: None,
+            revocations: HashMap::new(),
+            revocations_mask: HashMap::new(),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: ColumnData::new(),
@@ -143,6 +147,49 @@ impl ChangeGraph {
         self.seq_index.len()
     }
 
+    fn validate_heads(&self, heads: &[ChangeHash]) -> Result<(), AutomergeError> {
+        for h in heads {
+            if !self.nodes_by_hash.contains_key(h) {
+                return Err(AutomergeError::InvalidHash(*h));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn revoke(
+        &mut self,
+        author: &Author,
+        heads: &[ChangeHash],
+    ) -> Result<(), AutomergeError> {
+        self.validate_heads(heads)?;
+        let clock = self.calculate_clock(self.heads_to_nodes(heads));
+        for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
+            self.revocations_mask
+                .insert(a.into(), clock.get_for_actor(&a));
+        }
+        self.revocations.insert(author.clone(), heads.to_vec());
+        Ok(())
+    }
+
+    pub(crate) fn unrevoke(&mut self, author: &Author) {
+        for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
+            self.revocations_mask.remove(&a.into());
+        }
+        self.revocations.remove(author);
+    }
+
+    pub(crate) fn is_revoked(&self, actor: ActorIdx, seq: u64) -> bool {
+        match self.revocations_mask.get(&actor) {
+            Some(Some(v)) if (v.get() as u64) < seq => true,
+            Some(None) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn get_revocations(&self) -> &HashMap<Author, Vec<ChangeHash>> {
+        &self.revocations
+    }
+
     pub(crate) fn get_authors(&self) -> &[Author] {
         &self.authors
     }
@@ -156,21 +203,15 @@ impl ChangeGraph {
         &self,
         author: &Author,
     ) -> impl Iterator<Item = usize> + '_ {
-        self.authors
-            .binary_search(author)
-            .ok()
-            .map(|idx| {
-                let idx = AuthorIdx::from(idx);
-                self.actor_author
-                    .iter()
-                    .enumerate()
-                    .filter_map(move |(i, a)| if a.as_ref()? == &idx { Some(i) } else { None })
-            })
-            .into_iter()
-            .flatten()
+        get_actors_for_author(&self.authors, &self.actor_author, author)
     }
 
     pub(crate) fn assign_author(&mut self, author: Author, actor: usize) {
+        if let Some(heads) = self.revocations.get(&author) {
+            let clock = self.calculate_clock(self.heads_to_nodes(heads));
+            self.revocations_mask
+                .insert(actor.into(), clock.get_for_actor(&actor));
+        }
         let author_id = self.put_author(author);
         self.actor_author[actor] = Some(author_id);
     }
@@ -702,10 +743,17 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> OpClock {
         let nodes = self.heads_to_nodes(heads);
-        self.calculate_clock(nodes)
-            .iter()
+        let mut clock = self.calculate_clock(nodes);
+        for (actor, seq) in self.revocations_mask.iter() {
+            clock.mask(usize::from(*actor), *seq);
+        }
+        self.to_op_clock(clock)
+    }
+
+    fn to_op_clock(&self, c: SeqClock) -> OpClock {
+        c.iter()
             .map(|(actor, seq)| {
                 self.seq_index
                     .get(actor)
@@ -716,7 +764,7 @@ impl ChangeGraph {
             .collect()
     }
 
-    pub(crate) fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
+    fn seq_clock_for_heads(&self, heads: &[ChangeHash]) -> SeqClock {
         let nodes = self.heads_to_nodes(heads);
         self.calculate_clock(nodes)
     }
@@ -924,9 +972,12 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
+
         let author = None;
         let authors = vec![];
         let actor_author = vec![None; num_actors];
+        let revocations = HashMap::default();
+        let revocations_mask = HashMap::default();
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -935,6 +986,8 @@ impl ChangeGraphCols {
             authors,
             author,
             actor_author,
+            revocations,
+            revocations_mask,
             parents,
             seq,
             max_ops,
@@ -1283,4 +1336,26 @@ pub(crate) mod ids {
     pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
+}
+
+fn get_actors_for_author<'a>(
+    authors: &'a [Author],
+    actor_author: &'a [Option<AuthorIdx>],
+    author: &Author,
+) -> impl Iterator<Item = usize> + 'a {
+    authors
+        .binary_search(author)
+        .ok()
+        .map(|idx| {
+            let idx = AuthorIdx::from(idx);
+            actor_author.iter().enumerate().filter_map(move |(i, a)| {
+                if a.as_ref()? == &idx {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+        })
+        .into_iter()
+        .flatten()
 }
