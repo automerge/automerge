@@ -44,7 +44,7 @@ const HEAD_STR: &str = "_head";
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
-#[derive(PartialEq, Clone, Ord, Eq, PartialOrd)]
+#[derive(PartialEq, Hash, Clone, Ord, Eq, PartialOrd)]
 pub struct Author(Vec<u8>);
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub(crate) struct AuthorIdx(usize);
