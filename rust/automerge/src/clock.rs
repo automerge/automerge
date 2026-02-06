@@ -29,6 +29,20 @@ impl SeqClock {
         Self(vec![None; size])
     }
 
+    pub(crate) fn mask(&mut self, actor_idx: usize, data: Option<NonZeroU32>) -> bool {
+        match (self.0[actor_idx], data) {
+            (Some(old), Some(new)) if old > new => {
+                self.0[actor_idx] = data;
+                true
+            }
+            (Some(_), None) => {
+                self.0[actor_idx] = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn include(&mut self, actor_idx: usize, data: Option<u32>) -> bool {
         if let Some(data) = data {
             match self.0[actor_idx] {
@@ -71,6 +85,10 @@ impl Default for ClockRange {
 impl ClockRange {
     pub(crate) fn current(clock: Option<Clock>) -> Self {
         Self::Current(clock)
+    }
+
+    pub(crate) fn is_head(&self) -> bool {
+        matches!(self, Self::Current(None))
     }
 
     pub(crate) fn after(&self) -> Option<&Clock> {
@@ -126,7 +144,6 @@ mod tests {
         pub(crate) fn new(size: usize) -> Self {
             Self(vec![0; size])
         }
-
         pub(crate) fn include(&mut self, actor_idx: usize, data: u32) -> bool {
             if data > self.0[actor_idx] {
                 self.0[actor_idx] = data;
