@@ -39,6 +39,7 @@ pub(super) struct Indexes {
     pub(super) text: v1::PrefixColumn<Option<u32>>,
     pub(super) top: v1::PrefixColumn<bool>,
     pub(super) visible: v1::Column<bool>,
+    pub(super) counter: v1::Column<i64>,
     pub(super) inc: v1::Column<Option<i64>>,
     pub(super) mark: MarkIndexColumn,
 }
@@ -49,6 +50,7 @@ impl Default for Indexes {
             text: v1::PrefixColumn::new(),
             top: v1::PrefixColumn::new(),
             visible: v1::Column::new(),
+            counter: v1::Column::new(),
             inc: v1::Column::new(),
             mark: MarkIndexColumn::new(),
         }
@@ -480,6 +482,16 @@ impl Columns {
         self.index
             .visible
             .splice(pos, 0, ops.clone().map(O::visible));
+
+        self.index
+            .counter
+            .splice(pos, 0, ops.clone().map(O::counter));
+
+        /*
+                for o in ops.clone() {
+                    log!("op={:?} vis={} top={}", o, O::visible(&o), O::top(&o));
+                }
+        */
 
         ops.count()
     }

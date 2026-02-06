@@ -206,11 +206,13 @@ impl OpSet {
         assert_eq!(indexes.text.len(), self.len());
         assert_eq!(indexes.mark.len(), self.len());
         assert_eq!(indexes.visible.len(), self.len());
+        assert_eq!(indexes.counter.len(), self.len());
         assert_eq!(indexes.inc.len(), self.cols.sub_len());
 
         self.cols.index.text = indexes.text;
         self.cols.index.top = indexes.top;
         self.cols.index.visible = indexes.visible;
+        self.cols.index.counter = indexes.counter;
         self.cols.index.inc = indexes.inc;
         self.cols.index.mark = indexes.mark;
         self.obj_info = indexes.obj_info;
@@ -261,10 +263,15 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
-                self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
-                self.cols.index.top.splice(i.pos, 1, [false]);
+            if !i.rev {
+                if let Some(inc) = i.inc {
+                    let current = self.cols.index.counter.get(i.pos).unwrap_or_default();
+                    self.cols.index.counter.splice(i.pos, 1, [current + inc]);
+                } else {
+                    self.cols.index.visible.splice(i.pos, 1, [false]);
+                    self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
+                    self.cols.index.top.splice(i.pos, 1, [false]);
+                }
             }
         }
     }
@@ -290,22 +297,30 @@ impl OpSet {
                 .succ_ctr
                 .splice(i.sub_pos, 0, [i.id.counter() as u32]);
             self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
-            if i.inc.is_none() {
-                delete = true;
-                let visible = self.cols.index.visible.get(i.pos);
-                let text = self.cols.index.text.values().get(i.pos);
-                let top = self.cols.index.top.values().get(i.pos);
-                undo.push(SuccUndo::new(*i, visible, text, top));
-                self.cols.index.visible.splice(i.pos, 1, [false]);
-                self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
-                self.cols.index.top.splice(i.pos, 1, [false]);
-            } else if delete && !expose {
-                expose = true;
-                let top = self.cols.index.top.values().get(i.pos);
-                undo.push(SuccUndo::new(*i, None, None, top));
-                self.cols.index.top.splice(i.pos, 1, [true]);
+            if !i.rev {
+                if let Some(inc) = i.inc {
+                    let counter = self.cols.index.counter.get(i.pos).unwrap_or_default();
+                    if delete && !expose {
+                        expose = true;
+                        let top = self.cols.index.top.values().get(i.pos);
+                        undo.push(SuccUndo::new(*i, None, None, top, Some(counter)));
+                        self.cols.index.top.splice(i.pos, 1, [true]);
+                    } else {
+                        undo.push(SuccUndo::new(*i, None, None, None, Some(counter)));
+                    }
+                    self.cols.index.counter.splice(i.pos, 1, [counter + inc]);
+                } else {
+                    delete = true;
+                    let visible = self.cols.index.visible.get(i.pos);
+                    let text = self.cols.index.text.values().get(i.pos);
+                    let top = self.cols.index.top.values().get(i.pos);
+                    undo.push(SuccUndo::new(*i, visible, text, top, None));
+                    self.cols.index.visible.splice(i.pos, 1, [false]);
+                    self.cols.index.text.splice(i.pos, 1, [None::<u32>]);
+                    self.cols.index.top.splice(i.pos, 1, [false]);
+                }
             } else {
-                undo.push(SuccUndo::new(*i, None, None, None));
+                undo.push(SuccUndo::new(*i, None, None, None, None));
             }
         }
         undo
@@ -333,6 +348,9 @@ impl OpSet {
             }
             if let Some(top) = undo.top {
                 self.cols.index.top.splice(i.pos, 1, [top]);
+            }
+            if let Some(counter) = undo.counter {
+                self.cols.index.counter.splice(i.pos, 1, [counter]);
             }
         }
     }
@@ -939,17 +957,23 @@ impl OpSet {
         Some((o1, vis))
     }
 
+    fn get_succ_for_pos(&self, pos: usize) -> Option<SuccCursors<'_>> {
+        let (prefix, count) = self.cols.succ_count.get(pos)?;
+        let start = (prefix - count as u64) as usize;
+        let len = count as usize;
+        let end = prefix as usize;
+        Some(SuccCursors {
+            len,
+            succ_actor: self.cols.succ_actor.iter_range(start..end),
+            succ_counter: self.cols.succ_ctr.iter_range(start..end),
+            inc_values: self.cols.index.inc.iter_range(start..end),
+        })
+    }
+
     pub(crate) fn get_increment_diff_at_pos(&self, pos: usize, clock: &ClockRange) -> (i64, i64) {
-        if let Some((prefix, count)) = self.cols.succ_count.get(pos) {
-            let start = (prefix - count as u64) as usize;
-            let len = count as usize;
-            let end = prefix as usize;
-            let succ = SuccCursors {
-                len,
-                succ_actor: self.cols.succ_actor.iter_range(start..end),
-                succ_counter: self.cols.succ_ctr.iter_range(start..end),
-                inc_values: self.cols.index.inc.iter_range(start..end),
-            };
+        if clock.is_head() {
+            (0, self.cols.index.counter.get(pos).unwrap_or_default())
+        } else if let Some(succ) = self.get_succ_for_pos(pos) {
             let mut inc1 = 0;
             let mut inc2 = 0;
             for (id, value) in succ.with_inc() {
@@ -1094,6 +1118,22 @@ impl OpSet {
             self.cols.mark_name.iter_range(range.clone()),
             self.cols.expand.iter_range(range.clone()),
         )
+    }
+
+    pub(crate) fn recompute_indexes(&mut self, clock: &Clock) {
+        let mut builder = self.index_builder();
+        let mut last = None;
+        for op in self.iter() {
+            let next = Some((op.obj, op.elemid_or_key()));
+
+            if last != next {
+                builder.flush();
+                last = next;
+            }
+
+            builder.process_masked_op(&op, clock);
+        }
+        self.set_indexes(builder);
     }
 
     pub(crate) fn succ_iter_range(&self, range: &Range<usize>) -> SuccIterIter<'_> {
@@ -1390,6 +1430,7 @@ pub(crate) struct SuccUndo {
     pub(crate) visible: Option<bool>,
     pub(crate) text: Option<Option<u32>>,
     pub(crate) top: Option<bool>,
+    pub(crate) counter: Option<i64>,
 }
 
 impl SuccUndo {
@@ -1398,12 +1439,14 @@ impl SuccUndo {
         visible: Option<bool>,
         text: Option<Option<u32>>,
         top: Option<bool>,
+        counter: Option<i64>,
     ) -> Self {
         Self {
             succ,
             visible,
             text,
             top,
+            counter,
         }
     }
 }

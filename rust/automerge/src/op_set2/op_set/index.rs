@@ -1,3 +1,4 @@
+use crate::clock::Clock;
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
@@ -7,10 +8,11 @@ use std::collections::HashMap;
 // hexane::Encoder was used here instead of Vec<>
 
 pub(crate) struct IndexBuilder {
-    counters: HashMap<OpId, Vec<(usize, usize)>>,
+    counter_map: HashMap<OpId, Vec<(usize, usize)>>,
     succ: Vec<u32>,
     top: Vec<bool>,
     widths: Vec<u64>,
+    counter: Vec<i64>,
     incs: Vec<Option<i64>>,
     marks: Vec<Option<MarkIndexBuilder>>,
     obj_info: ObjIndex,
@@ -95,6 +97,7 @@ pub(crate) struct Indexes {
     pub(crate) text: hexane::v1::PrefixColumn<Option<u32>>,
     pub(crate) top: hexane::v1::PrefixColumn<bool>,
     pub(crate) visible: hexane::v1::Column<bool>,
+    pub(crate) counter: hexane::v1::Column<i64>,
     pub(crate) inc: hexane::v1::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
@@ -103,10 +106,11 @@ pub(crate) struct Indexes {
 impl IndexBuilder {
     pub(crate) fn new(op_set: &OpSet, encoding: TextEncoding) -> Self {
         Self {
-            counters: HashMap::new(),
+            counter_map: HashMap::new(),
             succ: Vec::with_capacity(op_set.len()),
             top: Vec::with_capacity(op_set.len()),
             widths: Vec::with_capacity(op_set.len()),
+            counter: Vec::with_capacity(op_set.len()),
             incs: Vec::with_capacity(op_set.sub_len()),
             marks: Vec::with_capacity(op_set.len()),
             obj_info: ObjIndex::default(),
@@ -125,21 +129,60 @@ impl IndexBuilder {
         }
         self.last_flush = len;
     }
+
+    pub(crate) fn process_masked_op(&mut self, op: &Op<'_>, clock: &Clock) {
+        let visible = clock.covers(&op.id);
+
+        if visible {
+            self.marks.push(op.mark_index());
+        } else {
+            self.marks.push(None);
+        }
+
+        self.succ.push(masked_vis_num(op, clock));
+        self.counter.push(0);
+        self.top.push(false);
+        self.widths
+            .push(op.width(SequenceType::Text, self.text_encoding) as u64);
+
+        let count = self.counter_map.remove(&op.id);
+
+        if let Some(i) = op.get_increment_value() {
+            for (succ_idx, op_idx) in count.into_iter().flatten() {
+                self.incs[succ_idx] = Some(i);
+                if visible {
+                    self.succ[op_idx] -= 1;
+                    self.counter[op_idx] += i;
+                }
+            }
+        }
+
+        if let Some(obj_info) = op.obj_info() {
+            self.obj_info.insert(op.id, obj_info);
+        }
+
+        for succ_id in op.succ() {
+            self.process_succ(op.is_counter(), succ_id);
+        }
+    }
+
     pub(crate) fn process_op(&mut self, op: &Op<'_>) {
         self.marks.push(op.mark_index());
 
         self.succ.push(vis_num(op));
+        self.counter.push(0);
         self.top.push(false);
 
         self.widths
             .push(op.width(SequenceType::Text, self.text_encoding) as u64);
 
-        let count = self.counters.remove(&op.id);
+        let count = self.counter_map.remove(&op.id);
 
         if let Some(i) = op.get_increment_value() {
             for (succ_idx, op_idx) in count.into_iter().flatten() {
                 self.incs[succ_idx] = Some(i);
                 self.succ[op_idx] -= 1;
+                self.counter[op_idx] += i;
             }
         }
 
@@ -150,7 +193,7 @@ impl IndexBuilder {
 
     pub(crate) fn process_succ(&mut self, op_is_counter: bool, id: OpId) {
         if op_is_counter {
-            self.counters
+            self.counter_map
                 .entry(id)
                 .or_default()
                 .push((self.incs.len(), self.succ.len() - 1));
@@ -174,6 +217,7 @@ impl IndexBuilder {
         let top: Vec<bool> = self.top.to_vec();
         let top = hexane::v1::PrefixColumn::from_values(top);
 
+        let counter = hexane::v1::Column::from_values(self.counter);
         let inc = hexane::v1::Column::from_values(self.incs);
 
         let mut mark = MarkIndexColumn::new();
@@ -185,6 +229,7 @@ impl IndexBuilder {
             text,
             top,
             visible,
+            counter,
             inc,
             mark,
             obj_info,
@@ -197,5 +242,13 @@ fn vis_num(op: &Op<'_>) -> u32 {
         u32::MAX
     } else {
         op.succ().len() as u32
+    }
+}
+
+fn masked_vis_num(op: &Op<'_>, clock: &Clock) -> u32 {
+    if op.is_inc() || !clock.covers(&op.id) {
+        u32::MAX
+    } else {
+        op.succ().filter(|id| clock.covers(id)).count() as u32
     }
 }
