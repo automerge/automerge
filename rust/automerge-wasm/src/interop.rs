@@ -1418,6 +1418,15 @@ impl Automerge {
                 let result = before.concat(&value.make_string().into()).concat(&after);
                 Ok(result.into())
             }
+            PatchAction::Insert { index, values, .. } => {
+                let index = *index as u32;
+                let placeholder = "\u{fffc}".repeat(values.len());
+                let length = string.length();
+                let before = string.slice(0, index);
+                let after = string.slice(index, length);
+                let result = before.concat(&placeholder.into()).concat(&after);
+                Ok(result.into())
+            }
             _ => Ok(string.into()),
         }
     }
