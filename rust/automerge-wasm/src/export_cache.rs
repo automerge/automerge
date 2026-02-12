@@ -150,6 +150,8 @@ impl<'a> ExportCache<'a> {
                 if let Some((new_o, new_p)) = self.obj_cache.get(&obj) {
                     o = new_o.clone();
                     parent_prop = new_p.clone();
+                } else {
+                    continue; // disconnected object
                 }
                 current_obj_id = obj;
                 index = 0;

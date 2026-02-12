@@ -26,6 +26,11 @@ describe("Automerge", () => {
         Automerge.splitBlock(d, ["text"], 3, block)
       })
 
+      // make sure the block is escaped
+      assert.deepStrictEqual(doc.text, "aaa\u{FFFC}bbbccc");
+      // ensure round-tripping works
+      assert.deepStrictEqual(doc, Automerge.load(Automerge.save(doc)));
+
       assert.deepStrictEqual(Automerge.block(doc, ["text"], 3), block)
 
       assert.deepStrictEqual(callbacks[0][0], {
