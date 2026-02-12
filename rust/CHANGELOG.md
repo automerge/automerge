@@ -1,3 +1,8 @@
+# 0.7.4
+
+* Fix a bug which caused patches in documents containing rich text to be 
+  malformed
+
 # 0.7.3
 
 * Fix a bug in sync where peers which have lost their sync state would revert to
