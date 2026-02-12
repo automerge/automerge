@@ -139,20 +139,9 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    { crate = "windows-link@0.1.3", reason = "brought in by clap used in automerge-cli, cbindgen, and criterion" },
-    { crate = "windows-sys@0.52.0", reason = "brought in by tracing-subscriber used in automerge (dev) and automerge-cli" },
+    { crate = "getrandom@0.3.4", reason = "brought in by automerge and rand; 0.4.1 brought in by tempfile/cbindgen" },
     { crate = "windows-sys@0.60.2", reason = "brought in by clap and other deps used in automerge-cli, cbindgen, and criterion" },
-    { crate = "itertools@0.13.0", reason = "this is bought in by criterion-plot, which we only use in benchmarks" },
-    { crate = "windows_x86_64_msvc@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_x86_64_gnullvm@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_i686_msvc@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_x86_64_gnu@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_i686_gnullvm@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_aarch64_msvc@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_i686_gnu@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows_aarch64_gnullvm@0.52.6", reason = "this is bought in by dev dependencies" },
-    { crate = "windows-sys@0.60.2", reason = "this is bought in by dev dependencies" },
-    { crate = "windows-targets@0.52.6", reason = "this is bought in by dev dependencies" },
+    { crate = "itertools@0.13.0", reason = "this is brought in by criterion-plot, which we only use in benchmarks" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
