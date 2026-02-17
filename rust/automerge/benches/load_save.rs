@@ -3,7 +3,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
 use rand::distr::Alphanumeric;
-use rand::{rng, Rng};
+use rand::{rng, RngExt};
 
 fn random_string(n: u64) -> String {
     let rand_string: String = rng()

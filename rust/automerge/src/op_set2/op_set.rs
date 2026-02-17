@@ -1347,7 +1347,7 @@ mod tests {
     use super::OpSet;
 
     use rand::distr::Alphanumeric;
-    use rand::Rng;
+    use rand::RngExt;
 
     #[test]
     fn suspend_resume_op_set_iter() {
