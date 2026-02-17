@@ -496,7 +496,7 @@ where
     fn random_level(&mut self) -> usize {
         // Create random number between 0 and 2^32 - 1
         // Count leading zeros in that 32-bit number
-        let rand: u32 = self.rng.gen();
+        let rand: u32 = self.rng.random();
         //let rand: u32 = rand::thread_rng().gen();
 
         let mut level = 1;

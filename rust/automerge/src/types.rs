@@ -4,7 +4,7 @@ use crate::legacy as amp;
 use crate::op_set2::ActorIdx;
 use rand::{
     distr::{Distribution, StandardUniform},
-    Rng,
+    Rng, RngExt,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
