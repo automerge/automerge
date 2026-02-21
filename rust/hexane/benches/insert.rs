@@ -2,7 +2,7 @@ use divan::Bencher;
 use hexane::*;
 use std::time::Duration;
 
-use rand::{rng, RngCore};
+use rand::{rng, Rng};
 
 const N: u64 = 10_000;
 
