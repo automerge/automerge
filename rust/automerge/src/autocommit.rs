@@ -411,15 +411,11 @@ impl AutoCommit {
         self.doc.get_authors()
     }
 
-    pub fn revoke(
-        &mut self,
-        author: &Author,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<Patch>, AutomergeError> {
+    pub fn revoke(&mut self, author: &Author, heads: &[ChangeHash]) -> Vec<Patch> {
         self.ensure_transaction_closed();
         let mut patch_log = PatchLog::active();
-        self.doc.revoke(author, heads, &mut patch_log)?;
-        Ok(patch_log.make_patches(&self.doc))
+        self.doc.revoke(author, heads, &mut patch_log);
+        patch_log.make_patches(&self.doc)
     }
 
     pub fn unrevoke(&mut self, author: &Author) -> Vec<Patch> {
