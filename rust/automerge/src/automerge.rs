@@ -300,6 +300,18 @@ impl Automerge {
         self
     }
 
+    /// Set the revocations for this document.
+    pub fn with_revocations(mut self, revocations: HashMap<Author, Vec<ChangeHash>>) -> Self {
+        self.set_revocations(revocations);
+        self
+    }
+
+    pub fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
+        self.change_graph.set_revocations(revocations);
+        self.ops
+            .recompute_indexes(&self.clock_at(&self.get_heads()));
+    }
+
     /// Set the author for this document.
     pub fn with_author(mut self, author: Option<Author>) -> Self {
         self.set_author(author);
@@ -322,20 +334,14 @@ impl Automerge {
 
     /// Revoke all changes made by author after heads
     /// Errors if given a heads not in the document yet
-    pub fn revoke(
-        &mut self,
-        author: &Author,
-        from: &[ChangeHash],
-        patch_log: &mut PatchLog,
-    ) -> Result<(), AutomergeError> {
+    pub fn revoke(&mut self, author: &Author, from: &[ChangeHash], patch_log: &mut PatchLog) {
         let heads = self.get_heads();
         let before = self.clock_at(&heads);
-        self.change_graph.revoke(author, from)?;
+        self.change_graph.revoke(author.clone(), from.to_vec());
         let after = self.clock_at(&heads);
         self.ops.recompute_indexes(&after);
         let clock = ClockRange::Diff(before, after);
         DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
-        Ok(())
     }
 
     pub fn unrevoke(&mut self, author: &Author, patch_log: &mut PatchLog) {
@@ -904,9 +910,14 @@ impl Automerge {
                 data,
                 LoadOptions::new()
                     .on_partial_load(OnPartialLoad::Ignore)
-                    .verification_mode(VerificationMode::Check),
+                    .verification_mode(VerificationMode::Check)
+                    .text_encoding(self.text_encoding()),
             )?;
-            doc = doc.with_actor(self.actor_id().clone());
+            // because we replace the *self here its important that all state not
+            // in the file to be loaded is copied here
+            doc.set_actor(self.actor_id().clone());
+            doc.set_author(self.author.clone());
+            doc.set_revocations(self.get_revocations());
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }

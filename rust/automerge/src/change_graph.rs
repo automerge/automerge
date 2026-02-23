@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::ops::Add;
 
@@ -35,8 +35,9 @@ pub(crate) struct ChangeGraph {
     actors: Vec<ActorIdx>,
     authors: Vec<Author>,
     author: Option<AuthorIdx>,
-    revocations: HashMap<Author, Vec<ChangeHash>>,
+    pub(crate) revocations: HashMap<Author, Vec<ChangeHash>>,
     revocations_mask: HashMap<ActorIdx, Option<NonZeroU32>>,
+    pending_revoke: HashSet<ChangeHash>,
     actor_author: Vec<Option<AuthorIdx>>,
     parents: Vec<Option<EdgeIdx>>,
     seq: Vec<u32>,
@@ -100,6 +101,7 @@ impl ChangeGraph {
             author: None,
             revocations: HashMap::new(),
             revocations_mask: HashMap::new(),
+            pending_revoke: HashSet::new(),
             max_ops: Vec::new(),
             max_op: 0,
             num_ops: ColumnData::new(),
@@ -147,28 +149,38 @@ impl ChangeGraph {
         self.seq_index.len()
     }
 
-    fn validate_heads(&self, heads: &[ChangeHash]) -> Result<(), AutomergeError> {
-        for h in heads {
+    pub(crate) fn revoke(&mut self, author: Author, heads: Vec<ChangeHash>) {
+        // save for later if unknown
+        for h in &heads {
             if !self.nodes_by_hash.contains_key(h) {
-                return Err(AutomergeError::InvalidHash(*h));
+                self.pending_revoke.insert(*h);
             }
         }
-        Ok(())
-    }
-
-    pub(crate) fn revoke(
-        &mut self,
-        author: &Author,
-        heads: &[ChangeHash],
-    ) -> Result<(), AutomergeError> {
-        self.validate_heads(heads)?;
-        let clock = self.calculate_clock(self.heads_to_nodes(heads));
-        for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
+        let clock = self.calculate_clock(self.heads_to_nodes(&heads));
+        for a in get_actors_for_author(&self.authors, &self.actor_author, &author) {
             self.revocations_mask
                 .insert(a.into(), clock.get_for_actor(&a));
         }
-        self.revocations.insert(author.clone(), heads.to_vec());
-        Ok(())
+        self.revocations.insert(author, heads);
+    }
+
+    pub(crate) fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
+        self.pending_revoke.clear();
+        self.revocations_mask.clear();
+        self.revocations.clear();
+        for (author, heads) in revocations {
+            self.revoke(author, heads)
+        }
+    }
+
+    fn recomp_revocations(&mut self) {
+        for (author, heads) in &self.revocations {
+            let clock = self.calculate_clock(self.heads_to_nodes(heads));
+            for a in get_actors_for_author(&self.authors, &self.actor_author, author) {
+                self.revocations_mask
+                    .insert(a.into(), clock.get_for_actor(&a));
+            }
+        }
     }
 
     pub(crate) fn unrevoke(&mut self, author: &Author) {
@@ -632,6 +644,7 @@ impl ChangeGraph {
         iter: I,
     ) -> Result<(), MissingDep> {
         let node = NodeIdx(self.hashes.len() as u32);
+        let mut recomp_revocations = false;
 
         self.add_nodes(iter.clone());
 
@@ -641,6 +654,7 @@ impl ChangeGraph {
             self.max_op = std::cmp::max(self.max_op, change.max_op() as u32);
             self.hashes.push(hash);
             debug_assert!(!self.nodes_by_hash.contains_key(&hash));
+            recomp_revocations = recomp_revocations || self.pending_revoke.remove(&hash);
             self.nodes_by_hash.insert(hash, node_idx);
             self.update_heads(change);
 
@@ -661,6 +675,11 @@ impl ChangeGraph {
                 self.cache_clock(node_idx);
             }
         }
+
+        if recomp_revocations {
+            self.recomp_revocations();
+        }
+
         Ok(())
     }
 
@@ -978,6 +997,7 @@ impl ChangeGraphCols {
         let actor_author = vec![None; num_actors];
         let revocations = HashMap::default();
         let revocations_mask = HashMap::default();
+        let pending_revoke = HashSet::default();
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -988,6 +1008,7 @@ impl ChangeGraphCols {
             actor_author,
             revocations,
             revocations_mask,
+            pending_revoke,
             parents,
             seq,
             max_ops,
