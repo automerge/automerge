@@ -1417,7 +1417,7 @@ impl Automerge {
     pub fn revoke(&mut self, author: String, heads: JsValue) -> Result<Array, JsValue> {
         let heads = get_heads(heads)?.unwrap_or_default();
         let author = am::Author::try_from(author).map_err(error::BadAuthor::from)?;
-        let patches = self.doc.revoke(&author, &heads)?;
+        let patches = self.doc.revoke(&author, &heads);
         let result = interop::export_patches(&self.external_types, patches)?;
         Ok(result)
     }
