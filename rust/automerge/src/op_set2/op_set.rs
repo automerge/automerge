@@ -611,19 +611,6 @@ impl OpSet {
         let range = self.scope_to_obj(obj);
 
         let mut iter = self.cols.index.top.iter_range(range.clone());
-        log!(" TOP {:?}", iter.clone().collect::<Vec<_>>());
-        log!(
-            " VIS {:?}",
-            self.cols
-                .index
-                .visible
-                .iter_range(range.clone())
-                .collect::<Vec<_>>()
-        );
-        log!(
-            " VALUE {:?}",
-            self.value_iter_range(&range).collect::<Vec<_>>()
-        );
         iter.advance_acc_by(index);
         let tx_pos = iter.pos();
 
