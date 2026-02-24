@@ -19,6 +19,12 @@ pub struct DeltaCursorInternal<const B: usize> {
     rle: SubCursor<B>,
 }
 
+/// A [`ColumnCursor`] that decodes delta-encoded signed 64-bit integer columns.
+///
+/// Delta encoding stores the *difference* between consecutive values rather than the absolute
+/// values, which compresses well for monotonically changing sequences (e.g. operation indices).
+/// Values are decoded as absolute `i64` (the cumulative sum of stored deltas).
+/// `DeltaCursor` uses a 64-item slab size.
 pub type DeltaCursor = DeltaCursorInternal<64>;
 
 impl DeltaState<'_> {

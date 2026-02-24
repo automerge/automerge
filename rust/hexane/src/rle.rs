@@ -11,6 +11,15 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Range;
 
+/// A [`ColumnCursor`] that decodes run-length encoded data.
+///
+/// Generic over:
+/// - `B`: maximum slab size in items (controls B-tree depth vs. per-slab decode cost).
+/// - `P`: the item type (must implement [`Packable`]).
+/// - `X`: the slab index / weight type (defaults to [`SlabWeight`]).
+///
+/// Use the type aliases [`UIntCursor`], [`IntCursor`], [`StrCursor`], [`ByteCursor`] for the
+/// most common configurations, or construct `RleCursor<B, T>` directly for custom types.
 #[derive(Debug, PartialEq)]
 pub struct RleCursor<const B: usize, P: Packable + ?Sized, X = SlabWeight> {
     pub(crate) index: usize,
@@ -560,9 +569,13 @@ impl LitRunCursor {
     }
 }
 
+/// RLE cursor for byte-slice columns (`[u8]`), with a 128-item slab size.
 pub type ByteCursor = RleCursor<128, [u8]>;
+/// RLE cursor for UTF-8 string columns (`str`), with a 128-item slab size.
 pub type StrCursor = RleCursor<128, str>;
+/// RLE cursor for unsigned 64-bit integer columns (`u64`), with a 64-item slab size.
 pub type UIntCursor = RleCursor<64, u64>;
+/// RLE cursor for signed 64-bit integer columns (`i64`), with a 64-item slab size.
 pub type IntCursor = RleCursor<64, i64>;
 
 #[derive(Debug, Default)]

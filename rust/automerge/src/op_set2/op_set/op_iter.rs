@@ -343,7 +343,7 @@ impl Iterator for SuccWalker<'_> {
             self.ctr.next();
         }
         let delta = self.ctr.peek()? - self.acc;
-        let c = self.count.nth(delta)?;
+        let c = self.count.shift_acc(delta)?;
         self.acc = c.next_acc().as_usize();
         Some(c.pos)
     }

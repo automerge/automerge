@@ -17,10 +17,12 @@ pub trait HasMinMax {
     }
 }
 
+/// Implemented by slab weight / span-weight types that carry a cumulative item count.
 pub trait HasPos {
     fn pos(&self) -> usize;
 }
 
+/// Implemented by slab weight / span-weight types that carry a cumulative [`Acc`] sum.
 pub trait HasAcc {
     fn acc(&self) -> Acc;
 }
@@ -54,6 +56,10 @@ pub enum MyCow<'a, T: PartialEq + ?Sized + ToOwned> {
 }
 */
 
+/// A single RLE run: `count` consecutive repetitions of `value`.
+///
+/// `value` is `None` for null runs. `Run` also implements `Iterator`, yielding
+/// `Option<Cow<'a, P>>` for each repetition until the count is exhausted.
 #[derive(Debug, PartialEq, Default)]
 pub struct Run<'a, P: Packable + ?Sized> {
     pub count: usize,
@@ -143,6 +149,21 @@ impl<'a, T: Packable + ?Sized> Run<'a, T> {
     }
 }
 
+/// Core trait for cursor types that know how to decode a specific columnar encoding.
+///
+/// A `ColumnCursor` is a stateful byte-level decoder for a single slab. It advances through
+/// the slab byte-by-byte, yielding [`Run`]s of decoded values. The cursor is embedded in
+/// [`RunIter`] and ultimately drives [`ColumnDataIter`](crate::ColumnDataIter).
+///
+/// You rarely need to implement this trait directly; use one of the built-in cursor type
+/// aliases ([`UIntCursor`](crate::UIntCursor), [`StrCursor`](crate::StrCursor), etc.) or
+/// implement [`Packable`] for your type and use `RleCursor<B, T>`.
+///
+/// # Associated Types
+/// - `Item` — the decoded value type (e.g. `u64`, `str`)
+/// - `Export` — the type returned by `to_vec()` (often `Option<Item::Owned>`)
+/// - `SlabIndex` — the weight type stored in the B-tree for this cursor
+/// - `State` / `PostState` — encoder state used during splice
 pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
     type Item: Packable + ?Sized;
     type State<'a>: EncoderState<'a, Self::Item>
@@ -156,17 +177,34 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
 
     // TODO: needs a test
     #[inline(never)]
-    fn encode<'a, I>(out: &mut Vec<u8>, values: I, force: bool) -> Range<usize>
+    fn encode<'a, M, I>(out: &mut Vec<u8>, values: I) -> Range<usize>
     where
-        I: Iterator<Item = Option<Cow<'a, Self::Item>>>,
+        M: MaybePackable<'a, Self::Item>,
+        I: IntoIterator<Item = M>,
         Self::Item: 'a,
     {
         let start = out.len();
         let mut state = Self::State::default();
         for v in values {
-            state.append(out, v);
+            state.append(out, v.maybe_packable());
         }
-        if !force && out.len() == start && state.is_empty() {
+        state.flush(out);
+        let end = out.len();
+        start..end
+    }
+
+    fn encode_unless_empty<'a, M, I>(out: &mut Vec<u8>, values: I) -> Range<usize>
+    where
+        M: MaybePackable<'a, Self::Item>,
+        I: IntoIterator<Item = M>,
+        Self::Item: 'a,
+    {
+        let start = out.len();
+        let mut state = Self::State::default();
+        for v in values {
+            state.append(out, v.maybe_packable());
+        }
+        if out.len() == start && state.is_empty() {
             out.truncate(start);
             return start..start;
         }
@@ -464,7 +502,12 @@ pub enum SpliceResult {
     Noop,
 }
 
-// TODO : this needs tests
+/// A low-level iterator that decodes [`Run`]s from a raw byte slice using a [`ColumnCursor`].
+///
+/// Unlike [`ColumnDataIter`](crate::ColumnDataIter), `CursorIter` operates on a single
+/// flat `&[u8]` rather than a multi-slab tree, and returns `Result` to surface decode errors.
+/// It is most useful when reading directly from a serialized buffer.
+// TODO: needs tests
 #[derive(Debug)]
 pub struct CursorIter<'a, C: ColumnCursor> {
     pub(crate) slab: &'a [u8],

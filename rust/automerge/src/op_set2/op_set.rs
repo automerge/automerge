@@ -411,7 +411,7 @@ impl OpSet {
         let range = self.scope_to_obj(obj);
         let mut iter = self.cols.index.text.iter_range(range.clone()).with_acc();
         let start_acc = iter.acc().as_usize();
-        let tx = iter.nth(index.get() - 1)?;
+        let tx = iter.shift_acc(index.get() - 1)?;
         let current_acc = tx.acc.as_usize();
         let iter = self.iter_range(&(tx.pos..range.end));
         let marks = self.cols.index.mark.rich_text_at(tx.pos, None);
@@ -631,7 +631,7 @@ impl OpSet {
         let mut ops = vec![];
         let mut end_pos = range.end;
         let obj_start = iter.acc();
-        if let Some(tx) = iter.nth(index) {
+        if let Some(tx) = iter.shift_acc(index) {
             assert!(tx.acc >= obj_start);
             range.start = tx.pos;
             index = (tx.acc - obj_start).as_usize();

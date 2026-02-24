@@ -360,6 +360,24 @@ fn flush_run<'a, P: ?Sized + Packable, W: Writer<'a, P>>(
     }
 }
 
+/// A streaming encoder that accumulates values and writes them into a compressed slab.
+///
+/// `Encoder<C>` buffers incoming values in its [`EncoderState`] and periodically flushes
+/// encoded runs to an internal [`SlabWriter`]. Use it when you need to build a buffer
+/// incrementally rather than encoding all values at once with [`ColumnCursor::encode`].
+///
+/// # Example
+///
+/// ```rust
+/// use hexane::{Encoder, StrCursor};
+///
+/// let mut buf = vec![];
+/// let mut encoder: Encoder<'_, StrCursor> = Encoder::default();
+/// for word in ["dog", "book", "bell"] {
+///     encoder.append(word);
+/// }
+/// let range = encoder.save_to(&mut buf);
+/// ```
 #[derive(Debug)]
 pub struct Encoder<'a, C: ColumnCursor>
 where
@@ -397,6 +415,11 @@ impl<'a, C: ColumnCursor> Encoder<'a, C>
 where
     C::Item: 'a,
 {
+    /// Appends a single value (or null) to the encoder.
+    ///
+    /// Accepts any type implementing [`MaybePackable`] for `C::Item` (e.g. `&str`, `String`,
+    /// `Option<&str>` for `StrCursor`).
+    /// Returns the number of items appended (always 1).
     pub fn append<M: MaybePackable<'a, C::Item>>(&mut self, value: M) -> usize {
         self.append_item(value.maybe_packable())
     }
@@ -430,20 +453,20 @@ where
         self.state.append_chunk(&mut self.writer, run)
     }
 
-    pub fn new(locked: bool) -> Self {
+    pub fn new(single_slab: bool) -> Self {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), locked),
+            writer: SlabWriter::new(C::slab_size(), single_slab),
             _phantom: PhantomData,
         }
     }
 
-    pub fn with_capacity(_cap: usize, locked: bool) -> Self {
+    pub fn with_capacity(_cap: usize, single_slab: bool) -> Self {
         Self {
             len: 0,
             state: C::State::default(),
-            writer: SlabWriter::new(C::slab_size(), locked),
+            writer: SlabWriter::new(C::slab_size(), single_slab),
             _phantom: PhantomData,
         }
     }
@@ -471,16 +494,16 @@ where
         self.writer.copy(slab, range, lit, size, acc, bool_state)
     }
 
+    /// Flushes any buffered state to the internal writer. Usually called automatically by
+    /// `save_to` / `into_column_data`; call manually only if you need to finalize the encoder
+    /// state before those methods.
     pub fn flush(&mut self) {
         self.state.flush(&mut self.writer);
     }
 
-    #[inline(never)]
-    pub fn finish(mut self) -> Vec<Slab> {
-        self.state.flush(&mut self.writer);
-        self.writer.finish()
-    }
-
+    /// Flushes and appends the encoded bytes to `out`, returning the byte range written.
+    ///
+    /// Only valid for encoders created with `single_slab = true` (i.e. `Encoder::default()`).
     pub fn save_to(mut self, out: &mut Vec<u8>) -> Range<usize> {
         // theres a save_to bug w unlocked encoders on slab boundaries but its currently not needed anywhere
         assert!(self.writer.is_locked());
@@ -497,6 +520,8 @@ where
         self.writer.is_empty() && self.state.is_empty()
     }
 
+    /// Like [`save_to`](Encoder::save_to) but writes nothing if all appended values were
+    /// null/empty, returning an empty range.
     pub fn save_to_unless_empty(self, out: &mut Vec<u8>) -> Range<usize> {
         let mut _tmp: Vec<u8> = vec![];
         #[cfg(debug_assertions)]
@@ -536,6 +561,7 @@ where
         start..end
     }
 
+    /// Finalizes and converts the encoder into a [`ColumnData`].
     pub fn into_column_data(mut self) -> ColumnData<C> {
         self.state.flush(&mut self.writer);
         self.writer.into_column(self.len)
@@ -570,7 +596,7 @@ impl<'a, C: ColumnCursor> SpliceEncoder<'a, C> {
     }
 
     #[inline(never)]
-    pub fn finish(mut self) -> Vec<Slab> {
+    pub(crate) fn finish(mut self) -> Vec<Slab> {
         if let Some(cursor) =
             C::finalize_state(self.slab, &mut self.encoder, self.post, self.cursor)
         {

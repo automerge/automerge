@@ -202,23 +202,25 @@ where
         actor.map(|a| Cow::Owned(mapper.mapping[usize::from(*a)].unwrap()))
     };
 
-    let obj_actor = ActorCursor::encode(data, ops.iter().map(T::obj_actor).map(&remap), false);
-    let obj_ctr = UIntCursor::encode(data, ops.iter().map(T::obj_ctr), false);
-    let key_actor = ActorCursor::encode(data, ops.iter().map(T::key_actor).map(&remap), false);
-    let key_ctr = DeltaCursor::encode(data, ops.iter().map(T::key_ctr), false);
-    let key_str = StrCursor::encode(data, ops.iter().map(T::key_str), false);
-    let insert = BooleanCursor::encode(data, ops.iter().map(T::insert), true); // force
-    let action = ActionCursor::encode(data, ops.iter().map(T::action), false);
-    let value_meta = MetaCursor::encode(data, ops.iter().map(T::value_meta), false);
-    let value = RawCursor::encode(data, ops.iter().map(T::value), false);
-    let pred_count = UIntCursor::encode(data, ops.iter().map(T::pred_count), false);
+    let obj_actor =
+        ActorCursor::encode_unless_empty(data, ops.iter().map(T::obj_actor).map(&remap));
+    let obj_ctr = UIntCursor::encode_unless_empty(data, ops.iter().map(T::obj_ctr));
+    let key_actor =
+        ActorCursor::encode_unless_empty(data, ops.iter().map(T::key_actor).map(&remap));
+    let key_ctr = DeltaCursor::encode_unless_empty(data, ops.iter().map(T::key_ctr));
+    let key_str = StrCursor::encode_unless_empty(data, ops.iter().map(T::key_str));
+    let insert = BooleanCursor::encode(data, ops.iter().map(T::insert));
+    let action = ActionCursor::encode_unless_empty(data, ops.iter().map(T::action));
+    let value_meta = MetaCursor::encode_unless_empty(data, ops.iter().map(T::value_meta));
+    let value = RawCursor::encode_unless_empty(data, ops.iter().map(T::value));
+    let pred_count = UIntCursor::encode_unless_empty(data, ops.iter().map(T::pred_count));
     let pred_iter = ops.iter().map(T::pred).flat_map(|id| id.iter());
     let pred_actor_iter = pred_iter.clone().map(T::id_actor).map(&remap);
-    let pred_actor = ActorCursor::encode(data, pred_actor_iter, false);
+    let pred_actor = ActorCursor::encode_unless_empty(data, pred_actor_iter);
     let pred_ctr_iter = pred_iter.map(T::id_ctr);
-    let pred_ctr = DeltaCursor::encode(data, pred_ctr_iter, false);
-    let expand = BooleanCursor::encode(data, ops.iter().map(T::expand), false);
-    let mark_name = StrCursor::encode(data, ops.iter().map(T::mark_name), false);
+    let pred_ctr = DeltaCursor::encode_unless_empty(data, pred_ctr_iter);
+    let expand = BooleanCursor::encode_unless_empty(data, ops.iter().map(T::expand));
+    let mark_name = StrCursor::encode_unless_empty(data, ops.iter().map(T::mark_name));
 
     let cols = ChangeOpsColumns {
         obj_actor,

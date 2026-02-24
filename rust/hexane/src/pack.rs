@@ -4,22 +4,41 @@ use super::{lebsize, ulebsize};
 
 use std::fmt::Debug;
 
+/// Errors returned when decoding or validating column data.
 #[derive(thiserror::Error, Debug)]
 pub enum PackError {
+    /// A LEB128 varint in the encoded data was malformed.
     #[error(transparent)]
     InvalidNumber(#[from] leb128::read::Error),
+    /// A string column contained invalid UTF-8 bytes.
     #[error("invalid utf8")]
     InvalidUtf8,
+    /// A value failed a caller-supplied validation check (from `load_with`).
     #[error("invalid value: {0}")]
     InvalidValue(String),
+    /// The decoded column length did not match the expected length passed to
+    /// `load_unless_empty` / `load_with_unless_empty`.
     #[error("invalid load length len={0}, expected={0}")]
     InvalidLength(usize, usize),
+    /// The encoded data did not follow the expected format.
     #[error("malformed leb encoding")]
     BadFormat,
+    /// An iterator state produced by `suspend()` could not be resumed because the
+    /// underlying `ColumnData` was mutated after the suspend.
     #[error("invalid resume")]
     InvalidResume,
 }
 
+/// Types that can be encoded into and decoded from the hexane columnar format.
+///
+/// Implemented for the primitive types used by the built-in cursors: `u64`, `i64`, `u32`,
+/// `usize`, `bool`, `str`, and `[u8]`.
+///
+/// To use a custom type with [`RleCursor`](crate::RleCursor), implement `Packable` for it.
+/// - `pack` / `unpack`: byte-level serialization (typically LEB128 for integers).
+/// - `width`: the number of bytes `pack` will write, used for capacity estimation.
+/// - `agg`: the per-item [`Agg`] aggregate (defaults to `Agg::default()` = no accumulation).
+/// - `abs`: the "absolute" value for delta encoding (`i64` only).
 pub trait Packable:
     PartialEq + Debug + ToOwned<Owned: Debug + Clone + PartialEq> + PartialOrd
 {
@@ -204,6 +223,12 @@ impl Packable for str {
     }
 }
 
+/// Adapter trait that lets both `T` and `Option<T>` (and `&T`, `Option<&T>`, etc.) be used
+/// as input values when writing to a [`ColumnData`](crate::ColumnData) or [`Encoder`](crate::Encoder).
+///
+/// This is what allows `StrCursor` to accept `&str`, `String`, `Option<&str>`, and
+/// `Option<String>` interchangeably, and `UIntCursor` to accept `u64` or `Option<u64>`.
+/// A value that converts to `None` encodes a null entry.
 pub trait MaybePackable<'a, T: Packable + ?Sized> {
     fn maybe_packable(self) -> Option<Cow<'a, T>>;
     fn agg(&self) -> Agg;

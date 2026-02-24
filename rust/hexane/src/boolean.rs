@@ -47,6 +47,11 @@ pub struct BooleanCursorInternal<const B: usize> {
     last_offset: usize,
 }
 
+/// A [`ColumnCursor`] that decodes boolean run-length encoded columns.
+///
+/// Stores alternating run lengths of `false` and `true` values without the per-value overhead
+/// of general RLE. The `agg` of each `true` value is 1 and `false` is 0, so the [`Acc`]
+/// accumulator counts the number of `true` values. Uses a 64-item slab size.
 pub type BooleanCursor = BooleanCursorInternal<64>;
 
 impl<const B: usize> ColumnCursor for BooleanCursorInternal<B> {
