@@ -218,23 +218,23 @@ impl ChangeGraph {
         use ids::*;
 
         let actor_iter = self.actors.iter().map(as_actor);
-        let actor = ActorCursor::encode(out, actor_iter, false);
+        let actor = ActorCursor::encode_unless_empty(out, actor_iter);
 
         let seq_iter = self.seq.iter().map(as_seq);
-        let seq = DeltaCursor::encode(out, seq_iter, false);
+        let seq = DeltaCursor::encode_unless_empty(out, seq_iter);
 
         let max_op_iter = self.max_ops.iter().map(as_max_op);
-        let max_op = DeltaCursor::encode(out, max_op_iter, false);
+        let max_op = DeltaCursor::encode_unless_empty(out, max_op_iter);
 
         let time = self.timestamps.save_to_unless_empty(out);
 
         let message = self.messages.save_to_unless_empty(out);
 
         let num_deps_iter = self.num_deps().map(as_num_deps);
-        let num_deps = UIntCursor::encode(out, num_deps_iter, false);
+        let num_deps = UIntCursor::encode_unless_empty(out, num_deps_iter);
 
         let deps_iter = self.deps_iter().map(as_deps);
-        let deps = DeltaCursor::encode(out, deps_iter, false);
+        let deps = DeltaCursor::encode_unless_empty(out, deps_iter);
 
         // FIXME - we could eliminate this column if empty but meta isnt all null
         let meta = self.extra_bytes_meta.save_to_unless_empty(out);
@@ -1167,7 +1167,7 @@ impl<'a> Iterator for ChangeIter<'a> {
         let message = self.messages.nth(0).flatten();
         let start_op = max_op - num_ops + 1;
 
-        let meta = self.extra_bytes_meta.nth(0)?;
+        let meta = self.extra_bytes_meta.shift_acc(0)?;
         let meta_range = meta.acc.as_usize()..(meta.acc.as_usize() + meta.item.unwrap().length());
         let extra = Cow::Borrowed(&self.graph.extra_bytes_raw[meta_range]);
 

@@ -5,7 +5,16 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use std::fmt;
 
-// Aggregate Accumulator
+/// A running accumulator — the cumulative sum of per-item [`Agg`] values.
+///
+/// `Acc` is a non-decreasing `u64`. Its meaning depends on the cursor type:
+/// - [`UIntCursor`](crate::UIntCursor) / [`IntCursor`](crate::IntCursor): sum of item values
+/// - [`BooleanCursor`](crate::BooleanCursor): count of `true` values seen so far
+/// - [`StrCursor`](crate::StrCursor) / [`ByteCursor`](crate::ByteCursor): always 0
+///
+/// Methods like [`ColumnDataIter::advance_acc_by`](crate::ColumnDataIter::advance_acc_by) and
+/// [`ColumnData::get_acc`](crate::ColumnData::get_acc) use `Acc` for navigation by cumulative
+/// value rather than by index.
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Acc(pub u64);
 
@@ -179,7 +188,14 @@ impl PartialEq<usize> for Acc {
     }
 }
 
-// Aggregate
+/// A per-item aggregate value, used for min/max slab metadata and accumulator steps.
+///
+/// `Agg` wraps `Option<NonZeroU32>`. A value of `None` (i.e. `Agg::default()`) means the item
+/// contributes nothing to the accumulator (e.g. null values or cursor types that don't aggregate).
+/// Non-zero values are used for range queries (`find_by_value`, `find_by_range`) and for
+/// accumulator-based navigation (`advance_acc_by`).
+///
+/// `Agg` is produced by [`Packable::agg`](crate::Packable::agg) for each concrete item type.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Agg(Option<NonZeroU32>);
 

@@ -14,6 +14,10 @@ pub struct RawCursorInternal<const B: usize> {
     offset: usize,
 }
 
+/// A [`ColumnCursor`] for uncompressed raw byte columns.
+///
+/// Unlike other cursors, `RawCursor` stores data as-is without any RLE or delta encoding.
+/// Iteration yields one-byte `[u8]` slices at a time. Uses a 4096-byte slab size.
 pub type RawCursor = RawCursorInternal<4096>;
 
 impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
@@ -145,6 +149,13 @@ impl<const B: usize> ColumnCursor for RawCursorInternal<B> {
     }
 }
 
+/// A low-level reader for sequential byte access across a multi-slab tree.
+///
+/// Unlike column iterators, `RawReader` reads raw bytes rather than decoded values.
+/// It is used internally by Automerge to access byte fields (e.g. actor IDs, string
+/// payloads) that are stored as consecutive byte ranges across slab boundaries.
+///
+/// Obtain a `RawReader` via [`ColumnData::raw_reader`](crate::ColumnData::raw_reader).
 #[derive(Debug, Clone, Default)]
 pub struct RawReader<'a, T: SpanWeight<Slab> + HasPos> {
     pub(crate) pos: usize,
@@ -208,13 +219,18 @@ impl<'a, T: SpanWeight<Slab> + HasPos> RawReader<'a, T> {
         }
     }
 
+    /// Returns the current byte position, which can be passed to
+    /// [`ColumnData::raw_reader`](crate::ColumnData::raw_reader) to reconstruct a `RawReader`
+    /// at the same position.
     pub fn suspend(&self) -> usize {
         self.pos
     }
 }
 
+/// Errors returned by [`RawReader::read_next`].
 #[derive(Debug, thiserror::Error)]
 pub enum ReadRawError {
+    /// The requested byte range crosses a slab boundary (slabs are immutable and non-contiguous).
     #[error("attempted to read across slab boundaries")]
     CrossBoundary,
     #[error("attempted to read past end of data")]

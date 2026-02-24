@@ -16,6 +16,30 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Bound, Range, RangeBounds};
 
+/// A compressed, mutable column of optional typed values.
+///
+/// `ColumnData<C>` stores a sequence of `Option<C::Item>` values using the encoding
+/// determined by cursor type `C`. Data is held internally in a `SpanTree` of [`Slab`]s;
+/// modifications replace individual slabs, leaving the rest untouched.
+///
+/// # Common cursor types
+///
+/// [`UIntCursor`](crate::UIntCursor), [`IntCursor`](crate::IntCursor),
+/// [`StrCursor`](crate::StrCursor), [`ByteCursor`](crate::ByteCursor),
+/// [`BooleanCursor`](crate::BooleanCursor), [`DeltaCursor`](crate::DeltaCursor),
+/// [`RawCursor`](crate::RawCursor).
+///
+/// # Example
+///
+/// ```rust
+/// use hexane::{ColumnData, UIntCursor};
+/// use std::borrow::Cow;
+///
+/// let mut col: ColumnData<UIntCursor> = ColumnData::new();
+/// col.splice(0, 0, [1u64, 2, 3]);
+/// assert_eq!(col.get(1), Some(Some(Cow::Owned(2))));
+/// assert_eq!(col.to_vec(), vec![Some(1), Some(2), Some(3)]);
+/// ```
 #[derive(Debug, Clone)]
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
@@ -41,16 +65,26 @@ impl<C: ColumnCursor> PartialEq for ColumnData<C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    /// Total number of bytes used by all slabs (encoded, compressed size).
     pub fn byte_len(&self) -> usize {
         self.slabs.iter().map(|s| s.as_slice().len()).sum()
     }
 
+    /// Returns the value at `index`, or `None` if the index is out of bounds.
+    ///
+    /// The inner `Option` is `None` for null entries and `Some(value)` otherwise.
+    /// This is O(log n + B) where B is the number of encoded runs in the target slab.
+    /// For multiple sequential reads prefer [`ColumnData::iter`] or [`ColumnData::iter_range`].
     pub fn get(&self, index: usize) -> Option<Option<Cow<'_, C::Item>>> {
         let range = index..(index + 1);
         let mut iter = self.iter_range(range);
         iter.next()
     }
 
+    /// Returns the change in accumulator between `index1` and `index2`, together with
+    /// the item at `index2`.
+    ///
+    /// Panics if `index1 > index2`.
     pub fn get_acc_delta(&self, index1: usize, index2: usize) -> (Acc, Option<Cow<'_, C::Item>>) {
         assert!(index1 <= index2);
         let acc1 = self.get_acc(index1);
@@ -60,12 +94,16 @@ impl<C: ColumnCursor> ColumnData<C> {
         (acc2 - acc1, item)
     }
 
+    /// Returns the cumulative [`Acc`] for all items *before* `index`
+    /// (i.e. the sum of `agg(item)` for items `0..index`).
     pub fn get_acc(&self, index: usize) -> Acc {
         let range = index..(index + 1);
         let iter = self.iter_range(range);
         iter.calculate_acc()
     }
 
+    /// Returns the item at `index` together with the [`Acc`] value immediately before it,
+    /// or `None` if the index is out of bounds.
     pub fn get_with_acc(
         &self,
         index: usize,
@@ -75,6 +113,10 @@ impl<C: ColumnCursor> ColumnData<C> {
         iter.next()
     }
 
+    /// Returns `true` if every item in the column is null (`None`) or, for
+    /// [`BooleanCursor`](crate::BooleanCursor), if every value is `false`.
+    ///
+    /// An empty column (`len() == 0`) is also considered empty.
     pub fn is_empty(&self) -> bool {
         let run = self.iter().next_run();
         match run {
@@ -89,6 +131,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         log!(" :: {:?}", data);
     }
 
+    /// Returns a new column with every item transformed by `f`.
+    ///
+    /// Equivalent to consuming `self` and re-encoding all items through `f`.
+    /// For an in-place version see [`ColumnData::remap`].
+    // TODO: could be much faster if done a run at a time (delta runs are tricky)
     pub fn and_remap<F>(self, f: F) -> Self
     where
         F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
@@ -104,6 +151,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         encoder.into_column_data()
     }
 
+    /// Replaces the column with a re-encoded version where every item has been
+    /// transformed by `f`. For a consuming version see [`ColumnData::and_remap`].
+    // TODO: could be much faster if done a run at a time (delta runs are tricky)
     pub fn remap<F>(&mut self, f: F)
     where
         F: Fn(Option<Cow<'_, C::Item>>) -> Option<Cow<'_, C::Item>>,
@@ -118,6 +168,8 @@ impl<C: ColumnCursor> ColumnData<C> {
         *self = encoder.into_column_data();
     }
 
+    /// Like [`save_to`](ColumnData::save_to) but writes nothing if [`is_empty`](ColumnData::is_empty)
+    /// returns `true`, returning an empty range at the current end of `out`.
     pub fn save_to_unless_empty(&self, out: &mut Vec<u8>) -> Range<usize> {
         if self.is_empty() {
             out.len()..out.len()
@@ -126,6 +178,11 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    /// Serializes the column by appending encoded bytes to `out`.
+    ///
+    /// Returns the byte range written (`out[range]` is the serialized column data).
+    /// The output is compatible with [`ColumnData::load`]. If the column is empty (zero items),
+    /// nothing is written and an empty range is returned.
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
         #[allow(clippy::len_zero)]
@@ -169,6 +226,22 @@ impl<C: ColumnCursor> ColumnData<C> {
     }
 }
 
+/// An iterator over items in a [`ColumnData`], with rich navigation capabilities.
+///
+/// Produced by [`ColumnData::iter`] and [`ColumnData::iter_range`].
+///
+/// Beyond standard `Iterator` usage, `ColumnDataIter` supports:
+/// - [`advance_by`](ColumnDataIter::advance_by) / [`advance_to`](ColumnDataIter::advance_to)
+///   — fast O(log n) forward jump.
+/// - [`seek_to_value`](ColumnDataIter::seek_to_value) — binary search for a sorted value.
+/// - [`advance_acc_by`](ColumnDataIter::advance_acc_by) — advance by accumulator amount.
+/// - [`next_run`](ColumnDataIter::next_run) — access the raw RLE runs.
+/// - [`shift_next`](ColumnDataIter::shift_next) — move the window and return the next item.
+/// - [`suspend`](ColumnDataIter::suspend) / [`ColumnDataIterState::try_resume`] — serialize
+///   and restore position across async boundaries or between calls.
+/// - [`with_acc`](ColumnDataIter::with_acc) — wrap in a [`ColGroupIter`] that emits
+///   `(acc, pos, item)` tuples.
+/// - [`as_acc`](ColumnDataIter::as_acc) — wrap in a [`ColAccIter`] that emits only `Acc`.
 #[derive(Debug)]
 pub struct ColumnDataIter<'a, C: ColumnCursor> {
     counter: usize,
@@ -302,6 +375,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
+    /// Returns the current position (index of the next item to be yielded).
     pub fn pos(&self) -> usize {
         debug_assert_eq!(
             self.slabs.weight().pos() - self.slab.pos_left() - self.run_count(),
@@ -317,6 +391,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         );
     }
 
+    /// Returns the number of items remaining in the current [`Run`].
     pub fn run_count(&self) -> usize {
         self.run.as_ref().map(|e| e.count).unwrap_or_default()
     }
@@ -329,6 +404,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.slab.cursor.pop(self.run.as_mut()?)
     }
 
+    /// Returns the next RLE [`Run`], advancing `pos` by `run.count`.
+    ///
+    /// More efficient than calling `next()` repeatedly when you only need run-level access.
+    /// Returns `None` when the iterator is exhausted.
     pub fn next_run(&mut self) -> Option<Run<'a, C::Item>> {
         if self.pos >= self.max {
             return None;
@@ -362,6 +441,7 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         })
     }
 
+    /// Advances the iterator by `amount` items in O(log n). A no-op if `amount` is 0.
     pub fn advance_by(&mut self, amount: usize) {
         if amount > 0 {
             self.nth(amount - 1);
@@ -369,6 +449,9 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.check_pos();
     }
 
+    /// Advances the iterator to position `target` in O(log n).
+    ///
+    /// Panics if `target < self.pos()`.
     pub fn advance_to(&mut self, target: usize) {
         assert!(target >= self.pos());
         if target > self.pos() {
@@ -381,11 +464,9 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.slabs.index() - 1
     }
 
-    // binary search through the span tree nodes
-    // this will only work if the data is ordered over the range
-    // we only read the first element of each node and never
-    // from the first node as we arent always including its first element
-
+    // Binary search through the span tree nodes to find the slab likely containing `target`.
+    // Only valid when data is sorted within the range. Reads only the first element of each
+    // node; never reads the first node because we may not be including its first element.
     fn binary_search_for<B>(&self, target: Option<B>, max: usize) -> Option<usize>
     where
         B: Borrow<C::Item> + Debug + Copy,
@@ -428,8 +509,15 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
-    // this function assumes all values within its range are ordered
-    // will give undefined results otherwise
+    /// Returns the contiguous index range where `value` appears within `range`, positioning
+    /// the iterator at the start of that range.
+    ///
+    /// **Requires** that values within `range` are sorted; gives undefined results otherwise.
+    /// Uses B-tree binary search followed by a linear slab scan.
+    /// Returns an empty range at the found position if `value` is absent.
+    ///
+    /// After returning, the iterator is positioned at the first index where `value` appears
+    /// (or where it would appear if absent), ready for further reads.
     pub fn seek_to_value<B, R>(&mut self, value: Option<B>, range: R) -> Range<usize>
     where
         B: Borrow<C::Item> + Copy + Debug,
@@ -488,28 +576,34 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         start..end
     }
 
+    /// Returns the exclusive upper bound of the iteration range (as set by `iter_range` or `set_max`).
     pub fn end_pos(&self) -> usize {
         self.max
     }
 
+    /// Overrides the upper bound of the iteration range.
     pub fn set_max(&mut self, max: usize) {
         self.max = max
     }
 
+    /// Collects all remaining items into a `Vec`. Primarily useful for testing.
     pub fn to_vec(self) -> Vec<C::Export> {
         let mut result = vec![];
         C::export_splice(&mut result, 0..0, self);
         result
     }
 
+    /// Wraps this iterator in a [`ColGroupIter`] that emits `(acc, pos, item)` tuples.
     pub fn with_acc(self) -> ColGroupIter<'a, C> {
         ColGroupIter { iter: self }
     }
 
+    /// Wraps this iterator in a [`ColAccIter`] that emits only the [`Acc`] value for each item.
     pub fn as_acc(self) -> ColAccIter<'a, C> {
         ColAccIter { iter: self }
     }
 
+    /// Returns the [`Acc`] value immediately before the current iterator position.
     pub fn calculate_acc(&self) -> Acc {
         self.slabs.weight().acc() - self.slab.acc_left() - self.run_acc()
     }
@@ -539,6 +633,13 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         }
     }
 
+    /// Moves the iterator window to `range` and returns the item at `range.start`.
+    ///
+    /// The iterator must already be at or before `range.start`. After this call, the
+    /// iterator will yield items from `range.start` up to (exclusive) `range.end`.
+    /// Subsequent calls to `shift_next` can extend the window further forward.
+    ///
+    /// Panics if `range.start < self.pos`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
         assert!(range.start >= self.pos);
         self.max = range.end;
@@ -552,6 +653,12 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
             .unwrap_or_default()
     }
 
+    /// Advances the iterator until the cumulative [`Acc`] has grown by at least `n`.
+    ///
+    /// Returns the number of items consumed. If the total accumulator of the remaining
+    /// items is less than `n`, the iterator is exhausted and the actual advance is returned.
+    ///
+    /// This is O(log n) using the slab-level accumulator index.
     pub fn advance_acc_by<A: Into<Acc>>(&mut self, n: A) -> usize {
         let mut n = n.into();
         let start_pos = self.pos();
@@ -584,6 +691,10 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
         self.pos() - start_pos
     }
 
+    /// Captures the current iterator position as a [`ColumnDataIterState`] that can be
+    /// stored and later restored via [`ColumnDataIterState::try_resume`].
+    ///
+    /// Resumption will fail if the underlying `ColumnData` is mutated between suspend and resume.
     pub fn suspend(&self) -> ColumnDataIterState<C> {
         ColumnDataIterState {
             counter: self.counter,
@@ -597,6 +708,11 @@ impl<'a, C: ColumnCursor> ColumnDataIter<'a, C> {
     }
 }
 
+/// Serializable snapshot of a [`ColumnDataIter`] position.
+///
+/// Created by [`ColumnDataIter::suspend`] and restored by [`try_resume`](ColumnDataIterState::try_resume).
+/// Resumption returns [`PackError::InvalidResume`] if the source `ColumnData` was mutated
+/// after the snapshot was taken.
 pub struct ColumnDataIterState<C: ColumnCursor> {
     counter: usize,
     pos: usize,
@@ -608,6 +724,9 @@ pub struct ColumnDataIterState<C: ColumnCursor> {
 }
 
 impl<C: ColumnCursor> ColumnDataIterState<C> {
+    /// Attempts to restore the iterator position in `column`.
+    ///
+    /// Returns [`PackError::InvalidResume`] if `column` was mutated since [`ColumnDataIter::suspend`].
     pub fn try_resume<'a>(
         &self,
         column: &'a ColumnData<C>,
@@ -616,6 +735,10 @@ impl<C: ColumnCursor> ColumnDataIterState<C> {
     }
 }
 
+/// An iterator adapter over [`ColumnDataIter`] that emits the [`Acc`] value after each item.
+///
+/// Each `next()` call yields the cumulative accumulator *after* consuming the current item.
+/// Created by [`ColumnDataIter::as_acc`].
 #[derive(Debug, Default, Clone)]
 pub struct ColAccIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
@@ -649,16 +772,16 @@ impl<C: ColumnCursor> Iterator for ColAccIter<'_, C> {
     }
 }
 
-// This iterator has a strange dual purpose implementation
-// the next() method just grabs the next item on the underlying
-// iterator but includes the ACC value where as the nth()
-// seeks forward not n steps but an increase of n in in acc
-// this is extremely useful but its confusing b/c it breaks the abstraction
-// probably the best move is to split this into two different interfaces
-// rather than overload this iterator with both
-// something that could force the change would be to make ColGroupItem::item
-// not an Option because the acc cant go up if that is None
-
+/// An iterator adapter over [`ColumnDataIter`] that emits [`ColGroupItem`] values.
+///
+/// Each `next()` yields a `ColGroupItem { acc, pos, item }` where `acc` is the accumulator
+/// *before* the item and `pos` is the item's index.
+///
+/// **Important:** `nth(n)` advances by accumulator amount `n` rather than by item count `n`.
+/// This is intentional for Automerge's internal use but deviates from the `Iterator` contract.
+/// TODO: consider splitting this into two distinct types.
+///
+/// Created by [`ColumnDataIter::with_acc`].
 #[derive(Debug, Clone)]
 pub struct ColGroupIter<'a, C: ColumnCursor> {
     iter: ColumnDataIter<'a, C>,
@@ -667,6 +790,11 @@ pub struct ColGroupIter<'a, C: ColumnCursor> {
 impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     pub fn advance_by(&mut self, amount: usize) {
         self.iter.advance_by(amount)
+    }
+
+    pub fn shift_acc(&mut self, n: usize) -> Option<ColGroupItem<'a, C::Item>> {
+        self.iter.advance_acc_by(n);
+        self.next()
     }
 
     pub fn run_count(&self) -> usize {
@@ -682,6 +810,12 @@ impl<'a, C: ColumnCursor> ColGroupIter<'a, C> {
     }
 }
 
+/// A single item from a [`ColGroupIter`], bundling the item with its position and
+/// the pre-item accumulator.
+///
+/// - `acc`: [`Acc`] value immediately *before* this item (sum of all prior `agg` values).
+/// - `pos`: zero-based index of this item in the column.
+/// - `item`: the value (`None` for null entries).
 #[derive(Debug, PartialEq, Clone)]
 pub struct ColGroupItem<'a, P: Packable + ?Sized> {
     pub acc: Acc,
@@ -690,6 +824,7 @@ pub struct ColGroupItem<'a, P: Packable + ?Sized> {
 }
 
 impl<P: Packable + ?Sized> ColGroupItem<'_, P> {
+    /// Returns the accumulator value *after* this item (`self.acc + agg(self.item)`).
     pub fn next_acc(&self) -> Acc {
         self.acc + P::maybe_agg(&self.item)
     }
@@ -706,7 +841,9 @@ impl<'a, C: ColumnCursor> Iterator for ColGroupIter<'a, C> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.iter.advance_acc_by(n);
+        if n > 0 {
+            self.iter.nth(n - 1);
+        }
         self.next()
     }
 }
@@ -772,20 +909,37 @@ impl<'a, C: ColumnCursor> Iterator for ColumnDataIter<'a, C> {
 }
 
 impl<C: ColumnCursor> ColumnData<C> {
+    /// Iterates over the raw [`Run`]s in the column.
+    ///
+    /// Each `Run` has a `count` and an optional `value`. This gives lower-level access to the
+    /// RLE structure than `iter()` — useful for re-encoding or bulk inspection.
     pub fn run_iter(&self) -> impl Iterator<Item = Run<'_, C::Item>> {
         self.slabs.iter().flat_map(|s| s.run_iter::<C>())
     }
 
+    /// Decodes all items into a `Vec`. Primarily useful for testing and debugging.
     pub fn to_vec(&self) -> Vec<C::Export> {
         let mut result = vec![];
         C::export_splice(&mut result, 0..0, self.iter());
         result
     }
 
+    /// Returns a forward iterator over all items in the column.
+    ///
+    /// The iterator decodes one slab at a time, carrying state across items within each slab
+    /// for amortized O(1) per-item cost after an O(log n) initial seek.
+    /// For a sub-range use [`iter_range`](ColumnData::iter_range).
     pub fn iter(&self) -> ColumnDataIter<'_, C> {
         ColumnDataIter::new(&self.slabs, 0, self.len, self.counter)
     }
 
+    /// Returns the contiguous index range where `value` appears within `range`.
+    ///
+    /// Requires that the values in `range` are sorted. Uses B-tree binary search over slabs
+    /// followed by a linear scan within the target slab.
+    /// Returns an empty range at the found position if `value` is not present.
+    ///
+    /// For repeated lookups on the same iterator use [`ColumnDataIter::seek_to_value`].
     pub fn scope_to_value<B, R>(&self, value: Option<B>, range: R) -> Range<usize>
     where
         B: Borrow<C::Item> + Copy + Debug,
@@ -797,6 +951,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.iter().seek_to_value(value, range)
     }
 
+    /// Returns an iterator over items in `range`, clamped to the column's length.
     pub fn iter_range(&self, range: Range<usize>) -> ColumnDataIter<'_, C> {
         let start = std::cmp::min(self.len, range.start);
         let end = std::cmp::min(self.len, range.end);
@@ -826,6 +981,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         col
     }
 
+    /// Creates a new, empty column.
     pub fn new() -> Self {
         ColumnData {
             len: 0,
@@ -837,12 +993,17 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    /// Serializes the column to a new `Vec<u8>`. See also [`save_to`](ColumnData::save_to).
     pub fn save(&self) -> Vec<u8> {
         let mut data = vec![];
         self.save_to(&mut data);
         data
     }
 
+    /// Appends a single value to the end of the column.
+    ///
+    /// Returns the [`Acc`] value of the appended item. For bulk appends at the end,
+    /// [`extend`](ColumnData::extend) is more efficient.
     pub fn push<'b, M>(&mut self, value: M) -> Acc
     where
         M: MaybePackable<'b, C::Item> + Clone,
@@ -852,6 +1013,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.splice(index, 0, [value])
     }
 
+    /// Appends multiple values to the end of the column.
+    ///
+    /// Returns the total [`Acc`] contributed by the appended values.
     pub fn extend<'b, M, I>(&mut self, values: I) -> Acc
     where
         M: MaybePackable<'b, C::Item>,
@@ -862,6 +1026,15 @@ impl<C: ColumnCursor> ColumnData<C> {
         self.splice(index, 0, values)
     }
 
+    /// Removes `del` items starting at `index` and inserts `values` in their place.
+    ///
+    /// This is the primary mutation method. It finds the slab containing `index` in O(log n),
+    /// re-encodes the affected slab with the deletion/insertion applied, then replaces it in
+    /// the B-tree. Unaffected slabs are not touched.
+    ///
+    /// Returns the accumulated [`Acc`] of the inserted values.
+    ///
+    /// Panics if `index > self.len()`.
     pub fn splice<'b, M, I>(&mut self, index: usize, del: usize, values: I) -> Acc
     where
         M: MaybePackable<'b, C::Item>,
@@ -935,6 +1108,8 @@ impl<C: ColumnCursor> ColumnData<C> {
         acc
     }
 
+    /// If the column is currently empty, fills it with `len` null values and returns `true`.
+    /// If the column already has items, returns `false` without modifying it.
     pub fn fill_if_empty(&mut self, len: usize) -> bool {
         if self.len == 0 && len > 0 {
             *self = Self::init_empty(len);
@@ -944,6 +1119,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    /// Creates a column of `len` null values.
     pub fn init_empty(len: usize) -> Self {
         let new_slab = C::init_empty(len);
         let mut slabs = SlabTree::default();
@@ -952,6 +1128,10 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnData::init(len, slabs)
     }
 
+    /// Deserializes `data`, or returns a column of `len` nulls if `data` is empty.
+    ///
+    /// Returns [`PackError::InvalidLength`] if the decoded column has a different length
+    /// than `len`.
     pub fn load_unless_empty(data: &[u8], len: usize) -> Result<Self, PackError> {
         if data.is_empty() {
             Ok(ColumnData::init_empty(len))
@@ -965,6 +1145,9 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    /// Like [`load_unless_empty`](ColumnData::load_unless_empty) but also validates each value
+    /// with `test`. If `test` returns `Some(msg)`, decoding fails with
+    /// [`PackError::InvalidValue`].
     pub fn load_with_unless_empty<F>(data: &[u8], len: usize, test: &F) -> Result<Self, PackError>
     where
         F: Fn(Option<&C::Item>) -> Option<String>,
@@ -981,10 +1164,16 @@ impl<C: ColumnCursor> ColumnData<C> {
         }
     }
 
+    /// Deserializes a column from bytes produced by [`save`](ColumnData::save) /
+    /// [`save_to`](ColumnData::save_to).
+    ///
+    /// Returns a [`PackError`] if the bytes are malformed or use the wrong encoding.
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
         Self::load_with(data, &|_| None)
     }
 
+    /// Like [`load`](ColumnData::load) but validates each decoded value with `test`.
+    /// If `test` returns `Some(msg)`, decoding fails with [`PackError::InvalidValue`].
     pub fn load_with<F>(data: &[u8], test: &F) -> Result<Self, PackError>
     where
         F: Fn(Option<&C::Item>) -> Option<String>,
@@ -999,10 +1188,13 @@ impl<C: ColumnCursor> ColumnData<C> {
         Ok(col)
     }
 
+    /// Returns the number of items in the column (including nulls).
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Returns the total accumulated [`Acc`] for the entire column
+    /// (sum of `agg(item)` for every non-null item).
     pub fn acc(&self) -> Acc {
         self.slabs.weight().map(|w| w.acc()).unwrap_or_default()
     }
@@ -1012,6 +1204,11 @@ impl<C: ColumnCursor> ColumnData<C>
 where
     C::SlabIndex: HasMinMax,
 {
+    /// Returns an iterator over the indices of items whose value falls within `range`.
+    ///
+    /// Uses slab-level min/max metadata to skip slabs that cannot contain matching values,
+    /// making this efficient for sparse matches. Requires that the cursor type supports
+    /// min/max tracking ([`HasMinMax`]).
     pub fn find_by_range(&self, range: Range<usize>) -> impl Iterator<Item = usize> + '_ {
         let start = range.start;
         let end = range.end;
@@ -1026,6 +1223,10 @@ where
             })
     }
 
+    /// Returns an iterator over the indices of items whose [`Agg`] value equals `agg`.
+    ///
+    /// Uses slab-level min/max metadata to skip non-matching slabs. Requires that the cursor
+    /// type supports min/max tracking ([`HasMinMax`]).
     pub fn find_by_value<A: Into<Agg>>(&self, agg: A) -> impl Iterator<Item = usize> + '_ {
         let agg = agg.into();
 
@@ -1887,7 +2088,7 @@ pub(crate) mod tests {
         let mut last_acc = Acc::new();
         let mut last_item_agg = Default::default();
         for n in 0..(col.acc().as_usize()) {
-            let result = col.iter().with_acc().nth(n).unwrap();
+            let result = col.iter().with_acc().shift_acc(n).unwrap();
             let item = result.item;
             let acc = result.acc;
             assert!(acc <= Acc::from(n));
@@ -2128,5 +2329,71 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn readme_test() {
+        // columns are generally modified with a splice command
+        let mut column1: ColumnData<IntCursor> = ColumnData::new();
+        column1.splice(0, 0, [1, 2, 3, 4, 5, 6, 7]);
+
+        // the columns can be created with collect()
+        // data written to columns is mediated by the MaybePackable trait.
+        // this allows StrCursor to use &str, String, Option<&str> and Option<String>
+        // or UIntCursor to use u64, or Option<u64> interchangably
+        let column2: ColumnData<UIntCursor> = [1, 2, 3].into_iter().collect();
+        // data read is always Option<Cow<'_, Cursor::Item>> or Option<Cursor::Item>
+        assert_eq!(column2.to_vec(), vec![Some(1), Some(2), Some(3)]);
+
+        // save() writes the column data to a single Vec<u8> combinding the internal slabs
+        // load() does the inverse and will throw an error if the data does not fit the
+        // encoding standard
+        let column3: ColumnData<IntCursor> = ColumnData::load(&column1.save()).unwrap();
+        // TODO add a load_with() example
+
+        // the vec representation of the data is the same
+        assert_eq!(column1.to_vec(), column3.to_vec());
+        // and the saved data is the same - but the internal representation may differ
+        assert_eq!(column1.save(), column3.save());
+
+        // Cursors can directly encode data into a buffer and skip the slab intermediary
+        // By default encode writes nothing if all the data passed in is false or None
+        // but you can force it to write the nulls if the third parameter is true
+        let mut buffer = vec![];
+        let _word_range = StrCursor::encode(&mut buffer, ["dog", "book", "bell"]);
+        assert_eq!(_word_range, 0..15);
+        let _bool_range = BooleanCursor::encode_unless_empty(&mut buffer, [false, false, false]);
+        assert_eq!(_bool_range, 15..15);
+
+        // if you need to build the data incrementally you can get access to the underlying encoder
+        let mut encoder: Encoder<'_, StrCursor> = Encoder::default();
+        for word in ["dog", "book", "bell"] {
+            encoder.append(word);
+        }
+        let _word_range2 = encoder.save_to(&mut buffer);
+
+        // accessing elements within a column
+
+        assert_eq!(column1.get(1), Some(Some(Cow::Owned(2))));
+        assert_eq!(
+            column1.iter().take(3).collect::<Vec<_>>(),
+            vec![
+                Some(Cow::Owned(1)),
+                Some(Cow::Owned(2)),
+                Some(Cow::Owned(3)),
+            ]
+        );
+        assert_eq!(
+            column1.iter_range(3..5).collect::<Vec<_>>(),
+            vec![Some(Cow::Owned(4)), Some(Cow::Owned(5)),]
+        );
+
+        // TODO
+        // get_acc()
+        // get_with_acc()
+        // seek_to_value()
+        // advance_acc_by()
+        // iter().with_acc()
+        // suspend()
     }
 }
