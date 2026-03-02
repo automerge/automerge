@@ -396,11 +396,11 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
             copy_of_values.push(opt_v.clone());
             add += encoder.append_item(opt_v);
         }
-        assert!(encoder.overflow == 0);
 
         #[cfg(debug_assertions)]
         Self::export_splice(debug.0, debug.1, copy_of_values.into_iter());
 
+        let overflow = encoder.overflow;
         let del = encoder.deleted;
         let group = encoder.acc;
         let slabs = encoder.finish();
@@ -414,15 +414,12 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
                 slab.len() + add
             );
         }
-        if slabs.is_empty() {
-            SpliceResult::Noop
-        } else {
-            SpliceResult::Replace {
-                add,
-                del,
-                group,
-                slabs,
-            }
+        SpliceResult {
+            add,
+            del,
+            overflow,
+            group,
+            slabs,
         }
     }
 
@@ -492,14 +489,12 @@ pub struct SpliceDel<'a, C: ColumnCursor> {
     pub(crate) post: Option<Run<'a, C::Item>>,
 }
 
-pub enum SpliceResult {
-    Replace {
-        add: usize,
-        del: usize,
-        group: Acc,
-        slabs: Vec<Slab>,
-    },
-    Noop,
+pub struct SpliceResult {
+    pub(crate) add: usize,
+    pub(crate) del: usize,
+    pub(crate) overflow: usize,
+    pub(crate) group: Acc,
+    pub(crate) slabs: Vec<Slab>,
 }
 
 /// A low-level iterator that decodes [`Run`]s from a raw byte slice using a [`ColumnCursor`].
