@@ -1,7 +1,7 @@
 use super::aggregate::Acc;
 use super::aggregate::Agg;
 use super::cursor::{
-    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, RunIterState, SpliceResult,
+    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, RunIterState,
 };
 use super::encoder::Encoder;
 use super::pack::{MaybePackable, PackError, Packable};
@@ -1063,28 +1063,56 @@ impl<C: ColumnCursor> ColumnData<C> {
             self.acc()
         );
 
-        match C::splice(
+        let subindex = index - cursor.weight.pos();
+
+        let mut result = C::splice(
             cursor.element,
-            index - cursor.weight.pos(),
+            subindex,
             del,
             values,
             #[cfg(debug_assertions)]
             (&mut self.debug, index..(index + del)),
-        ) {
-            SpliceResult::Replace {
-                add,
-                del,
-                group,
-                mut slabs,
-            } => {
-                acc += group;
-                C::compute_min_max(&mut slabs); // this should be handled by slabwriter.finish
-                self.len = self.len + add - del;
-                self.slabs.splice(cursor.index..(cursor.index + 1), slabs);
-                self.counter += 1;
-                assert!(!self.slabs.is_empty());
+        );
+
+        acc += result.group;
+        C::compute_min_max(&mut result.slabs); // this should be handled by slabwriter.finish
+        self.len = self.len + result.add - result.del;
+        let post_slab_index = cursor.index + result.slabs.len();
+        let post_index = index + result.add;
+        self.slabs
+            .splice(cursor.index..(cursor.index + 1), result.slabs);
+        self.counter += 1;
+
+        log!("OVERFLOW {}", result.overflow);
+        while result.overflow > 0 {
+            if let Some(post_slab) = self.slabs.get(post_slab_index) {
+                if post_slab.len() <= result.overflow {
+                    log!("DELETE WHOLE SLAB {}", post_slab.len());
+                    result.overflow -= post_slab.len();
+                    self.len -= post_slab.len();
+                    self.slabs.remove(post_slab_index);
+                } else {
+                    log!("SPLICE DEL {}", result.overflow);
+                    log!(" {}..{}", post_index, (post_index + result.overflow));
+                    let mut r = C::splice::<_,M>(
+                        post_slab,
+                        0,
+                        result.overflow,
+                        [].into_iter(),
+                        #[cfg(debug_assertions)]
+                        (&mut self.debug, 0..0),
+                    );
+                    self.len -= r.del;
+                    C::compute_min_max(&mut r.slabs);
+                    self.slabs
+                        .splice(post_slab_index..(post_slab_index + 1), r.slabs);
+                    break;
+                }
             }
-            SpliceResult::Noop => {}
+        }
+        if self.slabs.is_empty() {
+            assert!(self.len == 0);
+            self.slabs.push(Slab::default()); // need a blank empty slab
         }
 
         debug_assert_eq!(
@@ -1315,8 +1343,20 @@ pub(crate) mod tests {
     ) where
         E: MaybePackable<'a, C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
     {
-        vec.splice(index..index, values.clone());
-        col.splice(index, 0, values);
+        test_splice_del(vec, col, index, 0, values);
+    }
+
+    fn test_splice_del<'a, C: ColumnCursor, E>(
+        vec: &'a mut Vec<E>,
+        col: &'a mut ColumnData<C>,
+        index: usize,
+        del: usize,
+        values: Vec<E>,
+    ) where
+        E: MaybePackable<'a, C::Item> + std::fmt::Debug + std::cmp::PartialEq<C::Export> + Clone,
+    {
+        vec.splice(index..index + del, values.clone());
+        col.splice(index, del, values);
         for slab in &col.slabs {
             let (_, c) = C::seek(slab.len(), slab);
             assert_eq!(c.min(), slab.min());
@@ -1669,6 +1709,31 @@ pub(crate) mod tests {
         );
     }
 
+    /// v0 splice panics when del > 1 and the delete range spans a slab boundary.
+    /// Build a multi-slab column (B=64) and delete 5 items near the boundary.
+    #[test]
+    fn splice_cross_slab_delete() {
+        let mut col: ColumnData<UIntCursor> = (0..200).map(|i| i as u64).collect();
+        // Position 62: last few items of first slab (64 items). del=5 crosses into the next slab.
+        col.splice(62, 5, std::iter::empty::<u64>());
+        assert_eq!(col.len(), 195);
+    }
+
+    #[test]
+    fn column_data_big_delete() {
+        let mut col: ColumnData<IntCursor> = [
+            1, 2, 3, 4, 5, 6, 5, 5, 5, 4, 3, 2, 2, 2, 1, 1, 1, 1, 2, 3, 4, 4, 4,
+        ]
+        .into_iter()
+        .collect();
+        let len = col.len();
+        let v: Vec<i64> = vec![];
+        log!("SPLICE 1");
+        col.splice(0, 0, v.clone());
+        log!("SPLICE 2");
+        col.splice(0, len, v);
+    }
+
     // TODO - would be nice if you printed the seed on failure
     // so we could re-seed if we ever see one of these fail
     trait TestRand: Clone {
@@ -1762,6 +1827,7 @@ pub(crate) mod tests {
         SmallRng::seed_from_u64(seed)
     }
 
+    /// Generate a random insert-only splice (del=0).
     fn generate_splice<T: TestRand>(len: usize, rng: &mut SmallRng) -> (usize, Vec<T>) {
         let index = T::index(len, rng);
         let patch = match rng.random::<u32>() % 4 {
@@ -1780,6 +1846,56 @@ pub(crate) mod tests {
         (index, patch)
     }
 
+    /// Generate a random splice that may insert, delete, replace, or do a mix.
+    /// Returns (index, del, values).
+    fn generate_splice_del<T: TestRand>(len: usize, rng: &mut SmallRng) -> (usize, usize, Vec<T>) {
+        if len == 0 {
+            // Can only insert when empty.
+            let (index, values) = generate_splice(len, rng);
+            return (index, 0, values);
+        }
+        match rng.random::<u32>() % 5 {
+            // Insert only (del=0).
+            0 => {
+                let (index, values) = generate_splice(len, rng);
+                (index, 0, values)
+            }
+            // Delete only (no new values).
+            1 => {
+                let max_del = min(len, 10);
+                let del = (rng.random::<u32>() as usize % max_del) + 1;
+                let index = rng.random::<u32>() as usize % (len - del + 1);
+                (index, del, vec![])
+            }
+            // Replace same count.
+            2 => {
+                let max_del = min(len, 10);
+                let del = (rng.random::<u32>() as usize % max_del) + 1;
+                let index = rng.random::<u32>() as usize % (len - del + 1);
+                let values = (0..del).map(|_| T::maybe_rand(rng)).collect();
+                (index, del, values)
+            }
+            // Replace with fewer (shrink).
+            3 => {
+                let max_del = min(len, 10);
+                let del = (rng.random::<u32>() as usize % max_del) + 1;
+                let index = rng.random::<u32>() as usize % (len - del + 1);
+                let ins = rng.random::<u32>() as usize % del;
+                let values = (0..ins).map(|_| T::maybe_rand(rng)).collect();
+                (index, del, values)
+            }
+            // Replace with more (grow).
+            _ => {
+                let max_del = min(len, 5);
+                let del = (rng.random::<u32>() as usize % max_del) + 1;
+                let index = rng.random::<u32>() as usize % (len - del + 1);
+                let ins = del + (rng.random::<u32>() as usize % 10) + 1;
+                let values = (0..ins).map(|_| T::maybe_rand(rng)).collect();
+                (index, del, values)
+            }
+        }
+    }
+
     #[test]
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
@@ -1788,6 +1904,14 @@ pub(crate) mod tests {
         for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
+        }
+        let export = ColumnData::<RleCursor<64, u64>>::load(&col.save()).unwrap();
+        assert_eq!(col.to_vec(), export.to_vec());
+
+        // Phase 2: mixed insert/delete/replace.
+        for _ in 0..FUZZ_SIZE {
+            let (index, del, values) = generate_splice_del(data.len(), &mut rng);
+            test_splice_del(&mut data, &mut col, index, del, values);
         }
         let export = ColumnData::<RleCursor<64, u64>>::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
@@ -1865,6 +1989,14 @@ pub(crate) mod tests {
         }
         let copy: ColumnData<StrCursor> = ColumnData::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
+
+        // Phase 2: mixed insert/delete/replace.
+        for _ in 0..FUZZ_SIZE {
+            let (index, del, values) = generate_splice_del(data.len(), &mut rng);
+            test_splice_del(&mut data, &mut col, index, del, values);
+        }
+        let copy: ColumnData<StrCursor> = ColumnData::load(&col.save()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
     }
 
     #[test]
@@ -1886,6 +2018,14 @@ pub(crate) mod tests {
         for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
+        }
+        let copy: ColumnData<DeltaCursor> = ColumnData::load(&col.save()).unwrap();
+        assert_eq!(col.to_vec(), copy.to_vec());
+
+        // Phase 2: mixed insert/delete/replace.
+        for _ in 0..FUZZ_SIZE {
+            let (index, del, values) = generate_splice_del(data.len(), &mut rng);
+            test_splice_del(&mut data, &mut col, index, del, values);
         }
         let copy: ColumnData<DeltaCursor> = ColumnData::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), copy.to_vec());
@@ -1966,6 +2106,14 @@ pub(crate) mod tests {
         for _ in 0..FUZZ_SIZE {
             let (index, values) = generate_splice(data.len(), &mut rng);
             test_splice(&mut data, &mut col, index, values);
+        }
+        let export = ColumnData::<BooleanCursor>::load(&col.save()).unwrap();
+        assert_eq!(col.to_vec(), export.to_vec());
+
+        // Phase 2: mixed insert/delete/replace.
+        for _ in 0..FUZZ_SIZE {
+            let (index, del, values) = generate_splice_del(data.len(), &mut rng);
+            test_splice_del(&mut data, &mut col, index, del, values);
         }
         let export = ColumnData::<BooleanCursor>::load(&col.save()).unwrap();
         assert_eq!(col.to_vec(), export.to_vec());
