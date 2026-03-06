@@ -140,6 +140,7 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { crate = "getrandom@0.3.4", reason = "brought in by automerge and rand; 0.4.1 brought in by tempfile/cbindgen" },
+    { crate = "r-efi@5.3.0", reason = "brought in by getrandom 0.3.4; 6.0.0 brought in by getrandom 0.4.2 via tempfile/cbindgen" },
     { crate = "windows-sys@0.60.2", reason = "brought in by clap and other deps used in automerge-cli, cbindgen, and criterion" },
     { crate = "itertools@0.13.0", reason = "this is brought in by criterion-plot, which we only use in benchmarks" },
 ]
