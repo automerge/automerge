@@ -1,8 +1,6 @@
 use super::aggregate::Acc;
 use super::aggregate::Agg;
-use super::cursor::{
-    ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, RunIterState,
-};
+use super::cursor::{ColumnCursor, HasAcc, HasMinMax, HasPos, Run, RunIter, RunIterState};
 use super::encoder::Encoder;
 use super::pack::{MaybePackable, PackError, Packable};
 use super::raw::RawReader;
@@ -1078,23 +1076,18 @@ impl<C: ColumnCursor> ColumnData<C> {
         C::compute_min_max(&mut result.slabs); // this should be handled by slabwriter.finish
         self.len = self.len + result.add - result.del;
         let post_slab_index = cursor.index + result.slabs.len();
-        let post_index = index + result.add;
         self.slabs
             .splice(cursor.index..(cursor.index + 1), result.slabs);
         self.counter += 1;
 
-        log!("OVERFLOW {}", result.overflow);
         while result.overflow > 0 {
             if let Some(post_slab) = self.slabs.get(post_slab_index) {
                 if post_slab.len() <= result.overflow {
-                    log!("DELETE WHOLE SLAB {}", post_slab.len());
                     result.overflow -= post_slab.len();
                     self.len -= post_slab.len();
                     self.slabs.remove(post_slab_index);
                 } else {
-                    log!("SPLICE DEL {}", result.overflow);
-                    log!(" {}..{}", post_index, (post_index + result.overflow));
-                    let mut r = C::splice::<_,M>(
+                    let mut r = C::splice::<_, M>(
                         post_slab,
                         0,
                         result.overflow,
