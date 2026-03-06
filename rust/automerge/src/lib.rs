@@ -307,7 +307,9 @@ pub use sequence_tree::SequenceTree;
 pub use storage::{Bundle, BundleChange, BundleChangeIter, VerificationMode};
 pub use text_value::ConcreteTextValue;
 pub use transaction::BlockOrText;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
+pub use types::{
+    ActorId, Author, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding,
+};
 pub use value::{ScalarValue, Value};
 
 /// The object ID for the root map of a document

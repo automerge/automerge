@@ -1,5 +1,5 @@
 use crate::storage::load::Error as LoadError;
-use crate::types::{ActorId, ScalarValue};
+use crate::types::{ActorId, Author, ScalarValue};
 use crate::value::DataType;
 use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use hexane::PackError;
@@ -13,12 +13,16 @@ pub enum AutomergeError {
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("duplicate author assignment {0} for actor {1} found for seq {2}")]
+    DuplicateAuthor(Author, ActorId, u64),
     #[error("duplicate actor {0}: possible document clone")]
     DuplicateActorId(ActorId),
     #[error("general failure")]
     Fail,
     #[error("invalid actor ID `{0}`")]
     InvalidActorId(String),
+    #[error("invalid author `{0}`")]
+    InvalidAuthor(String),
     #[error("invalid actor index `{0}`")]
     InvalidActorIndex(usize),
     #[error(transparent)]
@@ -88,6 +92,10 @@ impl From<AutomergeError> for wasm_bindgen::JsValue {
 #[derive(Error, Debug)]
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorId(pub String);
+
+#[derive(Error, Debug)]
+#[error("Invalid author: {0}")]
+pub struct InvalidAuthor(pub String);
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]

@@ -2,8 +2,9 @@ use automerge::marks::{ExpandMark, Mark};
 //use automerge::op_tree::B;
 use automerge::transaction::{CommitOptions, Transactable};
 use automerge::{
-    sync::SyncDoc, ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId,
-    ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    sync::SyncDoc, ActorId, Author, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange,
+    ObjId, ObjType, Patch, PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value,
+    ROOT,
 };
 
 const B: usize = 16;
@@ -2594,4 +2595,61 @@ fn reproduce_clock_cache_bug() {
     let heads = base.get_heads();
 
     assert!(base.get_changes(&heads).is_empty());
+}
+
+#[test]
+fn authorship() {
+    let author1 = Author::from(vec![1, 1, 1]);
+    let author2 = Author::from(vec![2, 2, 2]);
+    let mut doc1 = AutoCommit::new();
+    doc1.put(ROOT, "key", "value1").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
+
+    let mut doc2 = doc1.fork();
+
+    doc1.set_author(Some(author1.clone()));
+    doc2.set_author(Some(author2.clone()));
+
+    doc1.put(ROOT, "key", "value2").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author1.as_bytes()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 1, 1, 1]);
+
+    doc1.put(ROOT, "key", "value3").unwrap();
+    let change = doc1.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 2);
+    assert_eq!(change.author(), None);
+    assert!(change.extra_bytes().is_empty());
+
+    doc2.put(ROOT, "key", "value4").unwrap();
+    let change = doc2.get_last_local_change().unwrap();
+    assert_eq!(change.seq(), 1);
+    assert_eq!(change.author(), Some(author2.as_bytes()));
+    assert_eq!(change.extra_bytes(), &[1, 3, 2, 2, 2]);
+
+    doc1.merge(&mut doc2).unwrap();
+
+    let authors = doc1.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc1.get_actors_for_author(&author1);
+    let actors2 = doc1.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(doc1.get_author_for_actor(&actors1[0]), Some(&author1));
+    assert_eq!(doc1.get_author_for_actor(&actors2[0]), Some(&author2));
+
+    let doc3 = AutoCommit::load(&doc1.save()).unwrap();
+
+    let authors = doc3.get_authors();
+    assert_eq!(authors, vec![author1.clone(), author2.clone()]);
+    let actors1 = doc3.get_actors_for_author(&author1);
+    let actors2 = doc3.get_actors_for_author(&author2);
+    assert_eq!(actors1.len(), 1);
+    assert_eq!(actors2.len(), 1);
+    assert_eq!(doc3.get_author_for_actor(&actors1[0]), Some(&author1));
+    assert_eq!(doc3.get_author_for_actor(&actors2[0]), Some(&author2));
 }

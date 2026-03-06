@@ -6,7 +6,7 @@ use crate::{
         change::{Unverified, Verified},
         parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
     },
-    types::{ActorId, ChangeHash, ElemId},
+    types::{ActorId, Author, ChangeHash, ElemId},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +42,17 @@ impl Change {
             len,
             compression,
         })
+    }
+
+    pub fn author(&self) -> Option<&[u8]> {
+        let mut buff = self.stored.extra_bytes();
+        let id = leb128::read::unsigned(&mut buff).ok()?;
+        let len = leb128::read::unsigned(&mut buff).ok()? as usize;
+        if id == Footer::Author as u64 && buff.len() >= len {
+            Some(&buff[0..len])
+        } else {
+            None
+        }
     }
 
     pub fn actor_id(&self) -> &ActorId {
@@ -345,6 +356,7 @@ impl From<&Change> for crate::ExpandedChange {
         crate::ExpandedChange {
             operations,
             actor_id: actors.get(&0).unwrap().clone(),
+            author: c.author().map(Author::from),
             hash: Some(c.hash()),
             time: c.timestamp(),
             deps: c.deps().to_vec(),
@@ -354,4 +366,9 @@ impl From<&Change> for crate::ExpandedChange {
             message: c.message().cloned(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Footer {
+    Author = 1,
 }

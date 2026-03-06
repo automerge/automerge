@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
@@ -27,7 +27,9 @@ use crate::transaction::{
 
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
-use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
+use crate::types::{
+    ActorId, Author, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value,
+};
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
 
 pub(crate) mod current_state;
@@ -87,6 +89,7 @@ pub struct LoadOptions<'a> {
     string_migration: StringMigration,
     patch_log: Option<&'a mut PatchLog>,
     text_encoding: TextEncoding,
+    author: Option<Author>,
 }
 
 impl<'a> LoadOptions<'a> {
@@ -154,6 +157,13 @@ impl<'a> LoadOptions<'a> {
             ..self
         }
     }
+
+    pub fn author(self, author: Author) -> Self {
+        Self {
+            author: Some(author),
+            ..self
+        }
+    }
 }
 
 impl std::default::Default for LoadOptions<'static> {
@@ -164,6 +174,7 @@ impl std::default::Default for LoadOptions<'static> {
             patch_log: None,
             string_migration: StringMigration::NoMigration,
             text_encoding: TextEncoding::platform_default(),
+            author: None,
         }
     }
 }
@@ -208,6 +219,8 @@ pub struct Automerge {
     pub(crate) ops: OpSet,
     /// The current actor.
     actor: Actor,
+    /// The current author.
+    author: Option<Author>,
 }
 
 impl Automerge {
@@ -219,6 +232,7 @@ impl Automerge {
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
@@ -229,6 +243,7 @@ impl Automerge {
             ops: OpSet::new(encoding),
             deps: Default::default(),
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         }
     }
 
@@ -240,6 +255,7 @@ impl Automerge {
             ops,
             deps,
             actor: Actor::Unused(ActorId::random()),
+            author: None,
         };
         doc.remove_unused_actors(false);
         doc
@@ -282,6 +298,80 @@ impl Automerge {
             Err(_) => self.actor = Actor::Unused(actor),
         }
         self
+    }
+
+    /// Set the revocations for this document.
+    pub fn with_revocations(mut self, revocations: HashMap<Author, Vec<ChangeHash>>) -> Self {
+        self.set_revocations(revocations);
+        self
+    }
+
+    pub fn set_revocations(&mut self, revocations: HashMap<Author, Vec<ChangeHash>>) {
+        self.change_graph.set_revocations(revocations);
+        self.ops
+            .recompute_indexes(&self.clock_at(&self.get_heads()));
+    }
+
+    /// Set the author for this document.
+    pub fn with_author(mut self, author: Option<Author>) -> Self {
+        self.set_author(author);
+        self
+    }
+
+    /// Set the author for this document.
+    pub fn set_author(&mut self, author: Option<Author>) -> &mut Self {
+        if author.as_ref() != self.get_author() {
+            self.author = author;
+            self.actor = Actor::Unused(ActorId::random());
+        }
+        self
+    }
+
+    /// Get the current author of this document.
+    pub fn get_author(&self) -> Option<&Author> {
+        self.author.as_ref()
+    }
+
+    /// Revoke all changes made by author after heads
+    /// Errors if given a heads not in the document yet
+    pub fn revoke(&mut self, author: &Author, from: &[ChangeHash], patch_log: &mut PatchLog) {
+        let heads = self.get_heads();
+        let before = self.clock_at(&heads);
+        self.change_graph.revoke(author.clone(), from.to_vec());
+        let after = self.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    pub fn unrevoke(&mut self, author: &Author, patch_log: &mut PatchLog) {
+        let heads = self.get_heads();
+        let before = self.clock_at(&heads);
+        self.change_graph.unrevoke(author);
+        let after = self.clock_at(&heads);
+        self.ops.recompute_indexes(&after);
+        let clock = ClockRange::Diff(before, after);
+        DiffIter::log(self, ObjMeta::root(), clock, patch_log, true);
+    }
+
+    pub fn get_revocations(&self) -> HashMap<Author, Vec<ChangeHash>> {
+        self.change_graph.get_revocations().clone()
+    }
+
+    pub fn get_actors_for_author(&self, author: &Author) -> Vec<ActorId> {
+        self.change_graph
+            .get_actors_for_author(author)
+            .filter_map(|idx| self.ops.actors.get(idx).cloned())
+            .collect()
+    }
+
+    pub fn get_authors(&self) -> Vec<Author> {
+        self.change_graph.get_authors().to_vec()
+    }
+
+    pub fn get_author_for_actor(&self, actor: &ActorId) -> Option<&Author> {
+        let actor_index = self.ops.actors.binary_search(actor).ok()?;
+        self.change_graph.get_author_for_actor(actor_index)
     }
 
     /// Get the current actor id of this document.
@@ -387,6 +477,7 @@ impl Automerge {
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
         let checkpoint = self.ops.save_checkpoint();
+        let author = if seq == 1 { self.author.clone() } else { None };
         TransactionArgs {
             actor_index,
             seq,
@@ -394,6 +485,7 @@ impl Automerge {
             deps,
             checkpoint,
             scope,
+            author,
         }
     }
 
@@ -698,7 +790,7 @@ impl Automerge {
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
-            return Ok(Self::new());
+            return Ok(Self::new_with_encoding(options.text_encoding).with_author(options.author));
         }
         tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
@@ -722,7 +814,7 @@ impl Automerge {
                     Change::new_from_unverified(stored_change.into_owned(), None)
                         .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::Bundle(bundle) => {
                 tracing::trace!("first chunk is change chunk");
@@ -732,7 +824,7 @@ impl Automerge {
                     .to_changes()
                     .map_err(|e| load::Error::InvalidBundleChange(Box::new(e)))?;
                 changes.extend(bundle_changes);
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
                 tracing::trace!("first chunk is compressed change");
@@ -743,7 +835,7 @@ impl Automerge {
                     )
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
                 );
-                Self::new()
+                Self::new_with_encoding(options.text_encoding)
             }
         };
         tracing::trace!("loading change chunks");
@@ -773,7 +865,8 @@ impl Automerge {
                 am.log_current_state(ObjMeta::root(), patch_log, true);
             }
         }
-        Ok(am)
+
+        Ok(am.with_author(options.author))
     }
 
     /// Create the patches from a [`PatchLog`]
@@ -817,9 +910,14 @@ impl Automerge {
                 data,
                 LoadOptions::new()
                     .on_partial_load(OnPartialLoad::Ignore)
-                    .verification_mode(VerificationMode::Check),
+                    .verification_mode(VerificationMode::Check)
+                    .text_encoding(self.text_encoding()),
             )?;
-            doc = doc.with_actor(self.actor_id().clone());
+            // because we replace the *self here its important that all state not
+            // in the file to be loaded is copied here
+            doc.set_actor(self.actor_id().clone());
+            doc.set_author(self.author.clone());
+            doc.set_revocations(self.get_revocations());
             if patch_log.is_active() {
                 doc.log_current_state(ObjMeta::root(), patch_log, true);
             }
@@ -863,6 +961,10 @@ impl Automerge {
 
     pub(crate) fn has_actor_seq(&self, change: &Change) -> bool {
         self.seq_for_actor(change.actor_id()) >= change.seq()
+    }
+
+    pub(crate) fn has_actor_author(&self, change: &Change) -> bool {
+        change.author().is_some() && self.get_author_for_actor(change.actor_id()).is_some()
     }
 
     /// Apply changes to this document.
@@ -1069,6 +1171,7 @@ impl Automerge {
         self.actor.rewrite_with_new_actor(index);
         index
     }
+
     pub(crate) fn put_actor_ref(&mut self, actor: &ActorId) -> usize {
         match self.ops.actors.binary_search(actor) {
             Ok(idx) => idx,
@@ -1076,7 +1179,7 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn put_actor(&mut self, actor: ActorId) -> usize {
+    fn put_actor(&mut self, actor: ActorId) -> usize {
         match self.ops.actors.binary_search(&actor) {
             Ok(idx) => idx,
             Err(idx) => self.insert_actor(idx, actor),
@@ -1283,6 +1386,18 @@ impl Automerge {
         obj: &ExId,
         clock: Option<Clock>,
     ) -> Result<Vec<Mark>, AutomergeError> {
+        // this function does not properly handle revocations
+        // because it does not use the index - no point in using
+        // the index b/c it does a full pass anyway
+        // so we hack the clock in to get the right results
+        // best option would be to rewrite this to use doc.iter() to build the result
+        let clock = match clock {
+            Some(c) => Some(c),
+            None if !self.change_graph.get_revocations().is_empty() => {
+                Some(self.clock_at(&self.get_heads()))
+            }
+            None => None,
+        };
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut top_ops = self
             .ops()
@@ -1626,6 +1741,18 @@ impl Automerge {
         index: usize,
         clock: Option<Clock>,
     ) -> Result<MarkSet, AutomergeError> {
+        // this function does not properly handle revocations
+        // because it does not use the index - no point in using
+        // the index b/c it does a full pass anyway
+        // so we hack the clock in to get the right results
+        // best option would be to rewrite this to use doc.iter() to build the result
+        let clock = match clock {
+            Some(c) => Some(c),
+            None if !self.change_graph.get_revocations().is_empty() => {
+                Some(self.clock_at(&self.get_heads()))
+            }
+            None => None,
+        };
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut iter = self
             .ops
