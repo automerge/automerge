@@ -193,6 +193,7 @@ where
     T: AsChangeOp,
 {
     if ops.is_empty() {
+        mapper.reset();
         return ChangeOpsColumns::default().into();
     }
 
@@ -270,7 +271,7 @@ impl<'a> ActorMapper<'a> {
         }
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         let len = self.actors.len();
         self.seen_actors.truncate(0);
         self.mapping.truncate(0);
