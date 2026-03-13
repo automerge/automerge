@@ -130,6 +130,18 @@ impl Transaction<'_> {
 }
 
 impl ReadDoc for Transaction<'_> {
+    type ViewAt<'a>
+        = crate::view_at::AutomergeAt<'a>
+    where
+        Self: 'a;
+
+    fn view_at(&self, heads: &[ChangeHash]) -> Result<Self::ViewAt<'_>, crate::error::ViewAtError> {
+        // Note: view_at sees the document state, not uncommitted transaction changes, which
+        // is fine, because view_at requires heads, which means uncommitted transaction changes
+        // are not relevant to the view at the specified heads.
+        crate::view_at::AutomergeAt::new(self.doc, heads)
+    }
+
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys_for(obj.as_ref(), self.get_scope(None))
     }

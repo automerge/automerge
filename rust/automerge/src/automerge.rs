@@ -1708,6 +1708,12 @@ impl Automerge {
 }
 
 impl ReadDoc for Automerge {
+    type ViewAt<'a> = crate::view_at::AutomergeAt<'a>;
+
+    fn view_at(&self, heads: &[ChangeHash]) -> Result<Self::ViewAt<'_>, crate::error::ViewAtError> {
+        crate::view_at::AutomergeAt::new(self, heads)
+    }
+
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.parents_for(obj.as_ref(), None)
     }
