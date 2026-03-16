@@ -1,3 +1,20 @@
+# Unreleased
+
+## Added
+
+* `Transactable::batch_create_object` which takes a `hydrate::Value` and creates
+  an object in one go rather than requiring many individual calls to create each
+  nested object in the value. This is much faster for large objects.
+* `Transactable::init_root_from_hydrate` allows initializing all the keys of the
+  root object from a map. As above this is much more efficient for large initial
+  values.
+
+## Breaking Changes
+
+* `Transactable::splice` now takes an iterator of `Into<hydrate::Value>` rather
+  than an `IntoIterator<ScalarValue>`. This allows batch splicing of large
+  objects
+
 # 0.7.4
 
 * Fix a bug which caused patches in documents containing rich text to be 

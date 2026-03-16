@@ -1,4 +1,9 @@
-import { isCounter, isImmutableString, rootProxy } from "./proxies.js"
+import {
+  isCounter,
+  isImmutableString,
+  rootProxy,
+  validateForBatchInsert,
+} from "./proxies.js"
 export { isImmutableString, isCounter } from "./proxies.js"
 import { STATE } from "./constants.js"
 
@@ -356,8 +361,19 @@ export function from<T extends Record<string, unknown>>(
   initialState: T | Doc<T>,
   _opts?: ActorId | InitOptions<T>,
 ): Doc<T> {
-  return _change(init(_opts), "from", {}, d => Object.assign(d, initialState))
-    .newDoc
+  const opts = importOpts(_opts)
+
+  if (typeof initialState !== "object" || Array.isArray(initialState)) {
+    initialState = Object.assign({}, initialState)
+  }
+
+  validateForBatchInsert(initialState, null, [])
+
+  const doc = init<T>(_opts)
+  return _change(doc, "from", {}, d => {
+    _state(doc).handle.initRootFromHydrate(initialState)
+    return d
+  }).newDoc
 }
 
 /**
@@ -1034,7 +1050,13 @@ export function diff(doc: Doc<unknown>, before: Heads, after: Heads): Patch[] {
  *
  * This is an experimental API
  */
-export function diffPath(doc: Doc<unknown>, path: Prop[], before: Heads, after: Heads, opts?: DiffOptions): Patch[] {
+export function diffPath(
+  doc: Doc<unknown>,
+  path: Prop[],
+  before: Heads,
+  after: Heads,
+  opts?: DiffOptions,
+): Patch[] {
   checkHeads(before, "before")
   checkHeads(after, "after")
   const state = _state(doc)

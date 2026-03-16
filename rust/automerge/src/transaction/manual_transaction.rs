@@ -1,7 +1,7 @@
-use crate::automerge::Automerge;
 use crate::exid::ExId;
 use crate::patches::PatchLog;
 use crate::ChangeHash;
+use crate::{automerge::Automerge, AutomergeError};
 
 use super::{CommitOptions, TransactionArgs, TransactionInner};
 
@@ -119,6 +119,13 @@ impl Transaction<'_> {
         } else {
             self.inner.as_ref().and_then(|i| i.get_scope().clone())
         }
+    }
+
+    pub(crate) fn batch_init_root_map(
+        &mut self,
+        value: &crate::hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(move |tx, doc, hist| tx.batch_init_root_map(doc, hist, value))
     }
 }
 

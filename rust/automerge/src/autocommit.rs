@@ -1039,14 +1039,13 @@ impl Transactable for AutoCommit {
         tx.delete(&mut self.doc, patch_log, obj.as_ref(), prop)
     }
 
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
-    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
+    /// Splice new elements into the given sequence
+    fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
         &mut self,
         obj: O,
         pos: usize,
         del: isize,
-        vals: V,
+        vals: I,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
@@ -1166,6 +1165,35 @@ impl Transactable for AutoCommit {
         self.ensure_transaction_open();
         let (patch_log, tx) = self.transaction.as_mut().unwrap();
         tx.update_object(&mut self.doc, patch_log, obj.as_ref(), new_value)
+    }
+
+    fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: &crate::hydrate::Value,
+        insert: bool,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.batch_create_object(
+            &mut self.doc,
+            patch_log,
+            obj.as_ref(),
+            prop.into(),
+            value,
+            insert,
+        )
+    }
+
+    fn init_root_from_hydrate(
+        &mut self,
+        value: &crate::hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (patch_log, tx) = self.transaction.as_mut().unwrap();
+        tx.batch_init_root_map(&mut self.doc, patch_log, value)?;
+        Ok(())
     }
 }
 

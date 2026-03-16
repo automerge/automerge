@@ -78,12 +78,16 @@ pub trait Transactable: ReadDoc {
     /// replace a section of a list. If `del` is positive then N values
     /// are deleted after position `pos` and the new values inserted. If
     /// it is negative then N values are deleted before position `pos` instead.
-    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
+    ///
+    /// Values can be scalars or nested objects (maps, lists, text). Scalar
+    /// values are inserted directly, while nested objects are created using
+    /// batch insertion for efficiency.
+    fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
         &mut self,
         obj: O,
         pos: usize,
         del: isize,
-        vals: V,
+        vals: I,
     ) -> Result<(), AutomergeError>;
 
     /// Like [`Self::splice`] but for text.
@@ -165,6 +169,31 @@ pub trait Transactable: ReadDoc {
         obj: O,
         new_value: &crate::hydrate::Value,
     ) -> Result<(), crate::error::UpdateObjectError>;
+
+    /// Put or insert a nested `hydrate::Value` as a new object tree using
+    /// batch operations.
+    ///
+    /// This is much faster than decomposing the value into individual put/insert
+    /// operations because it only requires two OpSet splices instead of one per
+    /// node.
+    ///
+    /// When `insert` is true and `prop` is a sequence index, the value is
+    /// inserted at that index. When false, it overwrites the existing element.
+    /// For map keys, `insert` is ignored.
+    fn batch_create_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: &crate::hydrate::Value,
+        insert: bool,
+    ) -> Result<ExId, AutomergeError>;
+
+    /// Overwrite the keys of the root object with the values from `value`
+    ///
+    /// This is useful to initialize an empty document with a large initial
+    /// value. Note that existing keys which are not in `value` are left as is
+    fn init_root_from_hydrate(&mut self, value: &crate::hydrate::Map)
+        -> Result<(), AutomergeError>;
 }
 
 #[derive(Debug, PartialEq, Clone)]

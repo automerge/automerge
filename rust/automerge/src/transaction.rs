@@ -362,12 +362,12 @@ macro_rules! impl_transactable_for_tx {
                 self.do_tx(|tx, doc, hist| tx.delete(doc, hist, obj.as_ref(), prop))
             }
 
-            fn splice<O: AsRef<crate::exid::ExId>, V: IntoIterator<Item = crate::ScalarValue>>(
+            fn splice<O: AsRef<ExId>, V: Into<crate::hydrate::Value>, I: IntoIterator<Item = V>>(
                 &mut self,
                 obj: O,
                 pos: usize,
                 del: isize,
-                vals: V,
+                vals: I,
             ) -> Result<(), crate::AutomergeError> {
                 self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))?;
                 Ok(())
@@ -483,6 +483,27 @@ macro_rules! impl_transactable_for_tx {
                 self.do_tx(move |tx, doc, hist| {
                     tx.update_object(doc, hist, obj.as_ref(), new_value)
                 })
+            }
+
+            fn batch_create_object<O: AsRef<ExId>, P: Into<crate::Prop>>(
+                &mut self,
+                obj: O,
+                prop: P,
+                value: &crate::hydrate::Value,
+                insert: bool,
+            ) -> Result<ExId, crate::AutomergeError> {
+                let prop = prop.into();
+                self.do_tx(move |tx, doc, hist| {
+                    tx.batch_create_object(doc, hist, obj.as_ref(), prop, value, insert)
+                })
+            }
+
+            fn init_root_from_hydrate(
+                &mut self,
+                value: &crate::hydrate::Map,
+            ) -> Result<(), crate::AutomergeError> {
+                self.do_tx(move |tx, doc, hist| tx.batch_init_root_map(doc, hist, value))?;
+                Ok(())
             }
         }
     };

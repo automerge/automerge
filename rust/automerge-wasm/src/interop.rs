@@ -1872,6 +1872,21 @@ pub(super) fn js_val_to_hydrate(
         Some(Err(e)) => return Err(e.into()),
         None => (None, js_val.clone()),
     };
+    // Check for JS Object types that should be treated as scalars, not as
+    // automerge maps. import_obj would incorrectly classify these as maps
+    // since dyn_into::<js_sys::Object>() succeeds for any JS object.
+    if datatype.is_none() {
+        if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+            return Ok(am::hydrate::Value::Scalar(am::ScalarValue::Timestamp(
+                d.get_time() as i64,
+            )));
+        }
+        if let Ok(u) = value.clone().dyn_into::<Uint8Array>() {
+            return Ok(am::hydrate::Value::Scalar(am::ScalarValue::Bytes(
+                u.to_vec(),
+            )));
+        }
+    }
     if let Ok(js_obj) = import_obj(&value, datatype) {
         match js_obj.objtype() {
             am::ObjType::Map | am::ObjType::Table => {
@@ -1904,10 +1919,11 @@ pub(super) fn js_val_to_hydrate(
                 )))
             }
         }
-    } else if let Ok(val) = import_scalar(&value, datatype) {
-        Ok(am::hydrate::Value::Scalar(val))
     } else {
-        Err(error::JsValToHydrate::UnknownType)
+        match import_scalar(&value, datatype) {
+            Ok(val) => Ok(am::hydrate::Value::Scalar(val)),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 

@@ -432,6 +432,22 @@ impl Automerge {
         })
     }
 
+    /// Initialize the root object of an empty document from a JS object.
+    /// This is much faster than setting keys one at a time for large initial states.
+    #[wasm_bindgen(js_name = initRootFromHydrate)]
+    pub fn init_root_from_hydrate(
+        self: &mut Automerge,
+        value: JsValue,
+    ) -> Result<(), error::InitFromHydrate> {
+        let hydrate_value = interop::js_val_to_hydrate(self, value)?;
+        let map = match hydrate_value {
+            am::hydrate::Value::Map(m) => m,
+            _ => return Err(error::InitFromHydrate::NotAMap),
+        };
+        self.doc.init_root_from_hydrate(&map)?;
+        Ok(())
+    }
+
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut automerge = Automerge {
@@ -815,6 +831,70 @@ impl Automerge {
             self.subset::<error::InsertObject, _>(&opid, imported_obj.subvals())?;
         }
         Ok(opid.to_string().into())
+    }
+
+    /// Put a nested JavaScript value as a new object tree using batch insertion.
+    /// This is much faster than putObject for large nested objects.
+    /// For map keys this overwrites any existing value. For list indices this
+    /// overwrites the element at that index.
+    #[wasm_bindgen(js_name = putObjectFromHydrate, unchecked_return_type = "ObjID")]
+    pub fn put_object_from_hydrate(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "Prop")] prop: JsValue,
+        value: JsValue,
+    ) -> Result<JsValue, error::BatchCreateObject> {
+        let (obj, _) = self.import(obj)?;
+        let prop = self.import_prop(prop)?;
+        let hydrate_value = interop::js_val_to_hydrate(self, value)?;
+        let opid = self
+            .doc
+            .batch_create_object(&obj, prop, &hydrate_value, false)?;
+        Ok(opid.to_string().into())
+    }
+
+    /// Insert a nested JavaScript value into a list using batch insertion.
+    /// This is much faster than insertObject for large nested objects.
+    /// The value is inserted at the given index, shifting subsequent elements.
+    #[wasm_bindgen(js_name = insertObjectFromHydrate, unchecked_return_type = "ObjID")]
+    pub fn insert_object_from_hydrate(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        index: f64,
+        value: JsValue,
+    ) -> Result<JsValue, error::BatchCreateObject> {
+        let (obj, _) = self.import(obj)?;
+        let hydrate_value = interop::js_val_to_hydrate(self, value)?;
+        let opid = self.doc.batch_create_object(
+            &obj,
+            am::Prop::Seq(index as usize),
+            &hydrate_value,
+            true,
+        )?;
+        Ok(opid.to_string().into())
+    }
+
+    /// Splice values into a list using batch insertion.
+    /// This is much faster than individual insert calls for multiple values.
+    #[wasm_bindgen(js_name = spliceFromHydrate)]
+    pub fn splice_from_hydrate(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "ObjID")] obj: JsValue,
+        index: f64,
+        del: f64,
+        values: JsValue,
+    ) -> Result<(), error::SpliceHydrate> {
+        let (obj, _) = self.import(obj)?;
+        let js_array: js_sys::Array = values
+            .dyn_into()
+            .map_err(|_| error::SpliceHydrate::ValuesNotArray)?;
+        let hydrate_values: Vec<am::hydrate::Value> = js_array
+            .iter()
+            .map(|v| interop::js_val_to_hydrate(self, v))
+            .collect::<Result<_, _>>()?;
+        self.doc
+            .splice(&obj, index as usize, del as i64 as isize, hydrate_values)?;
+        Ok(())
     }
 
     fn subset<'a, E, I>(&mut self, obj: &am::ObjId, vals: I) -> Result<(), E>
@@ -2035,6 +2115,60 @@ pub mod error {
 
     impl From<InsertObject> for JsValue {
         fn from(e: InsertObject) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BatchCreateObject {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidProp(#[from] interop::error::InvalidProp),
+        #[error("invalid value")]
+        InvalidValue(#[from] interop::error::JsValToHydrate),
+    }
+
+    impl From<BatchCreateObject> for JsValue {
+        fn from(e: BatchCreateObject) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum InitFromHydrate {
+        #[error("value must be a map/object")]
+        NotAMap,
+        #[error("invalid actor id")]
+        BadActorId,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidValue(#[from] interop::error::JsValToHydrate),
+    }
+
+    impl From<InitFromHydrate> for JsValue {
+        fn from(e: InitFromHydrate) -> Self {
+            RangeError::new(&e.to_string()).into()
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum SpliceHydrate {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("values must be an array")]
+        ValuesNotArray,
+        #[error(transparent)]
+        InvalidValue(#[from] interop::error::JsValToHydrate),
+    }
+
+    impl From<SpliceHydrate> for JsValue {
+        fn from(e: SpliceHydrate) -> Self {
             RangeError::new(&e.to_string()).into()
         }
     }

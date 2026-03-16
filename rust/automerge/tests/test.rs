@@ -363,7 +363,8 @@ fn concurrent_insertions_at_different_list_positions() {
     doc1.insert(&list_id, 0, "one").unwrap();
     doc1.insert(&list_id, 1, "three").unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.splice(&list_id, 1, 0, vec!["two".into()]).unwrap();
+    doc1.splice(&list_id, 1, 0, vec![ScalarValue::from("two")])
+        .unwrap();
     doc2.insert(&list_id, 2, "four").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
@@ -504,9 +505,10 @@ fn insertion_after_a_deleted_list_element() {
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.splice(&list_id, 1, 2, Vec::new()).unwrap();
+    doc1.splice(&list_id, 1, 2, Vec::<ScalarValue>::new())
+        .unwrap();
 
-    doc2.splice(&list_id, 2, 0, vec!["starling".into()])
+    doc2.splice(&list_id, 2, 0, vec![ScalarValue::from("starling")])
         .unwrap();
 
     doc1.merge(&mut doc2).unwrap();
@@ -665,11 +667,11 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
         0,
         0,
         vec![
-            "to".into(),
-            "be".into(),
-            "is".into(),
-            "to".into(),
-            "do".into(),
+            ScalarValue::from("to"),
+            ScalarValue::from("be"),
+            ScalarValue::from("is"),
+            ScalarValue::from("to"),
+            ScalarValue::from("do"),
         ],
     )
     .unwrap();
@@ -679,11 +681,11 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
         0,
         0,
         vec![
-            "to".into(),
-            "do".into(),
-            "is".into(),
-            "to".into(),
-            "be".into(),
+            ScalarValue::from("to"),
+            ScalarValue::from("do"),
+            ScalarValue::from("is"),
+            ScalarValue::from("to"),
+            ScalarValue::from("be"),
         ],
     )
     .unwrap();

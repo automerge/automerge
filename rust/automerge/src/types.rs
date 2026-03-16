@@ -471,11 +471,13 @@ impl OpId {
     }
 
     #[inline]
+    #[expect(dead_code)]
     pub(crate) fn minus(&self, n: usize) -> OpId {
         OpId(self.0 - n as u32, self.1)
     }
 
     #[inline]
+    #[expect(dead_code)]
     pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
     }

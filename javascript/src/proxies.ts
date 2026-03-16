@@ -3,6 +3,44 @@ import type { Automerge, ObjID, Prop } from "./wasm_types.js"
 
 const MAX_I64 = BigInt("9223372036854775807") // 2n ** 63n - 1n;
 
+/**
+ * Recursively validate a value before batch insertion. Checks for
+ * - undefined values
+ * - proxy references to the same document (common footgun)
+ */
+export function validateForBatchInsert(
+  value: any,
+  context: Automerge | null,
+  path: Prop[],
+): void {
+  if (value === undefined) {
+    throw new RangeError(
+      [
+        `Cannot assign undefined value at ${printPath(path)}, `,
+        "You might consider setting the property's value to `null`, ",
+        "or using `delete` to remove it altogether.",
+      ].join(""),
+    )
+  }
+  if (value === null) return
+  const type = typeof value
+  if (type !== "object") return
+  if (context && isSameDocument(value, context)) {
+    throw new RangeError(
+      "Cannot create a reference to an existing document object",
+    )
+  }
+  if (value instanceof Array) {
+    for (let i = 0; i < value.length; i++) {
+      validateForBatchInsert(value[i], context, [...path, i])
+    }
+  } else if (Object.prototype.toString.call(value) === "[object Object]") {
+    for (const k in value) {
+      validateForBatchInsert(value[k], context, [...path, k])
+    }
+  }
+}
+
 import type {
   AutomergeValue,
   ScalarValue,
@@ -240,24 +278,14 @@ const MapHandler = {
 
     const [value, datatype] = import_value(val, [...path, key], context)
     switch (datatype) {
-      case "list": {
-        const list = context.putObject(objectId, key, [])
-        const proxyList = listProxy(context, list, [...path, key])
-        for (let i = 0; i < value.length; i++) {
-          proxyList[i] = value[i]
-        }
+      case "list":
+      case "map": {
+        validateForBatchInsert(value, context, [...path, key])
+        context.putObjectFromHydrate(objectId, key, value)
         break
       }
       case "text": {
         context.putObject(objectId, key, value)
-        break
-      }
-      case "map": {
-        const map = context.putObject(objectId, key, {})
-        const proxyMap = mapProxy(context, map, [...path, key])
-        for (const key in value) {
-          proxyMap[key] = value[key]
-        }
         break
       }
       default:
@@ -351,15 +379,14 @@ const ListHandler = {
     }
     const [value, datatype] = import_value(val, [...path, index], context)
     switch (datatype) {
-      case "list": {
-        let list: ObjID
+      case "list":
+      case "map": {
+        validateForBatchInsert(value, context, [...path, index])
         if (index >= context.length(objectId)) {
-          list = context.insertObject(objectId, index, [])
+          context.insertObjectFromHydrate(objectId, index, value)
         } else {
-          list = context.putObject(objectId, index, [])
+          context.putObjectFromHydrate(objectId, index, value)
         }
-        const proxyList = listProxy(context, list, [...path, index])
-        proxyList.splice(0, 0, ...value)
         break
       }
       case "text": {
@@ -367,19 +394,6 @@ const ListHandler = {
           context.insertObject(objectId, index, value)
         } else {
           context.putObject(objectId, index, value)
-        }
-        break
-      }
-      case "map": {
-        let map: ObjID
-        if (index >= context.length(objectId)) {
-          map = context.insertObject(objectId, index, {})
-        } else {
-          map = context.putObject(objectId, index, {})
-        }
-        const proxyMap = mapProxy(context, map, [...path, index])
-        for (const key in value) {
-          proxyMap[key] = value[key]
         }
         break
       }
@@ -603,52 +617,32 @@ function listMethods(target: Target) {
           )
         }
       }
+
+      // Read values to be deleted (for return value) before mutating
       const result: AutomergeValue[] = []
       for (let i = 0; i < del; i++) {
-        const value = valueAt(target, index)
+        const value = valueAt(target, index + i)
         if (value !== undefined) {
           result.push(value)
         }
-        context.delete(objectId, index)
       }
-      const values = vals.map((val, index) => {
+
+      // Validate all values before the WASM call
+      for (let i = 0; i < vals.length; i++) {
         try {
-          return import_value(val, [...path], context)
+          validateForBatchInsert(vals[i], context, [...path, index + i])
         } catch (e) {
           if (e instanceof RangeError) {
-            throw new RangeError(
-              `${e.message} (at index ${index} in the input)`,
-            )
+            throw new RangeError(`${e.message} (at index ${i} in the input)`)
           } else {
             throw e
           }
         }
-      })
-      for (const [value, datatype] of values) {
-        switch (datatype) {
-          case "list": {
-            const list = context.insertObject(objectId, index, [])
-            const proxyList = listProxy(context, list, [...path, index])
-            proxyList.splice(0, 0, ...value)
-            break
-          }
-          case "text": {
-            context.insertObject(objectId, index, value)
-            break
-          }
-          case "map": {
-            const map = context.insertObject(objectId, index, {})
-            const proxyMap = mapProxy(context, map, [...path, index])
-            for (const key in value) {
-              proxyMap[key] = value[key]
-            }
-            break
-          }
-          default:
-            context.insert(objectId, index, value, datatype)
-        }
-        index += 1
       }
+
+      // Single WASM call for both deletes and inserts
+      context.spliceFromHydrate(objectId, index, del, vals)
+
       return result
     },
 

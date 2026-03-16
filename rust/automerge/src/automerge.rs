@@ -224,6 +224,17 @@ impl Automerge {
         }
     }
 
+    /// Overwrite the keys of the root object with the values from `value`
+    ///
+    /// This is useful to initialize an empty document with a large initial
+    /// value. Note that existing keys which are not in `value` are left as is
+    pub fn init_from_hydrate(&mut self, value: &crate::hydrate::Map) -> Result<(), AutomergeError> {
+        let mut tx = self.transaction();
+        tx.batch_init_root_map(value)?;
+        tx.commit();
+        Ok(())
+    }
+
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
         Automerge {
             queue: ChangeQueue::new(),
