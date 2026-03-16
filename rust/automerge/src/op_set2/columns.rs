@@ -487,12 +487,6 @@ impl Columns {
             .counter
             .splice(pos, 0, ops.clone().map(O::counter));
 
-        /*
-                for o in ops.clone() {
-                    log!("op={:?} vis={} top={}", o, O::visible(&o), O::top(&o));
-                }
-        */
-
         ops.count()
     }
 
