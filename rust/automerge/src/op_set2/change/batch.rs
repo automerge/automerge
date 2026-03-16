@@ -2001,4 +2001,21 @@ mod tests {
             doc.validate_top_index();
         }
     }
+
+    #[test]
+    fn batch_multiple_changes_same_author() {
+        let author = crate::Author::try_from("aabbccdd").unwrap();
+        let mut doc1 = AutoCommit::new().with_author(Some(author.clone()));
+        doc1.put(&ROOT, "key1", "value1").unwrap();
+        doc1.commit();
+        doc1.put(&ROOT, "key2", "value2").unwrap();
+        doc1.commit();
+
+        let heads0 = [];
+        let changes = doc1.get_changes(&heads0);
+        assert_eq!(changes.len(), 2);
+
+        let mut doc2 = AutoCommit::new();
+        doc2.apply_changes_batch(changes).unwrap();
+    }
 }
