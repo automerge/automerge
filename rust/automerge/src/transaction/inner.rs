@@ -163,6 +163,7 @@ impl TransactionInner {
 
     fn extra_bytes<'a>(&self) -> Cow<'a, [u8]> {
         if let Some(author) = self.author.as_ref() {
+            assert_eq!(self.seq, 1);
             let mut buf = vec![];
             leb128::write::unsigned(&mut buf, Footer::Author as u64).unwrap();
             leb128::write::unsigned(&mut buf, author.as_bytes().len() as u64).unwrap();
