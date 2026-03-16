@@ -22,7 +22,8 @@ use crate::marks::{Mark, MarkAccumulator, MarkSet};
 use crate::patches::{Patch, PatchLog};
 use crate::storage::{self, change, load, Bundle, CompressConfig, Document, VerificationMode};
 use crate::transaction::{
-    self, CommitOptions, Failure, Success, Transactable, Transaction, TransactionArgs,
+    self, CommitOptions, Failure, OwnedTransaction, Success, Transactable, Transaction,
+    TransactionArgs,
 };
 
 use crate::clock::{Clock, ClockRange};
@@ -355,6 +356,24 @@ impl Automerge {
     pub fn transaction_at(&mut self, patch_log: PatchLog, heads: &[ChangeHash]) -> Transaction<'_> {
         let args = self.transaction_args(Some(heads));
         Transaction::new(self, args, patch_log)
+    }
+
+    /// Start a transaction that owns the document, consuming `self`.
+    ///
+    /// This is useful when the transaction must be `'static` (e.g. storing across an FFI
+    /// boundary or in a struct that requires `'static`). The document is returned when the
+    /// transaction is committed or rolled back.
+    ///
+    /// # Arguments
+    /// * `patch_log` - An optional [`PatchLog`] to log the changes in this transaction to
+    /// * `heads` - An optional set of heads to isolate this transaction at, or `None` to use the
+    ///   current heads of the document
+    pub fn into_transaction(
+        self,
+        patch_log: Option<PatchLog>,
+        heads: Option<&[ChangeHash]>,
+    ) -> OwnedTransaction {
+        OwnedTransaction::new(self, patch_log, heads)
     }
 
     pub(crate) fn transaction_args(&mut self, heads: Option<&[ChangeHash]>) -> TransactionArgs {
