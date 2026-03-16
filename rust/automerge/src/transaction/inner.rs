@@ -1,10 +1,11 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::Arc;
 
 use crate::change_graph::ChangeGraph;
+use crate::op_set2::op_set::ResolvedAction;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::exid::ExId;
@@ -12,9 +13,9 @@ use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
 use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
 use crate::patches::PatchLog;
-use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding};
+use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::Automerge;
-use crate::{AutomergeError, ObjType, OpType, ReadDoc};
+use crate::{hydrate, AutomergeError, ObjType, OpType, ReadDoc};
 use crate::{Change, ChangeHash, Prop};
 
 #[derive(Debug, Clone)]
@@ -242,7 +243,7 @@ impl TransactionInner {
             .map(|opid| doc.id_to_exid(opid.unwrap()))
     }
 
-    fn next_id(&mut self) -> OpId {
+    pub(super) fn next_id(&self) -> OpId {
         OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
@@ -478,7 +479,6 @@ impl TransactionInner {
                     obj,
                     index,
                     del: 1,
-                    values: vec![],
                     splice_type: SpliceType::Text(""),
                 },
             )?;
@@ -489,7 +489,11 @@ impl TransactionInner {
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
+    /// the new elements.
+    ///
+    /// Values can be scalars or nested objects (maps, lists, text). Scalar
+    /// values are inserted directly, while nested objects are created using
+    /// batch insertion for efficiency.
     pub(crate) fn splice(
         &mut self,
         doc: &mut Automerge,
@@ -497,13 +501,13 @@ impl TransactionInner {
         ex_obj: &ExId,
         index: usize,
         del: isize,
-        vals: impl IntoIterator<Item = ScalarValue>,
+        vals: impl IntoIterator<Item = impl Into<hydrate::Value>>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         if !matches!(obj.typ, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let values = vals.into_iter().collect();
+        let values: Vec<hydrate::Value> = vals.into_iter().map(Into::into).collect();
         self.inner_splice(
             doc,
             patch_log,
@@ -511,8 +515,7 @@ impl TransactionInner {
                 obj,
                 index,
                 del,
-                values,
-                splice_type: SpliceType::List,
+                splice_type: SpliceType::List(values),
             },
         )?;
         Ok(())
@@ -532,15 +535,6 @@ impl TransactionInner {
         if obj.typ != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let values = match doc.text_encoding() {
-            // Arguably we should do this for all text, rather than just the grapheme cluster encoding.
-            // However, at the time which I (Alex Good) am writing this code the existing implementation
-            // uses the unicode code points and the grapheme cluster text encoding is a new thing. I
-            // don't want to change the existing behaviour for the existing text encodings without a
-            // little more thought.
-            TextEncoding::GraphemeCluster => text.graphemes(true).map(ScalarValue::from).collect(),
-            _ => text.chars().map(ScalarValue::from).collect(),
-        };
         self.inner_splice(
             doc,
             patch_log,
@@ -548,7 +542,6 @@ impl TransactionInner {
                 obj,
                 index,
                 del,
-                values,
                 splice_type: SpliceType::Text(text),
             },
         )
@@ -562,7 +555,6 @@ impl TransactionInner {
             obj,
             mut index,
             mut del,
-            values,
             splice_type,
         }: SpliceArgs<'_>,
     ) -> Result<(), AutomergeError> {
@@ -577,54 +569,66 @@ impl TransactionInner {
 
         let seq_type = splice_type.seq_type();
 
-        let mut inserted_width = 0;
-
-        // do the insert query for the first item and then
-        // insert the remaining ops one after the other
-        if !values.is_empty() {
+        let inserted_width = if !splice_type.is_empty() {
             let query = doc
                 .ops()
                 .query_insert_at(&obj.id, index, seq_type, self.scope.clone())?;
 
             index = query.index;
 
-            let mut pos = query.pos;
-            let mut elemid = query.elemid;
-            let marks = query.marks;
-
-            let start = self.pending.len();
-            let start_pos = pos;
-
-            for v in &values {
-                let op = TxOp::insert_val(self.next_id(), obj, pos, v.clone(), elemid);
-
-                inserted_width += op.bld.width(seq_type, doc.text_encoding());
-
-                elemid = ElemId(op.id());
-
-                self.pending.push(op);
-                pos += 1;
-            }
-
-            doc.ops_mut().splice(start_pos, &self.pending[start..]);
-
-            if patch_log.is_active() {
-                match splice_type {
-                    SpliceType::Text(text) => {
-                        patch_log.splice(obj.id, index, text, marks);
-                    }
-                    SpliceType::List => {
-                        let mut opid = self.next_id().minus(values.len());
-                        for (offset, v) in values.iter().enumerate() {
-                            opid = opid.next();
-                            let hydrated =
-                                crate::hydrate::Value::new(v.clone(), doc.text_encoding());
-                            patch_log.insert(obj.id, index + offset, hydrated, opid, false);
-                        }
-                    }
+            let inserted_width = match splice_type {
+                SpliceType::Text(t) => {
+                    let mut batch = BatchInsertion::new(self, doc, patch_log, query.pos);
+                    let SpliceResult { inserted_width } =
+                        batch.splice_text(obj, query.index, query.elemid, t, query.marks);
+                    batch.finish();
+                    inserted_width
                 }
-            }
-        }
+                SpliceType::List(values) => {
+                    let num_values = values.len();
+                    let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+
+                    // Batch 1: root insert ops at query.pos
+                    {
+                        let mut batch = BatchInsertion::new(self, doc, patch_log, query.pos);
+                        let mut elemid = query.elemid;
+
+                        for (i, value) in values.iter().enumerate() {
+                            let (child_obj_type, op_type) = value_to_op_type(value);
+
+                            let id = batch.append(move |pos, id| {
+                                TxOp::insert(id, obj, pos, query.index + i, op_type, elemid)
+                            });
+                            elemid = ElemId(id);
+
+                            if let Some(obj_type) = child_obj_type {
+                                let child_obj_meta = ObjMeta {
+                                    id: crate::types::ObjId(id),
+                                    typ: obj_type,
+                                };
+                                queue.push_back((child_obj_meta, value));
+                            }
+                        }
+
+                        batch.finish();
+                    }
+
+                    // Batch 2: all descendants at end of OpSet
+                    if !queue.is_empty() {
+                        let desc_pos = doc.ops().len();
+                        let mut batch = BatchInsertion::new(self, doc, patch_log, desc_pos);
+                        batch_bfs(&mut batch, &mut queue)?;
+                        batch.finish();
+                    }
+
+                    num_values
+                }
+            };
+
+            inserted_width
+        } else {
+            0
+        };
 
         // delete `del` items - performing the query for each one
         let mut delete_index = index + inserted_width;
@@ -1059,6 +1063,121 @@ impl TransactionInner {
         }
     }
 
+    /// Put or insert a nested `hydrate::Value` into the document as a batch
+    /// operation.
+    ///
+    /// This is much more efficient than decomposing the value into individual
+    /// put/insert operations because it only requires two OpSet splices:
+    /// one for the root op in the parent, and one bulk append for all descendants.
+    ///
+    /// When `insert` is true and `prop` is `Prop::Seq`, the value is inserted
+    /// at the given index (shifting subsequent elements). When `insert` is
+    /// false, the value replaces the existing element at that index. For
+    /// `Prop::Map` the `insert` flag is ignored (maps always use put semantics).
+    pub(crate) fn batch_create_object(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        ex_parent: &ExId,
+        prop: Prop,
+        value: &hydrate::Value,
+        insert: bool,
+    ) -> Result<ExId, AutomergeError> {
+        let parent = doc.exid_to_obj(ex_parent)?;
+
+        // Determine the ObjType for the root of the value being inserted
+        let root_obj_type = match value {
+            hydrate::Value::Map(_) => ObjType::Map,
+            hydrate::Value::List(_) => ObjType::List,
+            hydrate::Value::Text(_) => ObjType::Text,
+            hydrate::Value::Scalar(_) => return Err(AutomergeError::NotAnObject),
+        };
+
+        // First insert the root of the new object
+        let root_id = match (&prop, insert) {
+            (Prop::Seq(index), true) => self.do_insert(
+                doc,
+                patch_log,
+                &parent,
+                parent
+                    .typ
+                    .as_sequence_type()
+                    .ok_or(AutomergeError::InvalidOp(parent.typ))?,
+                *index,
+                OpType::Make(root_obj_type),
+            )?,
+            _ => self
+                .local_op(doc, patch_log, &parent, prop, OpType::Make(root_obj_type))?
+                .expect("creating a new object"),
+        };
+
+        let root_obj_id = crate::types::ObjId(root_id);
+        let root_obj_meta = ObjMeta {
+            id: root_obj_id,
+            typ: root_obj_type,
+        };
+
+        let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+        queue.push_back((root_obj_meta, value));
+        let insert_pos = doc.ops().len();
+        let mut batch = BatchInsertion::new(self, doc, patch_log, insert_pos);
+
+        batch_bfs(&mut batch, &mut queue)?;
+
+        batch.finish();
+
+        Ok(doc.id_to_exid(root_id))
+    }
+
+    /// Initialize the root object of an empty document from a `hydrate::Map`.
+    pub(crate) fn batch_init_root_map(
+        &mut self,
+        doc: &mut Automerge,
+        patch_log: &mut PatchLog,
+        value: &hydrate::Map,
+    ) -> Result<(), AutomergeError> {
+        let root_meta = ObjMeta {
+            id: crate::types::ObjId::root(),
+            typ: ObjType::Map,
+        };
+
+        let insert_pos = doc.ops().len();
+        let mut batch = BatchInsertion::new(self, doc, patch_log, insert_pos);
+        let mut queue: VecDeque<(ObjMeta, &hydrate::Value)> = VecDeque::new();
+
+        let mut keys: Vec<_> = value.iter().collect();
+        keys.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        for (key, map_value) in keys {
+            let child_value = &map_value.value;
+            let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+            let id = batch.append(|pos, id| {
+                TxOp::map(
+                    id,
+                    root_meta,
+                    pos,
+                    ResolvedAction::VisibleUpdate(op_type),
+                    key.to_string(),
+                    vec![],
+                )
+            });
+
+            if let Some(obj_type) = child_obj_type {
+                let child_obj_meta = ObjMeta {
+                    id: crate::types::ObjId(id),
+                    typ: obj_type,
+                };
+                queue.push_back((child_obj_meta, child_value));
+            }
+        }
+
+        batch_bfs(&mut batch, &mut queue)?;
+
+        batch.finish();
+        Ok(())
+    }
+
     pub(crate) fn get_scope(&self) -> &Option<Clock> {
         &self.scope
     }
@@ -1069,15 +1188,22 @@ impl TransactionInner {
 }
 
 enum SpliceType<'a> {
-    List,
+    List(Vec<hydrate::Value>),
     Text(&'a str),
 }
 
 impl SpliceType<'_> {
     fn seq_type(&self) -> SequenceType {
         match self {
-            SpliceType::List => SequenceType::List,
+            SpliceType::List(_) => SequenceType::List,
             SpliceType::Text(_) => SequenceType::Text,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::List(v) => v.is_empty(),
+            Self::Text(v) => v.is_empty(),
         }
     }
 }
@@ -1086,8 +1212,177 @@ struct SpliceArgs<'a> {
     obj: ObjMeta,
     index: usize,
     del: isize,
-    values: Vec<ScalarValue>,
     splice_type: SpliceType<'a>,
+}
+
+struct BatchInsertion<'a> {
+    inner: &'a mut TransactionInner,
+    doc: &'a mut Automerge,
+    patch_log: &'a mut PatchLog,
+    pending_start: usize,
+    insert_pos: usize,
+}
+
+impl<'a> BatchInsertion<'a> {
+    fn new(
+        inner: &'a mut TransactionInner,
+        doc: &'a mut Automerge,
+        patch_log: &'a mut PatchLog,
+        start_pos: usize,
+    ) -> Self {
+        let pending_start = inner.pending.len();
+        Self {
+            inner,
+            doc,
+            patch_log,
+            pending_start,
+            insert_pos: start_pos,
+        }
+    }
+
+    fn next_pos(&self) -> usize {
+        self.inner.pending[self.pending_start..].len() + self.insert_pos
+    }
+
+    fn append<F: FnOnce(usize, OpId) -> TxOp>(&mut self, factory: F) -> OpId {
+        let id = self.inner.next_id();
+        let op = factory(self.next_pos(), id);
+        self.inner
+            .finalize_op(self.doc.text_encoding(), self.patch_log, &op, None);
+        self.inner.pending.push(op);
+        id
+    }
+
+    fn splice_text(
+        &mut self,
+        container: ObjMeta,
+        index: usize,
+        after: ElemId,
+        text_str: &str,
+        marks: Option<Arc<MarkSet>>,
+    ) -> SpliceResult {
+        let char_values: Vec<ScalarValue> = match self.doc.text_encoding() {
+            // Arguably we should do this for all text, rather than just the grapheme cluster encoding.
+            // However, at the time which I (Alex Good) am writing this code the existing implementation
+            // uses the unicode code points and the grapheme cluster text encoding is a new thing. I
+            // don't want to change the existing behaviour for the existing text encodings without a
+            // little more thought.
+            TextEncoding::GraphemeCluster => {
+                text_str.graphemes(true).map(ScalarValue::from).collect()
+            }
+            _ => text_str.chars().map(ScalarValue::from).collect(),
+        };
+        let mut inserted_width = 0;
+        let mut elemid = after;
+        for char in char_values {
+            let op = TxOp::insert_val(
+                self.inner.next_id(),
+                container,
+                self.next_pos(),
+                char,
+                elemid,
+            );
+            inserted_width += op.bld.width(SequenceType::Text, self.doc.text_encoding());
+            elemid = ElemId(op.id());
+            self.inner.pending.push(op);
+        }
+
+        if self.patch_log.is_active() {
+            self.patch_log.splice(container.id, index, text_str, marks);
+        }
+
+        SpliceResult { inserted_width }
+    }
+
+    fn finish(self) {
+        let new_ops = &self.inner.pending[self.pending_start..];
+        if !new_ops.is_empty() {
+            self.doc.ops_mut().splice(self.insert_pos, new_ops);
+        }
+    }
+}
+
+struct SpliceResult {
+    inserted_width: usize,
+}
+
+fn value_to_op_type(value: &hydrate::Value) -> (Option<ObjType>, OpType) {
+    match value {
+        hydrate::Value::Map(_) => (Some(ObjType::Map), OpType::Make(ObjType::Map)),
+        hydrate::Value::List(_) => (Some(ObjType::List), OpType::Make(ObjType::List)),
+        hydrate::Value::Text(_) => (Some(ObjType::Text), OpType::Make(ObjType::Text)),
+        hydrate::Value::Scalar(s) => (None, OpType::Put(s.clone())),
+    }
+}
+
+/// BFS traversal of nested hydrate values, appending ops to a `BatchInsertion`.
+///
+/// This is the shared logic used by `batch_create_object`, `batch_init_map`,
+/// and `inner_splice` to populate the children of container objects.
+fn batch_bfs(
+    batch: &mut BatchInsertion<'_>,
+    queue: &mut VecDeque<(ObjMeta, &'_ hydrate::Value)>,
+) -> Result<(), AutomergeError> {
+    while let Some((container_meta, container_value)) = queue.pop_front() {
+        match (container_meta.typ, container_value) {
+            (ObjType::Map, hydrate::Value::Map(map)) => {
+                let mut keys: Vec<_> = map.iter().collect();
+                keys.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+                for (key, map_value) in keys {
+                    let child_value = &map_value.value;
+                    let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+                    let id = batch.append(|pos, id| {
+                        TxOp::map(
+                            id,
+                            container_meta,
+                            pos,
+                            ResolvedAction::VisibleUpdate(op_type),
+                            key.to_string(),
+                            vec![],
+                        )
+                    });
+
+                    if let Some(obj_type) = child_obj_type {
+                        let child_obj_meta = ObjMeta {
+                            id: crate::types::ObjId(id),
+                            typ: obj_type,
+                        };
+                        queue.push_back((child_obj_meta, child_value));
+                    }
+                }
+            }
+            (ObjType::List, hydrate::Value::List(list)) => {
+                let mut elemid = HEAD;
+                for (index, list_value) in list.iter().enumerate() {
+                    let child_value = &list_value.value;
+                    let (child_obj_type, op_type) = value_to_op_type(child_value);
+
+                    let id = batch.append(move |pos, id| {
+                        TxOp::insert(id, container_meta, pos, index, op_type, elemid)
+                    });
+                    elemid = ElemId(id);
+
+                    if let Some(obj_type) = child_obj_type {
+                        let child_obj_meta = ObjMeta {
+                            id: crate::types::ObjId(id),
+                            typ: obj_type,
+                        };
+                        queue.push_back((child_obj_meta, child_value));
+                    }
+                }
+            }
+            (ObjType::Text, hydrate::Value::Text(text)) => {
+                let text_str = text.to_string();
+                batch.splice_text(container_meta, 0, ElemId::head(), &text_str, None);
+            }
+            _ => {
+                return Err(AutomergeError::InvalidOp(container_meta.typ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
