@@ -856,7 +856,7 @@ impl BatchApply {
             }
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         {
             // should always be ordered correctly - just double checking
             let mut tmp_succ = succ.clone();

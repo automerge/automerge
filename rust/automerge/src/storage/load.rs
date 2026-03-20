@@ -106,12 +106,12 @@ fn load_next_change<'a>(
             tracing::trace!("loading change chunk");
             let change = Change::new_from_unverified(change.into_owned(), None)
                 .map_err(|e| Error::InvalidChangeColumns(Box::new(e)))?;
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             {
                 let loaded_ops = change.iter_ops().collect::<Vec<_>>();
                 tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), ops=?loaded_ops, "loaded change");
             }
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(feature = "slow_path_assertions"))]
             tracing::trace!(actor=?change.actor_id(), num_ops=change.len(), "loaded change");
             changes.push(change);
         }

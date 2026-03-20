@@ -13,6 +13,9 @@ optree-visualisation = ["dot"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "getrandom/wasm_js", "hexane/wasm"]
 utf8-indexing = []
 utf16-indexing = []
+# Whether to enable "slow path" assertions which check that various invariants hold
+# should only be enabled when running tests
+slow_path_assertions = ["hexane/slow_path_assertions"]
 
 [dependencies]
 hexane = { version = "0.2.0", path = "../hexane" }

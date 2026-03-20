@@ -42,7 +42,7 @@ use std::ops::{Bound, Range, RangeBounds};
 pub struct ColumnData<C: ColumnCursor> {
     pub len: usize,
     pub slabs: SpanTree<Slab, C::SlabIndex>,
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "slow_path_assertions")]
     pub debug: Vec<C::Export>,
     counter: usize,
     _phantom: PhantomData<C>,
@@ -956,7 +956,7 @@ impl<C: ColumnCursor> ColumnData<C> {
         ColumnDataIter::new(&self.slabs, start, end, self.counter)
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "slow_path_assertions")]
     fn init_debug(mut self) -> Self {
         let mut debug = vec![];
         C::export_splice(&mut debug, 0..0, self.iter());
@@ -971,10 +971,10 @@ impl<C: ColumnCursor> ColumnData<C> {
             len,
             slabs,
             _phantom: PhantomData,
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             debug: vec![],
         };
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         let col = col.init_debug();
         col
     }
@@ -986,7 +986,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             counter: 0,
             slabs: SlabTree::new2(Slab::default()),
             _phantom: PhantomData,
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             debug: vec![],
         }
     }
@@ -1068,7 +1068,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             subindex,
             del,
             values,
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             (&mut self.debug, index..(index + del)),
         );
 
@@ -1092,7 +1092,7 @@ impl<C: ColumnCursor> ColumnData<C> {
                         0,
                         result.overflow,
                         [].into_iter(),
-                        #[cfg(debug_assertions)]
+                        #[cfg(feature = "slow_path_assertions")]
                         (&mut self.debug, 0..0),
                     );
                     self.len -= r.del;
@@ -1115,7 +1115,7 @@ impl<C: ColumnCursor> ColumnData<C> {
             self.acc()
         );
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         if self.debug != self.to_vec() {
             let col = self.to_vec();
             assert_eq!(self.debug.len(), col.len());

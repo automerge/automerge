@@ -377,14 +377,14 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
         index: usize,
         del: usize,
         values: I,
-        #[cfg(debug_assertions)] debug: (&mut Vec<Self::Export>, Range<usize>),
+        #[cfg(feature = "slow_path_assertions")] debug: (&mut Vec<Self::Export>, Range<usize>),
     ) -> SpliceResult
     where
         M: MaybePackable<'b, Self::Item>,
         I: Iterator<Item = M>,
         Self::Item: 'b,
     {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         let mut copy_of_values = vec![];
         let mut encoder = Self::splice_encoder(index, del, slab);
         let mut add = 0;
@@ -392,12 +392,12 @@ pub trait ColumnCursor: Debug + Clone + Copy + PartialEq + Default {
         for v in values {
             value_acc += v.agg();
             let opt_v = v.maybe_packable();
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             copy_of_values.push(opt_v.clone());
             add += encoder.append_item(opt_v);
         }
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         Self::export_splice(debug.0, debug.1, copy_of_values.into_iter());
 
         let overflow = encoder.overflow;

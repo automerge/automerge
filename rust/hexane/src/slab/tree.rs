@@ -153,15 +153,17 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
     /// Panics if `index > len`.
     pub fn insert(&mut self, index: usize, element: T) {
         let old_len = self.len();
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         let old_weight = self.weight().cloned().unwrap_or_default();
         let weight = W::alloc(&element);
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         let weight_chk = weight.clone();
         if let Some(root) = self.root_node.as_mut() {
-            debug_assert_eq!(root.check_weight(), *root.weight());
-            #[cfg(debug_assertions)]
-            root.check();
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                debug_assert_eq!(root.check_weight(), *root.weight());
+                root.check();
+            }
 
             if root.is_full() {
                 let original_len = root.len();
@@ -204,7 +206,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
 
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
 
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         {
             let w = self.weight().cloned().unwrap_or_default();
             assert_eq!(w, weight_chk.and(&old_weight));
@@ -282,11 +284,11 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
     /// Panics if `index` is out of bounds.
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             let len = root.check();
+            #[cfg(feature = "slow_path_assertions")]
             debug_assert_eq!(&root.check_weight(), root.weight());
             let old = root.remove(index);
-            debug_assert_eq!(&root.check_weight(), root.weight());
 
             if root.elements.is_empty() {
                 if root.is_leaf() {
@@ -296,9 +298,11 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
                 }
             }
 
-            #[cfg(debug_assertions)]
-            debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()) + 1);
-            debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()) + 1);
+                debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+            }
             old
         } else {
             panic!("remove from empty tree")
@@ -307,19 +311,22 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
 
     pub fn replace(&mut self, index: usize, element: T) -> T {
         if let Some(root) = self.root_node.as_mut() {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             let len = root.check();
             let old = root.replace(index, element);
 
-            #[cfg(debug_assertions)]
-            debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()));
-            debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()));
+                debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+            }
             old
         } else {
             panic!("remove from empty tree")
         }
     }
 
+    #[cfg(feature = "slow_path_assertions")]
     fn check_weight(&self) -> Option<W> {
         self.root_node.as_ref().map(|root| root.check_weight())
     }
