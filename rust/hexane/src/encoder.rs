@@ -523,8 +523,9 @@ where
     /// Like [`save_to`](Encoder::save_to) but writes nothing if all appended values were
     /// null/empty, returning an empty range.
     pub fn save_to_unless_empty(self, out: &mut Vec<u8>) -> Range<usize> {
+        #[cfg(feature = "slow_path_assertions")]
         let mut _tmp: Vec<u8> = vec![];
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         self.clone()
             .into_column_data()
             .save_to_unless_empty(&mut _tmp);
@@ -533,6 +534,7 @@ where
         } else {
             out.len()..out.len()
         };
+        #[cfg(feature = "slow_path_assertions")]
         debug_assert_eq!(&_tmp, &out[range.clone()]);
         range
     }

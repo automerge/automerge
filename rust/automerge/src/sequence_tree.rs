@@ -49,7 +49,7 @@ where
     pub fn insert(&mut self, index: usize, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             root.check();
 
             if root.is_full() {
@@ -111,7 +111,7 @@ where
     /// Panics if `index` is out of bounds.
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             let len = root.check();
             let old = root.remove(index);
 
@@ -123,7 +123,7 @@ where
                 }
             }
 
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()) + 1);
             old
         } else {

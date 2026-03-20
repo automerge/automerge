@@ -523,7 +523,7 @@ impl OpSet {
             } else {
                 self.seek_text_ops_by_index_fast(obj, index)
             };
-            #[cfg(debug_assertions)]
+            #[cfg(feature = "slow_path_assertions")]
             {
                 let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
                 assert_eq!(found, slow, "fast != slow");

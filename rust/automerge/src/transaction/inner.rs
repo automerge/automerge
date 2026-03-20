@@ -123,9 +123,9 @@ impl TransactionInner {
 
         let change = self.export(doc.ops(), doc.changes());
         let hash = change.hash();
-        #[cfg(not(debug_assertions))]
+        #[cfg(not(feature = "slow_path_assertions"))]
         tracing::trace!(commit=?hash, deps=?change.deps(), "committing transaction");
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "slow_path_assertions")]
         {
             let ops = change.iter_ops().collect::<Vec<_>>();
             tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
