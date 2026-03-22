@@ -2,6 +2,7 @@ use crate::marks::{MarkSet, MarkStateMachine};
 
 use super::{Action, MarkData, Op, OpQueryTerm};
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ impl<'a, I: Iterator<Item = Op<'a>> + Clone> Iterator for MarkIter<'a, I> {
             if op.action == Action::Mark {
                 if let Some(name) = op.mark_name {
                     let value = op.value;
+                    let name = Cow::Borrowed(name);
                     self.marks.mark_begin(op.id, MarkData { name, value });
                     continue;
                 } else {

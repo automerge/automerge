@@ -1,7 +1,6 @@
 use crate::op_set2::op_set::{MarkIndexBuilder, MarkIndexColumn};
 use crate::op_set2::{ChangeOp, Op, OpBuilder, OpSet};
 use crate::types::{ObjId, ObjType, OpId, SequenceType, TextEncoding};
-use hexane::{BooleanCursor, ColumnData, IntCursor, UIntCursor};
 use std::collections::HashMap;
 
 // TODO : this could be faster and use less memory if
@@ -41,6 +40,10 @@ impl ObjIndex {
 
     pub(crate) fn insert(&mut self, id: OpId, obj_info: ObjInfo) {
         self.0.insert(id, obj_info);
+    }
+
+    pub(crate) fn remove(&mut self, id: OpId) {
+        self.0.remove(&id);
     }
 }
 
@@ -89,10 +92,10 @@ impl OpBuilder<'_> {
 }
 
 pub(crate) struct Indexes {
-    pub(crate) text: ColumnData<UIntCursor>,
-    pub(crate) top: ColumnData<BooleanCursor>,
-    pub(crate) visible: ColumnData<BooleanCursor>,
-    pub(crate) inc: ColumnData<IntCursor>,
+    pub(crate) text: hexane::v1::PrefixColumn<Option<u32>>,
+    pub(crate) top: hexane::v1::PrefixColumn<bool>,
+    pub(crate) visible: hexane::v1::Column<bool>,
+    pub(crate) inc: hexane::v1::Column<Option<i64>>,
     pub(crate) mark: MarkIndexColumn,
     pub(crate) obj_info: ObjIndex,
 }
@@ -162,18 +165,19 @@ impl IndexBuilder {
             .widths
             .iter()
             .zip(self.succ.iter())
-            .map(|(w, t)| if *t == 0 { Some(*w) } else { None })
+            .map(|(w, t)| if *t == 0 { Some(*w as u32) } else { None })
             .collect();
 
-        let visible = self.succ.iter().map(|&n| n == 0).collect();
+        let visible: Vec<bool> = self.succ.iter().map(|&n| n == 0).collect();
+        let visible = hexane::v1::Column::from_values(visible);
 
-        let top = self.top.iter().collect();
+        let top: Vec<bool> = self.top.to_vec();
+        let top = hexane::v1::PrefixColumn::from_values(top);
 
-        let mut inc = ColumnData::new();
-        inc.splice(0, 0, self.incs);
+        let inc = hexane::v1::Column::from_values(self.incs);
 
         let mut mark = MarkIndexColumn::new();
-        mark.splice(0, 0, self.marks);
+        mark.extend(0, self.marks);
 
         let obj_info = self.obj_info;
 

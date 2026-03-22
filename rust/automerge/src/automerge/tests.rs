@@ -2020,4 +2020,5 @@ fn hash_for_opid() {
     let hash2 = doc.commit();
     assert_eq!(doc.hash_for_opid(&id1), hash1);
     assert_eq!(doc.hash_for_opid(&id2), hash2);
+
 }

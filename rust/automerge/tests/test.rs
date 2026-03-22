@@ -2666,7 +2666,6 @@ fn reproduce_clock_cache_bug() {
 
     assert!(base.get_changes(&heads).is_empty());
 }
-
 #[test]
 fn merge_panic_after_putting_value_equal_to_initial_value() {
     // Regression test for https://github.com/automerge/automerge/issues/1390
@@ -2721,4 +2720,40 @@ fn merge_after_noop_then_real_put() {
 
     assert_eq!(left.get(ROOT, "a").unwrap().unwrap().0, Value::int(0));
     assert_eq!(left.get(ROOT, "b").unwrap().unwrap().0, Value::str("hello"));
+}
+
+#[test]
+fn should_reload_document_containing_deflated_columns() {
+    use std::time::SystemTime;
+    let base_seed = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos() as u64;
+    for trial in 0..100u64 {
+        let seed = base_seed.wrapping_add(trial);
+        let mut doc = AutoCommit::new_with_encoding(automerge::TextEncoding::Utf16CodeUnit);
+        let list = doc.put_object(&ROOT, "list", ObjType::List).unwrap();
+
+        let mut rng_state: u64 = seed;
+        for i in 0..200 {
+            rng_state ^= rng_state.wrapping_shl(13);
+            rng_state ^= rng_state.wrapping_shr(7);
+            rng_state ^= rng_state.wrapping_shl(17);
+            let pos = if i == 0 {
+                0
+            } else {
+                (rng_state as usize) % (i + 1)
+            };
+            doc.splice(&list, pos, 0, [ScalarValue::Str("a".into())])
+                .unwrap_or_else(|e| panic!("seed={seed} i={i} pos={pos}: {e}"));
+            let len = doc.length(&list);
+            if len != i + 1 {
+                panic!(
+                    "seed={seed} i={i} pos={pos}: expected length {} got {len}",
+                    i + 1
+                );
+            }
+        }
+        doc.commit();
+    }
 }
