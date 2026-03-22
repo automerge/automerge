@@ -15,6 +15,7 @@ pub(crate) use crate::op_set2::{
 pub(crate) use crate::read::ReadDoc;
 
 use crate::change_graph::ChangeGraph;
+use crate::change_queue::ChangeQueue;
 use crate::cursor::{CursorPosition, MoveCursor, OpCursor};
 use crate::exid::ExId;
 use crate::iter::{DiffIter, DocIter, Keys, ListRange, MapRange, Spans, Values};
@@ -200,7 +201,7 @@ impl std::default::Default for LoadOptions<'static> {
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: Vec<Change>,
+    pub(crate) queue: ChangeQueue,
     /// Graph of changes
     pub(crate) change_graph: ChangeGraph,
     /// Current dependencies of this document (heads hashes).
@@ -215,7 +216,7 @@ impl Automerge {
     /// Create a new document with a random actor id.
     pub fn new() -> Self {
         Automerge {
-            queue: vec![],
+            queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
             ops: OpSet::new(TextEncoding::platform_default()),
             deps: Default::default(),
@@ -225,7 +226,7 @@ impl Automerge {
 
     pub fn new_with_encoding(encoding: TextEncoding) -> Self {
         Automerge {
-            queue: vec![],
+            queue: ChangeQueue::new(),
             change_graph: ChangeGraph::new(0),
             ops: OpSet::new(encoding),
             deps: Default::default(),
@@ -236,7 +237,7 @@ impl Automerge {
     pub(crate) fn from_parts(ops: OpSet, change_graph: ChangeGraph) -> Self {
         let deps = change_graph.heads().collect();
         let mut doc = Automerge {
-            queue: vec![],
+            queue: ChangeQueue::new(),
             change_graph,
             ops,
             deps,
@@ -1944,7 +1945,6 @@ impl ReadDoc for Automerge {
 
     #[inline(never)]
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash()).collect();
         let mut missing = HashSet::new();
 
         for head in self.queue.iter().flat_map(|change| change.deps()) {
@@ -1961,7 +1961,7 @@ impl ReadDoc for Automerge {
 
         let mut missing = missing
             .into_iter()
-            .filter(|hash| !in_queue.contains(hash))
+            .filter(|hash| !self.queue.has_hash(hash))
             .copied()
             .collect::<Vec<_>>();
         missing.sort();
