@@ -11,6 +11,7 @@ pub use tree::{SpanTree, SpanTreeIter, SpanWeight};
 pub use writer::{SlabWriter, WriteOp};
 
 pub type SlabTree<W> = SpanTree<Slab, W>;
+//pub type SubCursor<'a, W> = tree::SubCursor<'a, Slab, W>;
 
 use std::fmt::Debug;
 use std::ops::{Index, Range};
