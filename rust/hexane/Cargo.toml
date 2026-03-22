@@ -41,6 +41,14 @@ harness = false
 name = "seek"
 harness = false
 
+[[bench]]
+name = "v0_vs_v1"
+harness = false
+
+[[bench]]
+name = "max_segments"
+harness = false
+
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]
