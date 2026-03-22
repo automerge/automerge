@@ -78,6 +78,8 @@ pub(crate) mod slab;
 #[cfg(test)]
 pub mod test;
 
+pub mod v1;
+
 pub use aggregate::{Acc, Agg};
 pub use boolean::BooleanCursor;
 pub use columndata::{

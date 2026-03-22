@@ -326,7 +326,28 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
         }
     }
 
-    #[cfg(feature = "slow_path_assertions")]
+    /// Mutate the element at `index` in place, then recompute weights
+    /// along the path from the element to the root.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the tree is empty or `index` is out of bounds.
+    pub fn update_at<F>(&mut self, index: usize, f: F)
+    where
+        F: FnOnce(&mut T),
+    {
+        if let Some(root) = self.root_node.as_mut() {
+            #[cfg(debug_assertions)]
+            let len = root.check();
+            root.update_at(index, f);
+            #[cfg(debug_assertions)]
+            debug_assert_eq!(len, root.check());
+            debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+        } else {
+            panic!("update_at on empty tree")
+        }
+    }
+
     fn check_weight(&self) -> Option<W> {
         self.root_node.as_ref().map(|root| root.check_weight())
     }
@@ -747,6 +768,59 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                 total_index,
                 self.len(),
                 self.check()
+            );
+        }
+    }
+
+    fn update_at<F>(&mut self, index: usize, f: F)
+    where
+        F: FnOnce(&mut T),
+    {
+        if self.is_leaf() {
+            let elem = &mut self.elements[index];
+            let old_w = W::alloc(elem);
+            f(elem);
+            let new_w = W::alloc(elem);
+            self.weight.union(&new_w);
+            self.subtract_weight(&old_w);
+            debug_assert_eq!(&self.check_weight(), self.weight());
+        } else {
+            let mut total_index = 0;
+            for child_index in 0..self.children.len() {
+                let child_len = self.children[child_index].len();
+                match (total_index + child_len).cmp(&index) {
+                    Ordering::Less => {
+                        total_index += child_len + 1;
+                        continue;
+                    }
+                    Ordering::Equal => {
+                        let ei = min(child_index, self.elements.len() - 1);
+                        let elem = &mut self.elements[ei];
+                        let old_w = W::alloc(elem);
+                        f(elem);
+                        let new_w = W::alloc(elem);
+                        self.weight.union(&new_w);
+                        self.subtract_weight(&old_w);
+                        debug_assert_eq!(&self.check_weight(), self.weight());
+                        return;
+                    }
+                    Ordering::Greater => {
+                        let child = &mut self.children[child_index];
+                        let old_child_w = child.weight().clone();
+                        child.update_at(index - total_index, f);
+                        let new_child_w = child.weight().clone();
+                        self.weight.union(&new_child_w);
+                        self.subtract_weight(&old_child_w);
+                        debug_assert_eq!(&self.check_weight(), self.weight());
+                        return;
+                    }
+                }
+            }
+            panic!(
+                "update_at: index not found {} {} {}",
+                index,
+                total_index,
+                self.len()
             );
         }
     }
