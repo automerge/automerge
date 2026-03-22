@@ -74,8 +74,8 @@ impl Change {
         self.stored.start_op()
     }
 
-    pub fn message(&self) -> Option<&String> {
-        self.stored.message().as_ref()
+    pub fn message(&self) -> Option<&str> {
+        self.stored.message()
     }
 
     pub fn deps(&self) -> &[ChangeHash] {
@@ -351,7 +351,7 @@ impl From<&Change> for crate::ExpandedChange {
             seq: c.seq(),
             start_op: c.start_op(),
             extra_bytes: c.extra_bytes().to_vec(),
-            message: c.message().cloned(),
+            message: c.message().map(|s| s.to_owned()),
         }
     }
 }

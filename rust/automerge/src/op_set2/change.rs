@@ -1,11 +1,10 @@
-use super::meta::MetaCursor;
+use super::meta::ValueMeta;
 use super::op::{AsChangeOp, OpBuilder};
-use super::types::{ActionCursor, ActorCursor, ActorIdx};
+use super::types::{Action, ActorIdx};
 use crate::change_graph::ChangeGraph;
 use crate::storage::change::{ChangeOpsColumns as ChangeOpsColumns2, Verified};
 use crate::storage::{Change, ChunkType, Header};
 use crate::types::{ActorId, ChangeHash};
-use hexane::{BooleanCursor, ColumnCursor, DeltaCursor, RawCursor, StrCursor, UIntCursor};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::io::Write;
@@ -198,29 +197,61 @@ where
 
     mapper.remap_actors(ops, change_actor);
 
-    let remap = move |actor: Option<Cow<'_, ActorIdx>>| {
-        actor.map(|a| Cow::Owned(mapper.mapping[usize::from(*a)].unwrap()))
-    };
+    use hexane::v1::EncoderApi;
 
-    let obj_actor =
-        ActorCursor::encode_unless_empty(data, ops.iter().map(T::obj_actor).map(&remap));
-    let obj_ctr = UIntCursor::encode_unless_empty(data, ops.iter().map(T::obj_ctr));
-    let key_actor =
-        ActorCursor::encode_unless_empty(data, ops.iter().map(T::key_actor).map(&remap));
-    let key_ctr = DeltaCursor::encode_unless_empty(data, ops.iter().map(T::key_ctr));
-    let key_str = StrCursor::encode_unless_empty(data, ops.iter().map(T::key_str));
-    let insert = BooleanCursor::encode(data, ops.iter().map(T::insert));
-    let action = ActionCursor::encode_unless_empty(data, ops.iter().map(T::action));
-    let value_meta = MetaCursor::encode_unless_empty(data, ops.iter().map(T::value_meta));
-    let value = RawCursor::encode_unless_empty(data, ops.iter().map(T::value));
-    let pred_count = UIntCursor::encode_unless_empty(data, ops.iter().map(T::pred_count));
+    let mapping = &mapper.mapping;
+    let remap_opt_actor = |actor: Option<ActorIdx>| actor.map(|a| mapping[usize::from(a)].unwrap());
+    let remap_actor = |a: ActorIdx| mapping[usize::from(a)].unwrap();
+
+    let obj_actor = hexane::v1::Encoder::<Option<ActorIdx>>::encode_to_unless(
+        data,
+        ops.iter().map(T::obj_actor).map(&remap_opt_actor),
+        None,
+    );
+    let obj_ctr = hexane::v1::Encoder::<Option<u64>>::encode_to_unless(
+        data,
+        ops.iter().map(T::obj_ctr),
+        None,
+    );
+    let key_actor = hexane::v1::Encoder::<Option<ActorIdx>>::encode_to_unless(
+        data,
+        ops.iter().map(T::key_actor).map(&remap_opt_actor),
+        None,
+    );
+    let key_ctr = hexane::v1::DeltaEncoder::<Option<i64>>::encode_to_unless(
+        data,
+        ops.iter().map(T::key_ctr).map(|c| c.map(|c| *c)),
+        None,
+    );
+    let key_str = hexane::v1::Encoder::<Option<String>>::encode_to_unless(
+        data,
+        ops.iter().map(T::key_str),
+        None,
+    );
+    let insert = hexane::v1::Encoder::<bool>::encode_to(data, ops.iter().map(T::insert));
+    let action = hexane::v1::Encoder::<Action>::encode_to(data, ops.iter().map(T::action));
+    let value_meta =
+        hexane::v1::Encoder::<ValueMeta>::encode_to(data, ops.iter().map(T::value_meta));
+    let value_start = data.len();
+    for bytes in ops.iter().filter_map(T::value) {
+        data.extend_from_slice(&bytes);
+    }
+    let value = value_start..data.len();
+    let pred_count = hexane::v1::Encoder::<u32>::encode_to(data, ops.iter().map(T::pred_count));
     let pred_iter = ops.iter().map(T::pred).flat_map(|id| id.iter());
-    let pred_actor_iter = pred_iter.clone().map(T::id_actor).map(&remap);
-    let pred_actor = ActorCursor::encode_unless_empty(data, pred_actor_iter);
-    let pred_ctr_iter = pred_iter.map(T::id_ctr);
-    let pred_ctr = DeltaCursor::encode_unless_empty(data, pred_ctr_iter);
-    let expand = BooleanCursor::encode_unless_empty(data, ops.iter().map(T::expand));
-    let mark_name = StrCursor::encode_unless_empty(data, ops.iter().map(T::mark_name));
+    let pred_actor = hexane::v1::Encoder::<ActorIdx>::encode_to(
+        data,
+        pred_iter.clone().map(T::id_actor).map(&remap_actor),
+    );
+    let pred_ctr =
+        hexane::v1::DeltaEncoder::<i64>::encode_to(data, pred_iter.map(|id| id.icounter()));
+    let expand =
+        hexane::v1::Encoder::<bool>::encode_to_unless(data, ops.iter().map(T::expand), false);
+    let mark_name = hexane::v1::Encoder::<Option<String>>::encode_to_unless(
+        data,
+        ops.iter().map(T::mark_name),
+        None,
+    );
 
     let cols = ChangeOpsColumns {
         obj_actor,
@@ -288,11 +319,11 @@ impl<'a> ActorMapper<'a> {
     where
         C: AsChangeOp,
     {
-        if let Some(actor) = C::obj_actor(op).as_deref() {
-            self.process_actor(usize::from(*actor))
+        if let Some(actor) = C::obj_actor(op) {
+            self.process_actor(usize::from(actor))
         }
-        if let Some(actor) = C::key_actor(op).as_deref() {
-            self.process_actor(usize::from(*actor));
+        if let Some(actor) = C::key_actor(op) {
+            self.process_actor(usize::from(actor));
         }
         for id in C::pred(op) {
             self.process_actor(id.actor());

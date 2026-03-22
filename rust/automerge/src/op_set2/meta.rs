@@ -1,6 +1,5 @@
 use super::types::ScalarValue;
-use hexane::{lebsize, ulebsize, Agg, PackError, Packable, RleCursor};
-use std::borrow::Cow;
+use hexane::{lebsize, ulebsize, PackError};
 
 #[derive(Debug)]
 pub(crate) enum ValueType {
@@ -99,76 +98,81 @@ impl From<&[u8]> for ValueMeta {
     }
 }
 
-impl Packable for ValueMeta {
-    //type Unpacked<'a> = ValueMeta;
+impl hexane::v1::ColumnValue for ValueMeta {
+    type Encoding = hexane::v1::RleEncoding<ValueMeta>;
+}
 
-    fn agg(item: &ValueMeta) -> Agg {
-        Agg::from(item.length())
+impl hexane::v1::RleValue for ValueMeta {
+    fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        Ok((start - buf.len(), ValueMeta(v)))
     }
-
-    fn width(item: &ValueMeta) -> usize {
-        hexane::ulebsize(item.0) as usize
-    }
-
-    fn pack(item: &ValueMeta, out: &mut Vec<u8>) {
-        leb128::write::unsigned(out, item.0).unwrap();
-    }
-
-    fn unpack(mut buff: &[u8]) -> Result<(usize, Cow<'_, Self>), PackError> {
-        let start_len = buff.len();
-        let val = leb128::read::unsigned(&mut buff)?;
-        Ok((start_len - buff.len(), Cow::Owned(ValueMeta(val))))
+    fn pack(value: ValueMeta, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, value.0).unwrap();
+        true
     }
 }
 
-pub(crate) type MetaCursor = RleCursor<64, ValueMeta>;
+impl hexane::v1::PrefixValue for ValueMeta {
+    type Prefix = u64;
+    fn accumulate(target: &mut u64, val: ValueMeta) {
+        *target += val.length() as u64;
+    }
+    fn accumulate_run(target: &mut u64, run: &hexane::v1::Run<ValueMeta>) {
+        *target += run.value.length() as u64 * run.count as u64;
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hexane::ColumnData;
+    use hexane::v1::PrefixColumn;
 
     #[test]
     fn column_data_meta_group() {
+        // ValueMeta packs (length << 4) | type_code; lengths sum to a running
+        // byte offset into the value blob.  Types 0–3 (Null/False/True/Uleb)
+        // have length 0; types 6+ encode an explicit length in the upper bits.
         let data = vec![
-            ValueMeta(1),
-            ValueMeta(6 + (30 << 4)),
-            ValueMeta(6 + (10 << 4)),
-            ValueMeta(3),
-            ValueMeta(4),
+            ValueMeta(1),             // length 0
+            ValueMeta(6 + (30 << 4)), // length 30
+            ValueMeta(6 + (10 << 4)), // length 10
+            ValueMeta(3),             // length 0
+            ValueMeta(4),             // length 0
         ];
-        let mut col = ColumnData::<MetaCursor>::new();
-        col.splice(0, 0, data);
+        let col = PrefixColumn::<ValueMeta>::from_values(data);
 
-        let mut iter = col.iter().with_acc();
+        // PrefixIter yields (inclusive_prefix, value) — running sum of length()
+        // up to and including the current item.
+        let mut iter = col.iter();
 
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(1)));
-        assert_eq!(r.acc, 0);
+        let (acc, v) = iter.next().unwrap();
+        assert_eq!(v, ValueMeta(1));
+        assert_eq!(acc, 0);
 
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(6 + (30 << 4))));
-        assert_eq!(r.acc, 0);
+        let (acc, v) = iter.next().unwrap();
+        assert_eq!(v, ValueMeta(6 + (30 << 4)));
+        assert_eq!(acc, 30);
 
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(6 + (10 << 4))));
-        assert_eq!(r.acc, 30);
+        let (acc, v) = iter.next().unwrap();
+        assert_eq!(v, ValueMeta(6 + (10 << 4)));
+        assert_eq!(acc, 40);
 
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
-        assert_eq!(r.acc, 40);
+        let (acc, v) = iter.next().unwrap();
+        assert_eq!(v, ValueMeta(3));
+        assert_eq!(acc, 40);
 
-        let mut iter = col.iter().with_acc();
-        iter.advance_by(3);
+        // nth(3) jumps to index 3 (the fourth item)
+        let (acc, v) = col.iter().nth(3).unwrap();
+        assert_eq!(v, ValueMeta(3));
+        assert_eq!(acc, 40);
 
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
-        assert_eq!(r.acc, 40);
-
-        let mut iter = col.iter_range(3..5).with_acc();
-
-        let r = iter.next().unwrap();
-        assert_eq!(r.item.as_deref(), Some(&ValueMeta(3)));
-        assert_eq!(r.acc, 40);
+        // iter_range(3..5) starts at index 3 with the cumulative prefix carried
+        let mut iter = col.iter_range(3..5);
+        let (acc, v) = iter.next().unwrap();
+        assert_eq!(v, ValueMeta(3));
+        assert_eq!(acc, 40);
     }
 }

@@ -38,6 +38,9 @@ pub(crate) mod current_state;
 //#[cfg(test)]
 //mod tests;
 
+#[cfg(test)]
+mod rollback_tests;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
     Unused(ActorId),
@@ -439,16 +442,19 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
-        let checkpoint = self.ops.save_checkpoint();
 
         TransactionArgs {
             actor_index,
             seq,
             start_op,
             deps,
-            checkpoint,
             scope,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+        self.ops.save_checkpoint()
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
@@ -691,8 +697,6 @@ impl Automerge {
                     log!(" s={:?}|{:?} ", s.id(), s.col_type());
                     log!(" {:?} ", d1);
                     log!(" {:?} ", d2);
-                    OpSet::decode(s, d1);
-                    OpSet::decode(s, d2);
                 }
             }
         }
@@ -1980,7 +1984,6 @@ impl ReadDoc for Automerge {
         typ.ok_or_else(|| AutomergeError::InvalidObjId(obj.to_string()))
     }
 
-    #[inline(never)]
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         let mut missing = HashSet::new();
 
