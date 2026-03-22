@@ -190,9 +190,9 @@ impl<const B: usize, P: Packable + ?Sized, X: HasPos + HasAcc + SpanWeight<Slab>
                 acc -= run.acc();
                 post = Some(run);
                 let count = count - delta;
-                RleState::Run { count, value }
+                RleState::from(Run::new(count, value))
             }
-            Some(Run { count, value }) => RleState::Run { count, value },
+            Some(Run { count, value }) => RleState::from(Run::new(count, value)),
         };
 
         let mut current = SlabWriter::new(B, locked);
