@@ -13,7 +13,7 @@ use super::super::op_set::{ObjIdIter, ObjIndex, OpIter, OpSet};
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
 type PredCache = SmallHashMap<OpId, Vec<(OpId, Option<i64>)>>;
@@ -761,12 +761,6 @@ fn walk_map(mw: &mut MapWalker<'_, '_>, change_ops: &mut [ChangeOp]) {
 }
 
 impl BatchApply {
-    fn has_change(&self, doc: &Automerge, hash: ChangeHash) -> bool {
-        doc.change_graph.has_change(&hash)
-            || self.hashes.contains(&hash)
-            || doc.ready_q_has_hash(&hash)
-    }
-
     fn push(&mut self, c: Change) {
         assert!(!self.has_actor_seq(&c));
         self.record_actor_seq(&c);
@@ -791,10 +785,6 @@ impl BatchApply {
             .get(c.actor_id())
             .map(|set| set.contains(&c.seq()))
             .unwrap_or(false)
-    }
-
-    fn duplicate_seq(&self, doc: &Automerge, c: &Change) -> bool {
-        doc.has_actor_seq(c) || self.has_actor_seq(c) || doc.ready_q_has_dupe(c)
     }
 
     fn insert_new_actors(&mut self, doc: &mut Automerge) {
@@ -994,64 +984,104 @@ impl Automerge {
         changes: I,
         log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let mut chap = BatchApply::default();
-        let mut result = Ok(());
+        // Pool all incoming changes together with any previously queued orphans.
+        let mut pool: Vec<Change> = self.queue.take();
+        let mut seen: HashSet<ChangeHash> = pool.iter().map(|c| c.hash()).collect();
+        let mut actor_seqs: HashMap<ActorId, HashSet<u64>> = HashMap::new();
+        for c in &pool {
+            actor_seqs
+                .entry(c.actor_id().clone())
+                .or_default()
+                .insert(c.seq());
+        }
+
+        // Add new changes, deduplicating and checking for duplicate seq numbers.
         for c in changes {
-            if !chap.has_change(self, c.hash()) {
-                if chap.duplicate_seq(self, &c) {
-                    result = Err(AutomergeError::DuplicateSeqNumber(
-                        c.seq(),
-                        c.actor_id().clone(),
-                    ));
-                    break;
+            let hash = c.hash();
+            if self.change_graph.has_change(&hash) || seen.contains(&hash) {
+                continue;
+            }
+            if self.has_actor_seq(&c)
+                || actor_seqs
+                    .get(c.actor_id())
+                    .is_some_and(|s| s.contains(&c.seq()))
+            {
+                // Put pool back as queue before returning error
+                for pc in pool {
+                    self.queue.push(pc);
                 }
-                if self.is_causally_ready(&c, &chap.hashes) {
-                    chap.push(c);
-                } else {
-                    self.queue.push(c);
+                return Err(AutomergeError::DuplicateSeqNumber(
+                    c.seq(),
+                    c.actor_id().clone(),
+                ));
+            }
+            seen.insert(hash);
+            actor_seqs
+                .entry(c.actor_id().clone())
+                .or_default()
+                .insert(c.seq());
+            pool.push(c);
+        }
+
+        if pool.is_empty() {
+            return Ok(());
+        }
+
+        // Kahn's algorithm: topological sort of the pool.
+        let n = pool.len();
+        let mut unsatisfied = vec![0u32; n];
+        let mut waiting_on: HashMap<ChangeHash, Vec<usize>> = HashMap::new();
+
+        for (i, c) in pool.iter().enumerate() {
+            for dep in c.deps() {
+                if !self.change_graph.has_change(dep) {
+                    unsatisfied[i] += 1;
+                    waiting_on.entry(*dep).or_default().push(i);
                 }
             }
         }
-        if result.is_ok() {
-            while let Some(c) = self.pop_next_causally_ready_change(&chap.hashes) {
+
+        let mut ready: VecDeque<usize> = VecDeque::new();
+        for (i, &count) in unsatisfied.iter().enumerate() {
+            if count == 0 {
+                ready.push_back(i);
+            }
+        }
+
+        let mut topo_order: Vec<usize> = Vec::new();
+        while let Some(idx) = ready.pop_front() {
+            let hash = pool[idx].hash();
+            topo_order.push(idx);
+            if let Some(dependents) = waiting_on.remove(&hash) {
+                for dep_idx in dependents {
+                    unsatisfied[dep_idx] -= 1;
+                    if unsatisfied[dep_idx] == 0 {
+                        ready.push_back(dep_idx);
+                    }
+                }
+            }
+        }
+
+        // Split pool into ready (topo-sorted) and orphaned.
+        let mut consumed = vec![false; n];
+        for &idx in &topo_order {
+            consumed[idx] = true;
+        }
+        let mut slots: Vec<Option<Change>> = pool.into_iter().map(Some).collect();
+
+        let mut chap = BatchApply::default();
+        for idx in topo_order {
+            if let Some(c) = slots[idx].take() {
                 chap.push(c);
             }
         }
-        chap.apply(self, log);
 
-        result
-    }
-
-    fn ready_q_has_hash(&self, hash: &ChangeHash) -> bool {
-        // if the queue gets huge this could be slow - maybe add an index
-        self.queue.iter().any(|c| &c.hash() == hash)
-    }
-
-    fn ready_q_has_dupe(&self, change: &Change) -> bool {
-        // if the queue gets huge this could be slow - maybe add an index
-        self.queue.iter().any(|c| {
-            c.seq() == change.seq()
-                && c.actor_id() == change.actor_id()
-                && c.hash() != change.hash()
-        })
-    }
-
-    fn is_causally_ready(&self, change: &Change, ready: &HashSet<ChangeHash>) -> bool {
-        change
-            .deps()
-            .iter()
-            .all(|d| self.change_graph.has_change(d) || ready.contains(d))
-    }
-
-    fn pop_next_causally_ready_change(&mut self, ready: &HashSet<ChangeHash>) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            if self.is_causally_ready(&self.queue[index], ready) {
-                return Some(self.queue.swap_remove(index));
-            }
-            index += 1;
+        for c in slots.into_iter().flatten() {
+            self.queue.push(c);
         }
-        None
+
+        chap.apply(self, log);
+        Ok(())
     }
 
     fn import_ops_to(
