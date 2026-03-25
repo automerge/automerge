@@ -1,4 +1,4 @@
-# Unreleased
+## 0.8.0
 
 ## Added
 
@@ -14,6 +14,13 @@
 * `Transactable::splice` now takes an iterator of `Into<hydrate::Value>` rather
   than an `IntoIterator<ScalarValue>`. This allows batch splicing of large
   objects
+
+## Fixed
+
+* Fixed an n^2 performance slowdown in `{Automerge, AutoCommit}::load_incremental` 
+* There were a number of very slow assertions in `debug` builds of `automerge`
+  which are now behind a feature flag so downstream crates should not be as slow
+  in `debug` builds
 
 # 0.7.4
 
