@@ -1,3 +1,11 @@
+## 0.2.1 - 25th March 2026
+
+### Added
+
+* Adding the `slow_path_assertions` feature so that slow path assertions can
+  be disabled by default
+
+
 ## 0.2.0 - 6th March 2026
 
 ### Added
