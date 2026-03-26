@@ -12,6 +12,7 @@ use crate::patches::PatchLog;
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::{ObjId, ObjMeta};
+use crate::Fragment;
 use crate::{hydrate, Bundle, OnPartialLoad, TextEncoding};
 use crate::{sync, ObjType, Patch, ReadDoc, ScalarValue, ROOT};
 use crate::{
@@ -611,6 +612,35 @@ impl AutoCommit {
     pub fn dump(&mut self) {
         self.ensure_transaction_closed();
         self.doc.dump()
+    }
+
+    /// EXPERIMENTAL: Return the fragments covering the document history at
+    /// the given levels, ordered oldest to newest.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        self.doc.fragments(levels)
+    }
+
+    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.doc.get_fragment(head)
+    }
+
+    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
+    /// (level-0 fragments with one member) or as a bundle.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        self.doc.bundle_fragments(fragments)
     }
 
     /// Get the current heads of the document.

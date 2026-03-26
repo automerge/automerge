@@ -1112,11 +1112,20 @@ impl TransactionInner {
                 }
             }
         }
-        for (key, new_value) in new_value.iter() {
-            if !present_keys.contains(key) {
-                self.update_value(doc, patch_log, map, key.into(), &new_value.value, None)?;
-            }
+        // Hydrated maps and the sets above are hash-based, so their iteration
+        // order varies between executions. Apply additions and deletions in key
+        // order so operation IDs and nested-object creation are deterministic.
+        // (this is useful for fuzzing, but also generally nice)
+        let mut additions = new_value
+            .iter()
+            .filter(|(key, _)| !present_keys.contains(*key))
+            .collect::<Vec<_>>();
+        additions.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        for (key, new_value) in additions {
+            self.update_value(doc, patch_log, map, key.into(), &new_value.value, None)?;
         }
+        let mut delenda = delenda.into_iter().collect::<Vec<_>>();
+        delenda.sort_unstable();
         for key in delenda {
             self.delete(doc, patch_log, map, key)?;
         }

@@ -1169,7 +1169,7 @@ mod tests {
     use crate::read::ReadDoc;
     use crate::transaction::Transactable;
     use crate::types;
-    use crate::{ActorId, AutoCommit, ROOT};
+    use crate::{make_rng, ActorId, AutoCommit, ROOT};
     use rand::prelude::*;
 
     impl AutoCommit {
@@ -1382,15 +1382,6 @@ mod tests {
         doc1.apply_changes_batch(changes).unwrap();
         doc1.validate_top_index();
         assert_eq!(doc1.save(), doc2.save());
-    }
-
-    fn make_rng() -> SmallRng {
-        let seed = std::env::var("AUTOMERGE_TEST_SEED")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or_else(rand::random::<u64>);
-        log!("SEED: {}", seed);
-        SmallRng::seed_from_u64(seed)
     }
 
     #[test]

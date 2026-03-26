@@ -53,6 +53,10 @@ import type {
   ObjID,
   Change,
   ChangeMetadata,
+  FragmentMeta,
+  Commit,
+  Fragment,
+  FragmentLevelRange,
   DecodedChange,
   DiffOptions,
   Heads,
@@ -65,6 +69,10 @@ import type {
 } from "./wasm_types.js"
 export type {
   ChangeMetadata,
+  FragmentMeta,
+  Commit,
+  Fragment,
+  FragmentLevelRange,
   PutPatch,
   DelPatch,
   DiffOptions,
@@ -1832,6 +1840,174 @@ export const RawString = ImmutableString
 export function saveBundle(doc: Doc<unknown>, hashes: string[]): Uint8Array {
   const state = _state(doc, false)
   return state.handle.saveBundle(hashes)
+}
+
+/**
+ * EXPERIMENTAL: Return the Automerge fragments currently covering the document
+ * history.
+ *
+ * Fragments are ordered oldest-to-newest. Passing a number returns only that
+ * fragment level. Passing `{ start, end }` returns levels in the half-open range
+ * `[start, end)`. Omitting `levels` returns all levels, including loose commits
+ * at level 0.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentMetadata(
+  doc: Doc<unknown>,
+  levels?: FragmentLevelRange,
+): FragmentMeta[] {
+  const state = _state(doc, false)
+  return state.handle.getFragmentMetadata(levels)
+}
+
+/**
+ * EXPERIMENTAL: Return a fragment by its head hash, or `null` if the hash is
+ * unknown or does not identify an available fragment.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragmentMeta(
+  doc: Doc<unknown>,
+  head: string,
+): FragmentMeta | null {
+  const state = _state(doc, false)
+  return state.handle.getFragmentMeta(head)
+}
+
+/**
+ * EXPERIMENTAL: Encode fragments as the blob bytes expected by Subduction's
+ * `addFragments` path. Level-0 fragments are encoded as individual Automerge
+ * changes; higher level fragments are encoded as Automerge bundles.
+ *
+ * @experimental
+ * @hidden
+ */
+export function bundleFragmentMetadata(
+  doc: Doc<unknown>,
+  fragments: FragmentMeta[],
+): Uint8Array[] {
+  const state = _state(doc, false)
+  return state.handle.bundleFragmentMetadata(fragments)
+}
+
+/**
+ * EXPERIMENTAL: Return level-0 fragments in the object shape expected by
+ * Subduction's `addCommits` path.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getCommits(doc: Doc<unknown>): Commit[] {
+  const state = _state(doc, false)
+  const commits = state.handle.getFragmentMetadata(0)
+  const bytes = state.handle.bundleFragmentMetadata(commits)
+  return commits.map((fragment, index) => ({
+    head: fragment.head,
+    parents: fragment.boundary,
+    bytes: bytes[index],
+  }))
+}
+
+/**
+ * EXPERIMENTAL: Return bundled Automerge fragments in the object shape
+ * expected by Subduction's `addFragments` path. By default this excludes
+ * level-0 loose commits; use {@link getCommits} for those.
+ *
+ * @experimental
+ * @hidden
+ */
+export function getFragments(
+  doc: Doc<unknown>,
+  levels?: FragmentLevelRange,
+): Fragment[] {
+  const state = _state(doc, false)
+  const fragmentMetadata = state.handle.getFragmentMetadata(
+    levels ?? { start: 1 },
+  )
+  const bytes = state.handle.bundleFragmentMetadata(fragmentMetadata)
+  return fragmentMetadata.map((fragment, index) => ({
+    ...fragment,
+    bytes: bytes[index],
+  }))
+}
+
+/**
+ * EXPERIMENTAL: Add commit-shaped Automerge changes to a document.
+ *
+ * This mirrors Subduction's `addCommits` shape: each input carries the commit
+ * head, its parents, and the encoded change bytes. The encoded bytes are
+ * authoritative and are checked against the supplied metadata.
+ *
+ * @experimental
+ * @hidden
+ */
+export function addCommits<T>(
+  doc: Doc<T>,
+  commits: Commit[],
+  opts?: ApplyOptions<T>,
+): Doc<T> {
+  const state = _state(doc)
+  if (!opts) {
+    opts = {}
+  }
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  state.handle.addCommits(commits)
+  state.heads = heads
+  return progressDocument(
+    doc,
+    "addCommits",
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
+}
+
+/**
+ * EXPERIMENTAL: Add fragment-shaped Automerge bundles to a document.
+ *
+ * This mirrors Subduction's `addFragments` shape: each input contains fragment
+ * metadata plus encoded bytes from {@link bundleFragmentMetadata}. Fragment bytes are
+ * loaded incrementally, so this can ingest bundles and loose level-0 changes.
+ *
+ * @experimental
+ * @hidden
+ */
+export function addFragments<T>(
+  doc: Doc<T>,
+  fragments: Fragment[],
+  opts?: ApplyOptions<T>,
+): Doc<T> {
+  const state = _state(doc)
+  if (!opts) {
+    opts = {}
+  }
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.",
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  state.handle.addFragments(fragments)
+  state.heads = heads
+  return progressDocument(
+    doc,
+    "addFragments",
+    heads,
+    opts.patchCallback || state.patchCallback,
+  )
 }
 
 /**
