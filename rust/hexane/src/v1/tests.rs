@@ -76,7 +76,7 @@ impl GetEq<Option<Vec<u8>>> for Option<&[u8]> {
 /// Assert column contents match `expected`, and encoding is canonical.
 fn assert_col<T>(col: &Column<T>, expected: &[T])
 where
-    T: crate::v1::ColumnValue + std::fmt::Debug,
+    T: crate::v1::ColumnValueRef + std::fmt::Debug,
     for<'a> T::Get<'a>: GetEq<T> + std::fmt::Debug,
 {
     assert_eq!(col.len(), expected.len(), "length mismatch");
@@ -285,7 +285,7 @@ enum Op<T> {
 
 fn apply_ops<T>(ops: &[Op<T>], positions: &[usize], col: &mut Column<T>, mirror: &mut Vec<T>)
 where
-    T: crate::v1::ColumnValue + Clone + std::fmt::Debug,
+    T: crate::v1::ColumnValueRef + Clone + std::fmt::Debug,
     for<'a> T::Get<'a>: GetEq<T> + std::fmt::Debug,
 {
     for (op, &raw_pos) in ops.iter().zip(positions.iter()) {
@@ -311,7 +311,7 @@ where
     }
 }
 
-// ── IntoColumnValue (borrowed insert/splice) ────────────────────────────────
+// ── AsColumnRef (borrowed insert/splice) ────────────────────────────────
 
 #[test]
 fn insert_str_into_string_column() {
