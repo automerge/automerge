@@ -380,8 +380,9 @@ impl ColumnEncoding for BoolEncoding {
         bool_validate_encoding(slab)
     }
 
-    fn encode_all_slabs(values: Vec<bool>, max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
-        bool_encode_all_slabs(&values, max_segments)
+    fn encode_all_slabs<V: super::AsColumnRef<bool>>(values: Vec<V>, max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
+        let bools: Vec<bool> = values.iter().map(|v| v.as_column_ref()).collect();
+        bool_encode_all_slabs(&bools, max_segments)
     }
 
     fn load_and_verify(

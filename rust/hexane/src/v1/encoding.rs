@@ -1,8 +1,8 @@
-use super::ColumnValue;
+use super::ColumnValueRef;
 use crate::PackError;
 
 /// Validation function type for [`ColumnEncoding::load_and_verify`].
-pub type ValidateFn<V> = for<'a> fn(<V as super::ColumnValue>::Get<'a>) -> Option<String>;
+pub type ValidateFn<V> = for<'a> fn(<V as super::ColumnValueRef>::Get<'a>) -> Option<String>;
 
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
@@ -13,7 +13,7 @@ pub type ValidateFn<V> = for<'a> fn(<V as super::ColumnValue>::Get<'a>) -> Optio
 /// are zero-sized types — all state lives in the slab bytes.
 pub trait ColumnEncoding: Default {
     /// The column value type this encoding operates on.
-    type Value: ColumnValue<Encoding = Self>;
+    type Value: ColumnValueRef<Encoding = Self>;
 
     /// Read the value at `index` from `slab`, returning the optimal `Get` type.
     ///
@@ -24,7 +24,7 @@ pub trait ColumnEncoding: Default {
         slab: &'a [u8],
         index: usize,
         len: usize,
-    ) -> Option<<Self::Value as ColumnValue>::Get<'a>>;
+    ) -> Option<<Self::Value as ColumnValueRef>::Get<'a>>;
 
     /// Insert `value` at `index` into `slab`.
     /// `len` is the *pre-insertion* logical length.
@@ -34,7 +34,7 @@ pub trait ColumnEncoding: Default {
         slab: &mut Vec<u8>,
         index: usize,
         len: usize,
-        value: <Self::Value as ColumnValue>::Get<'v>,
+        value: <Self::Value as ColumnValueRef>::Get<'v>,
     ) -> i32;
 
     /// Remove the value at `index` from `slab`.
@@ -69,8 +69,12 @@ pub trait ColumnEncoding: Default {
     ///
     /// Returns `(data, item_count, segment_count)` tuples, each respecting
     /// `max_segments`.  Much faster than repeated `insert` calls.
-    fn encode_all_slabs(
-        values: Vec<Self::Value>,
+    ///
+    /// Accepts any type convertible to the column value via [`super::AsColumnRef`],
+    /// so borrowed forms (e.g. `&str` for a `String` column) can be packed
+    /// directly without an intermediate owned allocation.
+    fn encode_all_slabs<V: super::AsColumnRef<Self::Value>>(
+        values: Vec<V>,
         max_segments: usize,
     ) -> Vec<(Vec<u8>, usize, usize)>;
 
@@ -98,7 +102,7 @@ pub trait ColumnEncoding: Default {
     fn streaming_save(slabs: &[&[u8]]) -> Vec<u8>;
 
     /// Decoder type for iterating over all items in a slab.
-    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValue>::Get<'a>> + RunDecoder + Clone;
+    type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
 
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;

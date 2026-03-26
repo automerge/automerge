@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use super::prefix_column::PrefixValue;
-use super::ColumnValue;
+use super::ColumnValueRef;
 use super::PrefixColumn;
 use crate::PackError;
 
@@ -44,7 +44,7 @@ pub trait DeltaValue: Copy {
 
     /// Extract `Option<i64>` from an inner column get result.
     /// Returns `None` for null deltas, `Some(d)` for non-null.
-    fn get_inner(inner: <Self::Inner as ColumnValue>::Get<'_>) -> Option<i64>;
+    fn get_inner(inner: <Self::Inner as ColumnValueRef>::Get<'_>) -> Option<i64>;
 
     /// Convert the prefix sum type to `i64`.
     fn prefix_to_i64(p: <Self::Inner as PrefixValue>::Prefix) -> i64;

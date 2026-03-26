@@ -64,7 +64,7 @@ pub struct Run<V> {
 /// | `Vec<u8>`          | `&'a [u8]`         | `RleEncoding`   | no       |
 /// | `Option<Vec<u8>>`  | `Option<&'a [u8]>` | `RleEncoding`   | yes      |
 /// | `bool`             | `bool`             | `BoolEncoding`  | no       |
-pub trait ColumnValue: 'static {
+pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> {
     /// The encoding strategy for this value type.
     type Encoding: ColumnEncoding<Value = Self>;
 
@@ -73,28 +73,57 @@ pub trait ColumnValue: 'static {
     type Get<'a>: Copy + PartialEq + 'a
     where
         Self: 'a;
-
-    /// Convert an owned value to its borrowed `Get` form.
-    fn as_get(&self) -> Self::Get<'_>;
 }
 
-/// Extension of [`ColumnValue`] with RLE-specific encoding/decoding methods.
+/// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.
+///
+/// Blanket impls provide [`ColumnValueRef`], [`AsColumnRef`], and a nullable
+/// `Option<T>` column type automatically.
+///
+/// ```ignore
+/// impl ColumnValue for ValueMeta {
+///     type Encoding = RleEncoding<ValueMeta>;
+/// }
+///
+/// impl RleValue for ValueMeta {
+///     fn try_unpack(data: &[u8]) -> Result<(usize, ValueMeta), PackError> { ... }
+///     fn pack(value: ValueMeta, out: &mut Vec<u8>) -> bool { ... }
+/// }
+/// // That's it — Column<ValueMeta> and Column<Option<ValueMeta>> now work.
+/// ```
+pub trait ColumnValue: Copy + PartialEq + 'static {
+    /// The encoding strategy — always `RleEncoding<Self>` for RLE types.
+    type Encoding: ColumnEncoding<Value = Self>;
+}
+
+impl<T: ColumnValue> ColumnValueRef for T {
+    type Encoding = T::Encoding;
+    type Get<'a> = T;
+}
+
+/// Extension of [`ColumnValueRef`] with RLE-specific encoding/decoding methods.
 ///
 /// This is implemented by all value types that use [`RleEncoding`] — i.e.,
 /// everything except `bool` (which uses [`BoolEncoding`]).
-pub trait RleValue: ColumnValue {
+pub trait RleValue: ColumnValueRef {
     /// Whether this column type allows null entries.
     ///
     /// `true` for `Option<T>` types, `false` for bare `T`.  Used by `load`
     /// to reject null runs in non-nullable columns.
-    const NULLABLE: bool;
+    const NULLABLE: bool = false;
 
     /// Return the byte length of one encoded value at the start of `data`,
     /// or `None` if the data is malformed / too short.
     ///
     /// This is the primary "skip over a value" operation used by `scan_to`,
     /// `split_at_item`, `count_segments`, and similar slab-walking functions.
-    fn value_len(data: &[u8]) -> Option<usize>;
+    ///
+    /// The default delegates to [`try_unpack`](Self::try_unpack) and discards
+    /// the decoded value.  Override for types where skipping is cheaper than
+    /// decoding (e.g. `String` avoids UTF-8 validation).
+    fn value_len(data: &[u8]) -> Option<usize> {
+        Self::try_unpack(data).ok().map(|(n, _)| n)
+    }
 
     /// Decode a non-null value from raw slab bytes with full validation.
     ///
@@ -110,247 +139,165 @@ pub trait RleValue: ColumnValue {
         Self::try_unpack(data).unwrap()
     }
 
-    /// Construct the `Get` value for a null entry.  Panics for non-nullable types.
+    /// Construct the `Get` value for a null entry.
+    ///
+    /// The default panics, which is correct for non-nullable types (`NULLABLE = false`).
+    /// Nullable types (`Option<T>`) must override this to return `None`.
     ///
     /// The `slab` parameter is unused but anchors the lifetime so that
     /// the return type `Self::Get<'_>` is well-formed for borrowing types.
-    fn get_null(slab: &[u8]) -> Self::Get<'_>;
+    fn get_null(_slab: &[u8]) -> Self::Get<'_> {
+        panic!("unexpected null in non-nullable column")
+    }
 
     /// Encode a value (in borrowed `Get` form) to raw slab bytes.
     /// Returns `true` if a value was written, `false` for null entries.
     fn pack(value: Self::Get<'_>, out: &mut Vec<u8>) -> bool;
 }
 
+// ── Option<T> blanket impls ─────────────────────────────────────────────────
+//
+// Any `T: RleValue` automatically gets `Option<T>` as a nullable column type.
+// The blanket wraps `T`'s encoding/decoding in `Some`/`None`.
+
+impl<T: RleValue> ColumnValueRef for Option<T> {
+    type Encoding = RleEncoding<Option<T>>;
+    type Get<'a> = Option<T::Get<'a>>;
+}
+
+impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
+    #[inline]
+    fn as_column_ref(&self) -> Option<T::Get<'_>> {
+        self.as_ref().map(|v| v.as_column_ref())
+    }
+}
+
+impl<T: RleValue> RleValue for Option<T> {
+    const NULLABLE: bool = true;
+
+    fn value_len(data: &[u8]) -> Option<usize> {
+        T::value_len(data)
+    }
+
+    fn try_unpack(data: &[u8]) -> Result<(usize, Option<T::Get<'_>>), PackError> {
+        let (n, v) = T::try_unpack(data)?;
+        Ok((n, Some(v)))
+    }
+
+    fn unpack(data: &[u8]) -> (usize, Option<T::Get<'_>>) {
+        let (n, v) = T::unpack(data);
+        (n, Some(v))
+    }
+
+    fn get_null(_slab: &[u8]) -> Option<T::Get<'_>> {
+        None
+    }
+
+    fn pack(value: Option<T::Get<'_>>, out: &mut Vec<u8>) -> bool {
+        match value {
+            Some(v) => T::pack(v, out),
+            None => false,
+        }
+    }
+}
+
 // ── Base impls ──────────────────────────────────────────────────────────────
 //
-// The slab wire format only has four value types.  All other ColumnValue
+// The slab wire format only has four value types.  All other ColumnValueRef
 // impls delegate to one of these.
 
-impl ColumnValue for Option<u64> {
-    type Encoding = RleEncoding<Option<u64>>;
-    type Get<'a> = Option<u64>;
-    fn as_get(&self) -> Option<u64> {
-        *self
-    }
-}
-
-impl RleValue for Option<u64> {
-    const NULLABLE: bool = true;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        let mut buf = data;
-        let start = buf.len();
-        leb128::read::unsigned(&mut buf).ok()?;
-        Some(start - buf.len())
-    }
-    fn try_unpack(data: &[u8]) -> Result<(usize, Option<u64>), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::unsigned(&mut buf)?;
-        Ok((start - buf.len(), Some(v)))
-    }
-    fn get_null(_slab: &[u8]) -> Option<u64> {
-        None
-    }
-    fn pack(value: Option<u64>, out: &mut Vec<u8>) -> bool {
-        match value {
-            Some(v) => {
-                leb128::write::unsigned(out, v).unwrap();
-                true
-            }
-            None => false,
-        }
-    }
-}
-
-impl ColumnValue for Option<i64> {
-    type Encoding = RleEncoding<Option<i64>>;
-    type Get<'a> = Option<i64>;
-    fn as_get(&self) -> Option<i64> {
-        *self
-    }
-}
-
-impl RleValue for Option<i64> {
-    const NULLABLE: bool = true;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        let mut buf = data;
-        let start = buf.len();
-        leb128::read::signed(&mut buf).ok()?;
-        Some(start - buf.len())
-    }
-    fn try_unpack(data: &[u8]) -> Result<(usize, Option<i64>), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let v = leb128::read::signed(&mut buf)?;
-        Ok((start - buf.len(), Some(v)))
-    }
-    fn get_null(_slab: &[u8]) -> Option<i64> {
-        None
-    }
-    fn pack(value: Option<i64>, out: &mut Vec<u8>) -> bool {
-        match value {
-            Some(v) => {
-                leb128::write::signed(out, v).unwrap();
-                true
-            }
-            None => false,
-        }
-    }
-}
-
-impl ColumnValue for Option<Vec<u8>> {
-    type Encoding = RleEncoding<Option<Vec<u8>>>;
-    type Get<'a> = Option<&'a [u8]>;
-    fn as_get(&self) -> Option<&[u8]> {
-        self.as_deref()
-    }
-}
-
-impl RleValue for Option<Vec<u8>> {
-    const NULLABLE: bool = true;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        let mut buf = data;
-        let start = buf.len();
-        let len = leb128::read::unsigned(&mut buf).ok()? as usize;
-        let hdr = start - buf.len();
-        if buf.len() < len {
-            return None;
-        }
-        Some(hdr + len)
-    }
-    fn try_unpack(data: &[u8]) -> Result<(usize, Option<&[u8]>), PackError> {
-        let mut buf = data;
-        let start = buf.len();
-        let len = leb128::read::unsigned(&mut buf)? as usize;
-        let hdr = start - buf.len();
-        if buf.len() < len {
-            return Err(PackError::BadFormat);
-        }
-        Ok((hdr + len, Some(&buf[..len])))
-    }
-    fn get_null(_slab: &[u8]) -> Option<&[u8]> {
-        None
-    }
-    fn pack(value: Option<&[u8]>, out: &mut Vec<u8>) -> bool {
-        match value {
-            Some(v) => {
-                leb128::write::unsigned(out, v.len() as u64).unwrap();
-                out.extend_from_slice(v);
-                true
-            }
-            None => false,
-        }
-    }
-}
-
-impl ColumnValue for bool {
+impl ColumnValueRef for bool {
     type Encoding = BoolEncoding;
     type Get<'a> = bool;
-    fn as_get(&self) -> bool {
+}
+
+impl AsColumnRef<bool> for bool {
+    #[inline]
+    fn as_column_ref(&self) -> bool {
         *self
     }
 }
 
-// ── IntoColumnValue ─────────────────────────────────────────────────────────
+// ── AsColumnRef ─────────────────────────────────────────────────────────
 
 /// Conversion trait for values that can be inserted into a column of type `T`.
 ///
 /// This allows `insert` and `splice` to accept both owned and borrowed forms:
 ///
 /// ```ignore
-/// col.insert(0, "hello");          // &str → String
-/// col.insert(0, Some("hello"));    // Option<&str> → Option<String>
-/// col.insert(0, b"bytes".as_slice()); // &[u8] → Vec<u8>
+/// col.insert(0, "hello");          // &str for Column<String>
+/// col.insert(0, Some("hello"));    // Option<&str> for Column<Option<String>>
+/// col.insert(0, b"bytes".as_slice()); // &[u8] for Column<Vec<u8>>
 /// ```
 ///
-/// All `ColumnValue` types implement this as an identity conversion.
+/// All `ColumnValueRef` types implement this as an identity conversion.
 /// No conflict with the borrowed impls because `&str`, `Option<&str>`, etc.
-/// have lifetimes and cannot be `ColumnValue: 'static`.
-pub trait IntoColumnValue<T: ColumnValue> {
+/// have lifetimes and cannot be `ColumnValueRef: 'static`.
+pub trait AsColumnRef<T: ColumnValueRef> {
     /// Borrow as the column's `Get` type without allocating.
     fn as_column_ref(&self) -> T::Get<'_>;
-
-    /// Convert to the owned column value (allocates for `&str` → `String`, etc.).
-    fn into_column_value(self) -> T;
 }
 
-impl<T: ColumnValue> IntoColumnValue<T> for T {
+impl<T: ColumnValue> AsColumnRef<T> for T {
     #[inline]
-    fn as_column_ref(&self) -> T::Get<'_> {
-        self.as_get()
-    }
-    #[inline]
-    fn into_column_value(self) -> T {
-        self
+    fn as_column_ref(&self) -> T {
+        *self
     }
 }
 
-impl IntoColumnValue<String> for &str {
+impl AsColumnRef<String> for String {
+    #[inline]
+    fn as_column_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsColumnRef<String> for &str {
     #[inline]
     fn as_column_ref(&self) -> &str {
         self
     }
-    #[inline]
-    fn into_column_value(self) -> String {
-        self.to_string()
-    }
 }
 
-impl IntoColumnValue<Option<String>> for Option<&str> {
+impl AsColumnRef<Option<String>> for Option<&str> {
     #[inline]
     fn as_column_ref(&self) -> Option<&str> {
         *self
     }
-    #[inline]
-    fn into_column_value(self) -> Option<String> {
-        self.map(str::to_string)
-    }
 }
 
-impl IntoColumnValue<Option<String>> for &str {
+impl AsColumnRef<Option<String>> for &str {
     #[inline]
     fn as_column_ref(&self) -> Option<&str> {
         Some(self)
     }
+}
+
+impl AsColumnRef<Vec<u8>> for Vec<u8> {
     #[inline]
-    fn into_column_value(self) -> Option<String> {
-        Some(self.to_string())
+    fn as_column_ref(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
-impl IntoColumnValue<Vec<u8>> for &[u8] {
+impl AsColumnRef<Vec<u8>> for &[u8] {
     #[inline]
     fn as_column_ref(&self) -> &[u8] {
         self
     }
-    #[inline]
-    fn into_column_value(self) -> Vec<u8> {
-        self.to_vec()
-    }
 }
 
-impl IntoColumnValue<Option<Vec<u8>>> for Option<&[u8]> {
+impl AsColumnRef<Option<Vec<u8>>> for Option<&[u8]> {
     #[inline]
     fn as_column_ref(&self) -> Option<&[u8]> {
         *self
     }
-    #[inline]
-    fn into_column_value(self) -> Option<Vec<u8>> {
-        self.map(<[u8]>::to_vec)
-    }
 }
 
-impl IntoColumnValue<Option<Vec<u8>>> for &[u8] {
+impl AsColumnRef<Option<Vec<u8>>> for &[u8] {
     #[inline]
     fn as_column_ref(&self) -> Option<&[u8]> {
         Some(self)
-    }
-    #[inline]
-    fn into_column_value(self) -> Option<Vec<u8>> {
-        Some(self.to_vec())
     }
 }
 
@@ -364,7 +311,7 @@ impl IntoColumnValue<Option<Vec<u8>>> for &[u8] {
 ///
 /// Enables `Column<T>::is_default()`, `Column<T>::init_default()`, and
 /// `Column<T>::save_to_unless_default()`.
-pub trait ColumnDefault: ColumnValue {
+pub trait ColumnDefault: ColumnValueRef {
     /// Returns `true` if the slab contains only default values.
     fn slab_is_default(data: &[u8], len: usize) -> bool;
 
@@ -455,69 +402,46 @@ impl ColumnDefault for bool {
 
 impl ColumnValue for u64 {
     type Encoding = RleEncoding<u64>;
-    type Get<'a> = u64;
-    fn as_get(&self) -> u64 {
-        *self
-    }
 }
 
 impl RleValue for u64 {
-    const NULLABLE: bool = false;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        Option::<u64>::value_len(data)
-    }
     fn try_unpack(data: &[u8]) -> Result<(usize, u64), PackError> {
-        let (n, v) = Option::<u64>::try_unpack(data)?;
-        Ok((n, v.expect("unexpected null in non-nullable u64 column")))
-    }
-    fn get_null(_slab: &[u8]) -> u64 {
-        panic!("unexpected null in non-nullable u64 column")
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        Ok((start - buf.len(), v))
     }
     fn pack(value: u64, out: &mut Vec<u8>) -> bool {
-        Option::<u64>::pack(Some(value), out)
+        leb128::write::unsigned(out, value).unwrap();
+        true
     }
 }
 
 impl ColumnValue for i64 {
     type Encoding = RleEncoding<i64>;
-    type Get<'a> = i64;
-    fn as_get(&self) -> i64 {
-        *self
-    }
 }
 
 impl RleValue for i64 {
-    const NULLABLE: bool = false;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        Option::<i64>::value_len(data)
-    }
     fn try_unpack(data: &[u8]) -> Result<(usize, i64), PackError> {
-        let (n, v) = Option::<i64>::try_unpack(data)?;
-        Ok((n, v.expect("unexpected null in non-nullable i64 column")))
-    }
-    fn get_null(_slab: &[u8]) -> i64 {
-        panic!("unexpected null in non-nullable i64 column")
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::signed(&mut buf)?;
+        Ok((start - buf.len(), v))
     }
     fn pack(value: i64, out: &mut Vec<u8>) -> bool {
-        Option::<i64>::pack(Some(value), out)
+        leb128::write::signed(out, value).unwrap();
+        true
     }
 }
 
-impl ColumnValue for String {
+impl ColumnValueRef for String {
     type Encoding = RleEncoding<String>;
     type Get<'a> = &'a str;
-    fn as_get(&self) -> &str {
-        self.as_str()
-    }
 }
 
 impl RleValue for String {
-    const NULLABLE: bool = false;
-
     fn value_len(data: &[u8]) -> Option<usize> {
-        Option::<Vec<u8>>::value_len(data)
+        Vec::<u8>::value_len(data)
     }
     fn try_unpack(data: &[u8]) -> Result<(usize, &str), PackError> {
         let mut buf = data;
@@ -530,8 +454,17 @@ impl RleValue for String {
         let s = std::str::from_utf8(&buf[..len]).map_err(|_| PackError::InvalidUtf8)?;
         Ok((hdr + len, s))
     }
-    fn get_null(_slab: &[u8]) -> &str {
-        panic!("unexpected null in non-nullable String column")
+    /// Skip UTF-8 validation — data was already validated on load.
+    fn unpack(data: &[u8]) -> (usize, &str) {
+        let mut buf = data;
+        let start = buf.len();
+        let len = leb128::read::unsigned(&mut buf).unwrap() as usize;
+        let hdr = start - buf.len();
+        // SAFETY: all slab data passes through try_unpack during load,
+        // which validates UTF-8.  After load, slabs are only mutated by
+        // pack() which writes known-valid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+        (hdr + len, s)
     }
     fn pack(value: &str, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value.len() as u64).unwrap();
@@ -540,57 +473,36 @@ impl RleValue for String {
     }
 }
 
-impl ColumnValue for Option<String> {
-    type Encoding = RleEncoding<Option<String>>;
-    type Get<'a> = Option<&'a str>;
-    fn as_get(&self) -> Option<&str> {
-        self.as_deref()
-    }
-}
 
-impl RleValue for Option<String> {
-    const NULLABLE: bool = true;
-
-    fn value_len(data: &[u8]) -> Option<usize> {
-        Option::<Vec<u8>>::value_len(data)
-    }
-    fn try_unpack(data: &[u8]) -> Result<(usize, Option<&str>), PackError> {
-        let (n, s) = String::try_unpack(data)?;
-        Ok((n, Some(s)))
-    }
-    fn get_null(_slab: &[u8]) -> Option<&str> {
-        None
-    }
-    fn pack(value: Option<&str>, out: &mut Vec<u8>) -> bool {
-        Option::<Vec<u8>>::pack(value.map(str::as_bytes), out)
-    }
-}
-
-impl ColumnValue for Vec<u8> {
+impl ColumnValueRef for Vec<u8> {
     type Encoding = RleEncoding<Vec<u8>>;
     type Get<'a> = &'a [u8];
-    fn as_get(&self) -> &[u8] {
-        self.as_slice()
-    }
 }
 
 impl RleValue for Vec<u8> {
-    const NULLABLE: bool = false;
-
     fn value_len(data: &[u8]) -> Option<usize> {
-        Option::<Vec<u8>>::value_len(data)
+        let mut buf = data;
+        let start = buf.len();
+        let len = leb128::read::unsigned(&mut buf).ok()? as usize;
+        let hdr = start - buf.len();
+        if buf.len() < len {
+            return None;
+        }
+        Some(hdr + len)
     }
     fn try_unpack(data: &[u8]) -> Result<(usize, &[u8]), PackError> {
-        let (n, v) = Option::<Vec<u8>>::try_unpack(data)?;
-        Ok((
-            n,
-            v.expect("unexpected null in non-nullable Vec<u8> column"),
-        ))
-    }
-    fn get_null(_slab: &[u8]) -> &[u8] {
-        panic!("unexpected null in non-nullable Vec<u8> column")
+        let mut buf = data;
+        let start = buf.len();
+        let len = leb128::read::unsigned(&mut buf)? as usize;
+        let hdr = start - buf.len();
+        if buf.len() < len {
+            return Err(PackError::BadFormat);
+        }
+        Ok((hdr + len, &buf[..len]))
     }
     fn pack(value: &[u8], out: &mut Vec<u8>) -> bool {
-        Option::<Vec<u8>>::pack(Some(value), out)
+        leb128::write::unsigned(out, value.len() as u64).unwrap();
+        out.extend_from_slice(value);
+        true
     }
 }

@@ -1,4 +1,4 @@
-use super::{ColumnDefault, ColumnValue};
+use super::{ColumnDefault, ColumnValueRef};
 
 /// Options for [`Column::load_with`], [`PrefixColumn::load_with`], etc.
 ///
@@ -10,21 +10,21 @@ use super::{ColumnDefault, ColumnValue};
 ///   value with a function pointer.
 /// - [`with_max_segments`](LoadOpts::with_max_segments) — override the default
 ///   slab segment budget (default: 16).
-pub struct LoadOpts<T: ColumnValue> {
+pub struct LoadOpts<T: ColumnValueRef> {
     pub(crate) length: Option<usize>,
     pub(crate) validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
     pub(crate) max_segments: usize,
 }
 
-impl<T: ColumnValue> Clone for LoadOpts<T> {
+impl<T: ColumnValueRef> Clone for LoadOpts<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: ColumnValue> Copy for LoadOpts<T> {}
+impl<T: ColumnValueRef> Copy for LoadOpts<T> {}
 
-impl<T: ColumnValue> LoadOpts<T> {
+impl<T: ColumnValueRef> LoadOpts<T> {
     pub fn new() -> Self {
         Self {
             length: None,
@@ -60,7 +60,7 @@ impl<T: ColumnDefault> LoadOpts<T> {
     }
 }
 
-impl<T: ColumnValue> Default for LoadOpts<T> {
+impl<T: ColumnValueRef> Default for LoadOpts<T> {
     fn default() -> Self {
         Self::new()
     }

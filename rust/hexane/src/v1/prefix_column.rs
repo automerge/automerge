@@ -3,7 +3,7 @@ use std::ops::{Add, AddAssign, Mul, Range, Sub, SubAssign};
 
 use super::column::{find_slab, Column, Iter, Slab, SlabWeight, WeightFn};
 use super::encoding::ColumnEncoding;
-use super::ColumnValue;
+use super::ColumnValueRef;
 
 // ── PrefixValue trait ────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ use super::ColumnValue;
 /// | `bool`           | `u32`    |
 /// | `Option<u64>`    | `u128`   |
 /// | `Option<i64>`    | `i128`   |
-pub trait PrefixValue: ColumnValue {
+pub trait PrefixValue: ColumnValueRef {
     /// The accumulator type for prefix sums.
     type Prefix: Copy
         + Default
@@ -207,7 +207,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     // ── Mutations (compound BIT maintained automatically) ────────────────
 
-    pub fn insert(&mut self, index: usize, value: impl super::IntoColumnValue<T>) {
+    pub fn insert(&mut self, index: usize, value: impl super::AsColumnRef<T>) {
         self.col.insert(index, value);
     }
 
@@ -215,7 +215,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.remove(index);
     }
 
-    pub fn splice<V: super::IntoColumnValue<T>>(
+    pub fn splice<V: super::AsColumnRef<T>>(
         &mut self,
         index: usize,
         del: usize,
