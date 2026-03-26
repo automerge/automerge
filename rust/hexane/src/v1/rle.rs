@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::PackError;
 
 use super::encoding::ColumnEncoding;
-use super::{ColumnValueRef, RleValue};
+use super::{ColumnValueRef, RleValue, ValidBytes};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -505,7 +505,7 @@ fn merge_lit1_into_right<T: RleValue>(
 /// in O(1) per item.  Literal runs decode each value.  Null runs yield
 /// the type's null value.
 pub struct RleDecoder<'a, T: RleValue> {
-    data: &'a [u8],
+    data: &'a ValidBytes,
     byte_pos: usize,
     remaining: usize,
     state: RleDecoderState<'a, T>,
@@ -545,7 +545,7 @@ impl<T: RleValue> Clone for RleDecoderState<'_, T> {
 }
 
 impl<'a, T: RleValue> RleDecoder<'a, T> {
-    pub(crate) fn new(data: &'a [u8]) -> Self {
+    pub(crate) fn new(data: &'a ValidBytes) -> Self {
         let mut dec = RleDecoder {
             data,
             byte_pos: 0,
@@ -717,7 +717,7 @@ impl<T: RleValue> Default for RleEncoding<T> {
 impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
     type Value = T;
 
-    fn get<'a>(slab: &'a [u8], index: usize, len: usize) -> Option<T::Get<'a>> {
+    fn get<'a>(slab: &'a ValidBytes, index: usize, len: usize) -> Option<T::Get<'a>> {
         if index >= len {
             return None;
         }
@@ -806,7 +806,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
     type Decoder<'a> = RleDecoder<'a, T>;
 
-    fn decoder(slab: &[u8]) -> RleDecoder<'_, T> {
+    fn decoder(slab: &ValidBytes) -> RleDecoder<'_, T> {
         RleDecoder::new(slab)
     }
 }
@@ -3033,7 +3033,7 @@ fn rle_load_and_verify<T: RleValue>(
                     ));
                 }
                 if let Some(validate) = validate {
-                    if let Some(msg) = validate(T::get_null(data)) {
+                    if let Some(msg) = validate(T::get_null(ValidBytes::from_bytes(data))) {
                         return Err(PackError::InvalidValue(msg));
                     }
                 }
