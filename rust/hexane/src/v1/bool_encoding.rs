@@ -108,41 +108,17 @@ fn encode_count(n: usize) -> BoolLeb128Buf {
 
 // ── Scan ─────────────────────────────────────────────────────────────────────
 
-struct BoolScanResult {
-    /// Byte offset of this run's LEB128 count.
-    run_start: usize,
-    /// Number of bytes in the LEB128 count.
-    count_bytes: usize,
-    /// Number of items in this run.
-    count: usize,
-    /// The boolean value of items in this run.
-    value: bool,
-    /// How many items before the target within this run.
-    offset_in_run: usize,
-    /// Byte offset and value of the previous run (for merging).
-    prev: Option<(usize, usize, bool)>, // (byte_pos, count_bytes, value)
-}
-
-fn scan_to(slab: &[u8], target: usize) -> Option<BoolScanResult> {
+/// Walk the boolean RLE runs to find the value at `target`.
+fn scan_to(slab: &[u8], target: usize) -> Option<bool> {
     let (mut byte_pos, mut item_pos, mut value) = (0, 0, false);
-
-    let mut prev: Option<(usize, usize, bool)> = None;
 
     while byte_pos < slab.len() {
         let (cb, count) = read_count(&slab[byte_pos..])?;
 
         if target < item_pos + count {
-            return Some(BoolScanResult {
-                run_start: byte_pos,
-                count_bytes: cb,
-                count,
-                value,
-                offset_in_run: target - item_pos,
-                prev,
-            });
+            return Some(value);
         }
 
-        prev = Some((byte_pos, cb, value));
         item_pos += count;
         byte_pos += cb;
         value = !value;
@@ -268,101 +244,7 @@ impl ColumnEncoding for BoolEncoding {
         if index >= len {
             return None;
         }
-        let scan = scan_to(slab, index)?;
-        Some(scan.value)
-    }
-
-    fn insert<'v>(slab: &mut Vec<u8>, index: usize, len: usize, value: bool) -> i32 {
-        #[cfg(debug_assertions)]
-        let seg_before = bool_count_segments(slab);
-
-        let delta = if slab.is_empty() || index == len {
-            // Append case.
-            append_bool(slab, len, value)
-        } else {
-            let scan = scan_to(slab, index).expect("index < len so scan must succeed");
-
-            if scan.value == value {
-                // Same value as current run — increment count.
-                let new_count = encode_count(scan.count + 1);
-                slab.splice(scan.run_start..scan.run_start + scan.count_bytes, new_count);
-                0 // count bump, no segment change
-            } else {
-                // Different value — need to split the run.
-                let k = scan.offset_in_run;
-
-                if k == 0 {
-                    if let Some((prev_start, prev_cb, _prev_val)) = scan.prev {
-                        // Extend previous run (same value due to alternation).
-                        let (_, prev_count) = read_count(&slab[prev_start..]).unwrap();
-                        let new_prev = encode_count(prev_count + 1);
-                        slab.splice(prev_start..prev_start + prev_cb, new_prev);
-                        // If prev was 0-count (structural padding), it just became a
-                        // real segment; otherwise no change.
-                        if prev_count == 0 {
-                            1
-                        } else {
-                            0
-                        }
-                    } else {
-                        // No prev: insert_split at 0 creates [0][1][N] = +1 seg
-                        // (the 0-count run is structural padding, not a segment)
-                        insert_split(slab, &scan, 0);
-                        1
-                    }
-                } else if k == scan.count {
-                    let next_start = scan.run_start + scan.count_bytes;
-                    if next_start < slab.len() {
-                        // Extend next run.
-                        let (next_cb, next_count) = read_count(&slab[next_start..]).unwrap();
-                        let new_next = encode_count(next_count + 1);
-                        slab.splice(next_start..next_start + next_cb, new_next);
-                        0 // extended next run
-                    } else {
-                        // Append new run at end.
-                        slab.extend(encode_count(1));
-                        1 // new non-zero run
-                    }
-                } else {
-                    // Mid-run split: [N] → [k][1][N-k] = +2 segs
-                    insert_split(slab, &scan, k);
-                    2
-                }
-            }
-        };
-
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            delta,
-            bool_count_segments(slab) as i32 - seg_before as i32,
-            "segment delta mismatch in Bool insert"
-        );
-        delta
-    }
-
-    fn remove(slab: &mut Vec<u8>, index: usize, _len: usize) -> i32 {
-        #[cfg(debug_assertions)]
-        let seg_before = bool_count_segments(slab);
-
-        let scan = scan_to(slab, index).expect("index < len so scan must succeed");
-
-        let delta = if scan.count > 1 {
-            // Decrement count — non-structural.
-            let new_count = encode_count(scan.count - 1);
-            slab.splice(scan.run_start..scan.run_start + scan.count_bytes, new_count);
-            0
-        } else {
-            // count == 1: remove this run and merge neighbors.
-            remove_and_merge(slab, &scan)
-        };
-
-        #[cfg(debug_assertions)]
-        debug_assert_eq!(
-            delta,
-            bool_count_segments(slab) as i32 - seg_before as i32,
-            "segment delta mismatch in Bool remove"
-        );
-        delta
+        scan_to(slab, index)
     }
 
     fn count_segments(slab: &[u8]) -> usize {
@@ -402,164 +284,6 @@ impl ColumnEncoding for BoolEncoding {
 
     fn decoder(slab: &ValidBytes) -> BoolDecoder<'_> {
         BoolDecoder::new(slab.as_bytes())
-    }
-}
-
-// ── Append ───────────────────────────────────────────────────────────────────
-
-/// Append a boolean value to the end of the slab. Returns segment delta.
-fn append_bool(slab: &mut Vec<u8>, len: usize, value: bool) -> i32 {
-    if slab.is_empty() {
-        // Empty column — create initial runs.
-        if value {
-            // [0 false, 1 true] — 0-count false is structural padding, 1 segment
-            slab.extend(encode_count(0));
-            slab.extend(encode_count(1));
-        } else {
-            // [1 false] — 1 segment
-            slab.extend(encode_count(1));
-        }
-        return 1;
-    }
-
-    // Walk to the last run to determine its value and extend it.
-    let mut byte_pos = 0;
-    let mut run_value = false;
-    let mut last_start = 0;
-    let mut last_cb = 0;
-    let mut _item_pos = 0;
-
-    while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..]).unwrap();
-        last_start = byte_pos;
-        last_cb = cb;
-        _item_pos += count;
-        byte_pos += cb;
-        if byte_pos < slab.len() {
-            run_value = !run_value;
-        }
-    }
-
-    debug_assert_eq!(_item_pos, len, "slab item count mismatch");
-
-    if run_value == value {
-        // Extend the last run.
-        let (_, last_count) = read_count(&slab[last_start..]).unwrap();
-        let new_count = encode_count(last_count + 1);
-        slab.splice(last_start..last_start + last_cb, new_count);
-        0 // extended existing run
-    } else {
-        // Append a new 1-count run.
-        slab.extend(encode_count(1));
-        1 // new non-zero run
-    }
-}
-
-// ── Mid-run split ────────────────────────────────────────────────────────────
-
-/// Split a run at offset `k`, inserting a 1-count run of the opposite value.
-/// Turns `[N same]` into `[k same][1 opposite][N-k same]`.
-fn insert_split(slab: &mut Vec<u8>, scan: &BoolScanResult, k: usize) {
-    let before = k;
-    let after = scan.count - k;
-
-    let mut new_bytes = vec![];
-    new_bytes.extend(encode_count(before));
-    new_bytes.extend(encode_count(1)); // the inserted opposite-value item
-    new_bytes.extend(encode_count(after));
-
-    slab.splice(scan.run_start..scan.run_start + scan.count_bytes, new_bytes);
-}
-
-// ── Remove + merge ───────────────────────────────────────────────────────────
-
-/// Remove a run with count==1 and merge the now-adjacent same-value neighbors.
-/// Returns segment delta.
-fn remove_and_merge(slab: &mut Vec<u8>, scan: &BoolScanResult) -> i32 {
-    let run_end = scan.run_start + scan.count_bytes;
-
-    // Check if there's a next run.
-    let next = if run_end < slab.len() {
-        let (cb, count) = read_count(&slab[run_end..]).unwrap();
-        Some((run_end, cb, count))
-    } else {
-        None
-    };
-
-    match (scan.prev, next) {
-        (Some((prev_start, _prev_cb, _)), Some((next_start, next_cb, next_count))) => {
-            // Both neighbors exist and have the same value (they bookended
-            // the removed run).  Merge them.
-            let (_, prev_count) = read_count(&slab[prev_start..]).unwrap();
-            let merged_count = prev_count + next_count;
-            let merge_end = next_start + next_cb;
-
-            // Replace [prev_count][removed_count][next_count] with [merged_count].
-            let new_bytes = encode_count(merged_count);
-            slab.splice(prev_start..merge_end, new_bytes);
-            // Segments removed: 1 (the removed run) + 1 (next, always non-zero)
-            // + prev_seg (1 if prev_count > 0, else 0).
-            // Segments added: 1 (if merged > 0, which it must be since next > 0).
-            let prev_seg = if prev_count > 0 { 1i32 } else { 0 };
-            1 - (prev_seg + 1 + 1)
-        }
-        (None, Some((next_start, next_cb, next_count))) => {
-            // No previous run — the removed run was the first run.
-            let next_value = !scan.value;
-            if !next_value {
-                // Next run is false — it becomes the new first run.  Remove
-                // the old first run.
-                slab.drain(scan.run_start..next_start);
-            } else {
-                // Next run is true — we need a 0-count false run before it.
-                // Replace [removed] with [0], keeping the next run as-is.
-                let zero = encode_count(0);
-                slab.splice(scan.run_start..next_start, zero);
-            }
-            let _ = next_cb;
-            let _ = next_count;
-            // Removed the run = -1 seg
-            -1
-        }
-        (Some((prev_start, prev_cb, _)), None) => {
-            // No next run — the removed run was the last run.
-            // Just remove it.  But also strip any trailing zero-count runs.
-            slab.truncate(scan.run_start);
-            strip_trailing_zeros(slab);
-            let _ = prev_start;
-            let _ = prev_cb;
-            // Removed the run = -1 seg
-            -1
-        }
-        (None, None) => {
-            // Only run in the slab — clear everything.
-            slab.clear();
-            // Removed the only run = -1 seg
-            -1
-        }
-    }
-}
-
-/// Strip trailing zero-count runs from the slab.
-fn strip_trailing_zeros(slab: &mut Vec<u8>) {
-    loop {
-        if slab.is_empty() {
-            break;
-        }
-        // Walk to find the last run.
-        let mut byte_pos = 0;
-        let mut last_start = 0;
-        while byte_pos < slab.len() {
-            last_start = byte_pos;
-            let (cb, _) = read_count(&slab[byte_pos..]).unwrap();
-            byte_pos += cb;
-        }
-        let (_, count) = read_count(&slab[last_start..]).unwrap();
-        if count == 0 {
-            slab.truncate(last_start);
-        } else {
-            break;
-        }
     }
 }
 
