@@ -5,6 +5,7 @@ use super::encoding::ColumnEncoding;
 use super::ColumnDefault;
 use super::ColumnValueRef;
 use super::AsColumnRef;
+use super::{ValidBuf, ValidBytes};
 use crate::PackError;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
@@ -12,7 +13,7 @@ use crate::PackError;
 #[doc(hidden)]
 #[derive(Clone, Debug, Default)]
 pub struct Slab {
-    pub(crate) data: Vec<u8>,
+    pub(crate) data: ValidBuf,
     pub(crate) len: usize,
     pub(crate) segments: usize,
 }
@@ -189,7 +190,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let slabs: Vec<Slab> = T::Encoding::encode_all_slabs(values, max_segments)
             .into_iter()
             .map(|(data, len, segments)| Slab {
-                data,
+                data: ValidBuf::new(data),
                 len,
                 segments,
             })
@@ -226,7 +227,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let slabs: Vec<Slab> = verified
             .into_iter()
             .map(|(data, len, segments)| Slab {
-                data,
+                data: ValidBuf::new(data),
                 len,
                 segments,
             })
@@ -257,7 +258,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Iterator over raw slab data (for debugging/testing).
     pub fn slab_data(&self) -> Vec<Vec<u8>> {
-        self.slabs.iter().map(|s| s.data.clone()).collect()
+        self.slabs.iter().map(|s| s.data.to_vec()).collect()
     }
 
     /// Returns `(len, segments)` for each slab (for debugging/testing).
@@ -290,7 +291,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Returns the byte range written (`out[range]` is the serialized data).
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
-        let slab_refs: Vec<&[u8]> = self.slabs.iter().map(|s| s.data.as_slice()).collect();
+        let slab_refs: Vec<&[u8]> = self.slabs.iter().map(|s| s.data.as_bytes()).collect();
         let bytes = T::Encoding::streaming_save(&slab_refs);
         out.extend_from_slice(&bytes);
         start..out.len()
@@ -331,7 +332,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let (si, offset) = self.locate_index(index);
         let old_weight = WF::compute(&self.slabs[si]);
         let slab = &mut self.slabs[si];
-        let delta = T::Encoding::insert(&mut slab.data, offset, slab.len, value.as_column_ref());
+        let delta = T::Encoding::insert(slab.data.as_mut_vec(), offset, slab.len, value.as_column_ref());
         slab.len += 1;
         slab.segments = (slab.segments as i32 + delta) as usize;
         let new_weight = WF::compute(&self.slabs[si]);
@@ -355,7 +356,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let (si, offset) = self.locate_index(index);
         let old_weight = WF::compute(&self.slabs[si]);
         let slab = &mut self.slabs[si];
-        let delta = T::Encoding::remove(&mut slab.data, offset, slab.len);
+        let delta = T::Encoding::remove(slab.data.as_mut_vec(), offset, slab.len);
         slab.len -= 1;
         slab.segments = (slab.segments as i32 + delta) as usize;
         let new_weight = WF::compute(&self.slabs[si]);
@@ -413,7 +414,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let new_slabs: Vec<Slab> = encoded_slabs
             .into_iter()
             .map(|(data, len, segments)| Slab {
-                data,
+                data: ValidBuf::new(data),
                 len,
                 segments,
             })
@@ -491,7 +492,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         if left_items > 0 {
             result_slabs.push(Slab {
                 segments: T::Encoding::count_segments(&left_data),
-                data: left_data,
+                data: ValidBuf::new(left_data),
                 len: left_items,
             });
         }
@@ -501,7 +502,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         if right_items > 0 {
             result_slabs.push(Slab {
                 segments: T::Encoding::count_segments(&right_data),
-                data: right_data,
+                data: ValidBuf::new(right_data),
                 len: right_items,
             });
         }
@@ -555,12 +556,12 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let right_segs = T::Encoding::count_segments(&right_data);
 
         let left = Slab {
-            data: left_data,
+            data: ValidBuf::new(left_data),
             len: item_index,
             segments: left_segs,
         };
         let right = Slab {
-            data: right_data,
+            data: ValidBuf::new(right_data),
             len: right_len,
             segments: right_segs,
         };
@@ -583,7 +584,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let (merged, segments) = T::Encoding::merge_slab_bytes(&slab_a.data, &slab_b.data);
         slab_a.len += slab_b.len;
         slab_a.segments = segments;
-        slab_a.data = merged;
+        slab_a.data = ValidBuf::new(merged);
     }
 
     fn remove_slab(&mut self, si: usize) {
@@ -641,7 +642,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             return Iter {
                 slabs: &self.slabs,
                 slab_idx: 0,
-                decoder: T::Encoding::decoder(&[]),
+                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: 0,
@@ -670,7 +671,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             return Iter {
                 slabs: &self.slabs,
                 slab_idx: self.slabs.len(),
-                decoder: T::Encoding::decoder(&[]),
+                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: start,
@@ -1007,7 +1008,7 @@ impl IterState {
             return Ok(Iter {
                 slabs,
                 slab_idx: slabs.len(),
-                decoder: T::Encoding::decoder(&[]),
+                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: self.pos,

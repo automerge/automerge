@@ -33,6 +33,9 @@ use crate::PackError;
 use bool_encoding::BoolEncoding;
 use rle::RleEncoding;
 
+pub mod valid;
+pub use valid::{ValidBuf, ValidBytes};
+
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 /// A run of identical values from a column iterator.
@@ -131,12 +134,15 @@ pub trait RleValue: ColumnValueRef {
     /// data is malformed (e.g. truncated LEB128, invalid UTF-8).
     fn try_unpack(data: &[u8]) -> Result<(usize, Self::Get<'_>), PackError>;
 
-    /// Decode a non-null value from raw slab bytes.
+    /// Decode a non-null value from validated slab bytes.
     ///
-    /// Panics if the data is malformed — use [`try_unpack`](Self::try_unpack)
-    /// when error handling is needed.
-    fn unpack(data: &[u8]) -> (usize, Self::Get<'_>) {
-        Self::try_unpack(data).unwrap()
+    /// [`ValidBytes`] can only be constructed inside this crate, guaranteeing
+    /// the data has passed through [`try_unpack`](Self::try_unpack) during load.
+    /// This lets types like `String` skip re-validation (e.g. UTF-8 checks).
+    ///
+    /// The default delegates to `try_unpack` and panics on error.
+    fn unpack(data: &ValidBytes) -> (usize, Self::Get<'_>) {
+        Self::try_unpack(data.as_bytes()).unwrap()
     }
 
     /// Construct the `Get` value for a null entry.
@@ -146,7 +152,7 @@ pub trait RleValue: ColumnValueRef {
     ///
     /// The `slab` parameter is unused but anchors the lifetime so that
     /// the return type `Self::Get<'_>` is well-formed for borrowing types.
-    fn get_null(_slab: &[u8]) -> Self::Get<'_> {
+    fn get_null(_slab: &ValidBytes) -> Self::Get<'_> {
         panic!("unexpected null in non-nullable column")
     }
 
@@ -184,12 +190,12 @@ impl<T: RleValue> RleValue for Option<T> {
         Ok((n, Some(v)))
     }
 
-    fn unpack(data: &[u8]) -> (usize, Option<T::Get<'_>>) {
+    fn unpack(data: &ValidBytes) -> (usize, Option<T::Get<'_>>) {
         let (n, v) = T::unpack(data);
         (n, Some(v))
     }
 
-    fn get_null(_slab: &[u8]) -> Option<T::Get<'_>> {
+    fn get_null(_slab: &ValidBytes) -> Option<T::Get<'_>> {
         None
     }
 
@@ -328,7 +334,7 @@ impl ColumnDefault for Option<u64> {
         let mut data = vec![0x00u8];
         leb128::write::unsigned(&mut data, len as u64).unwrap();
         column::Slab {
-            data,
+            data: ValidBuf::new(data),
             len,
             segments: 1,
         }
@@ -343,7 +349,7 @@ impl ColumnDefault for Option<i64> {
         let mut data = vec![0x00u8];
         leb128::write::unsigned(&mut data, len as u64).unwrap();
         column::Slab {
-            data,
+            data: ValidBuf::new(data),
             len,
             segments: 1,
         }
@@ -358,7 +364,7 @@ impl ColumnDefault for Option<String> {
         let mut data = vec![0x00u8];
         leb128::write::unsigned(&mut data, len as u64).unwrap();
         column::Slab {
-            data,
+            data: ValidBuf::new(data),
             len,
             segments: 1,
         }
@@ -373,7 +379,7 @@ impl ColumnDefault for Option<Vec<u8>> {
         let mut data = vec![0x00u8];
         leb128::write::unsigned(&mut data, len as u64).unwrap();
         column::Slab {
-            data,
+            data: ValidBuf::new(data),
             len,
             segments: 1,
         }
@@ -391,7 +397,7 @@ impl ColumnDefault for bool {
         let mut data = Vec::new();
         leb128::write::unsigned(&mut data, len as u64).unwrap();
         column::Slab {
-            data,
+            data: ValidBuf::new(data),
             len,
             segments: 1,
         }
@@ -454,16 +460,17 @@ impl RleValue for String {
         let s = std::str::from_utf8(&buf[..len]).map_err(|_| PackError::InvalidUtf8)?;
         Ok((hdr + len, s))
     }
-    /// Skip UTF-8 validation — data was already validated on load.
-    fn unpack(data: &[u8]) -> (usize, &str) {
-        let mut buf = data;
-        let start = buf.len();
-        let len = leb128::read::unsigned(&mut buf).unwrap() as usize;
-        let hdr = start - buf.len();
-        // SAFETY: all slab data passes through try_unpack during load,
-        // which validates UTF-8.  After load, slabs are only mutated by
-        // pack() which writes known-valid UTF-8.
-        let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
+    /// Skip UTF-8 validation — [`ValidBytes`] guarantees the data passed
+    /// through `try_unpack` (which checks UTF-8) during load.
+    fn unpack(data: &ValidBytes) -> (usize, &str) {
+        let buf = data.as_bytes();
+        let mut cursor = buf;
+        let start = cursor.len();
+        let len = leb128::read::unsigned(&mut cursor).unwrap() as usize;
+        let hdr = start - cursor.len();
+        // SAFETY: ValidBytes can only be constructed inside this crate,
+        // after try_unpack has validated UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(&cursor[..len]) };
         (hdr + len, s)
     }
     fn pack(value: &str, out: &mut Vec<u8>) -> bool {

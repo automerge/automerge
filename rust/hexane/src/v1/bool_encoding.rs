@@ -1,6 +1,7 @@
 use crate::PackError;
 
 use super::encoding::ColumnEncoding;
+use super::ValidBytes;
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -263,7 +264,7 @@ impl Default for BoolEncoding {
 impl ColumnEncoding for BoolEncoding {
     type Value = bool;
     #[allow(clippy::needless_lifetimes)]
-    fn get<'a>(slab: &'a [u8], index: usize, len: usize) -> Option<bool> {
+    fn get<'a>(slab: &'a ValidBytes, index: usize, len: usize) -> Option<bool> {
         if index >= len {
             return None;
         }
@@ -399,8 +400,8 @@ impl ColumnEncoding for BoolEncoding {
 
     type Decoder<'a> = BoolDecoder<'a>;
 
-    fn decoder(slab: &[u8]) -> BoolDecoder<'_> {
-        BoolDecoder::new(slab)
+    fn decoder(slab: &ValidBytes) -> BoolDecoder<'_> {
+        BoolDecoder::new(slab.as_bytes())
     }
 }
 
