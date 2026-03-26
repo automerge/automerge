@@ -31,7 +31,7 @@ use crate::transaction::{
 use crate::clock::{Clock, ClockRange};
 use crate::hydrate;
 use crate::types::{ActorId, ChangeHash, ObjId, ObjMeta, OpId, SequenceType, TextEncoding, Value};
-use crate::{AutomergeError, Change, Cursor, ObjType, Prop};
+use crate::{AutomergeError, Change, Cursor, Fragment, ObjType, Prop};
 
 pub(crate) mod current_state;
 
@@ -1325,6 +1325,52 @@ impl Automerge {
         DiffIter::log(self, obj, clock, &mut patch_log, recursive);
         patch_log.heads = Some(after_heads.to_vec());
         Ok(patch_log.make_patches(self))
+    }
+
+    /// EXPERIMENTAL: Return the fragments covering the document history at
+    /// the given levels, ordered oldest to newest.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn fragments<R: RangeBounds<usize>>(&self, levels: R) -> Vec<Fragment> {
+        // these produce fragments newest to oldest
+        let mut fragments: Vec<_> = self
+            .change_graph
+            .fragments(&self.get_heads(), levels)
+            .collect();
+        // but we want to return them oldest to newest
+        fragments.reverse();
+        fragments
+    }
+
+    /// EXPERIMENTAL: Return the fragment with the given head hash, if any.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn get_fragment(&self, head: ChangeHash) -> Option<Fragment> {
+        self.change_graph.get_fragment(head)
+    }
+
+    /// EXPERIMENTAL: Encode each fragment as bytes, either as a single change
+    /// (level-0 fragments with one member) or as a bundle.
+    ///
+    /// This is an experimental API, it may change or be removed without
+    /// warning.
+    #[doc(hidden)]
+    pub fn bundle_fragments<I: IntoIterator<Item = Fragment>>(&self, fragments: I) -> Vec<Vec<u8>> {
+        fragments
+            .into_iter()
+            .filter_map(|f| {
+                if f.head.fragment_level() == 0 && f.members.len() == 1 {
+                    // there should be a unwrap().into_owned()/to_vec() to avoid a memory copy
+                    Some(self.get_change_by_hash(&f.head)?.bytes().to_vec())
+                } else {
+                    Some(self.bundle(f.members).ok()?.bytes().to_vec())
+                }
+            })
+            .collect()
     }
 
     /// Get the heads of this document.
