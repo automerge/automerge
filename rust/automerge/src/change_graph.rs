@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroU32;
 use std::ops::Add;
 
@@ -46,6 +46,8 @@ pub(crate) struct ChangeGraph {
     nodes_by_hash: HashMap<ChangeHash, NodeIdx>,
     clock_cache: HashMap<NodeIdx, SeqClock>,
     seq_index: Vec<Vec<NodeIdx>>,
+    fragment_top: SeqClock,
+    fragments: Vec<FragmentNode>,
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -102,6 +104,8 @@ impl ChangeGraph {
             heads: BTreeSet::new(),
             clock_cache: HashMap::new(),
             seq_index: vec![vec![]; num_actors],
+            fragments: vec![],
+            fragment_top: SeqClock::new(num_actors),
         }
     }
 
@@ -148,6 +152,10 @@ impl ChangeGraph {
         for clock in self.clock_cache.values_mut() {
             clock.rewrite_with_new_actor(idx)
         }
+        for f in &mut self.fragments {
+            f.clock.rewrite_with_new_actor(idx)
+        }
+        self.fragment_top.rewrite_with_new_actor(idx);
         self.seq_index.insert(idx, vec![]);
     }
 
@@ -558,8 +566,109 @@ impl ChangeGraph {
             if (node_idx + 1).0 % CACHE_STEP == 0 {
                 self.cache_clock(node_idx);
             }
+
+            self.cache_fragment(node_idx);
         }
         Ok(())
+    }
+
+    pub(crate) fn fragments<'a>(
+        &'a self,
+        heads: &'a [ChangeHash],
+    ) -> impl Iterator<Item = Fragment> + 'a {
+        self.loose_fragments(heads)
+            .chain(self.fragments.iter().rev().map(|f| f.export(self)))
+    }
+
+    fn loose_fragments<'a>(
+        &'a self,
+        heads: &'a [ChangeHash],
+    ) -> impl Iterator<Item = Fragment> + 'a {
+        let nodes = heads
+            .iter()
+            .filter(|h| h.fragment_level() == 0)
+            .filter_map(|h| self.nodes_by_hash.get(h).copied());
+        self.bfs_until_clock(nodes, &self.fragment_top)
+            .map(move |n| {
+                let id = self.hashes[n.0 as usize];
+                assert_eq!(id.fragment_level(), 0);
+                let deps = self.parents(n).map(|p| self.hashes[p.0 as usize]).collect();
+                let content = vec![id];
+                let level = id.fragment_level();
+                Fragment {
+                    id,
+                    level,
+                    deps,
+                    content,
+                }
+            })
+    }
+
+    fn fragment_content<'a>(
+        &'a self,
+        node: NodeIdx,
+        clock: &'a SeqClock,
+    ) -> impl Iterator<Item = ChangeHash> + 'a {
+        self.bfs_until_clock([node], clock)
+            .map(|n| self.hashes[n.0 as usize])
+    }
+
+    fn bfs_until_clock<'a, I>(
+        &'a self,
+        seed: I,
+        clock: &'a SeqClock,
+    ) -> impl Iterator<Item = NodeIdx> + 'a
+    where
+        I: IntoIterator<Item = NodeIdx>,
+    {
+        let mut to_visit: VecDeque<_> = seed.into_iter().collect();
+        let mut seen: HashSet<_> = to_visit.iter().copied().collect();
+
+        std::iter::from_fn(move || {
+            let idx = to_visit.pop_front()?;
+            for p in self.parents(idx) {
+                if !seen.contains(&p) {
+                    let actor = self.actors[p.0 as usize].into();
+                    let seq = self.seq[p.0 as usize];
+                    if clock.get_for_actor(&actor) < NonZeroU32::new(seq) {
+                        seen.insert(p);
+                        to_visit.push_back(p);
+                    }
+                }
+            }
+            Some(idx)
+        })
+    }
+
+    fn cache_fragments(&mut self) {
+        for n in 0..self.hashes.len() {
+            self.cache_fragment(NodeIdx(n as u32))
+        }
+    }
+
+    fn cache_fragment(&mut self, id: NodeIdx) {
+        let hash = &self.hashes[id.0 as usize];
+        let level = hash.fragment_level();
+        if level == 0 {
+            return;
+        }
+        let mut deps = vec![];
+        let mut supercede = vec![];
+        let clock = self.calculate_clock(vec![id]);
+        for (i, f) in self.fragments.iter().enumerate().rev() {
+            if clock.covers(&f.clock) {
+                if self.hashes[f.id.0 as usize].fragment_level() >= level {
+                    deps.push(f.id);
+                } else {
+                    supercede.push(i);
+                }
+            }
+        }
+        for i in supercede {
+            self.fragments.remove(i);
+        }
+        SeqClock::merge(&mut self.fragment_top, &clock);
+        self.fragments.push(FragmentNode { id, deps, clock });
     }
 
     pub(crate) fn add_change(&mut self, change: &Change, actor: usize) -> Result<(), MissingDep> {
@@ -759,6 +868,8 @@ impl ChangeGraphCols {
             }
         }
 
+        graph.cache_fragments();
+
         graph
     }
 
@@ -859,6 +970,8 @@ impl ChangeGraphCols {
         let clock_cache = HashMap::default();
         let hashes = vec![];
         let nodes_by_hash = HashMap::new();
+        let fragments = vec![];
+        let fragment_top = SeqClock::new(num_actors);
 
         Ok(ChangeGraphCols(ChangeGraph {
             edges,
@@ -877,6 +990,8 @@ impl ChangeGraphCols {
             nodes_by_hash,
             clock_cache,
             seq_index,
+            fragments,
+            fragment_top,
         }))
     }
 }
@@ -1067,6 +1182,183 @@ mod tests {
             }
             graph
         }
+
+        fn all_hashes(&self) -> Vec<ChangeHash> {
+            self.changes.iter().map(|c| c.hash()).collect()
+        }
+    }
+
+    #[test]
+    fn fragments_cover_all_changes() {
+        // Create a long linear chain — with ~1000 changes, we expect several
+        // with fragment_level >= 1 (roughly 1 in 256).
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+
+        let fragments: Vec<_> = graph.fragments(&heads).collect();
+
+        // Collect all content hashes across all fragments
+        // (hashes may appear in multiple fragments — this is expected)
+        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            for h in &f.content {
+                covered.insert(*h);
+            }
+        }
+
+        // Every change must appear in at least one fragment
+        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        assert!(
+            missing.is_empty(),
+            "changes not covered by any fragment: {:?}",
+            missing,
+        );
+    }
+
+    fn assert_fragment_invariants(fragments: &[Fragment]) {
+        for f in fragments {
+            // level must match the fragment_level of the id hash
+            assert_eq!(
+                f.level,
+                f.id.fragment_level(),
+                "fragment level mismatch for {:?}",
+                f.id
+            );
+
+            // id must be in content
+            assert!(
+                f.content.contains(&f.id),
+                "fragment id {:?} not found in its own content",
+                f.id
+            );
+
+            // deps must be equal or higher level than the fragment
+            for dep in &f.deps {
+                assert!(
+                    dep.fragment_level() >= f.level,
+                    "fragment {:?} (level {}) has dep {:?} with lower level {}",
+                    f.id,
+                    f.level,
+                    dep,
+                    dep.fragment_level(),
+                );
+            }
+
+            // content must not contain a hash with a higher level than the id
+            for h in &f.content {
+                assert!(
+                    h.fragment_level() <= f.level,
+                    "fragment {:?} (level {}) contains {:?} with higher level {}",
+                    f.id,
+                    f.level,
+                    h,
+                    h.fragment_level(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fragment_id_and_level_consistent() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads).collect();
+
+        assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn fragments_work_with_concurrent_actors() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+
+        // Build two concurrent chains that merge periodically
+        let root = builder.change(&actor1, 1, &[]);
+        let mut tip1 = root;
+        let mut tip2 = root;
+        for i in 0..500 {
+            tip1 = builder.change(&actor1, 1, &[tip1]);
+            tip2 = builder.change(&actor2, 1, &[tip2]);
+            if i % 50 == 49 {
+                // merge
+                let merge = builder.change(&actor1, 1, &[tip1, tip2]);
+                tip1 = merge;
+                tip2 = merge;
+            }
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads).collect();
+
+        let mut covered: BTreeSet<ChangeHash> = BTreeSet::new();
+        for f in &fragments {
+            for h in &f.content {
+                covered.insert(*h);
+            }
+        }
+
+        let missing: Vec<_> = all_hashes.difference(&covered).collect();
+        assert!(
+            missing.is_empty(),
+            "changes not covered by any fragment: {:?}",
+            missing,
+        );
+
+        assert_fragment_invariants(&fragments);
+    }
+
+    #[test]
+    fn fragment_deps_reference_known_hashes() {
+        let mut builder = TestGraphBuilder::new();
+        let actor = builder.actor();
+        let mut prev = vec![];
+        for _ in 0..1000 {
+            let h = builder.change(&actor, 1, &prev);
+            prev = vec![h];
+        }
+        let graph = builder.build();
+        let all_hashes: BTreeSet<_> = builder.all_hashes().into_iter().collect();
+        let heads: Vec<_> = graph.heads().collect();
+        let fragments: Vec<_> = graph.fragments(&heads).collect();
+        let fragment_ids: BTreeSet<_> = fragments.iter().map(|f| f.id).collect();
+
+        for f in &fragments {
+            for dep in &f.deps {
+                assert!(
+                    all_hashes.contains(dep),
+                    "fragment {:?} has dep {:?} not in change graph",
+                    f.id,
+                    dep
+                );
+                // Deps of cached fragments (level > 0) should point to other fragment ids
+                // Deps of loose fragments (level == 0) point to change-level parents
+                if f.level > 0 {
+                    assert!(
+                        fragment_ids.contains(dep) || dep.fragment_level() == 0,
+                        "cached fragment {:?} has dep {:?} that is not a fragment id",
+                        f.id,
+                        dep
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1189,6 +1481,41 @@ impl<'a> Iterator for ChangeIter<'a> {
             builder: 0,
         })
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+struct FragmentNode {
+    id: NodeIdx,
+    deps: Vec<NodeIdx>,
+    clock: SeqClock,
+}
+
+impl FragmentNode {
+    fn export(&self, graph: &ChangeGraph) -> Fragment {
+        let id = graph.hashes[self.id.0 as usize];
+        let level = id.fragment_level();
+        let deps = self
+            .deps
+            .iter()
+            .map(|d| graph.hashes[d.0 as usize])
+            .collect();
+        let clock = graph.calculate_clock(self.deps.clone());
+        let content = graph.fragment_content(self.id, &clock).collect();
+        Fragment {
+            id,
+            level,
+            deps,
+            content,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Fragment {
+    pub id: ChangeHash,
+    pub level: usize,
+    pub deps: Vec<ChangeHash>,
+    pub content: Vec<ChangeHash>,
 }
 
 #[rustfmt::skip]
