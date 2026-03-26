@@ -174,8 +174,8 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Bulk-construct with a custom segment budget per slab.
     pub fn from_values_with_max_segments(values: Vec<T>, max_segments: usize) -> Self {
-        let total_len = values.len();
-        let slabs: Vec<Slab> = T::Encoding::encode_all_slabs(values, max_segments)
+        let (encoded, total_len) = T::Encoding::encode_all_slabs(values.into_iter(), max_segments);
+        let slabs: Vec<Slab> = encoded
             .into_iter()
             .map(|(data, len, segments)| Slab {
                 data: ValidBuf::new(data),
@@ -336,19 +336,14 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         self.counter += 1;
         assert!(index + del <= self.total_len, "splice range out of bounds");
 
-        // Collect into the caller's type to avoid premature owned conversion.
-        // For the small path, values go straight to insert() via as_column_ref()
-        // with no intermediate allocation (e.g. &str stays &str, never becomes String).
-        let values: Vec<V> = values.into_iter().collect();
-
-        let new_len = values.len();
+        // Encode all new values into pre-split slabs in one O(n) pass.
+        let (encoded_slabs, new_len) = T::Encoding::encode_all_slabs(values.into_iter(), self.max_segments);
 
         if del == 0 && new_len == 0 {
             return;
         }
 
         if self.slabs.is_empty() {
-            let encoded_slabs = T::Encoding::encode_all_slabs(values, self.max_segments);
             self.slabs = encoded_slabs
                 .into_iter()
                 .map(|(data, len, segments)| Slab {
@@ -371,8 +366,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             (si, off + 1)
         };
 
-        // Encode all new values into pre-split slabs in one O(n) pass.
-        let encoded_slabs = T::Encoding::encode_all_slabs(values, self.max_segments);
         let new_slabs: Vec<Slab> = encoded_slabs
             .into_iter()
             .map(|(data, len, segments)| Slab {

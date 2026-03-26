@@ -203,6 +203,106 @@ mod splice_small_replace {
     }
 }
 
+// ── Small splice: u64 replace (already above), now String insert/replace ────
+
+fn rand_strings(n: usize, len: usize) -> Vec<String> {
+    (0..n).map(|_| rand_string(len)).collect()
+}
+
+fn build_v0_str(n: usize, slen: usize) -> ColumnData<StrCursor> {
+    (0..n).map(|_| rand_string(slen)).collect()
+}
+
+fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
+    v1::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
+}
+
+#[divan::bench_group(name = "string_insert_small")]
+mod string_insert_small {
+    use super::*;
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v0_insert_1(bencher: Bencher, slen: usize) {
+        let mut col = build_v0_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.splice(pos, 0, [rand_string(slen)]);
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v1_insert_1(bencher: Bencher, slen: usize) {
+        let mut col = build_v1_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.insert(pos, rand_string(slen));
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v0_insert_5(bencher: Bencher, slen: usize) {
+        let mut col = build_v0_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.splice(pos, 0, rand_strings(5, slen));
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v1_insert_5(bencher: Bencher, slen: usize) {
+        let mut col = build_v1_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.splice(pos, 0, rand_strings(5, slen));
+        });
+    }
+}
+
+#[divan::bench_group(name = "string_replace_small")]
+mod string_replace_small {
+    use super::*;
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v0_replace_1(bencher: Bencher, slen: usize) {
+        let mut col = build_v0_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.splice(pos, 1, [rand_string(slen)]);
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v1_replace_1(bencher: Bencher, slen: usize) {
+        let mut col = build_v1_str(10_000, slen);
+        bencher.bench_local(|| {
+            let pos = rand_usize() % col.len();
+            col.splice(pos, 1, [rand_string(slen)]);
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v0_replace_5(bencher: Bencher, slen: usize) {
+        let mut col = build_v0_str(10_000, slen);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len < 6 { return; }
+            let pos = rand_usize() % (len - 5);
+            col.splice(pos, 5, rand_strings(5, slen));
+        });
+    }
+
+    #[divan::bench(args = [8, 64, 1024], max_time = Duration::from_secs(3))]
+    fn v1_replace_5(bencher: Bencher, slen: usize) {
+        let mut col = build_v1_str(10_000, slen);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len < 6 { return; }
+            let pos = rand_usize() % (len - 5);
+            col.splice(pos, 5, rand_strings(5, slen));
+        });
+    }
+}
+
 // ── Large splice: insert 100k elements into a 1k column ─────────────────────
 
 #[divan::bench_group(name = "splice_large_insert")]

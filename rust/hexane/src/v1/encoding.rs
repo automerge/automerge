@@ -58,10 +58,11 @@ pub trait ColumnEncoding: Default {
     /// Accepts any type convertible to the column value via [`super::AsColumnRef`],
     /// so borrowed forms (e.g. `&str` for a `String` column) can be packed
     /// directly without an intermediate owned allocation.
+    /// Returns `(slabs, total_item_count)`.
     fn encode_all_slabs<V: super::AsColumnRef<Self::Value>>(
-        values: Vec<V>,
+        values: impl Iterator<Item = V>,
         max_segments: usize,
-    ) -> Vec<(Vec<u8>, usize, usize)>;
+    ) -> (Vec<(Vec<u8>, usize, usize)>, usize);
 
     /// Decode and validate raw bytes, splitting into slabs.
     ///

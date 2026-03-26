@@ -581,7 +581,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_validate_encoding::<T>(slab)
     }
 
-    fn encode_all_slabs<V: super::AsColumnRef<T>>(values: Vec<V>, max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
+    fn encode_all_slabs<V: super::AsColumnRef<T>>(values: impl Iterator<Item = V>, max_segments: usize) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
         rle_encode_all_slabs::<T, V>(values, max_segments)
     }
 
@@ -1471,18 +1471,13 @@ struct PackEntry {
 /// Phase 2: Greedy scan emitting runs directly, cutting slabs when the
 ///           segment budget is reached.
 fn rle_encode_all_slabs<T: RleValue, V: super::AsColumnRef<T>>(
-    values: Vec<V>,
+    values: impl Iterator<Item = V>,
     max_segments: usize,
-) -> Vec<(Vec<u8>, usize, usize)> {
-    if values.is_empty() {
-        return vec![];
-    }
-
+) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
     // Phase 1: Pack into a flat buffer.
-    let n = values.len();
-    let mut pack_buf = Vec::with_capacity(n * 2);
-    let mut entries = Vec::with_capacity(n);
-    for value in &values {
+    let mut pack_buf = Vec::new();
+    let mut entries = Vec::new();
+    for value in values {
         let start = pack_buf.len();
         let is_value = T::pack(value.as_column_ref(), &mut pack_buf);
         let len = pack_buf.len() - start;
@@ -1491,6 +1486,11 @@ fn rle_encode_all_slabs<T: RleValue, V: super::AsColumnRef<T>>(
             len: len as u16,
             is_value,
         });
+    }
+
+    let n = entries.len();
+    if n == 0 {
+        return (vec![], 0);
     }
 
     let val_bytes = |idx: usize| -> &[u8] {
@@ -1578,7 +1578,7 @@ fn rle_encode_all_slabs<T: RleValue, V: super::AsColumnRef<T>>(
         slabs.push((cur, cur_items, cur_segs));
     }
 
-    slabs
+    (slabs, n)
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────
