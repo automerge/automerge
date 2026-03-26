@@ -19,7 +19,7 @@ use crate::PackError;
 
 use super::column::Column;
 use super::prefix_column::{PrefixColumn, PrefixIter, PrefixValue};
-use super::{ColumnDefault, ColumnValue, IntoColumnValue};
+use super::{ColumnDefault, ColumnValueRef, AsColumnRef};
 
 // ── Mirrorable trait ────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ use super::{ColumnDefault, ColumnValue, IntoColumnValue};
 ///
 /// Provides comparison methods and v0 column operations so that generic code
 /// in `MirroredColumn`/`MirroredPrefixColumn` doesn't need HRTB bounds.
-pub trait Mirrorable: ColumnValue + Sized {
+pub trait Mirrorable: ColumnValueRef + Sized {
     type V0Cursor: ColumnCursor;
 
     /// Compare a v0 `get()` result with a v1 `get()` result.
@@ -42,11 +42,11 @@ pub trait Mirrorable: ColumnValue + Sized {
         v1: Self::Get<'_>,
     ) -> bool;
 
-    /// Apply a splice to a v0 ColumnData.
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]);
+    /// Apply a splice to a v0 ColumnData using borrowed `Get` values.
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self::Get<'_>]);
 
-    /// Collect owned values into a v0 ColumnData.
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor>;
+    /// Collect borrowed `Get` values into a v0 ColumnData.
+    fn v0_from_values(values: &[Self::Get<'_>]) -> ColumnData<Self::V0Cursor>;
 }
 
 // ── Mirrorable impls ────────────────────────────────────────────────────────
@@ -70,11 +70,11 @@ impl Mirrorable for Option<u64> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]) {
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<u64>]) {
         col.splice(index, del, values.iter().copied());
     }
 
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor> {
+    fn v0_from_values(values: &[Option<u64>]) -> ColumnData<Self::V0Cursor> {
         values.iter().copied().collect()
     }
 }
@@ -98,11 +98,11 @@ impl Mirrorable for Option<i64> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]) {
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<i64>]) {
         col.splice(index, del, values.iter().copied());
     }
 
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor> {
+    fn v0_from_values(values: &[Option<i64>]) -> ColumnData<Self::V0Cursor> {
         values.iter().copied().collect()
     }
 }
@@ -126,12 +126,12 @@ impl Mirrorable for Option<String> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]) {
-        col.splice(index, del, values.iter().map(|v| v.as_deref()));
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<&str>]) {
+        col.splice(index, del, values.iter().copied());
     }
 
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor> {
-        values.iter().map(|v| v.as_deref()).collect()
+    fn v0_from_values(values: &[Option<&str>]) -> ColumnData<Self::V0Cursor> {
+        values.iter().copied().collect()
     }
 }
 
@@ -154,12 +154,12 @@ impl Mirrorable for Option<Vec<u8>> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]) {
-        col.splice(index, del, values.iter().map(|v| v.as_deref()));
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<&[u8]>]) {
+        col.splice(index, del, values.iter().copied());
     }
 
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor> {
-        values.iter().map(|v| v.as_deref()).collect()
+    fn v0_from_values(values: &[Option<&[u8]>]) -> ColumnData<Self::V0Cursor> {
+        values.iter().copied().collect()
     }
 }
 
@@ -181,11 +181,11 @@ impl Mirrorable for bool {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self]) {
+    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[bool]) {
         col.splice(index, del, values.iter().copied());
     }
 
-    fn v0_from_values(values: &[Self]) -> ColumnData<Self::V0Cursor> {
+    fn v0_from_values(values: &[bool]) -> ColumnData<Self::V0Cursor> {
         values.iter().copied().collect()
     }
 }
@@ -243,10 +243,12 @@ impl<T: Mirrorable> MirroredColumn<T> {
         v1_result
     }
 
-    pub fn insert(&mut self, index: usize, value: impl IntoColumnValue<T>) {
-        let owned: T = value.into_column_value();
-        T::v0_splice(&mut self.v0, index, 0, std::slice::from_ref(&owned));
-        self.v1.insert(index, owned);
+    pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
+        {
+            let get = value.as_column_ref();
+            T::v0_splice(&mut self.v0, index, 0, std::slice::from_ref(&get));
+        }
+        self.v1.insert(index, value);
     }
 
     pub fn remove(&mut self, index: usize) {
@@ -254,15 +256,18 @@ impl<T: Mirrorable> MirroredColumn<T> {
         T::v0_splice(&mut self.v0, index, 1, &[]);
     }
 
-    pub fn splice<V: IntoColumnValue<T>>(
+    pub fn splice<V: AsColumnRef<T>>(
         &mut self,
         index: usize,
         del: usize,
         values: impl IntoIterator<Item = V>,
     ) {
-        let owned: Vec<T> = values.into_iter().map(V::into_column_value).collect();
-        T::v0_splice(&mut self.v0, index, del, &owned);
-        self.v1.splice(index, del, owned);
+        let vals: Vec<V> = values.into_iter().collect();
+        {
+            let gets: Vec<T::Get<'_>> = vals.iter().map(|v| v.as_column_ref()).collect();
+            T::v0_splice(&mut self.v0, index, del, &gets);
+        }
+        self.v1.splice(index, del, vals);
     }
 
     pub fn save(&self) -> Vec<u8> {
@@ -288,7 +293,10 @@ impl<T: Mirrorable> MirroredColumn<T> {
     }
 
     pub fn from_values(values: Vec<T>) -> Self {
-        let v0 = T::v0_from_values(&values);
+        let v0 = {
+            let gets: Vec<T::Get<'_>> = values.iter().map(|v| v.as_column_ref()).collect();
+            T::v0_from_values(&gets)
+        };
         let v1 = Column::from_values(values);
         Self { v1, v0 }
     }
@@ -657,10 +665,12 @@ impl<T: Mirrorable + PrefixValue + PrefixToAcc> MirroredPrefixColumn<T> {
         self.v1.get_index_for_total(target)
     }
 
-    pub fn insert(&mut self, index: usize, value: impl IntoColumnValue<T>) {
-        let owned: T = value.into_column_value();
-        T::v0_splice(&mut self.v0, index, 0, std::slice::from_ref(&owned));
-        self.v1.insert(index, owned);
+    pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
+        {
+            let get = value.as_column_ref();
+            T::v0_splice(&mut self.v0, index, 0, std::slice::from_ref(&get));
+        }
+        self.v1.insert(index, value);
     }
 
     pub fn remove(&mut self, index: usize) {
@@ -668,15 +678,18 @@ impl<T: Mirrorable + PrefixValue + PrefixToAcc> MirroredPrefixColumn<T> {
         T::v0_splice(&mut self.v0, index, 1, &[]);
     }
 
-    pub fn splice<V: IntoColumnValue<T>>(
+    pub fn splice<V: AsColumnRef<T>>(
         &mut self,
         index: usize,
         del: usize,
         values: impl IntoIterator<Item = V>,
     ) {
-        let owned: Vec<T> = values.into_iter().map(V::into_column_value).collect();
-        T::v0_splice(&mut self.v0, index, del, &owned);
-        self.v1.splice(index, del, owned);
+        let vals: Vec<V> = values.into_iter().collect();
+        {
+            let gets: Vec<T::Get<'_>> = vals.iter().map(|v| v.as_column_ref()).collect();
+            T::v0_splice(&mut self.v0, index, del, &gets);
+        }
+        self.v1.splice(index, del, vals);
     }
 
     pub fn save(&self) -> Vec<u8> {
@@ -706,7 +719,10 @@ impl<T: Mirrorable + PrefixValue + PrefixToAcc> MirroredPrefixColumn<T> {
     }
 
     pub fn from_values(values: Vec<T>) -> Self {
-        let v0 = T::v0_from_values(&values);
+        let v0 = {
+            let gets: Vec<T::Get<'_>> = values.iter().map(|v| v.as_column_ref()).collect();
+            T::v0_from_values(&gets)
+        };
         let v1 = PrefixColumn::from_values(values);
         Self { v1, v0 }
     }

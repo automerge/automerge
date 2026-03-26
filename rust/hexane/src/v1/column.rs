@@ -3,8 +3,8 @@ use std::ops::{AddAssign, Range, SubAssign};
 
 use super::encoding::ColumnEncoding;
 use super::ColumnDefault;
-use super::ColumnValue;
-use super::IntoColumnValue;
+use super::ColumnValueRef;
+use super::AsColumnRef;
 use crate::PackError;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ impl SlabWeight for usize {
 /// counts.  Prefix-aware columns use a compound weight that also tracks
 /// prefix sums in the same BIT.
 #[doc(hidden)]
-pub trait WeightFn<T: ColumnValue> {
+pub trait WeightFn<T: ColumnValueRef> {
     type Weight: SlabWeight;
     fn compute(slab: &Slab) -> Self::Weight;
 }
@@ -61,7 +61,7 @@ pub trait WeightFn<T: ColumnValue> {
 #[derive(Clone)]
 pub struct LenWeight;
 
-impl<T: ColumnValue> WeightFn<T> for LenWeight {
+impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     type Weight = usize;
     #[inline]
     fn compute(slab: &Slab) -> usize {
@@ -73,7 +73,7 @@ impl<T: ColumnValue> WeightFn<T> for LenWeight {
 
 /// Rebuild BIT from scratch. O(S).
 /// The BIT is 1-indexed: bit[0] is unused, bit[1..=n] holds the tree.
-pub(crate) fn rebuild_bit<T: ColumnValue, WF: WeightFn<T>>(slabs: &[Slab]) -> Vec<WF::Weight> {
+pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(slabs: &[Slab]) -> Vec<WF::Weight> {
     let n = slabs.len();
     let mut bit = vec![WF::Weight::default(); n + 1];
     for i in 0..n {
@@ -131,7 +131,7 @@ pub(crate) fn find_slab<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (us
 // ── Column ──────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-pub struct Column<T: ColumnValue, WF: WeightFn<T> = LenWeight> {
+pub struct Column<T: ColumnValueRef, WF: WeightFn<T> = LenWeight> {
     pub(crate) slabs: Vec<Slab>,
     pub(crate) bit: Vec<WF::Weight>,
     pub(crate) total_len: usize,
@@ -140,13 +140,13 @@ pub struct Column<T: ColumnValue, WF: WeightFn<T> = LenWeight> {
     _phantom: PhantomData<fn() -> (T, WF)>,
 }
 
-impl<T: ColumnValue, WF: WeightFn<T>> Default for Column<T, WF> {
+impl<T: ColumnValueRef, WF: WeightFn<T>> Default for Column<T, WF> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: ColumnValue, WF: WeightFn<T>> Column<T, WF> {
+impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     pub fn new() -> Self {
         Self::with_max_segments(16)
     }
@@ -316,12 +316,12 @@ impl<T: ColumnValue, WF: WeightFn<T>> Column<T, WF> {
     /// Inserts `value` at `index`, shifting subsequent elements right.
     /// Panics if `index > self.len()`.
     ///
-    /// Accepts both owned and borrowed forms via [`IntoColumnValue`]:
+    /// Accepts both owned and borrowed forms via [`AsColumnRef`]:
     /// ```ignore
     /// col.insert(0, "hello");       // &str for Column<String>
     /// col.insert(0, Some("hello")); // Option<&str> for Column<Option<String>>
     /// ```
-    pub fn insert(&mut self, index: usize, value: impl IntoColumnValue<T>) {
+    pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
         self.counter += 1;
         assert!(index <= self.total_len, "insert index out of bounds");
         if self.slabs.is_empty() {
@@ -372,11 +372,11 @@ impl<T: ColumnValue, WF: WeightFn<T>> Column<T, WF> {
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
     /// Panics if `index + del > self.len()`.
     ///
-    /// Accepts both owned and borrowed forms via [`IntoColumnValue`]:
+    /// Accepts both owned and borrowed forms via [`AsColumnRef`]:
     /// ```ignore
     /// col.splice(0, 2, ["hello", "world"]); // &str items for Column<String>
     /// ```
-    pub fn splice<V: IntoColumnValue<T>>(
+    pub fn splice<V: AsColumnRef<T>>(
         &mut self,
         index: usize,
         del: usize,
@@ -385,7 +385,10 @@ impl<T: ColumnValue, WF: WeightFn<T>> Column<T, WF> {
         self.counter += 1;
         assert!(index + del <= self.total_len, "splice range out of bounds");
 
-        let values: Vec<T> = values.into_iter().map(|v| v.into_column_value()).collect();
+        // Collect into the caller's type to avoid premature owned conversion.
+        // For the small path, values go straight to insert() via as_column_ref()
+        // with no intermediate allocation (e.g. &str stays &str, never becomes String).
+        let values: Vec<V> = values.into_iter().collect();
 
         // For small splices, the simple loop has less overhead.
         if del + values.len() <= 16 {
@@ -405,6 +408,7 @@ impl<T: ColumnValue, WF: WeightFn<T>> Column<T, WF> {
         }
 
         // Encode all new values into pre-split slabs in one O(n) pass.
+        // Values are packed directly via as_column_ref() — no owned conversion needed.
         let encoded_slabs = T::Encoding::encode_all_slabs(values, self.max_segments);
         let new_slabs: Vec<Slab> = encoded_slabs
             .into_iter()
@@ -766,7 +770,7 @@ impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
 ///
 /// `nth()` is O(slabs_skipped + runs_skipped) — repeat and null runs are
 /// skipped in O(1), whole slabs are skipped without creating a decoder.
-pub struct Iter<'a, T: ColumnValue> {
+pub struct Iter<'a, T: ColumnValueRef> {
     pub(crate) slabs: &'a [Slab],
     pub(crate) slab_idx: usize,
     pub(crate) decoder: <T::Encoding as ColumnEncoding>::Decoder<'a>,
@@ -779,7 +783,7 @@ pub struct Iter<'a, T: ColumnValue> {
     pub(crate) counter: usize,
 }
 
-impl<'a, T: ColumnValue> Iterator for Iter<'a, T> {
+impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     type Item = T::Get<'a>;
 
     #[inline]
@@ -854,9 +858,9 @@ impl<'a, T: ColumnValue> Iterator for Iter<'a, T> {
     }
 }
 
-impl<T: ColumnValue> ExactSizeIterator for Iter<'_, T> {}
+impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
 
-impl<T: ColumnValue> Clone for Iter<'_, T> {
+impl<T: ColumnValueRef> Clone for Iter<'_, T> {
     fn clone(&self) -> Self {
         Self {
             slabs: self.slabs,
@@ -870,7 +874,7 @@ impl<T: ColumnValue> Clone for Iter<'_, T> {
     }
 }
 
-impl<'a, T: ColumnValue> Iter<'a, T> {
+impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
@@ -987,7 +991,7 @@ impl IterState {
     ///
     /// Returns [`PackError::InvalidResume`] if `column` was mutated since
     /// [`Iter::suspend`].
-    pub fn try_resume<'a, T: ColumnValue, WF: WeightFn<T>>(
+    pub fn try_resume<'a, T: ColumnValueRef, WF: WeightFn<T>>(
         &self,
         column: &'a Column<T, WF>,
     ) -> Result<Iter<'a, T>, PackError> {
@@ -1029,7 +1033,7 @@ impl IterState {
     }
 }
 
-impl<'a, T: ColumnValue> Iter<'a, T> {
+impl<'a, T: ColumnValueRef> Iter<'a, T> {
     /// Captures the current iterator position so it can be restored later.
     pub fn suspend(&self) -> IterState {
         let slab_len = if self.slab_idx < self.slabs.len() {
@@ -1050,7 +1054,7 @@ impl<'a, T: ColumnValue> Iter<'a, T> {
 
 // ── FromIterator ────────────────────────────────────────────────────────────
 
-impl<T: ColumnValue> FromIterator<T> for Column<T> {
+impl<T: ColumnValueRef> FromIterator<T> for Column<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
     }

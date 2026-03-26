@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::PackError;
 
 use super::encoding::ColumnEncoding;
-use super::RleValue;
+use super::{ColumnValueRef, RleValue};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -178,7 +178,7 @@ enum ScannedRun {
 
 /// Walk `slab` linearly until the run containing logical item `target` is
 /// found.  Returns `None` if `target` is out of bounds.
-fn scan_to<T: RleValue<Encoding = RleEncoding<T>>>(
+fn scan_to<T: RleValue>(
     slab: &[u8],
     target: usize,
 ) -> Option<ScanResult> {
@@ -310,7 +310,7 @@ enum LastRun {
 }
 
 /// Walk the slab to find the last run.  Returns `None` only if the slab is empty.
-fn scan_last_run<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> Option<LastRunResult> {
+fn scan_last_run<T: RleValue>(slab: &[u8]) -> Option<LastRunResult> {
     let mut byte_pos = 0;
     let mut result: Option<LastRunResult> = None;
 
@@ -466,7 +466,7 @@ fn merge_lit1_into_left(left: &mut Vec<u8>, value: &[u8], prev_literal: Option<(
 
 /// Build the start of `right` with a `lit-1` for `value`, merging with the
 /// following literal in `rest` if present.
-fn merge_lit1_into_right<T: RleValue<Encoding = RleEncoding<T>>>(
+fn merge_lit1_into_right<T: RleValue>(
     right: &mut Vec<u8>,
     value: &[u8],
     rest: &[u8],
@@ -524,7 +524,7 @@ impl<T: RleValue> Clone for RleDecoder<'_, T> {
 
 enum RleDecoderState<'a, T: RleValue> {
     /// Repeat run: yield the same cached value.
-    Repeat(<T as super::ColumnValue>::Get<'a>),
+    Repeat(<T as super::ColumnValueRef>::Get<'a>),
     /// Literal run: decode each value from `byte_pos`.
     Literal,
     /// Null run: yield the type's null value.
@@ -544,7 +544,7 @@ impl<T: RleValue> Clone for RleDecoderState<'_, T> {
     }
 }
 
-impl<'a, T: RleValue<Encoding = RleEncoding<T>>> RleDecoder<'a, T> {
+impl<'a, T: RleValue> RleDecoder<'a, T> {
     pub(crate) fn new(data: &'a [u8]) -> Self {
         let mut dec = RleDecoder {
             data,
@@ -598,7 +598,7 @@ impl<'a, T: RleValue<Encoding = RleEncoding<T>>> RleDecoder<'a, T> {
     }
 }
 
-impl<'a, T: RleValue<Encoding = RleEncoding<T>>> RleDecoder<'a, T> {
+impl<'a, T: RleValue> RleDecoder<'a, T> {
     /// Skip `n` literal values by advancing `byte_pos` without decoding.
     /// Uses `value_len` (reads only the length header) rather than `unpack`.
     #[inline]
@@ -610,8 +610,8 @@ impl<'a, T: RleValue<Encoding = RleEncoding<T>>> RleDecoder<'a, T> {
     }
 }
 
-impl<'a, T: RleValue<Encoding = RleEncoding<T>>> Iterator for RleDecoder<'a, T> {
-    type Item = <T as super::ColumnValue>::Get<'a>;
+impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
+    type Item = <T as super::ColumnValueRef>::Get<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -666,7 +666,7 @@ impl<'a, T: RleValue<Encoding = RleEncoding<T>>> Iterator for RleDecoder<'a, T> 
     }
 }
 
-impl<'a, T: RleValue<Encoding = RleEncoding<T>>> super::encoding::RunDecoder for RleDecoder<'a, T> {
+impl<'a, T: RleValue> super::encoding::RunDecoder for RleDecoder<'a, T> {
     fn next_run(&mut self) -> Option<super::Run<Self::Item>> {
         loop {
             if self.remaining > 0 {
@@ -714,7 +714,7 @@ impl<T: RleValue> Default for RleEncoding<T> {
     }
 }
 
-impl<T: RleValue<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
+impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
     type Value = T;
 
     fn get<'a>(slab: &'a [u8], index: usize, len: usize) -> Option<T::Get<'a>> {
@@ -788,14 +788,14 @@ impl<T: RleValue<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
         rle_validate_encoding::<T>(slab)
     }
 
-    fn encode_all_slabs(values: Vec<T>, max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
-        rle_encode_all_slabs::<T>(values, max_segments)
+    fn encode_all_slabs<V: super::AsColumnRef<T>>(values: Vec<V>, max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
+        rle_encode_all_slabs::<T, V>(values, max_segments)
     }
 
     fn load_and_verify(
         data: &[u8],
         max_segments: usize,
-        validate: Option<for<'a> fn(<T as super::ColumnValue>::Get<'a>) -> Option<String>>,
+        validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
     ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
         rle_load_and_verify::<T>(data, max_segments, validate)
     }
@@ -815,7 +815,7 @@ impl<T: RleValue<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
 
 /// Count segments in an RLE slab. A repeat run = 1 segment, a null run = 1
 /// segment, a literal of N = N segments.
-fn rle_count_segments<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> usize {
+fn rle_count_segments<T: RleValue>(slab: &[u8]) -> usize {
     let mut byte_pos = 0;
     let mut segments = 0;
 
@@ -868,7 +868,7 @@ fn rle_count_segments<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> us
 // ── split_at_item ────────────────────────────────────────────────────────────
 
 /// Split an RLE slab at logical item `index` into two byte arrays.
-fn rle_split_at_item<T: RleValue<Encoding = RleEncoding<T>>>(
+fn rle_split_at_item<T: RleValue>(
     slab: &[u8],
     index: usize,
     len: usize,
@@ -1038,7 +1038,7 @@ enum ParsedRun {
 
 /// Find the byte offset of the last run in `slab`.  Returns `None` only if
 /// `slab` is empty.
-fn last_run_start<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> Option<usize> {
+fn last_run_start<T: RleValue>(slab: &[u8]) -> Option<usize> {
     let mut pos = 0;
     let mut last = 0;
     while pos < slab.len() {
@@ -1068,7 +1068,7 @@ fn last_run_start<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> Option
 }
 
 /// End byte offset of the first run in `slab`.
-fn first_run_end<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> usize {
+fn first_run_end<T: RleValue>(slab: &[u8]) -> usize {
     if slab.is_empty() {
         return 0;
     }
@@ -1096,7 +1096,7 @@ fn first_run_end<T: RleValue<Encoding = RleEncoding<T>>>(slab: &[u8]) -> usize {
 
 /// Merge two RLE slabs, decoding only the boundary runs and memcopying
 /// interiors.
-fn rle_merge_slab_bytes<T: RleValue<Encoding = RleEncoding<T>>>(
+fn rle_merge_slab_bytes<T: RleValue>(
     a: &[u8],
     b: &[u8],
 ) -> (Vec<u8>, usize) {
@@ -1151,7 +1151,7 @@ fn run_segments(run: &ParsedRun) -> usize {
 }
 
 /// Parse a single run from the start of `data`.
-fn parse_one_run<T: RleValue<Encoding = RleEncoding<T>>>(data: &[u8]) -> ParsedRun {
+fn parse_one_run<T: RleValue>(data: &[u8]) -> ParsedRun {
     let (cb, raw) = read_signed(data).unwrap();
     match raw {
         n if n > 0 => {
@@ -1318,7 +1318,7 @@ fn canonicalize_literal(values: Vec<Vec<u8>>) -> Vec<ParsedRun> {
 /// Processes runs from all slabs sequentially, maintaining a pending tail
 /// run that accumulates adjacent compatible runs.  Each value byte is
 /// visited at most twice (once to parse, once to write), giving O(n) total.
-fn rle_streaming_save<T: RleValue<Encoding = RleEncoding<T>>>(slabs: &[&[u8]]) -> Vec<u8> {
+fn rle_streaming_save<T: RleValue>(slabs: &[&[u8]]) -> Vec<u8> {
     if slabs.is_empty() {
         return vec![];
     }
@@ -1512,7 +1512,7 @@ fn rle_streaming_save<T: RleValue<Encoding = RleEncoding<T>>>(slabs: &[&[u8]]) -
 /// 7. First value of a literal differs from previous run's last value
 /// 8. Last value of a literal differs from next run's first value
 /// 9. No two consecutive equal values within a literal (would form a repeat)
-fn rle_validate_encoding<T: RleValue<Encoding = RleEncoding<T>>>(
+fn rle_validate_encoding<T: RleValue>(
     slab: &[u8],
 ) -> Result<(), String> {
     if slab.is_empty() {
@@ -1665,7 +1665,7 @@ fn rle_validate_encoding<T: RleValue<Encoding = RleEncoding<T>>>(
 
 // ── insert_null ──────────────────────────────────────────────────────────────
 
-fn insert_null<T: RleValue<Encoding = RleEncoding<T>>>(
+fn insert_null<T: RleValue>(
     slab: &mut Vec<u8>,
     index: usize,
     len: usize,
@@ -1822,7 +1822,7 @@ fn insert_null<T: RleValue<Encoding = RleEncoding<T>>>(
 
 // ── insert_value ─────────────────────────────────────────────────────────────
 
-fn insert_value<T: RleValue<Encoding = RleEncoding<T>>>(
+fn insert_value<T: RleValue>(
     slab: &mut Vec<u8>,
     index: usize,
     len: usize,
@@ -1981,7 +1981,7 @@ fn append_null_run(slab: &mut Vec<u8>, count: usize) {
     slab.extend(null_run_bytes(count));
 }
 
-fn append_value_run<T: RleValue<Encoding = RleEncoding<T>>>(
+fn append_value_run<T: RleValue>(
     slab: &mut Vec<u8>,
     vbytes: &[u8],
 ) -> i32 {
@@ -2045,7 +2045,7 @@ fn append_value_run<T: RleValue<Encoding = RleEncoding<T>>>(
 
 /// Perform the slab mutation for deleting the item at `index`, without
 /// decoding the value.  Shared by both `delete_impl` and `remove_impl`.
-fn delete_mutate<T: RleValue<Encoding = RleEncoding<T>>>(
+fn delete_mutate<T: RleValue>(
     slab: &mut Vec<u8>,
     scan: &ScanResult,
     _index: usize,
@@ -2155,7 +2155,7 @@ fn delete_mutate<T: RleValue<Encoding = RleEncoding<T>>>(
 
 // ── Targeted literal merging ─────────────────────────────────────────────────
 
-fn normalize_literal_at<T: RleValue<Encoding = RleEncoding<T>>>(
+fn normalize_literal_at<T: RleValue>(
     slab: &mut Vec<u8>,
     run_start: usize,
     prev_run_start: Option<usize>,
@@ -2325,7 +2325,7 @@ fn normalize_literal_at<T: RleValue<Encoding = RleEncoding<T>>>(
     0
 }
 
-fn merge_adjacent_lits<T: RleValue<Encoding = RleEncoding<T>>>(
+fn merge_adjacent_lits<T: RleValue>(
     slab: &mut Vec<u8>,
     from: usize,
     prev_run_start: Option<usize>,
@@ -2435,7 +2435,7 @@ fn merge_adjacent_nulls(slab: &mut Vec<u8>, pos: usize, prev_run_start: Option<u
     -1 // merged two null runs into one
 }
 
-fn canonicalize_neighbors<T: RleValue<Encoding = RleEncoding<T>>>(
+fn canonicalize_neighbors<T: RleValue>(
     slab: &mut Vec<u8>,
     pos: usize,
     prev_run_start: Option<usize>,
@@ -2482,7 +2482,7 @@ fn canonicalize_neighbors<T: RleValue<Encoding = RleEncoding<T>>>(
     }
 }
 
-fn merge_adjacent_repeats<T: RleValue<Encoding = RleEncoding<T>>>(
+fn merge_adjacent_repeats<T: RleValue>(
     slab: &mut Vec<u8>,
     pos: usize,
     prev_run_start: Option<usize>,
@@ -2533,7 +2533,7 @@ fn merge_adjacent_repeats<T: RleValue<Encoding = RleEncoding<T>>>(
     -1 // merged two repeat runs into one
 }
 
-fn absorb_lit1_into_repeat<T: RleValue<Encoding = RleEncoding<T>>>(
+fn absorb_lit1_into_repeat<T: RleValue>(
     slab: &mut Vec<u8>,
     pos: usize,
     prev_run_start: Option<usize>,
@@ -2605,7 +2605,7 @@ fn absorb_lit1_into_repeat<T: RleValue<Encoding = RleEncoding<T>>>(
     (false, 0)
 }
 
-fn try_absorb_into_prev<T: RleValue<Encoding = RleEncoding<T>>>(
+fn try_absorb_into_prev<T: RleValue>(
     slab: &mut Vec<u8>,
     scan: &ScanResult,
     vbytes: &[u8],
@@ -2643,7 +2643,7 @@ fn try_absorb_into_prev<T: RleValue<Encoding = RleEncoding<T>>>(
     true
 }
 
-fn try_absorb_into_next<T: RleValue<Encoding = RleEncoding<T>>>(
+fn try_absorb_into_next<T: RleValue>(
     slab: &mut Vec<u8>,
     scan: &ScanResult,
     vbytes: &[u8],
@@ -2708,8 +2708,8 @@ struct PackEntry {
 /// Phase 1: Pack all values into a flat buffer (one allocation).
 /// Phase 2: Greedy scan emitting runs directly, cutting slabs when the
 ///           segment budget is reached.
-fn rle_encode_all_slabs<T: RleValue<Encoding = RleEncoding<T>>>(
-    values: Vec<T>,
+fn rle_encode_all_slabs<T: RleValue, V: super::AsColumnRef<T>>(
+    values: Vec<V>,
     max_segments: usize,
 ) -> Vec<(Vec<u8>, usize, usize)> {
     if values.is_empty() {
@@ -2722,7 +2722,7 @@ fn rle_encode_all_slabs<T: RleValue<Encoding = RleEncoding<T>>>(
     let mut entries = Vec::with_capacity(n);
     for value in &values {
         let start = pack_buf.len();
-        let is_value = T::pack(value.as_get(), &mut pack_buf);
+        let is_value = T::pack(value.as_column_ref(), &mut pack_buf);
         let len = pack_buf.len() - start;
         entries.push(PackEntry {
             offset: start as u32,
@@ -2830,10 +2830,10 @@ fn rle_encode_all_slabs<T: RleValue<Encoding = RleEncoding<T>>>(
 /// Uses direct memcpy from the input buffer — no intermediate
 /// representations or re-encoding except when splitting a literal run
 /// (which requires rewriting the count header for each piece).
-fn rle_load_and_verify<T: RleValue<Encoding = RleEncoding<T>>>(
+fn rle_load_and_verify<T: RleValue>(
     data: &[u8],
     max_segments: usize,
-    validate: Option<for<'a> fn(<T as super::ColumnValue>::Get<'a>) -> Option<String>>,
+    validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
 ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
     if data.is_empty() {
         return Ok(vec![]);
