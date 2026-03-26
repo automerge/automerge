@@ -7,8 +7,9 @@ pub type ValidateFn<V> = for<'a> fn(<V as super::ColumnValueRef>::Get<'a>) -> Op
 
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
-/// Implementors provide the full `get`, `insert`, and `remove` operations on a
-/// raw `Vec<u8>` slab.  [`super::Column`] delegates to `T::Encoding`.
+/// Implementors provide `get`, bulk encoding/decoding, split/merge, and
+/// validation operations on raw `Vec<u8>` slabs.  [`super::Column`] delegates
+/// to `T::Encoding`.
 ///
 /// Both [`super::rle::RleEncoding`] and [`super::bool_encoding::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
@@ -26,23 +27,6 @@ pub trait ColumnEncoding: Default {
         index: usize,
         len: usize,
     ) -> Option<<Self::Value as ColumnValueRef>::Get<'a>>;
-
-    /// Insert `value` at `index` into `slab`.
-    /// `len` is the *pre-insertion* logical length.
-    /// Returns the segment delta (change in number of segments).
-    /// The caller is responsible for incrementing `len` after this returns.
-    fn insert<'v>(
-        slab: &mut Vec<u8>,
-        index: usize,
-        len: usize,
-        value: <Self::Value as ColumnValueRef>::Get<'v>,
-    ) -> i32;
-
-    /// Remove the value at `index` from `slab`.
-    /// Returns the segment delta (change in number of segments).
-    /// `len` is the *pre-removal* logical length.
-    /// The caller is responsible for decrementing `len` after this returns.
-    fn remove(slab: &mut Vec<u8>, index: usize, len: usize) -> i32;
 
     /// Count the total number of segments in `slab`.
     ///

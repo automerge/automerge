@@ -19,9 +19,9 @@ impl ValidBuf {
 
     /// Mutable access to the underlying `Vec<u8>` for in-place mutations.
     ///
-    /// Callers (insert, remove, splice) must preserve validity — i.e. only
-    /// write bytes produced by `pack`.
+    /// Callers must preserve validity — i.e. only write bytes produced by `pack`.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn as_mut_vec(&mut self) -> &mut Vec<u8> {
         &mut self.0
     }
