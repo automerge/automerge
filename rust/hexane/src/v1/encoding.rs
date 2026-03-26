@@ -1,3 +1,4 @@
+use super::ValidBytes;
 use super::ColumnValueRef;
 use crate::PackError;
 
@@ -21,7 +22,7 @@ pub trait ColumnEncoding: Default {
     /// (`str`, `[u8]`) this borrows directly from the slab without allocation.
     /// Returns `None` if `index >= len`.
     fn get<'a>(
-        slab: &'a [u8],
+        slab: &'a ValidBytes,
         index: usize,
         len: usize,
     ) -> Option<<Self::Value as ColumnValueRef>::Get<'a>>;
@@ -105,7 +106,7 @@ pub trait ColumnEncoding: Default {
     type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
 
     /// Create a decoder that yields all items in `slab` in order.
-    fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
+    fn decoder(slab: &ValidBytes) -> Self::Decoder<'_>;
 }
 
 /// Trait for decoders that can yield runs of values.
