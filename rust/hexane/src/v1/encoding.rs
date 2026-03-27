@@ -1,5 +1,5 @@
-use super::ValidBytes;
 use super::ColumnValueRef;
+use super::ValidBytes;
 use crate::PackError;
 
 /// Validation function type for [`ColumnEncoding::load_and_verify`].
@@ -86,6 +86,103 @@ pub trait ColumnEncoding: Default {
     /// Memcopies slab interiors and only decodes/re-encodes the boundary
     /// runs between adjacent slabs.
     fn streaming_save(slabs: &[&[u8]]) -> Vec<u8>;
+
+    /// Fast in-place splice on a single slab.
+    ///
+    /// Consumes values from the iterator, modifies `slab` in place.
+    /// If the result exceeds `max_segments`, overflow is written into
+    /// new slabs returned alongside the number of items inserted.
+    ///
+    /// Returns `Some((overflow_slabs, items_inserted))` on success,
+    /// `None` if this encoding doesn't support it.
+    fn fast_splice_inplace<V: super::AsColumnRef<Self::Value>>(
+        _slab: &mut super::column::Slab,
+        _index: usize,
+        _del: usize,
+        _values: &mut impl Iterator<Item = V>,
+        _max_segments: usize,
+    ) -> Option<(Vec<super::column::Slab>, usize)> {
+        None
+    }
+
+    /// Fast splice on a Column. Locates the target slab, calls
+    /// `fast_splice_inplace`, handles cross-slab deletes, updates the BIT.
+    ///
+    /// Returns `None` if this encoding doesn't support the fast path.
+    fn fast_splice<WF: super::column::WeightFn<Self::Value>, V: super::AsColumnRef<Self::Value>>(
+        col: &mut super::column::Column<Self::Value, WF>,
+        index: usize,
+        del: usize,
+        values: &mut impl Iterator<Item = V>,
+    ) -> Option<()> {
+        use super::column::{bit_point_update, find_slab, rebuild_bit};
+
+        if col.slabs.is_empty() {
+            return None;
+        }
+
+        let (si, offset) = find_slab(&col.bit, index, col.slabs.len());
+        let (si, offset) = if si >= col.slabs.len() {
+            let last = col.slabs.len() - 1;
+            (last, col.slabs[last].len)
+        } else {
+            (si, offset)
+        };
+
+        // Clamp del to this slab. Any remainder gets applied to subsequent slabs.
+        let slab_del = del.min(col.slabs[si].len - offset);
+        let overflow_del = del - slab_del;
+
+        let old_weight = WF::compute(&col.slabs[si]);
+
+        let (overflow_slabs, items_inserted) = Self::fast_splice_inplace(
+            &mut col.slabs[si],
+            offset,
+            slab_del,
+            values,
+            col.max_segments,
+        )?;
+
+        col.total_len = col.total_len - del + items_inserted;
+
+        if overflow_slabs.is_empty() && overflow_del == 0 {
+            let new_weight = WF::compute(&col.slabs[si]);
+            bit_point_update(&mut col.bit, si, old_weight, new_weight);
+        } else {
+            // Insert any new slabs from segment overflow.
+            let insert_pos = si + 1;
+            for (i, s) in overflow_slabs.into_iter().enumerate() {
+                col.slabs.insert(insert_pos + i, s);
+            }
+
+            // Apply remaining deletes to subsequent slabs.
+            if overflow_del > 0 {
+                let mut remaining = overflow_del;
+                let pos = si + 1;
+                while remaining > 0 && pos < col.slabs.len() {
+                    let slab_len = col.slabs[pos].len;
+                    if remaining >= slab_len {
+                        col.slabs.remove(pos);
+                        remaining -= slab_len;
+                    } else {
+                        let mut empty = std::iter::empty::<V>();
+                        Self::fast_splice_inplace(
+                            &mut col.slabs[pos],
+                            0,
+                            remaining,
+                            &mut empty,
+                            col.max_segments,
+                        );
+                        remaining = 0;
+                    }
+                }
+            }
+
+            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
+        }
+
+        Some(())
+    }
 
     /// Decoder type for iterating over all items in a slab.
     type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;

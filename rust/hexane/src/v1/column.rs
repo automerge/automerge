@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 use std::ops::{AddAssign, Range, SubAssign};
 
 use super::encoding::ColumnEncoding;
+use super::AsColumnRef;
 use super::ColumnDefault;
 use super::ColumnValueRef;
-use super::AsColumnRef;
 use super::{ValidBuf, ValidBytes};
 use crate::PackError;
 
@@ -89,6 +89,19 @@ pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(slabs: &[Slab]) ->
         }
     }
     bit
+}
+
+/// Update the BIT at slab index `si` after a weight change. O(log S).
+///
+/// Subtracts the old weight and adds the new weight at every ancestor node.
+#[inline]
+pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, new: W) {
+    let mut i = si + 1; // BIT is 1-indexed
+    while i < bit.len() {
+        bit[i] -= old;
+        bit[i] += new;
+        i += i & i.wrapping_neg();
+    }
 }
 
 /// Find slab containing logical index. Returns (slab_index, offset_within_slab). O(log S).
@@ -311,13 +324,13 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// col.insert(0, Some("hello")); // Option<&str> for Column<Option<String>>
     /// ```
     pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
-        self.splice(index, 0, [value]);
+        self.fast_splice(index, 0, [value]);
     }
 
     /// Removes the value at `index`.
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) {
-        self.splice(index, 1, std::iter::empty::<T>());
+        self.fast_splice(index, 1, std::iter::empty::<T>());
     }
 
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
@@ -336,8 +349,8 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         self.counter += 1;
         assert!(index + del <= self.total_len, "splice range out of bounds");
 
-        // Encode all new values into pre-split slabs in one O(n) pass.
-        let (encoded_slabs, new_len) = T::Encoding::encode_all_slabs(values.into_iter(), self.max_segments);
+        let (encoded_slabs, new_len) =
+            T::Encoding::encode_all_slabs(values.into_iter(), self.max_segments);
 
         if del == 0 && new_len == 0 {
             return;
@@ -449,6 +462,37 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         }
 
         self.bit = rebuild_bit::<T, WF>(&self.slabs);
+    }
+
+    /// Fast partition-based splice. Uses cursor-aware encoding to avoid
+    /// re-encoding the entire slab. Falls back to [`splice`](Self::splice)
+    /// for cross-slab deletes.
+    pub fn fast_splice<V: AsColumnRef<T>>(
+        &mut self,
+        index: usize,
+        del: usize,
+        values: impl IntoIterator<Item = V>,
+    ) {
+        self.counter += 1;
+        assert!(index + del <= self.total_len, "splice range out of bounds");
+
+        let mut iter = values.into_iter().peekable();
+
+        if del == 0 && iter.peek().is_none() {
+            return;
+        }
+
+        if !self.slabs.is_empty() {
+            if let Some(()) = T::Encoding::fast_splice(self, index, del, &mut iter) {
+                #[cfg(debug_assertions)]
+                self.validate_encoding();
+                return;
+            }
+        }
+
+        // Fall back to old splice path.
+        self.counter -= 1;
+        self.splice(index, del, iter);
     }
 
     fn locate_index(&self, index: usize) -> (usize, usize) {

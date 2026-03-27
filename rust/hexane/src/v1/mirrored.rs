@@ -19,7 +19,7 @@ use crate::PackError;
 
 use super::column::Column;
 use super::prefix_column::{PrefixColumn, PrefixIter, PrefixValue};
-use super::{ColumnDefault, ColumnValueRef, AsColumnRef};
+use super::{AsColumnRef, ColumnDefault, ColumnValueRef};
 
 // ── Mirrorable trait ────────────────────────────────────────────────────────
 
@@ -43,7 +43,12 @@ pub trait Mirrorable: ColumnValueRef + Sized {
     ) -> bool;
 
     /// Apply a splice to a v0 ColumnData using borrowed `Get` values.
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Self::Get<'_>]);
+    fn v0_splice(
+        col: &mut ColumnData<Self::V0Cursor>,
+        index: usize,
+        del: usize,
+        values: &[Self::Get<'_>],
+    );
 
     /// Collect borrowed `Get` values into a v0 ColumnData.
     fn v0_from_values(values: &[Self::Get<'_>]) -> ColumnData<Self::V0Cursor>;
@@ -70,7 +75,12 @@ impl Mirrorable for Option<u64> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<u64>]) {
+    fn v0_splice(
+        col: &mut ColumnData<Self::V0Cursor>,
+        index: usize,
+        del: usize,
+        values: &[Option<u64>],
+    ) {
         col.splice(index, del, values.iter().copied());
     }
 
@@ -98,7 +108,12 @@ impl Mirrorable for Option<i64> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<i64>]) {
+    fn v0_splice(
+        col: &mut ColumnData<Self::V0Cursor>,
+        index: usize,
+        del: usize,
+        values: &[Option<i64>],
+    ) {
         col.splice(index, del, values.iter().copied());
     }
 
@@ -126,7 +141,12 @@ impl Mirrorable for Option<String> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<&str>]) {
+    fn v0_splice(
+        col: &mut ColumnData<Self::V0Cursor>,
+        index: usize,
+        del: usize,
+        values: &[Option<&str>],
+    ) {
         col.splice(index, del, values.iter().copied());
     }
 
@@ -154,7 +174,12 @@ impl Mirrorable for Option<Vec<u8>> {
         }
     }
 
-    fn v0_splice(col: &mut ColumnData<Self::V0Cursor>, index: usize, del: usize, values: &[Option<&[u8]>]) {
+    fn v0_splice(
+        col: &mut ColumnData<Self::V0Cursor>,
+        index: usize,
+        del: usize,
+        values: &[Option<&[u8]>],
+    ) {
         col.splice(index, del, values.iter().copied());
     }
 

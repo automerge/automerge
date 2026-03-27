@@ -261,7 +261,11 @@ impl<T: PrefixValue> PrefixColumn<T> {
         let idx = self.get_index_for_prefix(target);
         // get_index_for_prefix finds where the *exclusive* prefix reaches target,
         // which is one past the item whose inclusive total first reaches it.
-        if idx > 0 { idx - 1 } else { 0 }
+        if idx > 0 {
+            idx - 1
+        } else {
+            0
+        }
     }
 
     /// Returns the exclusive sum of values at indices `0..index` (before `index`).

@@ -15,9 +15,9 @@ pub mod mirrored;
 pub mod prefix_column;
 pub mod rle;
 pub use column::{Column, Iter};
-pub use encoding::RunDecoder;
 pub use delta_column::{DeltaColumn, DeltaValue};
 pub use encoding::ColumnEncoding;
+pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
 pub use load_opts::LoadOpts;
 pub use mirrored::{
@@ -479,7 +479,6 @@ impl RleValue for String {
         true
     }
 }
-
 
 impl ColumnValueRef for Vec<u8> {
     type Encoding = RleEncoding<Vec<u8>>;

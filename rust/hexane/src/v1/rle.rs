@@ -140,10 +140,7 @@ fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
 /// Walk `slab` linearly until the run containing logical item `target` is
 /// found.  Returns `None` if out of bounds, `Some(None)` for a null item,
 /// or `Some(Some(byte_offset))` for a non-null item.
-fn scan_to<T: RleValue>(
-    slab: &[u8],
-    target: usize,
-) -> Option<Option<usize>> {
+fn scan_to<T: RleValue>(slab: &[u8], target: usize) -> Option<Option<usize>> {
     let mut byte_pos = 0;
     let mut item_pos = 0;
 
@@ -301,11 +298,7 @@ fn merge_lit1_into_left(left: &mut Vec<u8>, value: &[u8], prev_literal: Option<(
 
 /// Build the start of `right` with a `lit-1` for `value`, merging with the
 /// following literal in `rest` if present.
-fn merge_lit1_into_right<T: RleValue>(
-    right: &mut Vec<u8>,
-    value: &[u8],
-    rest: &[u8],
-) {
+fn merge_lit1_into_right<T: RleValue>(right: &mut Vec<u8>, value: &[u8], rest: &[u8]) {
     if !rest.is_empty() {
         if let Some((next_hl, next_hv)) = read_signed(rest) {
             if next_hv < 0 {
@@ -581,7 +574,10 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_validate_encoding::<T>(slab)
     }
 
-    fn encode_all_slabs<V: super::AsColumnRef<T>>(values: impl Iterator<Item = V>, max_segments: usize) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
+    fn encode_all_slabs<V: super::AsColumnRef<T>>(
+        values: impl Iterator<Item = V>,
+        max_segments: usize,
+    ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
         rle_encode_all_slabs::<T, V>(values, max_segments)
     }
 
@@ -596,6 +592,8 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
     fn streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
         rle_streaming_save::<T>(slabs)
     }
+
+    // TODO: implement RLE fast_splice_inplace
 
     type Decoder<'a> = RleDecoder<'a, T>;
 
@@ -661,11 +659,7 @@ fn rle_count_segments<T: RleValue>(slab: &[u8]) -> usize {
 // ── split_at_item ────────────────────────────────────────────────────────────
 
 /// Split an RLE slab at logical item `index` into two byte arrays.
-fn rle_split_at_item<T: RleValue>(
-    slab: &[u8],
-    index: usize,
-    len: usize,
-) -> (Vec<u8>, Vec<u8>) {
+fn rle_split_at_item<T: RleValue>(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>) {
     if index == 0 {
         return (vec![], slab.to_vec());
     }
@@ -889,10 +883,7 @@ fn first_run_end<T: RleValue>(slab: &[u8]) -> usize {
 
 /// Merge two RLE slabs, decoding only the boundary runs and memcopying
 /// interiors.
-fn rle_merge_slab_bytes<T: RleValue>(
-    a: &[u8],
-    b: &[u8],
-) -> (Vec<u8>, usize) {
+fn rle_merge_slab_bytes<T: RleValue>(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
     if a.is_empty() {
         let segs = rle_count_segments::<T>(b);
         return (b.to_vec(), segs);
@@ -1305,9 +1296,7 @@ fn rle_streaming_save<T: RleValue>(slabs: &[&[u8]]) -> Vec<u8> {
 /// 7. First value of a literal differs from previous run's last value
 /// 8. Last value of a literal differs from next run's first value
 /// 9. No two consecutive equal values within a literal (would form a repeat)
-fn rle_validate_encoding<T: RleValue>(
-    slab: &[u8],
-) -> Result<(), String> {
+fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<(), String> {
     if slab.is_empty() {
         return Ok(());
     }
