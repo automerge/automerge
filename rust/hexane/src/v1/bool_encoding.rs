@@ -106,6 +106,233 @@ fn encode_count(n: usize) -> BoolLeb128Buf {
     out
 }
 
+// ── Partition ───────────────────────────────────────────────────────────────
+
+/// One side of a partition split within a boolean slab.
+///
+/// Describes a partial (or complete) run at the boundary between the
+/// unmodified prefix/suffix bytes and the splice region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BoolPartition {
+    /// The boolean value of the run at this boundary.
+    pub value: bool,
+    /// Number of items from this run on the "outside" of the splice.
+    /// For the start cursor: items in the prefix.
+    /// For the end cursor: items in the suffix.
+    pub count: usize,
+    /// Byte position in the original slab.
+    /// For the start cursor: raw prefix = `data[..pos]`.
+    /// For the end cursor: raw suffix = `data[pos..]`.
+    pub pos: usize,
+    /// Number of non-zero-count segments in `data[..pos]` (start cursor)
+    /// or `data[pos..]` (end cursor).
+    pub segments: usize,
+}
+
+/// Find the partition boundaries for a splice at `[start_index, end_index)`.
+///
+/// Returns `(prefix_cursor, suffix_cursor)` such that the slab can be
+/// reconstructed as:
+///
+/// ```text
+/// data[..prefix.offset]           // raw prefix bytes (complete runs)
+/// + encode(prefix.count, prefix.value)  // partial run ending the prefix
+/// + [NEW DATA]
+/// + encode(suffix.count, suffix.value)  // partial run starting the suffix
+/// + data[suffix.offset..]         // raw suffix bytes (complete runs)
+/// ```
+///
+/// Runs with `count == 0` are omitted during reconstruction.
+pub(crate) fn find_partition(
+    data: &[u8],
+    start_index: usize,
+    end_index: usize,
+) -> Option<(BoolPartition, BoolPartition)> {
+    debug_assert!(start_index <= end_index);
+
+    let mut byte_pos = 0;
+    let mut item_pos: usize = 0;
+    let mut value = false;
+    let mut segments: usize = 0;
+    let mut prefix = None;
+    let mut suffix = None;
+
+    while byte_pos < data.len() {
+        let (cb, count) = read_count(&data[byte_pos..])?;
+        let run_end_item = item_pos + count;
+        let run_end_byte = byte_pos + cb;
+
+        // Start cursor: first run where start_index <= run_end_item
+        if prefix.is_none() && start_index <= run_end_item {
+            prefix = Some(BoolPartition {
+                value,
+                count: start_index - item_pos,
+                pos: byte_pos,
+                segments,
+            });
+        }
+
+        if count > 0 {
+            segments += 1;
+        }
+
+        // End cursor: once prefix is set, find where end_index falls
+        if prefix.is_some() && suffix.is_none() {
+            if end_index < run_end_item {
+                // end_index falls strictly within this run.
+                // Suffix segments = total segments from run_end_byte onward.
+                let suffix_segs = bool_count_segments(&data[run_end_byte..]);
+                // This run contributes 1 segment to the suffix (the partial run).
+                suffix = Some(BoolPartition {
+                    value,
+                    count: run_end_item - end_index,
+                    pos: run_end_byte,
+                    segments: suffix_segs,
+                });
+                break;
+            }
+            // end_index == run_end_item: falls at boundary, continue to next run
+        }
+
+        item_pos = run_end_item;
+        byte_pos = run_end_byte;
+        value = !value;
+    }
+
+    // end_index at or past the last item
+    if prefix.is_some() && suffix.is_none() {
+        suffix = Some(BoolPartition {
+            value,
+            count: 0,
+            pos: byte_pos,
+            segments: 0,
+        });
+    }
+
+    Some((prefix?, suffix?))
+}
+
+// ── Fast splice ─────────────────────────────────────────────────────────────
+
+/// Fast in-place boolean splice using partition cursors.
+///
+/// Builds a replacement buffer for the affected byte range and splices
+/// it directly into `slab_data`, avoiding a full slab copy.
+///
+/// Returns `Some(new_segment_count)` on success.
+pub(crate) fn bool_fast_splice_inplace(
+    slab: &mut super::column::Slab,
+    index: usize,
+    del: usize,
+    values: &mut impl Iterator<Item = bool>,
+    max_segments: usize,
+) -> (Vec<super::column::Slab>, usize) {
+    let end_index = index + del;
+    assert!(end_index <= slab.len, "del extends beyond slab");
+
+    let slab_data = slab.data.as_mut_vec();
+    let (prefix, suffix) =
+        find_partition(slab_data, index, end_index).expect("find_partition failed");
+
+    // Save raw suffix before we modify slab_data.
+    let raw_suffix = slab_data[suffix.pos..].to_vec();
+    // Items in raw suffix bytes (data[suffix.pos..]), NOT including suffix.count.
+    let raw_suffix_item_count = slab.len - end_index - suffix.count;
+    let prefix_item_count = index - prefix.count; // items in data[..prefix.pos]
+
+    let mut buf = Vec::new();
+    let mut segments = prefix.segments;
+    let mut len: usize = 0;
+    let mut overflow: Vec<super::column::Slab> = Vec::new();
+    let mut overflowed = false;
+    let mut items_inserted: usize = 0;
+
+    let mut cur_value = prefix.value;
+    let mut cur_count = prefix.count;
+
+    for val in values {
+        items_inserted += 1;
+        if val == cur_value {
+            cur_count += 1;
+        } else {
+            // Flush current run.
+            buf.extend(encode_count(cur_count).into_iter());
+            len += cur_count;
+            if cur_count > 0 {
+                segments += 1;
+            }
+            cur_value = !cur_value;
+            cur_count = 1;
+
+            // Check if we've hit max segments.
+            if segments >= max_segments {
+                if !overflowed {
+                    slab_data.truncate(prefix.pos);
+                    slab_data.extend_from_slice(&buf);
+                    let new_len = prefix_item_count + len;
+                    slab.len = new_len;
+                    slab.segments = segments;
+                    overflowed = true;
+                } else {
+                    overflow.push(super::column::Slab {
+                        data: super::ValidBuf::new(buf),
+                        len,
+                        segments,
+                    });
+                }
+                buf = Vec::new();
+                segments = 0;
+                len = 0;
+                if cur_value {
+                    buf.extend(encode_count(0).into_iter());
+                }
+            }
+        }
+    }
+
+    // Merge suffix into the current run.
+    if suffix.count > 0 {
+        if suffix.value == cur_value {
+            cur_count += suffix.count;
+        } else {
+            // Flush, then start the suffix run.
+            buf.extend(encode_count(cur_count).into_iter());
+            len += cur_count;
+            if cur_count > 0 {
+                segments += 1;
+            }
+            cur_count = suffix.count;
+        }
+    }
+
+    // Flush final run.
+    if cur_count > 0 {
+        buf.extend(encode_count(cur_count).into_iter());
+        len += cur_count;
+        segments += 1;
+    }
+
+    if !overflowed {
+        // Common case: everything fits in the original slab.
+        slab_data.splice(prefix.pos..suffix.pos, buf);
+        slab.len = slab.len - del + items_inserted;
+        slab.segments = segments + suffix.segments;
+    } else {
+        // Append raw suffix to the last buf.
+        buf.extend_from_slice(&raw_suffix);
+        len += raw_suffix_item_count;
+        segments += suffix.segments;
+
+        overflow.push(super::column::Slab {
+            data: super::ValidBuf::new(buf),
+            len,
+            segments,
+        });
+    }
+
+    (overflow, items_inserted)
+}
+
 // ── Scan ─────────────────────────────────────────────────────────────────────
 
 /// Walk the boolean RLE runs to find the value at `target`.
@@ -263,7 +490,10 @@ impl ColumnEncoding for BoolEncoding {
         bool_validate_encoding(slab)
     }
 
-    fn encode_all_slabs<V: super::AsColumnRef<bool>>(values: impl Iterator<Item = V>, max_segments: usize) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
+    fn encode_all_slabs<V: super::AsColumnRef<bool>>(
+        values: impl Iterator<Item = V>,
+        max_segments: usize,
+    ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
         let bools: Vec<bool> = values.map(|v| v.as_column_ref()).collect();
         let n = bools.len();
         (bool_encode_all_slabs(&bools, max_segments), n)
@@ -281,6 +511,23 @@ impl ColumnEncoding for BoolEncoding {
         bool_streaming_save(slabs)
     }
 
+    fn fast_splice_inplace<V: super::AsColumnRef<bool>>(
+        slab: &mut super::column::Slab,
+        index: usize,
+        del: usize,
+        values: &mut impl Iterator<Item = V>,
+        max_segments: usize,
+    ) -> Option<(Vec<super::column::Slab>, usize)> {
+        let mut bools = values.map(|v| v.as_column_ref());
+        Some(bool_fast_splice_inplace(
+            slab,
+            index,
+            del,
+            &mut bools,
+            max_segments,
+        ))
+    }
+
     type Decoder<'a> = BoolDecoder<'a>;
 
     fn decoder(slab: &ValidBytes) -> BoolDecoder<'_> {
@@ -290,9 +537,6 @@ impl ColumnEncoding for BoolEncoding {
 
 // ── count_segments ───────────────────────────────────────────────────────────
 
-/// Count non-zero runs in a boolean slab. Zero-count runs are structural
-/// padding (e.g. a leading 0-count false run for an all-true column) and
-/// are not counted as segments.
 fn bool_count_segments(slab: &[u8]) -> usize {
     let mut byte_pos = 0;
     let mut segments = 0;
@@ -822,6 +1066,7 @@ fn bool_streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::super::Column;
+    use super::{encode_count, find_partition, read_count, BoolPartition};
 
     fn build_bool(values: &[bool]) -> Column<bool> {
         let mut col = Column::<bool>::new();
@@ -960,6 +1205,268 @@ mod tests {
             col.splice(pos, 5, (0..5).map(|j| (iter + j) % 2 == 0));
             mirror.splice(pos..pos + 5, (0..5).map(|j| (iter + j) % 2 == 0));
             assert_bool(&col, &mirror);
+        }
+    }
+
+    // ── find_partition tests ─────────────────────────────────────────────
+
+    fn decode_bool_slab(data: &[u8]) -> Vec<bool> {
+        let mut result = Vec::new();
+        let mut byte_pos = 0;
+        let mut value = false;
+        while byte_pos < data.len() {
+            let (cb, count) = read_count(&data[byte_pos..]).unwrap();
+            for _ in 0..count {
+                result.push(value);
+            }
+            byte_pos += cb;
+            value = !value;
+        }
+        result
+    }
+
+    /// Encode a bool slab from alternating run counts.
+    fn encode_runs(counts: &[usize]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &c in counts {
+            out.extend(encode_count(c).into_iter());
+        }
+        out
+    }
+
+    #[test]
+    fn partition_mid_run() {
+        // [100f, 100t, 100f]
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 150, 160).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: true,
+                count: 50,
+                pos: 1,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: true,
+                count: 40,
+                pos: 2,
+                segments: s.segments
+            }
+        );
+    }
+
+    #[test]
+    fn partition_on_boundary() {
+        // [100f, 100t, 100f]
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 200, 200).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: true,
+                count: 100,
+                pos: 1,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: false,
+                count: 100,
+                pos: 3,
+                segments: s.segments
+            }
+        );
+    }
+
+    #[test]
+    fn partition_at_start() {
+        // [100f, 100t, 100f]
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 0, 10).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: false,
+                count: 0,
+                pos: 0,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: false,
+                count: 90,
+                pos: 1,
+                segments: s.segments
+            }
+        );
+    }
+
+    #[test]
+    fn partition_at_end() {
+        // [100f, 100t, 100f]
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 290, 300).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: false,
+                count: 90,
+                pos: 2,
+                segments: p.segments
+            }
+        );
+        // end_index == total items → no suffix run, offset at end of data
+        assert_eq!(s.count, 0);
+        assert_eq!(s.pos, 3);
+    }
+
+    #[test]
+    fn partition_entire_slab() {
+        // [100f, 100t, 100f]
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 0, 300).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: false,
+                count: 0,
+                pos: 0,
+                segments: p.segments
+            }
+        );
+        assert_eq!(s.count, 0);
+        assert_eq!(s.pos, 3);
+    }
+
+    #[test]
+    fn partition_span_runs() {
+        // [100f, 100t, 100f]  — delete items 50..250 (spans all three runs)
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 50, 250).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: false,
+                count: 50,
+                pos: 0,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: false,
+                count: 50,
+                pos: 3,
+                segments: s.segments
+            }
+        );
+    }
+
+    #[test]
+    fn partition_single_insert_point() {
+        // [100f, 100t, 100f] — insert at position 150 (no delete)
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 150, 150).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: true,
+                count: 50,
+                pos: 1,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: true,
+                count: 50,
+                pos: 2,
+                segments: s.segments
+            }
+        );
+    }
+
+    #[test]
+    fn partition_at_run_start() {
+        // [100f, 100t, 100f] — insert at position 100 (start of true run)
+        let data = encode_runs(&[100, 100, 100]);
+        let (p, s) = find_partition(&data, 100, 100).unwrap();
+        assert_eq!(
+            p,
+            BoolPartition {
+                value: false,
+                count: 100,
+                pos: 0,
+                segments: p.segments
+            }
+        );
+        assert_eq!(
+            s,
+            BoolPartition {
+                value: true,
+                count: 100,
+                pos: 2,
+                segments: s.segments
+            }
+        );
+    }
+
+    /// Reconstruct a bool slab from partition cursors and (empty) new data.
+    /// Handles the bool alternation convention properly.
+    /// Decode a bool slab suffix where the first run has value `start_value`.
+    fn decode_bool_slab_with_start(data: &[u8], start_value: bool) -> Vec<bool> {
+        let mut result = Vec::new();
+        let mut byte_pos = 0;
+        let mut value = start_value;
+        while byte_pos < data.len() {
+            let (cb, count) = read_count(&data[byte_pos..]).unwrap();
+            for _ in 0..count {
+                result.push(value);
+            }
+            byte_pos += cb;
+            value = !value;
+        }
+        result
+    }
+
+    fn reconstruct(data: &[u8], p: &BoolPartition, s: &BoolPartition) -> Vec<bool> {
+        let mut items = Vec::new();
+        // Decode raw prefix (always starts with false)
+        items.extend(decode_bool_slab(&data[..p.pos]));
+        // Add prefix cursor's partial run
+        for _ in 0..p.count {
+            items.push(p.value);
+        }
+        // (new data would go here)
+        // Add suffix cursor's partial run
+        for _ in 0..s.count {
+            items.push(s.value);
+        }
+        // Decode raw suffix — starts with the opposite of the suffix cursor's value
+        items.extend(decode_bool_slab_with_start(&data[s.pos..], !s.value));
+        items
+    }
+
+    #[test]
+    fn partition_reconstruct_identity() {
+        // Verify that reconstructing from partition yields the original
+        // when there's no deletion and no insertion.
+        let data = encode_runs(&[100, 100, 100]);
+        let orig = decode_bool_slab(&data);
+        for idx in [0, 50, 100, 150, 200, 250, 300] {
+            let (p, s) = find_partition(&data, idx, idx).unwrap();
+            let recon = reconstruct(&data, &p, &s);
+            assert_eq!(orig, recon, "identity failed at idx={idx}");
         }
     }
 }
