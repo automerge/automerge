@@ -285,7 +285,9 @@ mod string_replace_small {
         let mut col = build_v0_str(10_000, slen);
         bencher.bench_local(|| {
             let len = col.len();
-            if len < 6 { return; }
+            if len < 6 {
+                return;
+            }
             let pos = rand_usize() % (len - 5);
             col.splice(pos, 5, rand_strings(5, slen));
         });
@@ -296,7 +298,9 @@ mod string_replace_small {
         let mut col = build_v1_str(10_000, slen);
         bencher.bench_local(|| {
             let len = col.len();
-            if len < 6 { return; }
+            if len < 6 {
+                return;
+            }
             let pos = rand_usize() % (len - 5);
             col.splice(pos, 5, rand_strings(5, slen));
         });
@@ -505,7 +509,7 @@ mod bool_splice_small {
         let mut col = build_v1_bool(10_000);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
-            col.splice(pos, 1, [rand_bool()]);
+            col.fast_splice(pos, 1, [rand_bool()]);
         });
     }
 
@@ -533,7 +537,7 @@ mod bool_splice_small {
                 return;
             }
             let pos = rand_usize() % (len - 5);
-            col.splice(pos, 5, rand_bools(5));
+            col.fast_splice(pos, 5, rand_bools(5));
         });
     }
 }
