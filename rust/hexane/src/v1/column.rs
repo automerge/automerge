@@ -490,7 +490,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             }
         }
 
-        // Fall back to old splice path.
         self.counter -= 1;
         self.splice(index, del, iter);
     }

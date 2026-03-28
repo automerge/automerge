@@ -145,7 +145,31 @@ pub trait ColumnEncoding: Default {
 
         col.total_len = col.total_len - del + items_inserted;
 
-        if overflow_slabs.is_empty() && overflow_del == 0 {
+        // Check if the slab needs splitting after the splice.
+        if overflow_slabs.is_empty()
+            && overflow_del == 0
+            && col.slabs[si].segments > col.max_segments
+        {
+            let new_item_count = col.slabs[si].len;
+            let (left, right) =
+                Self::split_at_item(&col.slabs[si].data, new_item_count / 2, new_item_count);
+            let left_segs = Self::count_segments(&left);
+            let right_segs = Self::count_segments(&right);
+            col.slabs[si] = super::column::Slab {
+                data: super::ValidBuf::new(left),
+                len: new_item_count / 2,
+                segments: left_segs,
+            };
+            col.slabs.insert(
+                si + 1,
+                super::column::Slab {
+                    data: super::ValidBuf::new(right),
+                    len: new_item_count - new_item_count / 2,
+                    segments: right_segs,
+                },
+            );
+            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
+        } else if overflow_slabs.is_empty() && overflow_del == 0 {
             let new_weight = WF::compute(&col.slabs[si]);
             bit_point_update(&mut col.bit, si, old_weight, new_weight);
         } else {

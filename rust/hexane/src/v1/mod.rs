@@ -14,6 +14,7 @@ pub mod load_opts;
 pub mod mirrored;
 pub mod prefix_column;
 pub mod rle;
+pub(crate) mod rle_state;
 pub use column::{Column, Iter};
 pub use delta_column::{DeltaColumn, DeltaValue};
 pub use encoding::ColumnEncoding;
@@ -115,6 +116,11 @@ pub trait RleValue: ColumnValueRef {
     /// to reject null runs in non-nullable columns.
     const NULLABLE: bool = false;
 
+    /// Check if a value is null. Always returns `false` for non-nullable types.
+    fn is_null(_value: Self::Get<'_>) -> bool {
+        false
+    }
+
     /// Return the byte length of one encoded value at the start of `data`,
     /// or `None` if the data is malformed / too short.
     ///
@@ -193,6 +199,10 @@ impl<T: RleValue> RleValue for Option<T> {
     fn unpack(data: &ValidBytes) -> (usize, Option<T::Get<'_>>) {
         let (n, v) = T::unpack(data);
         (n, Some(v))
+    }
+
+    fn is_null(value: Option<T::Get<'_>>) -> bool {
+        value.is_none()
     }
 
     fn get_null(_slab: &ValidBytes) -> Option<T::Get<'_>> {

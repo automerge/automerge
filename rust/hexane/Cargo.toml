@@ -49,6 +49,10 @@ harness = false
 name = "max_segments"
 harness = false
 
+[[bench]]
+name = "profile_bool_replace"
+harness = false
+
 [dependencies.web-sys]
 version = "^0.3.55"
 features = ["console"]
