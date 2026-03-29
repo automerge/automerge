@@ -33,6 +33,7 @@ use crate::PackError;
 
 use bool_encoding::BoolEncoding;
 use rle::RleEncoding;
+use std::fmt::Debug;
 
 pub mod valid;
 pub use valid::{ValidBuf, ValidBytes};
@@ -45,7 +46,7 @@ pub use valid::{ValidBuf, ValidBytes};
 /// current one) and `value` is the repeated value.  For null runs, `count`
 /// is the remaining null count and `value` is the type's null representation.
 /// For literal runs, `count` is always 1 since each item is distinct.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Run<V> {
     pub count: usize,
     pub value: V,
@@ -68,13 +69,13 @@ pub struct Run<V> {
 /// | `Vec<u8>`          | `&'a [u8]`         | `RleEncoding`   | no       |
 /// | `Option<Vec<u8>>`  | `Option<&'a [u8]>` | `RleEncoding`   | yes      |
 /// | `bool`             | `bool`             | `BoolEncoding`  | no       |
-pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> {
+pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// The encoding strategy for this value type.
     type Encoding: ColumnEncoding<Value = Self>;
 
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
-    type Get<'a>: Copy + PartialEq + 'a
+    type Get<'a>: Copy + PartialEq + Debug + Default + 'a
     where
         Self: 'a;
 }
@@ -95,7 +96,7 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> {
 /// }
 /// // That's it — Column<ValueMeta> and Column<Option<ValueMeta>> now work.
 /// ```
-pub trait ColumnValue: Copy + PartialEq + 'static {
+pub trait ColumnValue: Copy + PartialEq + Debug + Default + 'static {
     /// The encoding strategy — always `RleEncoding<Self>` for RLE types.
     type Encoding: ColumnEncoding<Value = Self>;
 }
@@ -249,7 +250,7 @@ impl AsColumnRef<bool> for bool {
 /// All `ColumnValueRef` types implement this as an identity conversion.
 /// No conflict with the borrowed impls because `&str`, `Option<&str>`, etc.
 /// have lifetimes and cannot be `ColumnValueRef: 'static`.
-pub trait AsColumnRef<T: ColumnValueRef> {
+pub trait AsColumnRef<T: ColumnValueRef>: Debug {
     /// Borrow as the column's `Get` type without allocating.
     fn as_column_ref(&self) -> T::Get<'_>;
 }

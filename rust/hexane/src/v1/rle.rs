@@ -5,6 +5,7 @@ use crate::PackError;
 
 use super::column::Slab;
 use super::encoding::ColumnEncoding;
+use super::rle_state::RewriteHeader;
 use super::{ColumnValueRef, RleValue, ValidBytes};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
@@ -376,14 +377,12 @@ impl<T: RleValue> Clone for RleDecoderState<'_, T> {
 
 impl<'a, T: RleValue> RleDecoder<'a, T> {
     pub(crate) fn new(data: &'a ValidBytes) -> Self {
-        let mut dec = RleDecoder {
+        RleDecoder {
             data,
             byte_pos: 0,
             remaining: 0,
             state: RleDecoderState::Idle,
-        };
-        dec.advance_run();
-        dec
+        }
     }
 
     pub(crate) fn is_literal(&self) -> bool {
@@ -599,9 +598,21 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_streaming_save::<T>(slabs)
     }
 
-    // TODO: RLE fast splice has 7 remaining edge cases with boundary merging.
-    // Disabled until those are fixed. Falls back to slow bulk splice.
-    // fn fast_splice_inplace<V: super::AsColumnRef<T>>(...) { ... }
+    fn fast_splice_inplace<V: super::AsColumnRef<T>>(
+        slab: &mut super::column::Slab,
+        index: usize,
+        del: usize,
+        values: &mut impl Iterator<Item = V>,
+        max_segments: usize,
+    ) -> Option<(Vec<super::column::Slab>, usize)> {
+        Some(rle_fast_splice_inplace::<T, V>(
+            slab,
+            index,
+            del,
+            values,
+            max_segments,
+        ))
+    }
 
     type Decoder<'a> = RleDecoder<'a, T>;
 
@@ -612,202 +623,164 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
 // ── RLE fast splice ─────────────────────────────────────────────────────────
 
-use super::rle_state::{rewrite_lit_header, RleState};
+use super::rle_state::RleState;
 
-struct Postfix<'a, T: RleValue> {
-    value: T::Get<'a>,
-    count: usize, // count of values above
-    lit: usize,  // remaining lit's after postfix
-    segments: usize, // remaining segments after postfix
+///// Postfix: what comes after the deleted range in the same/adjacent run(s).
+/// `segments` = segment count from outer.end to the end of the slab.
+#[derive(Debug)]
+enum Postfix<'a, T: RleValue> {
+    /// Repeat or null run with count ≥ 1. No lit boundary concern.
+    Run {
+        count: usize,
+        value: T::Get<'a>,
+        segments: usize,
+    },
+    /// Literal item with `lit` more literal items following in the slab.
+    /// Use flush_with_lit(lit) to write a header that covers them.
+    Lit {
+        value: T::Get<'a>,
+        lit: usize,
+        segments: usize,
+    },
+    /// Split repeat leaving 1 item, followed immediately by a literal run.
+    /// Feed lone + value into state, then flush_with_lit(lit).
+    LonePlusLit {
+        lone: T::Get<'a>,
+        value: T::Get<'a>,
+        lit: usize,
+        segments: usize,
+    },
 }
 
+#[derive(Debug)]
 struct Prefix<'a, T: RleValue> {
     state: RleState<'a, T>,
-    segments: usize, // segments before prefix
+    segments: usize, // segments of data[..outer.start]
 }
 
+impl<'a, T: RleValue> Prefix<'a, T> {
+    fn new() -> Self {
+        Prefix {
+            state: RleState::Empty,
+            segments: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct RlePartition<'a, T: RleValue> {
-    outer: Range<usize>, // range of bytes that include prefix and postfix values
-    inner: Range<usize>, // range of bytes between prefix and postfix values
+    outer: Range<usize>, // byte range to splice: data[outer] gets replaced by buf
     prefix: Prefix<'a, T>,
-    postfix: Option<Postfix<'a, T>>, // None if at end of slab
+    postfix: Option<Postfix<'a, T>>,
 }
 
-fn rle_find_partition<'a, T: RleValue>(
-    slab: &'a Slab,
-    range: Range<usize>,
-) -> RlePartition<'a, T> {
+fn rle_find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePartition<'a, T> {
     use super::encoding::RunDecoder;
 
-    let data: &[u8] = &slab.data;
-    let start_index = range.start;
-    let end_index = range.end;
 
     let mut decoder = RleDecoder::<T>::new(&slab.data);
+    let mut byte_before = decoder.byte_pos;
     let mut item_pos: usize = 0;
     let mut segments: usize = 0;
 
-    let mut outer_start: usize = 0;
-    let mut outer_end: usize = data.len();
-    let mut prefix_state: RleState<'a, T> = RleState::new();
-    let mut prefix_segments: usize = 0;
-    let mut prefix_done = false;
+    let mut outer = 0..slab.data.len();
+    let mut prefix = Prefix::new();
+    let mut prefix_done = range.start == 0;
     let mut postfix: Option<Postfix<'a, T>> = None;
 
     // Literal run tracking.
-    let mut lit_header_pos: usize = 0;
+    let mut header_pos: usize = 0;
     let mut lit_start_item: usize = 0;
-    let mut last_literal_value: Option<T::Get<'a>> = None;
-    let mut last_lit_value_byte: usize = 0; // byte pos where last literal value starts
+    let mut lit_segments_before: usize = 0; // segments of complete runs before lit run
 
-    // Track run header positions.
-    let mut new_run = true;
-    let mut run_header_pos: usize = 0;
+    let mut was_lit = false;
 
-    loop {
-        let byte_before = decoder.byte_pos;
-        let Some(run) = decoder.next_run() else { break };
-
+    while let Some(run) = decoder.next_run() {
         let is_lit = decoder.is_literal() && run.count == 1;
+        let is_null = T::is_null(run.value);
+        let new_run = is_lit && !was_lit;
 
-        // Detect new run start (advance_run was called inside next_run).
         if new_run {
-            if is_lit {
-                lit_header_pos = run_header_pos;
-                lit_start_item = item_pos;
-                last_literal_value = None;
-            }
+            header_pos = byte_before;
+            lit_start_item = item_pos;
+            lit_segments_before = segments;
         }
-
-        // For literal items, byte_before is where the value starts
-        // (either right after advance_run set byte_pos past header,
-        //  or where the previous literal left off).
-        let value_byte_start = if is_lit { byte_before } else { 0 };
 
         let run_end_item = item_pos + run.count;
 
         // ── Prefix ──────────────────────────────────────────────────────
-        if !prefix_done && start_index <= run_end_item {
-            let k = start_index - item_pos;
-
-            if is_lit {
-                let items_before = (item_pos - lit_start_item) + k;
-                prefix_segments = segments - (item_pos - lit_start_item);
-
-                if items_before == 0 {
-                    prefix_state = RleState::Empty;
-                    outer_start = lit_header_pos;
-                } else if items_before == 1 {
-                    let current = if k > 0 { run.value } else { last_literal_value.unwrap() };
-                    prefix_state = RleState::Lone(current);
-                    // Include the literal header in the replaced range — Lone
-                    // will emit its own header when flushed.
-                    outer_start = lit_header_pos;
-                } else {
-                    let current = if k > 0 { run.value } else { last_literal_value.unwrap() };
-                    let byte_pos = if k > 0 { value_byte_start } else { last_lit_value_byte };
-                    prefix_state = RleState::Lit {
-                        count: items_before - 1,
-                        local: 0,
-                        header_pos: lit_header_pos,
-                        current,
-                    };
-                    // outer_start is at the current value's byte pos —
-                    // the header + preceding values stay in the slab
-                    // and RewriteHeader will fix the header count.
-                    outer_start = byte_pos;
-                }
-            } else {
-                outer_start = run_header_pos;
-                prefix_segments = segments;
-                prefix_state = if T::is_null(run.value) {
-                    if k == 0 { RleState::Empty } else { RleState::Null(k) }
-                } else {
-                    RleState::run(k, run.value)
-                };
-            }
+        if !prefix_done && range.start <= run_end_item {
+            let k = range.start - item_pos;
+            outer.start = byte_before;
+            prefix.segments = segments;
             prefix_done = true;
 
-            // Check if postfix is also in this same run.
-            if end_index < run_end_item {
-                let remaining = run_end_item - end_index;
-                if is_lit {
-                    let lit = decoder.remaining;
-                    outer_end = decoder.byte_pos;
-                    for _ in 0..lit {
-                        outer_end += T::value_len(&data[outer_end..]).unwrap();
-                    }
-                    postfix = Some(Postfix {
-                        value: run.value,
-                        count: 1,
-                        lit,
-                        segments: slab.segments - segments,
-                    });
-                } else {
-                    outer_end = decoder.byte_pos;
-                    postfix = Some(Postfix {
-                        value: run.value,
-                        count: remaining,
-                        lit: 0,
-                        segments: slab.segments - segments,
-                    });
-                }
-                break;
+            if is_lit {
+                let count = item_pos - lit_start_item;
+                prefix.state = RleState::lit(count, run.value, header_pos);
+            } else if is_null {
+                prefix.state = RleState::Null(k);
+            } else if k == 1 && !is_lit && was_lit {
+                let count = segments - lit_segments_before;
+                prefix.state = RleState::lit(count, run.value, header_pos);
+            } else {
+                prefix.state = RleState::run(k, run.value);
             }
         }
 
         // ── Postfix ─────────────────────────────────────────────────────
-        if prefix_done && end_index < run_end_item {
-            let remaining = run_end_item - end_index;
-
-            if is_lit {
+        if prefix_done && range.end < run_end_item {
+            let count = run_end_item - range.end;
+            let value = run.value;
+            let consumed = segments + 1; // loop segments + this run
+            outer.end = decoder.byte_pos;
+            let p = if is_lit {
                 let lit = decoder.remaining;
-                outer_end = decoder.byte_pos;
-                for _ in 0..lit {
-                    outer_end += T::value_len(&data[outer_end..]).unwrap();
-                }
-                postfix = Some(Postfix {
-                    value: run.value,
-                    count: 1,
+                Postfix::Lit {
+                    value,
                     lit,
-                    segments: slab.segments - segments,
-                });
+                    segments: slab.segments - consumed,
+                }
             } else {
-                outer_end = decoder.byte_pos;
-                postfix = Some(Postfix {
-                    value: run.value,
-                    count: remaining,
-                    lit: 0,
-                    segments: slab.segments - segments,
-                });
-            }
+                (|| {
+                    if count == 1 && !is_null {
+                        if let Some(post_run) = decoder.next_run() {
+                            if decoder.is_literal() && post_run.count == 1 {
+                                let lone = value;
+                                let value = post_run.value;
+                                let lit = decoder.remaining;
+                                outer.end = decoder.byte_pos; // past the first lit value
+                                return Some(Postfix::LonePlusLit {
+                                    lone,
+                                    value,
+                                    lit,
+                                    segments: slab.segments - consumed - 1, // -1 for the peeked lit value
+                                });
+                            }
+                        }
+                    }
+                    None
+                })()
+                .unwrap_or_else(|| Postfix::Run {
+                    count,
+                    value,
+                    segments: slab.segments - consumed,
+                })
+            };
+            postfix = Some(p);
             break;
         }
 
-        // Prepare for next iteration.
-        if is_lit {
-            last_literal_value = Some(run.value);
-            last_lit_value_byte = value_byte_start;
-        }
-        new_run = decoder.remaining == 0;
-        if new_run {
-            run_header_pos = decoder.byte_pos;
-        }
         segments += 1;
         item_pos = run_end_item;
+        byte_before = decoder.byte_pos;
+        was_lit = is_lit;
     }
 
-    // If prefix was never set, start_index is at or past slab end.
-    if !prefix_done {
-        outer_start = data.len();
-        outer_end = data.len();
-        prefix_segments = slab.segments;
-    }
-
+    //let prefix = Prefix { state: prefix_state, segments: prefix_segments };
     RlePartition {
-        outer: outer_start..outer_end,
-        inner: 0..0,
-        prefix: Prefix { state: prefix_state, segments: prefix_segments },
+        outer,
+        prefix,
         postfix,
     }
 }
@@ -820,7 +793,11 @@ mod partition_tests {
 
     fn make_slab(data: Vec<u8>, len: usize) -> Slab {
         let segments = rle_count_segments::<u64>(&data);
-        Slab { data: ValidBuf::new(data), len, segments }
+        Slab {
+            data: ValidBuf::new(data),
+            len,
+            segments,
+        }
     }
 
     fn encode_u64_slab(vals: &[u64]) -> Slab {
@@ -839,93 +816,87 @@ mod partition_tests {
 
     #[test]
     fn mid_repeat() {
-        // [7,7,7,7,7] = repeat(5, 7). Split at 2..3 (delete item 2).
         let slab = encode_u64_slab(&[7, 7, 7, 7, 7]);
         let p = rle_find_partition::<u64>(&slab, 2..3);
-        // prefix: Run(2, 7)
         match &p.prefix.state {
             RleState::Run(2, v) => assert_eq!(*v, 7),
             s => panic!("expected Run(2, 7), got {:?}", state_item_count(s)),
         }
-        assert_eq!(p.prefix.segments, 0); // nothing before the run
-        // postfix: value=7, count=2 (items 3,4)
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, 7);
-        assert_eq!(post.count, 2);
-        assert_eq!(post.lit, 0);
+        assert_eq!(p.prefix.segments, 0);
+        match p.postfix.unwrap() {
+            Postfix::Run {
+                count: 2, value: 7, ..
+            } => {}
+            _ => panic!("expected Run(2, 7)"),
+        }
     }
 
     #[test]
     fn mid_literal() {
-        // [1,2,3,4,5] = lit(-5, 1,2,3,4,5). Split at 2..3 (delete item 2).
         let slab = encode_u64_slab(&[1, 2, 3, 4, 5]);
         let p = rle_find_partition::<u64>(&slab, 2..3);
-        // prefix: state from feeding [1,2] → Lit{count:1, current:2}
         assert_eq!(state_item_count(&p.prefix.state), 2);
-        // postfix: value=4, count=1, lit=1 (item 5)
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, 4);
-        assert_eq!(post.count, 1);
-        assert_eq!(post.lit, 1);
+        match p.postfix.unwrap() {
+            Postfix::Lit {
+                value: 4, lit: 1, ..
+            } => {}
+            _ => panic!("expected Lit(4, lit=1)"),
+        }
     }
 
     #[test]
     fn mid_null() {
-        // [Some(1), None, None, None, Some(2)] — delete null at index 2
         let slab = encode_opt_slab(&[Some(1), None, None, None, Some(2)]);
         let p = rle_find_partition::<Option<u64>>(&slab, 2..3);
-        // prefix: should have Null(1) for the first None (index 1)
-        // Actually prefix is from index 0..2: Some(1) and first None
-        // The Lone(Some(1)) gets flushed, then Null(1).
-        // postfix: null value, count=1 (the third None at index 3)
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, None);
-        assert_eq!(post.count, 1);
+        match &p.postfix {
+            Some(Postfix::Run {
+                count: 1,
+                value: None,
+                ..
+            }) => {}
+            _ => panic!("expected Run(1, None)"),
+        }
     }
 
     #[test]
     fn exact_boundary() {
-        // [1,1,1, 2,2,2] = repeat(3,1) repeat(3,2). Split at 3..3 (insert between runs).
         let slab = encode_u64_slab(&[1, 1, 1, 2, 2, 2]);
         let p = rle_find_partition::<u64>(&slab, 3..3);
-        // prefix: Run(3, 1) — the entire first run
         match &p.prefix.state {
             RleState::Run(3, v) => assert_eq!(*v, 1),
             _ => panic!("expected Run(3, 1)"),
         }
-        // postfix: value=2, count=3
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, 2);
-        assert_eq!(post.count, 3);
+        match p.postfix.unwrap() {
+            Postfix::Run {
+                count: 3, value: 2, ..
+            } => {}
+            _ => panic!("expected Run(3, 2)"),
+        }
     }
 
     #[test]
     fn at_start() {
-        // [5,5,5] — splice at 0..1 (delete first item)
         let slab = encode_u64_slab(&[5, 5, 5]);
         let p = rle_find_partition::<u64>(&slab, 0..1);
-        // prefix: Empty (nothing before index 0)
         assert_eq!(state_item_count(&p.prefix.state), 0);
-        // postfix: value=5, count=2
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, 5);
-        assert_eq!(post.count, 2);
+        match p.postfix.unwrap() {
+            Postfix::Run {
+                count: 2, value: 5, ..
+            } => {}
+            _ => panic!("expected Run(2, 5)"),
+        }
     }
 
     #[test]
     fn at_end() {
-        // [1,2,3] — splice at 3..3 (append)
         let slab = encode_u64_slab(&[1, 2, 3]);
         let p = rle_find_partition::<u64>(&slab, 3..3);
-        // prefix: state from [1,2,3]
         assert_eq!(state_item_count(&p.prefix.state), 3);
-        // postfix: None (at end of slab)
         assert!(p.postfix.is_none());
     }
 
     #[test]
     fn delete_all() {
-        // [1,2,3] — splice at 0..3 (delete everything)
         let slab = encode_u64_slab(&[1, 2, 3]);
         let p = rle_find_partition::<u64>(&slab, 0..3);
         assert_eq!(state_item_count(&p.prefix.state), 0);
@@ -934,67 +905,49 @@ mod partition_tests {
 
     #[test]
     fn insert_mid_repeat() {
-        // [7,7,7,7] — splice at 2..2 (insert between 7s, no delete)
         let slab = encode_u64_slab(&[7, 7, 7, 7]);
         let p = rle_find_partition::<u64>(&slab, 2..2);
         match &p.prefix.state {
             RleState::Run(2, v) => assert_eq!(*v, 7),
             _ => panic!("expected Run(2, 7)"),
         }
-        let post = p.postfix.unwrap();
-        assert_eq!(post.value, 7);
-        assert_eq!(post.count, 2);
+        match p.postfix.unwrap() {
+            Postfix::Run {
+                count: 2, value: 7, ..
+            } => {}
+            _ => panic!("expected Run(2, 7)"),
+        }
     }
 
-    /// Reconstruct a slab from partition + inner values and verify
-    /// it decodes to the same values as the original.
+    /// Use rle_build_splice_buf to splice vals[start..end] back in and verify roundtrip.
     fn roundtrip_check(vals: &[u64], start: usize, end: usize) {
         let slab = encode_u64_slab(vals);
         let data: &[u8] = &slab.data;
-        let p = rle_find_partition::<u64>(&slab, start..end);
 
-        // Feed prefix state + inner values + postfix into a fresh state machine.
-        let mut buf = Vec::new();
-        let mut state = p.prefix.state;
-        let mut rewrite = None;
+        let result = rle_build_splice_buf::<u64, u64>(
+            &slab,
+            start,
+            end - start,
+            &mut vals[start..end].iter().copied(),
+        );
 
-        // Inner values = vals[start..end]
-        for &v in &vals[start..end] {
-            let f = state.append(&mut buf, v);
-            if f.rewrite.is_some() { rewrite = f.rewrite; }
+        let mut reconstructed_bytes = data.to_vec();
+        reconstructed_bytes.splice(result.range.clone(), result.bytes);
+        if let Some(rw) = result.rewrite {
+            crate::v1::rle_state::rewrite_lit_header(&mut reconstructed_bytes, rw.pos, rw.count);
         }
 
-        // Postfix: feed the value + remaining items from the original vals
-        if let Some(post) = &p.postfix {
-            let f = state.append_n(&mut buf, post.value, post.count);
-            if f.rewrite.is_some() { rewrite = f.rewrite; }
-            // Feed the lit items (the values after the postfix in the same run)
-            let postfix_items = post.count + post.lit;
-            for &v in &vals[end + post.count..end + postfix_items] {
-                let f = state.append(&mut buf, v);
-                if f.rewrite.is_some() { rewrite = f.rewrite; }
-            }
-        }
-        let f = state.flush(&mut buf);
-        if f.rewrite.is_some() { rewrite = f.rewrite; }
-
-        // Reconstruct: raw prefix bytes + buf + raw suffix bytes (after outer)
-        let mut result = Vec::new();
-        result.extend_from_slice(&data[..p.outer.start]);
-        result.extend_from_slice(&buf);
-        result.extend_from_slice(&data[p.outer.end..]);
-
-        // Apply header rewrite if needed (for literal prefix with header in slab).
-        if let Some(rw) = rewrite {
-            crate::v1::rle_state::rewrite_lit_header(&mut result, rw.pos, rw.count);
-        }
-
-        // Decode both and compare
         let original = decode_u64_bytes(data);
-        let reconstructed = decode_u64_bytes(&result);
+        let reconstructed = match std::panic::catch_unwind(|| decode_u64_bytes(&reconstructed_bytes)) {
+            Ok(v) => v,
+            Err(_) => panic!(
+                "decode failed for vals={vals:?}, range={start}..{end}\n  orig bytes={data:?}\n  recon bytes={reconstructed_bytes:?}\n  range={:?} rewrite={:?}",
+                result.range, result.rewrite,
+            ),
+        };
         assert_eq!(
             original, reconstructed,
-            "roundtrip failed for vals={vals:?}, range={start}..{end}\n  orig bytes={data:?}\n  recon bytes={result:?}"
+            "roundtrip failed for vals={vals:?}, range={start}..{end}\n  orig bytes={data:?}\n  recon bytes={reconstructed_bytes:?}"
         );
     }
 
@@ -1006,7 +959,9 @@ mod partition_tests {
             match raw {
                 n if n > 0 => {
                     let (vl, val) = u64::try_unpack(&data[pos + cb..]).unwrap();
-                    for _ in 0..n as usize { result.push(val); }
+                    for _ in 0..n as usize {
+                        result.push(val);
+                    }
                     pos += cb + vl;
                 }
                 n if n < 0 => {
@@ -1068,6 +1023,7 @@ mod partition_tests {
     }
 }
 
+#[cfg(test)]
 fn state_item_count<T: RleValue>(state: &RleState<'_, T>) -> usize {
     match state {
         RleState::Empty => 0,
@@ -1078,213 +1034,128 @@ fn state_item_count<T: RleValue>(state: &RleState<'_, T>) -> usize {
     }
 }
 
+struct SpliceBuf {
+    bytes: Vec<u8>,
+    range: Range<usize>,
+    len: usize,
+    segments: usize,
+    rewrite: Option<RewriteHeader>,
+}
+
+/// Build the splice buffer. Borrows slab immutably; returns owned output.
+/// After this, caller does: `slab.data.splice(result.range, result.bytes)`,
+/// applies rewrite, sets slab.len and slab.segments.
+fn rle_build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
+    slab: &Slab,
+    index: usize,
+    del: usize,
+    values: &mut impl Iterator<Item = V>,
+) -> SpliceBuf {
+    // Collect values so they outlive the state machine (needed for &str lifetimes).
+    let collected: Vec<V> = values.collect();
+    let items_inserted = collected.len();
+
+    let p = rle_find_partition::<T>(slab, index..index + del);
+
+    let mut buf = Vec::new();
+    let mut state = p.prefix.state;
+    let mut rewrite: Option<RewriteHeader> = None;
+    let mut buf_segments: usize = 0;
+
+    macro_rules! track {
+        ($f:expr) => {{
+            let f = $f;
+            buf_segments += f.segments;
+            if f.rewrite.is_some() {
+                rewrite = f.rewrite;
+            }
+        }};
+    }
+
+    // 1. Feed new values.
+    for v in &collected {
+        track!(state.append(&mut buf, v.as_column_ref()));
+    }
+
+    // 2. Feed postfix + flush.
+    let postfix_segments = match p.postfix {
+        None => {
+            track!(state.flush(&mut buf));
+            0
+        }
+        Some(Postfix::Run {
+            count,
+            value,
+            segments,
+            ..
+        }) => {
+            track!(state.append_n(&mut buf, value, count));
+            track!(state.flush(&mut buf));
+            segments
+        }
+        Some(Postfix::Lit {
+            value,
+            lit,
+            segments,
+            ..
+        }) => {
+            track!(state.append(&mut buf, value));
+            track!(state.flush_with_lit(&mut buf, lit));
+            segments
+        }
+        Some(Postfix::LonePlusLit {
+            lone,
+            value,
+            lit,
+            segments,
+            ..
+        }) => {
+            track!(state.append(&mut buf, lone));
+            track!(state.append(&mut buf, value));
+            track!(state.flush_with_lit(&mut buf, lit));
+            segments
+        }
+    };
+
+    SpliceBuf {
+        bytes: buf,
+        range: p.outer,
+        len: slab.len - del + items_inserted,
+        segments: p.prefix.segments + buf_segments + postfix_segments,
+        rewrite,
+    }
+}
+
 pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
     slab: &mut Slab,
     index: usize,
     del: usize,
     values: &mut impl Iterator<Item = V>,
-    max_segments: usize,
+    _max_segments: usize,
 ) -> (Vec<Slab>, usize) {
-    let end_index = index + del;
-    assert!(end_index <= slab.len, "del extends beyond slab");
+    assert!(index + del <= slab.len, "del extends beyond slab");
 
-    // Phase 1: read slab, build buf. Borrow confined to function call.
-    let mut slab_vec = std::mem::take(slab.data.as_mut_vec());
-    let enc =
-        rle_encode_splice::<T, V>(&slab_vec, slab.len, index, end_index, values, max_segments);
+    let old_len = slab.len;
+    let result = rle_build_splice_buf::<T, V>(slab, index, del, values);
+    assert!(
+        result.len + del >= old_len,
+        "bad len: result.len={} del={del} old_len={old_len} idx={index} segs={}",
+        result.len,
+        result.segments
+    );
+    let items_inserted = result.len + del - old_len;
 
-    // Phase 2: mutate and put back.
-    // Note: enc.rewrite (if any) is handled by streaming_save which
-    // re-encodes boundary runs, making the header rewrite unnecessary.
+    let slab_data = slab.data.as_mut_vec();
+    slab_data.splice(result.range, result.bytes);
 
-    if enc.overflow.is_empty() {
-        // Common case: merge prefix + buf.
-        // buf already contains suffix data (via append_raw in rle_encode_splice).
-        let prefix_bytes = &slab_vec[..enc.prefix_pos];
-        let parts: Vec<&[u8]> = [prefix_bytes, enc.buf.as_slice()]
-            .iter()
-            .filter(|p| !p.is_empty())
-            .copied()
-            .collect();
-        let merged = if parts.len() <= 1 {
-            let mut r = Vec::new();
-            for p in &parts {
-                r.extend_from_slice(p);
-            }
-            r
-        } else {
-            rle_streaming_save::<T>(&parts)
-        };
-        slab.segments = rle_count_segments::<T>(&merged);
-        *slab.data.as_mut_vec() = merged;
-        slab.len = slab.len - del + enc.items_inserted;
-        (vec![], enc.items_inserted)
-    } else {
-        // Overflow: build all slabs.
-        // overflow[0] = first cut (goes into the original slab with prefix bytes).
-        // overflow[1..] = middle slabs.
-        // enc.buf = final partial buf + raw suffix = last slab.
-        /*
-                let (first_data, first_len, first_segs) = enc.overflow.into_iter().next().unwrap();
-                let mut first = slab_vec[..enc.prefix_pos].to_vec();
-                first.extend_from_slice(&first_data);
-                *slab.data.as_mut_vec() = first;
-                slab.len = count_items_in_rle_buf::<T>(slab.data.as_mut_vec());
-                slab.segments = rle_count_segments::<T>(slab.data.as_mut_vec());
-
-        */
-        todo!();
-
-        // Remaining overflow → new slabs returned to caller.
-        // TODO: handle enc.overflow[1..] as middle slabs.
-        // For now just return the last slab.
-        let mut last = enc.buf;
-        last.extend_from_slice(&enc.raw_suffix);
-        let last_len = count_items_in_rle_buf::<T>(&last) + enc.raw_suffix_item_count;
-        let last_segs = rle_count_segments::<T>(&last);
-        let overflow = vec![Slab {
-            data: super::ValidBuf::new(last),
-            len: last_len,
-            segments: last_segs,
-        }];
-
-        (overflow, enc.items_inserted)
+    if let Some(rw) = result.rewrite {
+        super::rle_state::rewrite_lit_header(slab_data, rw.pos, rw.count);
     }
-}
 
-struct SpliceEncoded {
-    /// Encoded bytes for the first (or only) slab.
-    buf: Vec<u8>,
-    segments: usize,
-    prefix_pos: usize,
-    suffix_pos: usize,
-    prefix_segments: usize,
-    items_inserted: usize,
-    rewrite: Option<super::rle_state::RewriteHeader>,
-    /// Overflow slabs when encoding exceeded max_segments.
-    overflow: Vec<Slab>,
-    /// Raw suffix bytes + item count (appended to the last slab by the caller).
-    raw_suffix: Vec<u8>,
-    raw_suffix_item_count: usize,
-}
+    slab.len = result.len;
+    slab.segments = result.segments;
 
-/// Read from slab, encode prefix items + new values + suffix items into buf.
-/// Borrows from `data` are confined to this function call.
-fn rle_encode_splice<T: RleValue, V: super::AsColumnRef<T>>(
-    data: &[u8],
-    slab_len: usize,
-    index: usize,
-    end_index: usize,
-    values: &mut impl Iterator<Item = V>,
-    max_segments: usize,
-) -> SpliceEncoded {
-    todo!()
-    /*
-      let (prefix, suffix) = rle_find_partition::<T>(data, index, end_index)
-          .expect("rle_find_partition failed");
-
-      let prefix_pos = prefix.pos;
-      let suffix_pos = suffix.pos;
-      let prefix_segments = prefix.segments;
-      let suffix_segments = suffix.segments;
-      let suffix_lit = suffix.lit;
-      let suffix_state_items = state_item_count(&suffix.state) + suffix.lit;
-      let raw_suffix_item_count = slab_len - end_index - suffix_state_items;
-
-      // Prepend any bytes the state machine wrote during partition (literal splits).
-      let mut buf = Vec::new();
-      let mut segments = prefix.segments;
-      let mut len: usize = 0;
-      let mut state = prefix.state;
-      let mut items_inserted: usize = 0;
-      let mut overflow: Vec<Slab> = Vec::new();
-
-      let mut budget = max_segments.saturating_sub(prefix.segments);
-
-      for v in &collected {
-          items_inserted += 1;
-          segments += state.append(&mut buf, v.as_column_ref());
-
-          if segments >= budget {
-            let (s, _) = state.flush(&mut buf);
-            segments += s;
-
-            overflow.push(Slab {
-              data: super::ValidBuf::new(std::mem::take(&mut buf)),
-              len: items_inserted,
-              segments,
-            });
-
-            budget = max_segments;
-            state = RleState::new();
-            segments = 0;
-            items_inserted = 0;
-          }
-
-      }
-
-      // Merge suffix partial run.
-      match suffix.state {
-          RleState::Lone(v) => {
-              segments += state.append_n(&mut buf, v, 1);
-          }
-          RleState::Run(count, v) => {
-              segments += state.append_n(&mut buf, v, count);
-          }
-          RleState::Null(count) => {
-              segments += state.append_null_n(&mut buf, count);
-          }
-          RleState::Empty => {}
-          RleState::Lit { .. } => unreachable!("partition never produces Lit suffix"),
-      }
-
-      // Merge raw suffix bytes.
-      let rewrite = if !raw_suffix.is_empty() || suffix_lit > 0 {
-          segments += state.append_raw(&mut buf, &raw_suffix, suffix_segments, suffix_lit);
-          None
-      } else {
-          let (s, rw) = state.flush(&mut buf);
-          segments += s;
-          rw
-      };
-
-      SpliceEncoded {
-          buf, segments, prefix_pos, suffix_pos, prefix_segments,
-          items_inserted, rewrite, overflow, raw_suffix, raw_suffix_item_count,
-      }
-    */
-}
-
-fn count_items_in_rle_buf<T: RleValue>(buf: &[u8]) -> usize {
-    let mut byte_pos = 0;
-    let mut total = 0;
-    while byte_pos < buf.len() {
-        let (cb, raw) = match read_signed(&buf[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-        match raw {
-            n if n > 0 => {
-                total += n as usize;
-                byte_pos += cb + T::value_len(&buf[byte_pos + cb..]).unwrap_or(0);
-            }
-            n if n < 0 => {
-                let count = (-n) as usize;
-                total += count;
-                let mut scan = byte_pos + cb;
-                for _ in 0..count {
-                    scan += T::value_len(&buf[scan..]).unwrap_or(0);
-                }
-                byte_pos = scan;
-            }
-            _ => {
-                let (ncb, nc) = read_unsigned(&buf[byte_pos + cb..]).unwrap_or((0, 0));
-                total += nc as usize;
-                byte_pos += cb + ncb;
-            }
-        }
-    }
-    total
+    (vec![], items_inserted)
 }
 
 // ── count_segments ───────────────────────────────────────────────────────────
