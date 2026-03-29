@@ -161,6 +161,7 @@ pub trait ColumnEncoding: Default {
                     std::iter::empty::<V>(),
                     col.max_segments,
                 );
+                range.end += 1; // include the partially deleted slab
                 break;
             }
         }

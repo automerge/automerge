@@ -357,13 +357,13 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// col.insert(0, Some("hello")); // Option<&str> for Column<Option<String>>
     /// ```
     pub fn insert(&mut self, index: usize, value: impl AsColumnRef<T>) {
-        self.fast_splice(index, 0, [value]);
+        self.splice(index, 0, [value]);
     }
 
     /// Removes the value at `index`.
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) {
-        self.fast_splice(index, 1, std::iter::empty::<T>());
+        self.splice(index, 1, std::iter::empty::<T>());
     }
 
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
@@ -374,133 +374,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// col.splice(0, 2, ["hello", "world"]); // &str items for Column<String>
     /// ```
     pub fn splice<V: AsColumnRef<T>>(
-        &mut self,
-        index: usize,
-        del: usize,
-        values: impl IntoIterator<Item = V>,
-    ) {
-        self.counter += 1;
-        assert!(index + del <= self.total_len, "splice range out of bounds");
-
-        let (encoded_slabs, new_len) =
-            T::Encoding::encode_all_slabs(values.into_iter(), self.max_segments);
-
-        if del == 0 && new_len == 0 {
-            return;
-        }
-
-        if self.slabs.is_empty() {
-            self.slabs = encoded_slabs
-                .into_iter()
-                .map(|(data, len, segments)| Slab {
-                    data: ValidBuf::new(data),
-                    len,
-                    segments,
-                })
-                .collect();
-            self.bit = rebuild_bit::<T, WF>(&self.slabs);
-            self.total_len = new_len;
-            return;
-        }
-
-        let (si_start, offset_start) = self.locate_index(index);
-
-        let (si_end, del_end_offset) = if del == 0 {
-            (si_start, offset_start)
-        } else {
-            let (si, off) = self.locate_index(index + del - 1);
-            (si, off + 1)
-        };
-
-        let new_slabs: Vec<Slab> = encoded_slabs
-            .into_iter()
-            .map(|(data, len, segments)| Slab {
-                data: ValidBuf::new(data),
-                len,
-                segments,
-            })
-            .collect();
-
-        // 1. Left prefix: items before the splice point in the first slab.
-        let first_slab = &self.slabs[si_start];
-        let first_slab_len = first_slab.len;
-        let left_data = if offset_start == 0 {
-            vec![]
-        } else {
-            let (l, _) = T::Encoding::split_at_item(&first_slab.data, offset_start, first_slab_len);
-            l
-        };
-        let left_items = offset_start;
-
-        // 2. Right suffix: items after the splice range in the last slab.
-        let last_slab = &self.slabs[si_end];
-        let last_slab_len = last_slab.len;
-        let right_data = if del_end_offset >= last_slab_len {
-            vec![]
-        } else {
-            let (_, r) = T::Encoding::split_at_item(&last_slab.data, del_end_offset, last_slab_len);
-            r
-        };
-        let right_items = last_slab_len - del_end_offset;
-
-        // 3. Rebuild the slab vec.
-        let slab_count = self.slabs.len();
-        let suffix_count = slab_count - si_end - 1;
-        let capacity = si_start
-            + (if left_items > 0 { 1 } else { 0 })
-            + new_slabs.len()
-            + (if right_items > 0 { 1 } else { 0 })
-            + suffix_count;
-
-        let suffix_slabs: Vec<Slab> = if suffix_count > 0 {
-            self.slabs.drain((si_end + 1)..).collect()
-        } else {
-            Vec::new()
-        };
-        let prefix_slabs: Vec<Slab> = if si_start > 0 {
-            self.slabs.drain(0..si_start).collect()
-        } else {
-            Vec::new()
-        };
-
-        let mut result_slabs: Vec<Slab> = Vec::with_capacity(capacity);
-        result_slabs.extend(prefix_slabs);
-
-        if left_items > 0 {
-            result_slabs.push(Slab {
-                segments: T::Encoding::count_segments(&left_data),
-                data: ValidBuf::new(left_data),
-                len: left_items,
-            });
-        }
-
-        result_slabs.extend(new_slabs);
-
-        if right_items > 0 {
-            result_slabs.push(Slab {
-                segments: T::Encoding::count_segments(&right_data),
-                data: ValidBuf::new(right_data),
-                len: right_items,
-            });
-        }
-
-        result_slabs.extend(suffix_slabs);
-
-        self.slabs = result_slabs;
-        self.total_len = self.total_len - del + new_len;
-
-        let merge_pos = si_start + (if left_items > 0 { 1 } else { 0 });
-        if merge_pos < self.slabs.len() {
-            self.try_merge_no_rebuild(merge_pos);
-        }
-
-        self.bit = rebuild_bit::<T, WF>(&self.slabs);
-    }
-
-    /// Fast partition-based splice. Uses cursor-aware encoding to avoid
-    /// re-encoding the entire slab. Falls back to [`splice`](Self::splice)
-    /// for cross-slab deletes.
-    pub fn fast_splice<V: AsColumnRef<T>>(
         &mut self,
         index: usize,
         del: usize,
@@ -520,25 +393,10 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             self.bit = rebuild_bit::<T, WF>(&self.slabs);
         }
 
-        T::Encoding::fast_splice(self, index, del, &mut iter);
+        T::Encoding::fast_splice(self, index, del, iter);
 
         #[cfg(debug_assertions)]
         self.validate_encoding();
-    }
-
-    fn locate_index(&self, index: usize) -> (usize, usize) {
-        if self.slabs.is_empty() {
-            return (0, 0);
-        }
-        let (si, off) = find_slab(&self.bit, index, self.slabs.len());
-        // Clamp: if binary lifting walked past the last slab (happens when
-        // index == total_len, i.e. appending), return last slab + its length.
-        if si >= self.slabs.len() {
-            let last = self.slabs.len() - 1;
-            (last, self.slabs[last].len)
-        } else {
-            (si, off)
-        }
     }
 
     // ── Merge ────────────────────────────────────────────────────────────────
@@ -599,26 +457,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         }
 
         start..end
-    }
-
-    /// Like try_merge_around but does NOT rebuild the BIT.
-    /// Used by splice which rebuilds once at the end.
-    pub(crate) fn try_merge_no_rebuild(&mut self, si: usize) {
-        let half = self.max_segments / 2;
-
-        if si + 1 < self.slabs.len()
-            && self.slabs[si].segments + self.slabs[si + 1].segments <= half
-        {
-            self.merge_slabs_no_rebuild(si, si + 1);
-            if si > 0 && self.slabs[si - 1].segments + self.slabs[si].segments <= half {
-                self.merge_slabs_no_rebuild(si - 1, si);
-            }
-            return;
-        }
-
-        if si > 0 && self.slabs[si - 1].segments + self.slabs[si].segments <= half {
-            self.merge_slabs_no_rebuild(si - 1, si);
-        }
     }
 
     /// Returns a forward iterator over all items in the column.
