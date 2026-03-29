@@ -29,29 +29,24 @@ fn main() {
     let u64_col = Column::<u64>::from_values((0..10_000).map(|_| rand_u64()).collect());
 
     let mut c = bool_col.clone();
-    bench("bool fast replace_1", 500_000, || {
-        c.fast_splice(rand_usize(c.len()), 1, [rand_bool()]);
+    bench("bool replace_1", 500_000, || {
+        c.splice(rand_usize(c.len()), 1, [rand_bool()]);
     });
 
     let mut c = u64_col.clone();
-    bench("u64  fast replace_1", 500_000, || {
-        c.fast_splice(rand_usize(c.len()), 1, [rand_u64()]);
+    bench("u64  replace_1", 500_000, || {
+        c.splice(rand_usize(c.len()), 1, [rand_u64()]);
     });
 
     let mut c = u64_col.clone();
-    bench("u64  fast insert_1 ", 10_000, || {
-        c.fast_splice(rand_usize(c.len()), 0, [rand_u64()]);
-    });
-
-    let mut c = u64_col.clone();
-    bench("u64  old  insert_1 ", 10_000, || {
+    bench("u64  insert_1 ", 10_000, || {
         c.splice(rand_usize(c.len()), 0, [rand_u64()]);
     });
 
     let mut c = u64_col.clone();
-    bench("u64  fast delete_1 ", 10_000, || {
+    bench("u64  delete_1 ", 10_000, || {
         if c.len() > 1 {
-            c.fast_splice(rand_usize(c.len()), 1, std::iter::empty::<u64>());
+            c.splice(rand_usize(c.len()), 1, std::iter::empty::<u64>());
         }
     });
 }
