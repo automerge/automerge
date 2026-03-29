@@ -1,7 +1,8 @@
 use crate::PackError;
 
-use super::encoding::ColumnEncoding;
-use super::ValidBytes;
+use super::column::Slab;
+use super::encoding::{ColumnEncoding, RunDecoder};
+use super::{AsColumnRef, Run, ValidBuf, ValidBytes};
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -221,19 +222,28 @@ pub(crate) fn find_partition(
 /// it directly into `slab_data`, avoiding a full slab copy.
 ///
 /// Returns `Some(new_segment_count)` on success.
-pub(crate) fn bool_fast_splice_inplace(
-    slab: &mut super::column::Slab,
+pub(crate) fn splice_slab(
+    slab: &mut Slab,
     index: usize,
     del: usize,
-    values: &mut impl Iterator<Item = bool>,
+    values: impl Iterator<Item = bool>,
     max_segments: usize,
-) -> (Vec<super::column::Slab>, usize) {
+) -> Vec<super::column::Slab> {
     let end_index = index + del;
     assert!(end_index <= slab.len, "del extends beyond slab");
 
     let slab_data = slab.data.as_mut_vec();
-    let (prefix, suffix) =
-        find_partition(slab_data, index, end_index).expect("find_partition failed");
+    let (prefix, suffix) = if slab_data.is_empty() {
+        let p = BoolPartition {
+            value: false,
+            count: 0,
+            pos: 0,
+            segments: 0,
+        };
+        (p, p)
+    } else {
+        find_partition(slab_data, index, end_index).expect("find_partition failed")
+    };
 
     // Save raw suffix before we modify slab_data.
     let raw_suffix = slab_data[suffix.pos..].to_vec();
@@ -275,8 +285,8 @@ pub(crate) fn bool_fast_splice_inplace(
                     slab.segments = segments;
                     overflowed = true;
                 } else {
-                    overflow.push(super::column::Slab {
-                        data: super::ValidBuf::new(buf),
+                    overflow.push(Slab {
+                        data: ValidBuf::new(buf),
                         len,
                         segments,
                     });
@@ -324,14 +334,14 @@ pub(crate) fn bool_fast_splice_inplace(
         len += raw_suffix_item_count;
         segments += suffix.segments;
 
-        overflow.push(super::column::Slab {
-            data: super::ValidBuf::new(buf),
+        overflow.push(Slab {
+            data: ValidBuf::new(buf),
             len,
             segments,
         });
     }
 
-    (overflow, items_inserted)
+    overflow
 }
 
 // ── Scan ─────────────────────────────────────────────────────────────────────
@@ -435,14 +445,14 @@ impl<'a> Iterator for BoolDecoder<'a> {
     }
 }
 
-impl<'a> super::encoding::RunDecoder for BoolDecoder<'a> {
-    fn next_run(&mut self) -> Option<super::Run<bool>> {
+impl<'a> RunDecoder for BoolDecoder<'a> {
+    fn next_run(&mut self) -> Option<Run<bool>> {
         loop {
             if self.remaining > 0 {
                 let count = self.remaining;
                 let value = self.value;
                 self.remaining = 0;
-                return Some(super::Run { count, value });
+                return Some(Run { count, value });
             }
             if self.byte_pos >= self.data.len() {
                 return None;
@@ -491,7 +501,7 @@ impl ColumnEncoding for BoolEncoding {
         bool_validate_encoding(slab)
     }
 
-    fn encode_all_slabs<V: super::AsColumnRef<bool>>(
+    fn encode_all_slabs<V: AsColumnRef<bool>>(
         values: impl Iterator<Item = V>,
         max_segments: usize,
     ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
@@ -512,21 +522,20 @@ impl ColumnEncoding for BoolEncoding {
         bool_streaming_save(slabs)
     }
 
-    fn fast_splice_inplace<V: super::AsColumnRef<bool>>(
-        slab: &mut super::column::Slab,
+    fn splice_slab<V: AsColumnRef<bool>>(
+        slab: &mut Slab,
         index: usize,
         del: usize,
-        values: &mut impl Iterator<Item = V>,
+        values: impl Iterator<Item = V>,
         max_segments: usize,
-    ) -> Option<(Vec<super::column::Slab>, usize)> {
-        let mut bools = values.map(|v| v.as_column_ref());
-        Some(bool_fast_splice_inplace(
-            slab,
-            index,
-            del,
-            &mut bools,
-            max_segments,
-        ))
+    ) -> (Vec<Slab>, usize) {
+        let slab_del = del.min(slab.len - index);
+        let overflow_del = del - slab_del;
+        let bools = values.map(|v| v.as_column_ref());
+        (
+            splice_slab(slab, index, slab_del, bools, max_segments),
+            overflow_del,
+        )
     }
 
     type Decoder<'a> = BoolDecoder<'a>;

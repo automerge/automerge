@@ -147,7 +147,6 @@ pub(crate) fn find_slab<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (us
     }
     let mut pos = 0usize;
     let mut idx = 0usize;
-    // Find the highest bit.
     let mut bit_k = 1;
     while bit_k <= n {
         bit_k <<= 1;
@@ -516,16 +515,15 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             return;
         }
 
-        if !self.slabs.is_empty() {
-            if let Some(()) = T::Encoding::fast_splice(self, index, del, &mut iter) {
-                #[cfg(debug_assertions)]
-                self.validate_encoding();
-                return;
-            }
+        if self.slabs.is_empty() {
+            self.slabs.push(T::Encoding::empty_slab());
+            self.bit = rebuild_bit::<T, WF>(&self.slabs);
         }
 
-        self.counter -= 1;
-        self.splice(index, del, iter);
+        T::Encoding::fast_splice(self, index, del, &mut iter);
+
+        #[cfg(debug_assertions)]
+        self.validate_encoding();
     }
 
     fn locate_index(&self, index: usize) -> (usize, usize) {
@@ -555,9 +553,57 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         slab_a.data = ValidBuf::new(merged);
     }
 
+    /// Try merging at both boundaries of a slab range without rebuilding the BIT.
+    #[allow(dead_code)]
+    /// Given range `5..9`, checks if slabs 4+5 can merge and 8+9 can merge.
+    /// Returns the adjusted range accounting for any merges that happened.
+    pub(crate) fn try_merge(&mut self, range: Range<usize>) -> Range<usize> {
+        let half = self.max_segments / 2;
+        let mut start = range.start;
+        let mut end = range.end;
+
+        // When we have a small slab at the end of a splice and the following
+        // pre-existing slab is also small
+
+        // Try merging at the right boundary: slab[end-1] + slab[end]
+        if end < self.slabs.len()
+            && end > 0
+            && self.slabs[end - 1].segments + self.slabs[end].segments <= half
+        {
+            self.merge_slabs_no_rebuild(end - 1, end);
+            // range absorbs the next slab
+        }
+
+        // When a splice makes two new small slabs - one is overflow from writing
+        // one is a partially deleted slab
+
+        // Try merging at the left boundary: slab[end - 2] + slab[end - 1]
+        if range.len() >= 2
+            && range.end >= 2
+            && self.slabs[end - 2].segments + self.slabs[end - 1].segments <= half
+        {
+            self.merge_slabs_no_rebuild(end - 2, end - 1);
+            end -= 1; // shortens the range
+        }
+
+        // When splice makes a small slab but preexisting one before it is already small
+
+        // Try merging at the left boundary: slab[start-1] + slab[start]
+        if start > 0
+            && start < self.slabs.len()
+            && self.slabs[start - 1].segments + self.slabs[start].segments <= half
+        {
+            self.merge_slabs_no_rebuild(start - 1, start);
+            start -= 1; // shifts the range one to the left
+            end -= 1;
+        }
+
+        start..end
+    }
+
     /// Like try_merge_around but does NOT rebuild the BIT.
     /// Used by splice which rebuilds once at the end.
-    fn try_merge_no_rebuild(&mut self, si: usize) {
+    pub(crate) fn try_merge_no_rebuild(&mut self, si: usize) {
         let half = self.max_segments / 2;
 
         if si + 1 < self.slabs.len()
