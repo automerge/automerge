@@ -3,7 +3,6 @@
 use super::rle::{encode_signed, encode_unsigned};
 use super::RleValue;
 
-
 /// Returned when flushing a Lit whose header is not in our buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct RewriteHeader {
@@ -40,6 +39,23 @@ impl FlushState {
     fn with_segments(mut self, segments: usize) -> Self {
         self.segments += segments;
         self
+    }
+}
+
+impl std::ops::AddAssign for FlushState {
+    fn add_assign(&mut self, rhs: Self) {
+        self.segments += rhs.segments;
+        if rhs.rewrite.is_some() {
+            self.rewrite = rhs.rewrite;
+        }
+    }
+}
+
+impl std::ops::AddAssign<Option<FlushState>> for FlushState {
+    fn add_assign(&mut self, rhs: Option<FlushState>) {
+        if let Some(rhs) = rhs {
+            *self += rhs;
+        }
     }
 }
 
@@ -223,7 +239,6 @@ impl<'a, T: RleValue> RleState<'a, T> {
             n => Self::Run(n, value),
         }
     }
-
 
     /// Feed `count` null values. Returns segments flushed.
     pub fn append_null_n(&mut self, buf: &mut Vec<u8>, count: usize) -> FlushState {
@@ -429,10 +444,7 @@ pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: us
     if new_len == old_header_len {
         buf[header_pos..header_pos + new_len].copy_from_slice(&new_header.buf[..new_len]);
     } else {
-        buf.splice(
-            header_pos..header_pos + old_header_len,
-            new_header,
-        );
+        buf.splice(header_pos..header_pos + old_header_len, new_header);
     }
 }
 
