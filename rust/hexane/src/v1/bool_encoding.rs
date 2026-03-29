@@ -177,6 +177,7 @@ pub(crate) fn find_partition(
         }
 
         // End cursor: once prefix is set, find where end_index falls
+        #[allow(clippy::collapsible_if)]
         if prefix.is_some() && suffix.is_none() {
             if end_index < run_end_item {
                 // end_index falls strictly within this run.
@@ -256,7 +257,7 @@ pub(crate) fn bool_fast_splice_inplace(
             cur_count += 1;
         } else {
             // Flush current run.
-            buf.extend(encode_count(cur_count).into_iter());
+            buf.extend(encode_count(cur_count));
             len += cur_count;
             if cur_count > 0 {
                 segments += 1;
@@ -284,7 +285,7 @@ pub(crate) fn bool_fast_splice_inplace(
                 segments = 0;
                 len = 0;
                 if cur_value {
-                    buf.extend(encode_count(0).into_iter());
+                    buf.extend(encode_count(0));
                 }
             }
         }
@@ -296,7 +297,7 @@ pub(crate) fn bool_fast_splice_inplace(
             cur_count += suffix.count;
         } else {
             // Flush, then start the suffix run.
-            buf.extend(encode_count(cur_count).into_iter());
+            buf.extend(encode_count(cur_count));
             len += cur_count;
             if cur_count > 0 {
                 segments += 1;
@@ -307,7 +308,7 @@ pub(crate) fn bool_fast_splice_inplace(
 
     // Flush final run.
     if cur_count > 0 {
-        buf.extend(encode_count(cur_count).into_iter());
+        buf.extend(encode_count(cur_count));
         len += cur_count;
         segments += 1;
     }
@@ -999,7 +1000,7 @@ fn bool_streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
                 out.truncate(out_last_start);
                 out_last_start = out.len();
                 let enc = encode_count(merged);
-                out.extend(enc.into_iter());
+                out.extend(enc);
 
                 out_last_count = merged;
                 // out_last_value stays false
@@ -1021,7 +1022,7 @@ fn bool_streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
             out.truncate(out_last_start);
             out_last_start = out.len();
             let enc = encode_count(merged);
-            out.extend(enc.into_iter());
+            out.extend(enc);
 
             out_last_count = merged;
             // out_last_value stays true
@@ -1229,7 +1230,7 @@ mod tests {
     fn encode_runs(counts: &[usize]) -> Vec<u8> {
         let mut out = Vec::new();
         for &c in counts {
-            out.extend(encode_count(c).into_iter());
+            out.extend(encode_count(c));
         }
         out
     }
