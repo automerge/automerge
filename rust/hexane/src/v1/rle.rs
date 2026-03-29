@@ -6,7 +6,7 @@ use crate::PackError;
 use super::column::Slab;
 use super::encoding::ColumnEncoding;
 use super::rle_state::RewriteHeader;
-use super::{ColumnValueRef, RleValue, ValidBytes};
+use super::{ColumnValueRef, RleValue, ValidBuf, ValidBytes};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -623,7 +623,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
 // ── RLE fast splice ─────────────────────────────────────────────────────────
 
-use super::rle_state::RleState;
+use super::rle_state::{FlushState, RleState};
 
 ///// Postfix: what comes after the deleted range in the same/adjacent run(s).
 /// `segments` = segment count from outer.end to the end of the slab.
@@ -674,9 +674,8 @@ struct RlePartition<'a, T: RleValue> {
     postfix: Option<Postfix<'a, T>>,
 }
 
-fn rle_find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePartition<'a, T> {
+fn find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePartition<'a, T> {
     use super::encoding::RunDecoder;
-
 
     let mut decoder = RleDecoder::<T>::new(&slab.data);
     let mut byte_before = decoder.byte_pos;
@@ -817,7 +816,7 @@ mod partition_tests {
     #[test]
     fn mid_repeat() {
         let slab = encode_u64_slab(&[7, 7, 7, 7, 7]);
-        let p = rle_find_partition::<u64>(&slab, 2..3);
+        let p = find_partition::<u64>(&slab, 2..3);
         match &p.prefix.state {
             RleState::Run(2, v) => assert_eq!(*v, 7),
             s => panic!("expected Run(2, 7), got {:?}", state_item_count(s)),
@@ -834,7 +833,7 @@ mod partition_tests {
     #[test]
     fn mid_literal() {
         let slab = encode_u64_slab(&[1, 2, 3, 4, 5]);
-        let p = rle_find_partition::<u64>(&slab, 2..3);
+        let p = find_partition::<u64>(&slab, 2..3);
         assert_eq!(state_item_count(&p.prefix.state), 2);
         match p.postfix.unwrap() {
             Postfix::Lit {
@@ -847,7 +846,7 @@ mod partition_tests {
     #[test]
     fn mid_null() {
         let slab = encode_opt_slab(&[Some(1), None, None, None, Some(2)]);
-        let p = rle_find_partition::<Option<u64>>(&slab, 2..3);
+        let p = find_partition::<Option<u64>>(&slab, 2..3);
         match &p.postfix {
             Some(Postfix::Run {
                 count: 1,
@@ -861,7 +860,7 @@ mod partition_tests {
     #[test]
     fn exact_boundary() {
         let slab = encode_u64_slab(&[1, 1, 1, 2, 2, 2]);
-        let p = rle_find_partition::<u64>(&slab, 3..3);
+        let p = find_partition::<u64>(&slab, 3..3);
         match &p.prefix.state {
             RleState::Run(3, v) => assert_eq!(*v, 1),
             _ => panic!("expected Run(3, 1)"),
@@ -877,7 +876,7 @@ mod partition_tests {
     #[test]
     fn at_start() {
         let slab = encode_u64_slab(&[5, 5, 5]);
-        let p = rle_find_partition::<u64>(&slab, 0..1);
+        let p = find_partition::<u64>(&slab, 0..1);
         assert_eq!(state_item_count(&p.prefix.state), 0);
         match p.postfix.unwrap() {
             Postfix::Run {
@@ -890,7 +889,7 @@ mod partition_tests {
     #[test]
     fn at_end() {
         let slab = encode_u64_slab(&[1, 2, 3]);
-        let p = rle_find_partition::<u64>(&slab, 3..3);
+        let p = find_partition::<u64>(&slab, 3..3);
         assert_eq!(state_item_count(&p.prefix.state), 3);
         assert!(p.postfix.is_none());
     }
@@ -898,7 +897,7 @@ mod partition_tests {
     #[test]
     fn delete_all() {
         let slab = encode_u64_slab(&[1, 2, 3]);
-        let p = rle_find_partition::<u64>(&slab, 0..3);
+        let p = find_partition::<u64>(&slab, 0..3);
         assert_eq!(state_item_count(&p.prefix.state), 0);
         assert!(p.postfix.is_none());
     }
@@ -906,7 +905,7 @@ mod partition_tests {
     #[test]
     fn insert_mid_repeat() {
         let slab = encode_u64_slab(&[7, 7, 7, 7]);
-        let p = rle_find_partition::<u64>(&slab, 2..2);
+        let p = find_partition::<u64>(&slab, 2..2);
         match &p.prefix.state {
             RleState::Run(2, v) => assert_eq!(*v, 7),
             _ => panic!("expected Run(2, 7)"),
@@ -919,16 +918,17 @@ mod partition_tests {
         }
     }
 
-    /// Use rle_build_splice_buf to splice vals[start..end] back in and verify roundtrip.
+    /// Use build_splice_buf to splice vals[start..end] back in and verify roundtrip.
     fn roundtrip_check(vals: &[u64], start: usize, end: usize) {
         let slab = encode_u64_slab(vals);
         let data: &[u8] = &slab.data;
 
-        let result = rle_build_splice_buf::<u64, u64>(
+        let result = build_splice_buf::<u64, u64>(
             &slab,
             start,
             end - start,
             &mut vals[start..end].iter().copied(),
+            usize::MAX,
         );
 
         let mut reconstructed_bytes = data.to_vec();
@@ -1021,6 +1021,79 @@ mod partition_tests {
             roundtrip_check(&vals, start, end.min(len));
         }
     }
+
+    #[test]
+    fn roundtrip_regression_delete_end() {
+        let vals = vec![3u64, 4, 3, 0, 2, 1, 3, 3, 4, 1, 1, 3, 2, 2, 4, 0, 1, 2, 4, 2, 0, 1, 1, 2, 3, 3, 0, 1, 3];
+        roundtrip_check(&vals, 23, 27);
+    }
+
+    // ── Overflow tests ──────────────────────────────────────────────────
+
+    /// Verify that build_splice_buf with overflow produces correct slabs
+    /// that decode to the expected values.
+    fn overflow_insert_check(initial: &[u64], index: usize, new_vals: &[u64], max_seg: usize) {
+        let slab = encode_u64_slab(initial);
+        let result = build_splice_buf::<u64, u64>(
+            &slab, index, 0, &mut new_vals.iter().copied(), max_seg,
+        );
+
+        // Decode all slabs: first slab (after splice) + overflow slabs.
+        let mut first = slab.data.to_vec();
+        first.splice(result.range.clone(), result.bytes);
+        if let Some(rw) = result.rewrite {
+            crate::v1::rle_state::rewrite_lit_header(&mut first, rw.pos, rw.count);
+        }
+        let mut all_vals = decode_u64_bytes(&first);
+        for s in &result.overflow {
+            let d: &[u8] = &s.data;
+            all_vals.extend(decode_u64_bytes(d));
+        }
+
+        // Build expected: initial[..index] + new_vals + initial[index..]
+        let mut expected = initial[..index].to_vec();
+        expected.extend_from_slice(new_vals);
+        expected.extend_from_slice(&initial[index..]);
+        assert_eq!(all_vals, expected,
+            "overflow insert mismatch: index={index} max_seg={max_seg}");
+    }
+
+    #[test]
+    fn overflow_insert_many_at_start() {
+        // Insert enough values to trigger overflow with max_segments=4.
+        overflow_insert_check(&[1, 2, 3], 0, &[10, 20, 30, 40, 50, 60], 4);
+    }
+
+    #[test]
+    fn overflow_insert_many_at_mid() {
+        overflow_insert_check(&[1, 2, 3, 4, 5], 2, &[10, 20, 30, 40, 50], 3);
+    }
+
+    #[test]
+    fn overflow_insert_many_at_end() {
+        overflow_insert_check(&[1, 2, 3], 3, &[10, 20, 30, 40, 50], 3);
+    }
+
+    #[test]
+    fn overflow_insert_repeats() {
+        // Repeats compress well — may not overflow even with many values.
+        overflow_insert_check(&[7, 7, 7], 1, &[7, 7, 7, 7, 7, 7, 7, 7], 4);
+    }
+
+    #[test]
+    fn overflow_fuzz() {
+        use rand::{rng, RngCore};
+        let mut r = rng();
+        for _ in 0..100 {
+            let initial_len = (r.next_u32() % 10 + 1) as usize;
+            let initial: Vec<u64> = (0..initial_len).map(|_| r.next_u64() % 5).collect();
+            let insert_len = (r.next_u32() % 20 + 1) as usize;
+            let new_vals: Vec<u64> = (0..insert_len).map(|_| r.next_u64() % 5).collect();
+            let index = r.next_u32() as usize % (initial_len + 1);
+            let max_seg = (r.next_u32() % 8 + 2) as usize;
+            overflow_insert_check(&initial, index, &new_vals, max_seg);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1034,73 +1107,88 @@ fn state_item_count<T: RleValue>(state: &RleState<'_, T>) -> usize {
     }
 }
 
+#[derive(Default)]
 struct SpliceBuf {
     bytes: Vec<u8>,
     range: Range<usize>,
     len: usize,
     segments: usize,
     rewrite: Option<RewriteHeader>,
+    overflow: Vec<Slab>,
 }
 
 /// Build the splice buffer. Borrows slab immutably; returns owned output.
 /// After this, caller does: `slab.data.splice(result.range, result.bytes)`,
 /// applies rewrite, sets slab.len and slab.segments.
-fn rle_build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
+fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     slab: &Slab,
     index: usize,
     del: usize,
     values: &mut impl Iterator<Item = V>,
+    max_segments: usize,
 ) -> SpliceBuf {
     // Collect values so they outlive the state machine (needed for &str lifetimes).
     let collected: Vec<V> = values.collect();
-    let items_inserted = collected.len();
 
-    let p = rle_find_partition::<T>(slab, index..index + del);
+    let p = find_partition::<T>(slab, index..index + del);
+
+    let mut result = SpliceBuf { range: p.outer, ..Default::default() };
 
     let mut buf = Vec::new();
     let mut state = p.prefix.state;
-    let mut rewrite: Option<RewriteHeader> = None;
-    let mut buf_segments: usize = 0;
-
-    macro_rules! track {
-        ($f:expr) => {{
-            let f = $f;
-            buf_segments += f.segments;
-            if f.rewrite.is_some() {
-                rewrite = f.rewrite;
-            }
-        }};
-    }
+    let mut f = FlushState::default();
+    let mut overflowed = false;
+    let mut inserted = 0;
+    let mut starting_segments = p.prefix.segments;
 
     // 1. Feed new values.
     for v in &collected {
-        track!(state.append(&mut buf, v.as_column_ref()));
+        if starting_segments + f.segments >= max_segments {
+            f += state.flush(&mut buf);
+            if !overflowed {
+                overflowed = true;
+                result.bytes = std::mem::take(&mut buf);
+                result.len = index + inserted;
+                result.segments = p.prefix.segments + f.segments;
+                result.rewrite = f.rewrite;
+            } else {
+                result.overflow.push(Slab {
+                    data: ValidBuf::new(std::mem::take(&mut buf)),
+                    len: inserted,
+                    segments: f.segments,
+                });
+            }
+            state = RleState::Empty;
+            f = FlushState::default();
+            inserted = 0;
+            starting_segments = 0;
+        }
+        inserted += 1;
+        f += state.append(&mut buf, v.as_column_ref());
     }
 
     // 2. Feed postfix + flush.
     let postfix_segments = match p.postfix {
         None => {
-            track!(state.flush(&mut buf));
+            f += state.flush(&mut buf);
             0
         }
         Some(Postfix::Run {
             count,
             value,
             segments,
-            ..
         }) => {
-            track!(state.append_n(&mut buf, value, count));
-            track!(state.flush(&mut buf));
+            f += state.append_n(&mut buf, value, count);
+            f += state.flush(&mut buf);
             segments
         }
         Some(Postfix::Lit {
             value,
             lit,
             segments,
-            ..
         }) => {
-            track!(state.append(&mut buf, value));
-            track!(state.flush_with_lit(&mut buf, lit));
+            f += state.append(&mut buf, value);
+            f += state.flush_with_lit(&mut buf, lit);
             segments
         }
         Some(Postfix::LonePlusLit {
@@ -1108,22 +1196,39 @@ fn rle_build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
             value,
             lit,
             segments,
-            ..
         }) => {
-            track!(state.append(&mut buf, lone));
-            track!(state.append(&mut buf, value));
-            track!(state.flush_with_lit(&mut buf, lit));
+            f += state.append(&mut buf, lone);
+            f += state.append(&mut buf, value);
+            f += state.flush_with_lit(&mut buf, lit);
             segments
         }
     };
 
-    SpliceBuf {
-        bytes: buf,
-        range: p.outer,
-        len: slab.len - del + items_inserted,
-        segments: p.prefix.segments + buf_segments + postfix_segments,
-        rewrite,
+    if !overflowed {
+        result.bytes = buf;
+        result.len = slab.len - del + inserted;
+        result.segments = p.prefix.segments + f.segments + postfix_segments;
+        result.rewrite = f.rewrite;
+    } else {
+        // the postfix goes on the final slab
+        buf.extend_from_slice(&slab.data[result.range.end..]);
+        result.range.end = slab.data.len();
+
+        let postfix_count = slab.len - index - del;
+
+        result.overflow.push(Slab {
+            data: ValidBuf::new(std::mem::take(&mut buf)),
+            len: inserted + postfix_count,
+            segments: f.segments + postfix_segments,
+        });
     }
+
+    #[cfg(debug_assertions)]
+    for s in &result.overflow {
+        s.validate::<T>();
+    }
+
+    result
 }
 
 pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
@@ -1131,19 +1236,16 @@ pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
     index: usize,
     del: usize,
     values: &mut impl Iterator<Item = V>,
-    _max_segments: usize,
+    max_segments: usize,
 ) -> (Vec<Slab>, usize) {
     assert!(index + del <= slab.len, "del extends beyond slab");
 
-    let old_len = slab.len;
-    let result = rle_build_splice_buf::<T, V>(slab, index, del, values);
-    assert!(
-        result.len + del >= old_len,
-        "bad len: result.len={} del={del} old_len={old_len} idx={index} segs={}",
-        result.len,
-        result.segments
-    );
-    let items_inserted = result.len + del - old_len;
+    let result = build_splice_buf::<T, V>(slab, index, del, values, max_segments);
+
+    // items_inserted is needed by the caller (ColumnEncoding::fast_splice)
+    // to update col.total_len.
+    let items_inserted = result.len + result.overflow.iter().map(|s| s.len).sum::<usize>()
+        + del - slab.len;
 
     let slab_data = slab.data.as_mut_vec();
     slab_data.splice(result.range, result.bytes);
@@ -1155,7 +1257,10 @@ pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
     slab.len = result.len;
     slab.segments = result.segments;
 
-    (vec![], items_inserted)
+    #[cfg(debug_assertions)]
+    slab.validate::<T>();
+
+    (result.overflow, items_inserted)
 }
 
 // ── count_segments ───────────────────────────────────────────────────────────
