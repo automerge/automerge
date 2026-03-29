@@ -17,6 +17,15 @@ pub trait ColumnEncoding: Default {
     /// The column value type this encoding operates on.
     type Value: ColumnValueRef<Encoding = Self>;
 
+    /// Create an empty slab with no items.
+    fn empty_slab() -> super::column::Slab {
+        super::column::Slab {
+            data: super::ValidBuf::new(vec![]),
+            len: 0,
+            segments: 0,
+        }
+    }
+
     /// Read the value at `index` from `slab`, returning the optimal `Get` type.
     ///
     /// For `Copy` types this returns the value directly.  For ref types
@@ -87,125 +96,96 @@ pub trait ColumnEncoding: Default {
     /// runs between adjacent slabs.
     fn streaming_save(slabs: &[&[u8]]) -> Vec<u8>;
 
-    /// Fast in-place splice on a single slab.
-    ///
-    /// Consumes values from the iterator, modifies `slab` in place.
-    /// If the result exceeds `max_segments`, overflow is written into
-    /// new slabs returned alongside the number of items inserted.
-    ///
-    /// Returns `Some((overflow_slabs, items_inserted))` on success,
-    /// `None` if this encoding doesn't support it.
-    fn fast_splice_inplace<V: super::AsColumnRef<Self::Value>>(
-        _slab: &mut super::column::Slab,
-        _index: usize,
-        _del: usize,
-        _values: &mut impl Iterator<Item = V>,
-        _max_segments: usize,
-    ) -> Option<(Vec<super::column::Slab>, usize)> {
-        None
-    }
+    /// Splice a single slab: delete `del` items at `index`, insert values.
+    /// `del` may exceed the slab length — the excess is returned as `overflow_del`.
+    /// Returns `(overflow_slabs, overflow_del)`.
+    fn splice_slab<V: super::AsColumnRef<Self::Value>>(
+        slab: &mut super::column::Slab,
+        index: usize,
+        del: usize,
+        values: impl Iterator<Item = V>,
+        max_segments: usize,
+    ) -> (Vec<super::column::Slab>, usize);
 
-    /// Fast splice on a Column. Locates the target slab, calls
-    /// `fast_splice_inplace`, handles cross-slab deletes, updates the BIT.
+    /// Fast splice on a Column. Locates the target slab,
+    /// handles cross-slab deletes, updates the BIT.
     ///
     /// Returns `None` if this encoding doesn't support the fast path.
     fn fast_splice<WF: super::column::WeightFn<Self::Value>, V: super::AsColumnRef<Self::Value>>(
         col: &mut super::column::Column<Self::Value, WF>,
         index: usize,
         del: usize,
-        values: &mut impl Iterator<Item = V>,
-    ) -> Option<()> {
+        values: impl Iterator<Item = V>,
+    ) {
         use super::column::{bit_point_update, find_slab, rebuild_bit};
 
-        if col.slabs.is_empty() {
-            return None;
+        assert!(!col.slabs.is_empty());
+
+        // find_slab returns si == slabs.len() when index == total_len (append at end).
+        // Clamp to last slab with offset = slab.len.
+        let (mut si, mut offset) = find_slab(&col.bit, index, col.slabs.len());
+        if si >= col.slabs.len() {
+            si = col.slabs.len() - 1;
+            offset = col.slabs[si].len;
         }
 
-        let (si, offset) = find_slab(&col.bit, index, col.slabs.len());
-        let (si, offset) = if si >= col.slabs.len() {
-            let last = col.slabs.len() - 1;
-            (last, col.slabs[last].len)
-        } else {
-            (si, offset)
-        };
-
-        // Clamp del to this slab. Any remainder gets applied to subsequent slabs.
-        let slab_del = del.min(col.slabs[si].len - offset);
-        let overflow_del = del - slab_del;
-
+        let mut range = si..(si + 1);
+        let mut old_slab_len = col.slabs[si].len;
         let old_weight = WF::compute(&col.slabs[si]);
+        let old_slab_count = col.slabs.len();
 
-        let (overflow_slabs, items_inserted) = Self::fast_splice_inplace(
-            &mut col.slabs[si],
-            offset,
-            slab_del,
-            values,
-            col.max_segments,
-        )?;
+        let (overflow, overflow_del) =
+            Self::splice_slab(&mut col.slabs[si], offset, del, values, col.max_segments);
 
-        col.total_len = col.total_len - del + items_inserted;
-
-        // Check if the slab needs splitting after the splice.
-        if overflow_slabs.is_empty()
-            && overflow_del == 0
-            && col.slabs[si].segments > col.max_segments
-        {
-            let new_item_count = col.slabs[si].len;
-            let (left, right) =
-                Self::split_at_item(&col.slabs[si].data, new_item_count / 2, new_item_count);
-            let left_segs = Self::count_segments(&left);
-            let right_segs = Self::count_segments(&right);
-            col.slabs[si] = super::column::Slab {
-                data: super::ValidBuf::new(left),
-                len: new_item_count / 2,
-                segments: left_segs,
-            };
-            col.slabs.insert(
-                si + 1,
-                super::column::Slab {
-                    data: super::ValidBuf::new(right),
-                    len: new_item_count - new_item_count / 2,
-                    segments: right_segs,
-                },
-            );
-            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
-        } else if overflow_slabs.is_empty() && overflow_del == 0 {
-            let new_weight = WF::compute(&col.slabs[si]);
-            bit_point_update(&mut col.bit, si, old_weight, new_weight);
-        } else {
-            // Insert any new slabs from segment overflow.
-            let insert_pos = si + 1;
-            for (i, s) in overflow_slabs.into_iter().enumerate() {
-                col.slabs.insert(insert_pos + i, s);
-            }
-
-            // Apply remaining deletes to subsequent slabs.
-            if overflow_del > 0 {
-                let mut remaining = overflow_del;
-                let pos = si + 1;
-                while remaining > 0 && pos < col.slabs.len() {
-                    let slab_len = col.slabs[pos].len;
-                    if remaining >= slab_len {
-                        col.slabs.remove(pos);
-                        remaining -= slab_len;
-                    } else {
-                        let mut empty = std::iter::empty::<V>();
-                        Self::fast_splice_inplace(
-                            &mut col.slabs[pos],
-                            0,
-                            remaining,
-                            &mut empty,
-                            col.max_segments,
-                        );
-                        remaining = 0;
-                    }
-                }
-            }
-
-            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
+        // Insert overflow slabs.
+        if !overflow.is_empty() {
+            let pos = range.end;
+            range.end += overflow.len();
+            col.slabs.splice(pos..pos, overflow);
         }
 
-        Some(())
+        // Apply remaining deletes to subsequent slabs.
+        let mut remaining = overflow_del;
+        while remaining > 0 && range.end < col.slabs.len() {
+            let slab_len = col.slabs[range.end].len;
+            if remaining >= slab_len {
+                col.slabs.remove(range.end);
+                old_slab_len += slab_len;
+                remaining -= slab_len;
+            } else {
+                old_slab_len += slab_len;
+                Self::splice_slab(
+                    &mut col.slabs[range.end],
+                    0,
+                    remaining,
+                    std::iter::empty::<V>(),
+                    col.max_segments,
+                );
+                break;
+            }
+        }
+
+        // add new total for affected slabs
+        col.total_len += col.slabs[range.clone()]
+            .iter()
+            .map(|s| s.len)
+            .sum::<usize>();
+        col.total_len -= old_slab_len; // and subtract the old total
+        debug_assert_eq!(
+            col.total_len,
+            col.slabs.iter().map(|s| s.len).sum::<usize>()
+        );
+
+        // Try merging small neighbours at the boundaries.
+        let range = col.try_merge(range);
+
+        // Update BIT.
+        if col.slabs.len() == old_slab_count && range.len() == 1 {
+            let new_weight = WF::compute(&col.slabs[range.start]);
+            bit_point_update(&mut col.bit, range.start, old_weight, new_weight);
+        } else {
+            col.bit = rebuild_bit::<Self::Value, WF>(&col.slabs);
+        }
     }
 
     /// Decoder type for iterating over all items in a slab.

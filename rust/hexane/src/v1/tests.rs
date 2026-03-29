@@ -2140,3 +2140,87 @@ fn delta_column_load_with_nullable_empty_default() {
         assert_eq!(col.get(i), Some(None));
     }
 }
+
+// ── Cross-slab splice tests ────────────────────────────────────────────────
+
+/// Build a multi-slab column with small max_segments.
+fn multi_slab_col(vals: &[u64], max_seg: usize) -> Column<u64> {
+    Column::<u64>::from_values_with_max_segments(vals.to_vec(), max_seg)
+}
+
+#[test]
+fn cross_slab_delete_middle() {
+    // 10 literal values with max_segments=4 → multiple slabs.
+    let vals: Vec<u64> = (0..10).collect();
+    let mut col = multi_slab_col(&vals, 4);
+    assert!(col.slab_count() > 1, "need multiple slabs");
+    // Delete across a slab boundary.
+    col.splice(3, 4, std::iter::empty::<u64>());
+    let expected: Vec<u64> = vec![0, 1, 2, 7, 8, 9];
+    assert_col(&col, &expected);
+}
+
+#[test]
+fn cross_slab_delete_to_end() {
+    let vals: Vec<u64> = (0..10).collect();
+    let mut col = multi_slab_col(&vals, 4);
+    col.splice(6, 4, std::iter::empty::<u64>());
+    let expected: Vec<u64> = (0..6).collect();
+    assert_col(&col, &expected);
+}
+
+#[test]
+fn cross_slab_delete_from_start() {
+    let vals: Vec<u64> = (0..10).collect();
+    let mut col = multi_slab_col(&vals, 4);
+    col.splice(0, 5, std::iter::empty::<u64>());
+    let expected: Vec<u64> = (5..10).collect();
+    assert_col(&col, &expected);
+}
+
+#[test]
+fn cross_slab_replace() {
+    let vals: Vec<u64> = (0..10).collect();
+    let mut col = multi_slab_col(&vals, 4);
+    col.splice(3, 4, [99, 88]);
+    let expected: Vec<u64> = vec![0, 1, 2, 99, 88, 7, 8, 9];
+    assert_col(&col, &expected);
+}
+
+#[test]
+fn cross_slab_delete_all() {
+    let vals: Vec<u64> = (0..10).collect();
+    let mut col = multi_slab_col(&vals, 4);
+    col.splice(0, 10, std::iter::empty::<u64>());
+    assert_eq!(col.len(), 0);
+}
+
+#[test]
+fn cross_slab_fuzz() {
+    use rand::{rng, RngCore};
+    let mut r = rng();
+    for _ in 0..200 {
+        let n = (r.next_u32() % 20 + 5) as usize;
+        let vals: Vec<u64> = (0..n).map(|_| r.next_u64() % 5).collect();
+        let max_seg = (r.next_u32() % 6 + 3) as usize;
+        let mut col = multi_slab_col(&vals, max_seg);
+        let mut mirror = vals.clone();
+
+        // Perform 10 random operations.
+        for _ in 0..10 {
+            let len = col.len();
+            if len == 0 {
+                break;
+            }
+            let idx = r.next_u32() as usize % len;
+            let max_del = (len - idx).min(5);
+            let del = r.next_u32() as usize % (max_del + 1);
+            let ins_count = r.next_u32() as usize % 4;
+            let new_vals: Vec<u64> = (0..ins_count).map(|_| r.next_u64() % 5).collect();
+
+            col.splice(idx, del, new_vals.iter().copied());
+            mirror.splice(idx..idx + del, new_vals);
+            assert_col(&col, &mirror);
+        }
+    }
+}
