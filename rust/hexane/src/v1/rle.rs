@@ -4,9 +4,9 @@ use std::ops::Range;
 use crate::PackError;
 
 use super::column::Slab;
-use super::encoding::ColumnEncoding;
+use super::encoding::{ColumnEncoding, RunDecoder};
 use super::rle_state::RewriteHeader;
-use super::{ColumnValueRef, RleValue, ValidBuf, ValidBytes};
+use super::{AsColumnRef, ColumnValueRef, RleValue, Run, ValidBuf, ValidBytes};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -355,7 +355,7 @@ impl<T: RleValue> Clone for RleDecoder<'_, T> {
 
 enum RleDecoderState<'a, T: RleValue> {
     /// Repeat run: yield the same cached value.
-    Repeat(<T as super::ColumnValueRef>::Get<'a>),
+    Repeat(<T as ColumnValueRef>::Get<'a>),
     /// Literal run: decode each value from `byte_pos`.
     Literal,
     /// Null run: yield the type's null value.
@@ -444,7 +444,7 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
 }
 
 impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
-    type Item = <T as super::ColumnValueRef>::Get<'a>;
+    type Item = <T as ColumnValueRef>::Get<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -499,8 +499,8 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
     }
 }
 
-impl<'a, T: RleValue> super::encoding::RunDecoder for RleDecoder<'a, T> {
-    fn next_run(&mut self) -> Option<super::Run<Self::Item>> {
+impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
+    fn next_run(&mut self) -> Option<Run<Self::Item>> {
         loop {
             if self.remaining > 0 {
                 let count = self.remaining;
@@ -509,19 +509,19 @@ impl<'a, T: RleValue> super::encoding::RunDecoder for RleDecoder<'a, T> {
                         let value = *v;
                         self.remaining = 0;
                         // byte_pos already past the value data for repeat runs
-                        Some(super::Run { count, value })
+                        Some(Run { count, value })
                     }
                     RleDecoderState::Literal => {
                         // Literal: each item is distinct, yield one at a time
                         self.remaining -= 1;
                         let (vlen, value) = T::unpack(&self.data[self.byte_pos..]);
                         self.byte_pos += vlen;
-                        Some(super::Run { count: 1, value })
+                        Some(Run { count: 1, value })
                     }
                     RleDecoderState::Null => {
                         let value = T::get_null(self.data);
                         self.remaining = 0;
-                        Some(super::Run { count, value })
+                        Some(Run { count, value })
                     }
                     RleDecoderState::Idle => None,
                 };
@@ -579,7 +579,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_validate_encoding::<T>(slab)
     }
 
-    fn encode_all_slabs<V: super::AsColumnRef<T>>(
+    fn encode_all_slabs<V: AsColumnRef<T>>(
         values: impl Iterator<Item = V>,
         max_segments: usize,
     ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
@@ -589,7 +589,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
     fn load_and_verify(
         data: &[u8],
         max_segments: usize,
-        validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
+        validate: Option<for<'a> fn(<T as ColumnValueRef>::Get<'a>) -> Option<String>>,
     ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
         rle_load_and_verify::<T>(data, max_segments, validate)
     }
@@ -598,20 +598,19 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_streaming_save::<T>(slabs)
     }
 
-    fn fast_splice_inplace<V: super::AsColumnRef<T>>(
-        slab: &mut super::column::Slab,
+    fn splice_slab<V: AsColumnRef<T>>(
+        slab: &mut Slab,
         index: usize,
         del: usize,
-        values: &mut impl Iterator<Item = V>,
+        values: impl Iterator<Item = V>,
         max_segments: usize,
-    ) -> Option<(Vec<super::column::Slab>, usize)> {
-        Some(rle_fast_splice_inplace::<T, V>(
-            slab,
-            index,
-            del,
-            values,
-            max_segments,
-        ))
+    ) -> (Vec<Slab>, usize) {
+        let slab_del = del.min(slab.len - index);
+        let overflow_del = del - slab_del;
+        (
+            splice_slab::<T, V>(slab, index, slab_del, values, max_segments),
+            overflow_del,
+        )
     }
 
     type Decoder<'a> = RleDecoder<'a, T>;
@@ -675,7 +674,7 @@ struct RlePartition<'a, T: RleValue> {
 }
 
 fn find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePartition<'a, T> {
-    use super::encoding::RunDecoder;
+    use RunDecoder;
 
     let mut decoder = RleDecoder::<T>::new(&slab.data);
     let mut byte_before = decoder.byte_pos;
@@ -1024,7 +1023,10 @@ mod partition_tests {
 
     #[test]
     fn roundtrip_regression_delete_end() {
-        let vals = vec![3u64, 4, 3, 0, 2, 1, 3, 3, 4, 1, 1, 3, 2, 2, 4, 0, 1, 2, 4, 2, 0, 1, 1, 2, 3, 3, 0, 1, 3];
+        let vals = vec![
+            3u64, 4, 3, 0, 2, 1, 3, 3, 4, 1, 1, 3, 2, 2, 4, 0, 1, 2, 4, 2, 0, 1, 1, 2, 3, 3, 0, 1,
+            3,
+        ];
         roundtrip_check(&vals, 23, 27);
     }
 
@@ -1034,9 +1036,8 @@ mod partition_tests {
     /// that decode to the expected values.
     fn overflow_insert_check(initial: &[u64], index: usize, new_vals: &[u64], max_seg: usize) {
         let slab = encode_u64_slab(initial);
-        let result = build_splice_buf::<u64, u64>(
-            &slab, index, 0, &mut new_vals.iter().copied(), max_seg,
-        );
+        let result =
+            build_splice_buf::<u64, u64>(&slab, index, 0, new_vals.iter().copied(), max_seg);
 
         // Decode all slabs: first slab (after splice) + overflow slabs.
         let mut first = slab.data.to_vec();
@@ -1054,8 +1055,10 @@ mod partition_tests {
         let mut expected = initial[..index].to_vec();
         expected.extend_from_slice(new_vals);
         expected.extend_from_slice(&initial[index..]);
-        assert_eq!(all_vals, expected,
-            "overflow insert mismatch: index={index} max_seg={max_seg}");
+        assert_eq!(
+            all_vals, expected,
+            "overflow insert mismatch: index={index} max_seg={max_seg}"
+        );
     }
 
     #[test]
@@ -1124,7 +1127,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     slab: &Slab,
     index: usize,
     del: usize,
-    values: &mut impl Iterator<Item = V>,
+    values: impl Iterator<Item = V>,
     max_segments: usize,
 ) -> SpliceBuf {
     // Collect values so they outlive the state machine (needed for &str lifetimes).
@@ -1132,7 +1135,10 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
 
     let p = find_partition::<T>(slab, index..index + del);
 
-    let mut result = SpliceBuf { range: p.outer, ..Default::default() };
+    let mut result = SpliceBuf {
+        range: p.outer,
+        ..Default::default()
+    };
 
     let mut buf = Vec::new();
     let mut state = p.prefix.state;
@@ -1231,21 +1237,16 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     result
 }
 
-pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
+pub(crate) fn splice_slab<T: RleValue, V: super::AsColumnRef<T>>(
     slab: &mut Slab,
     index: usize,
     del: usize,
-    values: &mut impl Iterator<Item = V>,
+    values: impl Iterator<Item = V>,
     max_segments: usize,
-) -> (Vec<Slab>, usize) {
+) -> Vec<Slab> {
     assert!(index + del <= slab.len, "del extends beyond slab");
 
     let result = build_splice_buf::<T, V>(slab, index, del, values, max_segments);
-
-    // items_inserted is needed by the caller (ColumnEncoding::fast_splice)
-    // to update col.total_len.
-    let items_inserted = result.len + result.overflow.iter().map(|s| s.len).sum::<usize>()
-        + del - slab.len;
 
     let slab_data = slab.data.as_mut_vec();
     slab_data.splice(result.range, result.bytes);
@@ -1260,7 +1261,7 @@ pub(crate) fn rle_fast_splice_inplace<T: RleValue, V: super::AsColumnRef<T>>(
     #[cfg(debug_assertions)]
     slab.validate::<T>();
 
-    (result.overflow, items_inserted)
+    result.overflow
 }
 
 // ── count_segments ───────────────────────────────────────────────────────────
