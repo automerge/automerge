@@ -622,7 +622,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
 // ── RLE fast splice ─────────────────────────────────────────────────────────
 
-use super::rle_state::{FlushState, RleState};
+use super::rle_state::{FlushState, RleCow, RleState};
 
 ///// Postfix: what comes after the deleted range in the same/adjacent run(s).
 /// `segments` = segment count from outer.end to the end of the slab.
@@ -652,28 +652,28 @@ enum Postfix<'a, T: RleValue> {
 }
 
 #[derive(Debug)]
-struct Prefix<'a, T: RleValue> {
-    state: RleState<'a, T>,
-    segments: usize, // segments of data[..outer.start]
+struct Prefix<'a, T: RleValue, V: super::AsColumnRef<T>> {
+    state: RleState<'a, T, V>,
+    segments: usize,
 }
 
-impl<'a, T: RleValue> Prefix<'a, T> {
+impl<'a, T: RleValue, V: super::AsColumnRef<T>> Prefix<'a, T, V> {
     fn new() -> Self {
-        Prefix {
-            state: RleState::Empty,
-            segments: 0,
-        }
+        Prefix { state: RleState::Empty, segments: 0 }
     }
 }
 
 #[derive(Debug)]
-struct RlePartition<'a, T: RleValue> {
-    outer: Range<usize>, // byte range to splice: data[outer] gets replaced by buf
-    prefix: Prefix<'a, T>,
+struct RlePartition<'a, T: RleValue, V: super::AsColumnRef<T>> {
+    outer: Range<usize>,
+    prefix: Prefix<'a, T, V>,
     postfix: Option<Postfix<'a, T>>,
 }
 
-fn find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePartition<'a, T> {
+fn find_partition<'a, T: RleValue, V: super::AsColumnRef<T>>(
+    slab: &'a Slab,
+    range: Range<usize>,
+) -> RlePartition<'a, T, V> {
     use RunDecoder;
 
     let mut decoder = RleDecoder::<T>::new(&slab.data);
@@ -715,14 +715,14 @@ fn find_partition<'a, T: RleValue>(slab: &'a Slab, range: Range<usize>) -> RlePa
 
             if is_lit {
                 let count = item_pos - lit_start_item;
-                prefix.state = RleState::lit(count, run.value, header_pos);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else if is_null {
                 prefix.state = RleState::Null(k);
             } else if k == 1 && !is_lit && was_lit {
                 let count = segments - lit_segments_before;
-                prefix.state = RleState::lit(count, run.value, header_pos);
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
             } else {
-                prefix.state = RleState::run(k, run.value);
+                prefix.state = RleState::make_run(k, RleCow::Ref(run.value));
             }
         }
 
@@ -815,9 +815,9 @@ mod partition_tests {
     #[test]
     fn mid_repeat() {
         let slab = encode_u64_slab(&[7, 7, 7, 7, 7]);
-        let p = find_partition::<u64>(&slab, 2..3);
+        let p = find_partition::<u64, u64>(&slab, 2..3);
         match &p.prefix.state {
-            RleState::Run(2, v) => assert_eq!(*v, 7),
+            RleState::Run(2, v) => assert_eq!(v.get(), 7),
             s => panic!("expected Run(2, 7), got {:?}", state_item_count(s)),
         }
         assert_eq!(p.prefix.segments, 0);
@@ -832,7 +832,7 @@ mod partition_tests {
     #[test]
     fn mid_literal() {
         let slab = encode_u64_slab(&[1, 2, 3, 4, 5]);
-        let p = find_partition::<u64>(&slab, 2..3);
+        let p = find_partition::<u64, u64>(&slab, 2..3);
         assert_eq!(state_item_count(&p.prefix.state), 2);
         match p.postfix.unwrap() {
             Postfix::Lit {
@@ -845,7 +845,7 @@ mod partition_tests {
     #[test]
     fn mid_null() {
         let slab = encode_opt_slab(&[Some(1), None, None, None, Some(2)]);
-        let p = find_partition::<Option<u64>>(&slab, 2..3);
+        let p = find_partition::<Option<u64>, Option<u64>>(&slab, 2..3);
         match &p.postfix {
             Some(Postfix::Run {
                 count: 1,
@@ -859,9 +859,9 @@ mod partition_tests {
     #[test]
     fn exact_boundary() {
         let slab = encode_u64_slab(&[1, 1, 1, 2, 2, 2]);
-        let p = find_partition::<u64>(&slab, 3..3);
+        let p = find_partition::<u64, u64>(&slab, 3..3);
         match &p.prefix.state {
-            RleState::Run(3, v) => assert_eq!(*v, 1),
+            RleState::Run(3, v) => assert_eq!(v.get(), 1),
             _ => panic!("expected Run(3, 1)"),
         }
         match p.postfix.unwrap() {
@@ -875,7 +875,7 @@ mod partition_tests {
     #[test]
     fn at_start() {
         let slab = encode_u64_slab(&[5, 5, 5]);
-        let p = find_partition::<u64>(&slab, 0..1);
+        let p = find_partition::<u64, u64>(&slab, 0..1);
         assert_eq!(state_item_count(&p.prefix.state), 0);
         match p.postfix.unwrap() {
             Postfix::Run {
@@ -888,7 +888,7 @@ mod partition_tests {
     #[test]
     fn at_end() {
         let slab = encode_u64_slab(&[1, 2, 3]);
-        let p = find_partition::<u64>(&slab, 3..3);
+        let p = find_partition::<u64, u64>(&slab, 3..3);
         assert_eq!(state_item_count(&p.prefix.state), 3);
         assert!(p.postfix.is_none());
     }
@@ -896,7 +896,7 @@ mod partition_tests {
     #[test]
     fn delete_all() {
         let slab = encode_u64_slab(&[1, 2, 3]);
-        let p = find_partition::<u64>(&slab, 0..3);
+        let p = find_partition::<u64, u64>(&slab, 0..3);
         assert_eq!(state_item_count(&p.prefix.state), 0);
         assert!(p.postfix.is_none());
     }
@@ -904,9 +904,9 @@ mod partition_tests {
     #[test]
     fn insert_mid_repeat() {
         let slab = encode_u64_slab(&[7, 7, 7, 7]);
-        let p = find_partition::<u64>(&slab, 2..2);
+        let p = find_partition::<u64, u64>(&slab, 2..2);
         match &p.prefix.state {
-            RleState::Run(2, v) => assert_eq!(*v, 7),
+            RleState::Run(2, v) => assert_eq!(v.get(), 7),
             _ => panic!("expected Run(2, 7)"),
         }
         match p.postfix.unwrap() {
@@ -1100,7 +1100,7 @@ mod partition_tests {
 }
 
 #[cfg(test)]
-fn state_item_count<T: RleValue>(state: &RleState<'_, T>) -> usize {
+fn state_item_count<T: RleValue, V: super::AsColumnRef<T>>(state: &RleState<'_, T, V>) -> usize {
     match state {
         RleState::Empty => 0,
         RleState::Lone(_) => 1,
@@ -1130,10 +1130,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     values: impl Iterator<Item = V>,
     max_segments: usize,
 ) -> SpliceBuf {
-    // Collect values so they outlive the state machine (needed for &str lifetimes).
-    let collected: Vec<V> = values.collect();
-
-    let p = find_partition::<T>(slab, index..index + del);
+    let p = find_partition::<T, V>(slab, index..index + del);
 
     let mut result = SpliceBuf {
         range: p.outer,
@@ -1148,7 +1145,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     let mut starting_segments = p.prefix.segments;
 
     // 1. Feed new values.
-    for v in &collected {
+    for v in values {
         if starting_segments + f.segments >= max_segments {
             f += state.flush(&mut buf);
             if !overflowed {
@@ -1170,7 +1167,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
             starting_segments = 0;
         }
         inserted += 1;
-        f += state.append(&mut buf, v.as_column_ref());
+        f += state.append(&mut buf, v);
     }
 
     // 2. Feed postfix + flush.
@@ -1179,32 +1176,19 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
             f += state.flush(&mut buf);
             0
         }
-        Some(Postfix::Run {
-            count,
-            value,
-            segments,
-        }) => {
-            f += state.append_n(&mut buf, value, count);
+        Some(Postfix::Run { count, value, segments }) => {
+            f += state.append_n(&mut buf, RleCow::Ref(value), count);
             f += state.flush(&mut buf);
             segments
         }
-        Some(Postfix::Lit {
-            value,
-            lit,
-            segments,
-        }) => {
-            f += state.append(&mut buf, value);
+        Some(Postfix::Lit { value, lit, segments }) => {
+            f += state.append(&mut buf, RleCow::Ref(value));
             f += state.flush_with_lit(&mut buf, lit);
             segments
         }
-        Some(Postfix::LonePlusLit {
-            lone,
-            value,
-            lit,
-            segments,
-        }) => {
-            f += state.append(&mut buf, lone);
-            f += state.append(&mut buf, value);
+        Some(Postfix::LonePlusLit { lone, value, lit, segments }) => {
+            f += state.append(&mut buf, RleCow::Ref(lone));
+            f += state.append(&mut buf, RleCow::Ref(value));
             f += state.flush_with_lit(&mut buf, lit);
             segments
         }
