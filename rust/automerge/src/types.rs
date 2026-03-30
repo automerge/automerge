@@ -678,7 +678,7 @@ impl ChangeHash {
     }
 
     pub(crate) fn fragment_level(&self) -> usize {
-        self.0.iter().rev().take_while(|&&b| b == 0).count()
+        self.0.iter().take_while(|&&b| b == 0).count()
     }
 }
 
