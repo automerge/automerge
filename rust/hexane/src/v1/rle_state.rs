@@ -281,6 +281,53 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         }
     }
 
+    /// Feed an optional postfix and flush. Returns (flush_state, postfix_segments).
+    /// The postfix values are wrapped in RleCow::Ref since they come from slab data.
+    pub fn flush_postfix(
+        &mut self,
+        buf: &mut Vec<u8>,
+        postfix: Option<super::rle::Postfix<'a, T>>,
+    ) -> (FlushState, usize) {
+        use super::rle::Postfix;
+        let mut f = FlushState::default();
+        let postfix_segs = match postfix {
+            None => {
+                f += self.flush(buf);
+                0
+            }
+            Some(Postfix::Run {
+                count,
+                value,
+                segments,
+            }) => {
+                f += self.append_n(buf, RleCow::Ref(value), count);
+                f += self.flush(buf);
+                segments
+            }
+            Some(Postfix::Lit {
+                value,
+                lit,
+                segments,
+            }) => {
+                f += self.append(buf, RleCow::Ref(value));
+                f += self.flush_with_lit(buf, lit);
+                segments
+            }
+            Some(Postfix::LonePlusLit {
+                lone,
+                value,
+                lit,
+                segments,
+            }) => {
+                f += self.append(buf, RleCow::Ref(lone));
+                f += self.append(buf, RleCow::Ref(value));
+                f += self.flush_with_lit(buf, lit);
+                segments
+            }
+        };
+        (f, postfix_segs)
+    }
+
     pub fn append_null_n(&mut self, buf: &mut Vec<u8>, count: usize) -> FlushState {
         let mut flushed = FlushState::default();
         let old = std::mem::replace(self, RleState::Empty);
@@ -529,9 +576,7 @@ mod tests {
                 }
                 _ => {
                     let (ncb, nc) = crate::v1::rle::read_unsigned(&buf[pos + cb..]).unwrap();
-                    for _ in 0..nc as usize {
-                        result.push(0);
-                    }
+                    result.resize(result.len() + nc as usize, 0);
                     pos += cb + ncb;
                 }
             }
@@ -673,5 +718,4 @@ mod tests {
         };
         assert_eq!(decoded, vec![5, 5, 5, 1, 2]);
     }
-
 }

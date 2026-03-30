@@ -202,8 +202,8 @@ fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
     v1::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
 }
 
-#[divan::bench_group(name = "string_replace")]
-mod string_replace {
+#[divan::bench_group(name = "string_replace_8b")]
+mod string_replace_8b {
     use super::*;
 
     #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
@@ -229,6 +229,68 @@ mod string_replace {
             }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, rand_strings(n, 8));
+        });
+    }
+}
+
+#[divan::bench_group(name = "string_replace_10b")]
+mod string_replace_10b {
+    use super::*;
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let mut col = build_v0_str(10_000, 10);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_strings(n, 10));
+        });
+    }
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let mut col = build_v1_str(10_000, 10);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_strings(n, 10));
+        });
+    }
+}
+
+#[divan::bench_group(name = "string_replace_1kb")]
+mod string_replace_1kb {
+    use super::*;
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let mut col = build_v0_str(10_000, 1024);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_strings(n, 1024));
+        });
+    }
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let mut col = build_v1_str(10_000, 1024);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_strings(n, 1024));
         });
     }
 }
@@ -415,55 +477,87 @@ mod bool_get {
 
 // ── Bool small splice: replace ──────────────────────────────────────────────
 
-#[divan::bench_group(name = "bool_splice_small")]
-mod bool_splice_small {
+#[divan::bench_group(name = "bool_insert")]
+mod bool_insert {
     use super::*;
 
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_replace_1(bencher: Bencher) {
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
         let mut col = build_v0_bool(10_000);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
-            col.splice(pos, 1, [rand_bool()]);
+            col.splice(pos, 0, rand_bools(n));
         });
     }
 
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v1_replace_1(bencher: Bencher) {
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
         let mut col = build_v1_bool(10_000);
         bencher.bench_local(|| {
             let pos = rand_usize() % col.len();
-            col.splice(pos, 1, [rand_bool()]);
+            col.splice(pos, 0, rand_bools(n));
         });
     }
+}
 
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v0_replace_5(bencher: Bencher) {
+#[divan::bench_group(name = "bool_replace")]
+mod bool_replace {
+    use super::*;
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
         let mut col = build_v0_bool(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len < 6 {
+            if len <= n {
                 return;
             }
-            let pos = rand_usize() % (len - 5);
-            col.splice(pos, 5, rand_bools(5));
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_bools(n));
         });
     }
 
-    #[inline(never)]
-    #[divan::bench(max_time = Duration::from_secs(3))]
-    fn v1_replace_5(bencher: Bencher) {
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
         let mut col = build_v1_bool(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len < 6 {
+            if len <= n {
                 return;
             }
-            let pos = rand_usize() % (len - 5);
-            col.splice(pos, 5, rand_bools(5));
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, rand_bools(n));
+        });
+    }
+}
+
+#[divan::bench_group(name = "bool_delete")]
+mod bool_delete {
+    use super::*;
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let mut col = build_v0_bool(10_000);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, std::iter::empty::<bool>());
+        });
+    }
+
+    #[divan::bench(args = [1, 10, 1000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let mut col = build_v1_bool(10_000);
+        bencher.bench_local(|| {
+            let len = col.len();
+            if len <= n {
+                return;
+            }
+            let pos = rand_usize() % (len - n);
+            col.splice(pos, n, std::iter::empty::<bool>());
         });
     }
 }

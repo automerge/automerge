@@ -1421,16 +1421,12 @@ mod tests {
     fn prefix_iter_nth() {
         let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
         let mut iter = col.iter();
-        // nth(0) = next() = first item
-        assert_eq!(iter.nth(0), Some((1, 1)));
+        assert_eq!(iter.next(), Some((1, 1)));
         // nth(1) = skip 1, return next = skip index 1, return index 2
         assert_eq!(iter.nth(1), Some((6, 3)));
-        // now at index 3: nth(0) = index 3
-        assert_eq!(iter.nth(0), Some((10, 4)));
-        // nth(0) = index 4
-        assert_eq!(iter.nth(0), Some((15, 5)));
-        // exhausted
-        assert_eq!(iter.nth(0), None);
+        assert_eq!(iter.next(), Some((10, 4)));
+        assert_eq!(iter.next(), Some((15, 5)));
+        assert_eq!(iter.next(), None);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::{ColumnDefault, ColumnValueRef};
 
-/// Options for [`Column::load_with`], [`PrefixColumn::load_with`], etc.
+/// Options for [`Column::load_with`](super::Column::load_with), [`PrefixColumn::load_with`](super::PrefixColumn::load_with), etc.
 ///
 /// Use the builder methods to configure loading behavior:
 ///

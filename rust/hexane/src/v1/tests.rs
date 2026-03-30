@@ -1580,7 +1580,10 @@ fn iter_range_empty() {
     let vals: Vec<u64> = (0..10).collect();
     let col = Column::<u64>::from_values(vals);
     assert_eq!(col.iter_range(5..5).count(), 0);
-    assert_eq!(col.iter_range(7..3).count(), 0);
+    #[allow(clippy::reversed_empty_ranges)]
+    {
+        assert_eq!(col.iter_range(7..3).count(), 0);
+    }
 }
 
 #[test]
@@ -1636,8 +1639,7 @@ fn nth_across_runs() {
     // Alternating runs: 100 zeros, 100 ones, 100 twos, ...
     let vals: Vec<u64> = (0..10).flat_map(|v| vec![v; 100]).collect();
     let col = Column::<u64>::from_values(vals.clone());
-    // nth(0) = first item
-    assert_eq!(col.iter().nth(0), Some(0));
+    assert_eq!(col.iter().next(), Some(0));
     // nth(99) = last zero
     assert_eq!(col.iter().nth(99), Some(0));
     // nth(100) = first one
@@ -1675,7 +1677,7 @@ fn nth_from_iter_range() {
 fn nth_bool() {
     let vals: Vec<bool> = (0..1000).map(|i| i % 100 < 50).collect();
     let col = Column::<bool>::from_values(vals.clone());
-    assert_eq!(col.iter().nth(0), Some(vals[0]));
+    assert_eq!(col.iter().next(), Some(vals[0]));
     assert_eq!(col.iter().nth(49), Some(vals[49]));
     assert_eq!(col.iter().nth(50), Some(vals[50]));
     assert_eq!(col.iter().nth(500), Some(vals[500]));
@@ -1701,7 +1703,7 @@ fn nth_sequential_calls() {
     let mut iter = col.iter();
     assert_eq!(iter.nth(5), Some(5)); // consumes 0..=5, next is 6
     assert_eq!(iter.nth(3), Some(9)); // skips 6,7,8, returns 9
-    assert_eq!(iter.nth(0), Some(10)); // returns 10
+    assert_eq!(iter.next(), Some(10)); // returns 10
     assert_eq!(iter.len(), 89); // 100 - 11 consumed
 }
 
@@ -1811,9 +1813,8 @@ fn prefix_iter_nth_matches_v0() {
     // v0 with_acc collects all items; we use nth on v1 to verify
     let v0_all: Vec<_> = v0.iter().with_acc().collect();
 
-    for skip in 0..10 {
+    for (skip, v0_item) in v0_all.iter().take(10).enumerate() {
         let v1_result = v1.iter().nth(skip);
-        let v0_item = &v0_all[skip];
         let (v1_total, v1_val) = v1_result.unwrap();
         let v0_val = v0_item.item.as_ref().map(|c| *c.as_ref()).unwrap_or(0);
         assert_eq!(v0_val, v1_val, "nth({skip}) value mismatch");

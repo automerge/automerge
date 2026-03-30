@@ -204,6 +204,7 @@ impl<T: RleValue> RleValue for Option<T> {
         value.is_none()
     }
 
+    // CLAUDE why does get_null take an argument?
     fn get_null(_slab: &ValidBytes) -> Option<T::Get<'_>> {
         None
     }

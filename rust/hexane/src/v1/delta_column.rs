@@ -241,7 +241,7 @@ impl DeltaValue for Option<i64> {
 // ── DeltaColumn ─────────────────────────────────────────────────────────────
 
 /// A column that stores values using delta encoding, wrapping a
-/// [`Column`] of deltas.
+/// [`Column`](super::Column) of deltas.
 ///
 /// Externally presents absolute values of type `T`, but internally stores
 /// deltas in a `Column<T::Inner>`.  Prefix sums of deltas yield realized
