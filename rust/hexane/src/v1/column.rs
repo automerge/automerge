@@ -107,7 +107,7 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
 // ── Fenwick tree helpers ─────────────────────────────────────────────────────
 
 /// Rebuild BIT from scratch. O(S).
-/// The BIT is 1-indexed: bit[0] is unused, bit[1..=n] holds the tree.
+/// The BIT is 1-indexed: `bit\[0\]` is unused, `bit\[1..=n\]` holds the tree.
 pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(slabs: &[Slab]) -> Vec<WF::Weight> {
     let n = slabs.len();
     let mut bit = vec![WF::Weight::default(); n + 1];
@@ -389,11 +389,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             return;
         }
         let slab_b = self.slabs.remove(b);
-        let slab_a = &mut self.slabs[a];
-        let (merged, segments) = T::Encoding::merge_slab_bytes(&slab_a.data, &slab_b.data);
-        slab_a.len += slab_b.len;
-        slab_a.segments = segments;
-        slab_a.data = ValidBuf::new(merged);
+        T::Encoding::merge_slabs(&mut self.slabs[a], &slab_b);
     }
 
     /// Try merging at both boundaries of a slab range without rebuilding the BIT.

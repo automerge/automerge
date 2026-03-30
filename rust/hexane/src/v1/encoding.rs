@@ -1,14 +1,14 @@
-use super::ColumnValueRef;
-use super::ValidBytes;
+use super::column::{Column, Slab, WeightFn};
+use super::{AsColumnRef, ColumnValueRef, Run, ValidBuf, ValidBytes};
 use crate::PackError;
 
 /// Validation function type for [`ColumnEncoding::load_and_verify`].
-pub type ValidateFn<V> = for<'a> fn(<V as super::ColumnValueRef>::Get<'a>) -> Option<String>;
+pub type ValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Option<String>;
 
 /// Trait abstracting the byte-level encoding strategy for a column.
 ///
 /// Implementors provide `get`, bulk encoding/decoding, split/merge, and
-/// validation operations on raw `Vec<u8>` slabs.  [`super::Column`] delegates
+/// validation operations on raw `Vec<u8>` slabs.  [`Column`] delegates
 /// to `T::Encoding`.
 ///
 /// Both [`super::rle::RleEncoding`] and [`super::bool_encoding::BoolEncoding`]
@@ -18,9 +18,9 @@ pub trait ColumnEncoding: Default {
     type Value: ColumnValueRef<Encoding = Self>;
 
     /// Create an empty slab with no items.
-    fn empty_slab() -> super::column::Slab {
-        super::column::Slab {
-            data: super::ValidBuf::new(vec![]),
+    fn empty_slab() -> Slab {
+        Slab {
+            data: ValidBuf::new(vec![]),
             len: 0,
             segments: 0,
         }
@@ -37,41 +37,15 @@ pub trait ColumnEncoding: Default {
         len: usize,
     ) -> Option<<Self::Value as ColumnValueRef>::Get<'a>>;
 
-    /// Count the total number of segments in `slab`.
-    ///
-    /// A segment is: one repeat run, one null run, or one value within a
-    /// literal run.
-    fn count_segments(slab: &[u8]) -> usize;
-
-    /// Split `slab` at logical item `index`, producing two byte arrays:
-    /// `[0..index)` and `[index..len)`.
-    fn split_at_item(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>);
-
-    /// Merge two adjacent slab byte arrays into one canonical byte array.
-    ///
-    /// Only decodes boundary runs (last of `a`, first of `b`); interior bytes
-    /// are memcopied.  Returns `(merged_bytes, segment_count)`.
-    fn merge_slab_bytes(a: &[u8], b: &[u8]) -> (Vec<u8>, usize);
+    /// Merge slab `b` into `a` in place. Both slabs must be non-empty.
+    /// Handles boundary run merging. Updates `a.len` and `a.segments`.
+    fn merge_slabs(a: &mut Slab, b: &Slab);
 
     /// Validate that `slab` is in canonical encoding form.
     ///
     /// Returns `Ok(())` if the encoding is canonical, or `Err(description)` if
     /// any invariant is violated.  This is intended for testing and debugging.
     fn validate_encoding(slab: &[u8]) -> Result<(), String>;
-
-    /// Encode values into pre-split slabs in a single O(n) pass.
-    ///
-    /// Returns `(data, item_count, segment_count)` tuples, each respecting
-    /// `max_segments`.  Much faster than repeated `insert` calls.
-    ///
-    /// Accepts any type convertible to the column value via [`super::AsColumnRef`],
-    /// so borrowed forms (e.g. `&str` for a `String` column) can be packed
-    /// directly without an intermediate owned allocation.
-    /// Returns `(slabs, total_item_count)`.
-    fn encode_all_slabs<V: super::AsColumnRef<Self::Value>>(
-        values: impl Iterator<Item = V>,
-        max_segments: usize,
-    ) -> (Vec<(Vec<u8>, usize, usize)>, usize);
 
     /// Decode and validate raw bytes, splitting into slabs.
     ///
@@ -88,7 +62,7 @@ pub trait ColumnEncoding: Default {
         data: &[u8],
         max_segments: usize,
         validate: Option<ValidateFn<Self::Value>>,
-    ) -> Result<Vec<super::column::Slab>, PackError>;
+    ) -> Result<Vec<Slab>, PackError>;
 
     /// Serialize multiple slabs into a single canonical byte array in O(n).
     ///
@@ -99,18 +73,18 @@ pub trait ColumnEncoding: Default {
     /// Splice a single slab: delete `del` items at `index`, insert values.
     /// `del` may exceed the slab length — the excess is returned as `overflow_del`.
     /// Returns `(overflow_slabs, overflow_del)`.
-    fn splice_slab<V: super::AsColumnRef<Self::Value>>(
-        slab: &mut super::column::Slab,
+    fn splice_slab<V: AsColumnRef<Self::Value>>(
+        slab: &mut Slab,
         index: usize,
         del: usize,
         values: impl Iterator<Item = V>,
         max_segments: usize,
-    ) -> (Vec<super::column::Slab>, usize);
+    ) -> (Vec<Slab>, usize);
 
     /// Splice a Column: locate the target slab, splice it, handle overflow
     /// and cross-slab deletes, merge small neighbours, update the BIT.
-    fn splice<WF: super::column::WeightFn<Self::Value>, V: super::AsColumnRef<Self::Value>>(
-        col: &mut super::column::Column<Self::Value, WF>,
+    fn splice<WF: WeightFn<Self::Value>, V: AsColumnRef<Self::Value>>(
+        col: &mut Column<Self::Value, WF>,
         index: usize,
         del: usize,
         values: impl Iterator<Item = V>,
@@ -196,7 +170,7 @@ pub trait ColumnEncoding: Default {
 
 /// Trait for decoders that can yield runs of values.
 ///
-/// See [`super::Run`] for the semantics of each run kind.
+/// See [`Run`] for the semantics of each run kind.
 pub trait RunDecoder: Iterator {
     /// Returns the next run of values without consuming individual items.
     ///
@@ -205,5 +179,5 @@ pub trait RunDecoder: Iterator {
     /// For literal runs, returns count=1 and the next value (consuming it).
     ///
     /// Returns `None` when the iterator is exhausted.
-    fn next_run(&mut self) -> Option<super::Run<Self::Item>>;
+    fn next_run(&mut self) -> Option<Run<Self::Item>>;
 }

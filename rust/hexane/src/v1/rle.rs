@@ -207,6 +207,7 @@ fn scan_to<T: RleValue>(slab: &[u8], target: usize) -> Option<Option<usize>> {
 /// Encode a value-run count header.  A single item is stored as a literal
 /// run (`-1`) rather than a repeat run (`+1`) so that every repeat run has
 /// count >= 2.
+#[allow(dead_code)]
 fn value_run_header(count: usize) -> Leb128Buf {
     if count == 1 {
         encode_signed(-1)
@@ -216,6 +217,7 @@ fn value_run_header(count: usize) -> Leb128Buf {
 }
 
 /// Stack-buffered null run: marker (0) + unsigned count. Max 20 bytes.
+#[allow(dead_code)]
 struct NullRunBuf {
     buf: [u8; 20],
     len: u8,
@@ -269,6 +271,7 @@ impl IntoIterator for NullRunBuf {
     }
 }
 
+#[allow(dead_code)]
 fn null_run_bytes(count: usize) -> NullRunBuf {
     let marker = encode_signed(0);
     let cnt = encode_unsigned(count as u64);
@@ -281,51 +284,6 @@ fn null_run_bytes(count: usize) -> NullRunBuf {
     out.buf[out.len as usize..out.len as usize + cnt.len as usize].copy_from_slice(cnt.as_bytes());
     out.len += cnt.len;
     out
-}
-
-/// Append a single value as `lit-1` to `left`, merging into the trailing
-/// literal if `prev_is_literal` is `Some((run_start, count))`.
-fn merge_lit1_into_left(left: &mut Vec<u8>, value: &[u8], prev_literal: Option<(usize, usize)>) {
-    if let Some((run_start, old_count)) = prev_literal {
-        // Trailing literal — merge by bumping count and appending value.
-        let old_hdr = encode_signed(-(old_count as i64));
-        let new_hdr = encode_signed(-((old_count + 1) as i64));
-        left.splice(run_start..run_start + old_hdr.len(), new_hdr);
-        left.extend_from_slice(value);
-    } else {
-        // No trailing literal — emit a new lit-1.
-        left.extend(encode_signed(-1));
-        left.extend_from_slice(value);
-    }
-}
-
-/// Build the start of `right` with a `lit-1` for `value`, merging with the
-/// following literal in `rest` if present.
-fn merge_lit1_into_right<T: RleValue>(right: &mut Vec<u8>, value: &[u8], rest: &[u8]) {
-    if !rest.is_empty() {
-        if let Some((next_hl, next_hv)) = read_signed(rest) {
-            if next_hv < 0 {
-                // Next run is a literal — merge.
-                let next_n = (-next_hv) as usize;
-                let merged_count = 1 + next_n;
-                right.extend(encode_signed(-(merged_count as i64)));
-                right.extend_from_slice(value);
-                // Skip next literal's header, copy its values and the rest.
-                let mut next_vals_end = next_hl;
-                for _ in 0..next_n {
-                    let vl = T::value_len(&rest[next_vals_end..]).unwrap();
-                    next_vals_end += vl;
-                }
-                right.extend_from_slice(&rest[next_hl..next_vals_end]);
-                right.extend_from_slice(&rest[next_vals_end..]);
-                return;
-            }
-        }
-    }
-    // No following literal — emit lit-1 + rest.
-    right.extend(encode_signed(-1));
-    right.extend_from_slice(value);
-    right.extend_from_slice(rest);
 }
 
 // ── RleDecoder ───────────────────────────────────────────────────────────────
@@ -433,7 +391,6 @@ impl<'a, T: RleValue> RleDecoder<'a, T> {
 
 impl<'a, T: RleValue> RleDecoder<'a, T> {
     /// Skip `n` literal values by advancing `byte_pos` without decoding.
-    /// Uses `value_len` (reads only the length header) rather than `unpack`.
     #[inline]
     fn skip_literals(&mut self, n: usize) {
         for _ in 0..n {
@@ -563,27 +520,12 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         }
     }
 
-    fn count_segments(slab: &[u8]) -> usize {
-        rle_count_segments::<T>(slab)
-    }
-
-    fn split_at_item(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>) {
-        rle_split_at_item::<T>(slab, index, len)
-    }
-
-    fn merge_slab_bytes(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
-        rle_merge_slab_bytes::<T>(a, b)
+    fn merge_slabs(a: &mut Slab, b: &Slab) {
+        rle_merge_slabs::<T>(a, b)
     }
 
     fn validate_encoding(slab: &[u8]) -> Result<(), String> {
         rle_validate_encoding::<T>(slab)
-    }
-
-    fn encode_all_slabs<V: AsColumnRef<T>>(
-        values: impl Iterator<Item = V>,
-        max_segments: usize,
-    ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
-        rle_encode_all_slabs::<T, V>(values, max_segments)
     }
 
     fn load_and_verify(
@@ -627,7 +569,7 @@ use super::rle_state::{FlushState, RleCow, RleState};
 ///// Postfix: what comes after the deleted range in the same/adjacent run(s).
 /// `segments` = segment count from outer.end to the end of the slab.
 #[derive(Debug)]
-enum Postfix<'a, T: RleValue> {
+pub(crate) enum Postfix<'a, T: RleValue> {
     /// Repeat or null run with count ≥ 1. No lit boundary concern.
     Run {
         count: usize,
@@ -1174,41 +1116,8 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     }
 
     // 2. Feed postfix + flush.
-    let postfix_segments = match p.postfix {
-        None => {
-            f += state.flush(&mut buf);
-            0
-        }
-        Some(Postfix::Run {
-            count,
-            value,
-            segments,
-        }) => {
-            f += state.append_n(&mut buf, RleCow::Ref(value), count);
-            f += state.flush(&mut buf);
-            segments
-        }
-        Some(Postfix::Lit {
-            value,
-            lit,
-            segments,
-        }) => {
-            f += state.append(&mut buf, RleCow::Ref(value));
-            f += state.flush_with_lit(&mut buf, lit);
-            segments
-        }
-        Some(Postfix::LonePlusLit {
-            lone,
-            value,
-            lit,
-            segments,
-        }) => {
-            f += state.append(&mut buf, RleCow::Ref(lone));
-            f += state.append(&mut buf, RleCow::Ref(value));
-            f += state.flush_with_lit(&mut buf, lit);
-            segments
-        }
-    };
+    let (pf, postfix_segments) = state.flush_postfix(&mut buf, p.postfix);
+    f += pf;
 
     if !overflowed {
         result.bytes = buf;
@@ -1264,226 +1173,7 @@ pub(crate) fn splice_slab<T: RleValue, V: super::AsColumnRef<T>>(
     result.overflow
 }
 
-// ── count_segments ───────────────────────────────────────────────────────────
-
-/// Count segments in an RLE slab. A repeat run = 1 segment, a null run = 1
-/// segment, a literal of N = N segments.
-fn rle_count_segments<T: RleValue>(slab: &[u8]) -> usize {
-    let mut byte_pos = 0;
-    let mut segments = 0;
-
-    while byte_pos < slab.len() {
-        let (count_bytes, count_raw) = match read_signed(&slab[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-
-        match count_raw {
-            n if n > 0 => {
-                // Repeat run: 1 segment.
-                segments += 1;
-                let value_start = byte_pos + count_bytes;
-                let value_len = match T::value_len(&slab[value_start..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                byte_pos = value_start + value_len;
-            }
-            n if n < 0 => {
-                // Literal run of N: N segments.
-                let total = (-n) as usize;
-                segments += total;
-                let mut scan_byte = byte_pos + count_bytes;
-                for _ in 0..total {
-                    let vlen = match T::value_len(&slab[scan_byte..]) {
-                        Some(v) => v,
-                        None => return segments,
-                    };
-                    scan_byte += vlen;
-                }
-                byte_pos = scan_byte;
-            }
-            _ => {
-                // Null run: 1 segment.
-                segments += 1;
-                let (ncb, _) = match read_unsigned(&slab[byte_pos + count_bytes..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                byte_pos += count_bytes + ncb;
-            }
-        }
-    }
-
-    segments
-}
-
-// ── split_at_item ────────────────────────────────────────────────────────────
-
-/// Split an RLE slab at logical item `index` into two byte arrays.
-fn rle_split_at_item<T: RleValue>(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>) {
-    if index == 0 {
-        return (vec![], slab.to_vec());
-    }
-    if index >= len {
-        return (slab.to_vec(), vec![]);
-    }
-
-    // Walk to find the run containing `index`.
-    // Track whether the previous run was a literal, for merging when a
-    // repeat split produces a lit-1 adjacent to it.
-    let mut byte_pos = 0;
-    let mut item_pos = 0;
-    // (run_start_in_left, item_count) of the last literal run, if the
-    // immediately preceding run is a literal.
-    let mut prev_literal: Option<(usize, usize)> = None;
-
-    while byte_pos < slab.len() {
-        let (count_bytes, count_raw) = read_signed(&slab[byte_pos..]).unwrap();
-
-        match count_raw {
-            n if n > 0 => {
-                let count = n as usize;
-                let value_start = byte_pos + count_bytes;
-                let value_len = T::value_len(&slab[value_start..]).unwrap();
-                let run_end = value_start + value_len;
-
-                if index < item_pos + count {
-                    let k = index - item_pos;
-                    if k == 0 {
-                        // Split at run boundary (before this run).
-                        return (slab[..byte_pos].to_vec(), slab[byte_pos..].to_vec());
-                    }
-                    // Mid-run split.
-                    let value_bytes = &slab[value_start..value_start + value_len];
-                    let mut left = slab[..byte_pos].to_vec();
-                    // When k == 1, this produces lit-1 which might be
-                    // adjacent to a preceding literal — merge if needed.
-                    if k == 1 {
-                        merge_lit1_into_left(&mut left, value_bytes, prev_literal);
-                    } else {
-                        left.extend(value_run_header(k));
-                        left.extend_from_slice(value_bytes);
-                    }
-
-                    let remaining = count - k;
-                    let mut right = vec![];
-                    // When remaining == 1, this produces lit-1 which might
-                    // be adjacent to a following literal — merge if needed.
-                    if remaining == 1 {
-                        merge_lit1_into_right::<T>(&mut right, value_bytes, &slab[run_end..]);
-                    } else {
-                        right.extend(value_run_header(remaining));
-                        right.extend_from_slice(value_bytes);
-                        right.extend_from_slice(&slab[run_end..]);
-                    }
-
-                    return (left, right);
-                }
-                if index == item_pos + count {
-                    // Split at run boundary (after this run).
-                    return (slab[..run_end].to_vec(), slab[run_end..].to_vec());
-                }
-
-                item_pos += count;
-                byte_pos = run_end;
-                prev_literal = None;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let first_val_start = byte_pos + count_bytes;
-
-                if index < item_pos + total {
-                    let k = index - item_pos;
-                    if k == 0 {
-                        return (slab[..byte_pos].to_vec(), slab[byte_pos..].to_vec());
-                    }
-                    // Scan to position k to find the split byte offset.
-                    let mut scan_byte = first_val_start;
-                    for _ in 0..k {
-                        let vlen = T::value_len(&slab[scan_byte..]).unwrap();
-                        scan_byte += vlen;
-                    }
-                    let split_byte = scan_byte; // byte offset of first right value
-
-                    // Scan remaining values to find run_end.
-                    for _ in k..total {
-                        let vlen = T::value_len(&slab[scan_byte..]).unwrap();
-                        scan_byte += vlen;
-                    }
-                    let run_end = scan_byte;
-
-                    // Split literal at position k.
-                    let mut left = slab[..byte_pos].to_vec();
-                    let left_hdr = encode_signed(-(k as i64));
-                    left.extend(left_hdr);
-                    left.extend_from_slice(&slab[first_val_start..split_byte]);
-
-                    let remaining = total - k;
-                    let mut right = vec![];
-                    let right_hdr = encode_signed(-(remaining as i64));
-                    right.extend(right_hdr);
-                    right.extend_from_slice(&slab[split_byte..run_end]);
-                    right.extend_from_slice(&slab[run_end..]);
-
-                    return (left, right);
-                }
-
-                // Not in this run — skip past it.
-                let mut scan_byte = first_val_start;
-                for _ in 0..total {
-                    let vlen = T::value_len(&slab[scan_byte..]).unwrap();
-                    scan_byte += vlen;
-                }
-
-                item_pos += total;
-                prev_literal = Some((byte_pos, total));
-                byte_pos = scan_byte;
-            }
-            _ => {
-                // Null run.
-                let (ncb, null_count) = read_unsigned(&slab[byte_pos + count_bytes..]).unwrap();
-                let null_count = null_count as usize;
-                let run_end = byte_pos + count_bytes + ncb;
-
-                if index < item_pos + null_count {
-                    let k = index - item_pos;
-                    if k == 0 {
-                        return (slab[..byte_pos].to_vec(), slab[byte_pos..].to_vec());
-                    }
-                    let mut left = slab[..byte_pos].to_vec();
-                    left.extend(null_run_bytes(k));
-
-                    let remaining = null_count - k;
-                    let nrb = null_run_bytes(remaining);
-                    let mut right = Vec::with_capacity(nrb.len() + slab.len() - run_end);
-                    right.extend_from_slice(&nrb);
-                    right.extend_from_slice(&slab[run_end..]);
-
-                    return (left, right);
-                }
-
-                item_pos += null_count;
-                byte_pos = run_end;
-                prev_literal = None;
-            }
-        }
-    }
-
-    // Shouldn't reach here if index < len, but fallback.
-    (slab.to_vec(), vec![])
-}
-
-// ── split canonicalization ────────────────────────────────────────────────────
-
-/// Parsed RLE run for canonicalization.
-enum ParsedRun {
-    Repeat { count: usize, value: Vec<u8> },
-    Literal { values: Vec<Vec<u8>> },
-    Null { count: usize },
-}
-
-// ── merge_slab_bytes ─────────────────────────────────────────────────────────
+// ── streaming_save ───────────────────────────────────────────────────────────
 
 /// Find the byte offset of the last run in `slab`.  Returns `None` only if
 /// `slab` is empty.
@@ -1543,8 +1233,58 @@ fn first_run_end<T: RleValue>(slab: &[u8]) -> usize {
     }
 }
 
-/// Merge two RLE slabs, decoding only the boundary runs and memcopying
-/// interiors.
+/// Fast in-place merge of slab `b` into slab `a`. Only examines the
+/// boundary runs (last of `a`, first of `b`). Interior bytes are memcopied.
+///
+/// Both slabs must be non-empty.
+fn rle_merge_slabs<T: RleValue>(a: &mut Slab, b: &Slab) {
+    debug_assert!(a.len > 0 && b.len > 0);
+
+    // Use find_partition to get:
+    //   - a's last boundary value as a prefix state
+    //   - b's first run as a postfix
+    // Then let the state machine handle all boundary merging.
+
+    let (buf, a_outer_start, a_prefix_segs, b_outer_end, postfix_segs, rewrite) = {
+        let pa = find_partition::<T, T>(a, a.len..a.len);
+        let pb = find_partition::<T, T>(b, 0..0);
+
+        let mut buf = Vec::new();
+        let mut state = pa.prefix.state;
+        let (f, postfix_segs) = state.flush_postfix(&mut buf, pb.postfix);
+
+        (
+            buf,
+            pa.outer.start,
+            pa.prefix.segments,
+            pb.outer.end,
+            postfix_segs,
+            f,
+        )
+    };
+    // All borrows from a/b are now dropped.
+
+    let a_buf = a.data.as_mut_vec();
+    a_buf.truncate(a_outer_start);
+    a_buf.extend_from_slice(&buf);
+    a_buf.extend_from_slice(&b.data[b_outer_end..]);
+
+    if let Some(rw) = rewrite.rewrite {
+        super::rle_state::rewrite_lit_header(a_buf, rw.pos, rw.count);
+    }
+
+    a.segments = a_prefix_segs + rewrite.segments + postfix_segs;
+    a.len += b.len;
+}
+
+#[allow(dead_code)]
+enum ParsedRun {
+    Repeat { count: usize, value: Vec<u8> },
+    Literal { values: Vec<Vec<u8>> },
+    Null { count: usize },
+}
+
+#[allow(dead_code)]
 fn rle_merge_slab_bytes<T: RleValue>(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
     if a.is_empty() {
         let segs = rle_count_segments::<T>(b);
@@ -1588,6 +1328,7 @@ fn rle_merge_slab_bytes<T: RleValue>(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
 }
 
 /// Count segments in a single parsed run.
+#[allow(dead_code)]
 fn run_segments(run: &ParsedRun) -> usize {
     match run {
         ParsedRun::Repeat { .. } => 1,
@@ -1597,6 +1338,7 @@ fn run_segments(run: &ParsedRun) -> usize {
 }
 
 /// Parse a single run from the start of `data`.
+#[allow(dead_code)]
 fn parse_one_run<T: RleValue>(data: &[u8]) -> ParsedRun {
     let (cb, raw) = read_signed(data).unwrap();
     match raw {
@@ -1628,6 +1370,7 @@ fn parse_one_run<T: RleValue>(data: &[u8]) -> ParsedRun {
 }
 
 /// Encode a single parsed run into `out`.
+#[allow(dead_code)]
 fn encode_one_run(run: &ParsedRun, out: &mut Vec<u8>) {
     match run {
         ParsedRun::Repeat { count, value } => {
@@ -1647,6 +1390,7 @@ fn encode_one_run(run: &ParsedRun, out: &mut Vec<u8>) {
 }
 
 /// Merge two adjacent parsed runs into 1–3 canonical runs.
+#[allow(dead_code)]
 fn merge_two_runs(a: ParsedRun, b: ParsedRun) -> Vec<ParsedRun> {
     match (a, b) {
         // Null + Null → merge
@@ -1717,6 +1461,7 @@ fn merge_two_runs(a: ParsedRun, b: ParsedRun) -> Vec<ParsedRun> {
 }
 
 /// Canonicalize a merged literal run: extract leading/trailing/internal repeats.
+#[allow(dead_code)]
 fn canonicalize_literal(values: Vec<Vec<u8>>) -> Vec<ParsedRun> {
     if values.is_empty() {
         return vec![];
@@ -2107,142 +1852,13 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<(), Stri
     Ok(())
 }
 
-// ── Streaming encoder ────────────────────────────────────────────────────────
-
-/// Pack entry: (offset_in_pack_buf, byte_length). Length 0 with !is_value = null.
-struct PackEntry {
-    offset: u32,
-    len: u16,
-    is_value: bool,
-}
-
-/// Encode values into pre-split slabs in a single O(n) pass.
-///
-/// Phase 1: Pack all values into a flat buffer (one allocation).
-/// Phase 2: Greedy scan emitting runs directly, cutting slabs when the
-///           segment budget is reached.
-fn rle_encode_all_slabs<T: RleValue, V: super::AsColumnRef<T>>(
-    values: impl Iterator<Item = V>,
-    max_segments: usize,
-) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
-    // Phase 1: Pack into a flat buffer.
-    let mut pack_buf = Vec::new();
-    let mut entries = Vec::new();
-    for value in values {
-        let start = pack_buf.len();
-        let is_value = T::pack(value.as_column_ref(), &mut pack_buf);
-        let len = pack_buf.len() - start;
-        entries.push(PackEntry {
-            offset: start as u32,
-            len: len as u16,
-            is_value,
-        });
-    }
-
-    let n = entries.len();
-    if n == 0 {
-        return (vec![], 0);
-    }
-
-    let val_bytes = |idx: usize| -> &[u8] {
-        let e = &entries[idx];
-        &pack_buf[e.offset as usize..e.offset as usize + e.len as usize]
-    };
-
-    // Phase 2: Greedy scan, emit runs, cut into slabs.
-    let mut slabs: Vec<(Vec<u8>, usize, usize)> = Vec::new();
-    let mut cur = Vec::new();
-    let mut cur_items: usize = 0;
-    let mut cur_segs: usize = 0;
-
-    // Cut the current slab if adding `run_segs` would exceed the budget.
-    let maybe_cut = |slabs: &mut Vec<(Vec<u8>, usize, usize)>,
-                     cur: &mut Vec<u8>,
-                     cur_items: &mut usize,
-                     cur_segs: &mut usize,
-                     run_segs: usize| {
-        if *cur_segs > 0 && *cur_segs + run_segs > max_segments {
-            slabs.push((std::mem::take(cur), *cur_items, *cur_segs));
-            *cur_items = 0;
-            *cur_segs = 0;
-        }
-    };
-
-    let mut i = 0;
-    while i < n {
-        if !entries[i].is_value {
-            // Null run.
-            let mut count = 1;
-            while i + count < n && !entries[i + count].is_value {
-                count += 1;
-            }
-            maybe_cut(&mut slabs, &mut cur, &mut cur_items, &mut cur_segs, 1);
-            cur.extend(encode_signed(0));
-            cur.extend(encode_unsigned(count as u64));
-            cur_items += count;
-            cur_segs += 1;
-            i += count;
-        } else {
-            let vb = val_bytes(i);
-            // Count consecutive identical values.
-            let mut rcount = 1;
-            while i + rcount < n && entries[i + rcount].is_value && val_bytes(i + rcount) == vb {
-                rcount += 1;
-            }
-
-            if rcount >= 2 {
-                // Repeat run: 1 segment.
-                maybe_cut(&mut slabs, &mut cur, &mut cur_items, &mut cur_segs, 1);
-                cur.extend(encode_signed(rcount as i64));
-                cur.extend_from_slice(vb);
-                cur_items += rcount;
-                cur_segs += 1;
-                i += rcount;
-            } else {
-                // Literal run: collect distinct values, capped at remaining
-                // segment budget to avoid oversized runs.
-                // Cut BEFORE collecting so seg_room is computed after the cut,
-                // avoiding singleton literals followed by adjacent literals.
-                maybe_cut(&mut slabs, &mut cur, &mut cur_items, &mut cur_segs, 1);
-                let start = i;
-                i += 1;
-                let seg_room = max_segments.saturating_sub(cur_segs).max(1);
-                while i < n && entries[i].is_value && (i - start) < seg_room {
-                    // Stop before a repeat.
-                    if i + 1 < n && entries[i + 1].is_value && val_bytes(i) == val_bytes(i + 1) {
-                        break;
-                    }
-                    i += 1;
-                }
-                let lit_count = i - start;
-                cur.extend(encode_signed(-(lit_count as i64)));
-                for j in start..i {
-                    cur.extend_from_slice(val_bytes(j));
-                }
-                cur_items += lit_count;
-                cur_segs += lit_count;
-            }
-        }
-    }
-
-    if cur_items > 0 {
-        slabs.push((cur, cur_items, cur_segs));
-    }
-
-    (slabs, n)
-}
-
 // ── Load & verify ─────────────────────────────────────────────────────────
 
 /// Decode and validate RLE-encoded bytes, splitting into slabs.
 ///
-/// Walks every run, validates that all packed values decode correctly,
-/// rejects null runs when `T::NULLABLE` is false, and splits at slab
-/// boundaries when the segment budget is reached.
-///
-/// Uses direct memcpy from the input buffer — no intermediate
-/// representations or re-encoding except when splitting a literal run
-/// (which requires rewriting the count header for each piece).
+/// Walks every run, validates with try_unpack, and splits into slabs by
+/// copying byte ranges. No re-encoding except when splitting a literal
+/// run (which requires rewriting the count header for each piece).
 fn rle_load_and_verify<T: RleValue>(
     data: &[u8],
     max_segments: usize,
@@ -2253,14 +1869,14 @@ fn rle_load_and_verify<T: RleValue>(
     }
 
     let mut slabs: Vec<Slab> = Vec::new();
-
     let mut slab_start: usize = 0;
     let mut slab_items: usize = 0;
     let mut slab_segs: usize = 0;
     let mut pending_hdr: Option<Leb128Buf> = None;
 
+    /// Flush accumulated bytes into a slab.
     #[inline]
-    fn flush_slab(
+    fn flush(
         slabs: &mut Vec<Slab>,
         data: &[u8],
         slab_start: &mut usize,
@@ -2272,7 +1888,7 @@ fn rle_load_and_verify<T: RleValue>(
         if *slab_items == 0 {
             return;
         }
-        let slab_data = if let Some(hdr) = pending_hdr.take() {
+        let d = if let Some(hdr) = pending_hdr.take() {
             let mut v = Vec::with_capacity(hdr.len as usize + (end - *slab_start));
             v.extend_from_slice(hdr.as_bytes());
             v.extend_from_slice(&data[*slab_start..end]);
@@ -2280,7 +1896,11 @@ fn rle_load_and_verify<T: RleValue>(
         } else {
             data[*slab_start..end].to_vec()
         };
-        slabs.push(Slab { data: ValidBuf::new(slab_data), len: *slab_items, segments: *slab_segs });
+        slabs.push(Slab {
+            data: ValidBuf::new(d),
+            len: *slab_items,
+            segments: *slab_segs,
+        });
         *slab_start = end;
         *slab_items = 0;
         *slab_segs = 0;
@@ -2289,176 +1909,101 @@ fn rle_load_and_verify<T: RleValue>(
     let mut pos = 0;
     while pos < data.len() {
         let run_start = pos;
+        let (cb, raw) = read_signed(&data[pos..]).ok_or(PackError::BadFormat)?;
 
-        let (count_bytes, count_raw) = read_signed(&data[pos..]).ok_or(PackError::BadFormat)?;
-
-        match count_raw {
-            // ── Repeat run: count > 0 ────────────────────────────────────
-            n if n > 0 => {
-                let count = n as usize;
-                let value_start = pos + count_bytes;
-                if value_start > data.len() {
-                    return Err(PackError::BadFormat);
+        if raw > 0 {
+            // Repeat run.
+            let count = raw as usize;
+            let vs = pos + cb;
+            let (vlen, value) = T::try_unpack(&data[vs..])?;
+            if let Some(v) = validate {
+                if let Some(m) = v(value) {
+                    return Err(PackError::InvalidValue(m));
                 }
-                let (value_len, value) = T::try_unpack(&data[value_start..])?;
-                if let Some(validate) = validate {
-                    if let Some(msg) = validate(value) {
-                        return Err(PackError::InvalidValue(msg));
-                    }
-                }
-                let run_end = value_start + value_len;
-
-                // 1 segment — cut before if it would exceed budget.
-                if slab_segs > 0 && slab_segs + 1 > max_segments {
-                    flush_slab(
-                        &mut slabs,
-                        data,
-                        &mut slab_start,
-                        &mut slab_items,
-                        &mut slab_segs,
-                        &mut pending_hdr,
-                        run_start,
-                    );
-                }
-                slab_items += count;
-                slab_segs += 1;
-                pos = run_end;
             }
-            // ── Literal run: count < 0 ───────────────────────────────────
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let values_start = pos + count_bytes;
+            let run_end = vs + vlen;
+            if slab_segs > 0 && slab_segs + 1 > max_segments {
+                flush(
+                    &mut slabs,
+                    data,
+                    &mut slab_start,
+                    &mut slab_items,
+                    &mut slab_segs,
+                    &mut pending_hdr,
+                    run_start,
+                );
+            }
+            slab_items += count;
+            slab_segs += 1;
+            pos = run_end;
+        } else if raw < 0 {
+            // Literal run.
+            let total = (-raw) as usize;
+            let scan = pos + cb;
 
-                // Validate all values and record each value's byte offset
-                // so we can split at arbitrary value boundaries.
-                let mut val_offsets: Vec<usize> = Vec::with_capacity(total + 1);
-                let mut scan = values_start;
+            // Validate all values and compute byte offsets in a single pass.
+            let mut offsets = Vec::with_capacity(total + 1);
+            {
+                let mut check = scan;
                 for _ in 0..total {
-                    if scan >= data.len() {
+                    if check >= data.len() {
                         return Err(PackError::BadFormat);
                     }
-                    val_offsets.push(scan);
-                    let (vlen, value) = T::try_unpack(&data[scan..])?;
-                    if let Some(validate) = validate {
-                        if let Some(msg) = validate(value) {
-                            return Err(PackError::InvalidValue(msg));
+                    offsets.push(check);
+                    let (vlen, value) = T::try_unpack(&data[check..])?;
+                    if let Some(v) = validate {
+                        if let Some(m) = v(value) {
+                            return Err(PackError::InvalidValue(m));
                         }
                     }
-                    scan += vlen;
+                    check += vlen;
                 }
-                val_offsets.push(scan); // end sentinel
-                let run_end = scan;
-
-                // How many values can we still fit in the current slab?
-                let room = if slab_segs > 0 {
-                    max_segments.saturating_sub(slab_segs)
-                } else {
-                    max_segments
-                };
-
-                if total <= room {
-                    // Entire literal fits — just accumulate, no splitting.
-                    slab_items += total;
-                    slab_segs += total;
-                    pos = run_end;
-                } else {
-                    // Need to split this literal.
-                    let mut consumed = 0;
-
-                    // Step 1: flush current slab, optionally filling
-                    // remaining room with values from this literal.
-                    if slab_segs > 0 {
-                        if room > 0 {
-                            // Emit accumulated bytes + a new literal header
-                            // + the first `room` values from this literal.
-                            let chunk_hdr = encode_signed(-(room as i64));
-                            let chunk_vals_end = val_offsets[consumed + room];
-                            let mut slab_data = if let Some(hdr) = pending_hdr.take() {
-                                let mut v = Vec::with_capacity(
-                                    hdr.len as usize
-                                        + (run_start - slab_start)
-                                        + chunk_hdr.len as usize
-                                        + (chunk_vals_end - values_start),
-                                );
-                                v.extend_from_slice(hdr.as_bytes());
-                                v.extend_from_slice(&data[slab_start..run_start]);
-                                v
-                            } else {
-                                data[slab_start..run_start].to_vec()
-                            };
-                            slab_data.extend_from_slice(chunk_hdr.as_bytes());
-                            slab_data
-                                .extend_from_slice(&data[val_offsets[consumed]..chunk_vals_end]);
-                            slabs.push(Slab { data: ValidBuf::new(slab_data), len: slab_items + room, segments: slab_segs + room });
-                            consumed += room;
-                        } else {
-                            // Room is 0 — flush accumulated slab as-is.
-                            flush_slab(
-                                &mut slabs,
-                                data,
-                                &mut slab_start,
-                                &mut slab_items,
-                                &mut slab_segs,
-                                &mut pending_hdr,
-                                run_start,
-                            );
-                        }
-                        slab_items = 0;
-                        slab_segs = 0;
-                    }
-
-                    // Step 2: emit full max_segments-sized chunks.
-                    while total - consumed >= max_segments {
-                        let chunk_hdr = encode_signed(-(max_segments as i64));
-                        let chunk_start = val_offsets[consumed];
-                        let chunk_end = val_offsets[consumed + max_segments];
-                        let mut slab_data =
-                            Vec::with_capacity(chunk_hdr.len as usize + (chunk_end - chunk_start));
-                        slab_data.extend_from_slice(chunk_hdr.as_bytes());
-                        slab_data.extend_from_slice(&data[chunk_start..chunk_end]);
-                        slabs.push(Slab { data: ValidBuf::new(slab_data), len: max_segments, segments: max_segments });
-                        consumed += max_segments;
-                    }
-
-                    // Step 3: remainder becomes start of next slab.
-                    let remaining = total - consumed;
-                    if remaining > 0 {
-                        pending_hdr = Some(encode_signed(-(remaining as i64)));
-                        slab_start = val_offsets[consumed];
-                        slab_items = remaining;
-                        slab_segs = remaining;
-                    } else {
-                        slab_start = run_end;
-                        // slab_items and slab_segs already 0
-                    }
-                    pos = run_end;
-                }
+                offsets.push(check);
             }
-            // ── Null run: count == 0 ─────────────────────────────────────
-            _ => {
-                if !T::NULLABLE {
-                    return Err(PackError::InvalidValue(
-                        "null run in non-nullable column".into(),
-                    ));
-                }
-                if let Some(validate) = validate {
-                    if let Some(msg) = validate(T::get_null(ValidBytes::from_bytes(data))) {
-                        return Err(PackError::InvalidValue(msg));
-                    }
-                }
-                let null_data = &data[pos + count_bytes..];
-                if null_data.is_empty() {
-                    return Err(PackError::BadFormat);
-                }
-                let (ncb, nc) = read_unsigned(null_data).ok_or(PackError::BadFormat)?;
-                if nc == 0 {
-                    return Err(PackError::BadFormat);
-                }
-                let run_end = pos + count_bytes + ncb;
+            let run_end = *offsets.last().unwrap();
 
-                // 1 segment — cut before if it would exceed budget.
-                if slab_segs > 0 && slab_segs + 1 > max_segments {
-                    flush_slab(
+            // How many fit in current slab?
+            let room = if slab_segs > 0 {
+                max_segments.saturating_sub(slab_segs)
+            } else {
+                max_segments
+            };
+
+            if total <= room {
+                // Whole literal fits — no splitting needed.
+                slab_items += total;
+                slab_segs += total;
+                pos = run_end;
+            } else {
+                let mut consumed = 0;
+
+                // Fill remaining room in current slab.
+                if slab_segs > 0 && room > 0 {
+                    let chunk_end = offsets[consumed + room];
+                    let chunk_hdr = encode_signed(-(room as i64));
+                    let mut d = if let Some(hdr) = pending_hdr.take() {
+                        let mut v = Vec::with_capacity(
+                            hdr.len as usize
+                                + (run_start - slab_start)
+                                + chunk_hdr.len as usize
+                                + (chunk_end - offsets[0]),
+                        );
+                        v.extend_from_slice(hdr.as_bytes());
+                        v.extend_from_slice(&data[slab_start..run_start]);
+                        v
+                    } else {
+                        data[slab_start..run_start].to_vec()
+                    };
+                    d.extend_from_slice(chunk_hdr.as_bytes());
+                    d.extend_from_slice(&data[offsets[consumed]..chunk_end]);
+                    slabs.push(Slab {
+                        data: ValidBuf::new(d),
+                        len: slab_items + room,
+                        segments: slab_segs + room,
+                    });
+                    consumed += room;
+                } else if slab_segs > 0 {
+                    flush(
                         &mut slabs,
                         data,
                         &mut slab_start,
@@ -2468,15 +2013,76 @@ fn rle_load_and_verify<T: RleValue>(
                         run_start,
                     );
                 }
-                slab_items += nc as usize;
-                slab_segs += 1;
+
+                // Full chunks.
+                while total - consumed >= max_segments {
+                    let hdr = encode_signed(-(max_segments as i64));
+                    let cs = offsets[consumed];
+                    let ce = offsets[consumed + max_segments];
+                    let mut d = Vec::with_capacity(hdr.len as usize + (ce - cs));
+                    d.extend_from_slice(hdr.as_bytes());
+                    d.extend_from_slice(&data[cs..ce]);
+                    slabs.push(Slab {
+                        data: ValidBuf::new(d),
+                        len: max_segments,
+                        segments: max_segments,
+                    });
+                    consumed += max_segments;
+                }
+
+                // Remainder.
+                let rem = total - consumed;
+                if rem > 0 {
+                    pending_hdr = Some(encode_signed(-(rem as i64)));
+                    slab_start = offsets[consumed];
+                    slab_items = rem;
+                    slab_segs = rem;
+                } else {
+                    slab_start = run_end;
+                    slab_items = 0;
+                    slab_segs = 0;
+                }
                 pos = run_end;
             }
+        } else {
+            // Null run.
+            if !T::NULLABLE {
+                return Err(PackError::InvalidValue(
+                    "null run in non-nullable column".into(),
+                ));
+            }
+            if let Some(v) = validate {
+                if let Some(m) = v(T::get_null(ValidBytes::from_bytes(data))) {
+                    return Err(PackError::InvalidValue(m));
+                }
+            }
+            let nd = &data[pos + cb..];
+            if nd.is_empty() {
+                return Err(PackError::BadFormat);
+            }
+            let (ncb, nc) = read_unsigned(nd).ok_or(PackError::BadFormat)?;
+            if nc == 0 {
+                return Err(PackError::BadFormat);
+            }
+            let run_end = pos + cb + ncb;
+            if slab_segs > 0 && slab_segs + 1 > max_segments {
+                flush(
+                    &mut slabs,
+                    data,
+                    &mut slab_start,
+                    &mut slab_items,
+                    &mut slab_segs,
+                    &mut pending_hdr,
+                    run_start,
+                );
+            }
+            slab_items += nc as usize;
+            slab_segs += 1;
+            pos = run_end;
         }
     }
 
-    // Flush remaining.
-    flush_slab(
+    flush(
         &mut slabs,
         data,
         &mut slab_start,
@@ -2485,6 +2091,115 @@ fn rle_load_and_verify<T: RleValue>(
         &mut pending_hdr,
         pos,
     );
-
     Ok(slabs)
+}
+
+// ── count_segments ───────────────────────────────────────────────────────────
+
+/// Count segments in an RLE slab. A repeat run = 1 segment, a null run = 1
+/// segment, a literal of N = N segments.
+#[allow(dead_code)]
+fn rle_count_segments<T: RleValue>(slab: &[u8]) -> usize {
+    let mut byte_pos = 0;
+    let mut segments = 0;
+
+    while byte_pos < slab.len() {
+        let (count_bytes, count_raw) = match read_signed(&slab[byte_pos..]) {
+            Some(v) => v,
+            None => break,
+        };
+
+        match count_raw {
+            n if n > 0 => {
+                // Repeat run: 1 segment.
+                segments += 1;
+                let value_start = byte_pos + count_bytes;
+                let value_len = match T::value_len(&slab[value_start..]) {
+                    Some(v) => v,
+                    None => break,
+                };
+                byte_pos = value_start + value_len;
+            }
+            n if n < 0 => {
+                // Literal run of N: N segments.
+                let total = (-n) as usize;
+                segments += total;
+                let mut scan_byte = byte_pos + count_bytes;
+                for _ in 0..total {
+                    let vlen = match T::value_len(&slab[scan_byte..]) {
+                        Some(v) => v,
+                        None => return segments,
+                    };
+                    scan_byte += vlen;
+                }
+                byte_pos = scan_byte;
+            }
+            _ => {
+                // Null run: 1 segment.
+                segments += 1;
+                let (ncb, _) = match read_unsigned(&slab[byte_pos + count_bytes..]) {
+                    Some(v) => v,
+                    None => break,
+                };
+                byte_pos += count_bytes + ncb;
+            }
+        }
+    }
+
+    segments
+}
+
+#[cfg(test)]
+mod load_verify_tests {
+    use super::*;
+    use crate::v1::rle_state::rle_encode_state;
+
+    #[test]
+    fn load_verify_roundtrip() {
+        let mut buf = Vec::new();
+        rle_encode_state::<u64>((0..1000u64).map(|i| i % 7), &mut buf);
+        let slabs = rle_load_and_verify::<u64>(&buf, 16, None).unwrap();
+        let total: usize = slabs.iter().map(|s| s.len).sum();
+        assert_eq!(total, 1000);
+        let vals: Vec<u64> = slabs
+            .iter()
+            .flat_map(|s| RleDecoder::<u64>::new(&s.data))
+            .collect();
+        let expected: Vec<u64> = (0..1000u64).map(|i| i % 7).collect();
+        assert_eq!(vals, expected);
+        for (i, s) in slabs.iter().enumerate() {
+            assert!(
+                rle_validate_encoding::<u64>(&s.data).is_ok(),
+                "slab {i} invalid"
+            );
+            assert!(s.segments <= 16, "slab {i} exceeds max_segments");
+        }
+    }
+
+    #[test]
+    fn load_verify_rejects_null_in_non_nullable() {
+        // Encode a null run (0, count=1) into raw bytes.
+        let mut buf = Vec::new();
+        buf.extend(encode_signed(0));
+        buf.extend(encode_unsigned(1));
+        assert!(rle_load_and_verify::<u64>(&buf, 16, None).is_err());
+    }
+
+    #[test]
+    fn load_verify_with_validate_fn() {
+        let mut buf = Vec::new();
+        rle_encode_state::<u64>([1u64, 2, 3, 999].into_iter(), &mut buf);
+        let result = rle_load_and_verify::<u64>(
+            &buf,
+            16,
+            Some(|v| {
+                if v > 100 {
+                    Some(format!("too large: {v}"))
+                } else {
+                    None
+                }
+            }),
+        );
+        assert!(result.is_err());
+    }
 }

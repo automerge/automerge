@@ -485,29 +485,12 @@ impl ColumnEncoding for BoolEncoding {
         scan_to(slab, index)
     }
 
-    fn count_segments(slab: &[u8]) -> usize {
-        bool_count_segments(slab)
-    }
-
-    fn split_at_item(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>) {
-        bool_split_at_item(slab, index, len)
-    }
-
-    fn merge_slab_bytes(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
-        bool_merge_slab_bytes(a, b)
+    fn merge_slabs(a: &mut Slab, b: &Slab) {
+        bool_merge_slabs(a, b);
     }
 
     fn validate_encoding(slab: &[u8]) -> Result<(), String> {
         bool_validate_encoding(slab)
-    }
-
-    fn encode_all_slabs<V: AsColumnRef<bool>>(
-        values: impl Iterator<Item = V>,
-        max_segments: usize,
-    ) -> (Vec<(Vec<u8>, usize, usize)>, usize) {
-        let bools: Vec<bool> = values.map(|v| v.as_column_ref()).collect();
-        let n = bools.len();
-        (bool_encode_all_slabs(&bools, max_segments), n)
     }
 
     fn load_and_verify(
@@ -610,78 +593,63 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-// ── split_at_item ────────────────────────────────────────────────────────────
-
-/// Split a boolean slab at logical item `index`.
-fn bool_split_at_item(slab: &[u8], index: usize, len: usize) -> (Vec<u8>, Vec<u8>) {
-    if index == 0 {
-        return (vec![], slab.to_vec());
-    }
-    if index >= len {
-        return (slab.to_vec(), vec![]);
-    }
-
-    let mut byte_pos = 0;
-    let mut item_pos = 0;
-    let mut value = false;
-
-    while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..]).unwrap();
-
-        if index <= item_pos + count {
-            let k = index - item_pos;
-            if k == 0 {
-                // Split at run boundary.
-                let left = slab[..byte_pos].to_vec();
-                let mut right = vec![];
-                // Right half must start with false. If current run is true,
-                // prepend a 0-count false run.
-                if value {
-                    right.extend(encode_count(0));
-                }
-                right.extend_from_slice(&slab[byte_pos..]);
-                return (left, right);
-            }
-            if k == count {
-                // Split at end of this run.
-                let left = slab[..byte_pos + cb].to_vec();
-                let rest_start = byte_pos + cb;
-                let mut right = vec![];
-                let next_value = !value;
-                if next_value {
-                    right.extend(encode_count(0));
-                }
-                right.extend_from_slice(&slab[rest_start..]);
-                return (left, right);
-            }
-            // Mid-run split.
-            let mut left = slab[..byte_pos].to_vec();
-            left.extend(encode_count(k));
-
-            let remaining = count - k;
-            let mut right = vec![];
-            // The right half starts with the same value as the current run.
-            // If that value is true, prepend a 0-count false.
-            if value {
-                right.extend(encode_count(0));
-            }
-            right.extend(encode_count(remaining));
-            right.extend_from_slice(&slab[byte_pos + cb..]);
-            return (left, right);
-        }
-
-        item_pos += count;
-        byte_pos += cb;
-        value = !value;
-    }
-
-    (slab.to_vec(), vec![])
-}
-
 // ── merge_slab_bytes ─────────────────────────────────────────────────────────
 
 /// Merge two boolean slabs. Decodes only boundary runs and memcopies
 /// interiors.
+/// In-place merge of bool slab `b` into `a`. No extra allocation beyond
+/// extending `a`'s buffer. Both slabs must be non-empty.
+fn bool_merge_slabs(a: &mut super::column::Slab, b: &super::column::Slab) {
+    debug_assert!(a.len > 0 && b.len > 0);
+
+    let b_data: &[u8] = &b.data;
+
+    // a's last run.
+    let (a_last_start, _a_last_cb, a_last_count, a_last_value) = bool_last_run(&a.data).unwrap();
+
+    // b's first run (always starts with false).
+    let (b_first_cb, b_first_count) = read_count(b_data).unwrap();
+    let b_rest = &b_data[b_first_cb..];
+
+    let a_buf = a.data.as_mut_vec();
+
+    // Bool slabs alternate false/true. b always starts with false.
+    // Four cases based on a's last value and b's first count:
+    if !a_last_value {
+        // a ends false, b starts false.
+        if b_first_count > 0 {
+            // Same value — merge counts: truncate a's last run, write combined, append rest.
+            a_buf.truncate(a_last_start);
+            a_buf.extend(encode_count(a_last_count + b_first_count));
+            a_buf.extend_from_slice(b_rest);
+        } else {
+            // b starts with 0-count padding → skip it, proper alternation.
+            a_buf.extend_from_slice(b_rest);
+        }
+    } else {
+        // a ends true.
+        if b_first_count > 0 {
+            // a ends true, b starts false (>0) → proper alternation, just append.
+            a_buf.extend_from_slice(b_data);
+        } else {
+            // a ends true, b starts 0-count false padding.
+            // b's second run is true — merge with a's last true run.
+            if b_rest.is_empty() {
+                // b has no actual items — nothing to append.
+            } else {
+                let (cb2, count2) = read_count(b_rest).unwrap();
+                a_buf.truncate(a_last_start);
+                a_buf.extend(encode_count(a_last_count + count2));
+                a_buf.extend_from_slice(&b_rest[cb2..]);
+            }
+        }
+    }
+
+    a.len += b.len;
+    a.segments = bool_count_segments(a_buf);
+}
+
+#[allow(dead_code)]
 fn bool_merge_slab_bytes(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
     if a.is_empty() {
         return (b.to_vec(), bool_count_segments(b));
@@ -779,70 +747,6 @@ fn bool_merge_slab_bytes(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
     }
 }
 
-// ── Streaming encoder ────────────────────────────────────────────────────────
-
-/// Encode a sequence of booleans into pre-split slabs in a single O(n) pass.
-///
-/// Each returned tuple is `(data, item_count, segment_count)`.
-fn bool_encode_all_slabs(values: &[bool], max_segments: usize) -> Vec<(Vec<u8>, usize, usize)> {
-    if values.is_empty() {
-        return vec![];
-    }
-
-    let mut slabs: Vec<(Vec<u8>, usize, usize)> = Vec::new();
-    let mut out = Vec::new();
-    let mut out_items: usize = 0;
-    let mut out_segs: usize = 0;
-
-    let mut current_value = false; // first run is always false
-    let mut current_count: usize = 0;
-
-    for &v in values {
-        if v == current_value {
-            current_count += 1;
-        } else {
-            // Flush the finished run.
-            out.extend(encode_count(current_count));
-            if current_count > 0 {
-                out_segs += 1;
-            }
-            out_items += current_count;
-
-            // Check if we should cut the slab before starting the next run.
-            // The next run will be at least 1 segment.
-            if out_segs > 0 && out_segs + 1 > max_segments {
-                slabs.push((std::mem::take(&mut out), out_items, out_segs));
-                out_items = 0;
-                out_segs = 0;
-                // New slab always starts with false. If the new value is true,
-                // emit a 0-count false run as structural padding.
-                if v {
-                    out.extend(encode_count(0));
-                }
-                current_value = v;
-                current_count = 1;
-                continue;
-            }
-
-            current_value = !current_value;
-            current_count = 1;
-        }
-    }
-
-    // Flush final run.
-    if current_count > 0 {
-        out.extend(encode_count(current_count));
-        out_segs += 1;
-        out_items += current_count;
-    }
-
-    if out_items > 0 {
-        slabs.push((out, out_items, out_segs));
-    }
-
-    slabs
-}
-
 // ── Load & verify ─────────────────────────────────────────────────────────
 
 /// Validate boolean-encoded bytes and split into slabs via direct memcpy.
@@ -908,7 +812,11 @@ fn bool_load_and_verify(
         // Cut after `runs_per_slab` runs — always even, so the next slab
         // starts on a false run and can be memcpy'd as-is.
         if slab_runs >= runs_per_slab && slab_segs > 0 {
-            slabs.push(Slab { data: ValidBuf::new(data[slab_start..pos].to_vec()), len: slab_items, segments: slab_segs });
+            slabs.push(Slab {
+                data: ValidBuf::new(data[slab_start..pos].to_vec()),
+                len: slab_items,
+                segments: slab_segs,
+            });
             slab_start = pos;
             slab_items = 0;
             slab_segs = 0;
@@ -917,7 +825,11 @@ fn bool_load_and_verify(
     }
 
     if slab_items > 0 {
-        slabs.push(Slab { data: ValidBuf::new(data[slab_start..pos].to_vec()), len: slab_items, segments: slab_segs });
+        slabs.push(Slab {
+            data: ValidBuf::new(data[slab_start..pos].to_vec()),
+            len: slab_items,
+            segments: slab_segs,
+        });
     }
 
     Ok(slabs)
