@@ -75,9 +75,9 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
-    type Get<'a>: Copy + PartialEq + Debug + Default + 'a
-    where
-        Self: 'a;
+    type Get<'a>: Copy + PartialEq + Debug + Default;
+      //+ for<'b> PartialEq<<Self as ColumnValueRef>::Get<'b>>;
+
 }
 
 /// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.
@@ -250,7 +250,7 @@ impl AsColumnRef<bool> for bool {
 /// All `ColumnValueRef` types implement this as an identity conversion.
 /// No conflict with the borrowed impls because `&str`, `Option<&str>`, etc.
 /// have lifetimes and cannot be `ColumnValueRef: 'static`.
-pub trait AsColumnRef<T: ColumnValueRef>: Debug {
+pub trait AsColumnRef<T: ColumnValueRef>: Debug + Clone {
     /// Borrow as the column's `Get` type without allocating.
     fn as_column_ref(&self) -> T::Get<'_>;
 }
