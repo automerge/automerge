@@ -590,7 +590,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         data: &[u8],
         max_segments: usize,
         validate: Option<for<'a> fn(<T as ColumnValueRef>::Get<'a>) -> Option<String>>,
-    ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
+    ) -> Result<Vec<Slab>, PackError> {
         rle_load_and_verify::<T>(data, max_segments, validate)
     }
 
@@ -659,7 +659,10 @@ struct Prefix<'a, T: RleValue, V: super::AsColumnRef<T>> {
 
 impl<'a, T: RleValue, V: super::AsColumnRef<T>> Prefix<'a, T, V> {
     fn new() -> Self {
-        Prefix { state: RleState::Empty, segments: 0 }
+        Prefix {
+            state: RleState::Empty,
+            segments: 0,
+        }
     }
 }
 
@@ -1146,7 +1149,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
 
     // 1. Feed new values.
     for v in values {
-        if starting_segments + f.segments >= max_segments {
+        if starting_segments + f.segments + state.pending_segments() >= max_segments {
             f += state.flush(&mut buf);
             if !overflowed {
                 overflowed = true;
@@ -1176,17 +1179,30 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
             f += state.flush(&mut buf);
             0
         }
-        Some(Postfix::Run { count, value, segments }) => {
+        Some(Postfix::Run {
+            count,
+            value,
+            segments,
+        }) => {
             f += state.append_n(&mut buf, RleCow::Ref(value), count);
             f += state.flush(&mut buf);
             segments
         }
-        Some(Postfix::Lit { value, lit, segments }) => {
+        Some(Postfix::Lit {
+            value,
+            lit,
+            segments,
+        }) => {
             f += state.append(&mut buf, RleCow::Ref(value));
             f += state.flush_with_lit(&mut buf, lit);
             segments
         }
-        Some(Postfix::LonePlusLit { lone, value, lit, segments }) => {
+        Some(Postfix::LonePlusLit {
+            lone,
+            value,
+            lit,
+            segments,
+        }) => {
             f += state.append(&mut buf, RleCow::Ref(lone));
             f += state.append(&mut buf, RleCow::Ref(value));
             f += state.flush_with_lit(&mut buf, lit);
@@ -2231,25 +2247,21 @@ fn rle_load_and_verify<T: RleValue>(
     data: &[u8],
     max_segments: usize,
     validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
-) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
+) -> Result<Vec<Slab>, PackError> {
     if data.is_empty() {
         return Ok(vec![]);
     }
 
-    let mut slabs: Vec<(Vec<u8>, usize, usize)> = Vec::new();
+    let mut slabs: Vec<Slab> = Vec::new();
 
-    // Current slab accumulator — bytes in data[slab_start..pos] plus an
-    // optional `pending_hdr` that replaces the original literal header when
-    // a literal was split across slabs.
     let mut slab_start: usize = 0;
     let mut slab_items: usize = 0;
     let mut slab_segs: usize = 0;
     let mut pending_hdr: Option<Leb128Buf> = None;
 
-    /// Flush the current slab to `slabs`, incorporating `pending_hdr` if set.
     #[inline]
     fn flush_slab(
-        slabs: &mut Vec<(Vec<u8>, usize, usize)>,
+        slabs: &mut Vec<Slab>,
         data: &[u8],
         slab_start: &mut usize,
         slab_items: &mut usize,
@@ -2268,7 +2280,7 @@ fn rle_load_and_verify<T: RleValue>(
         } else {
             data[*slab_start..end].to_vec()
         };
-        slabs.push((slab_data, *slab_items, *slab_segs));
+        slabs.push(Slab { data: ValidBuf::new(slab_data), len: *slab_items, segments: *slab_segs });
         *slab_start = end;
         *slab_items = 0;
         *slab_segs = 0;
@@ -2377,7 +2389,7 @@ fn rle_load_and_verify<T: RleValue>(
                             slab_data.extend_from_slice(chunk_hdr.as_bytes());
                             slab_data
                                 .extend_from_slice(&data[val_offsets[consumed]..chunk_vals_end]);
-                            slabs.push((slab_data, slab_items + room, slab_segs + room));
+                            slabs.push(Slab { data: ValidBuf::new(slab_data), len: slab_items + room, segments: slab_segs + room });
                             consumed += room;
                         } else {
                             // Room is 0 — flush accumulated slab as-is.
@@ -2404,7 +2416,7 @@ fn rle_load_and_verify<T: RleValue>(
                             Vec::with_capacity(chunk_hdr.len as usize + (chunk_end - chunk_start));
                         slab_data.extend_from_slice(chunk_hdr.as_bytes());
                         slab_data.extend_from_slice(&data[chunk_start..chunk_end]);
-                        slabs.push((slab_data, max_segments, max_segments));
+                        slabs.push(Slab { data: ValidBuf::new(slab_data), len: max_segments, segments: max_segments });
                         consumed += max_segments;
                     }
 

@@ -76,8 +76,6 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
     type Get<'a>: Copy + PartialEq + Debug + Default;
-      //+ for<'b> PartialEq<<Self as ColumnValueRef>::Get<'b>>;
-
 }
 
 /// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.

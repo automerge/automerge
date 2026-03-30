@@ -135,7 +135,9 @@ mod u64_replace {
         let mut col = build_v0(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, rand_vals(n));
         });
@@ -146,7 +148,9 @@ mod u64_replace {
         let mut col = build_v1(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, rand_vals(n));
         });
@@ -162,7 +166,9 @@ mod u64_delete {
         let mut col = build_v0(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, std::iter::empty::<u64>());
         });
@@ -173,7 +179,9 @@ mod u64_delete {
         let mut col = build_v1(10_000);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, std::iter::empty::<u64>());
         });
@@ -203,7 +211,9 @@ mod string_replace {
         let mut col = build_v0_str(10_000, 8);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, rand_strings(n, 8));
         });
@@ -214,7 +224,9 @@ mod string_replace {
         let mut col = build_v1_str(10_000, 8);
         bencher.bench_local(|| {
             let len = col.len();
-            if len <= n { return; }
+            if len <= n {
+                return;
+            }
             let pos = rand_usize() % (len - n);
             col.splice(pos, n, rand_strings(n, 8));
         });

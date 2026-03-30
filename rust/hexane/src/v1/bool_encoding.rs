@@ -514,7 +514,7 @@ impl ColumnEncoding for BoolEncoding {
         data: &[u8],
         max_segments: usize,
         validate: Option<for<'a> fn(bool) -> Option<String>>,
-    ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
+    ) -> Result<Vec<super::column::Slab>, PackError> {
         bool_load_and_verify(data, max_segments, validate)
     }
 
@@ -857,16 +857,17 @@ fn bool_load_and_verify(
     data: &[u8],
     max_segments: usize,
     validate: Option<fn(bool) -> Option<String>>,
-) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError> {
+) -> Result<Vec<super::column::Slab>, PackError> {
+    use super::column::Slab;
+    use super::ValidBuf;
+
     if data.is_empty() {
         return Ok(vec![]);
     }
 
-    // Round down to even (min 2) so every cut lands on an even run
-    // boundary and the next slab naturally starts with a false run.
     let runs_per_slab = (max_segments & !1).max(2);
 
-    let mut slabs: Vec<(Vec<u8>, usize, usize)> = Vec::new();
+    let mut slabs: Vec<Slab> = Vec::new();
     let mut pos: usize = 0;
     let mut slab_start: usize = 0;
     let mut slab_items: usize = 0;
@@ -907,7 +908,7 @@ fn bool_load_and_verify(
         // Cut after `runs_per_slab` runs — always even, so the next slab
         // starts on a false run and can be memcpy'd as-is.
         if slab_runs >= runs_per_slab && slab_segs > 0 {
-            slabs.push((data[slab_start..pos].to_vec(), slab_items, slab_segs));
+            slabs.push(Slab { data: ValidBuf::new(data[slab_start..pos].to_vec()), len: slab_items, segments: slab_segs });
             slab_start = pos;
             slab_items = 0;
             slab_segs = 0;
@@ -916,7 +917,7 @@ fn bool_load_and_verify(
     }
 
     if slab_items > 0 {
-        slabs.push((data[slab_start..pos].to_vec(), slab_items, slab_segs));
+        slabs.push(Slab { data: ValidBuf::new(data[slab_start..pos].to_vec()), len: slab_items, segments: slab_segs });
     }
 
     Ok(slabs)

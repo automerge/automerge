@@ -83,12 +83,12 @@ pub trait ColumnEncoding: Default {
     /// function during the same pass.  Returns
     /// [`PackError::InvalidValue`] if the function returns `Some(msg)`.
     ///
-    /// Returns `(data, item_count, segment_count)` tuples on success.
+    /// Returns a Vec of Slabs on success.
     fn load_and_verify(
         data: &[u8],
         max_segments: usize,
         validate: Option<ValidateFn<Self::Value>>,
-    ) -> Result<Vec<(Vec<u8>, usize, usize)>, PackError>;
+    ) -> Result<Vec<super::column::Slab>, PackError>;
 
     /// Serialize multiple slabs into a single canonical byte array in O(n).
     ///
@@ -107,11 +107,9 @@ pub trait ColumnEncoding: Default {
         max_segments: usize,
     ) -> (Vec<super::column::Slab>, usize);
 
-    /// Fast splice on a Column. Locates the target slab,
-    /// handles cross-slab deletes, updates the BIT.
-    ///
-    /// Returns `None` if this encoding doesn't support the fast path.
-    fn fast_splice<WF: super::column::WeightFn<Self::Value>, V: super::AsColumnRef<Self::Value>>(
+    /// Splice a Column: locate the target slab, splice it, handle overflow
+    /// and cross-slab deletes, merge small neighbours, update the BIT.
+    fn splice<WF: super::column::WeightFn<Self::Value>, V: super::AsColumnRef<Self::Value>>(
         col: &mut super::column::Column<Self::Value, WF>,
         index: usize,
         del: usize,

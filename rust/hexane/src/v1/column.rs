@@ -220,24 +220,9 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Bulk-construct with a custom segment budget per slab.
     pub fn from_values_with_max_segments(values: Vec<T>, max_segments: usize) -> Self {
-        let (encoded, total_len) = T::Encoding::encode_all_slabs(values.into_iter(), max_segments);
-        let slabs: Vec<Slab> = encoded
-            .into_iter()
-            .map(|(data, len, segments)| Slab {
-                data: ValidBuf::new(data),
-                len,
-                segments,
-            })
-            .collect();
-        let bit = rebuild_bit::<T, WF>(&slabs);
-        Self {
-            slabs,
-            bit,
-            total_len,
-            max_segments,
-            counter: 0,
-            _phantom: PhantomData,
-        }
+        let mut col = Self::with_max_segments(max_segments);
+        col.splice(0, 0, values);
+        col
     }
 
     /// Deserialize a column from bytes produced by [`save`](Column::save).
@@ -256,16 +241,8 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         max_segments: usize,
         validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
     ) -> Result<Self, PackError> {
-        let verified = T::Encoding::load_and_verify(data, max_segments, validate)?;
-        let total_len: usize = verified.iter().map(|(_, len, _)| *len).sum();
-        let slabs: Vec<Slab> = verified
-            .into_iter()
-            .map(|(data, len, segments)| Slab {
-                data: ValidBuf::new(data),
-                len,
-                segments,
-            })
-            .collect();
+        let slabs = T::Encoding::load_and_verify(data, max_segments, validate)?;
+        let total_len: usize = slabs.iter().map(|s| s.len).sum();
         let bit = rebuild_bit::<T, WF>(&slabs);
         Ok(Self {
             slabs,
@@ -393,7 +370,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             self.bit = rebuild_bit::<T, WF>(&self.slabs);
         }
 
-        T::Encoding::fast_splice(self, index, del, iter);
+        T::Encoding::splice(self, index, del, iter);
 
         #[cfg(debug_assertions)]
         self.validate_encoding();
@@ -403,6 +380,14 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Merge two adjacent slabs without rebuilding the BIT.
     fn merge_slabs_no_rebuild(&mut self, a: usize, b: usize) {
+        if self.slabs[a].len == 0 {
+            self.slabs.remove(a);
+            return;
+        }
+        if self.slabs[b].len == 0 {
+            self.slabs.remove(b);
+            return;
+        }
         let slab_b = self.slabs.remove(b);
         let slab_a = &mut self.slabs[a];
         let (merged, segments) = T::Encoding::merge_slab_bytes(&slab_a.data, &slab_b.data);
@@ -412,8 +397,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Try merging at both boundaries of a slab range without rebuilding the BIT.
-    #[allow(dead_code)]
-    /// Given range `5..9`, checks if slabs 4+5 can merge and 8+9 can merge.
     /// Returns the adjusted range accounting for any merges that happened.
     pub(crate) fn try_merge(&mut self, range: Range<usize>) -> Range<usize> {
         let half = self.max_segments / 2;

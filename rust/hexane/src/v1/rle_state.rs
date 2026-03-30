@@ -3,6 +3,8 @@
 use super::rle::{encode_signed, encode_unsigned};
 use super::{AsColumnRef, RleValue};
 
+use std::ops::Range;
+
 /// A Cow-like type for RLE values. Holds either an owned value from the
 /// splice iterator (`V`) or a borrowed value decoded from the slab (`T::Get<'a>`).
 ///
@@ -151,14 +153,34 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         RleState::Empty
     }
 
+    /// Segments that will be produced when this state is flushed.
+    pub fn pending_segments(&self) -> usize {
+        match self {
+            RleState::Empty => 0,
+            RleState::Lone(_) => 1,
+            RleState::Run(_, _) => 1,
+            RleState::Lit { local, .. } => local + 1,
+            RleState::Null(_) => 1,
+        }
+    }
+
     pub fn append(&mut self, buf: &mut Vec<u8>, value: impl Into<Cow<'a, T, V>>) -> FlushState {
         self.append_n(buf, value, 1)
     }
 
-    pub fn append_n(&mut self, buf: &mut Vec<u8>, value: impl Into<Cow<'a, T, V>>, n: usize) -> FlushState {
+    pub fn append_n(
+        &mut self,
+        buf: &mut Vec<u8>,
+        value: impl Into<Cow<'a, T, V>>,
+        n: usize,
+    ) -> FlushState {
         let value = value.into();
-        if n == 0 { return FlushState::default(); }
-        if value.is_null() { return self.append_null_n(buf, n); }
+        if n == 0 {
+            return FlushState::default();
+        }
+        if value.is_null() {
+            return self.append_null_n(buf, n);
+        }
 
         let mut flushed = FlushState::default();
         let old = std::mem::replace(self, RleState::Empty);
@@ -168,7 +190,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
             RleState::Lone(prev) if value == prev => RleState::Run(n + 1, value),
             RleState::Lone(prev) if n == 1 => {
                 let header_pos = emit_lit(buf, &prev);
-                RleState::Lit { count: 1, local: 1, header_pos, current: value }
+                RleState::Lit {
+                    count: 1,
+                    local: 1,
+                    header_pos,
+                    current: value,
+                }
             }
             RleState::Lone(prev) => {
                 emit_lit(buf, &prev);
@@ -181,25 +208,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 flushed.segments = 1;
                 Self::make_run(n, value)
             }
-            // Lit{0,0}: no header written yet — behaves like Lone.
-            RleState::Lit { count: 0, local: 0, header_pos, current }
-                if value == current =>
-            {
-                flushed.rewrite = Some(RewriteHeader::new(0, header_pos));
-                RleState::Run(n + 1, value)
-            }
-            RleState::Lit { count: 0, local: 0, header_pos, current } if n == 1 => {
-                let hp = emit_lit(buf, &current);
-                flushed.rewrite = Some(RewriteHeader::new(0, header_pos));
-                RleState::Lit { count: 1, local: 1, header_pos: hp, current: value }
-            }
-            RleState::Lit { count: 0, local: 0, header_pos, current } => {
-                emit_lit(buf, &current);
-                flushed.rewrite = Some(RewriteHeader::new(0, header_pos));
-                flushed.segments = 1;
-                RleState::Run(n, value)
-            }
-            RleState::Lit { count, local, header_pos, current } if value == current => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } if value == current => {
                 if local == count {
                     rewrite_lit_header(buf, header_pos, count);
                 } else {
@@ -208,11 +222,26 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 flushed.segments = local;
                 RleState::Run(n + 1, value)
             }
-            RleState::Lit { count, local, header_pos, current } if n == 1 => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } if n == 1 => {
                 current.pack(buf);
-                RleState::Lit { count: count + 1, local: local + 1, header_pos, current: value }
+                RleState::Lit {
+                    count: count + 1,
+                    local: local + 1,
+                    header_pos,
+                    current: value,
+                }
             }
-            RleState::Lit { count, local, header_pos, current } => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } => {
                 current.pack(buf);
                 if local == count {
                     rewrite_lit_header(buf, header_pos, count + 1);
@@ -235,7 +264,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         if count == 0 {
             Self::Lone(current)
         } else {
-            Self::Lit { count, local: 0, current, header_pos }
+            Self::Lit {
+                count,
+                local: 0,
+                current,
+                header_pos,
+            }
         }
     }
 
@@ -263,10 +297,17 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
 
     pub fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> FlushState {
         let old = std::mem::replace(self, RleState::Empty);
-        if lit == 0 { return Self::do_flush(old, buf); }
+        if lit == 0 {
+            return Self::do_flush(old, buf);
+        }
 
         match old {
-            RleState::Lit { count, local, header_pos, current } => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } => {
                 current.pack(buf);
                 let total = count + 1 + lit;
                 if local == count {
@@ -291,7 +332,13 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     }
 
     #[allow(dead_code)]
-    pub fn append_raw(&mut self, buf: &mut Vec<u8>, raw: &[u8], segments: usize, lit: usize) -> FlushState {
+    pub fn append_raw(
+        &mut self,
+        buf: &mut Vec<u8>,
+        raw: &[u8],
+        segments: usize,
+        lit: usize,
+    ) -> FlushState {
         let old = std::mem::replace(self, RleState::Empty);
         if lit == 0 {
             let flushed = Self::do_flush(old, buf);
@@ -299,7 +346,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
             return flushed.with_segments(segments);
         }
         match old {
-            RleState::Lit { count, local, header_pos, current } => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } => {
                 current.pack(buf);
                 buf.extend_from_slice(raw);
                 let total = count + 1 + lit;
@@ -343,12 +395,12 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 emit_run(buf, count, &value);
                 FlushState::new(1)
             }
-            RleState::Lit { count: 0, local: 0, header_pos, current } => {
-                buf.extend(encode_signed(-1));
-                current.pack(buf);
-                FlushState::rewrite(1, RewriteHeader::new(0, header_pos))
-            }
-            RleState::Lit { count, local, header_pos, current } => {
+            RleState::Lit {
+                count,
+                local,
+                header_pos,
+                current,
+            } => {
                 current.pack(buf);
                 let total = count + 1;
                 if local == count {
@@ -366,14 +418,21 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     }
 }
 
-fn emit_lit<'a, T: RleValue, V: AsColumnRef<T>>(buf: &mut Vec<u8>, value: &RleCow<'a, T, V>) -> usize {
+fn emit_lit<'a, T: RleValue, V: AsColumnRef<T>>(
+    buf: &mut Vec<u8>,
+    value: &RleCow<'a, T, V>,
+) -> usize {
     let header_pos = buf.len();
     buf.extend(encode_signed(-1));
     value.pack(buf);
     header_pos
 }
 
-fn emit_run<'a, T: RleValue, V: AsColumnRef<T>>(buf: &mut Vec<u8>, count: usize, value: &RleCow<'a, T, V>) {
+fn emit_run<'a, T: RleValue, V: AsColumnRef<T>>(
+    buf: &mut Vec<u8>,
+    count: usize,
+    value: &RleCow<'a, T, V>,
+) {
     if count == 1 {
         buf.extend(encode_signed(-1));
     } else {
@@ -387,30 +446,22 @@ fn emit_null(buf: &mut Vec<u8>, count: usize) {
     buf.extend(encode_unsigned(count as u64));
 }
 
+fn leb_signed_bytes(buf: &[u8], pos: usize) -> Range<usize> {
+    let mut tmp = &buf[pos..];
+    let start = tmp.len();
+    let _ = leb128::read::signed(&mut tmp);
+    let n = start - tmp.len();
+    pos..pos + n
+}
+
 pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: usize) {
+    let header_bytes = leb_signed_bytes(buf, header_pos);
     if total == 0 {
-        // Remove the header entirely — the lit run is gone.
-        let old_header_len = {
-            let mut tmp = &buf[header_pos..];
-            let start = tmp.len();
-            let _ = leb128::read::signed(&mut tmp);
-            start - tmp.len()
-        };
-        buf.splice(header_pos..header_pos + old_header_len, std::iter::empty());
-        return;
-    }
-    let new_header = encode_signed(-(total as i64));
-    let old_header_len = {
-        let mut tmp = &buf[header_pos..];
-        let start = tmp.len();
-        let _ = leb128::read::signed(&mut tmp);
-        start - tmp.len()
-    };
-    let new_len = new_header.len as usize;
-    if new_len == old_header_len {
-        buf[header_pos..header_pos + new_len].copy_from_slice(&new_header.buf[..new_len]);
+        // remove header
+        buf.splice(header_bytes, []);
     } else {
-        buf.splice(header_pos..header_pos + old_header_len, new_header);
+        // rewrite header
+        buf.splice(header_bytes, encode_signed(-(total as i64)));
     }
 }
 
@@ -423,7 +474,8 @@ pub(crate) fn rle_encode_state<T: RleValue>(
     values: impl Iterator<Item = T::Get<'static>>,
     buf: &mut Vec<u8>,
 ) -> (usize, usize)
-where T::Get<'static>: AsColumnRef<T>
+where
+    T::Get<'static>: AsColumnRef<T>,
 {
     let mut state = RleState::<'static, T, T::Get<'static>>::new();
     let mut segments = 0;
@@ -622,18 +674,4 @@ mod tests {
         assert_eq!(decoded, vec![5, 5, 5, 1, 2]);
     }
 
-    // #[test]
-    #[allow(dead_code)]
-    fn string_mixed_lifetimes() {
-        let slab_bytes = b"\x05hello";
-        let mut buf = Vec::new();
-        let mut state = RleState::<'_, String, &str>::new();
-
-        let (_, slab_val) = String::try_unpack(slab_bytes).unwrap();
-        state.append(&mut buf, RleCow::Ref(slab_val));
-
-        let owned = String::from("world");
-        state.append(&mut buf, RleCow::Owned(owned.as_str()));
-        state.flush(&mut buf);
-    }
 }
