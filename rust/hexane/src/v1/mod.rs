@@ -14,8 +14,6 @@ pub mod load_opts;
 pub mod prefix_column;
 pub mod rle;
 pub(crate) mod rle_state;
-#[allow(dead_code, clippy::needless_range_loop)]
-mod slab_index;
 pub use column::{Column, Iter};
 pub use delta_column::{DeltaColumn, DeltaIter, DeltaValue};
 pub use encoding::ColumnEncoding;
