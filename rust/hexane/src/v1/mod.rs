@@ -11,19 +11,17 @@ pub mod delta_column;
 pub mod encoding;
 pub mod indexed;
 pub mod load_opts;
-pub mod mirrored;
 pub mod prefix_column;
 pub mod rle;
 pub(crate) mod rle_state;
+#[allow(dead_code, clippy::needless_range_loop)]
+mod slab_index;
 pub use column::{Column, Iter};
-pub use delta_column::{DeltaColumn, DeltaValue};
+pub use delta_column::{DeltaColumn, DeltaIter, DeltaValue};
 pub use encoding::ColumnEncoding;
 pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
 pub use load_opts::LoadOpts;
-pub use mirrored::{
-    MirrorIter, MirrorIterState, MirrorPrefixIter, Mirrorable, MirroredColumn, MirroredPrefixColumn,
-};
 pub use prefix_column::{PrefixColumn, PrefixIter, PrefixValue};
 
 #[cfg(test)]

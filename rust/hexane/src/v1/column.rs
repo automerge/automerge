@@ -138,10 +138,27 @@ pub(crate) fn bit_point_update<W: SlabWeight>(bit: &mut [W], si: usize, old: W, 
     }
 }
 
+/// Trait for types that can locate the slab containing a logical item index.
+///
+/// This abstracts the index structure (Fenwick tree, B-tree, etc.) behind the
+/// Column so that iterators don't depend on a specific implementation.
+pub(crate) trait SlabFind {
+    /// Find the slab containing logical `index`.
+    /// Returns `(slab_index, offset_within_slab)`.
+    fn find_slab(&self, index: usize) -> (usize, usize);
+}
+
+impl<T: ColumnValueRef, WF: WeightFn<T>> SlabFind for Column<T, WF> {
+    #[inline]
+    fn find_slab(&self, index: usize) -> (usize, usize) {
+        find_slab_bit(&self.bit, index, self.slabs.len())
+    }
+}
+
 /// Find slab containing logical index. Returns (slab_index, offset_within_slab). O(log S).
 /// Uses binary lifting on the BIT.
 #[inline]
-pub(crate) fn find_slab<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (usize, usize) {
+pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) -> (usize, usize) {
     if n == 0 {
         return (0, 0);
     }
@@ -317,12 +334,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// For nullable columns (`Column<Option<T>>`), an in-bounds null entry
     /// returns `Some(None)`.
     pub fn get(&self, index: usize) -> Option<T::Get<'_>> {
-        if index >= self.total_len {
-            return None;
-        }
-        let (si, offset) = find_slab(&self.bit, index, self.slabs.len());
-        let slab = &self.slabs[si];
-        T::Encoding::get(&slab.data, offset, slab.len)
+        self.iter().nth(index)
     }
 
     /// Inserts `value` at `index`, shifting subsequent elements right.
@@ -440,12 +452,12 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Returns a forward iterator over all items in the column.
     ///
-    /// Decodes one slab at a time with amortized O(1) per-item cost.
-    /// Repeat runs yield a cached value; literal runs decode per item.
+    /// `nth()` is O(log S) — uses the column's index for slab lookup.
     pub fn iter(&self) -> Iter<'_, T> {
         if self.slabs.is_empty() {
             return Iter {
                 slabs: &self.slabs,
+                col: self,
                 slab_idx: 0,
                 decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
@@ -454,13 +466,13 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
                 counter: self.counter,
             };
         }
-        let slab_len = self.slabs[0].len;
         Iter {
             slabs: &self.slabs,
+            col: self,
             slab_idx: 0,
             decoder: T::Encoding::decoder(&self.slabs[0].data),
             items_left: self.total_len,
-            slab_remaining: slab_len,
+            slab_remaining: self.slabs[0].len,
             pos: 0,
             counter: self.counter,
         }
@@ -468,13 +480,14 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Returns a forward iterator over items in `range`, clamped to the column's length.
     ///
-    /// Uses the Fenwick tree for O(log S) initial seek, then O(1) per item.
+    /// Uses the index for O(log S) initial seek, then O(1) per item.
     pub fn iter_range(&self, range: Range<usize>) -> Iter<'_, T> {
         let start = range.start.min(self.total_len);
         let end = range.end.min(self.total_len);
         if start >= end || self.slabs.is_empty() {
             return Iter {
                 slabs: &self.slabs,
+                col: self,
                 slab_idx: self.slabs.len(),
                 decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
@@ -483,13 +496,14 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
                 counter: self.counter,
             };
         }
-        let (si, offset) = find_slab(&self.bit, start, self.slabs.len());
+        let (si, offset) = find_slab_bit(&self.bit, start, self.slabs.len());
         let mut decoder = T::Encoding::decoder(&self.slabs[si].data);
         if offset > 0 {
             decoder.nth(offset - 1);
         }
         Iter {
             slabs: &self.slabs,
+            col: self,
             slab_idx: si,
             decoder,
             items_left: end - start,
@@ -570,22 +584,22 @@ impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
 
 // ── Iter ─────────────────────────────────────────────────────────────────────
 
+// ── Iter ─────────────────────────────────────────────────────────────────────
+
 /// Forward iterator over column items.
 ///
 /// Created by [`Column::iter`] or [`Column::iter_range`].
 ///
-/// `nth()` is O(slabs_skipped + runs_skipped) — repeat and null runs are
-/// skipped in O(1), whole slabs are skipped without creating a decoder.
+/// `nth()` is O(log S + runs_skipped) — uses the column's index structure
+/// to skip directly to the target slab.
 pub struct Iter<'a, T: ColumnValueRef> {
     pub(crate) slabs: &'a [Slab],
+    pub(crate) col: &'a dyn SlabFind,
     pub(crate) slab_idx: usize,
     pub(crate) decoder: <T::Encoding as ColumnEncoding>::Decoder<'a>,
     pub(crate) items_left: usize,
-    /// Items remaining in the current slab's decoder (for `nth` slab skipping).
     pub(crate) slab_remaining: usize,
-    /// Absolute index of the next item to be yielded.
     pub(crate) pos: usize,
-    /// Mutation counter at time of construction, for suspend/resume validation.
     pub(crate) counter: usize,
 }
 
@@ -614,9 +628,8 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
         }
     }
 
-    /// O(slabs_skipped + runs_skipped) — skips whole slabs without decoding,
-    /// and within a slab delegates to the decoder's run-aware `nth()`.
-    fn nth(&mut self, mut n: usize) -> Option<T::Get<'a>> {
+    /// O(log S + runs_skipped) — uses the column's index for slab lookup.
+    fn nth(&mut self, n: usize) -> Option<T::Get<'a>> {
         if n >= self.items_left {
             self.pos += self.items_left;
             self.items_left = 0;
@@ -631,31 +644,22 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
             return self.decoder.nth(n);
         }
 
-        // Skip past the rest of the current slab.
-        n -= self.slab_remaining;
-        self.pos += self.slab_remaining;
-        self.items_left -= self.slab_remaining;
-        self.slab_idx += 1;
-
-        // Skip whole slabs without creating decoders.
-        while self.slab_idx < self.slabs.len() {
-            let slab_len = self.slabs[self.slab_idx].len;
-            if n < slab_len {
-                self.slab_remaining = slab_len;
-                self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
-                self.items_left -= n + 1;
-                self.slab_remaining -= n + 1;
-                self.pos += n + 1;
-                return self.decoder.nth(n);
-            }
-            n -= slab_len;
-            self.pos += slab_len;
-            self.items_left -= slab_len;
-            self.slab_idx += 1;
+        // Use the column's index for O(log S) slab lookup.
+        let target_pos = self.pos + n;
+        let (si, offset) = self.col.find_slab(target_pos);
+        if si >= self.slabs.len() {
+            self.pos += self.items_left;
+            self.items_left = 0;
+            return None;
         }
-
-        self.items_left = 0;
-        None
+        let skipped = n + 1;
+        self.slab_idx = si;
+        self.slab_remaining = self.slabs[si].len;
+        self.decoder = T::Encoding::decoder(&self.slabs[si].data);
+        self.items_left -= skipped;
+        self.slab_remaining -= offset + 1;
+        self.pos = target_pos + 1;
+        self.decoder.nth(offset)
     }
 
     #[inline]
@@ -670,6 +674,7 @@ impl<T: ColumnValueRef> Clone for Iter<'_, T> {
     fn clone(&self) -> Self {
         Self {
             slabs: self.slabs,
+            col: self.col,
             slab_idx: self.slab_idx,
             decoder: self.decoder.clone(),
             items_left: self.items_left,
@@ -681,27 +686,16 @@ impl<T: ColumnValueRef> Clone for Iter<'_, T> {
 }
 
 impl<'a, T: ColumnValueRef> Iter<'a, T> {
-    /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
 
-    /// Returns the next run of identical values.
-    ///
-    /// For repeat runs, returns the remaining count and repeated value.
-    /// For null runs, returns the remaining null count and the null value.
-    /// For literal runs, returns count=1 and the next distinct value.
-    ///
-    /// Runs are merged across slab boundaries: if the current slab ends
-    /// with value `v` and the next slab starts with a run of the same `v`,
-    /// they are combined into a single `Run`.
     pub fn next_run(&mut self) -> Option<super::Run<T::Get<'a>>> {
         use super::encoding::RunDecoder;
         if self.items_left == 0 {
             return None;
         }
-        // Get the initial run from the current (or next non-empty) slab.
         let run = loop {
             if let Some(run) = self.decoder.next_run() {
                 break run;
@@ -722,8 +716,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         self.pos += count;
         let mut total_count = count;
 
-        // Merge across slab boundaries while the next slab starts with
-        // the same value.
         while self.slab_remaining == 0 && self.items_left > 0 {
             self.slab_idx += 1;
             if self.slab_idx >= self.slabs.len() {
@@ -739,10 +731,7 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
                     self.items_left -= c;
                     self.slab_remaining -= c;
                     self.pos += c;
-                    // Continue loop — the next slab might also match.
                 } else {
-                    // Different value — recreate the decoder so the next
-                    // call to next_run()/next() sees this run.
                     self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
                     break;
                 }
@@ -757,12 +746,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         })
     }
 
-    /// Moves the iterator window to `range` and returns the item at `range.start`.
-    ///
-    /// After this call the iterator will yield items from `range.start + 1`
-    /// through `range.end - 1` (i.e. `range.end` becomes the new upper bound).
-    ///
-    /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
         assert!(
             range.start >= self.pos,
@@ -770,8 +753,6 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
             range.start,
             self.pos,
         );
-        // Set items_left to reflect the new end bound before calling nth,
-        // so that nth respects the new range.
         self.items_left = range.end.saturating_sub(self.pos);
         self.nth(range.start - self.pos)
     }
@@ -793,7 +774,7 @@ pub struct IterState {
 }
 
 impl IterState {
-    /// Restores the iterator position in `column`.
+    /// Restores the iterator position in any column.
     ///
     /// Returns [`PackError::InvalidResume`] if `column` was mutated since
     /// [`Iter::suspend`].
@@ -809,9 +790,9 @@ impl IterState {
         }
         let slabs = &column.slabs[..];
         if self.slab_idx >= slabs.len() {
-            // Iterator was exhausted — return an empty iterator at end position.
             return Ok(Iter {
                 slabs,
+                col: column,
                 slab_idx: slabs.len(),
                 decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
                 items_left: 0,
@@ -822,13 +803,13 @@ impl IterState {
         }
         let slab = &slabs[self.slab_idx];
         let mut decoder = T::Encoding::decoder(&slab.data);
-        // Skip past the already-consumed items within this slab.
         if self.slab_consumed > 0 {
             decoder.nth(self.slab_consumed - 1);
         }
         let slab_remaining = slab.len - self.slab_consumed;
         Ok(Iter {
             slabs,
+            col: column,
             slab_idx: self.slab_idx,
             decoder,
             items_left: self.items_left,
