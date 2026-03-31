@@ -109,6 +109,13 @@ impl From<am::sync::State> for JS {
             )
             .unwrap();
         }
+        Reflect::set(&result, &"readOnly".into(), &state.read_only.into()).unwrap();
+        Reflect::set(
+            &result,
+            &"peerReadOnly".into(),
+            &state.peer_read_only.into(),
+        )
+        .unwrap();
         JS(result)
     }
 }
@@ -389,15 +396,27 @@ impl TryFrom<JS> for am::sync::State {
         let their_capabilities = {
             let caps_obj = js_get(&value, "theirCapabilities")?;
             if !caps_obj.is_undefined() {
-                // Any peer that has a theirCapabilities section supports V2
-                let _flags: MessageFlags = caps_obj
-                    .try_into()
-                    .map_err(error::BadSyncState::BadTheirCapabilities)?;
-                Some(vec![am::sync::Capability::MessageV2])
+                let arr = caps_obj.0.dyn_into::<Array>().map_err(|_| {
+                    error::BadSyncState::BadTheirCapabilities(error::BadCapabilities::NotArray)
+                })?;
+                let mut caps = Vec::new();
+                for v in arr.iter() {
+                    if let Some(s) = v.as_string() {
+                        match s.as_str() {
+                            "message-v1" => caps.push(am::sync::Capability::MessageV1),
+                            "message-v2" => caps.push(am::sync::Capability::MessageV2),
+                            "supports-sync-reset" => caps.push(am::sync::Capability::SyncReset),
+                            _ => {}
+                        }
+                    }
+                }
+                Some(caps)
             } else {
                 None
             }
         };
+        let read_only = js_get(&value, "readOnly")?.0.as_bool().unwrap_or(false);
+        let peer_read_only = js_get(&value, "peerReadOnly")?.0.as_bool().unwrap_or(false);
         Ok(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -408,6 +427,9 @@ impl TryFrom<JS> for am::sync::State {
             in_flight,
             have_responded,
             their_capabilities,
+            read_only,
+            peer_read_only,
+            needs_reset: false,
         })
     }
 }
@@ -601,17 +623,24 @@ impl From<&[am::sync::Capability]> for AR {
             .map(|c| match c {
                 automerge::sync::Capability::MessageV1 => JsValue::from_str("message-v1"),
                 automerge::sync::Capability::MessageV2 => JsValue::from_str("message-v2"),
+                automerge::sync::Capability::SyncReset => JsValue::from_str("sync-reset"),
             })
             .collect())
     }
 }
 
 impl From<am::sync::MessageFlags> for AR {
-    fn from(_flags: am::sync::MessageFlags) -> Self {
-        // V1/V2 are not in the bitfield — they're communicated via the
-        // legacy 0x02 byte. New flags (added in later commits) will be
-        // checked here.
-        let arr: Vec<JsValue> = Vec::new();
+    fn from(flags: am::sync::MessageFlags) -> Self {
+        let mut arr = Vec::new();
+        if flags.contains(MessageFlags::SYNC_RESET) {
+            arr.push(JsValue::from_str("sync-reset"));
+        }
+        if flags.contains(MessageFlags::READ_ONLY) {
+            arr.push(JsValue::from_str("read-only"));
+        }
+        if flags.contains(MessageFlags::SUPPORTS_SYNC_RESET) {
+            arr.push(JsValue::from_str("supports-sync-reset"));
+        }
         AR(arr.into_iter().collect())
     }
 }
@@ -658,15 +687,16 @@ impl TryFrom<JS> for MessageFlags {
             .0
             .dyn_into::<Array>()
             .map_err(|_| error::BadCapabilities::NotArray)?;
-        let flags = MessageFlags::new();
+        let mut flags = MessageFlags::new();
         for (i, v) in value.iter().enumerate() {
             let as_str = v
                 .as_string()
                 .ok_or(error::BadCapabilities::ElemNotString(i))?;
             match as_str.as_str() {
-                // V1/V2 strings from old JS representations are accepted
-                // but ignored — they're not bitfield flags
-                "message-v1" | "message-v2" => {}
+                "message-v1" | "message-v2" => {} // accepted but not bitfield flags
+                "sync-reset" => flags.set(MessageFlags::SYNC_RESET),
+                "read-only" => flags.set(MessageFlags::READ_ONLY),
+                "supports-sync-reset" => flags.set(MessageFlags::SUPPORTS_SYNC_RESET),
                 other => return Err(error::BadCapabilities::ElemNotValid(i, other.to_string())),
             }
         }

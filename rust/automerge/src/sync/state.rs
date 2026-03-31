@@ -61,6 +61,20 @@ pub struct State {
     /// The persistent capabilities the other side has advertised (e.g. message
     /// format support). Derived from [`super::MessageFlags`]s on incoming messages.
     pub their_capabilities: Option<Vec<Capability>>,
+
+    /// If true, incoming changes from the peer will not be applied to the document.
+    /// The peer will still receive our changes. This is useful for publish-only peers.
+    pub read_only: bool,
+
+    /// Whether the remote peer is in read-only mode, as advertised by the
+    /// [`super::MessageFlags::READ_ONLY`] flag on their most recent message.
+    pub peer_read_only: bool,
+
+    /// If true, the next generated sync message will include a
+    /// [`super::MessageFlags::SYNC_RESET`] flag, signaling the remote peer to
+    /// clear its `sent_hashes`. Set by [`Self::set_read_only()`] when switching
+    /// from read-only to read-write.
+    pub needs_reset: bool,
 }
 
 /// A summary of the changes that the sender of the message already has.
@@ -78,6 +92,17 @@ pub struct Have {
 impl State {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    /// Create a new read-only sync state.
+    ///
+    /// In read-only mode, incoming changes from the peer are not applied to the
+    /// document, but our changes are still sent to the peer.
+    pub fn new_read_only() -> Self {
+        Self {
+            read_only: true,
+            ..Default::default()
+        }
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -117,8 +142,57 @@ impl State {
                 in_flight: false,
                 have_responded: false,
                 their_capabilities: None,
+                read_only: false,
+                peer_read_only: false,
+                needs_reset: false,
             },
         ))
+    }
+
+    /// Set the read-only mode of this sync state.
+    ///
+    /// When switching from read-only to read-write, the sync state is reset to
+    /// trigger a fresh sync exchange with the remote peer. This ensures the
+    /// remote peer resends any changes that were previously ignored.
+    ///
+    /// When switching from read-write to read-only, only the flag is changed.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        if self.read_only == read_only {
+            return;
+        }
+        if self.read_only && !read_only {
+            // Switching to read-write: reset sync state so the next message
+            // triggers a fresh exchange. Set needs_reset so the next message
+            // includes a SyncReset flag, telling the remote to clear its
+            // sent_hashes and resend changes we previously ignored.
+            let their_capabilities = self.their_capabilities.take();
+            *self = Self {
+                their_capabilities,
+                read_only: false,
+                needs_reset: true,
+                ..Default::default()
+            };
+        } else {
+            // Switching to read-only: ensure the next generate_sync_message
+            // produces a message so the peer discovers the ReadOnly flag.
+            self.read_only = true;
+            self.in_flight = false;
+            self.have_responded = false;
+        }
+    }
+
+    /// Returns true if the remote peer has advertised that it is in read-only
+    /// mode. A read-only peer will not apply incoming changes, so there is no
+    /// point sending them.
+    pub fn is_peer_read_only(&self) -> bool {
+        self.peer_read_only
+    }
+
+    pub(crate) fn peer_supports_sync_reset(&self) -> bool {
+        self.their_capabilities
+            .as_ref()
+            .map(|caps| caps.contains(&Capability::SyncReset))
+            .unwrap_or(false)
     }
 
     pub(crate) fn send_doc(&self) -> bool {
