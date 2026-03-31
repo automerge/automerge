@@ -153,7 +153,7 @@ pub trait RleValue: ColumnValueRef {
     ///
     /// The `slab` parameter is unused but anchors the lifetime so that
     /// the return type `Self::Get<'_>` is well-formed for borrowing types.
-    fn get_null(_slab: &ValidBytes) -> Self::Get<'_> {
+    fn get_null<'a>() -> Self::Get<'a> {
         panic!("unexpected null in non-nullable column")
     }
 
@@ -200,8 +200,8 @@ impl<T: RleValue> RleValue for Option<T> {
         value.is_none()
     }
 
-    // CLAUDE why does get_null take an argument?
-    fn get_null(_slab: &ValidBytes) -> Option<T::Get<'_>> {
+    // Takes &ValidBytes to tie the GAT lifetime: Get<'a> requires 'a from somewhere.
+    fn get_null<'a>() -> Option<T::Get<'a>> {
         None
     }
 

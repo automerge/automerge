@@ -4,7 +4,7 @@ use std::ops::Range;
 use crate::PackError;
 
 use super::column::Slab;
-use super::encoding::{ColumnEncoding, RunDecoder};
+use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
 use super::rle_state::RewriteHeader;
 use super::{AsColumnRef, ColumnValueRef, RleValue, Run, ValidBuf, ValidBytes};
 
@@ -140,90 +140,6 @@ pub(crate) fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
     Some((start - buf.len(), v))
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Encode a value-run count header.  A single item is stored as a literal
-/// run (`-1`) rather than a repeat run (`+1`) so that every repeat run has
-/// count >= 2.
-#[allow(dead_code)]
-fn value_run_header(count: usize) -> Leb128Buf {
-    if count == 1 {
-        encode_signed(-1)
-    } else {
-        encode_signed(count as i64)
-    }
-}
-
-/// Stack-buffered null run: marker (0) + unsigned count. Max 20 bytes.
-#[allow(dead_code)]
-struct NullRunBuf {
-    buf: [u8; 20],
-    len: u8,
-}
-
-impl std::ops::Deref for NullRunBuf {
-    type Target = [u8];
-    #[inline]
-    fn deref(&self) -> &[u8] {
-        &self.buf[..self.len as usize]
-    }
-}
-
-struct NullRunIter {
-    buf: [u8; 20],
-    pos: u8,
-    len: u8,
-}
-
-impl Iterator for NullRunIter {
-    type Item = u8;
-    #[inline]
-    fn next(&mut self) -> Option<u8> {
-        if self.pos < self.len {
-            let b = self.buf[self.pos as usize];
-            self.pos += 1;
-            Some(b)
-        } else {
-            None
-        }
-    }
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = (self.len - self.pos) as usize;
-        (n, Some(n))
-    }
-}
-
-impl ExactSizeIterator for NullRunIter {}
-
-impl IntoIterator for NullRunBuf {
-    type Item = u8;
-    type IntoIter = NullRunIter;
-    #[inline]
-    fn into_iter(self) -> NullRunIter {
-        NullRunIter {
-            buf: self.buf,
-            pos: 0,
-            len: self.len,
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn null_run_bytes(count: usize) -> NullRunBuf {
-    let marker = encode_signed(0);
-    let cnt = encode_unsigned(count as u64);
-    let mut out = NullRunBuf {
-        buf: [0u8; 20],
-        len: 0,
-    };
-    out.buf[..marker.len as usize].copy_from_slice(marker.as_bytes());
-    out.len = marker.len;
-    out.buf[out.len as usize..out.len as usize + cnt.len as usize].copy_from_slice(cnt.as_bytes());
-    out.len += cnt.len;
-    out
-}
-
 // ── RleDecoder ───────────────────────────────────────────────────────────────
 
 /// Forward iterator over all items in a single RLE-encoded slab.
@@ -353,7 +269,7 @@ impl<'a, T: RleValue> Iterator for RleDecoder<'a, T> {
                         self.byte_pos += vlen;
                         Some(value)
                     }
-                    RleDecoderState::Null => Some(T::get_null(self.data)),
+                    RleDecoderState::Null => Some(T::get_null()),
                     RleDecoderState::Idle => None,
                 };
             }
@@ -414,7 +330,7 @@ impl<'a, T: RleValue> RunDecoder for RleDecoder<'a, T> {
                         Some(Run { count: 1, value })
                     }
                     RleDecoderState::Null => {
-                        let value = T::get_null(self.data);
+                        let value = T::get_null();
                         self.remaining = 0;
                         Some(Run { count, value })
                     }
@@ -449,7 +365,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_merge_slabs::<T>(a, b)
     }
 
-    fn validate_encoding(slab: &[u8]) -> Result<(), String> {
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
         rle_validate_encoding::<T>(slab)
     }
 
@@ -670,14 +586,14 @@ mod partition_tests {
 
     fn encode_u64_slab(vals: &[u64]) -> Slab {
         let mut buf = Vec::new();
-        crate::v1::rle_state::rle_encode_state::<u64>(vals.iter().copied(), &mut buf);
+        rle_encode_state::<u64>(vals.iter().copied(), &mut buf);
         let len = vals.len();
         make_slab(buf, len)
     }
 
     fn encode_opt_slab(vals: &[Option<u64>]) -> Slab {
         let mut buf = Vec::new();
-        crate::v1::rle_state::rle_encode_state::<Option<u64>>(vals.iter().copied(), &mut buf);
+        rle_encode_state::<Option<u64>>(vals.iter().copied(), &mut buf);
         let len = vals.len();
         make_slab(buf, len)
     }
@@ -1100,64 +1016,6 @@ pub(crate) fn splice_slab<T: RleValue, V: super::AsColumnRef<T>>(
 
 // ── streaming_save ───────────────────────────────────────────────────────────
 
-/// Find the byte offset of the last run in `slab`.  Returns `None` only if
-/// `slab` is empty.
-fn last_run_start<T: RleValue>(slab: &[u8]) -> Option<usize> {
-    let mut pos = 0;
-    let mut last = 0;
-    while pos < slab.len() {
-        last = pos;
-        let (cb, raw) = read_signed(&slab[pos..])?;
-        match raw {
-            n if n > 0 => {
-                let vl = T::value_len(&slab[pos + cb..])?;
-                pos += cb + vl;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut sb = pos + cb;
-                for _ in 0..total {
-                    let vl = T::value_len(&slab[sb..])?;
-                    sb += vl;
-                }
-                pos = sb;
-            }
-            _ => {
-                let (ncb, _) = read_unsigned(&slab[pos + cb..])?;
-                pos += cb + ncb;
-            }
-        }
-    }
-    Some(last)
-}
-
-/// End byte offset of the first run in `slab`.
-fn first_run_end<T: RleValue>(slab: &[u8]) -> usize {
-    if slab.is_empty() {
-        return 0;
-    }
-    let (cb, raw) = read_signed(slab).unwrap();
-    match raw {
-        n if n > 0 => {
-            let vl = T::value_len(&slab[cb..]).unwrap();
-            cb + vl
-        }
-        n if n < 0 => {
-            let total = (-n) as usize;
-            let mut sb = cb;
-            for _ in 0..total {
-                let vl = T::value_len(&slab[sb..]).unwrap();
-                sb += vl;
-            }
-            sb
-        }
-        _ => {
-            let (ncb, _) = read_unsigned(&slab[cb..]).unwrap();
-            cb + ncb
-        }
-    }
-}
-
 /// Fast in-place merge of slab `b` into slab `a`. Only examines the
 /// boundary runs (last of `a`, first of `b`). Interior bytes are memcopied.
 ///
@@ -1200,231 +1058,6 @@ fn rle_merge_slabs<T: RleValue>(a: &mut Slab, b: &Slab) {
 
     a.segments = a_prefix_segs + rewrite.segments + postfix_segs;
     a.len += b.len;
-}
-
-#[allow(dead_code)]
-enum ParsedRun {
-    Repeat { count: usize, value: Vec<u8> },
-    Literal { values: Vec<Vec<u8>> },
-    Null { count: usize },
-}
-
-#[allow(dead_code)]
-fn rle_merge_slab_bytes<T: RleValue>(a: &[u8], b: &[u8]) -> (Vec<u8>, usize) {
-    if a.is_empty() {
-        let segs = rle_count_segments::<T>(b);
-        return (b.to_vec(), segs);
-    }
-    if b.is_empty() {
-        let segs = rle_count_segments::<T>(a);
-        return (a.to_vec(), segs);
-    }
-
-    // Locate the last run in `a` and the first run in `b`.
-    let a_last = last_run_start::<T>(a).unwrap();
-    let b_first_end = first_run_end::<T>(b);
-
-    let a_interior = &a[..a_last];
-    let b_rest = &b[b_first_end..];
-    let a_last_bytes = &a[a_last..];
-    let b_first_bytes = &b[..b_first_end];
-
-    // Count segments for interior portions.
-    let a_interior_segs = rle_count_segments::<T>(a_interior);
-    let b_rest_segs = rle_count_segments::<T>(b_rest);
-
-    // Parse only the two boundary runs.
-    let a_run = parse_one_run::<T>(a_last_bytes);
-    let b_run = parse_one_run::<T>(b_first_bytes);
-
-    // Try to merge them.
-    let merged = merge_two_runs(a_run, b_run);
-
-    // Count segments in the merged boundary.
-    let boundary_segs: usize = merged.iter().map(run_segments).sum();
-
-    let mut result = Vec::with_capacity(a.len() + b.len());
-    result.extend_from_slice(a_interior);
-    for run in &merged {
-        encode_one_run(run, &mut result);
-    }
-    result.extend_from_slice(b_rest);
-    (result, a_interior_segs + boundary_segs + b_rest_segs)
-}
-
-/// Count segments in a single parsed run.
-#[allow(dead_code)]
-fn run_segments(run: &ParsedRun) -> usize {
-    match run {
-        ParsedRun::Repeat { .. } => 1,
-        ParsedRun::Literal { values } => values.len(),
-        ParsedRun::Null { .. } => 1,
-    }
-}
-
-/// Parse a single run from the start of `data`.
-#[allow(dead_code)]
-fn parse_one_run<T: RleValue>(data: &[u8]) -> ParsedRun {
-    let (cb, raw) = read_signed(data).unwrap();
-    match raw {
-        n if n > 0 => {
-            let count = n as usize;
-            let vs = cb;
-            let vl = T::value_len(&data[vs..]).unwrap();
-            ParsedRun::Repeat {
-                count,
-                value: data[vs..vs + vl].to_vec(),
-            }
-        }
-        n if n < 0 => {
-            let total = (-n) as usize;
-            let mut values = Vec::with_capacity(total);
-            let mut sb = cb;
-            for _ in 0..total {
-                let vl = T::value_len(&data[sb..]).unwrap();
-                values.push(data[sb..sb + vl].to_vec());
-                sb += vl;
-            }
-            ParsedRun::Literal { values }
-        }
-        _ => {
-            let (_, nc) = read_unsigned(&data[cb..]).unwrap();
-            ParsedRun::Null { count: nc as usize }
-        }
-    }
-}
-
-/// Encode a single parsed run into `out`.
-#[allow(dead_code)]
-fn encode_one_run(run: &ParsedRun, out: &mut Vec<u8>) {
-    match run {
-        ParsedRun::Repeat { count, value } => {
-            out.extend(value_run_header(*count));
-            out.extend_from_slice(value);
-        }
-        ParsedRun::Literal { values } => {
-            out.extend(encode_signed(-(values.len() as i64)));
-            for v in values {
-                out.extend_from_slice(v);
-            }
-        }
-        ParsedRun::Null { count } => {
-            out.extend(null_run_bytes(*count));
-        }
-    }
-}
-
-/// Merge two adjacent parsed runs into 1–3 canonical runs.
-#[allow(dead_code)]
-fn merge_two_runs(a: ParsedRun, b: ParsedRun) -> Vec<ParsedRun> {
-    match (a, b) {
-        // Null + Null → merge
-        (ParsedRun::Null { count: c1 }, ParsedRun::Null { count: c2 }) => {
-            vec![ParsedRun::Null { count: c1 + c2 }]
-        }
-
-        // Repeat + Repeat, same value → merge
-        (
-            ParsedRun::Repeat {
-                count: c1,
-                value: v1,
-            },
-            ParsedRun::Repeat {
-                count: c2,
-                value: v2,
-            },
-        ) if v1 == v2 => {
-            vec![ParsedRun::Repeat {
-                count: c1 + c2,
-                value: v1,
-            }]
-        }
-
-        // Repeat + Literal starting with same value → absorb first literal item
-        (ParsedRun::Repeat { count, value }, ParsedRun::Literal { mut values })
-            if !values.is_empty() && values[0] == value =>
-        {
-            values.remove(0);
-            let mut result = vec![ParsedRun::Repeat {
-                count: count + 1,
-                value,
-            }];
-            if !values.is_empty() {
-                result.push(ParsedRun::Literal { values });
-            }
-            result
-        }
-
-        // Literal ending with same value as Repeat → absorb last literal item
-        (ParsedRun::Literal { mut values }, ParsedRun::Repeat { count, value })
-            if !values.is_empty() && *values.last().unwrap() == value =>
-        {
-            values.pop();
-            let mut result = vec![];
-            if !values.is_empty() {
-                result.push(ParsedRun::Literal { values });
-            }
-            result.push(ParsedRun::Repeat {
-                count: count + 1,
-                value,
-            });
-            result
-        }
-
-        // Literal + Literal → merge, then canonicalize
-        (ParsedRun::Literal { values: mut v1 }, ParsedRun::Literal { values: v2 }) => {
-            v1.extend(v2);
-            canonicalize_literal(v1)
-        }
-
-        // Repeat(count=1) is actually a literal — handle boundary with lit
-        // This shouldn't happen with our encoding (count=1 → literal), but be safe.
-
-        // No merge possible — emit both unchanged.
-        (a, b) => vec![a, b],
-    }
-}
-
-/// Canonicalize a merged literal run: extract leading/trailing/internal repeats.
-#[allow(dead_code)]
-fn canonicalize_literal(values: Vec<Vec<u8>>) -> Vec<ParsedRun> {
-    if values.is_empty() {
-        return vec![];
-    }
-    let mut result: Vec<ParsedRun> = vec![];
-    let mut i = 0;
-    while i < values.len() {
-        // Count consecutive equal values.
-        let mut count = 1;
-        while i + count < values.len() && values[i + count] == values[i] {
-            count += 1;
-        }
-        if count >= 2 {
-            result.push(ParsedRun::Repeat {
-                count,
-                value: values[i].clone(),
-            });
-            i += count;
-        } else {
-            // Collect a literal run of distinct values.
-            let start = i;
-            i += 1;
-            while i < values.len() {
-                if i + 1 < values.len() && values[i] == values[i + 1] {
-                    break;
-                }
-                i += 1;
-            }
-            let lit_values: Vec<Vec<u8>> = values[start..i].to_vec();
-            // Try to merge with a preceding literal.
-            if let Some(ParsedRun::Literal { values: prev_vals }) = result.last_mut() {
-                prev_vals.extend(lit_values);
-            } else {
-                result.push(ParsedRun::Literal { values: lit_values });
-            }
-        }
-    }
-    result
 }
 
 // ── streaming_save ───────────────────────────────────────────────────────────
@@ -1628,9 +1261,12 @@ fn rle_streaming_save<T: RleValue>(slabs: &[&[u8]]) -> Vec<u8> {
 /// 7. First value of a literal differs from previous run's last value
 /// 8. Last value of a literal differs from next run's first value
 /// 9. No two consecutive equal values within a literal (would form a repeat)
-pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<(), String> {
+pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo, String> {
     if slab.is_empty() {
-        return Ok(());
+        return Ok(SlabInfo {
+            segments: 0,
+            len: 0,
+        });
     }
 
     // Parse all runs and their value bytes for comparison.
@@ -1774,7 +1410,25 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<(), Stri
         }
     }
 
-    Ok(())
+    let mut segments = 0;
+    let mut len = 0;
+    for run in &runs {
+        match run {
+            Run::Repeat { count, .. } => {
+                segments += 1;
+                len += count;
+            }
+            Run::Literal { values } => {
+                segments += values.len();
+                len += values.len();
+            }
+            Run::Null { count } => {
+                segments += 1;
+                len += count;
+            }
+        }
+    }
+    Ok(SlabInfo { segments, len })
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────
@@ -1977,7 +1631,7 @@ fn rle_load_and_verify<T: RleValue>(
                 ));
             }
             if let Some(v) = validate {
-                if let Some(m) = v(T::get_null(ValidBytes::from_bytes(data))) {
+                if let Some(m) = v(T::get_null()) {
                     return Err(PackError::InvalidValue(m));
                 }
             }
@@ -2075,9 +1729,28 @@ fn rle_count_segments<T: RleValue>(slab: &[u8]) -> usize {
 }
 
 #[cfg(test)]
+pub(crate) fn rle_encode_state<T: RleValue>(
+    values: impl Iterator<Item = T::Get<'static>>,
+    buf: &mut Vec<u8>,
+) -> (usize, usize)
+where
+    T::Get<'static>: AsColumnRef<T>,
+{
+    let mut state = RleState::<'static, T, T::Get<'static>>::Empty;
+    let mut segments = 0;
+    let mut items = 0;
+    for v in values {
+        items += 1;
+        segments += state.append(buf, RleCow::Ref(v)).segments;
+    }
+    let f = state.flush(buf);
+    segments += f.segments;
+    (items, segments)
+}
+
+#[cfg(test)]
 mod load_verify_tests {
     use super::*;
-    use crate::v1::rle_state::rle_encode_state;
 
     #[test]
     fn load_verify_roundtrip() {

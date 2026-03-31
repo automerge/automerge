@@ -99,11 +99,6 @@ impl FlushState {
             rewrite: Some(r),
         }
     }
-    #[allow(dead_code)]
-    fn with_segments(mut self, segments: usize) -> Self {
-        self.segments += segments;
-        self
-    }
 }
 
 impl std::ops::AddAssign for FlushState {
@@ -149,10 +144,6 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>> {
 type Cow<'a, T, V> = RleCow<'a, T, V>;
 
 impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
-    pub fn new() -> Self {
-        RleState::Empty
-    }
-
     /// Segments that will be produced when this state is flushed.
     pub fn pending_segments(&self) -> usize {
         match self {
@@ -378,53 +369,6 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn append_raw(
-        &mut self,
-        buf: &mut Vec<u8>,
-        raw: &[u8],
-        segments: usize,
-        lit: usize,
-    ) -> FlushState {
-        let old = std::mem::replace(self, RleState::Empty);
-        if lit == 0 {
-            let flushed = Self::do_flush(old, buf);
-            buf.extend_from_slice(raw);
-            return flushed.with_segments(segments);
-        }
-        match old {
-            RleState::Lit {
-                count,
-                local,
-                header_pos,
-                current,
-            } => {
-                current.pack(buf);
-                buf.extend_from_slice(raw);
-                let total = count + 1 + lit;
-                if local == count {
-                    rewrite_lit_header(buf, header_pos, total);
-                    FlushState::new(local + 1 + segments)
-                } else {
-                    FlushState::rewrite(local + 1 + segments, RewriteHeader::new(total, header_pos))
-                }
-            }
-            RleState::Lone(value) => {
-                let total = 1 + lit;
-                buf.extend(encode_signed(-(total as i64)));
-                value.pack(buf);
-                buf.extend_from_slice(raw);
-                FlushState::new(1 + segments)
-            }
-            other => {
-                let flushed = Self::do_flush(other, buf);
-                buf.extend(encode_signed(-(lit as i64)));
-                buf.extend_from_slice(raw);
-                flushed.with_segments(lit + segments)
-            }
-        }
-    }
-
     pub fn flush(&mut self, buf: &mut Vec<u8>) -> FlushState {
         let old = std::mem::replace(self, RleState::Empty);
         Self::do_flush(old, buf)
@@ -512,30 +456,6 @@ pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: us
     }
 }
 
-/// Encode values into canonical RLE bytes. Returns (items, segments).
-///
-/// Values come from an iterator (owned, not borrowed from a slab),
-/// so the state uses `'static` lifetime.
-#[allow(dead_code)]
-pub(crate) fn rle_encode_state<T: RleValue>(
-    values: impl Iterator<Item = T::Get<'static>>,
-    buf: &mut Vec<u8>,
-) -> (usize, usize)
-where
-    T::Get<'static>: AsColumnRef<T>,
-{
-    let mut state = RleState::<'static, T, T::Get<'static>>::new();
-    let mut segments = 0;
-    let mut items = 0;
-    for v in values {
-        items += 1;
-        segments += state.append(buf, RleCow::Ref(v)).segments;
-    }
-    let f = state.flush(buf);
-    segments += f.segments;
-    (items, segments)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,7 +463,7 @@ mod tests {
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
         let mut buf = Vec::new();
-        let mut state = RleState::<u64, u64>::new();
+        let mut state = RleState::<u64, u64>::Empty;
         for &v in vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
@@ -665,7 +585,7 @@ mod tests {
     fn nullable_with_nulls() {
         let vals: Vec<Option<u64>> = vec![Some(1), None, None, Some(2), Some(2)];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::new();
+        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
@@ -676,7 +596,7 @@ mod tests {
     fn nullable_null_value_null() {
         let vals: Vec<Option<u64>> = vec![None, Some(5), None];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::new();
+        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
@@ -687,35 +607,11 @@ mod tests {
     fn nullable_value_then_null() {
         let vals: Vec<Option<u64>> = vec![Some(5), None];
         let mut buf = Vec::new();
-        let mut state = RleState::<Option<u64>, Option<u64>>::new();
+        let mut state = RleState::<Option<u64>, Option<u64>>::Empty;
         for &v in &vals {
             state.append(&mut buf, RleCow::Ref(v));
         }
         state.flush(&mut buf);
         rle_validate_encoding::<Option<u64>>(&buf).unwrap();
-    }
-
-    #[test]
-    fn append_raw_after_run() {
-        // Bug: append_raw with Run state + lit > 0 wrote lit header before flushing Run.
-        let mut buf = Vec::new();
-        let mut state = RleState::<u64, u64>::new();
-        // Build a Run(3, 5)
-        state.append_n(&mut buf, RleCow::Ref(5), 3);
-        // Now append_raw with lit=2, raw bytes = packed values [1, 2]
-        let mut raw = Vec::new();
-        u64::pack(1, &mut raw);
-        u64::pack(2, &mut raw);
-        state.append_raw(&mut buf, &raw, 0, 2);
-        // Result should be: repeat(3, 5) + lit(-2, 1, 2)
-        rle_validate_encoding::<u64>(&buf).unwrap();
-        // Decode and verify
-        let decoded: Vec<u64> = {
-            use crate::v1::rle::RleDecoder;
-            use crate::v1::ValidBuf;
-            let vb = ValidBuf::new(buf);
-            RleDecoder::<u64>::new(&vb).collect()
-        };
-        assert_eq!(decoded, vec![5, 5, 5, 1, 2]);
     }
 }
