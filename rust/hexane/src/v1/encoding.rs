@@ -34,7 +34,7 @@ pub trait ColumnEncoding: Default {
     ///
     /// Returns `Ok(())` if the encoding is canonical, or `Err(description)` if
     /// any invariant is violated.  This is intended for testing and debugging.
-    fn validate_encoding(slab: &[u8]) -> Result<(), String>;
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo, String>;
 
     /// Decode and validate raw bytes, splitting into slabs.
     ///
@@ -169,4 +169,9 @@ pub trait RunDecoder: Iterator {
     ///
     /// Returns `None` when the iterator is exhausted.
     fn next_run(&mut self) -> Option<Run<Self::Item>>;
+}
+
+pub struct SlabInfo {
+    pub segments: usize,
+    pub len: usize,
 }

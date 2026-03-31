@@ -24,30 +24,23 @@ impl Slab {
     /// the same code path as splice.
     #[cfg(debug_assertions)]
     pub(crate) fn validate<T: super::RleValue>(&self) {
-        use super::encoding::{ColumnEncoding, RunDecoder};
+        use super::encoding::ColumnEncoding;
         let bytes: &[u8] = &self.data;
 
-        if let Err(e) = T::Encoding::validate_encoding(bytes) {
-            panic!("slab encoding invalid: {e}\n  bytes={bytes:?}");
-        }
-
-        let mut decoder = T::Encoding::decoder(&self.data);
-        let mut items = 0usize;
-        let mut segments = 0usize;
-        while let Some(run) = decoder.next_run() {
-            items += run.count;
-            segments += 1;
-        }
+        let info = match T::Encoding::validate_encoding(bytes) {
+            Ok(info) => info,
+            Err(e) => panic!("slab encoding invalid: {e}\n  bytes={bytes:?}"),
+        };
 
         assert_eq!(
-            self.len, items,
-            "slab len mismatch: stored={} actual={items}\n  bytes={bytes:?}",
-            self.len,
+            self.len, info.len,
+            "slab len mismatch: stored={} actual={}\n  bytes={bytes:?}",
+            self.len, info.len,
         );
         assert_eq!(
-            self.segments, segments,
-            "slab segments mismatch: stored={} actual={segments}\n  bytes={bytes:?}",
-            self.segments,
+            self.segments, info.segments,
+            "slab segments mismatch: stored={} actual={}\n  bytes={bytes:?}",
+            self.segments, info.segments,
         );
     }
 }
@@ -301,6 +294,15 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         let bytes = self.save();
         if let Err(e) = T::Encoding::validate_encoding(&bytes) {
             panic!("invalid encoding: {e}");
+        }
+    }
+
+    /// Validate the canonical encoding and return its slab info.
+    pub fn validate_encoding_info(&self) -> super::encoding::SlabInfo {
+        let bytes = self.save();
+        match T::Encoding::validate_encoding(&bytes) {
+            Ok(info) => info,
+            Err(e) => panic!("invalid encoding: {e}"),
         }
     }
 
