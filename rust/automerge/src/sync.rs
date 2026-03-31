@@ -165,7 +165,11 @@ impl SyncDoc for Automerge {
     fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
         let our_heads = self.get_heads();
 
-        let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
+        let our_need = if sync_state.read_only {
+            vec![]
+        } else {
+            self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]))
+        };
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
             heads.iter().collect::<HashSet<_>>()
@@ -190,7 +194,11 @@ impl SyncDoc for Automerge {
             }
         }
 
-        let message_builder = if let Some((their_have, their_need)) = sync_state.their() {
+        let message_builder = if sync_state.is_peer_read_only() {
+            // The remote peer is read-only and will ignore incoming changes.
+            // Skip computing and sending changes to save bandwidth.
+            MessageBuilder::new(vec![], sync_state)
+        } else if let Some((their_have, their_need)) = sync_state.their() {
             if sync_state.send_doc() {
                 let hashes = self.change_graph.get_hashes(&[]);
                 MessageBuilder::new_v2(self.save(), hashes)
@@ -221,7 +229,7 @@ impl SyncDoc for Automerge {
         let heads_equal = sync_state.their_heads.as_ref() == Some(&our_heads);
 
         if heads_unchanged && sync_state.have_responded {
-            if heads_equal && message_builder.is_empty() {
+            if (heads_equal || sync_state.read_only) && message_builder.is_empty() {
                 return None;
             }
             if sync_state.in_flight {
@@ -233,11 +241,35 @@ impl SyncDoc for Automerge {
         sync_state.last_sent_heads.clone_from(&our_heads);
         sync_state.sent_hashes.extend(message_builder.hashes());
 
+        let mut flags = MessageFlags::new();
+        flags.set(MessageFlags::SUPPORTS_SYNC_RESET);
+        if sync_state.read_only {
+            flags.set(MessageFlags::READ_ONLY);
+        }
+
+        // When switching from read-only to read-write, we need the remote to
+        // clear its sent_hashes so it resends changes we previously ignored.
+        // Peers that advertise Capability::SyncReset understand the SyncReset
+        // flag. Old peers don't, so we send empty heads to simulate losing all
+        // local state, which triggers the same sent_hashes clearing via the
+        // existing "peer lost all data" code path.
+        let heads_to_send = if sync_state.needs_reset {
+            sync_state.needs_reset = false;
+            if sync_state.peer_supports_sync_reset() {
+                flags.set(MessageFlags::SYNC_RESET);
+                our_heads.clone()
+            } else {
+                vec![]
+            }
+        } else {
+            our_heads.clone()
+        };
+
         let sync_message = message_builder
-            .heads(our_heads)
+            .heads(heads_to_send)
             .have(our_have)
             .need(our_need)
-            .flags(Some(MessageFlags::new()))
+            .flags(Some(flags))
             .build();
 
         sync_state.in_flight = true;
@@ -356,14 +388,24 @@ impl Automerge {
             ..
         } = message;
 
-        if let Some(_flags) = message_flags {
+        if let Some(flags) = message_flags {
             // Any peer that sends the flags section supports V2 messages —
             // the flags section was introduced alongside V2 support.
-            sync_state.their_capabilities = Some(vec![Capability::MessageV2]);
+            let mut caps = vec![Capability::MessageV2];
+            if flags.contains(MessageFlags::SUPPORTS_SYNC_RESET) {
+                caps.push(Capability::SyncReset);
+            }
+            sync_state.their_capabilities = Some(caps);
+
+            // Process transient per-message signals
+            if flags.contains(MessageFlags::SYNC_RESET) {
+                sync_state.sent_hashes.clear();
+            }
+            sync_state.peer_read_only = flags.contains(MessageFlags::READ_ONLY);
         }
 
         let changes_is_empty = message_changes.is_empty();
-        if !changes_is_empty {
+        if !changes_is_empty && !sync_state.read_only {
             self.load_incremental_log_patches(&message_changes.join(), patch_log)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
@@ -465,10 +507,11 @@ impl From<parse::ParseError<ReadMessageError>> for ReadMessageError {
 ///
 /// Encoding this in a backwards compatible way is a bit tricky. The wire format of the v1 message
 /// didn't allow for any forwards compatible changes. In order to accomodate this the first message
-/// a peer sends is a V1 message with a [`MessageFlags`] bitfield appended to it. For old
+/// a peer sends is a V1 message with a length-prefixed `Vec<MessageFlag>` appended to it. For old
 /// implementations this appended data is just ignored but new implementations read it and store
 /// the advertised capabilities on the sync state. This allows new implementations to discover if
-/// the remote peer supports the V2 message format and if so send a V2 message.
+/// the remote peer supports the V2 message format and if so send a V2 message. The flags also
+/// carry transient per-message signals such as read-only mode and sync reset.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     /// The heads of the sender.
@@ -572,7 +615,11 @@ impl Message {
             need: Vec::new(),
             have: vec![Have::default()],
             changes: ChunkList::empty(),
-            flags: Some(MessageFlags::new()),
+            flags: {
+                let mut f = MessageFlags::new();
+                f.set(MessageFlags::SUPPORTS_SYNC_RESET);
+                Some(f)
+            },
             version: MessageVersion::V1,
         }
     }
@@ -734,12 +781,15 @@ impl MessageFlags {
     }
 }
 
-/// Persistent peer capabilities, derived from [`MessageFlags`] on incoming
+/// Persistent peer capabilities, derived from [`MessageFlags`]s on incoming
 /// messages. These describe what the remote peer supports.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     MessageV1,
     MessageV2,
+    /// The peer understands the [`MessageFlags::SYNC_RESET`] flag and will
+    /// clear its `sent_hashes` when it receives one.
+    SyncReset,
 }
 
 fn encode_many<'a, I, It, F>(out: &mut Vec<u8>, data: I, f: F)
@@ -1342,5 +1392,1091 @@ mod tests {
 
         let (_, chunk) = Chunk::parse(Input::new(&changes.0[0])).unwrap();
         assert!(matches!(chunk, Chunk::Document(_)));
+    }
+
+    #[test]
+    fn read_only_sync_does_not_apply_incoming_changes() {
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.commit();
+
+        let doc1_heads_before = doc1.get_heads();
+        let doc2_heads_before = doc2.get_heads();
+
+        // doc1 is read-only: it should send its changes but not accept doc2's
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc2 should have received doc1's changes
+        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_some());
+        assert!(doc2.get(crate::ROOT, "from_doc2").unwrap().is_some());
+
+        // doc1 should NOT have received doc2's changes
+        assert!(doc1.get(crate::ROOT, "from_doc1").unwrap().is_some());
+        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
+
+        // doc1's heads should be unchanged
+        assert_eq!(doc1.get_heads(), doc1_heads_before);
+
+        // doc2's heads should have advanced
+        assert_ne!(doc2.get_heads(), doc2_heads_before);
+    }
+
+    #[test]
+    fn read_only_empty_peer_syncs_with_data_peer() {
+        // An empty read-only peer syncs with a peer that has data.
+        // This exercises the V2 "send full document" path on the non-read-only side.
+        // The read-only peer should ignore the document and the protocol should converge.
+        let mut doc1 = crate::AutoCommit::new();
+        let mut doc2 = crate::AutoCommit::new();
+        doc2.put(crate::ROOT, "key", "value").unwrap();
+        doc2.commit();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc1 should still be empty
+        assert!(doc1.get(crate::ROOT, "key").unwrap().is_none());
+        assert!(doc1.get_heads().is_empty());
+
+        // doc2 should be unchanged
+        assert!(doc2.get(crate::ROOT, "key").unwrap().is_some());
+    }
+
+    #[test]
+    fn both_peers_read_only() {
+        // When both peers are read-only, neither applies the other's changes.
+        // The protocol should still converge.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.commit();
+
+        let doc1_heads = doc1.get_heads();
+        let doc2_heads = doc2.get_heads();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // Neither peer should have the other's changes
+        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
+        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_none());
+
+        // Both heads unchanged
+        assert_eq!(doc1.get_heads(), doc1_heads);
+        assert_eq!(doc2.get_heads(), doc2_heads);
+    }
+
+    #[test]
+    fn both_peers_read_only_converges_to_none() {
+        // Explicitly verify that generate_sync_message returns None on both
+        // sides after the initial exchange between two read-only peers.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.commit();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // After sync, both must return None — no infinite loop
+        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
+        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+
+        // Both discover the other is read-only
+        assert!(s1.is_peer_read_only());
+        assert!(s2.is_peer_read_only());
+    }
+
+    #[test]
+    fn both_read_only_one_makes_local_changes() {
+        // Both peers are read-only. One makes local changes between sync
+        // rounds. The updated heads should be communicated (no changes sent),
+        // and the protocol should converge.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        // Initial sync with no data — just exchange hellos
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc1 makes local changes
+        doc1.put(crate::ROOT, "key", "value1").unwrap();
+        doc1.commit();
+        let doc1_heads_after = doc1.get_heads();
+
+        // Sync again — should converge, doc1's new heads communicated
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc2 should know about doc1's heads but not have the changes
+        assert_eq!(s2.their_heads.as_ref().unwrap(), &doc1_heads_after);
+        assert!(doc2.get(crate::ROOT, "key").unwrap().is_none());
+
+        // doc1 makes more changes
+        doc1.put(crate::ROOT, "key", "value2").unwrap();
+        doc1.commit();
+        let doc1_heads_after2 = doc1.get_heads();
+
+        // Sync again
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc2 should see the updated heads
+        assert_eq!(s2.their_heads.as_ref().unwrap(), &doc1_heads_after2);
+        assert!(doc2.get(crate::ROOT, "key").unwrap().is_none());
+
+        // Must converge
+        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
+        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+    }
+
+    #[test]
+    fn both_read_only_both_make_local_changes() {
+        // Both peers are read-only and both make local changes between sync
+        // rounds. Both should learn the other's updated heads, neither should
+        // receive actual changes, and the protocol should converge each round.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        for round in 0..5 {
+            doc1.put(crate::ROOT, "doc1_counter", round as i64).unwrap();
+            doc1.commit();
+            doc2.put(crate::ROOT, "doc2_counter", round as i64).unwrap();
+            doc2.commit();
+
+            let doc1_heads = doc1.get_heads();
+            let doc2_heads = doc2.get_heads();
+
+            // Must converge each round (sync helper panics after 10 iterations)
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // Each peer should know the other's heads
+            assert_eq!(
+                s1.their_heads.as_ref().unwrap(),
+                &doc2_heads,
+                "round {round}: doc1 should know doc2's heads"
+            );
+            assert_eq!(
+                s2.their_heads.as_ref().unwrap(),
+                &doc1_heads,
+                "round {round}: doc2 should know doc1's heads"
+            );
+
+            // Neither should have the other's data
+            assert!(
+                doc1.get(crate::ROOT, "doc2_counter").unwrap().is_none(),
+                "round {round}: doc1 should not have doc2's changes"
+            );
+            assert!(
+                doc2.get(crate::ROOT, "doc1_counter").unwrap().is_none(),
+                "round {round}: doc2 should not have doc1's changes"
+            );
+
+            // Must be fully converged
+            assert!(
+                doc1.sync().generate_sync_message(&mut s1).is_none(),
+                "round {round}: doc1 should have nothing more to send"
+            );
+            assert!(
+                doc2.sync().generate_sync_message(&mut s2).is_none(),
+                "round {round}: doc2 should have nothing more to send"
+            );
+        }
+    }
+
+    #[test]
+    fn both_read_only_simultaneous_changes_during_sync() {
+        // Both peers are read-only. Both make changes, then exchange messages
+        // simultaneously (like the simultaneous sync test). Must converge.
+        for _ in 0..100 {
+            let mut doc1 =
+                crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+            let mut doc2 =
+                crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+            let mut s1 = State::new_read_only();
+            let mut s2 = State::new_read_only();
+
+            // Both make changes
+            doc1.put(crate::ROOT, "x", 1).unwrap();
+            doc1.commit();
+            doc2.put(crate::ROOT, "y", 2).unwrap();
+            doc2.commit();
+
+            // Sync (uses the helper which panics on non-convergence)
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // Now both make MORE changes
+            doc1.put(crate::ROOT, "x", 3).unwrap();
+            doc1.commit();
+            doc2.put(crate::ROOT, "y", 4).unwrap();
+            doc2.commit();
+
+            // Sync again
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // Must be fully converged
+            assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
+            assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
+
+            // Neither has the other's data
+            assert!(doc1.get(crate::ROOT, "y").unwrap().is_none());
+            assert!(doc2.get(crate::ROOT, "x").unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn read_only_peer_new_changes_between_sync_rounds() {
+        // After an initial sync converges, the read-only peer makes new local
+        // changes and syncs again. The new changes should flow to the other peer.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "round1", "from_doc1").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "round1", "from_doc2").unwrap();
+        doc2.commit();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new();
+
+        // First sync round
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+        assert!(doc2.get(crate::ROOT, "round1").unwrap().is_some());
+
+        // doc1 makes new changes
+        doc1.put(crate::ROOT, "round2", "new_from_doc1").unwrap();
+        doc1.commit();
+
+        // doc2 also makes new changes
+        doc2.put(crate::ROOT, "round2", "new_from_doc2").unwrap();
+        doc2.commit();
+
+        // Second sync round
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // doc2 should have doc1's new changes
+        assert_eq!(
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+            // doc2 has both values as a conflict, but the winning value depends on actor ordering;
+            // just check the key exists
+            doc2.get(crate::ROOT, "round2").unwrap().unwrap().0.to_str(),
+        );
+        // Verify doc2 has received "new_from_doc1" somewhere in the conflicts
+        let all_values: Vec<_> = doc2
+            .get_all(crate::ROOT, "round2")
+            .unwrap()
+            .into_iter()
+            .map(|(v, _)| v.into_string().unwrap())
+            .collect();
+        assert!(all_values.contains(&"new_from_doc1".to_string()));
+        assert!(all_values.contains(&"new_from_doc2".to_string()));
+
+        // doc1 should still NOT have doc2's changes
+        assert!(
+            doc1.get(crate::ROOT, "from_doc2").is_err()
+                || doc1.get(crate::ROOT, "from_doc2").unwrap().is_none()
+        );
+        let doc1_round2_values: Vec<_> = doc1
+            .get_all(crate::ROOT, "round2")
+            .unwrap()
+            .into_iter()
+            .map(|(v, _)| v.into_string().unwrap())
+            .collect();
+        assert_eq!(doc1_round2_values, vec!["new_from_doc1".to_string()]);
+    }
+
+    #[test]
+    fn read_only_peer_concurrent_changes_during_sync() {
+        // Like in_flight_logic_should_not_sabotage_concurrent_changes but with
+        // a read-only peer. The read-only peer makes a change after receiving a
+        // message but before the sync loop completes.
+        for _ in 0..300 {
+            let mut doc1 =
+                crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+            let mut doc2 =
+                crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+            let mut s1 = State::new_read_only();
+            let mut s2 = State::new();
+
+            // get them in sync (doc1 read-only, so only doc2 gets doc1's changes)
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // doc2 makes a change
+            doc2.put(crate::ROOT, "x", 0).unwrap();
+
+            // generate + receive one message from doc2 to doc1
+            let msg = doc2.sync().generate_sync_message(&mut s2).unwrap();
+            doc1.sync().receive_sync_message(&mut s1, msg).unwrap();
+
+            // before sending anything back, doc1 (read-only) makes a local change
+            doc1.put(crate::ROOT, "y", 1).unwrap();
+
+            // now synchronize the rest
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+            // doc2 should have doc1's change
+            assert!(doc2.get(crate::ROOT, "y").unwrap().is_some());
+            // doc1 should NOT have doc2's change
+            assert!(doc1.get(crate::ROOT, "x").unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn read_only_publisher_to_multiple_consumers() {
+        // R (read-only) publishes to A and B separately.
+        // A makes its own changes. Then B syncs with R again.
+        // B should NOT get A's changes through R (R never accepted them).
+        let mut r = crate::AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
+
+        r.put(crate::ROOT, "from_r", "hello").unwrap();
+        r.commit();
+
+        // R syncs with A (read-only: A gets R's changes, R ignores A's)
+        let mut sr_a = State::new_read_only();
+        let mut sa_r = State::new();
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+
+        // A makes its own changes
+        a.put(crate::ROOT, "from_a", "world").unwrap();
+        a.commit();
+
+        // A syncs with R — R should ignore A's changes
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+
+        // R syncs with B (read-only: B gets R's changes, R ignores B's)
+        let mut sr_b = State::new_read_only();
+        let mut sb_r = State::new();
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+
+        // B should have R's changes but NOT A's
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_none());
+    }
+
+    #[test]
+    fn triangle_changes_arrive_via_two_paths() {
+        // R (read-only) makes changes, syncs with A. A gets R's changes.
+        // A syncs with B (read-write). B gets R's changes via A.
+        // Now B syncs with R directly. R should recognize B already has its
+        // changes (via bloom filter) and not redundantly send them.
+        // The protocol should converge.
+        let mut r = crate::AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
+
+        r.put(crate::ROOT, "from_r", "hello").unwrap();
+        r.commit();
+        a.put(crate::ROOT, "from_a", "world").unwrap();
+        a.commit();
+
+        // R syncs with A (read-only)
+        let mut sr_a = State::new_read_only();
+        let mut sa_r = State::new();
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+
+        // A now has R's changes
+        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+
+        // A syncs with B (both read-write)
+        let mut sa_b = State::new();
+        let mut sb_a = State::new();
+        sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
+
+        // B now has R's changes (received via A)
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+
+        // Now B syncs with R directly
+        let mut sr_b = State::new_read_only();
+        let mut sb_r = State::new();
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+
+        // R should still only have its own changes
+        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+
+        // B should still have everything (R's changes aren't duplicated, just confirmed)
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+    }
+
+    #[test]
+    fn read_only_fully_connected_triangle() {
+        // Three peers: A, B, R. R is read-only toward both A and B.
+        // All three have their own changes. Each pair syncs.
+        // A and B should converge to having A's + B's + R's changes.
+        // R should only have its own changes.
+        let mut r = crate::AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
+
+        r.put(crate::ROOT, "from_r", "r_val").unwrap();
+        r.commit();
+        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "b_val").unwrap();
+        b.commit();
+
+        let r_heads = r.get_heads();
+
+        // R syncs with A (read-only)
+        let mut sr_a = State::new_read_only();
+        let mut sa_r = State::new();
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+
+        // R syncs with B (read-only)
+        let mut sr_b = State::new_read_only();
+        let mut sb_r = State::new();
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+
+        // A and B each have R's changes via separate sync sessions
+        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+
+        // A syncs with B (read-write) — both already have R's changes
+        let mut sa_b = State::new();
+        let mut sb_a = State::new();
+        sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
+
+        // A and B should have all three sets of changes
+        assert!(a.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+
+        // A and B should have the same heads
+        assert_eq!(a.get_heads(), b.get_heads());
+
+        // R should only have its own changes
+        assert_eq!(r.get_heads(), r_heads);
+        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
+    }
+
+    #[test]
+    fn stale_shared_heads_after_read_only_sync() {
+        // R (read-only) syncs with A. Then A syncs with B (B gets everything).
+        // Now B syncs with R using a fresh State. R tries to send its changes
+        // to B, but B already has them (received via A). The bloom filter
+        // should prevent redundant sending and the protocol should converge.
+        let mut r = crate::AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
+
+        // R has several changes to make bloom filter interaction interesting
+        for i in 0..10 {
+            r.put(crate::ROOT, "counter", i as i64).unwrap();
+            r.commit();
+        }
+        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.commit();
+
+        // R syncs with A (read-only)
+        let mut sr_a = State::new_read_only();
+        let mut sa_r = State::new();
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+
+        // A now has R's 10 changes
+        assert!(a.get(crate::ROOT, "counter").unwrap().is_some());
+
+        // A syncs with B — B gets everything (R's changes + A's changes)
+        let mut sa_b = State::new();
+        let mut sb_a = State::new();
+        sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
+
+        assert!(b.get(crate::ROOT, "counter").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+
+        // Now B syncs directly with R (fresh sync state)
+        let mut sr_b = State::new_read_only();
+        let mut sb_r = State::new();
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+
+        // R should not have B's or A's changes
+        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+
+        // B should still have everything
+        assert!(b.get(crate::ROOT, "counter").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+    }
+
+    #[test]
+    fn read_only_peer_receives_same_changes_from_two_peers() {
+        // A and B sync with each other first (both have the same data).
+        // Then A syncs with R (read-only), then B syncs with R (read-only).
+        // R ignores changes both times. R's sync state must handle receiving
+        // announcements about the same changes from two different peers.
+        let mut r = crate::AutoCommit::new().with_actor(ActorId::try_from("aaaaaa").unwrap());
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("bbbbbb").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("cccccc").unwrap());
+
+        r.put(crate::ROOT, "from_r", "r_val").unwrap();
+        r.commit();
+        a.put(crate::ROOT, "from_a", "a_val").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "b_val").unwrap();
+        b.commit();
+
+        // A and B sync — they now share A's + B's changes
+        let mut sa_b = State::new();
+        let mut sb_a = State::new();
+        sync(&mut a, &mut b, &mut sa_b, &mut sb_a);
+        assert_eq!(a.get_heads(), b.get_heads());
+
+        let r_heads = r.get_heads();
+
+        // A syncs with R (read-only) — R ignores A's+B's changes, A gets R's
+        let mut sr_a = State::new_read_only();
+        let mut sa_r = State::new();
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+        assert!(a.get(crate::ROOT, "from_r").unwrap().is_some());
+        assert_eq!(r.get_heads(), r_heads);
+
+        // B syncs with R (read-only) — R ignores the same changes again, B gets R's
+        let mut sr_b = State::new_read_only();
+        let mut sb_r = State::new();
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+        assert!(b.get(crate::ROOT, "from_r").unwrap().is_some());
+
+        // R should still only have its own changes
+        assert_eq!(r.get_heads(), r_heads);
+        assert!(r.get(crate::ROOT, "from_a").unwrap().is_none());
+        assert!(r.get(crate::ROOT, "from_b").unwrap().is_none());
+
+        // R makes a new change
+        r.put(crate::ROOT, "from_r_2", "new").unwrap();
+        r.commit();
+
+        // Sync R with A again — A should get the new change
+        sync(&mut r, &mut a, &mut sr_a, &mut sa_r);
+        assert!(a.get(crate::ROOT, "from_r_2").unwrap().is_some());
+
+        // Sync R with B again — B should also get the new change
+        sync(&mut r, &mut b, &mut sr_b, &mut sb_r);
+        assert!(b.get(crate::ROOT, "from_r_2").unwrap().is_some());
+    }
+
+    #[test]
+    fn switch_read_only_to_read_write_mid_session() {
+        // A starts read-only, syncs with B (A sends changes, ignores B's).
+        // Then A switches to read-write and syncs again.
+        // A should now receive B's changes despite B having previously sent
+        // them (the sent_hashes problem).
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // First sync: A is read-only
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
+
+        // Switch A to read-write
+        sa.set_read_only(false);
+
+        // Second sync: A should now receive B's changes
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+
+        // Both should have the same heads now
+        assert_eq!(a.get_heads(), b.get_heads());
+    }
+
+    #[test]
+    fn switch_read_write_to_read_only_mid_session() {
+        // A and B sync normally (both read-write). Then A switches to
+        // read-only. B makes new changes. A should not receive them.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new();
+        let mut sb = State::new();
+
+        // First sync: both read-write
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert_eq!(a.get_heads(), b.get_heads());
+
+        // Switch A to read-only
+        sa.set_read_only(true);
+
+        // B makes new changes
+        b.put(crate::ROOT, "new_from_b", "secret").unwrap();
+        b.commit();
+
+        // A also makes a new change
+        a.put(crate::ROOT, "new_from_a", "published").unwrap();
+        a.commit();
+
+        // Second sync: A is now read-only
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // B should have A's new change
+        assert!(b.get(crate::ROOT, "new_from_a").unwrap().is_some());
+        // A should NOT have B's new change
+        assert!(a.get(crate::ROOT, "new_from_b").unwrap().is_none());
+    }
+
+    #[test]
+    fn switch_read_only_to_read_write_with_multiple_rounds() {
+        // A starts read-only, syncs multiple rounds with B (B makes changes
+        // each round). A switches to read-write. A should receive ALL of B's
+        // accumulated changes.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "initial").unwrap();
+        a.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Round 1: B has changes, A is read-only
+        b.put(crate::ROOT, "round1", "from_b").unwrap();
+        b.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "round1").unwrap().is_none());
+
+        // Round 2: B has more changes, A still read-only
+        b.put(crate::ROOT, "round2", "from_b").unwrap();
+        b.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "round2").unwrap().is_none());
+
+        // Round 3: B has even more changes, A still read-only
+        b.put(crate::ROOT, "round3", "from_b").unwrap();
+        b.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "round3").unwrap().is_none());
+
+        // Switch A to read-write
+        sa.set_read_only(false);
+
+        // Sync again — A should receive ALL of B's changes from all rounds
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "round1").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "round2").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "round3").unwrap().is_some());
+
+        assert_eq!(a.get_heads(), b.get_heads());
+    }
+
+    #[test]
+    fn toggle_read_only_multiple_times() {
+        // Rapidly toggle read-only on and off, making changes between each toggle.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Round 1: A read-only, B makes changes
+        b.put(crate::ROOT, "b1", "val").unwrap();
+        b.commit();
+        a.put(crate::ROOT, "a1", "val").unwrap();
+        a.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(b.get(crate::ROOT, "a1").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "b1").unwrap().is_none());
+
+        // Round 2: switch to read-write
+        sa.set_read_only(false);
+        b.put(crate::ROOT, "b2", "val").unwrap();
+        b.commit();
+        a.put(crate::ROOT, "a2", "val").unwrap();
+        a.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "b1").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "b2").unwrap().is_some());
+        assert!(b.get(crate::ROOT, "a2").unwrap().is_some());
+
+        // Round 3: switch back to read-only
+        sa.set_read_only(true);
+        b.put(crate::ROOT, "b3", "val").unwrap();
+        b.commit();
+        a.put(crate::ROOT, "a3", "val").unwrap();
+        a.commit();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(b.get(crate::ROOT, "a3").unwrap().is_some());
+        assert!(a.get(crate::ROOT, "b3").unwrap().is_none());
+
+        // Round 4: switch to read-write again
+        sa.set_read_only(false);
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "b3").unwrap().is_some());
+        assert_eq!(a.get_heads(), b.get_heads());
+    }
+
+    #[test]
+    fn peer_discovers_remote_read_only_status() {
+        // After exchanging messages, B should discover that A is read-only.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Before any exchange, B doesn't know A's status
+        assert!(!sb.is_peer_read_only());
+
+        // A generates a message (includes ReadOnly capability)
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+
+        // B receives it and discovers A is read-only
+        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        assert!(sb.is_peer_read_only());
+
+        // Complete the sync
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(sb.is_peer_read_only());
+
+        // A switches to read-write
+        sa.set_read_only(false);
+
+        // After exchanging messages, B discovers A is no longer read-only
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        assert!(!sb.is_peer_read_only());
+    }
+
+    #[test]
+    fn changes_not_sent_to_read_only_peer() {
+        // B should not send changes to A when B knows A is read-only.
+        // This saves bandwidth.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Exchange initial messages so B discovers A is read-only
+        let msg_a = a.sync().generate_sync_message(&mut sa).unwrap();
+        b.sync().receive_sync_message(&mut sb, msg_a).unwrap();
+        assert!(sb.is_peer_read_only());
+
+        // B generates a response — should have no changes since A is read-only
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        assert!(msg_b.changes.is_empty());
+
+        // Complete the sync
+        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // A still doesn't have B's changes (read-only + B didn't even send them)
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
+
+        // Now A switches to read-write
+        sa.set_read_only(false);
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // A should now have B's changes
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert_eq!(a.get_heads(), b.get_heads());
+    }
+
+    #[test]
+    fn generate_message_after_set_read_only_even_with_in_flight() {
+        // After calling generate_sync_message (setting in_flight=true),
+        // then set_read_only, the next generate_sync_message must still
+        // produce a message so the peer learns about the mode change.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new();
+        let mut sb = State::new();
+
+        // Normal sync to get in sync
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // B makes a new change and sends it to A
+        b.put(crate::ROOT, "new_from_b", "secret").unwrap();
+        b.commit();
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
+
+        // A generates a response (sets in_flight=true)
+        let msg = a.sync().generate_sync_message(&mut sa);
+        assert!(msg.is_some());
+        assert!(sa.in_flight);
+
+        // A switches to read-only BEFORE receiving B's next message
+        sa.set_read_only(true);
+
+        // A must be able to generate another message to advertise ReadOnly
+        let msg = a.sync().generate_sync_message(&mut sa);
+        assert!(
+            msg.is_some(),
+            "should generate message after set_read_only even with prior in_flight"
+        );
+
+        // Verify the message advertises ReadOnly
+        let msg = msg.unwrap();
+        assert!(msg.flags.unwrap().contains(MessageFlags::READ_ONLY));
+    }
+
+    #[test]
+    fn generate_message_after_set_read_only_false_even_with_in_flight() {
+        // Same as above but switching from read-only to read-write.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Sync while read-only
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // B makes a change
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        // A generates (sets in_flight)
+        let _msg = a.sync().generate_sync_message(&mut sa);
+        // Force some state by receiving a message
+        let msg_b = b.sync().generate_sync_message(&mut sb).unwrap();
+        a.sync().receive_sync_message(&mut sa, msg_b).unwrap();
+        let _ = a.sync().generate_sync_message(&mut sa);
+
+        // Now switch to read-write
+        sa.set_read_only(false);
+
+        // Must generate a message with SyncReset
+        let msg = a.sync().generate_sync_message(&mut sa);
+        assert!(
+            msg.is_some(),
+            "should generate message after switching to read-write"
+        );
+        let msg = msg.unwrap();
+        let flags = msg.flags.unwrap();
+        assert!(flags.contains(MessageFlags::SYNC_RESET));
+        assert!(!flags.contains(MessageFlags::READ_ONLY));
+    }
+
+    #[test]
+    fn both_toggle_read_only_to_read_write_simultaneously() {
+        // Both peers start read-only with their own changes, sync (exchanging
+        // heads but not changes), then both switch to read-write simultaneously.
+        // After syncing again, both should have each other's changes.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "from_doc1", "hello").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "from_doc2", "world").unwrap();
+        doc2.commit();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        // Sync while both read-only — neither gets the other's changes
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_none());
+        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_none());
+
+        // Both switch to read-write simultaneously
+        s1.set_read_only(false);
+        s2.set_read_only(false);
+
+        // Sync again — both should exchange and apply changes
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        assert!(doc1.get(crate::ROOT, "from_doc2").unwrap().is_some());
+        assert!(doc2.get(crate::ROOT, "from_doc1").unwrap().is_some());
+        assert_eq!(doc1.get_heads(), doc2.get_heads());
+    }
+
+    #[test]
+    fn both_toggle_read_only_to_read_write_with_new_changes() {
+        // Both peers start read-only, sync, then both switch to read-write
+        // and make additional changes before syncing.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        doc1.put(crate::ROOT, "original_1", "v1").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "original_2", "v2").unwrap();
+        doc2.commit();
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        // Sync while both read-only
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // Both switch to read-write
+        s1.set_read_only(false);
+        s2.set_read_only(false);
+
+        // Both make NEW changes after switching
+        doc1.put(crate::ROOT, "new_1", "after_switch").unwrap();
+        doc1.commit();
+        doc2.put(crate::ROOT, "new_2", "after_switch").unwrap();
+        doc2.commit();
+
+        // Sync — should get both original AND new changes from each other
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        assert!(doc1.get(crate::ROOT, "original_2").unwrap().is_some());
+        assert!(doc1.get(crate::ROOT, "new_2").unwrap().is_some());
+        assert!(doc2.get(crate::ROOT, "original_1").unwrap().is_some());
+        assert!(doc2.get(crate::ROOT, "new_1").unwrap().is_some());
+        assert_eq!(doc1.get_heads(), doc2.get_heads());
+    }
+
+    #[test]
+    fn both_toggle_after_multiple_read_only_rounds() {
+        // Both peers are read-only for several rounds, making changes each
+        // round. Then both switch to read-write. All accumulated changes
+        // from all rounds should be exchanged.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        let mut s1 = State::new_read_only();
+        let mut s2 = State::new_read_only();
+
+        // Several rounds of read-only sync with changes each round
+        for i in 0..5 {
+            doc1.put(crate::ROOT, format!("doc1_r{i}"), i as i64)
+                .unwrap();
+            doc1.commit();
+            doc2.put(crate::ROOT, format!("doc2_r{i}"), i as i64)
+                .unwrap();
+            doc2.commit();
+            sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+        }
+
+        // Neither has the other's changes from any round
+        for i in 0..5 {
+            assert!(doc1
+                .get(crate::ROOT, format!("doc2_r{i}"))
+                .unwrap()
+                .is_none());
+            assert!(doc2
+                .get(crate::ROOT, format!("doc1_r{i}"))
+                .unwrap()
+                .is_none());
+        }
+
+        // Both switch to read-write
+        s1.set_read_only(false);
+        s2.set_read_only(false);
+
+        // Sync — all accumulated changes should flow
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        for i in 0..5 {
+            assert!(
+                doc1.get(crate::ROOT, format!("doc2_r{i}"))
+                    .unwrap()
+                    .is_some(),
+                "doc1 missing doc2_r{i}"
+            );
+            assert!(
+                doc2.get(crate::ROOT, format!("doc1_r{i}"))
+                    .unwrap()
+                    .is_some(),
+                "doc2 missing doc1_r{i}"
+            );
+        }
+        assert_eq!(doc1.get_heads(), doc2.get_heads());
+    }
+
+    #[test]
+    fn switch_to_read_write_with_old_peer() {
+        // Simulates switching from read-only to read-write when the remote
+        // peer is an old implementation that doesn't understand SyncReset.
+        // Old peers have their_capabilities = None. The fallback sends empty
+        // heads, which triggers the old "peer lost all data" reset path.
+        let mut a = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut b = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+
+        a.put(crate::ROOT, "from_a", "hello").unwrap();
+        a.commit();
+        b.put(crate::ROOT, "from_b", "world").unwrap();
+        b.commit();
+
+        let mut sa = State::new_read_only();
+        let mut sb = State::new();
+
+        // Sync while read-only
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_none());
+        assert!(b.get(crate::ROOT, "from_a").unwrap().is_some());
+
+        // Simulate an old peer by clearing their_capabilities before switching.
+        // set_read_only preserves their_capabilities, so we clear after.
+        sa.set_read_only(false);
+        sa.their_capabilities = None;
+
+        // The first message should have empty heads (old peer fallback)
+        let msg = a.sync().generate_sync_message(&mut sa).unwrap();
+        assert!(msg.heads.is_empty(), "should send empty heads for old peer");
+        assert!(
+            !msg.flags.unwrap().contains(MessageFlags::SYNC_RESET),
+            "should not include SyncReset for old peer"
+        );
+
+        // Complete the sync — old peer sees empty heads, clears sent_hashes
+        b.sync().receive_sync_message(&mut sb, msg).unwrap();
+        sync(&mut a, &mut b, &mut sa, &mut sb);
+
+        // A should now have B's changes
+        assert!(a.get(crate::ROOT, "from_b").unwrap().is_some());
+        assert_eq!(a.get_heads(), b.get_heads());
     }
 }

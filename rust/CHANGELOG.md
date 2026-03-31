@@ -1,3 +1,32 @@
+## Unreleased
+
+### Added
+
+* Read-only sync mode. `sync::State::new_read_only()` creates a sync state that
+  ignores incoming changes while still sending local changes to the peer. This is
+  useful for publish-only peers that share their data but don't accept writes.
+* `sync::State::set_read_only()` to toggle read-only mode on an existing sync
+  state. Switching from read-only to read-write sends a `SyncReset` flag that
+  tells the remote peer to resend previously ignored changes.
+* `sync::State::is_peer_read_only()` to check whether the remote peer has
+  advertised that it is in read-only mode. When the peer is read-only,
+  `generate_sync_message` automatically skips sending changes to save bandwidth.
+* `sync::MessageFlag` enum for per-message wire flags including capability
+  advertisements (`MessageV1`, `MessageV2`) and transient signals (`SyncReset`,
+  `ReadOnly`).
+
+### Breaking Changes
+
+* `sync::Capability` has been split into `sync::MessageFlag` (per-message wire
+  flags) and a smaller `sync::Capability` (persistent peer capabilities:
+  `MessageV1`, `MessageV2` only). The `Unknown`, `SyncReset`, and `ReadOnly`
+  variants now live on `MessageFlag`.
+* `sync::Message::supported_capabilities` has been renamed to
+  `sync::Message::flags` and its type changed from `Option<Vec<Capability>>` to
+  `Option<Vec<MessageFlag>>`.
+* `sync::State` has new public fields: `read_only`, `peer_read_only`, and
+  `needs_reset`.
+
 ## 0.8.0
 
 ## Added

@@ -360,6 +360,8 @@ export interface JsSyncState {
   theirHeed: Heads | undefined;
   theirHave: SyncHave[] | undefined;
   sentHashes: Heads;
+  readOnly: boolean;
+  peerReadOnly: boolean;
 }
 
 export interface DecodedBundle {
