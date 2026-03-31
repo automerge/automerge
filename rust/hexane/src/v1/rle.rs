@@ -140,68 +140,6 @@ pub(crate) fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
     Some((start - buf.len(), v))
 }
 
-/// Walk `slab` linearly until the run containing logical item `target` is
-/// found.  Returns `None` if out of bounds, `Some(None)` for a null item,
-/// or `Some(Some(byte_offset))` for a non-null item.
-fn scan_to<T: RleValue>(slab: &[u8], target: usize) -> Option<Option<usize>> {
-    let mut byte_pos = 0;
-    let mut item_pos = 0;
-
-    while byte_pos < slab.len() {
-        let (count_bytes, count_raw) = read_signed(&slab[byte_pos..])?;
-
-        match count_raw {
-            // ── Repeat run ────────────────────────────────────────────────
-            n if n > 0 => {
-                let count = n as usize;
-                let value_start = byte_pos + count_bytes;
-                let value_len = T::value_len(&slab[value_start..])?;
-
-                if target < item_pos + count {
-                    return Some(Some(value_start));
-                }
-
-                item_pos += count;
-                byte_pos = value_start + value_len;
-            }
-
-            // ── Literal run ───────────────────────────────────────────────
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut scan_byte = byte_pos + count_bytes;
-
-                for i in 0..total {
-                    let vstart = scan_byte;
-                    let vlen = T::value_len(&slab[scan_byte..])?;
-                    if item_pos + i == target {
-                        return Some(Some(vstart));
-                    }
-                    scan_byte += vlen;
-                }
-
-                item_pos += total;
-                byte_pos = scan_byte;
-            }
-
-            // ── Null run ──────────────────────────────────────────────────
-            _ => {
-                let (null_count_bytes, null_count) =
-                    read_unsigned(&slab[byte_pos + count_bytes..])?;
-                let null_count = null_count as usize;
-
-                if target < item_pos + null_count {
-                    return Some(None);
-                }
-
-                item_pos += null_count;
-                byte_pos += count_bytes + null_count_bytes;
-            }
-        }
-    }
-
-    None // target >= len
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Encode a value-run count header.  A single item is stored as a literal
@@ -506,19 +444,6 @@ impl<T: RleValue> Default for RleEncoding<T> {
 
 impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
     type Value = T;
-
-    fn get<'a>(slab: &'a ValidBytes, index: usize, len: usize) -> Option<T::Get<'a>> {
-        if index >= len {
-            return None;
-        }
-        match scan_to::<T>(slab, index)? {
-            None => Some(T::get_null(slab)),
-            Some(offset) => {
-                let (_, v) = T::unpack(&slab[offset..]);
-                Some(v)
-            }
-        }
-    }
 
     fn merge_slabs(a: &mut Slab, b: &Slab) {
         rle_merge_slabs::<T>(a, b)

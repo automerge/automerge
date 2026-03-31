@@ -1,8 +1,7 @@
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, Range, Sub, SubAssign};
 
-use super::column::{find_slab, Column, Iter, Slab, SlabWeight, WeightFn};
-use super::encoding::ColumnEncoding;
+use super::column::{find_slab_bit, Column, Iter, Slab, SlabWeight, WeightFn};
 use super::ColumnValueRef;
 
 // ── PrefixValue trait ────────────────────────────────────────────────────────
@@ -178,7 +177,14 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.is_empty()
     }
 
-    pub fn get(&self, index: usize) -> Option<T::Get<'_>> {
+    /// Returns `(prefix, value)` at `index`, where `prefix` is the inclusive
+    /// sum of items `0..=index`.
+    pub fn get(&self, index: usize) -> Option<(T::Prefix, T::Get<'_>)> {
+        self.iter().nth(index)
+    }
+
+    /// Returns just the value at `index` (no prefix sum).
+    pub fn get_value(&self, index: usize) -> Option<T::Get<'_>> {
         self.col.get(index)
     }
 
@@ -226,24 +232,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     // ── Prefix-sum queries ───────────────────────────────────────────────
 
-    /// Returns the value at `index` and the prefix sum of items `0..=index`.
-    ///
-    /// Equivalent to `(self.get(index), self.get_prefix(index + 1))` but
-    /// uses a single BIT traversal instead of three, making it roughly 3×
-    /// faster for columns with many slabs.
-    pub fn get_with_prefix(&self, index: usize) -> Option<(T::Get<'_>, T::Prefix)> {
-        if index >= self.col.len() {
-            return None;
-        }
-        let (si, offset, prefix_before) = self.find_slab_with_prefix(index);
-        let slab = &self.col.slabs[si];
-
-        let val = T::Encoding::get(&slab.data, offset, slab.len)?;
-        let partial = T::partial_sum(&slab.data, offset + 1);
-
-        Some((val, prefix_before + partial))
-    }
-
     /// Returns the inclusive sum of values at indices `0..=index` (through
     /// `index`).
     ///
@@ -279,7 +267,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
         let index = index.min(self.col.len());
 
         // Use the compound BIT to find which slab contains item (index-1).
-        let (si, off) = find_slab(&self.col.bit, index - 1, self.col.slabs.len());
+        let (si, off) = find_slab_bit(&self.col.bit, index - 1, self.col.slabs.len());
         let si = si.min(self.col.slabs.len() - 1);
 
         // `off` is the offset of item (index-1) within slab `si`.
@@ -375,7 +363,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     /// Access the inner `Column` for value-only iteration.
     ///
-    /// Use `prefix_col.inner().iter()` when you don't need prefix sums.
+    /// Use `prefix_col.value_iter()` when you don't need prefix sums.
     pub(crate) fn inner(&self) -> &Column<T, PrefixWeightFn<T>> {
         &self.col
     }
@@ -1037,29 +1025,51 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
         Some((self.total, val))
     }
 
-    /// O(log S + runs) — for small skips, delegates to the inner iterator's
-    /// slab-walking `nth()`.  For large skips (> 64 items), recreates the
-    /// inner iterator via `iter_range` for O(log S) BIT seek.
+    /// O(log S + runs) — single BIT traversal combining slab lookup and
+    /// prefix accumulation via `find_slab_with_prefix`.
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n < 64 {
-            // Small skip: inner's linear slab walk + run-aware skip is fast.
-            let val = self.inner.nth(n)?;
+        use super::encoding::ColumnEncoding;
+
+        if n >= self.inner.items_left {
+            self.inner.pos += self.inner.items_left;
+            self.inner.items_left = 0;
+            return None;
+        }
+
+        // Fast path: target is within the current slab.
+        if n < self.inner.slab_remaining {
+            let val = self.inner.decoder.nth(n)?;
+            self.inner.items_left -= n + 1;
+            self.inner.slab_remaining -= n + 1;
+            self.inner.pos += n + 1;
             self.pos += n + 1;
             self.total = self.col.get_prefix(self.pos);
             return Some((self.total, val));
         }
-        // Large skip: use iter_range for O(log S) BIT seek.
-        let item_idx = self.pos + n;
-        let remaining_end = self.pos + self.inner.len();
-        if item_idx >= remaining_end {
-            let _ = self.inner.nth(self.inner.len());
-            self.pos = remaining_end;
+
+        // Combined BIT traversal: find slab + accumulate prefix in one pass.
+        let target_pos = self.inner.pos + n;
+        let (si, offset, prefix_before) = self.col.find_slab_with_prefix(target_pos);
+        if si >= self.inner.slabs.len() {
+            self.inner.pos += self.inner.items_left;
+            self.inner.items_left = 0;
             return None;
         }
-        self.inner = self.col.inner().iter_range(item_idx..remaining_end);
-        let val = self.inner.next()?;
-        self.pos = item_idx + 1;
-        self.total = self.col.get_prefix(self.pos);
+
+        let slab = &self.inner.slabs[si];
+        let mut decoder = T::Encoding::decoder(&slab.data);
+        let val = decoder.nth(offset)?;
+        let partial = T::partial_sum(&slab.data, offset + 1);
+
+        let skipped = n + 1;
+        self.inner.slab_idx = si;
+        self.inner.decoder = decoder;
+        self.inner.items_left -= skipped;
+        self.inner.slab_remaining = slab.len - offset - 1;
+        self.inner.pos = target_pos + 1;
+        self.pos = target_pos + 1;
+        self.total = prefix_before + partial;
+
         Some((self.total, val))
     }
 
@@ -1149,7 +1159,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         let item_idx = target_pos - 1;
         let remaining_end = self.pos + self.inner.len();
 
-        // Use iter_range for O(log S) BIT seek instead of linear slab walk.
+        // Use iter_range for O(log S) BIT seek.
         self.inner = self.col.inner().iter_range(item_idx..remaining_end);
         let val = self.inner.next()?;
         self.pos = item_idx + 1;
@@ -1412,8 +1422,8 @@ mod tests {
     #[test]
     fn prefix_iter_inner_access() {
         let col = PrefixColumn::<u64>::from_values(vec![1, 2, 3, 4, 5]);
-        // inner().iter() gives value-only iteration
-        let values: Vec<_> = col.inner().iter().collect();
+        // value_iter() gives value-only iteration
+        let values: Vec<_> = col.value_iter().collect();
         assert_eq!(values, vec![1, 2, 3, 4, 5]);
     }
 
