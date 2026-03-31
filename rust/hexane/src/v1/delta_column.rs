@@ -338,16 +338,23 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
     /// Returns the realized value at `index`, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
-        if index >= self.inner.len() {
-            return None;
+        self.iter().nth(index)
+    }
+
+    /// Returns an iterator over all realized values.
+    pub fn iter(&self) -> DeltaIter<'_, T> {
+        DeltaIter {
+            inner: self.inner.iter(),
+            _phantom: PhantomData,
         }
-        // Single BIT traversal: get the raw delta AND prefix sum in one pass.
-        let (delta_raw, prefix) = self.inner.get_with_prefix(index)?;
-        if T::get_inner(delta_raw).is_none() {
-            return Some(T::null_value());
+    }
+
+    /// Returns an iterator over realized values in `range`.
+    pub fn iter_range(&self, range: std::ops::Range<usize>) -> DeltaIter<'_, T> {
+        DeltaIter {
+            inner: self.inner.iter_range(range),
+            _phantom: PhantomData,
         }
-        // realized(index) = sum of deltas 0..=index
-        Some(T::from_i64(T::prefix_to_i64(prefix)))
     }
 
     /// Inserts `value` at `index`, adjusting the following delta.
@@ -369,7 +376,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
                     return;
                 }
 
-                let current = T::get_inner(self.inner.get(index).unwrap());
+                let current = T::get_inner(self.inner.get_value(index).unwrap());
 
                 match current {
                     Some(d) => {
@@ -396,7 +403,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         let len = self.inner.len();
         assert!(index < len, "remove index out of bounds");
 
-        let delta = T::get_inner(self.inner.get(index).unwrap());
+        let delta = T::get_inner(self.inner.get_value(index).unwrap());
 
         match delta {
             None => {
@@ -473,14 +480,14 @@ impl<T: DeltaValue> DeltaColumn<T> {
         let len = self.inner.len();
         let mut j = index;
         while j < len {
-            if T::get_inner(self.inner.get(j).unwrap()).is_some() {
+            if T::get_inner(self.inner.get_value(j).unwrap()).is_some() {
                 break;
             }
             j += 1;
         }
 
         if j < len {
-            let d_j = T::get_inner(self.inner.get(j).unwrap()).unwrap();
+            let d_j = T::get_inner(self.inner.get_value(j).unwrap()).unwrap();
             let adjusted = d_j - new_delta;
             let null_count = j - index;
             let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 2);
@@ -500,7 +507,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         debug_assert!(index + 1 < len);
 
         if !T::NULLABLE {
-            let d_next = T::get_inner(self.inner.get(index + 1).unwrap()).unwrap();
+            let d_next = T::get_inner(self.inner.get_value(index + 1).unwrap()).unwrap();
             self.inner
                 .splice(index, 2, [T::make_inner(Some(delta + d_next))]);
             return;
@@ -508,7 +515,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
         let mut j = index + 1;
         while j < len {
-            if let Some(d_j) = T::get_inner(self.inner.get(j).unwrap()) {
+            if let Some(d_j) = T::get_inner(self.inner.get_value(j).unwrap()) {
                 let adjusted = delta + d_j;
                 let null_count = j - index - 1;
                 let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 1);
@@ -526,7 +533,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
     fn find_nonnull_from(&self, from: usize, adjustment: i64) -> (usize, Vec<T::Inner>) {
         if adjustment == 0 && !T::NULLABLE {
-            let d = T::get_inner(self.inner.get(from).unwrap()).unwrap();
+            let d = T::get_inner(self.inner.get_value(from).unwrap()).unwrap();
             return (1, vec![T::make_inner(Some(d))]);
         }
         if adjustment == 0 {
@@ -535,13 +542,13 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
         let len = self.inner.len();
         if !T::NULLABLE {
-            let d = T::get_inner(self.inner.get(from).unwrap()).unwrap();
+            let d = T::get_inner(self.inner.get_value(from).unwrap()).unwrap();
             return (1, vec![T::make_inner(Some(d + adjustment))]);
         }
 
         let mut j = from;
         while j < len {
-            if let Some(d) = T::get_inner(self.inner.get(j).unwrap()) {
+            if let Some(d) = T::get_inner(self.inner.get_value(j).unwrap()) {
                 let adjusted = d + adjustment;
                 let null_count = j - from;
                 let mut vals: Vec<T::Inner> = Vec::with_capacity(null_count + 1);
@@ -556,6 +563,47 @@ impl<T: DeltaValue> DeltaColumn<T> {
         (0, vec![])
     }
 }
+
+// ── DeltaIter ───────────────────────────────────────────────────────────────
+
+/// Iterator over realized values in a [`DeltaColumn`].
+///
+/// Each yielded value is the prefix sum of deltas through that position,
+/// converted back to the external type `T`.
+pub struct DeltaIter<'a, T: DeltaValue> {
+    inner: super::PrefixIter<'a, T::Inner>,
+    _phantom: PhantomData<T>,
+}
+
+impl<'a, T: DeltaValue> Iterator for DeltaIter<'a, T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        let (prefix, raw) = self.inner.next()?;
+        if T::get_inner(raw).is_none() {
+            Some(T::null_value())
+        } else {
+            Some(T::from_i64(T::prefix_to_i64(prefix)))
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<T> {
+        let (prefix, raw) = self.inner.nth(n)?;
+        if T::get_inner(raw).is_none() {
+            Some(T::null_value())
+        } else {
+            Some(T::from_i64(T::prefix_to_i64(prefix)))
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<T: DeltaValue> ExactSizeIterator for DeltaIter<'_, T> {}
 
 // ── FromIterator ────────────────────────────────────────────────────────────
 

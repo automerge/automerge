@@ -344,27 +344,6 @@ pub(crate) fn splice_slab(
     overflow
 }
 
-// ── Scan ─────────────────────────────────────────────────────────────────────
-
-/// Walk the boolean RLE runs to find the value at `target`.
-fn scan_to(slab: &[u8], target: usize) -> Option<bool> {
-    let (mut byte_pos, mut item_pos, mut value) = (0, 0, false);
-
-    while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..])?;
-
-        if target < item_pos + count {
-            return Some(value);
-        }
-
-        item_pos += count;
-        byte_pos += cb;
-        value = !value;
-    }
-
-    None
-}
-
 // ── BoolDecoder ──────────────────────────────────────────────────────────────
 
 /// Forward iterator over all items in a single boolean-encoded slab.
@@ -477,13 +456,6 @@ impl Default for BoolEncoding {
 
 impl ColumnEncoding for BoolEncoding {
     type Value = bool;
-    #[allow(clippy::needless_lifetimes)]
-    fn get<'a>(slab: &'a ValidBytes, index: usize, len: usize) -> Option<bool> {
-        if index >= len {
-            return None;
-        }
-        scan_to(slab, index)
-    }
 
     fn merge_slabs(a: &mut Slab, b: &Slab) {
         bool_merge_slabs(a, b);

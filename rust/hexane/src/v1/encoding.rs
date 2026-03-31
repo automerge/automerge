@@ -26,17 +26,6 @@ pub trait ColumnEncoding: Default {
         }
     }
 
-    /// Read the value at `index` from `slab`, returning the optimal `Get` type.
-    ///
-    /// For `Copy` types this returns the value directly.  For ref types
-    /// (`str`, `[u8]`) this borrows directly from the slab without allocation.
-    /// Returns `None` if `index >= len`.
-    fn get<'a>(
-        slab: &'a ValidBytes,
-        index: usize,
-        len: usize,
-    ) -> Option<<Self::Value as ColumnValueRef>::Get<'a>>;
-
     /// Merge slab `b` into `a` in place. Both slabs must be non-empty.
     /// Handles boundary run merging. Updates `a.len` and `a.segments`.
     fn merge_slabs(a: &mut Slab, b: &Slab);
@@ -89,13 +78,13 @@ pub trait ColumnEncoding: Default {
         del: usize,
         values: impl Iterator<Item = V>,
     ) {
-        use super::column::{bit_point_update, find_slab, rebuild_bit};
+        use super::column::{bit_point_update, find_slab_bit, rebuild_bit};
 
         assert!(!col.slabs.is_empty());
 
         // find_slab returns si == slabs.len() when index == total_len (append at end).
         // Clamp to last slab with offset = slab.len.
-        let (mut si, mut offset) = find_slab(&col.bit, index, col.slabs.len());
+        let (mut si, mut offset) = find_slab_bit(&col.bit, index, col.slabs.len());
         if si >= col.slabs.len() {
             si = col.slabs.len() - 1;
             offset = col.slabs[si].len;

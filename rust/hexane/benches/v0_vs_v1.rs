@@ -27,8 +27,10 @@ fn build_v0(n: usize) -> ColumnData<UIntCursor> {
     (0..n).map(|_| rand_u64()).collect()
 }
 
+const MS: usize = 24;
+
 fn build_v1(n: usize) -> v1::Column<u64> {
-    v1::Column::from_values((0..n).map(|_| rand_u64()).collect())
+    v1::Column::from_values_with_max_segments((0..n).map(|_| rand_u64()).collect(), MS)
 }
 
 fn build_v0_bool(n: usize) -> ColumnData<BooleanCursor> {
@@ -36,7 +38,7 @@ fn build_v0_bool(n: usize) -> ColumnData<BooleanCursor> {
 }
 
 fn build_v1_bool(n: usize) -> v1::Column<bool> {
-    v1::Column::from_values((0..n).map(|_| rand_bool()).collect())
+    v1::Column::from_values_with_max_segments((0..n).map(|_| rand_bool()).collect(), MS)
 }
 
 fn rand_string(len: usize) -> String {
@@ -199,7 +201,7 @@ fn build_v0_str(n: usize, slen: usize) -> ColumnData<StrCursor> {
 }
 
 fn build_v1_str(n: usize, slen: usize) -> v1::Column<String> {
-    v1::Column::from_values((0..n).map(|_| rand_string(slen)).collect())
+    v1::Column::from_values_with_max_segments((0..n).map(|_| rand_string(slen)).collect(), MS)
 }
 
 #[divan::bench_group(name = "string_replace_8b")]
