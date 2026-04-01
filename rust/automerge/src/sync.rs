@@ -237,7 +237,7 @@ impl SyncDoc for Automerge {
             .heads(our_heads)
             .have(our_have)
             .need(our_need)
-            .supported_capabilities(Some(vec![Capability::MessageV1, Capability::MessageV2]))
+            .flags(Some(MessageFlags::new()))
             .build();
 
         sync_state.in_flight = true;
@@ -352,12 +352,14 @@ impl Automerge {
             changes: message_changes,
             need: message_need,
             have: message_have,
-            supported_capabilities,
+            flags: message_flags,
             ..
         } = message;
 
-        if let Some(caps) = supported_capabilities {
-            sync_state.their_capabilities = Some(caps);
+        if let Some(_flags) = message_flags {
+            // Any peer that sends the flags section supports V2 messages —
+            // the flags section was introduced alongside V2 support.
+            sync_state.their_capabilities = Some(vec![Capability::MessageV2]);
         }
 
         let changes_is_empty = message_changes.is_empty();
@@ -463,11 +465,10 @@ impl From<parse::ParseError<ReadMessageError>> for ReadMessageError {
 ///
 /// Encoding this in a backwards compatible way is a bit tricky. The wire format of the v1 message
 /// didn't allow for any forwards compatible changes. In order to accomodate this the first message
-/// a peer sends is a V1 message with a length previxed `Vec<Capability>` appended to it. For old
+/// a peer sends is a V1 message with a [`MessageFlags`] bitfield appended to it. For old
 /// implementations this appended data is just ignored but new implementations read it and store
 /// the advertised capabilities on the sync state. This allows new implementations to discover if
-/// the remote peer supports the V2 message format (the `Capability::MessageV2` capability) and if
-/// so send a V2 message.
+/// the remote peer supports the V2 message format and if so send a V2 message.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     /// The heads of the sender.
@@ -483,8 +484,8 @@ pub struct Message {
     /// change chunks, each of which is length delimited. The V2 message format is a single length
     /// delimited chunk but we nest it inside a Vec for backwards compatibility.
     pub changes: ChunkList,
-    /// The capabilities the sender supports
-    pub supported_capabilities: Option<Vec<Capability>>,
+    /// Per-message flags including capability advertisements and transient signals.
+    pub flags: Option<MessageFlags>,
     /// What version to encode this message as
     pub version: MessageVersion,
 }
@@ -571,7 +572,7 @@ impl Message {
             need: Vec::new(),
             have: vec![Have::default()],
             changes: ChunkList::empty(),
-            supported_capabilities: Some(vec![Capability::MessageV1, Capability::MessageV2]),
+            flags: Some(MessageFlags::new()),
             version: MessageVersion::V1,
         }
     }
@@ -593,9 +594,9 @@ impl Message {
         let (i, have) = parse::length_prefixed(parse_have)(i)?;
 
         let (i, changes) = ChunkList::parse(i)?;
-        let (i, supported_capabilities) = if !i.is_empty() {
-            let (i, caps) = parse::length_prefixed(Capability::parse)(i)?;
-            (i, Some(caps))
+        let (i, flags) = if !i.is_empty() {
+            let (i, raw_bytes) = parse::length_prefixed_bytes(i)?;
+            (i, Some(MessageFlags::parse_bytes(raw_bytes)))
         } else {
             (i, None)
         };
@@ -606,7 +607,7 @@ impl Message {
                 need,
                 have,
                 changes,
-                supported_capabilities,
+                flags,
                 version: message_version,
             },
         ))
@@ -628,40 +629,117 @@ impl Message {
             buf.extend::<&[u8]>(change.as_ref())
         });
 
-        if let Some(supported_capabilities) = self.supported_capabilities {
-            encode_many(&mut buf, supported_capabilities.iter(), |buf, cap| {
-                cap.encode(buf);
-            });
+        if let Some(flags) = self.flags {
+            flags.encode(&mut buf);
         }
 
         buf
     }
 }
 
+/// Per-message flags packed into a bitfield byte on the wire.
+///
+/// ## Wire encoding
+///
+/// Flags are encoded a little strangely, it's easiest to explain by explaining
+/// the history. The first flag we added was to indicate that the other end
+/// supported "v2" sync protocol messages - sync messages in which the entire
+/// document state is sent in a single message. This flag was forward compatibly
+/// encoded by taking advantage of the fact that the original parser would ignore
+/// any bytes after the end of the sync message. We thus encoded new flags as
+/// length prefixed set of flags at the end of the message. I.e. it looked
+/// a bit like this:
+///
+/// | message length | < sync message > | number of flags | flags |
+///
+/// The idea was that this allows us to forward compatibly add new flags to the
+/// protocol by just sending a longer list of flags. The problem with this
+/// approach is that it usees a byte per flag, which becomes much more wasteful
+/// as the number of flags grows. Thus, we now encode flags as bitfields. We
+/// want to stay backwards compatible for implementations unaware of the bitfields
+/// though. To do this we take advantage of the fact that there was only ever
+/// one flag sent - the old `MessageV2` flag. This means that the only flags
+/// ever sent were:
+///
+/// | 0x01 | 0x02 |
+///
+/// Where `0x01` is the length prefix byte and `0x02` is the old `MessageV2` flag.
+/// To stay backwards compatible we encode the old `MessageV2` flag as a single byte
+/// and then all the remaining flags as a byte with the high bit set. The old
+/// code thus sees a bunch of unknown bytes after the old MessageV2 flag and
+/// ignores them, the new code reads every bit and parses any byte with it's high
+/// bit set as a bitfield of flags. This scheme allows us to forward compatibly
+/// add as many flags as we need (by increasing the length prefix) without breaking
+/// old implementations.
+///
+/// The final encoding then is
+///
+/// | length prefix | old MessageV2 flag | bitfield byte (0x80 set) |
+///
+/// When parsing messages from old implementations (all bytes < 0x80), the
+/// old individual byte values are mapped to the corresponding flag bits.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct MessageFlags(u8);
+
+impl MessageFlags {
+    // V1/V2 message format support is not encoded in the bitfield — V2 is
+    // communicated via the legacy `0x02` byte that always precedes the
+    // bitfield, and V1 is the default. This leaves all 7 bitfield bits
+    // available for future flags.
+
+    /// Signals the remote peer should clear its `sent_hashes` and perform a
+    /// fresh sync. Used when switching from read-only to read-write mode.
+    pub const SYNC_RESET: u8 = 1 << 0;
+    /// Indicates the sender is in read-only mode and will not apply incoming
+    /// changes.
+    pub const READ_ONLY: u8 = 1 << 1;
+    /// Advertises that the sender understands the [`SYNC_RESET`](Self::SYNC_RESET)
+    /// flag and will clear `sent_hashes` when it receives one.
+    pub const SUPPORTS_SYNC_RESET: u8 = 1 << 2;
+
+    const BITFIELD_MARKER: u8 = 0x80;
+    /// The old MessageV2 byte, sent first for backwards compatibility.
+    const LEGACY_V2_BYTE: u8 = 0x02;
+
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn contains(self, flag: u8) -> bool {
+        self.0 & flag != 0
+    }
+
+    pub fn set(&mut self, flag: u8) {
+        self.0 |= flag;
+    }
+
+    fn encode(&self, out: &mut Vec<u8>) {
+        // Two entries: 0x02 (old MessageV2 for backwards compat) + bitfield byte
+        leb128::write::unsigned(out, 2u64).unwrap();
+        out.push(Self::LEGACY_V2_BYTE);
+        out.push(Self::BITFIELD_MARKER | self.0);
+    }
+
+    fn parse_bytes(bytes: &[u8]) -> Self {
+        let mut flags = Self::new();
+        for &byte in bytes {
+            if byte & Self::BITFIELD_MARKER != 0 {
+                // New-style bitfield byte: extract the flag bits
+                flags.0 |= byte & !Self::BITFIELD_MARKER;
+            }
+            // Old-style bytes (0x01, 0x02) are ignored — V1/V2 support
+            // is inferred from the presence of the flags section itself
+        }
+        flags
+    }
+}
+
+/// Persistent peer capabilities, derived from [`MessageFlags`] on incoming
+/// messages. These describe what the remote peer supports.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Capability {
     MessageV1,
     MessageV2,
-    Unknown(u8),
-}
-
-impl Capability {
-    fn encode(&self, out: &mut Vec<u8>) {
-        match self {
-            Capability::MessageV1 => out.push(0x01),
-            Capability::MessageV2 => out.push(0x02),
-            Capability::Unknown(v) => out.push(*v),
-        }
-    }
-
-    fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
-        let (i, v) = parse::take1(input)?;
-        match v {
-            0x01 => Ok((i, Self::MessageV1)),
-            0x02 => Ok((i, Self::MessageV2)),
-            _ => Ok((i, Self::Unknown(v))),
-        }
-    }
 }
 
 fn encode_many<'a, I, It, F>(out: &mut Vec<u8>, data: I, f: F)
@@ -807,7 +885,7 @@ mod tests {
             need: vec![],
             have: vec![],
             changes: ChunkList::empty(),
-            supported_capabilities: None,
+            flags: None,
             version: MessageVersion::V2,
         };
         let encoded = msg.encode();

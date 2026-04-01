@@ -58,7 +58,8 @@ pub struct State {
     /// necessary because we want the other end to know what our heads are.
     pub have_responded: bool,
 
-    /// The capabilities the other side has said they have
+    /// The persistent capabilities the other side has advertised (e.g. message
+    /// format support). Derived from [`super::MessageFlags`]s on incoming messages.
     pub their_capabilities: Option<Vec<Capability>>,
 }
 

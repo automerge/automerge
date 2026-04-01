@@ -2,7 +2,7 @@ use crate::error::InsertObject;
 use crate::export_cache::CachedObject;
 use crate::value::Datatype;
 use crate::{Automerge, UpdateSpansArgs};
-use am::sync::{Capability, ChunkList, MessageVersion};
+use am::sync::{ChunkList, MessageFlags, MessageVersion};
 use automerge as am;
 use automerge::iter::{Span, Spans};
 use automerge::marks::{MarkSet, UpdateSpansConfig};
@@ -389,9 +389,11 @@ impl TryFrom<JS> for am::sync::State {
         let their_capabilities = {
             let caps_obj = js_get(&value, "theirCapabilities")?;
             if !caps_obj.is_undefined() {
-                caps_obj
+                // Any peer that has a theirCapabilities section supports V2
+                let _flags: MessageFlags = caps_obj
                     .try_into()
-                    .map_err(error::BadSyncState::BadTheirCapabilities)?
+                    .map_err(error::BadSyncState::BadTheirCapabilities)?;
+                Some(vec![am::sync::Capability::MessageV2])
             } else {
                 None
             }
@@ -479,10 +481,10 @@ impl TryFrom<JS> for am::sync::Message {
             .map_err(error::BadSyncMessage::BadNeed)?;
         let have = js_get(&value.0, "have")?.try_into()?;
 
-        let supported_capabilities = {
-            let caps_obj = js_get(&value.0, "supportedCapabilities")?;
-            if !caps_obj.is_undefined() {
-                caps_obj
+        let flags = {
+            let flags_obj = js_get(&value.0, "supportedCapabilities")?;
+            if !flags_obj.is_undefined() {
+                flags_obj
                     .try_into()
                     .map_err(error::BadSyncMessage::BadSupportedCapabilities)?
             } else {
@@ -513,7 +515,7 @@ impl TryFrom<JS> for am::sync::Message {
             need,
             have,
             changes,
-            supported_capabilities,
+            flags,
             version,
         })
     }
@@ -596,12 +598,21 @@ impl From<&[am::sync::Capability]> for AR {
     fn from(value: &[am::sync::Capability]) -> Self {
         AR(value
             .iter()
-            .filter_map(|c| match c {
-                am::sync::Capability::MessageV1 => Some(JsValue::from_str("message-v1")),
-                am::sync::Capability::MessageV2 => Some(JsValue::from_str("message-v2")),
-                am::sync::Capability::Unknown(_) => None,
+            .map(|c| match c {
+                automerge::sync::Capability::MessageV1 => JsValue::from_str("message-v1"),
+                automerge::sync::Capability::MessageV2 => JsValue::from_str("message-v2"),
             })
             .collect())
+    }
+}
+
+impl From<am::sync::MessageFlags> for AR {
+    fn from(_flags: am::sync::MessageFlags) -> Self {
+        // V1/V2 are not in the bitfield — they're communicated via the
+        // legacy 0x02 byte. New flags (added in later commits) will be
+        // checked here.
+        let arr: Vec<JsValue> = Vec::new();
+        AR(arr.into_iter().collect())
     }
 }
 
@@ -627,19 +638,19 @@ impl TryFrom<JS> for ChunkList {
     }
 }
 
-impl TryFrom<JS> for Option<Vec<Capability>> {
+impl TryFrom<JS> for Option<MessageFlags> {
     type Error = error::BadCapabilities;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         if value.0.is_null() {
             Ok(None)
         } else {
-            Vec::<Capability>::try_from(value).map(Some)
+            MessageFlags::try_from(value).map(Some)
         }
     }
 }
 
-impl TryFrom<JS> for Vec<Capability> {
+impl TryFrom<JS> for MessageFlags {
     type Error = error::BadCapabilities;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -647,21 +658,19 @@ impl TryFrom<JS> for Vec<Capability> {
             .0
             .dyn_into::<Array>()
             .map_err(|_| error::BadCapabilities::NotArray)?;
-        let value = value
-            .iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let as_str = v
-                    .as_string()
-                    .ok_or(error::BadCapabilities::ElemNotString(i))?;
-                match as_str.as_str() {
-                    "message-v1" => Ok(Capability::MessageV1),
-                    "message-v2" => Ok(Capability::MessageV2),
-                    other => Err(error::BadCapabilities::ElemNotValid(i, other.to_string())),
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(value)
+        let flags = MessageFlags::new();
+        for (i, v) in value.iter().enumerate() {
+            let as_str = v
+                .as_string()
+                .ok_or(error::BadCapabilities::ElemNotString(i))?;
+            match as_str.as_str() {
+                // V1/V2 strings from old JS representations are accepted
+                // but ignored — they're not bitfield flags
+                "message-v1" | "message-v2" => {}
+                other => return Err(error::BadCapabilities::ElemNotValid(i, other.to_string())),
+            }
+        }
+        Ok(flags)
     }
 }
 
