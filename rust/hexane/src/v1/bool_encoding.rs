@@ -2,7 +2,7 @@ use crate::PackError;
 
 use super::column::Slab;
 use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use super::{AsColumnRef, Run, ValidBuf, ValidBytes};
+use super::{AsColumnRef, Run};
 
 // ── Wire format ──────────────────────────────────────────────────────────────
 //
@@ -242,7 +242,7 @@ pub(crate) fn splice_slab(
         find_partition(slab, index, end_index).expect("find_partition failed")
     };
 
-    let slab_data = slab.data.as_mut_vec();
+    let slab_data = &mut slab.data;
 
     // Save raw suffix before we modify slab_data.
     let raw_suffix = slab_data[suffix.pos..].to_vec();
@@ -285,7 +285,7 @@ pub(crate) fn splice_slab(
                     overflowed = true;
                 } else {
                     overflow.push(Slab {
-                        data: ValidBuf::new(buf),
+                        data: buf,
                         len,
                         segments,
                     });
@@ -334,7 +334,7 @@ pub(crate) fn splice_slab(
         segments += suffix.segments;
 
         overflow.push(Slab {
-            data: ValidBuf::new(buf),
+            data: buf,
             len,
             segments,
         });
@@ -454,6 +454,24 @@ impl Default for BoolEncoding {
 impl ColumnEncoding for BoolEncoding {
     type Value = bool;
 
+    fn fill(len: usize, value: bool) -> Slab {
+        // Bool wire format: alternating unsigned counts starting with false.
+        let mut data = Vec::new();
+        if value {
+            // 0 false, then `len` true
+            leb128::write::unsigned(&mut data, 0).unwrap();
+            leb128::write::unsigned(&mut data, len as u64).unwrap();
+        } else {
+            // `len` false
+            leb128::write::unsigned(&mut data, len as u64).unwrap();
+        }
+        Slab {
+            data,
+            len,
+            segments: 1,
+        }
+    }
+
     fn merge_slabs(a: &mut Slab, b: &Slab) {
         bool_merge_slabs(a, b);
     }
@@ -492,8 +510,8 @@ impl ColumnEncoding for BoolEncoding {
 
     type Decoder<'a> = BoolDecoder<'a>;
 
-    fn decoder(slab: &ValidBytes) -> BoolDecoder<'_> {
-        BoolDecoder::new(slab.as_bytes())
+    fn decoder(slab: &[u8]) -> BoolDecoder<'_> {
+        BoolDecoder::new(slab)
     }
 }
 
@@ -592,7 +610,7 @@ fn bool_merge_slabs(a: &mut Slab, b: &Slab) {
 
     let a_segments = a.segments;
     let b_segments = b.segments;
-    let a_buf = a.data.as_mut_vec();
+    let a_buf = &mut a.data;
 
     // Bool slabs alternate false/true. b always starts with false.
     // Four cases based on a's last value and b's first count.
@@ -650,7 +668,6 @@ fn bool_load_and_verify(
     validate: Option<fn(bool) -> Option<String>>,
 ) -> Result<Vec<super::column::Slab>, PackError> {
     use super::column::Slab;
-    use super::ValidBuf;
 
     if data.is_empty() {
         return Ok(vec![]);
@@ -700,7 +717,7 @@ fn bool_load_and_verify(
         // starts on a false run and can be memcpy'd as-is.
         if slab_runs >= runs_per_slab && slab_segs > 0 {
             slabs.push(Slab {
-                data: ValidBuf::new(data[slab_start..pos].to_vec()),
+                data: data[slab_start..pos].to_vec(),
                 len: slab_items,
                 segments: slab_segs,
             });
@@ -713,7 +730,7 @@ fn bool_load_and_verify(
 
     if slab_items > 0 {
         slabs.push(Slab {
-            data: ValidBuf::new(data[slab_start..pos].to_vec()),
+            data: data[slab_start..pos].to_vec(),
             len: slab_items,
             segments: slab_segs,
         });
@@ -1058,7 +1075,7 @@ mod tests {
             n
         };
         Slab {
-            data: crate::v1::ValidBuf::new(data),
+            data,
             len,
             segments,
         }

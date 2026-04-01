@@ -304,10 +304,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
 
     /// Deserialize with options (applied to the inner delta column).
     /// See [`LoadOpts`](super::LoadOpts).
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError>
-    where
-        T::Inner: super::ColumnDefault,
-    {
+    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError> {
         let col = super::Column::<T::Inner>::load_with(data, opts)?;
         Ok(Self {
             inner: PrefixColumn::from_column(col),

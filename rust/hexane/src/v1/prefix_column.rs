@@ -950,11 +950,11 @@ impl PrefixValue for bool {
 
 // ── Default-valued PrefixColumn ──────────────────────────────────────────────
 
-impl<T: PrefixValue + super::ColumnDefault> PrefixColumn<T> {
+impl<T: PrefixValue> PrefixColumn<T> {
     /// Deserialize with options. See [`LoadOpts`](super::LoadOpts).
     pub fn load_with(data: &[u8], opts: super::LoadOpts<T>) -> Result<Self, crate::PackError> {
-        let col = Column::<T>::load_with(data, opts)?;
-        Ok(Self::from_column(col))
+        let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
+        Ok(Self { col })
     }
 
     /// Returns `true` if every item has the default value.
@@ -964,7 +964,9 @@ impl<T: PrefixValue + super::ColumnDefault> PrefixColumn<T> {
 
     /// Create a column of `len` default values.
     pub fn init_default(len: usize) -> Self {
-        Self::from_column(Column::init_default(len))
+        Self {
+            col: Column::fill_inner(len, T::Get::default()),
+        }
     }
 
     /// Serialize unless all values are the default.

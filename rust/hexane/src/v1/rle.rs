@@ -6,7 +6,7 @@ use crate::PackError;
 use super::column::Slab;
 use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
 use super::rle_state::RewriteHeader;
-use super::{AsColumnRef, ColumnValueRef, RleValue, Run, ValidBuf, ValidBytes};
+use super::{AsColumnRef, ColumnValueRef, RleValue, Run};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
 //
@@ -148,7 +148,7 @@ pub(crate) fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
 /// in O(1) per item.  Literal runs decode each value.  Null runs yield
 /// the type's null value.
 pub struct RleDecoder<'a, T: RleValue> {
-    data: &'a ValidBytes,
+    data: &'a [u8],
     pub(crate) byte_pos: usize,
     pub(crate) remaining: usize,
     state: RleDecoderState<'a, T>,
@@ -188,7 +188,7 @@ impl<T: RleValue> Clone for RleDecoderState<'_, T> {
 }
 
 impl<'a, T: RleValue> RleDecoder<'a, T> {
-    pub(crate) fn new(data: &'a ValidBytes) -> Self {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
         RleDecoder {
             data,
             byte_pos: 0,
@@ -361,6 +361,20 @@ impl<T: RleValue> Default for RleEncoding<T> {
 impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
     type Value = T;
 
+    fn fill(len: usize, value: T::Get<'_>) -> Slab {
+        use super::rle_state::{RleCow, RleState};
+        let mut buf = Vec::new();
+        let mut state = RleState::<T, T>::Empty;
+        let flush = state.append_n(&mut buf, RleCow::Ref(value), len);
+        let flush2 = state.flush(&mut buf);
+        let segments = flush.segments + flush2.segments;
+        Slab {
+            data: buf,
+            len,
+            segments,
+        }
+    }
+
     fn merge_slabs(a: &mut Slab, b: &Slab) {
         rle_merge_slabs::<T>(a, b)
     }
@@ -398,7 +412,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
 
     type Decoder<'a> = RleDecoder<'a, T>;
 
-    fn decoder(slab: &ValidBytes) -> RleDecoder<'_, T> {
+    fn decoder(slab: &[u8]) -> RleDecoder<'_, T> {
         RleDecoder::new(slab)
     }
 }
@@ -573,12 +587,11 @@ fn find_partition<'a, T: RleValue, V: super::AsColumnRef<T>>(
 mod partition_tests {
     use super::*;
     use crate::v1::rle_state::RleState;
-    use crate::v1::ValidBuf;
 
     fn make_slab(data: Vec<u8>, len: usize) -> Slab {
         let segments = rle_count_segments::<u64>(&data);
         Slab {
-            data: ValidBuf::new(data),
+            data,
             len,
             segments,
         }
@@ -942,7 +955,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
                 result.rewrite = f.rewrite;
             } else {
                 result.overflow.push(Slab {
-                    data: ValidBuf::new(std::mem::take(&mut buf)),
+                    data: std::mem::take(&mut buf),
                     len: inserted,
                     segments: f.segments,
                 });
@@ -973,7 +986,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
         let postfix_count = slab.len - index - del;
 
         result.overflow.push(Slab {
-            data: ValidBuf::new(std::mem::take(&mut buf)),
+            data: std::mem::take(&mut buf),
             len: inserted + postfix_count,
             segments: f.segments + postfix_segments,
         });
@@ -998,7 +1011,7 @@ pub(crate) fn splice_slab<T: RleValue, V: super::AsColumnRef<T>>(
 
     let result = build_splice_buf::<T, V>(slab, index, del, values, max_segments);
 
-    let slab_data = slab.data.as_mut_vec();
+    let slab_data = &mut slab.data;
     slab_data.splice(result.range, result.bytes);
 
     if let Some(rw) = result.rewrite {
@@ -1047,7 +1060,7 @@ fn rle_merge_slabs<T: RleValue>(a: &mut Slab, b: &Slab) {
     };
     // All borrows from a/b are now dropped.
 
-    let a_buf = a.data.as_mut_vec();
+    let a_buf = &mut a.data;
     a_buf.truncate(a_outer_start);
     a_buf.extend_from_slice(&buf);
     a_buf.extend_from_slice(&b.data[b_outer_end..]);
@@ -1476,7 +1489,7 @@ fn rle_load_and_verify<T: RleValue>(
             data[*slab_start..end].to_vec()
         };
         slabs.push(Slab {
-            data: ValidBuf::new(d),
+            data: d,
             len: *slab_items,
             segments: *slab_segs,
         });
@@ -1576,7 +1589,7 @@ fn rle_load_and_verify<T: RleValue>(
                     d.extend_from_slice(chunk_hdr.as_bytes());
                     d.extend_from_slice(&data[offsets[consumed]..chunk_end]);
                     slabs.push(Slab {
-                        data: ValidBuf::new(d),
+                        data: d,
                         len: slab_items + room,
                         segments: slab_segs + room,
                     });
@@ -1602,7 +1615,7 @@ fn rle_load_and_verify<T: RleValue>(
                     d.extend_from_slice(hdr.as_bytes());
                     d.extend_from_slice(&data[cs..ce]);
                     slabs.push(Slab {
-                        data: ValidBuf::new(d),
+                        data: d,
                         len: max_segments,
                         segments: max_segments,
                     });

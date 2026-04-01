@@ -232,7 +232,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
     /// See [`LoadOpts`](super::LoadOpts).
     pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError>
     where
-        T::Inner: super::ColumnDefault,
+        <T::Inner as super::ColumnValueRef>::Get<'static>: Default + PartialEq,
     {
         let col = DeltaColumn::load_with(data, opts)?;
         let (tree, tree_n) = build_tree(&col);
