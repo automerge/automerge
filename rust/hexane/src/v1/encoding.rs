@@ -158,6 +158,12 @@ pub trait ColumnEncoding: Default {
 
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
+
+    fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab {
+        let mut slab = Slab::default();
+        Self::splice_slab(&mut slab, 0, 0, values, usize::MAX);
+        slab
+    }
 }
 
 /// Trait for decoders that can yield runs of values.

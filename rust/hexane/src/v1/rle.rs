@@ -588,27 +588,12 @@ mod partition_tests {
     use super::*;
     use crate::v1::rle_state::RleState;
 
-    fn make_slab(data: Vec<u8>, len: usize) -> Slab {
-        let segments = rle_count_segments::<u64>(&data);
-        Slab {
-            data,
-            len,
-            segments,
-        }
-    }
-
     fn encode_u64_slab(vals: &[u64]) -> Slab {
-        let mut buf = Vec::new();
-        rle_encode_state::<u64>(vals.iter().copied(), &mut buf);
-        let len = vals.len();
-        make_slab(buf, len)
+        RleEncoding::<u64>::encode(vals.iter().copied())
     }
 
     fn encode_opt_slab(vals: &[Option<u64>]) -> Slab {
-        let mut buf = Vec::new();
-        rle_encode_state::<Option<u64>>(vals.iter().copied(), &mut buf);
-        let len = vals.len();
-        make_slab(buf, len)
+        RleEncoding::<Option<u64>>::encode(vals.iter().copied())
     }
 
     #[test]
