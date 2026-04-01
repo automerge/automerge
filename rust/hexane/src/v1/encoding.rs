@@ -1,5 +1,5 @@
 use super::column::{Column, Slab, WeightFn};
-use super::{AsColumnRef, ColumnValueRef, Run, ValidBuf, ValidBytes};
+use super::{AsColumnRef, ColumnValueRef, Run};
 use crate::PackError;
 
 /// Validation function type for [`ColumnEncoding::load_and_verify`].
@@ -20,11 +20,14 @@ pub trait ColumnEncoding: Default {
     /// Create an empty slab with no items.
     fn empty_slab() -> Slab {
         Slab {
-            data: ValidBuf::new(vec![]),
+            data: vec![],
             len: 0,
             segments: 0,
         }
     }
+
+    /// Create a slab of `len` copies of `value`. O(1).
+    fn fill(len: usize, value: <Self::Value as ColumnValueRef>::Get<'_>) -> Slab;
 
     /// Merge slab `b` into `a` in place. Both slabs must be non-empty.
     /// Handles boundary run merging. Updates `a.len` and `a.segments`.
@@ -154,7 +157,7 @@ pub trait ColumnEncoding: Default {
     type Decoder<'a>: Iterator<Item = <Self::Value as ColumnValueRef>::Get<'a>> + RunDecoder + Clone;
 
     /// Create a decoder that yields all items in `slab` in order.
-    fn decoder(slab: &ValidBytes) -> Self::Decoder<'_>;
+    fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
 }
 
 /// Trait for decoders that can yield runs of values.

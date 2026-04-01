@@ -3,9 +3,7 @@ use std::ops::{AddAssign, Range, SubAssign};
 
 use super::encoding::ColumnEncoding;
 use super::AsColumnRef;
-use super::ColumnDefault;
 use super::ColumnValueRef;
-use super::{ValidBuf, ValidBytes};
 use crate::PackError;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
@@ -13,12 +11,27 @@ use crate::PackError;
 #[doc(hidden)]
 #[derive(Clone, Debug, Default)]
 pub struct Slab {
-    pub(crate) data: ValidBuf,
+    pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
 }
 
 impl Slab {
+    /// Returns `true` if the slab contains only `default` values.
+    /// O(1) — checks segment count then decodes only the first value.
+    pub(crate) fn is_default<T: ColumnValueRef>(&self) -> bool
+    where
+        for<'a> T::Get<'a>: PartialEq,
+    {
+        use super::encoding::ColumnEncoding;
+        let default = T::Get::default();
+        self.len == 0
+            || (self.segments == 1
+                && T::Encoding::decoder(&self.data)
+                    .next()
+                    .map_or(true, |v| v == default))
+    }
+
     /// Validate that the slab's encoding, item count, and segment count are
     /// consistent. Uses the decoder's next_run() to walk the slab, exercising
     /// the same code path as splice.
@@ -220,6 +233,28 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         }
     }
 
+    /// Create a column of `len` copies of `value`. O(1) — writes a single
+    /// run regardless of `len`.
+    pub fn fill(len: usize, value: impl AsColumnRef<T>) -> Self {
+        if len == 0 {
+            return Self::new();
+        }
+        Self::fill_inner(len, value.as_column_ref())
+    }
+
+    pub(crate) fn fill_inner(len: usize, value: T::Get<'_>) -> Self {
+        let slab = T::Encoding::fill(len, value);
+        let bit = rebuild_bit::<T, WF>(std::slice::from_ref(&slab));
+        Self {
+            slabs: vec![slab],
+            bit,
+            total_len: len,
+            max_segments: 16,
+            counter: 0,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Bulk-construct a column from a Vec of values.
     ///
     /// Much faster than repeated `insert` calls — encodes all values in a
@@ -321,7 +356,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Returns the byte range written (`out[range]` is the serialized data).
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
         let start = out.len();
-        let slab_refs: Vec<&[u8]> = self.slabs.iter().map(|s| s.data.as_bytes()).collect();
+        let slab_refs: Vec<&[u8]> = self.slabs.iter().map(|s| s.data.as_slice()).collect();
         let bytes = T::Encoding::streaming_save(&slab_refs);
         out.extend_from_slice(&bytes);
         start..out.len()
@@ -461,7 +496,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
                 slabs: &self.slabs,
                 col: self,
                 slab_idx: 0,
-                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
+                decoder: T::Encoding::decoder(&[]),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: 0,
@@ -491,7 +526,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
                 slabs: &self.slabs,
                 col: self,
                 slab_idx: self.slabs.len(),
-                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
+                decoder: T::Encoding::decoder(&[]),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: start,
@@ -523,7 +558,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
 // ── Default-valued columns ──────────────────────────────────────────────────
 
-impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
+impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Deserialize with options: length validation, value validation, and
     /// default-on-empty behavior.
     ///
@@ -532,10 +567,7 @@ impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
         if data.is_empty() {
             return match opts.length {
                 Some(0) | None => Ok(Self::new()),
-                Some(len) => {
-                    let slab = T::default_slab(len);
-                    Ok(Self::from_slabs(vec![slab], len, opts.max_segments))
-                }
+                Some(len) => Ok(Self::fill_inner(len, T::Get::default())),
             };
         }
         let col = Self::load_verified(data, opts.max_segments, opts.validate)?;
@@ -549,15 +581,10 @@ impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
 
     /// Returns `true` if every item in the column has the default value.
     ///
-    /// For `Option<T>` the default is `None`.  For `bool` the default is `false`.
-    /// An empty column (len == 0) is considered default.
+    /// O(slabs) — checks each slab's single-segment first value against default.
+    /// An empty column is considered default.
     pub fn is_default(&self) -> bool {
-        if self.total_len == 0 {
-            return true;
-        }
-        self.slabs
-            .iter()
-            .all(|slab| slab.segments == 1 && T::slab_is_default(&slab.data, slab.len))
+        self.total_len == 0 || self.slabs.iter().all(|s| s.is_default::<T>())
     }
 
     /// Serialize the column by appending bytes to `out`, unless all values
@@ -573,14 +600,8 @@ impl<T: ColumnDefault, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Create a column of `len` default values.
-    ///
-    /// For `Option<T>` this is all-null.  For `bool` this is all-false.
     pub fn init_default(len: usize) -> Self {
-        if len == 0 {
-            return Self::new();
-        }
-        let slab = T::default_slab(len);
-        Self::from_slabs(vec![slab], len, 16)
+        Self::fill_inner(len, T::Get::default())
     }
 }
 
@@ -796,7 +817,7 @@ impl IterState {
                 slabs,
                 col: column,
                 slab_idx: slabs.len(),
-                decoder: T::Encoding::decoder(ValidBytes::from_bytes(&[])),
+                decoder: T::Encoding::decoder(&[]),
                 items_left: 0,
                 slab_remaining: 0,
                 pos: self.pos,
