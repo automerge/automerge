@@ -1134,4 +1134,62 @@ describe("Data sync protocol", () => {
     assert.ok(Automerge.hasOurChanges(left, leftToRight))
     assert.ok(Automerge.hasOurChanges(right, rightToLeft))
   })
+
+  describe("read-only sync", () => {
+    it("should not apply incoming changes when read-only", () => {
+      let doc1 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from1 = "hello"))
+      let doc2 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from2 = "world"))
+
+      // doc1 is read-only: sends changes but ignores doc2's
+      let [a, b] = sync(doc1, doc2, initSyncState({ readOnly: true }))
+
+      // doc2 got doc1's changes
+      assert.strictEqual((b as any).from1, "hello")
+      assert.strictEqual((b as any).from2, "world")
+
+      // doc1 did NOT get doc2's changes
+      assert.strictEqual((a as any).from1, "hello")
+      assert.strictEqual((a as any).from2, undefined)
+    })
+
+    it("should discover peer read-only status", () => {
+      let doc1 = Automerge.init()
+      let doc2 = Automerge.init()
+
+      let s1 = initSyncState({ readOnly: true })
+      let s2 = initSyncState()
+
+      // After one round-trip, s2 should know s1 is read-only
+      let msg1: Automerge.SyncMessage | null
+      ;[s1, msg1] = Automerge.generateSyncMessage(doc1, s1)
+      assert.ok(msg1)
+      ;[doc2, s2] = Automerge.receiveSyncMessage(doc2, s2, msg1)
+
+      assert.strictEqual(s2.peerReadOnly, true)
+      assert.strictEqual(s1.readOnly, true)
+    })
+
+    it("should allow switching from read-only to read-write", () => {
+      let doc1 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from1 = "hello"))
+      let doc2 = Automerge.change<any>(Automerge.init(), { time: 0 }, doc => (doc.from2 = "world"))
+
+      let s1 = initSyncState({ readOnly: true })
+      let s2 = initSyncState()
+
+      // First sync: doc1 is read-only
+      ;[doc1, doc2, s1, s2] = sync(doc1, doc2, s1, s2)
+      assert.strictEqual((doc1 as any).from2, undefined)
+
+      // Switch doc1 to read-write
+      s1.readOnly = false
+
+      // Second sync: doc1 should now receive doc2's changes
+      ;[doc1, doc2, s1, s2] = sync(doc1, doc2, s1, s2)
+      assert.strictEqual((doc1 as any).from2, "world")
+      assert.deepStrictEqual(
+        Automerge.getHeads(doc1),
+        Automerge.getHeads(doc2),
+      )
+    })
+  })
 })

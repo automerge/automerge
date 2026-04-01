@@ -45,6 +45,21 @@ impl SyncState {
         Ok(())
     }
 
+    #[wasm_bindgen(getter, js_name = readOnly)]
+    pub fn read_only(&self) -> bool {
+        self.0.read_only
+    }
+
+    #[wasm_bindgen(setter, js_name = readOnly)]
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.0.set_read_only(read_only);
+    }
+
+    #[wasm_bindgen(getter, js_name = peerReadOnly)]
+    pub fn peer_read_only(&self) -> bool {
+        self.0.is_peer_read_only()
+    }
+
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&self) -> Self {
         SyncState(self.0.clone())

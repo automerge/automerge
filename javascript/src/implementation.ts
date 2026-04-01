@@ -1220,9 +1220,20 @@ export function hasOurChanges<T>(doc: Doc<T>, remoteState: SyncState): boolean {
  * When communicating with a peer for the first time use this to generate a new
  * {@link SyncState} for them
  *
+ * @param options - Optional configuration for the sync state
+ * @param options.readOnly - If true, incoming changes from the peer will not be
+ *   applied to the document. Our changes are still sent to the peer.
+ *
  * @group sync
  */
-export function initSyncState(): SyncState {
+export function initSyncState(options?: { readOnly?: boolean }): SyncState {
+  if (options?.readOnly) {
+    const syncState = ApiHandler.initSyncState()
+    syncState.readOnly = true
+    const result = ApiHandler.exportSyncState(syncState) as SyncState
+    syncState.free()
+    return result
+  }
   return ApiHandler.exportSyncState(ApiHandler.initSyncState()) as SyncState
 }
 
