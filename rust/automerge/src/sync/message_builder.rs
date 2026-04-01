@@ -1,6 +1,6 @@
 use crate::{Change, ChangeHash};
 
-use super::{Capability, Have, Message, MessageVersion, State};
+use super::{Have, Message, MessageFlags, MessageVersion, State};
 
 use std::borrow::Cow;
 
@@ -10,7 +10,7 @@ pub(super) struct MessageBuilder<'a> {
     have: Vec<Have>,
     changes: Vec<Vec<u8>>,
     hashes: Cow<'a, [ChangeHash]>,
-    supported_capabilities: Option<Vec<Capability>>,
+    flags: Option<MessageFlags>,
     version: MessageVersion,
 }
 
@@ -35,7 +35,7 @@ impl<'a> MessageBuilder<'a> {
             have: Vec::new(),
             changes,
             hashes,
-            supported_capabilities: None,
+            flags: None,
             version: MessageVersion::V1,
         }
     }
@@ -47,7 +47,7 @@ impl<'a> MessageBuilder<'a> {
             hashes: Cow::Owned(vec![]),
             changes: Vec::new(),
             have: Vec::new(),
-            supported_capabilities: None,
+            flags: None,
             version: MessageVersion::V2,
         }
     }
@@ -72,7 +72,7 @@ impl<'a> MessageBuilder<'a> {
             hashes,
             changes: vec![data],
             have: Vec::new(),
-            supported_capabilities: None,
+            flags: None,
             version: MessageVersion::V2,
         }
     }
@@ -100,11 +100,8 @@ impl<'a> MessageBuilder<'a> {
         self
     }
 
-    pub(super) fn supported_capabilities(
-        mut self,
-        supported_capabilities: Option<Vec<Capability>>,
-    ) -> Self {
-        self.supported_capabilities = supported_capabilities;
+    pub(super) fn flags(mut self, flags: Option<MessageFlags>) -> Self {
+        self.flags = flags;
         self
     }
 
@@ -114,7 +111,7 @@ impl<'a> MessageBuilder<'a> {
             need: self.need,
             have: self.have,
             changes: super::ChunkList::from(self.changes),
-            supported_capabilities: self.supported_capabilities,
+            flags: self.flags,
             version: self.version,
         }
     }

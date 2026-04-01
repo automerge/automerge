@@ -1864,9 +1864,9 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMes
         }
     };
 
-    if let Some(caps) = msg.supported_capabilities {
-        let caps = AR::from(caps.as_slice());
-        js_set(&obj, "supportedCapabilities", caps).unwrap();
+    if let Some(flags) = msg.flags {
+        let flags = AR::from(flags);
+        js_set(&obj, "supportedCapabilities", flags).unwrap();
     }
 
     Ok(obj)
