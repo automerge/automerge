@@ -101,7 +101,7 @@ impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
 
     #[inline]
-    fn compute(slab: &Slab) -> PrefixSlabWeight<T::Prefix> {
+    fn compute(slab: &Slab<super::column::TailOf<T>>) -> PrefixSlabWeight<T::Prefix> {
         PrefixSlabWeight {
             len: slab.len,
             prefix: T::slab_sum(&slab.data, slab.len),

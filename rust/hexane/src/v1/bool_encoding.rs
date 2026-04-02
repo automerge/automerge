@@ -1,6 +1,6 @@
 use crate::PackError;
 
-use super::column::Slab;
+type Slab = super::column::Slab<u8>;
 use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
 use super::{AsColumnRef, Run};
 
@@ -107,6 +107,31 @@ fn encode_count(n: usize) -> BoolLeb128Buf {
     out
 }
 
+/// Compute the `tail` value: byte length of the last run's LEB128 count header.
+pub(crate) fn compute_tail(data: &[u8]) -> u8 {
+    if data.is_empty() {
+        return 0;
+    }
+    let mut pos = 0;
+    let mut last_cb = 0;
+    while pos < data.len() {
+        let (cb, _) = read_count(&data[pos..]).unwrap();
+        last_cb = cb;
+        pos += cb;
+    }
+    last_cb as u8
+}
+
+/// Validate a bool slab's len, segments, and tail. Panics on mismatch.
+#[cfg(debug_assertions)]
+fn validate_slab(slab: &Slab) {
+    let info = bool_validate_encoding(&slab.data).expect("invalid bool encoding");
+    assert_eq!(slab.len, info.len, "bool slab len mismatch");
+    assert_eq!(slab.segments, info.segments, "bool slab segments mismatch");
+    let expected_tail = compute_tail(&slab.data);
+    assert_eq!(slab.tail, expected_tail, "bool slab tail mismatch");
+}
+
 // ── Partition ───────────────────────────────────────────────────────────────
 
 /// One side of a partition split within a boolean slab.
@@ -174,9 +199,7 @@ pub(crate) fn find_partition(
             });
         }
 
-        if count > 0 {
-            segments += 1;
-        }
+        segments += 1;
 
         // End cursor: once prefix is set, find where end_index falls
         if prefix.is_some() && suffix.is_none() && end_index < run_end_item {
@@ -226,7 +249,7 @@ pub(crate) fn splice_slab(
     del: usize,
     values: impl Iterator<Item = bool>,
     max_segments: usize,
-) -> Vec<super::column::Slab> {
+) -> Vec<Slab> {
     let end_index = index + del;
     assert!(end_index <= slab.len, "del extends beyond slab");
 
@@ -250,15 +273,17 @@ pub(crate) fn splice_slab(
     let raw_suffix_item_count = slab.len - end_index - suffix.count;
     let prefix_item_count = index - prefix.count; // items in data[..prefix.pos]
 
+    let old_tail = slab.tail;
     let mut buf = Vec::new();
     let mut segments = prefix.segments;
     let mut len: usize = 0;
-    let mut overflow: Vec<super::column::Slab> = Vec::new();
+    let mut overflow: Vec<Slab> = Vec::new();
     let mut overflowed = false;
     let mut items_inserted: usize = 0;
 
     let mut cur_value = prefix.value;
     let mut cur_count = prefix.count;
+    let mut tail = prefix.pos as u8;
 
     for val in values {
         items_inserted += 1;
@@ -266,11 +291,11 @@ pub(crate) fn splice_slab(
             cur_count += 1;
         } else {
             // Flush current run.
-            buf.extend(encode_count(cur_count));
+            let c = encode_count(cur_count);
+            tail = c.len() as u8;
+            buf.extend(c);
             len += cur_count;
-            if cur_count > 0 {
-                segments += 1;
-            }
+            segments += 1;
             cur_value = !cur_value;
             cur_count = 1;
 
@@ -282,19 +307,25 @@ pub(crate) fn splice_slab(
                     let new_len = prefix_item_count + len;
                     slab.len = new_len;
                     slab.segments = segments;
+                    slab.tail = tail;
                     overflowed = true;
                 } else {
                     overflow.push(Slab {
                         data: buf,
                         len,
                         segments,
+                        tail,
                     });
                 }
                 buf = Vec::new();
                 segments = 0;
                 len = 0;
+                tail = 0;
                 if cur_value {
+                    // Zero-count false padding — counts as a segment.
                     buf.extend(encode_count(0));
+                    segments = 1;
+                    tail = 1;
                 }
             }
         }
@@ -306,38 +337,56 @@ pub(crate) fn splice_slab(
             cur_count += suffix.count;
         } else {
             // Flush, then start the suffix run.
-            buf.extend(encode_count(cur_count));
+            let c = encode_count(cur_count);
+            tail = c.len() as u8;
+            buf.extend(c);
             len += cur_count;
-            if cur_count > 0 {
-                segments += 1;
-            }
+            segments += 1;
             cur_count = suffix.count;
         }
     }
 
     // Flush final run.
     if cur_count > 0 {
-        buf.extend(encode_count(cur_count));
+        let c = encode_count(cur_count);
+        tail = c.len() as u8;
+        buf.extend(c);
         len += cur_count;
         segments += 1;
     }
 
     if !overflowed {
         // Common case: everything fits in the original slab.
+        if suffix.segments == 0 {
+            slab.tail = tail;
+        }
         slab_data.splice(prefix.pos..suffix.pos, buf);
         slab.len = slab.len - del + items_inserted;
         slab.segments = segments + suffix.segments;
+        #[cfg(debug_assertions)]
+        validate_slab(slab);
     } else {
         // Append raw suffix to the last buf.
+        if suffix.segments > 0 {
+            tail = old_tail
+        };
         buf.extend_from_slice(&raw_suffix);
         len += raw_suffix_item_count;
         segments += suffix.segments;
+
+        #[cfg(debug_assertions)]
+        validate_slab(slab);
 
         overflow.push(Slab {
             data: buf,
             len,
             segments,
+            tail,
         });
+        #[cfg(debug_assertions)]
+        for s in &overflow {
+            validate_slab(s);
+        }
     }
 
     overflow
@@ -453,30 +502,37 @@ impl Default for BoolEncoding {
 
 impl ColumnEncoding for BoolEncoding {
     type Value = bool;
+    type Tail = u8;
 
     fn fill(len: usize, value: bool) -> Slab {
-        // Bool wire format: alternating unsigned counts starting with false.
         let mut data = Vec::new();
-        if value {
-            // 0 false, then `len` true
+        let segments = if value {
             leb128::write::unsigned(&mut data, 0).unwrap();
-            leb128::write::unsigned(&mut data, len as u64).unwrap();
+            2 // zero-count false + true
         } else {
-            // `len` false
-            leb128::write::unsigned(&mut data, len as u64).unwrap();
-        }
+            1
+        };
+        let t = data.len();
+        leb128::write::unsigned(&mut data, len as u64).unwrap();
+        let tail = (data.len() - t) as u8;
         Slab {
             data,
             len,
-            segments: 1,
+            segments,
+            tail,
         }
     }
 
     fn merge_slabs(a: &mut Slab, b: &Slab) {
-        bool_merge_slabs(a, b);
+        let (new_segs, new_tail) = bool_merge_slabs(&mut a.data, a.tail, a.segments, b);
+        a.len += b.len;
+        a.segments = new_segs;
+        a.tail = new_tail;
+        #[cfg(debug_assertions)]
+        validate_slab(a);
     }
 
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, String> {
         bool_validate_encoding(slab)
     }
 
@@ -484,12 +540,22 @@ impl ColumnEncoding for BoolEncoding {
         data: &[u8],
         max_segments: usize,
         validate: Option<for<'a> fn(bool) -> Option<String>>,
-    ) -> Result<Vec<super::column::Slab>, PackError> {
+    ) -> Result<Vec<Slab>, PackError> {
         bool_load_and_verify(data, max_segments, validate)
     }
 
-    fn streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
-        bool_streaming_save(slabs)
+    fn do_merge(
+        acc: &mut Vec<u8>,
+        a_tail: u8,
+        a_segments: usize,
+        b: &Slab,
+        _buf: &mut Vec<u8>,
+    ) -> (usize, u8) {
+        if b.len == 0 || b.data.is_empty() {
+            (a_segments, a_tail)
+        } else {
+            bool_merge_slabs(acc, a_tail, a_segments, b)
+        }
     }
 
     fn splice_slab<V: AsColumnRef<bool>>(
@@ -522,13 +588,11 @@ fn bool_count_segments(slab: &[u8]) -> usize {
     let mut segments = 0;
 
     while byte_pos < slab.len() {
-        let (cb, count) = match read_count(&slab[byte_pos..]) {
+        let (cb, _count) = match read_count(&slab[byte_pos..]) {
             Some(v) => v,
             None => break,
         };
-        if count > 0 {
-            segments += 1;
-        }
+        segments += 1;
         byte_pos += cb;
     }
 
@@ -545,19 +609,21 @@ fn bool_count_segments(slab: &[u8]) -> usize {
 /// 3. No trailing zero-count run
 /// 4. No two adjacent runs can be merged (implied by alternating, but
 ///    a zero-count interior run would effectively merge its neighbors)
-fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
+fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, String> {
     if slab.is_empty() {
         return Ok(SlabInfo {
             segments: 0,
             len: 0,
+            tail: 0,
         });
     }
 
     let mut byte_pos = 0;
     let mut run_index = 0;
-    let mut value = false; // first run is always false
+    let mut value = false;
     let mut segments = 0;
     let mut len = 0;
+    let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
         let (cb, count) = read_count(&slab[byte_pos..])
@@ -569,7 +635,6 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
             ));
         }
 
-        // Check for trailing zero: if this is the last run and count is 0
         let next_pos = byte_pos + cb;
         if next_pos >= slab.len() && count == 0 {
             return Err(format!(
@@ -577,17 +642,20 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
             ));
         }
 
-        if count > 0 {
-            segments += 1;
-            len += count;
-        }
+        segments += 1;
+        len += count;
+        last_cb = cb as u8;
 
         byte_pos = next_pos;
         value = !value;
         run_index += 1;
     }
 
-    Ok(SlabInfo { segments, len })
+    Ok(SlabInfo {
+        segments,
+        len,
+        tail: last_cb,
+    })
 }
 
 // ── merge_slab_bytes ─────────────────────────────────────────────────────────
@@ -596,60 +664,86 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
 /// interiors.
 /// In-place merge of bool slab `b` into `a`. No extra allocation beyond
 /// extending `a`'s buffer. Both slabs must be non-empty.
-fn bool_merge_slabs(a: &mut Slab, b: &Slab) {
-    debug_assert!(a.len > 0 && b.len > 0);
+fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Slab) -> (usize, u8) {
+    // a's last run — derived from tail (no scan).
+    if b.len == 0 {
+        return (a_segments, a_tail);
+    }
 
-    let b_data: &[u8] = &b.data;
-
-    // a's last run.
-    let (a_last_start, _a_last_cb, a_last_count, a_last_value) = bool_last_run(&a.data).unwrap();
+    let a_last_start = a_data.len() - a_tail as usize;
+    let (a_last_cb, a_last_count) = read_count(&a_data[a_last_start..]).unwrap();
+    debug_assert_eq!(a_last_cb, a_tail as usize);
+    // Runs alternate false/true: seg 1=false, 2=true, 3=false...
+    // Even segments → last is true, odd → last is false.
+    let a_last_value = a_segments % 2 == 0;
 
     // b's first run (always starts with false).
+    let b_data: &[u8] = &b.data;
     let (b_first_cb, b_first_count) = read_count(b_data).unwrap();
     let b_rest = &b_data[b_first_cb..];
 
-    let a_segments = a.segments;
     let b_segments = b.segments;
-    let a_buf = &mut a.data;
 
     // Bool slabs alternate false/true. b always starts with false.
-    // Four cases based on a's last value and b's first count.
-    // Track whether we merged boundary runs (reduces total segments by 1).
+    // Track whether we merged boundary runs.
     let mut merged_boundary = 0;
+    let mut merge_bytes = 0;
+    let mut b_empty = b_rest.is_empty();
 
     if !a_last_value {
         // a ends false, b starts false.
         if b_first_count > 0 {
-            // Same value — merge counts.
-            a_buf.truncate(a_last_start);
-            a_buf.extend(encode_count(a_last_count + b_first_count));
-            a_buf.extend_from_slice(b_rest);
-            merged_boundary += 1;
+            // Same value — merge counts. Removes 1 segment (the two false runs become one).
+            a_data.truncate(a_last_start);
+            let count = encode_count(a_last_count + b_first_count);
+            merge_bytes = count.len() as u8;
+            a_data.extend(count);
+            a_data.extend_from_slice(b_rest);
+            merged_boundary = 1;
         } else {
-            // b starts with 0-count padding → skip it, proper alternation.
-            a_buf.extend_from_slice(b_rest);
+            // b starts with 0-count padding → skip it.
+            // Dropping b's zero-count first segment.
+            a_data.extend_from_slice(b_rest);
+            merged_boundary = 1;
         }
     } else {
         // a ends true.
         if b_first_count > 0 {
-            // a ends true, b starts false (>0) → proper alternation, just append.
-            a_buf.extend_from_slice(b_data);
+            // Proper alternation, just append all of b.
+            a_data.extend_from_slice(b_data);
+            b_empty = false;
         } else {
-            // a ends true, b starts 0-count false padding.
+            // b starts with 0-count false padding.
             // b's second run is true — merge with a's last true run.
+            // Removes 2 segments: b's zero-count false + b's first true merged into a's last true.
             if !b_rest.is_empty() {
                 let (cb2, count2) = read_count(b_rest).unwrap();
-                a_buf.truncate(a_last_start);
-                a_buf.extend(encode_count(a_last_count + count2));
-                a_buf.extend_from_slice(&b_rest[cb2..]);
-                merged_boundary += 1;
+                a_data.truncate(a_last_start);
+                let count = encode_count(a_last_count + count2);
+                merge_bytes = count.len() as u8;
+                a_data.extend(count);
+                a_data.extend_from_slice(&b_rest[cb2..]);
+                b_empty = b_rest[cb2..].is_empty();
+                merged_boundary = 2;
+            } else {
+                // b is just a zero-count false padding with nothing after — drop it.
+                merged_boundary = 1;
             }
         }
     }
 
-    a.len += b.len;
-    a.segments = a_segments + b_segments - merged_boundary;
-    debug_assert_eq!(a.segments, bool_count_segments(a_buf));
+    let new_segments = a_segments + b_segments - merged_boundary;
+
+    let new_tail = if !b_empty {
+        b.tail
+    } else if merged_boundary == 0 {
+        a_tail
+    } else {
+        merge_bytes
+    };
+
+    debug_assert_eq!(new_tail, compute_tail(a_data));
+    (new_segments, new_tail)
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────
@@ -666,9 +760,7 @@ fn bool_load_and_verify(
     data: &[u8],
     max_segments: usize,
     validate: Option<fn(bool) -> Option<String>>,
-) -> Result<Vec<super::column::Slab>, PackError> {
-    use super::column::Slab;
-
+) -> Result<Vec<Slab>, PackError> {
     if data.is_empty() {
         return Ok(vec![]);
     }
@@ -680,11 +772,12 @@ fn bool_load_and_verify(
     let mut slab_start: usize = 0;
     let mut slab_items: usize = 0;
     let mut slab_segs: usize = 0;
-    let mut slab_runs: usize = 0;
     let mut run_index: usize = 0; // global, for validation
+    let mut tail: u8 = 0;
 
     while pos < data.len() {
         let (cb, count) = read_count(&data[pos..]).ok_or(PackError::BadFormat)?;
+        tail = cb as u8;
 
         // Only the very first run may have count 0 (structural padding).
         if count == 0 && run_index > 0 {
@@ -698,11 +791,10 @@ fn bool_load_and_verify(
         }
 
         slab_items += count;
-        slab_runs += 1;
+        slab_segs += 1;
+
         if count > 0 {
-            slab_segs += 1;
             if let Some(validate) = validate {
-                // run_index is 0-based; even runs are false, odd are true.
                 let value = run_index % 2 != 0;
                 if let Some(msg) = validate(value) {
                     return Err(PackError::InvalidValue(msg));
@@ -713,187 +805,37 @@ fn bool_load_and_verify(
         pos = next_pos;
         run_index += 1;
 
-        // Cut after `runs_per_slab` runs — always even, so the next slab
+        // Cut after `runs_per_slab` segments — always even, so the next slab
         // starts on a false run and can be memcpy'd as-is.
-        if slab_runs >= runs_per_slab && slab_segs > 0 {
+        if slab_segs >= runs_per_slab {
             slabs.push(Slab {
                 data: data[slab_start..pos].to_vec(),
                 len: slab_items,
                 segments: slab_segs,
+                tail,
             });
             slab_start = pos;
             slab_items = 0;
             slab_segs = 0;
-            slab_runs = 0;
         }
     }
 
-    if slab_items > 0 {
+    if slab_segs > 0 {
         slabs.push(Slab {
             data: data[slab_start..pos].to_vec(),
             len: slab_items,
             segments: slab_segs,
+            tail,
         });
     }
 
     Ok(slabs)
 }
 
-// ── streaming_save ────────────────────────────────────────────────────────
-
-/// Find the byte offset and run-count of the last run in a bool slab.
-/// Returns `(byte_offset, count_bytes, count, value)`.
-fn bool_last_run(slab: &[u8]) -> Option<(usize, usize, usize, bool)> {
-    if slab.is_empty() {
-        return None;
-    }
-    let mut byte_pos = 0;
-    let mut value = false;
-    let mut last_start = 0;
-    let mut last_cb = 0;
-    let mut last_count = 0;
-
-    while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..])?;
-        last_start = byte_pos;
-        last_cb = cb;
-        last_count = count;
-        byte_pos += cb;
-        if byte_pos < slab.len() {
-            value = !value;
-        }
-    }
-    Some((last_start, last_cb, last_count, value))
-}
-
-/// O(n) serialization of multiple boolean slabs into a single byte array.
-///
-/// Memcopies slab interiors and only decodes/re-encodes boundary runs
-/// between adjacent slabs.
-fn bool_streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
-    if slabs.is_empty() {
-        return vec![];
-    }
-    if slabs.len() == 1 {
-        return slabs[0].to_vec();
-    }
-
-    let total_bytes: usize = slabs.iter().map(|s| s.len()).sum();
-    let mut out = Vec::with_capacity(total_bytes);
-
-    // Copy first non-empty slab entirely.
-    let mut start_idx = 0;
-    for (i, &slab) in slabs.iter().enumerate() {
-        if !slab.is_empty() {
-            out.extend_from_slice(slab);
-            start_idx = i + 1;
-            break;
-        }
-    }
-    if out.is_empty() {
-        return vec![];
-    }
-
-    // Track the last run in `out` so we don't re-scan the whole buffer.
-    let (mut out_last_start, _, mut out_last_count, mut out_last_value) =
-        bool_last_run(&out).unwrap();
-
-    for &slab in &slabs[start_idx..] {
-        if slab.is_empty() {
-            continue;
-        }
-
-        // Parse the first run of the incoming slab (always starts as `false`).
-        let (b_first_cb, b_first_count) = read_count(slab).unwrap();
-        let b_rest = &slab[b_first_cb..];
-
-        // Cases mirror bool_merge_slab_bytes:
-        //   out ends false + b starts false(>0)   → merge counts
-        //   out ends false + b starts false(=0)   → skip padding, concat b_rest
-        //   out ends true  + b starts false(>0)   → proper alternation, concat whole slab
-        //   out ends true  + b starts false(=0)   → skip padding, merge true runs
-
-        // The "tail" is whatever bytes from this slab follow the boundary merge.
-        // We'll compute `tail` (the bytes to memcopy) and whether we need to
-        // modify the last run of `out`.
-
-        let tail: &[u8];
-
-        if !out_last_value {
-            if b_first_count > 0 {
-                // Merge false runs.
-                let merged = out_last_count + b_first_count;
-                out.truncate(out_last_start);
-                out_last_start = out.len();
-                let enc = encode_count(merged);
-                out.extend(enc);
-
-                out_last_count = merged;
-                // out_last_value stays false
-                tail = b_rest;
-            } else {
-                // Skip 0-count padding; b_rest starts with true, proper alternation.
-                tail = b_rest;
-            }
-        } else if b_first_count > 0 {
-            // Proper alternation: out ends true, b starts false(>0). Concat whole slab.
-            tail = slab;
-        } else {
-            // b starts with 0-count padding; b's second run is true → merge.
-            if b_rest.is_empty() {
-                continue;
-            }
-            let (b2_cb, b2_count) = read_count(b_rest).unwrap();
-            let merged = out_last_count + b2_count;
-            out.truncate(out_last_start);
-            out_last_start = out.len();
-            let enc = encode_count(merged);
-            out.extend(enc);
-
-            out_last_count = merged;
-            // out_last_value stays true
-            tail = &b_rest[b2_cb..];
-        }
-
-        // Append the remaining bytes and update the last-run tracker.
-        if !tail.is_empty() {
-            // We know what value the first run in `tail` represents:
-            // it's the opposite of the current out_last_value (since we handled
-            // the merge above and `tail` is the continuation).
-            //
-            // Walk `tail` to find its last run, counting parity from the known
-            // starting value. This is O(tail) not O(out), so overall O(n).
-            let tail_first_value = !out_last_value;
-            let tail_offset = out.len();
-            out.extend_from_slice(tail);
-
-            // Find last run in tail by walking it.
-            let mut pos = 0;
-            let mut value = tail_first_value;
-            let mut last_start = 0;
-            let mut last_count = 0;
-            while pos < tail.len() {
-                let (cb, count) = read_count(&tail[pos..]).unwrap();
-                last_start = pos;
-                last_count = count;
-                pos += cb;
-                if pos < tail.len() {
-                    value = !value;
-                }
-            }
-            out_last_start = tail_offset + last_start;
-            out_last_count = last_count;
-            out_last_value = value;
-        }
-    }
-
-    out
-}
-
 #[cfg(test)]
 mod tests {
-    use super::super::column::Slab;
     use super::super::Column;
+    use super::Slab;
     use super::{bool_count_segments, encode_count, find_partition, read_count, BoolPartition};
 
     fn build_bool(values: &[bool]) -> Column<bool> {
@@ -1063,21 +1005,26 @@ mod tests {
     }
 
     fn make_slab(data: Vec<u8>) -> Slab {
-        let segments = bool_count_segments(&data);
-        let len = {
-            let mut n = 0;
-            let mut pos = 0;
-            while pos < data.len() {
-                let (cb, count) = read_count(&data[pos..]).unwrap();
-                n += count;
-                pos += cb;
+        let _segments = bool_count_segments(&data);
+        let mut tail = 0;
+        let mut len = 0;
+        let mut pos = 0;
+        let mut segments = 0;
+        while pos < data.len() {
+            let (cb, count) = read_count(&data[pos..]).unwrap();
+            if count > 0 {
+                segments += 1
             }
-            n
-        };
+            len += count;
+            pos += cb;
+            tail = cb as u8;
+        }
+        assert_eq!(segments, _segments);
         Slab {
             data,
             len,
             segments,
+            tail,
         }
     }
 

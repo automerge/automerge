@@ -1804,3 +1804,82 @@ mod advance_total_runs {
         });
     }
 }
+
+// ── Save benchmarks ─────────────────────────────────────────────────────────
+
+#[divan::bench_group(name = "save_u64")]
+mod save_u64 {
+    use super::*;
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let col = build_v0(n);
+        bencher.bench_local(|| col.save());
+    }
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let col = build_v1(n);
+        bencher.bench_local(|| col.save());
+    }
+}
+
+#[divan::bench_group(name = "save_bool")]
+mod save_bool {
+    use super::*;
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let col = build_v0_bool(n);
+        bencher.bench_local(|| col.save());
+    }
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let col = build_v1_bool(n);
+        bencher.bench_local(|| col.save());
+    }
+}
+
+#[divan::bench_group(name = "save_string_8b")]
+mod save_string_8b {
+    use super::*;
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v0(bencher: Bencher, n: usize) {
+        let col = build_v0_str(n, 8);
+        bencher.bench_local(|| col.save());
+    }
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let col = build_v1_str(n, 8);
+        bencher.bench_local(|| col.save());
+    }
+}
+
+#[divan::bench_group(name = "save_opt_u64")]
+mod save_opt_u64 {
+    use super::*;
+
+    fn build_v0_opt(n: usize) -> ColumnData<UIntCursor> {
+        // v0 doesn't have Option<u64> directly, use u64 with some zeros as "nulls"
+        (0..n).map(|_| rand_u64()).collect()
+    }
+
+    fn build_v1_opt(n: usize) -> v1::Column<Option<u64>> {
+        let choices: [Option<u64>; 5] = [None, Some(1), Some(2), Some(3), Some(4)];
+        v1::Column::from_values_with_max_segments(
+            (0..n)
+                .map(|_| choices[rng().next_u64() as usize % 5])
+                .collect(),
+            MS,
+        )
+    }
+
+    #[divan::bench(args = [1_000, 10_000, 100_000], max_time = Duration::from_secs(3))]
+    fn v1(bencher: Bencher, n: usize) {
+        let col = build_v1_opt(n);
+        bencher.bench_local(|| col.save());
+    }
+}

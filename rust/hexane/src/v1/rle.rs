@@ -1,11 +1,12 @@
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 use crate::PackError;
 
-use super::column::Slab;
+type Slab = super::column::Slab<RleTail>;
 use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
-use super::rle_state::RewriteHeader;
+use super::rle_state::{rewrite_lit_header, RewriteHeader, WPos};
 use super::{AsColumnRef, ColumnValueRef, RleValue, Run};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
@@ -358,28 +359,110 @@ impl<T: RleValue> Default for RleEncoding<T> {
     }
 }
 
+/// Compute the RleTail for a slab by scanning to the last segment.
+pub(crate) fn compute_rle_tail<T: RleValue>(data: &[u8]) -> RleTail {
+    if data.is_empty() {
+        return RleTail::default();
+    }
+    let mut pos = 0;
+    let mut last_start = 0;
+    let mut lit_tail: Option<NonZeroU32> = None;
+    while pos < data.len() {
+        last_start = pos;
+        let (cb, raw) = read_signed(&data[pos..]).unwrap();
+        match raw {
+            n if n > 0 => {
+                let vl = T::value_len(&data[pos + cb..]).unwrap();
+                lit_tail = None;
+                pos += cb + vl;
+            }
+            n if n < 0 => {
+                let total = (-n) as usize;
+                let mut sb = pos + cb;
+                let mut last_vl = 0;
+                for _ in 0..total {
+                    last_vl = T::value_len(&data[sb..]).unwrap();
+                    sb += last_vl;
+                }
+                lit_tail = NonZeroU32::new(last_vl as u32);
+                pos = sb;
+            }
+            _ => {
+                let (ncb, _) = read_unsigned(&data[pos + cb..]).unwrap();
+                lit_tail = None;
+                pos += cb + ncb;
+            }
+        }
+    }
+    RleTail {
+        bytes: (data.len() - last_start) as u32,
+        lit_tail,
+    }
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RleTail {
+    /// Total byte length of the last segment (header + values).
+    /// Same meaning for repeat, literal, and null runs.
+    pub(crate) bytes: u32,
+    /// For literal runs: byte length of the last value only.
+    /// `None` for repeat/null runs.
+    pub(crate) lit_tail: Option<NonZeroU32>,
+}
+
+impl RleTail {
+    pub(crate) fn with_lit_tail(mut self, lit_tail: Option<NonZeroU32>) -> Self {
+        self.lit_tail = lit_tail;
+        self
+    }
+}
+/// Create an RLE slab with correct tail.
+/// TODO : remove
+fn make_rle_slab<T: RleValue>(data: Vec<u8>, len: usize, segments: usize) -> Slab {
+    let tail = compute_rle_tail::<T>(&data);
+    Slab {
+        data,
+        len,
+        segments,
+        tail,
+    }
+}
+
+/// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
+#[cfg(debug_assertions)]
+fn validate_rle_slab<T: RleValue>(slab: &Slab) {
+    let info = rle_validate_encoding::<T>(&slab.data)
+        .unwrap_or_else(|e| panic!("rle slab encoding invalid: {e}"));
+    assert_eq!(slab.len, info.len, "rle slab len mismatch");
+    assert_eq!(slab.segments, info.segments, "rle slab segments mismatch");
+    assert_eq!(slab.tail, info.tail, "rle slab tail mismatch");
+}
+
 impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for RleEncoding<T> {
     type Value = T;
+    type Tail = RleTail;
 
     fn fill(len: usize, value: T::Get<'_>) -> Slab {
         use super::rle_state::{RleCow, RleState};
         let mut buf = Vec::new();
         let mut state = RleState::<T, T>::Empty;
-        let flush = state.append_n(&mut buf, RleCow::Ref(value), len);
-        let flush2 = state.flush(&mut buf);
-        let segments = flush.segments + flush2.segments;
+        let mut f = state.append_n(&mut buf, RleCow::Ref(value), len);
+        f += state.flush(&mut buf);
+        let tail = f.wpos.as_tail(0, buf.len());
         Slab {
             data: buf,
             len,
-            segments,
+            segments: f.segments,
+            tail,
         }
     }
 
     fn merge_slabs(a: &mut Slab, b: &Slab) {
-        rle_merge_slabs::<T>(a, b)
+        rle_merge::<T>(a, b);
     }
 
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo, String> {
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, String> {
         rle_validate_encoding::<T>(slab)
     }
 
@@ -391,8 +474,14 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_load_and_verify::<T>(data, max_segments, validate)
     }
 
-    fn streaming_save(slabs: &[&[u8]]) -> Vec<u8> {
-        rle_streaming_save::<T>(slabs)
+    fn do_merge(
+        acc: &mut Vec<u8>,
+        a_tail: RleTail,
+        a_segments: usize,
+        b: &Slab,
+        buf: &mut Vec<u8>,
+    ) -> (usize, RleTail) {
+        do_merge::<T>(acc, a_tail, a_segments, b, buf)
     }
 
     fn splice_slab<V: AsColumnRef<T>>(
@@ -452,6 +541,7 @@ pub(crate) enum Postfix<'a, T: RleValue> {
 struct Prefix<'a, T: RleValue, V: super::AsColumnRef<T>> {
     state: RleState<'a, T, V>,
     segments: usize,
+    bytes: usize,
 }
 
 impl<'a, T: RleValue, V: super::AsColumnRef<T>> Prefix<'a, T, V> {
@@ -459,6 +549,7 @@ impl<'a, T: RleValue, V: super::AsColumnRef<T>> Prefix<'a, T, V> {
         Prefix {
             state: RleState::Empty,
             segments: 0,
+            bytes: 0,
         }
     }
 }
@@ -511,16 +602,19 @@ fn find_partition<'a, T: RleValue, V: super::AsColumnRef<T>>(
             let k = range.start - item_pos;
             outer.start = byte_before;
             prefix.segments = segments;
+            prefix.bytes = byte_before;
             prefix_done = true;
 
             if is_lit {
                 let count = item_pos - lit_start_item;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
+                let bytes = decoder.byte_pos - byte_before;
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
             } else if is_null {
                 prefix.state = RleState::Null(k);
             } else if k == 1 && !is_lit && was_lit {
                 let count = segments - lit_segments_before;
-                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos);
+                let bytes = decoder.byte_pos - byte_before;
+                prefix.state = RleState::lit(count, RleCow::Ref(run.value), header_pos, bytes);
             } else {
                 prefix.state = RleState::make_run(k, RleCow::Ref(run.value));
             }
@@ -575,7 +669,6 @@ fn find_partition<'a, T: RleValue, V: super::AsColumnRef<T>>(
         was_lit = is_lit;
     }
 
-    //let prefix = Prefix { state: prefix_state, segments: prefix_segments };
     RlePartition {
         outer,
         prefix,
@@ -717,7 +810,7 @@ mod partition_tests {
         let mut reconstructed_bytes = data.to_vec();
         reconstructed_bytes.splice(result.range.clone(), result.bytes);
         if let Some(rw) = result.rewrite {
-            crate::v1::rle_state::rewrite_lit_header(&mut reconstructed_bytes, rw.pos, rw.count);
+            rewrite_lit_header(&mut reconstructed_bytes, rw.pos, rw.count);
         }
 
         let original = decode_u64_bytes(data);
@@ -827,7 +920,7 @@ mod partition_tests {
         let mut first = slab.data.to_vec();
         first.splice(result.range.clone(), result.bytes);
         if let Some(rw) = result.rewrite {
-            crate::v1::rle_state::rewrite_lit_header(&mut first, rw.pos, rw.count);
+            rewrite_lit_header(&mut first, rw.pos, rw.count);
         }
         let mut all_vals = decode_u64_bytes(&first);
         for s in &result.overflow {
@@ -902,6 +995,8 @@ struct SpliceBuf {
     segments: usize,
     rewrite: Option<RewriteHeader>,
     overflow: Vec<Slab>,
+    //tail: RleTail,
+    wpos: WPos,
 }
 
 /// Build the splice buffer. Borrows slab immutably; returns owned output.
@@ -927,6 +1022,7 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
     let mut overflowed = false;
     let mut inserted = 0;
     let mut starting_segments = p.prefix.segments;
+    let postfix_bytes = &slab.data[result.range.end..];
 
     // 1. Feed new values.
     for v in values {
@@ -934,15 +1030,22 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
             f += state.flush(&mut buf);
             if !overflowed {
                 overflowed = true;
+                //result.tail = f.wpos.as_tail(p.prefix.bytes, buf.len());
+                result.wpos = f.wpos;
                 result.bytes = std::mem::take(&mut buf);
                 result.len = index + inserted;
                 result.segments = p.prefix.segments + f.segments;
                 result.rewrite = f.rewrite;
             } else {
+                let tail = f.wpos.as_tail(0, buf.len());
+                let data = std::mem::take(&mut buf);
+                let len = inserted;
+                let segments = f.segments;
                 result.overflow.push(Slab {
-                    data: std::mem::take(&mut buf),
-                    len: inserted,
-                    segments: f.segments,
+                    data,
+                    len,
+                    segments,
+                    tail,
                 });
             }
             state = RleState::Empty;
@@ -963,17 +1066,30 @@ fn build_splice_buf<T: RleValue, V: super::AsColumnRef<T>>(
         result.len = slab.len - del + inserted;
         result.segments = p.prefix.segments + f.segments + postfix_segments;
         result.rewrite = f.rewrite;
+        result.wpos = f.wpos;
+    /*
+            result.tail = f.wpos.merge(
+                p.prefix.bytes,
+                result.bytes.len(),
+                postfix_bytes.len(),
+                slab.tail,
+            );
+    */
     } else {
         // the postfix goes on the final slab
-        buf.extend_from_slice(&slab.data[result.range.end..]);
         result.range.end = slab.data.len();
 
         let postfix_count = slab.len - index - del;
-
+        let len = inserted + postfix_count;
+        let segments = f.segments + postfix_segments;
+        let tail = f.wpos.merge(0, buf.len(), postfix_bytes.len(), slab.tail);
+        buf.extend_from_slice(postfix_bytes);
+        let data = std::mem::take(&mut buf);
         result.overflow.push(Slab {
-            data: std::mem::take(&mut buf),
-            len: inserted + postfix_count,
-            segments: f.segments + postfix_segments,
+            data,
+            len,
+            segments,
+            tail,
         });
     }
 
@@ -995,254 +1111,159 @@ pub(crate) fn splice_slab<T: RleValue, V: super::AsColumnRef<T>>(
     assert!(index + del <= slab.len, "del extends beyond slab");
 
     let result = build_splice_buf::<T, V>(slab, index, del, values, max_segments);
+    let wpos = result.wpos;
+    let range = result.range;
 
-    let slab_data = &mut slab.data;
-    slab_data.splice(result.range, result.bytes);
+    let mut prefix = range.start as i64;
+    let middle = result.bytes.len();
+    let postfix = slab.data.len() - range.end;
+
+    // we have to splice before rewrite header so range will be correct
+    slab.data.splice(range, result.bytes);
 
     if let Some(rw) = result.rewrite {
-        super::rle_state::rewrite_lit_header(slab_data, rw.pos, rw.count);
+        prefix += rewrite_lit_header(&mut slab.data, rw.pos, rw.count);
     }
 
+    // we have to gen the tail after rewrite so tail will be correct
+    slab.tail = wpos.merge(prefix as usize, middle, postfix, slab.tail);
     slab.len = result.len;
     slab.segments = result.segments;
 
     #[cfg(debug_assertions)]
-    slab.validate::<T>();
+    validate_rle_slab::<T>(slab);
+    #[cfg(debug_assertions)]
+    for s in &result.overflow {
+        validate_rle_slab::<T>(s);
+    }
 
     result.overflow
 }
 
-// ── streaming_save ───────────────────────────────────────────────────────────
-
-/// Fast in-place merge of slab `b` into slab `a`. Only examines the
-/// boundary runs (last of `a`, first of `b`). Interior bytes are memcopied.
-///
-/// Both slabs must be non-empty.
-fn rle_merge_slabs<T: RleValue>(a: &mut Slab, b: &Slab) {
-    debug_assert!(a.len > 0 && b.len > 0);
-
-    // Use find_partition to get:
-    //   - a's last boundary value as a prefix state
-    //   - b's first run as a postfix
-    // Then let the state machine handle all boundary merging.
-
-    let (buf, a_outer_start, a_prefix_segs, b_outer_end, postfix_segs, rewrite) = {
-        let pa = find_partition::<T, T>(a, a.len..a.len);
-        let pb = find_partition::<T, T>(b, 0..0);
-
-        let mut buf = Vec::new();
-        let mut state = pa.prefix.state;
-        let (f, postfix_segs) = state.flush_postfix(&mut buf, pb.postfix);
-
-        (
-            buf,
-            pa.outer.start,
-            pa.prefix.segments,
-            pb.outer.end,
-            postfix_segs,
-            f,
-        )
-    };
-    // All borrows from a/b are now dropped.
-
-    let a_buf = &mut a.data;
-    a_buf.truncate(a_outer_start);
-    a_buf.extend_from_slice(&buf);
-    a_buf.extend_from_slice(&b.data[b_outer_end..]);
-
-    if let Some(rw) = rewrite.rewrite {
-        super::rle_state::rewrite_lit_header(a_buf, rw.pos, rw.count);
+fn head<T: RleValue>(slab: &Slab) -> (Postfix<'_, T>, usize) {
+    let segments = slab.segments - 1;
+    match read_signed(&slab.data).unwrap() {
+        (tb, count) if count > 0 => {
+            let (vb, value) = T::unpack(&slab.data[tb..]);
+            let count = count as usize;
+            (
+                Postfix::Run {
+                    count,
+                    value,
+                    segments,
+                },
+                tb + vb,
+            )
+        }
+        (tb, 0) => {
+            let (vb, nulls) = read_unsigned(&slab.data[tb..]).unwrap();
+            let count = nulls as usize;
+            let value = T::get_null();
+            (
+                Postfix::Run {
+                    count,
+                    value,
+                    segments,
+                },
+                tb + vb,
+            )
+        }
+        (tb, count) => {
+            let (vb, value) = T::unpack(&slab.data[tb..]);
+            let count = -count as usize;
+            let lit = count - 1;
+            (
+                Postfix::Lit {
+                    lit,
+                    value,
+                    segments,
+                },
+                tb + vb,
+            )
+        }
     }
+}
 
-    a.segments = a_prefix_segs + rewrite.segments + postfix_segs;
+fn tail<T: RleValue>(data: &[u8], tail: RleTail) -> (RleState<'_, T, T>, usize, usize) {
+    let len = data.len();
+    let bytes = tail.bytes as usize;
+    let header_pos = len - bytes;
+    match read_signed(&data[header_pos..]) {
+        None => (RleState::Empty, 0, 0),
+        Some((tb, count)) if count > 0 => {
+            let (_, value) = T::unpack(&data[header_pos + tb..]);
+            (
+                RleState::make_run(count as usize, RleCow::Ref(value)),
+                header_pos,
+                1,
+            )
+        }
+        Some((tb, 0)) => {
+            let (_, nulls) = read_unsigned(&data[header_pos + tb..]).unwrap();
+            (RleState::Null(nulls as usize), header_pos, 1)
+        }
+        Some((tb, -1)) => {
+            let (_, value) = T::unpack(&data[header_pos + tb..]);
+            (RleState::Lone(RleCow::Ref(value)), header_pos, 1)
+        }
+        Some((_tb, count)) => {
+            let bytes = tail.lit_tail.unwrap().get() as usize;
+            let value_pos = len - bytes;
+            let (_, value) = T::unpack(&data[value_pos..]);
+            let current = RleCow::Ref(value);
+            let count = -count as usize - 1;
+            let state = RleState::Lit {
+                count,
+                local: 0,
+                current,
+                header_pos,
+                bytes,
+            };
+            (state, value_pos, 1)
+        }
+    }
+}
+
+fn rle_merge<T: RleValue>(a: &mut Slab, b: &Slab) {
+    let mut buf = vec![];
+    let (seg, tail) = do_merge::<T>(&mut a.data, a.tail, a.segments, b, &mut buf);
+    a.segments = seg;
+    a.tail = tail;
     a.len += b.len;
 }
 
-// ── streaming_save ───────────────────────────────────────────────────────────
-
-/// Serialize multiple RLE slabs into one canonical byte array in O(n).
-///
-/// Processes runs from all slabs sequentially, maintaining a pending tail
-/// run that accumulates adjacent compatible runs.  Each value byte is
-/// visited at most twice (once to parse, once to write), giving O(n) total.
-fn rle_streaming_save<T: RleValue>(slabs: &[&[u8]]) -> Vec<u8> {
-    if slabs.is_empty() {
-        return vec![];
+fn do_merge<T: RleValue>(
+    a: &mut Vec<u8>,
+    a_tail: RleTail,
+    a_segs: usize,
+    b: &Slab,
+    buf: &mut Vec<u8>,
+) -> (usize, RleTail) {
+    if b.len == 0 {
+        return (a_segs, a_tail);
     }
-    if slabs.len() == 1 {
-        return slabs[0].to_vec();
+    let (tail_pos, b_bytes, seg, f) = {
+        let (mut a_state, tail_pos, delta_seg) = tail::<T>(a, a_tail);
+        let (b_head, b_bytes) = head::<T>(b);
+        let (f, b_segments) = a_state.flush_postfix(buf, Some(b_head));
+        (
+            tail_pos,
+            b_bytes,
+            a_segs + f.segments + b_segments - delta_seg,
+            f,
+        )
+    };
+    a.truncate(tail_pos);
+    if let Some(rw) = f.rewrite {
+        rewrite_lit_header(a, rw.pos, rw.count); // a.len() could change here
     }
-
-    let total_bytes: usize = slabs.iter().map(|s| s.len()).sum();
-    let mut out = Vec::with_capacity(total_bytes);
-
-    // Pending tail state.  For a literal, value bytes accumulate in `p_lit_buf`
-    // (without header) and `p_value` holds the last value.  For a repeat,
-    // `p_value` holds the repeated value.  For null, `p_value` is unused.
-    #[derive(PartialEq)]
-    enum PK {
-        None,
-        Repeat,
-        Literal,
-        Null,
-    }
-    let mut p_kind = PK::None;
-    let mut p_count: usize = 0;
-    let mut p_value: Vec<u8> = Vec::new();
-    let mut p_lit_buf: Vec<u8> = Vec::new();
-
-    macro_rules! flush {
-        () => {{
-            match p_kind {
-                PK::None => {}
-                PK::Repeat => {
-                    out.extend(encode_signed(p_count as i64));
-                    out.extend_from_slice(&p_value);
-                }
-                PK::Literal => {
-                    if p_count > 0 {
-                        out.extend(encode_signed(-(p_count as i64)));
-                        out.extend_from_slice(&p_lit_buf);
-                    }
-                }
-                PK::Null => {
-                    out.extend(encode_signed(0));
-                    out.extend(encode_unsigned(p_count as u64));
-                }
-            }
-            #[allow(unused_assignments)]
-            {
-                p_kind = PK::None;
-            }
-            #[allow(unused_assignments)]
-            {
-                p_count = 0;
-            }
-            p_value.clear();
-            p_lit_buf.clear();
-        }};
-    }
-
-    for &slab in slabs {
-        let mut pos = 0;
-        while pos < slab.len() {
-            let (cb, raw) = read_signed(&slab[pos..]).unwrap();
-            match raw {
-                n if n > 0 => {
-                    // ── Repeat run ────────────────────────────────
-                    let count = n as usize;
-                    let vs = pos + cb;
-                    let vl = T::value_len(&slab[vs..]).unwrap();
-                    let value = &slab[vs..vs + vl];
-                    pos = vs + vl;
-
-                    if p_kind == PK::Repeat && p_value == value {
-                        p_count += count;
-                    } else if p_kind == PK::Literal && p_count > 0 && p_value == value {
-                        // Last literal value == repeat value: pop, flush, repeat
-                        p_lit_buf.truncate(p_lit_buf.len() - p_value.len());
-                        p_count -= 1;
-                        if p_count > 0 {
-                            let save_val = std::mem::take(&mut p_value);
-                            flush!();
-                            p_value = save_val;
-                        }
-                        p_kind = PK::Repeat;
-                        p_count = count + 1;
-                        // p_value already holds the right value
-                    } else {
-                        flush!();
-                        p_kind = PK::Repeat;
-                        p_count = count;
-                        p_value.clear();
-                        p_value.extend_from_slice(value);
-                    }
-                }
-                n if n < 0 => {
-                    // ── Literal run ───────────────────────────────
-                    let total = (-n) as usize;
-                    let lit_start = pos + cb;
-
-                    // Parse the first value to check boundary.
-                    let first_vl = T::value_len(&slab[lit_start..]).unwrap();
-                    let first_value = &slab[lit_start..lit_start + first_vl];
-
-                    let absorbed_first = if p_kind == PK::Repeat && p_value == first_value {
-                        p_count += 1;
-                        true
-                    } else if p_kind == PK::Literal && p_count > 0 && p_value == first_value {
-                        // Pop last literal value, flush, start repeat(2, v)
-                        p_lit_buf.truncate(p_lit_buf.len() - p_value.len());
-                        p_count -= 1;
-                        if p_count > 0 {
-                            let save_val = std::mem::take(&mut p_value);
-                            flush!();
-                            p_value = save_val;
-                        }
-                        p_kind = PK::Repeat;
-                        p_count = 2;
-                        // p_value already set
-                        true
-                    } else {
-                        false
-                    };
-
-                    let (vals_start, vals_count) = if absorbed_first {
-                        (lit_start + first_vl, total - 1)
-                    } else {
-                        (lit_start, total)
-                    };
-
-                    if vals_count > 0 {
-                        // Walk to find the last value's start and the total byte span.
-                        let mut walk = vals_start;
-                        for _ in 0..vals_count - 1 {
-                            walk += T::value_len(&slab[walk..]).unwrap();
-                        }
-                        let last_vs = walk;
-                        let last_vl = T::value_len(&slab[walk..]).unwrap();
-                        walk += last_vl;
-                        let vals_end = walk;
-
-                        if p_kind == PK::Literal {
-                            // Extend existing literal.
-                            p_lit_buf.extend_from_slice(&slab[vals_start..vals_end]);
-                            p_count += vals_count;
-                            p_value.clear();
-                            p_value.extend_from_slice(&slab[last_vs..last_vs + last_vl]);
-                        } else {
-                            // Flush pending (repeat/null/none), start new literal.
-                            flush!();
-                            p_kind = PK::Literal;
-                            p_count = vals_count;
-                            p_lit_buf.extend_from_slice(&slab[vals_start..vals_end]);
-                            p_value.extend_from_slice(&slab[last_vs..last_vs + last_vl]);
-                        }
-                        pos = vals_end;
-                    } else {
-                        // All values absorbed (literal of 1 that matched pending).
-                        pos = lit_start + first_vl;
-                    }
-                }
-                _ => {
-                    // ── Null run ──────────────────────────────────
-                    let (ncb, nc) = read_unsigned(&slab[pos + cb..]).unwrap();
-                    let count = nc as usize;
-                    pos += cb + ncb;
-
-                    if p_kind == PK::Null {
-                        p_count += count;
-                    } else {
-                        flush!();
-                        p_kind = PK::Null;
-                        p_count = count;
-                    }
-                }
-            }
-        }
-    }
-    flush!();
-    out
+    let a_len = a.len();
+    a.extend_from_slice(buf);
+    a.extend_from_slice(&b.data[b_bytes..]);
+    let tail = f
+        .wpos
+        .merge(a_len, buf.len(), b.data.len() - b_bytes, b.tail);
+    (seg, tail)
 }
 
 // ── validate_encoding ────────────────────────────────────────────────────────
@@ -1259,11 +1280,12 @@ fn rle_streaming_save<T: RleValue>(slabs: &[&[u8]]) -> Vec<u8> {
 /// 7. First value of a literal differs from previous run's last value
 /// 8. Last value of a literal differs from next run's first value
 /// 9. No two consecutive equal values within a literal (would form a repeat)
-pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo, String> {
+pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo<RleTail>, String> {
     if slab.is_empty() {
         return Ok(SlabInfo {
             segments: 0,
             len: 0,
+            tail: RleTail::default(),
         });
     }
 
@@ -1276,7 +1298,10 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo
 
     let mut runs: Vec<Run> = vec![];
     let mut pos = 0;
+    let mut last_start = 0;
+    let mut lit_tail: Option<NonZeroU32> = None;
     while pos < slab.len() {
+        last_start = pos;
         let (cb, raw) = read_signed(&slab[pos..])
             .ok_or_else(|| format!("truncated count header at byte {pos}"))?;
         match raw {
@@ -1289,6 +1314,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo
                     count,
                     value: slab[vs..vs + vl].to_vec(),
                 });
+                lit_tail = None;
                 pos = vs + vl;
             }
             n if n < 0 => {
@@ -1300,6 +1326,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo
                         .ok_or_else(|| format!("bad literal value {j} at byte {sb}"))?;
                     values.push(slab[sb..sb + vl].to_vec());
                     sb += vl;
+                    lit_tail = NonZeroU32::new(vl as u32);
                 }
                 runs.push(Run::Literal { values });
                 pos = sb;
@@ -1308,6 +1335,7 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo
                 let (ncb, nc) = read_unsigned(&slab[pos + cb..])
                     .ok_or_else(|| format!("truncated null count at byte {}", pos + cb))?;
                 runs.push(Run::Null { count: nc as usize });
+                lit_tail = None;
                 pos += cb + ncb;
             }
         }
@@ -1426,7 +1454,15 @@ pub(crate) fn rle_validate_encoding<T: RleValue>(slab: &[u8]) -> Result<SlabInfo
             }
         }
     }
-    Ok(SlabInfo { segments, len })
+    let tail = RleTail {
+        bytes: (slab.len() - last_start) as u32,
+        lit_tail,
+    };
+    Ok(SlabInfo {
+        segments,
+        len,
+        tail,
+    })
 }
 
 // ── Load & verify ─────────────────────────────────────────────────────────
@@ -1453,7 +1489,7 @@ fn rle_load_and_verify<T: RleValue>(
 
     /// Flush accumulated bytes into a slab.
     #[inline]
-    fn flush(
+    fn flush<T: RleValue>(
         slabs: &mut Vec<Slab>,
         data: &[u8],
         slab_start: &mut usize,
@@ -1473,11 +1509,7 @@ fn rle_load_and_verify<T: RleValue>(
         } else {
             data[*slab_start..end].to_vec()
         };
-        slabs.push(Slab {
-            data: d,
-            len: *slab_items,
-            segments: *slab_segs,
-        });
+        slabs.push(make_rle_slab::<T>(d, *slab_items, *slab_segs));
         *slab_start = end;
         *slab_items = 0;
         *slab_segs = 0;
@@ -1500,7 +1532,7 @@ fn rle_load_and_verify<T: RleValue>(
             }
             let run_end = vs + vlen;
             if slab_segs > 0 && slab_segs + 1 > max_segments {
-                flush(
+                flush::<T>(
                     &mut slabs,
                     data,
                     &mut slab_start,
@@ -1573,14 +1605,10 @@ fn rle_load_and_verify<T: RleValue>(
                     };
                     d.extend_from_slice(chunk_hdr.as_bytes());
                     d.extend_from_slice(&data[offsets[consumed]..chunk_end]);
-                    slabs.push(Slab {
-                        data: d,
-                        len: slab_items + room,
-                        segments: slab_segs + room,
-                    });
+                    slabs.push(make_rle_slab::<T>(d, slab_items + room, slab_segs + room));
                     consumed += room;
                 } else if slab_segs > 0 {
-                    flush(
+                    flush::<T>(
                         &mut slabs,
                         data,
                         &mut slab_start,
@@ -1599,11 +1627,7 @@ fn rle_load_and_verify<T: RleValue>(
                     let mut d = Vec::with_capacity(hdr.len as usize + (ce - cs));
                     d.extend_from_slice(hdr.as_bytes());
                     d.extend_from_slice(&data[cs..ce]);
-                    slabs.push(Slab {
-                        data: d,
-                        len: max_segments,
-                        segments: max_segments,
-                    });
+                    slabs.push(make_rle_slab::<T>(d, max_segments, max_segments));
                     consumed += max_segments;
                 }
 
@@ -1643,7 +1667,7 @@ fn rle_load_and_verify<T: RleValue>(
             }
             let run_end = pos + cb + ncb;
             if slab_segs > 0 && slab_segs + 1 > max_segments {
-                flush(
+                flush::<T>(
                     &mut slabs,
                     data,
                     &mut slab_start,
@@ -1659,7 +1683,7 @@ fn rle_load_and_verify<T: RleValue>(
         }
     }
 
-    flush(
+    flush::<T>(
         &mut slabs,
         data,
         &mut slab_start,
@@ -1797,5 +1821,39 @@ mod load_verify_tests {
             }),
         );
         assert!(result.is_err());
+    }
+
+    /// Test that splice across the LEB128 signed boundary (64 literal items)
+    /// triggers a rewrite_lit_header that changes the header byte count,
+    /// exposing the tail computation bug.
+    ///
+    /// Signed LEB128: -1..-64 fit in 1 byte, -65.. in 2 bytes.
+    /// So a literal run of 64 items has a 1-byte header; 65+ has 2 bytes.
+    #[test]
+    fn splice_lit_crosses_leb128_boundary() {
+        // Create a column with max_segments=256 so we can have a huge literal run.
+        // Use 60 unique values to get a literal run of 60 (under the 64 boundary).
+        let initial: Vec<u64> = (0..60).collect();
+        let mut col = crate::v1::Column::<u64>::from_values_with_max_segments(initial, 256);
+        assert_eq!(col.slab_count(), 1);
+        assert_eq!(col.len(), 60);
+
+        // Splice 10 unique values into the middle. This extends the literal
+        // from 60 to 70 items, crossing the 64 boundary.
+        // The rewrite_lit_header changes the header from 1 byte (-60) to
+        // 2 bytes (-70), shifting all subsequent byte positions.
+        let new_vals: Vec<u64> = (1000..1010).collect();
+        col.splice(30, 0, new_vals);
+
+        // If the tail was computed from wpos before the rewrite, it'll be
+        // off by 1 byte (the header grew). validate_encoding will catch it.
+        col.validate_encoding();
+        assert_eq!(col.len(), 70);
+        // Verify values are correct.
+        let vals: Vec<u64> = col.iter().collect();
+        let mut expected: Vec<u64> = (0..30).collect();
+        expected.extend(1000..1010);
+        expected.extend(30..60);
+        assert_eq!(vals, expected);
     }
 }
