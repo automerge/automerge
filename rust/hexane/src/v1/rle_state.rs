@@ -1,8 +1,9 @@
 //! RLE encoding state machine for cursor-aware splice.
 
-use super::rle::{encode_signed, encode_unsigned};
+use super::rle::{encode_signed, encode_unsigned, RleTail};
 use super::{AsColumnRef, RleValue};
 
+use std::num::NonZeroU32;
 use std::ops::Range;
 
 /// A Cow-like type for RLE values. Holds either an owned value from the
@@ -39,11 +40,13 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleCow<'a, T, V> {
     }
 
     #[inline]
-    pub fn pack(&self, buf: &mut Vec<u8>) -> bool {
+    pub fn pack(&self, buf: &mut Vec<u8>) -> usize {
+        let pos = buf.len();
         match self {
             Self::Owned(v) => T::pack(v.as_column_ref(), buf),
             Self::Ref(g) => T::pack(*g, buf),
-        }
+        };
+        buf.len() - pos
     }
 
     #[inline]
@@ -84,19 +87,105 @@ impl RewriteHeader {
 pub(crate) struct FlushState {
     pub segments: usize,
     pub rewrite: Option<RewriteHeader>,
+    pub wpos: WPos,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WPos {
+    Run {
+        pos: usize,
+        local: bool,
+    },
+    Lit {
+        pos: usize,
+        bytes: usize,
+        local: bool,
+    },
+}
+
+impl Default for WPos {
+    fn default() -> Self {
+        WPos::Run {
+            pos: 0,
+            local: true,
+        }
+    }
+}
+
+impl WPos {
+    fn lit(pos: usize, bytes: usize, local: bool) -> Self {
+        Self::Lit { pos, bytes, local }
+    }
+
+    // truncated lit run
+    fn trunc(count: usize, pos: usize, bytes: usize, local: bool) -> Self {
+        if count == 0 {
+            Self::Run { pos, local }
+        } else {
+            Self::Lit { pos, bytes, local }
+        }
+    }
+
+    fn run(pos: usize, local: bool) -> Self {
+        Self::Run { pos, local }
+    }
+
+    pub(crate) fn merge(
+        &self,
+        prefix: usize,
+        middle: usize,
+        postfix: usize,
+        tail: RleTail,
+    ) -> RleTail {
+        match postfix {
+            0 => self.as_tail(prefix, middle),
+            len if tail.bytes <= len as u32 => tail,
+            len => self
+                .as_tail(prefix, middle + len)
+                .with_lit_tail(tail.lit_tail),
+        }
+    }
+
+    pub(crate) fn as_tail(&self, prefix: usize, local: usize) -> RleTail {
+        let len = prefix + local;
+        match self {
+            WPos::Lit {
+                pos,
+                bytes,
+                local: true,
+            } => RleTail {
+                bytes: (local - *pos) as u32,
+                lit_tail: NonZeroU32::new(*bytes as u32),
+            },
+            WPos::Lit { pos, bytes, .. } => RleTail {
+                bytes: (len - *pos) as u32,
+                lit_tail: NonZeroU32::new(*bytes as u32),
+            },
+            WPos::Run { pos, local: true } => RleTail {
+                bytes: (local - *pos) as u32,
+                lit_tail: None,
+            },
+            WPos::Run { pos, .. } => RleTail {
+                bytes: (len - *pos) as u32,
+                lit_tail: None,
+            },
+        }
+    }
 }
 
 impl FlushState {
-    fn new(segments: usize) -> Self {
+    fn new(segments: usize, wpos: WPos) -> Self {
         Self {
             segments,
             rewrite: None,
+            wpos,
         }
     }
-    fn rewrite(segments: usize, r: RewriteHeader) -> Self {
+    fn rewrite(segments: usize, r: RewriteHeader, wpos: WPos) -> Self {
         Self {
             segments,
             rewrite: Some(r),
+            wpos,
         }
     }
 }
@@ -104,6 +193,7 @@ impl FlushState {
 impl std::ops::AddAssign for FlushState {
     fn add_assign(&mut self, rhs: Self) {
         self.segments += rhs.segments;
+        self.wpos = rhs.wpos;
         if rhs.rewrite.is_some() {
             self.rewrite = rhs.rewrite;
         }
@@ -136,6 +226,7 @@ pub(crate) enum RleState<'a, T: RleValue, V: AsColumnRef<T>> {
         count: usize,
         local: usize,
         header_pos: usize,
+        bytes: usize,
         current: RleCow<'a, T, V>,
     },
     Null(usize),
@@ -180,22 +271,24 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
             RleState::Empty => RleState::Run(n, value),
             RleState::Lone(prev) if value == prev => RleState::Run(n + 1, value),
             RleState::Lone(prev) if n == 1 => {
-                let header_pos = emit_lit(buf, &prev);
+                let (header_pos, bytes) = emit_lit(buf, &prev);
                 RleState::Lit {
                     count: 1,
                     local: 1,
                     header_pos,
+                    bytes,
                     current: value,
                 }
             }
             RleState::Lone(prev) => {
-                emit_lit(buf, &prev);
+                let (pos, bytes) = emit_lit(buf, &prev);
+                flushed.wpos = WPos::lit(pos, bytes, true);
                 flushed.segments = 1;
                 RleState::Run(n, value)
             }
             RleState::Run(count, prev) if value == prev => RleState::Run(count + n, value),
             RleState::Run(count, prev) => {
-                emit_run(buf, count, &prev);
+                flushed.wpos = emit_run(buf, count, &prev);
                 flushed.segments = 1;
                 Self::make_run(n, value)
             }
@@ -204,12 +297,14 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 local,
                 header_pos,
                 current,
+                bytes,
             } if value == current => {
                 if local == count {
                     rewrite_lit_header(buf, header_pos, count);
                 } else {
                     flushed.rewrite = Some(RewriteHeader::new(count, header_pos));
                 }
+                flushed.wpos = WPos::trunc(count, header_pos, bytes, local == count);
                 flushed.segments = local;
                 RleState::Run(n + 1, value)
             }
@@ -218,13 +313,15 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 local,
                 header_pos,
                 current,
+                ..
             } if n == 1 => {
-                current.pack(buf);
+                let bytes = current.pack(buf);
                 RleState::Lit {
                     count: count + 1,
                     local: local + 1,
                     header_pos,
                     current: value,
+                    bytes,
                 }
             }
             RleState::Lit {
@@ -232,8 +329,10 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 local,
                 header_pos,
                 current,
+                ..
             } => {
-                current.pack(buf);
+                let bytes = current.pack(buf);
+                flushed.wpos = WPos::lit(header_pos, bytes, count == local);
                 if local == count {
                     rewrite_lit_header(buf, header_pos, count + 1);
                 } else {
@@ -243,7 +342,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 RleState::Run(n, value)
             }
             RleState::Null(count) => {
-                emit_null(buf, count);
+                flushed.wpos = emit_null(buf, count);
                 flushed.segments = 1;
                 Self::make_run(n, value)
             }
@@ -251,7 +350,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         flushed
     }
 
-    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize) -> Self {
+    pub fn lit(count: usize, current: Cow<'a, T, V>, header_pos: usize, bytes: usize) -> Self {
         if count == 0 {
             Self::Lone(current)
         } else {
@@ -260,6 +359,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 local: 0,
                 current,
                 header_pos,
+                bytes,
             }
         }
     }
@@ -333,7 +433,7 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         flushed
     }
 
-    pub fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> FlushState {
+    fn flush_with_lit(&mut self, buf: &mut Vec<u8>, lit: usize) -> FlushState {
         let old = std::mem::replace(self, RleState::Empty);
         if lit == 0 {
             return Self::do_flush(old, buf);
@@ -345,25 +445,30 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 local,
                 header_pos,
                 current,
+                ..
             } => {
-                current.pack(buf);
+                let bytes = current.pack(buf);
+                let wpos = WPos::lit(header_pos, bytes, count == local);
                 let total = count + 1 + lit;
                 if local == count {
                     rewrite_lit_header(buf, header_pos, total);
-                    FlushState::new(local + 1)
+                    FlushState::new(local + 1, wpos)
                 } else {
-                    FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos))
+                    FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos), wpos)
                 }
             }
             RleState::Lone(value) => {
                 let total = 1 + lit;
+                let pos = buf.len();
                 buf.extend(encode_signed(-(total as i64)));
-                value.pack(buf);
-                FlushState::new(1)
+                let bytes = value.pack(buf);
+                FlushState::new(1, WPos::lit(pos, bytes, true))
             }
             other => {
-                let flushed = Self::do_flush(other, buf);
+                let mut flushed = Self::do_flush(other, buf);
+                let pos = buf.len();
                 buf.extend(encode_signed(-(lit as i64)));
+                flushed.wpos = WPos::lit(pos, 0, true); // fill in bytes later
                 flushed
             }
         }
@@ -378,32 +483,34 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         match state {
             RleState::Empty => FlushState::default(),
             RleState::Lone(value) => {
-                buf.extend(encode_signed(-1));
-                value.pack(buf);
-                FlushState::new(1)
+                let wpos = emit_run(buf, 1, &value);
+                FlushState::new(1, wpos)
             }
             RleState::Run(count, value) => {
-                emit_run(buf, count, &value);
-                FlushState::new(1)
+                let wpos = emit_run(buf, count, &value);
+                FlushState::new(1, wpos)
             }
             RleState::Lit {
                 count,
                 local,
                 header_pos,
                 current,
+                ..
             } => {
-                current.pack(buf);
+                let bytes = current.pack(buf);
+                let wpos = WPos::lit(header_pos, bytes, count == local);
                 let total = count + 1;
                 if local == count {
                     rewrite_lit_header(buf, header_pos, total);
-                    FlushState::new(total)
+                    FlushState::new(total, wpos)
                 } else {
-                    FlushState::rewrite(local + 1, RewriteHeader::new(total, header_pos))
+                    let rewrite = RewriteHeader::new(total, header_pos);
+                    FlushState::rewrite(local + 1, rewrite, wpos)
                 }
             }
             RleState::Null(count) => {
-                emit_null(buf, count);
-                FlushState::new(1)
+                let wpos = emit_null(buf, count);
+                FlushState::new(1, wpos)
             }
         }
     }
@@ -412,29 +519,35 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
 fn emit_lit<'a, T: RleValue, V: AsColumnRef<T>>(
     buf: &mut Vec<u8>,
     value: &RleCow<'a, T, V>,
-) -> usize {
-    let header_pos = buf.len();
+) -> (usize, usize) {
+    let pos = buf.len();
     buf.extend(encode_signed(-1));
-    value.pack(buf);
-    header_pos
+    let bytes = value.pack(buf);
+    (pos, bytes)
 }
 
 fn emit_run<'a, T: RleValue, V: AsColumnRef<T>>(
     buf: &mut Vec<u8>,
     count: usize,
     value: &RleCow<'a, T, V>,
-) {
+) -> WPos {
+    let pos = buf.len();
     if count == 1 {
         buf.extend(encode_signed(-1));
+        let bytes = value.pack(buf);
+        WPos::lit(pos, bytes, true)
     } else {
         buf.extend(encode_signed(count as i64));
+        value.pack(buf);
+        WPos::run(pos, true)
     }
-    value.pack(buf);
 }
 
-fn emit_null(buf: &mut Vec<u8>, count: usize) {
+fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
+    let pos = buf.len();
     buf.extend(encode_signed(0));
     buf.extend(encode_unsigned(count as u64));
+    WPos::run(pos, true)
 }
 
 fn leb_signed_bytes(buf: &[u8], pos: usize) -> Range<usize> {
@@ -445,7 +558,8 @@ fn leb_signed_bytes(buf: &[u8], pos: usize) -> Range<usize> {
     pos..pos + n
 }
 
-pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: usize) {
+pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: usize) -> i64 {
+    let len = buf.len();
     let header_bytes = leb_signed_bytes(buf, header_pos);
     if total == 0 {
         // remove header
@@ -454,6 +568,7 @@ pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: us
         // rewrite header
         buf.splice(header_bytes, encode_signed(-(total as i64)));
     }
+    buf.len() as i64 - len as i64
 }
 
 #[cfg(test)]

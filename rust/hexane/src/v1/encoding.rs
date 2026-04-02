@@ -17,27 +17,25 @@ pub trait ColumnEncoding: Default {
     /// The column value type this encoding operates on.
     type Value: ColumnValueRef<Encoding = Self>;
 
+    /// Per-slab metadata stored alongside data/len/segments.
+    type Tail: Copy + Clone + std::fmt::Debug + Default;
+
     /// Create an empty slab with no items.
-    fn empty_slab() -> Slab {
-        Slab {
-            data: vec![],
-            len: 0,
-            segments: 0,
-        }
+    fn empty_slab() -> Slab<Self::Tail> {
+        Slab::new(vec![], 0, 0)
     }
 
     /// Create a slab of `len` copies of `value`. O(1).
-    fn fill(len: usize, value: <Self::Value as ColumnValueRef>::Get<'_>) -> Slab;
+    fn fill(len: usize, value: <Self::Value as ColumnValueRef>::Get<'_>) -> Slab<Self::Tail>;
 
     /// Merge slab `b` into `a` in place. Both slabs must be non-empty.
-    /// Handles boundary run merging. Updates `a.len` and `a.segments`.
-    fn merge_slabs(a: &mut Slab, b: &Slab);
+    fn merge_slabs(a: &mut Slab<Self::Tail>, b: &Slab<Self::Tail>);
 
     /// Validate that `slab` is in canonical encoding form.
     ///
     /// Returns `Ok(())` if the encoding is canonical, or `Err(description)` if
     /// any invariant is violated.  This is intended for testing and debugging.
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo, String>;
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, String>;
 
     /// Decode and validate raw bytes, splitting into slabs.
     ///
@@ -54,24 +52,29 @@ pub trait ColumnEncoding: Default {
         data: &[u8],
         max_segments: usize,
         validate: Option<ValidateFn<Self::Value>>,
-    ) -> Result<Vec<Slab>, PackError>;
+    ) -> Result<Vec<Slab<Self::Tail>>, PackError>;
 
-    /// Serialize multiple slabs into a single canonical byte array in O(n).
-    ///
-    /// Memcopies slab interiors and only decodes/re-encodes the boundary
-    /// runs between adjacent slabs.
-    fn streaming_save(slabs: &[&[u8]]) -> Vec<u8>;
+    /// Merge slab `b`'s data into accumulator `acc`.
+    /// `a_tail` and `a_segments` describe the current state of `acc`.
+    /// Returns `(segment_delta, new_tail)`, or `None` if `b` is empty.
+    fn do_merge(
+        acc: &mut Vec<u8>,
+        a_tail: Self::Tail,
+        a_segments: usize,
+        b: &Slab<Self::Tail>,
+        buf: &mut Vec<u8>,
+    ) -> (usize, Self::Tail);
 
     /// Splice a single slab: delete `del` items at `index`, insert values.
     /// `del` may exceed the slab length — the excess is returned as `overflow_del`.
     /// Returns `(overflow_slabs, overflow_del)`.
     fn splice_slab<V: AsColumnRef<Self::Value>>(
-        slab: &mut Slab,
+        slab: &mut Slab<Self::Tail>,
         index: usize,
         del: usize,
         values: impl Iterator<Item = V>,
         max_segments: usize,
-    ) -> (Vec<Slab>, usize);
+    ) -> (Vec<Slab<Self::Tail>>, usize);
 
     /// Splice a Column: locate the target slab, splice it, handle overflow
     /// and cross-slab deletes, merge small neighbours, update the BIT.
@@ -159,8 +162,8 @@ pub trait ColumnEncoding: Default {
     /// Create a decoder that yields all items in `slab` in order.
     fn decoder(slab: &[u8]) -> Self::Decoder<'_>;
 
-    fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab {
-        let mut slab = Slab::default();
+    fn encode<V: AsColumnRef<Self::Value>>(values: impl Iterator<Item = V>) -> Slab<Self::Tail> {
+        let mut slab = Self::empty_slab();
         Self::splice_slab(&mut slab, 0, 0, values, usize::MAX);
         slab
     }
@@ -180,7 +183,8 @@ pub trait RunDecoder: Iterator {
     fn next_run(&mut self) -> Option<Run<Self::Item>>;
 }
 
-pub struct SlabInfo {
+pub struct SlabInfo<T> {
     pub segments: usize,
     pub len: usize,
+    pub tail: T,
 }
