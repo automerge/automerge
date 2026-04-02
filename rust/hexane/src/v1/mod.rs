@@ -370,6 +370,7 @@ impl RleValue for String {
         let s = std::str::from_utf8(&cursor[..len]).unwrap();
         (hdr + len, s)
     }
+
     fn pack(value: &str, out: &mut Vec<u8>) -> bool {
         leb128::write::unsigned(out, value.len() as u64).unwrap();
         out.extend_from_slice(value.as_bytes());

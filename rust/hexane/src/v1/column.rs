@@ -6,17 +6,33 @@ use super::AsColumnRef;
 use super::ColumnValueRef;
 use crate::PackError;
 
+/// Type alias for the slab tail metadata of a column value type.
+pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
+
 // ── Slab ─────────────────────────────────────────────────────────────────────
 
 #[doc(hidden)]
-#[derive(Clone, Debug, Default)]
-pub struct Slab {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Slab<Tail: Copy + Clone + std::fmt::Debug + Default = ()> {
     pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
+    #[allow(dead_code)]
+    pub(crate) tail: Tail,
 }
 
-impl Slab {
+impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
+    pub(crate) fn new(data: Vec<u8>, len: usize, segments: usize) -> Self {
+        Self {
+            data,
+            len,
+            segments,
+            tail: Tail::default(),
+        }
+    }
+}
+
+impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     /// Returns `true` if the slab contains only `default` values.
     /// O(1) — checks segment count then decodes only the first value.
     pub(crate) fn is_default<T: ColumnValueRef>(&self) -> bool
@@ -94,7 +110,7 @@ impl SlabWeight for usize {
 #[doc(hidden)]
 pub trait WeightFn<T: ColumnValueRef> {
     type Weight: SlabWeight;
-    fn compute(slab: &Slab) -> Self::Weight;
+    fn compute(slab: &Slab<TailOf<T>>) -> Self::Weight;
 }
 
 /// Default weight strategy: BIT stores only slab lengths.
@@ -105,7 +121,7 @@ pub struct LenWeight;
 impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
     type Weight = usize;
     #[inline]
-    fn compute(slab: &Slab) -> usize {
+    fn compute(slab: &Slab<TailOf<T>>) -> usize {
         slab.len
     }
 }
@@ -114,7 +130,9 @@ impl<T: ColumnValueRef> WeightFn<T> for LenWeight {
 
 /// Rebuild BIT from scratch. O(S).
 /// The BIT is 1-indexed: `bit\[0\]` is unused, `bit\[1..=n\]` holds the tree.
-pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(slabs: &[Slab]) -> Vec<WF::Weight> {
+pub(crate) fn rebuild_bit<T: ColumnValueRef, WF: WeightFn<T>>(
+    slabs: &[Slab<TailOf<T>>],
+) -> Vec<WF::Weight> {
     let n = slabs.len();
     let mut bit = vec![WF::Weight::default(); n + 1];
     for i in 0..n {
@@ -190,7 +208,7 @@ pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) ->
 
 #[derive(Clone)]
 pub struct Column<T: ColumnValueRef, WF: WeightFn<T> = LenWeight> {
-    pub(crate) slabs: Vec<Slab>,
+    pub(crate) slabs: Vec<Slab<TailOf<T>>>,
     pub(crate) bit: Vec<WF::Weight>,
     pub(crate) total_len: usize,
     pub(crate) max_segments: usize,
@@ -221,7 +239,11 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Build from pre-existing slabs, computing the BIT via `WF`.
-    pub(crate) fn from_slabs(slabs: Vec<Slab>, total_len: usize, max_segments: usize) -> Self {
+    pub(crate) fn from_slabs(
+        slabs: Vec<Slab<TailOf<T>>>,
+        total_len: usize,
+        max_segments: usize,
+    ) -> Self {
         let bit = rebuild_bit::<T, WF>(&slabs);
         Self {
             slabs,
@@ -333,7 +355,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Validate the canonical encoding and return its slab info.
-    pub fn validate_encoding_info(&self) -> super::encoding::SlabInfo {
+    pub fn validate_encoding_info(&self) -> super::encoding::SlabInfo<TailOf<T>> {
         let bytes = self.save();
         match T::Encoding::validate_encoding(&bytes) {
             Ok(info) => info,
@@ -354,11 +376,22 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Serialize the column by appending bytes to `out`.
     ///
     /// Returns the byte range written (`out[range]` is the serialized data).
+    /// Merges slabs directly into `out` with no intermediate allocation.
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
+        use super::encoding::ColumnEncoding;
         let start = out.len();
-        let slab_refs: Vec<&[u8]> = self.slabs.iter().map(|s| s.data.as_slice()).collect();
-        let bytes = T::Encoding::streaming_save(&slab_refs);
-        out.extend_from_slice(&bytes);
+        if let Some(first) = self.slabs.first() {
+            out.extend_from_slice(&first.data);
+            let mut tail = first.tail;
+            let mut segments = first.segments;
+            let mut buf = Vec::new();
+            for s in &self.slabs[1..] {
+                let (new_seg, new_tail) = T::Encoding::do_merge(out, tail, segments, s, &mut buf);
+                segments = new_seg;
+                tail = new_tail;
+                buf.clear();
+            }
+        }
         start..out.len()
     }
 
@@ -616,7 +649,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 /// `nth()` is O(log S + runs_skipped) — uses the column's index structure
 /// to skip directly to the target slab.
 pub struct Iter<'a, T: ColumnValueRef> {
-    pub(crate) slabs: &'a [Slab],
+    pub(crate) slabs: &'a [Slab<TailOf<T>>],
     pub(crate) col: &'a dyn SlabFind,
     pub(crate) slab_idx: usize,
     pub(crate) decoder: <T::Encoding as ColumnEncoding>::Decoder<'a>,
