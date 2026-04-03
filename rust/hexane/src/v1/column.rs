@@ -17,7 +17,6 @@ pub struct Slab<Tail: Copy + Clone + std::fmt::Debug + Default = ()> {
     pub(crate) data: Vec<u8>,
     pub(crate) len: usize,
     pub(crate) segments: usize,
-    #[allow(dead_code)]
     pub(crate) tail: Tail,
 }
 
@@ -39,7 +38,6 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     where
         for<'a> T::Get<'a>: PartialEq,
     {
-        use super::encoding::ColumnEncoding;
         let default = T::Get::default();
         self.len == 0
             || (self.segments == 1
@@ -53,7 +51,6 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     /// the same code path as splice.
     #[cfg(debug_assertions)]
     pub(crate) fn validate<T: super::RleValue>(&self) {
-        use super::encoding::ColumnEncoding;
         let bytes: &[u8] = &self.data;
 
         let info = match T::Encoding::validate_encoding(bytes) {
@@ -378,7 +375,6 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Returns the byte range written (`out[range]` is the serialized data).
     /// Merges slabs directly into `out` with no intermediate allocation.
     pub fn save_to(&self, out: &mut Vec<u8>) -> Range<usize> {
-        use super::encoding::ColumnEncoding;
         let start = out.len();
         if let Some(first) = self.slabs.first() {
             out.extend_from_slice(&first.data);

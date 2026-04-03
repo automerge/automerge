@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use super::prefix_column::PrefixValue;
+use super::prefix::PrefixValue;
 use super::ColumnValueRef;
 use super::PrefixColumn;
 use crate::PackError;
