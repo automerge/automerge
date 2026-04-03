@@ -2,17 +2,6 @@ use super::state::{RleCow, RleState};
 use super::*;
 use crate::v1::{AsColumnRef, RleValue};
 
-#[allow(dead_code)]
-fn state_item_count<T: RleValue, V: AsColumnRef<T>>(state: &RleState<'_, T, V>) -> usize {
-    match state {
-        RleState::Empty => 0,
-        RleState::Lone(_) => 1,
-        RleState::Run(n, _) => *n,
-        RleState::Lit { count, .. } => count + 1,
-        RleState::Null(n) => *n,
-    }
-}
-
 pub(crate) fn rle_encode_state<T: RleValue>(
     values: impl Iterator<Item = T::Get<'static>>,
     buf: &mut Vec<u8>,

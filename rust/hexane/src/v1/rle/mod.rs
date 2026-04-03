@@ -17,7 +17,6 @@ use crate::PackError;
 
 type Slab = super::column::Slab<RleTail>;
 use super::encoding::{ColumnEncoding, SlabInfo};
-use super::leb::{read_signed, read_unsigned};
 use super::{AsColumnRef, ColumnValueRef, RleValue};
 
 // ── Wire-format helpers ───────────────────────────────────────────────────────
@@ -42,7 +41,9 @@ impl<T: RleValue> Default for RleEncoding<T> {
 }
 
 /// Compute the RleTail for a slab by scanning to the last segment.
+#[cfg(test)]
 pub(crate) fn compute_rle_tail<T: RleValue>(data: &[u8]) -> RleTail {
+    use super::leb::{read_signed, read_unsigned};
     if data.is_empty() {
         return RleTail::default();
     }
@@ -99,17 +100,6 @@ impl RleTail {
         self
     }
 }
-/// Create an RLE slab with correct tail.
-/// TODO : remove
-fn make_rle_slab<T: RleValue>(data: Vec<u8>, len: usize, segments: usize) -> Slab {
-    let tail = compute_rle_tail::<T>(&data);
-    Slab {
-        data,
-        len,
-        segments,
-        tail,
-    }
-}
 
 /// Validate an RLE slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
@@ -144,7 +134,7 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         rle_merge::<T>(a, b);
     }
 
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, String> {
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, PackError> {
         rle_validate_encoding::<T>(slab)
     }
 

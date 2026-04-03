@@ -11,7 +11,7 @@ pub type ValidateFn<V> = for<'a> fn(<V as ColumnValueRef>::Get<'a>) -> Option<St
 /// validation operations on raw `Vec<u8>` slabs.  [`Column`] delegates
 /// to `T::Encoding`.
 ///
-/// Both [`super::rle::RleEncoding`] and [`super::bool_encoding::BoolEncoding`]
+/// Both [`super::rle::RleEncoding`] and [`super::bool::BoolEncoding`]
 /// are zero-sized types — all state lives in the slab bytes.
 pub trait ColumnEncoding: Default {
     /// The column value type this encoding operates on.
@@ -35,7 +35,7 @@ pub trait ColumnEncoding: Default {
     ///
     /// Returns `Ok(())` if the encoding is canonical, or `Err(description)` if
     /// any invariant is violated.  This is intended for testing and debugging.
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, String>;
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<Self::Tail>, PackError>;
 
     /// Decode and validate raw bytes, splitting into slabs.
     ///

@@ -1,5 +1,6 @@
 //! LEB128 encoding/decoding helpers used by RLE and boolean encodings.
 
+use crate::PackError;
 use std::ops::Range;
 
 /// Stack-buffered LEB128 encoding (max 10 bytes, no heap allocation).
@@ -120,12 +121,26 @@ pub(crate) fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
     Some((start - buf.len(), v))
 }
 
+pub(crate) fn try_read_signed(data: &[u8]) -> Result<(usize, i64), PackError> {
+    let mut buf = data;
+    let start = buf.len();
+    let v = leb128::read::signed(&mut buf)?;
+    Ok((start - buf.len(), v))
+}
+
 /// Decode one unsigned LEB128 value from `data`. Returns `(bytes_read, value)`.
 pub(crate) fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
     let mut buf = data;
     let start = buf.len();
     let v = leb128::read::unsigned(&mut buf).ok()?;
     Some((start - buf.len(), v))
+}
+
+pub(crate) fn try_read_unsigned(data: &[u8]) -> Result<(usize, u64), PackError> {
+    let mut buf = data;
+    let start = buf.len();
+    let v = leb128::read::unsigned(&mut buf)?;
+    Ok((start - buf.len(), v))
 }
 
 /// Decode one unsigned LEB128 as `usize`. Convenience for bool encoding.
