@@ -445,7 +445,7 @@ impl ColumnEncoding for BoolEncoding {
         validate_slab(a);
     }
 
-    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, String> {
+    fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
         bool_validate_encoding(slab)
     }
 
@@ -522,7 +522,7 @@ fn bool_count_segments(slab: &[u8]) -> usize {
 /// 3. No trailing zero-count run
 /// 4. No two adjacent runs can be merged (implied by alternating, but
 ///    a zero-count interior run would effectively merge its neighbors)
-fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, String> {
+fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, PackError> {
     if slab.is_empty() {
         return Ok(SlabInfo {
             segments: 0,
@@ -539,20 +539,19 @@ fn bool_validate_encoding(slab: &[u8]) -> Result<SlabInfo<u8>, String> {
     let mut last_cb: u8 = 0;
 
     while byte_pos < slab.len() {
-        let (cb, count) = read_count(&slab[byte_pos..])
-            .ok_or_else(|| format!("truncated count at byte {byte_pos}"))?;
+        let (cb, count) = read_count(&slab[byte_pos..]).ok_or(PackError::BadFormat)?;
 
         if count == 0 && run_index > 0 {
-            return Err(format!(
+            return Err(PackError::InvalidValue(format!(
                 "run {run_index} (value={value}): zero count in non-first run"
-            ));
+            )));
         }
 
         let next_pos = byte_pos + cb;
         if next_pos >= slab.len() && count == 0 {
-            return Err(format!(
+            return Err(PackError::InvalidValue(format!(
                 "run {run_index} (value={value}): trailing zero-count run"
-            ));
+            )));
         }
 
         segments += 1;
