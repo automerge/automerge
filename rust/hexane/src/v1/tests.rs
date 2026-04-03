@@ -2295,7 +2295,7 @@ where
 fn validate_bool_column(col: &Column<bool>) {
     validate_column(col);
     for (i, slab) in col.slabs.iter().enumerate() {
-        let expected_tail = super::bool_encoding::compute_tail(&slab.data);
+        let expected_tail = super::bool::compute_tail(&slab.data);
         assert_eq!(slab.tail, expected_tail, "slab {i}: tail mismatch");
     }
 }
@@ -2411,10 +2411,8 @@ fn save_to_multi_column_concatenation() {
             .collect(),
         16,
     );
-    let bool_col = Column::<bool>::from_values_with_max_segments(
-        (0..n).map(|_| r.random()).collect(),
-        16,
-    );
+    let bool_col =
+        Column::<bool>::from_values_with_max_segments((0..n).map(|_| r.random()).collect(), 16);
     let str_col = Column::<String>::from_values_with_max_segments(
         (0..n)
             .map(|i| ["alpha", "beta", "gamma", "delta"][i % 4].to_string())

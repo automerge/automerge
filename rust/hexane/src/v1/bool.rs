@@ -2,6 +2,7 @@ use crate::PackError;
 
 type Slab = super::column::Slab<u8>;
 use super::encoding::{ColumnEncoding, RunDecoder, SlabInfo};
+use super::leb::{encode_count, read_count};
 use super::{AsColumnRef, Run};
 
 // ── Wire format ──────────────────────────────────────────────────────────────
@@ -18,94 +19,6 @@ use super::{AsColumnRef, Run};
 //
 // An empty slab means an empty column.  An all-true column encodes as `[0, N]`
 // (zero falses, then N trues).
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/// Decode one unsigned LEB128 from `data`.  Returns `(bytes_read, value)`.
-fn read_count(data: &[u8]) -> Option<(usize, usize)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::unsigned(&mut buf).ok()?;
-    Some((start - buf.len(), v as usize))
-}
-
-/// Stack-buffered unsigned LEB128 encoding (max 10 bytes, no heap allocation).
-#[derive(Clone, Copy)]
-struct BoolLeb128Buf {
-    buf: [u8; 10],
-    len: u8,
-}
-
-impl std::ops::Deref for BoolLeb128Buf {
-    type Target = [u8];
-    #[inline]
-    fn deref(&self) -> &[u8] {
-        &self.buf[..self.len as usize]
-    }
-}
-
-struct BoolLeb128Iter {
-    buf: [u8; 10],
-    pos: u8,
-    len: u8,
-}
-
-impl Iterator for BoolLeb128Iter {
-    type Item = u8;
-    #[inline]
-    fn next(&mut self) -> Option<u8> {
-        if self.pos < self.len {
-            let b = self.buf[self.pos as usize];
-            self.pos += 1;
-            Some(b)
-        } else {
-            None
-        }
-    }
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = (self.len - self.pos) as usize;
-        (n, Some(n))
-    }
-}
-
-impl ExactSizeIterator for BoolLeb128Iter {}
-
-impl IntoIterator for BoolLeb128Buf {
-    type Item = u8;
-    type IntoIter = BoolLeb128Iter;
-    #[inline]
-    fn into_iter(self) -> BoolLeb128Iter {
-        BoolLeb128Iter {
-            buf: self.buf,
-            pos: 0,
-            len: self.len,
-        }
-    }
-}
-
-/// Encode `n` as unsigned LEB128 into a stack buffer.
-#[inline]
-fn encode_count(n: usize) -> BoolLeb128Buf {
-    let mut out = BoolLeb128Buf {
-        buf: [0u8; 10],
-        len: 0,
-    };
-    let mut val = n as u64;
-    loop {
-        let mut byte = (val & 0x7f) as u8;
-        val >>= 7;
-        if val != 0 {
-            byte |= 0x80;
-        }
-        out.buf[out.len as usize] = byte;
-        out.len += 1;
-        if val == 0 {
-            break;
-        }
-    }
-    out
-}
 
 /// Compute the `tail` value: byte length of the last run's LEB128 count header.
 pub(crate) fn compute_tail(data: &[u8]) -> u8 {
@@ -836,7 +749,8 @@ fn bool_load_and_verify(
 mod tests {
     use super::super::Column;
     use super::Slab;
-    use super::{bool_count_segments, encode_count, find_partition, read_count, BoolPartition};
+    use super::{bool_count_segments, find_partition, BoolPartition};
+    use crate::v1::leb::{encode_count, read_count};
 
     fn build_bool(values: &[bool]) -> Column<bool> {
         let mut col = Column::<bool>::new();

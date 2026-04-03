@@ -861,13 +861,7 @@ impl PrefixValue for Option<i64> {
 
 // ── bool impl ────────────────────────────────────────────────────────────────
 
-/// Read one unsigned LEB128 count from boolean slab data.
-fn bool_read_count(data: &[u8]) -> Option<(usize, usize)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::unsigned(&mut buf).ok()?;
-    Some((start - buf.len(), v as usize))
-}
+use super::leb::read_count as bool_read_count;
 
 impl PrefixValue for bool {
     type Prefix = u32;
