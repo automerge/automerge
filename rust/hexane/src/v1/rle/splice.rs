@@ -531,7 +531,6 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
             f += state.flush(&mut buf);
             if !overflowed {
                 overflowed = true;
-                //result.tail = f.wpos.as_tail(p.prefix.bytes, buf.len());
                 result.wpos = f.wpos;
                 result.bytes = std::mem::take(&mut buf);
                 result.len = index + inserted;
@@ -568,14 +567,6 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
         result.segments = p.prefix.segments + f.segments + postfix_segments;
         result.rewrite = f.rewrite;
         result.wpos = f.wpos;
-    /*
-            result.tail = f.wpos.merge(
-                p.prefix.bytes,
-                result.bytes.len(),
-                postfix_bytes.len(),
-                slab.tail,
-            );
-    */
     } else {
         // the postfix goes on the final slab
         result.range.end = slab.data.len();
