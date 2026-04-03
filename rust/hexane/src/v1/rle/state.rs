@@ -1,10 +1,10 @@
 //! RLE encoding state machine for cursor-aware splice.
 
-use super::rle::{encode_signed, encode_unsigned, RleTail};
-use super::{AsColumnRef, RleValue};
+use super::RleTail;
+use crate::v1::leb::{encode_signed, encode_unsigned, rewrite_lit_header};
+use crate::v1::{AsColumnRef, RleValue};
 
 use std::num::NonZeroU32;
-use std::ops::Range;
 
 /// A Cow-like type for RLE values. Holds either an owned value from the
 /// splice iterator (`V`) or a borrowed value decoded from the slab (`T::Get<'a>`).
@@ -377,9 +377,9 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
     pub fn flush_postfix(
         &mut self,
         buf: &mut Vec<u8>,
-        postfix: Option<super::rle::Postfix<'a, T>>,
+        postfix: Option<super::splice::Postfix<'a, T>>,
     ) -> (FlushState, usize) {
-        use super::rle::Postfix;
+        use super::splice::Postfix;
         let mut f = FlushState::default();
         let postfix_segs = match postfix {
             None => {
@@ -550,27 +550,6 @@ fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
     WPos::run(pos, true)
 }
 
-fn leb_signed_bytes(buf: &[u8], pos: usize) -> Range<usize> {
-    let mut tmp = &buf[pos..];
-    let start = tmp.len();
-    let _ = leb128::read::signed(&mut tmp);
-    let n = start - tmp.len();
-    pos..pos + n
-}
-
-pub(crate) fn rewrite_lit_header(buf: &mut Vec<u8>, header_pos: usize, total: usize) -> i64 {
-    let len = buf.len();
-    let header_bytes = leb_signed_bytes(buf, header_pos);
-    if total == 0 {
-        // remove header
-        buf.splice(header_bytes, []);
-    } else {
-        // rewrite header
-        buf.splice(header_bytes, encode_signed(-(total as i64)));
-    }
-    buf.len() as i64 - len as i64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,7 +566,7 @@ mod tests {
     }
 
     fn decode(buf: &[u8]) -> Vec<u64> {
-        use crate::v1::rle::read_signed;
+        use crate::v1::leb::read_signed;
         let mut result = Vec::new();
         let mut pos = 0;
         while pos < buf.len() {
@@ -610,7 +589,7 @@ mod tests {
                     pos = scan;
                 }
                 _ => {
-                    let (ncb, nc) = crate::v1::rle::read_unsigned(&buf[pos + cb..]).unwrap();
+                    let (ncb, nc) = crate::v1::leb::read_unsigned(&buf[pos + cb..]).unwrap();
                     result.resize(result.len() + nc as usize, 0);
                     pos += cb + ncb;
                 }

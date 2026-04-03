@@ -5,29 +5,29 @@
 //! RLE + LEB128 wire format as v0; mutations edit bytes in place instead of
 //! re-encoding the whole slab.
 
-pub mod bool_encoding;
+pub mod bool;
 pub mod column;
-pub mod delta_column;
+pub mod delta;
 pub mod encoding;
 pub mod indexed;
+pub(crate) mod leb;
 pub mod load_opts;
-pub mod prefix_column;
+pub mod prefix;
 pub mod rle;
-pub(crate) mod rle_state;
 pub use column::{Column, Iter};
-pub use delta_column::{DeltaColumn, DeltaIter, DeltaValue};
+pub use delta::{DeltaColumn, DeltaIter, DeltaValue};
 pub use encoding::ColumnEncoding;
 pub use encoding::RunDecoder;
 pub use indexed::IndexedDeltaColumn;
 pub use load_opts::LoadOpts;
-pub use prefix_column::{PrefixColumn, PrefixIter, PrefixValue};
+pub use prefix::{PrefixColumn, PrefixIter, PrefixValue};
 
 #[cfg(test)]
 mod tests;
 
 use crate::PackError;
 
-use bool_encoding::BoolEncoding;
+use bool::BoolEncoding;
 use rle::RleEncoding;
 use std::fmt::Debug;
 

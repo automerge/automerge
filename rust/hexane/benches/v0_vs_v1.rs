@@ -1862,11 +1862,6 @@ mod save_string_8b {
 mod save_opt_u64 {
     use super::*;
 
-    fn build_v0_opt(n: usize) -> ColumnData<UIntCursor> {
-        // v0 doesn't have Option<u64> directly, use u64 with some zeros as "nulls"
-        (0..n).map(|_| rand_u64()).collect()
-    }
-
     fn build_v1_opt(n: usize) -> v1::Column<Option<u64>> {
         let choices: [Option<u64>; 5] = [None, Some(1), Some(2), Some(3), Some(4)];
         v1::Column::from_values_with_max_segments(

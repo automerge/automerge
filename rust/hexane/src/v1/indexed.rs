@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use super::delta_column::{DeltaColumn, DeltaValue};
+use super::delta::{DeltaColumn, DeltaValue};
 use crate::PackError;
 
 // ── Segment tree node ───────────────────────────────────────────────────────
@@ -60,21 +60,7 @@ impl RangeNode {
 
 // ── Compute leaf from slab data ─────────────────────────────────────────────
 
-/// Decode one signed LEB128 from `data`. Returns `(bytes_read, value)`.
-fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::signed(&mut buf).ok()?;
-    Some((start - buf.len(), v))
-}
-
-/// Decode one unsigned LEB128 from `data`. Returns `(bytes_read, value)`.
-fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::unsigned(&mut buf).ok()?;
-    Some((start - buf.len(), v))
-}
+use super::leb::{read_signed, read_unsigned};
 
 /// Compute a [`RangeNode`] from an RLE-encoded slab of signed deltas (i64).
 ///
