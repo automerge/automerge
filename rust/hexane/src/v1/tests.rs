@@ -2294,10 +2294,6 @@ where
 
 fn validate_bool_column(col: &Column<bool>) {
     validate_column(col);
-    for (i, slab) in col.slabs.iter().enumerate() {
-        let expected_tail = super::bool::compute_tail(&slab.data);
-        assert_eq!(slab.tail, expected_tail, "slab {i}: tail mismatch");
-    }
 }
 
 #[test]
@@ -2466,4 +2462,406 @@ fn save_to_multi_column_concatenation() {
 
     let loaded_str = Column::<String>::load(&buf[r_str]).unwrap();
     assert_eq!(loaded_str.to_vec(), str_col.to_vec(), "str roundtrip");
+}
+
+// ── Edge case: splice at literal/repeat boundaries ──────────────────────────
+
+#[test]
+fn splice_at_literal_repeat_boundary() {
+    // [1, 2, 3, 3, 3] — literal [1,2] then repeat [3,3,3]
+    // Splice at every position with insert, delete, and replace.
+    let initial = vec![1u64, 2, 3, 3, 3];
+    let col = Column::<u64>::from_values_with_max_segments(initial.clone(), 8);
+    validate_rle_column(&col);
+
+    for pos in 0..=initial.len() {
+        // Insert at boundary
+        let mut c = col.clone();
+        c.insert(pos, 99u64);
+        validate_rle_column(&c);
+        assert_eq!(c.len(), initial.len() + 1);
+
+        // Insert the same value as what's at the boundary
+        if pos < initial.len() {
+            let mut c = col.clone();
+            c.insert(pos, initial[pos]);
+            validate_rle_column(&c);
+        }
+    }
+
+    for pos in 0..initial.len() {
+        // Delete at boundary
+        let mut c = col.clone();
+        c.remove(pos);
+        validate_rle_column(&c);
+        assert_eq!(c.len(), initial.len() - 1);
+
+        // Replace with same value
+        let mut c = col.clone();
+        c.splice(pos, 1, [initial[pos]]);
+        validate_rle_column(&c);
+        assert_eq!(c.to_vec(), initial);
+
+        // Replace with different value
+        let mut c = col.clone();
+        c.splice(pos, 1, [99u64]);
+        validate_rle_column(&c);
+    }
+}
+
+#[test]
+fn splice_at_repeat_then_literal_boundary() {
+    // [5, 5, 5, 1, 2, 3] — repeat [5,5,5] then literal [1,2,3]
+    let initial = vec![5u64, 5, 5, 1, 2, 3];
+    let col = Column::<u64>::from_values_with_max_segments(initial.clone(), 8);
+    validate_rle_column(&col);
+
+    for pos in 0..=initial.len() {
+        let mut c = col.clone();
+        c.insert(pos, 99u64);
+        validate_rle_column(&c);
+
+        // Insert the repeat value at the boundary (index 3)
+        let mut c = col.clone();
+        c.insert(pos, 5u64);
+        validate_rle_column(&c);
+    }
+
+    for pos in 0..initial.len() {
+        let mut c = col.clone();
+        c.remove(pos);
+        validate_rle_column(&c);
+    }
+}
+
+#[test]
+fn splice_insert_same_value_at_literal_repeat_junction() {
+    // Specifically insert the repeat value right at the junction.
+    // [1, 2, 3, 3, 3] — insert 3 at index 2 (last literal, same as repeat value)
+    let initial = vec![1u64, 2, 3, 3, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial, 8);
+    col.insert(2, 3u64);
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![1u64, 2, 3, 3, 3, 3]);
+
+    // Insert 2 at index 3 — splits the repeat, value matches last literal
+    let initial = vec![1u64, 2, 3, 3, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial, 8);
+    col.insert(3, 2u64);
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![1u64, 2, 3, 2, 3, 3]);
+}
+
+// ── Edge case: try_merge_range with multiple small slabs ────────────────────
+
+#[test]
+fn try_merge_range_multiple_merges() {
+    // Create a column with very small max_segments to get many slabs,
+    // then do a splice that produces overflow, triggering merge.
+    let initial: Vec<u64> = (0..50).collect();
+    let mut col = Column::<u64>::from_values_with_max_segments(initial.clone(), 4);
+    validate_rle_column(&col);
+    let slab_count_before = col.slab_count();
+    assert!(slab_count_before > 5, "need many slabs for this test");
+
+    // Big insert in the middle — will overflow and trigger merges
+    let new_vals: Vec<u64> = (100..120).collect();
+    col.splice(25, 0, new_vals.clone());
+    validate_rle_column(&col);
+
+    let mut expected = initial.clone();
+    expected.splice(25..25, new_vals);
+    assert_eq!(col.to_vec(), expected);
+}
+
+#[test]
+fn try_merge_range_delete_across_slabs() {
+    // Delete across multiple slab boundaries, triggering cross-slab delete + merge.
+    let initial: Vec<u64> = (0..100).collect();
+    let mut col = Column::<u64>::from_values_with_max_segments(initial.clone(), 4);
+    validate_rle_column(&col);
+
+    // Delete a large range spanning multiple slabs
+    col.splice(10, 30, std::iter::empty::<u64>());
+    validate_rle_column(&col);
+
+    let mut expected = initial;
+    expected.splice(10..40, []);
+    assert_eq!(col.to_vec(), expected);
+}
+
+#[test]
+fn try_merge_range_replace_across_slabs() {
+    // Replace across slab boundaries: delete many, insert many.
+    let initial: Vec<u64> = (0..80).map(|i| i % 7).collect();
+    let mut col = Column::<u64>::from_values_with_max_segments(initial.clone(), 4);
+    validate_rle_column(&col);
+
+    let new_vals: Vec<u64> = (200..215).collect();
+    col.splice(20, 25, new_vals.clone());
+    validate_rle_column(&col);
+
+    let mut expected = initial;
+    expected.splice(20..45, new_vals);
+    assert_eq!(col.to_vec(), expected);
+}
+
+// ── Edge case: overflow at postfix boundary ─────────────────────────────────
+
+#[test]
+fn splice_overflow_at_postfix_boundary() {
+    // Insert enough values that overflow happens right when the postfix
+    // needs to be attached. Use small max_segments.
+    let initial = vec![1u64, 2, 3, 4, 5, 6, 7, 8];
+    let col = Column::<u64>::from_values_with_max_segments(initial.clone(), 4);
+    validate_rle_column(&col);
+
+    // Insert in the middle of a slab — the postfix needs to go on the overflow slab.
+    let new_vals: Vec<u64> = (10..20).collect();
+    for pos in 0..=initial.len() {
+        let mut c = col.clone();
+        c.splice(pos, 0, new_vals.clone());
+        validate_rle_column(&c);
+
+        let mut expected = initial.clone();
+        expected.splice(pos..pos, new_vals.clone());
+        assert_eq!(c.to_vec(), expected);
+    }
+}
+
+#[test]
+fn splice_overflow_with_postfix_in_literal() {
+    // Postfix falls inside a literal run during overflow.
+    let initial = vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial.clone(), 4);
+    validate_rle_column(&col);
+
+    // Delete from middle of a literal and insert many
+    let new_vals: Vec<u64> = (50..60).collect();
+    col.splice(3, 2, new_vals.clone());
+    validate_rle_column(&col);
+
+    let mut expected = initial;
+    expected.splice(3..5, new_vals);
+    assert_eq!(col.to_vec(), expected);
+}
+
+// ── Edge case: LonePlusLit postfix ──────────────────────────────────────────
+
+#[test]
+fn splice_lone_plus_lit_postfix() {
+    // [7, 7, 7, 1, 2, 3] — delete index 1, leaving [7, 7, 1, 2, 3].
+    // The postfix after deleting inside the repeat: count=1 of 7, followed by lit [1, 2, 3].
+    // This should trigger LonePlusLit if the repeat remainder is 1 and next is literal.
+    let initial = vec![7u64, 7, 7, 1, 2, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial.clone(), 16);
+    validate_rle_column(&col);
+
+    col.splice(1, 1, std::iter::empty::<u64>());
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![7u64, 7, 1, 2, 3]);
+
+    // Delete 2 from middle of repeat, leaving lone 7 + lit
+    let initial = vec![7u64, 7, 7, 1, 2, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial, 16);
+    col.splice(0, 2, std::iter::empty::<u64>());
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![7u64, 1, 2, 3]);
+}
+
+#[test]
+fn splice_lone_plus_lit_with_insert() {
+    // Delete into repeat leaving 1, next is literal, AND insert values.
+    let initial = vec![7u64, 7, 7, 1, 2, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial, 16);
+    col.splice(1, 1, [99u64]);
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![7u64, 99, 7, 1, 2, 3]);
+}
+
+#[test]
+fn splice_lone_plus_lit_insert_same_as_lone() {
+    // Lone 7 + lit [1,2,3] — insert 7, should extend the repeat
+    let initial = vec![7u64, 7, 7, 1, 2, 3];
+    let mut col = Column::<u64>::from_values_with_max_segments(initial, 16);
+    col.splice(0, 2, std::iter::empty::<u64>()); // → [7, 1, 2, 3]
+    validate_rle_column(&col);
+    col.insert(0, 7u64); // → [7, 7, 1, 2, 3]
+    validate_rle_column(&col);
+    assert_eq!(col.to_vec(), vec![7u64, 7, 1, 2, 3]);
+}
+
+// ── Edge case: string column splice at literal/repeat boundary ──────────────
+
+#[test]
+fn string_splice_at_literal_repeat_boundary() {
+    // Strings have variable-length values, testing byte offset calculations.
+    let initial: Vec<String> = vec![
+        "alpha".into(),
+        "beta".into(),
+        "gamma".into(),
+        "gamma".into(),
+        "gamma".into(),
+        "delta".into(),
+    ];
+    let col = Column::<String>::from_values_with_max_segments(initial.clone(), 16);
+    validate_rle_column(&col);
+
+    // Insert at literal/repeat boundary
+    for pos in 0..=initial.len() {
+        let mut c = col.clone();
+        c.insert(pos, "new".to_string());
+        validate_rle_column(&c);
+    }
+
+    // Delete at every position
+    for pos in 0..initial.len() {
+        let mut c = col.clone();
+        c.remove(pos);
+        validate_rle_column(&c);
+    }
+
+    // Replace at the boundary with the repeat value
+    let mut c = col.clone();
+    c.splice(2, 1, ["gamma".to_string()]); // replace last lit with repeat value
+    validate_rle_column(&c);
+    assert_eq!(
+        c.to_vec(),
+        vec!["alpha", "beta", "gamma", "gamma", "gamma", "delta"]
+    );
+
+    // Replace repeat value with unique — breaks the run
+    let mut c = col.clone();
+    c.splice(3, 1, ["epsilon".to_string()]);
+    validate_rle_column(&c);
+    assert_eq!(
+        c.to_vec(),
+        vec!["alpha", "beta", "gamma", "epsilon", "gamma", "delta"]
+    );
+}
+
+#[test]
+fn string_splice_variable_length_values() {
+    // Mix of short and long strings to stress byte offset tracking.
+    let initial: Vec<String> = vec![
+        "a".into(),
+        "bb".into(),
+        "ccc".into(),
+        "ccc".into(),
+        "dddddddddd".into(),
+        "ee".into(),
+        "ee".into(),
+        "ee".into(),
+    ];
+    let col = Column::<String>::from_values_with_max_segments(initial.clone(), 8);
+    validate_rle_column(&col);
+
+    // Insert a long string in the middle of the literal run
+    let mut c = col.clone();
+    c.insert(2, "xxxxxxxxxxxxxxxxxx".to_string());
+    validate_rle_column(&c);
+
+    // Delete across the literal/repeat boundary
+    let mut c = col.clone();
+    c.splice(2, 3, std::iter::empty::<String>());
+    validate_rle_column(&c);
+    assert_eq!(c.to_vec(), vec!["a", "bb", "ee", "ee", "ee"]);
+}
+
+// ── Edge case: merge slab ending in literal with same-value start ───────────
+
+#[test]
+fn merge_slab_literal_to_same_value_start() {
+    use super::encoding::ColumnEncoding;
+    use super::rle::RleEncoding;
+
+    // Slab A ends with literal run [..., 5]
+    // Slab B starts with repeat [5, 5, 5]
+    // Merge should combine the boundary values.
+    let a_vals: &[u64] = &[1, 2, 3, 4, 5];
+    let b_vals: &[u64] = &[5, 5, 5, 6, 7];
+    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
+    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+    validate_rle_column_slab::<u64>(&a);
+    validate_rle_column_slab::<u64>(&b);
+
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    validate_rle_column_slab::<u64>(&a);
+
+    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    assert_eq!(merged, vec![1, 2, 3, 4, 5, 5, 5, 5, 6, 7]);
+}
+
+#[test]
+fn merge_slab_repeat_to_literal_same_value() {
+    use super::encoding::ColumnEncoding;
+    use super::rle::RleEncoding;
+
+    // Slab A ends with repeat [3, 3, 3]
+    // Slab B starts with literal [3, 4, 5]
+    let a_vals: &[u64] = &[1, 2, 3, 3, 3];
+    let b_vals: &[u64] = &[3, 4, 5];
+    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
+    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    validate_rle_column_slab::<u64>(&a);
+
+    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    assert_eq!(merged, vec![1, 2, 3, 3, 3, 3, 4, 5]);
+}
+
+#[test]
+fn merge_slab_literal_to_literal_same_value() {
+    use super::encoding::ColumnEncoding;
+    use super::rle::RleEncoding;
+
+    // Slab A ends with literal [..., 5]
+    // Slab B starts with literal [5, ...]
+    // The 5s at the boundary should merge into a repeat.
+    let a_vals: &[u64] = &[1, 2, 5];
+    let b_vals: &[u64] = &[5, 3, 4];
+    let mut a = RleEncoding::<u64>::encode(a_vals.iter().copied());
+    let b = RleEncoding::<u64>::encode(b_vals.iter().copied());
+
+    RleEncoding::<u64>::merge_slabs(&mut a, b);
+    validate_rle_column_slab::<u64>(&a);
+
+    let merged: Vec<u64> = super::rle::RleDecoder::<u64>::new(&a.data).collect();
+    assert_eq!(merged, vec![1, 2, 5, 5, 3, 4]);
+}
+
+#[test]
+fn merge_slab_string_literal_boundary() {
+    use super::encoding::ColumnEncoding;
+    use super::rle::RleEncoding;
+
+    let a_vals: Vec<String> = vec!["x".into(), "y".into(), "hello".into()];
+    let b_vals: Vec<String> = vec!["hello".into(), "hello".into(), "world".into()];
+    let mut a = RleEncoding::<String>::encode(a_vals.into_iter());
+    let b = RleEncoding::<String>::encode(b_vals.into_iter());
+
+    RleEncoding::<String>::merge_slabs(&mut a, b);
+    validate_rle_column_slab::<String>(&a);
+
+    let merged: Vec<&str> = super::rle::RleDecoder::<String>::new(&a.data).collect();
+    assert_eq!(merged, vec!["x", "y", "hello", "hello", "hello", "world"]);
+}
+
+/// Validate a single RLE slab (encoding + tail).
+fn validate_rle_column_slab<T>(slab: &super::column::Slab<super::rle::RleTail>)
+where
+    T: super::RleValue + super::ColumnValueRef<Encoding = super::rle::RleEncoding<T>>,
+    for<'a> T::Get<'a>: std::fmt::Debug,
+{
+    let info = super::rle::rle_validate_encoding::<T>(&slab.data)
+        .unwrap_or_else(|e| panic!("slab encoding invalid: {e}"));
+    assert_eq!(slab.len, info.len, "len mismatch");
+    assert_eq!(slab.segments, info.segments, "segments mismatch");
+    let expected_tail = super::rle::compute_rle_tail::<T>(&slab.data);
+    assert_eq!(slab.tail.bytes, expected_tail.bytes, "tail.bytes mismatch");
+    assert_eq!(
+        slab.tail.lit_tail, expected_tail.lit_tail,
+        "tail.lit_tail mismatch"
+    );
 }

@@ -20,29 +20,13 @@ use super::{AsColumnRef, Run};
 // An empty slab means an empty column.  An all-true column encodes as `[0, N]`
 // (zero falses, then N trues).
 
-/// Compute the `tail` value: byte length of the last run's LEB128 count header.
-pub(crate) fn compute_tail(data: &[u8]) -> u8 {
-    if data.is_empty() {
-        return 0;
-    }
-    let mut pos = 0;
-    let mut last_cb = 0;
-    while pos < data.len() {
-        let (cb, _) = read_count(&data[pos..]).unwrap();
-        last_cb = cb;
-        pos += cb;
-    }
-    last_cb as u8
-}
-
 /// Validate a bool slab's len, segments, and tail. Panics on mismatch.
 #[cfg(debug_assertions)]
 fn validate_slab(slab: &Slab) {
     let info = bool_validate_encoding(&slab.data).expect("invalid bool encoding");
     assert_eq!(slab.len, info.len, "bool slab len mismatch");
     assert_eq!(slab.segments, info.segments, "bool slab segments mismatch");
-    let expected_tail = compute_tail(&slab.data);
-    assert_eq!(slab.tail, expected_tail, "bool slab tail mismatch");
+    assert_eq!(slab.tail, info.tail, "bool slab tail mismatch");
 }
 
 // ── Partition ───────────────────────────────────────────────────────────────
@@ -51,7 +35,7 @@ fn validate_slab(slab: &Slab) {
 ///
 /// Describes a partial (or complete) run at the boundary between the
 /// unmodified prefix/suffix bytes and the splice region.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct BoolPartition {
     /// The boolean value of the run at this boundary.
     pub value: bool,
@@ -66,6 +50,12 @@ pub(crate) struct BoolPartition {
     /// Number of non-zero-count segments in `data[..pos]` (start cursor)
     /// or `data[pos..]` (end cursor).
     pub segments: usize,
+}
+
+impl BoolPartition {
+    fn padding(&self, cur_count: usize, cur_value: bool) -> usize {
+        (cur_count > 0) as usize + (self.count > 0 && self.value != cur_value) as usize
+    }
 }
 
 /// Find the partition boundaries for a splice at `[start_index, end_index)`.
@@ -167,13 +157,7 @@ pub(crate) fn splice_slab(
     assert!(end_index <= slab.len, "del extends beyond slab");
 
     let (prefix, suffix) = if slab.data.is_empty() {
-        let p = BoolPartition {
-            value: false,
-            count: 0,
-            pos: 0,
-            segments: 0,
-        };
-        (p, p)
+        (BoolPartition::default(), BoolPartition::default())
     } else {
         find_partition(slab, index, end_index).expect("find_partition failed")
     };
@@ -181,7 +165,7 @@ pub(crate) fn splice_slab(
     let slab_data = &mut slab.data;
 
     // Save raw suffix before we modify slab_data.
-    let raw_suffix = slab_data[suffix.pos..].to_vec();
+    let mut raw_suffix = vec![];
     // Items in raw suffix bytes (data[suffix.pos..]), NOT including suffix.count.
     let raw_suffix_item_count = slab.len - end_index - suffix.count;
     let prefix_item_count = index - prefix.count; // items in data[..prefix.pos]
@@ -193,6 +177,7 @@ pub(crate) fn splice_slab(
     let mut overflow: Vec<Slab> = Vec::new();
     let mut overflowed = false;
     let mut items_inserted: usize = 0;
+    let mut target_segments = max_segments;
 
     let mut cur_value = prefix.value;
     let mut cur_count = prefix.count;
@@ -212,16 +197,18 @@ pub(crate) fn splice_slab(
             cur_value = !cur_value;
             cur_count = 1;
 
-            // Check if we've hit max segments.
-            if segments >= max_segments {
+            // Check if we've hit the segment budget.
+            if segments >= target_segments {
                 if !overflowed {
+                    overflowed = true;
+                    target_segments = max_segments / 2;
+                    raw_suffix = slab_data[suffix.pos..].to_vec(); // save suffix
                     slab_data.truncate(prefix.pos);
                     slab_data.extend_from_slice(&buf);
                     let new_len = prefix_item_count + len;
                     slab.len = new_len;
                     slab.segments = segments;
                     slab.tail = tail;
-                    overflowed = true;
                 } else {
                     overflow.push(Slab {
                         data: buf,
@@ -242,6 +229,67 @@ pub(crate) fn splice_slab(
                 }
             }
         }
+    }
+
+    // Check if suffix would push us over max_segments before merging it.
+    // Estimate: current segments + 1 (flush cur_count) + possible suffix boundary + suffix.segments
+    let suffix_extra = suffix.padding(cur_count, cur_value) + suffix.segments;
+
+    if !overflowed && segments + suffix_extra > max_segments {
+        // Flush cur_count, commit buf to main slab, put suffix in overflow.
+        if cur_count > 0 {
+            let c = encode_count(cur_count);
+            tail = c.len() as u8;
+            buf.extend(c);
+            len += cur_count;
+            segments += 1;
+        }
+
+        raw_suffix = slab_data[suffix.pos..].to_vec(); // save suffix
+        slab_data.splice(prefix.pos.., buf);
+        slab.len = prefix_item_count + len;
+        slab.segments = segments;
+        slab.tail = tail;
+
+        // Build suffix slab.
+        let mut suffix_buf = Vec::new();
+        let mut suffix_segs = 0;
+        let mut suffix_len = 0;
+        let mut suffix_tail = 0u8;
+        // Bool slabs must start on a false run.
+        if suffix.value && suffix.count > 0 {
+            suffix_buf.extend(encode_count(0));
+            suffix_segs += 1;
+        }
+        if suffix.count > 0 {
+            let c = encode_count(suffix.count);
+            suffix_tail = c.len() as u8;
+            suffix_buf.extend(c);
+            suffix_len += suffix.count;
+            suffix_segs += 1;
+        }
+        if suffix.segments > 0 {
+            suffix_tail = old_tail;
+        }
+        suffix_buf.extend_from_slice(&raw_suffix);
+        suffix_len += raw_suffix_item_count;
+        suffix_segs += suffix.segments;
+        if suffix_len > 0 {
+            overflow.push(Slab {
+                data: suffix_buf,
+                len: suffix_len,
+                segments: suffix_segs,
+                tail: suffix_tail,
+            });
+        }
+
+        #[cfg(debug_assertions)]
+        validate_slab(slab);
+        #[cfg(debug_assertions)]
+        for s in &overflow {
+            validate_slab(s);
+        }
+        return overflow;
     }
 
     // Merge suffix into the current run.
@@ -279,23 +327,79 @@ pub(crate) fn splice_slab(
         #[cfg(debug_assertions)]
         validate_slab(slab);
     } else {
-        // Append raw suffix to the last buf.
-        if suffix.segments > 0 {
-            tail = old_tail
-        };
-        buf.extend_from_slice(&raw_suffix);
-        len += raw_suffix_item_count;
-        segments += suffix.segments;
+        // Overflowed — attach suffix to the last overflow slab.
+        let suffix_total_segs = segments + suffix.segments;
+
+        if suffix_total_segs <= max_segments {
+            // Suffix fits on the current overflow buf.
+            if suffix.segments > 0 {
+                tail = old_tail;
+            }
+            buf.extend_from_slice(&raw_suffix);
+            len += raw_suffix_item_count;
+
+            overflow.push(Slab {
+                data: buf,
+                len,
+                segments: suffix_total_segs,
+                tail,
+            });
+        } else {
+            // Suffix would exceed max_segments — flush current buf,
+            // then put suffix in its own slab.
+            if segments > 0 || !buf.is_empty() {
+                overflow.push(Slab {
+                    data: buf,
+                    len,
+                    segments,
+                    tail,
+                });
+            }
+
+            // Build suffix slab: partial run + raw suffix bytes.
+            let mut suffix_buf = Vec::new();
+            let mut suffix_segs = 0;
+            let mut suffix_len = 0;
+            let mut suffix_tail = 0u8;
+
+            if suffix.count > 0 {
+                let c = encode_count(suffix.count);
+                suffix_tail = c.len() as u8;
+                suffix_buf.extend(c);
+                suffix_len += suffix.count;
+                suffix_segs += 1;
+            }
+            if suffix.segments > 0 {
+                suffix_tail = old_tail;
+            }
+            suffix_buf.extend_from_slice(&raw_suffix);
+            suffix_len += raw_suffix_item_count;
+            suffix_segs += suffix.segments;
+
+            if suffix_len > 0 {
+                // Ensure slab starts on a false run.
+                if suffix.value && suffix.count > 0 {
+                    let mut padded = Vec::new();
+                    padded.extend(encode_count(0)); // zero-count false
+                    padded.extend_from_slice(&suffix_buf);
+                    suffix_segs += 1;
+                    if suffix_segs == 1 {
+                        suffix_tail = 1; // just the padding byte
+                    }
+                    suffix_buf = padded;
+                }
+
+                overflow.push(Slab {
+                    data: suffix_buf,
+                    len: suffix_len,
+                    segments: suffix_segs,
+                    tail: suffix_tail,
+                });
+            }
+        }
 
         #[cfg(debug_assertions)]
         validate_slab(slab);
-
-        overflow.push(Slab {
-            data: buf,
-            len,
-            segments,
-            tail,
-        });
         #[cfg(debug_assertions)]
         for s in &overflow {
             validate_slab(s);
@@ -436,11 +540,15 @@ impl ColumnEncoding for BoolEncoding {
         }
     }
 
-    fn merge_slabs(a: &mut Slab, b: &Slab) {
-        let (new_segs, new_tail) = bool_merge_slabs(&mut a.data, a.tail, a.segments, b);
-        a.len += b.len;
-        a.segments = new_segs;
-        a.tail = new_tail;
+    fn merge_slabs(a: &mut Slab, b: Slab) {
+        if a.len == 0 {
+            *a = b;
+        } else if b.len > 0 {
+            let (new_segs, new_tail) = bool_merge_slabs(&mut a.data, a.tail, a.segments, &b);
+            a.len += b.len;
+            a.segments = new_segs;
+            a.tail = new_tail;
+        }
         #[cfg(debug_assertions)]
         validate_slab(a);
     }
@@ -481,10 +589,8 @@ impl ColumnEncoding for BoolEncoding {
         let slab_del = del.min(slab.len - index);
         let overflow_del = del - slab_del;
         let bools = values.map(|v| v.as_column_ref());
-        (
-            splice_slab(slab, index, slab_del, bools, max_segments),
-            overflow_del,
-        )
+        let overflow_slabs = splice_slab(slab, index, slab_del, bools, max_segments);
+        (overflow_slabs, overflow_del)
     }
 
     type Decoder<'a> = BoolDecoder<'a>;
@@ -654,7 +760,6 @@ fn bool_merge_slabs(a_data: &mut Vec<u8>, a_tail: u8, a_segments: usize, b: &Sla
         merge_bytes
     };
 
-    debug_assert_eq!(new_tail, compute_tail(a_data));
     (new_segments, new_tail)
 }
 
@@ -677,7 +782,8 @@ fn bool_load_and_verify(
         return Ok(vec![]);
     }
 
-    let runs_per_slab = (max_segments & !1).max(2);
+    // Target half-full slabs, rounded to even so each slab starts on a false run.
+    let target_segments = ((max_segments / 2) & !1).max(2);
 
     let mut slabs: Vec<Slab> = Vec::new();
     let mut pos: usize = 0;
@@ -717,9 +823,9 @@ fn bool_load_and_verify(
         pos = next_pos;
         run_index += 1;
 
-        // Cut after `runs_per_slab` segments — always even, so the next slab
+        // Cut after target_segments — always even, so the next slab
         // starts on a false run and can be memcpy'd as-is.
-        if slab_segs >= runs_per_slab {
+        if slab_segs >= target_segments {
             slabs.push(Slab {
                 data: data[slab_start..pos].to_vec(),
                 len: slab_items,

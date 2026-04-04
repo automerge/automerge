@@ -74,6 +74,7 @@ pub(crate) fn rle_load_and_verify<T: RleValue>(
     max_segments: usize,
     validate: Option<for<'a> fn(<T as super::ColumnValueRef>::Get<'a>) -> Option<String>>,
 ) -> Result<Vec<Slab>, PackError> {
+    let target_segments = max_segments / 2;
     if input.is_empty() {
         return Ok(vec![]);
     }
@@ -133,7 +134,7 @@ pub(crate) fn rle_load_and_verify<T: RleValue>(
                 slab.tail.bytes = bytes as u32;
             }
         }
-        if slab.segments == max_segments {
+        if slab.segments == target_segments {
             slab.copy_from(
                 &input[start..decoder.pos()],
                 pending_header,
@@ -397,5 +398,121 @@ mod tests {
     fn validate_load_empty_input() {
         let result = rle_load_and_verify::<u64>(&[], 16, None).unwrap();
         assert!(result.is_empty());
+    }
+
+    // ── Load: literal run split across slab boundary ────────────────────
+
+    fn load_roundtrip<T: RleValue + crate::v1::ColumnValueRef<Encoding = RleEncoding<T>>>(
+        vals: Vec<T>,
+        max_segments: usize,
+    ) where
+        for<'a> T::Get<'a>: std::fmt::Debug,
+    {
+        let col = crate::v1::Column::<T>::from_values(vals.clone());
+        let saved = col.save();
+        let slabs = rle_load_and_verify::<T>(&saved, max_segments, None).unwrap();
+
+        // Every slab must be well-formed with correct tail.
+        let mut total_len = 0;
+        for (i, slab) in slabs.iter().enumerate() {
+            assert!(slab.len > 0, "slab {i} is empty");
+            let info = rle_validate_encoding::<T>(&slab.data)
+                .unwrap_or_else(|e| panic!("slab {i} encoding invalid: {e}"));
+            assert_eq!(slab.len, info.len, "slab {i}: len mismatch");
+            assert_eq!(slab.segments, info.segments, "slab {i}: segments mismatch");
+            assert_eq!(slab.tail, info.tail, "slab {i}: tail mismatch");
+            total_len += slab.len;
+        }
+
+        // Total items must match original.
+        assert_eq!(
+            total_len,
+            col.len(),
+            "total len mismatch: loaded={total_len} original={}",
+            col.len()
+        );
+
+        // Concatenated values must match original.
+        let mut loaded_vals = vec![];
+        for slab in &slabs {
+            let decoder = crate::v1::rle::RleDecoder::<T>::new(&slab.data);
+            loaded_vals.extend(decoder);
+        }
+        let orig_vals: Vec<_> = col.iter().collect();
+        assert_eq!(loaded_vals, orig_vals, "value mismatch after load");
+    }
+
+    #[test]
+    fn load_split_long_literal_run() {
+        // A long literal run (all unique values) that must be split across slabs.
+        let vals: Vec<u64> = (0..100).collect();
+        load_roundtrip(vals, 4);
+    }
+
+    #[test]
+    fn load_split_literal_at_various_segments() {
+        // Test with different max_segments to hit different split points.
+        let vals: Vec<u64> = (0..50).collect();
+        for max_seg in [2, 3, 4, 6, 8, 16] {
+            load_roundtrip(vals.clone(), max_seg);
+        }
+    }
+
+    #[test]
+    fn load_split_mixed_literal_and_repeat() {
+        // Literal runs interspersed with repeats — split should handle
+        // mid-literal and mid-repeat boundaries.
+        let mut vals = vec![];
+        for i in 0..20u64 {
+            vals.push(i); // literal
+            for _ in 0..3 {
+                vals.push(i + 100); // repeat of 3
+            }
+        }
+        load_roundtrip(vals, 4);
+    }
+
+    #[test]
+    fn load_split_nullable_with_nulls() {
+        // Nullable column with null runs interspersed.
+        let vals: Vec<Option<u64>> = (0..60)
+            .map(|i| if i % 5 == 0 { None } else { Some(i) })
+            .collect();
+        load_roundtrip(vals, 4);
+    }
+
+    #[test]
+    fn load_split_string_literal() {
+        // String columns have variable-length values, testing header rewrite.
+        let vals: Vec<String> = (0..40).map(|i| format!("item_{i:04}")).collect();
+        load_roundtrip(vals, 4);
+    }
+
+    #[test]
+    fn load_split_string_mixed() {
+        // Strings with repeats and literals.
+        let mut vals: Vec<String> = vec![];
+        for i in 0..15 {
+            vals.push(format!("unique_{i}"));
+            for _ in 0..3 {
+                vals.push("repeated".into());
+            }
+        }
+        load_roundtrip(vals, 6);
+    }
+
+    #[test]
+    fn load_split_then_save_roundtrip() {
+        // Load with small slabs, reassemble into a column, save, and verify
+        // the saved bytes match the original.
+        let vals: Vec<u64> = (0..200).map(|i| i % 13).collect();
+        let col = crate::v1::Column::<u64>::from_values(vals.clone());
+        let saved = col.save();
+        let loaded = crate::v1::Column::<u64>::load(&saved).unwrap();
+        assert_eq!(loaded.to_vec(), col.to_vec());
+        // Re-save and compare
+        let resaved = loaded.save();
+        let reloaded = crate::v1::Column::<u64>::load(&resaved).unwrap();
+        assert_eq!(reloaded.to_vec(), col.to_vec());
     }
 }
