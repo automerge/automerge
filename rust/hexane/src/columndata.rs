@@ -1721,9 +1721,7 @@ pub(crate) mod tests {
         .collect();
         let len = col.len();
         let v: Vec<i64> = vec![];
-        log!("SPLICE 1");
         col.splice(0, 0, v.clone());
-        log!("SPLICE 2");
         col.splice(0, len, v);
     }
 
@@ -1927,7 +1925,6 @@ pub(crate) mod tests {
     {
         const LEN: usize = 100;
         let col: ColumnData<C> = ((0..LEN).map(|_| M::maybe_rand(rng))).collect();
-        log!("COL = {:?}", col.to_vec());
         for _ in 0..1000 {
             let index = M::index(LEN, rng);
             let mut iter1 = col.iter();
