@@ -68,7 +68,7 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
-    type Get<'a>: Copy + PartialEq + Debug + Default;
+    type Get<'a>: Copy + PartialEq + Debug;
 }
 
 /// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.
@@ -87,7 +87,7 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
 /// }
 /// // That's it — Column<ValueMeta> and Column<Option<ValueMeta>> now work.
 /// ```
-pub trait ColumnValue: Copy + PartialEq + Debug + Default + 'static {
+pub trait ColumnValue: Copy + PartialEq + Debug + 'static {
     /// The encoding strategy — always `RleEncoding<Self>` for RLE types.
     type Encoding: ColumnEncoding<Value = Self>;
 }
@@ -236,7 +236,7 @@ impl AsColumnRef<bool> for bool {
 /// All `ColumnValueRef` types implement this as an identity conversion.
 /// No conflict with the borrowed impls because `&str`, `Option<&str>`, etc.
 /// have lifetimes and cannot be `ColumnValueRef: 'static`.
-pub trait AsColumnRef<T: ColumnValueRef>: Debug + Clone + Default {
+pub trait AsColumnRef<T: ColumnValueRef>: Debug + Clone {
     /// Borrow as the column's `Get` type without allocating.
     fn as_column_ref(&self) -> T::Get<'_>;
 }
@@ -336,6 +336,44 @@ impl RleValue for i64 {
     }
     fn pack(value: i64, out: &mut Vec<u8>) -> bool {
         leb128::write::signed(out, value).unwrap();
+        true
+    }
+}
+
+impl ColumnValue for u32 {
+    type Encoding = RleEncoding<u32>;
+}
+
+impl RleValue for u32 {
+    fn try_unpack(data: &[u8]) -> Result<(usize, u32), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        let v = u32::try_from(v).map_err(|_| PackError::InvalidValue("u32 overflow".into()))?;
+        Ok((start - buf.len(), v))
+    }
+    fn pack(value: u32, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, value as u64).unwrap();
+        true
+    }
+}
+
+impl ColumnValue for std::num::NonZeroU32 {
+    type Encoding = RleEncoding<std::num::NonZeroU32>;
+}
+
+impl RleValue for std::num::NonZeroU32 {
+    fn try_unpack(data: &[u8]) -> Result<(usize, std::num::NonZeroU32), PackError> {
+        let mut buf = data;
+        let start = buf.len();
+        let v = leb128::read::unsigned(&mut buf)?;
+        let v = u32::try_from(v).map_err(|_| PackError::InvalidValue("u32 overflow".into()))?;
+        let v = std::num::NonZeroU32::new(v)
+            .ok_or_else(|| PackError::InvalidValue("NonZeroU32 is zero".into()))?;
+        Ok((start - buf.len(), v))
+    }
+    fn pack(value: std::num::NonZeroU32, out: &mut Vec<u8>) -> bool {
+        leb128::write::unsigned(out, value.get() as u64).unwrap();
         true
     }
 }

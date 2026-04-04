@@ -36,7 +36,7 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
     /// O(1) — checks segment count then decodes only the first value.
     pub(crate) fn is_default<T: ColumnValueRef>(&self) -> bool
     where
-        for<'a> T::Get<'a>: PartialEq,
+        for<'a> T::Get<'a>: PartialEq + Default,
     {
         let default = T::Get::default();
         self.len == 0
@@ -587,7 +587,10 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
 // ── Default-valued columns ──────────────────────────────────────────────────
 
-impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
+impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF>
+where
+    for<'a> T::Get<'a>: Default,
+{
     /// Deserialize with options: length validation, value validation, and
     /// default-on-empty behavior.
     ///
