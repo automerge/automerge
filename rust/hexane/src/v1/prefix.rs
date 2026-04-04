@@ -1,8 +1,23 @@
+use std::iter::Sum;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Mul, Range, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, Range, Sub, SubAssign};
 
-use super::column::{find_slab_bit, Column, Iter, Slab, SlabWeight, WeightFn};
+use super::column::{find_slab_bit, Column, Iter, Slab, SlabWeight, TailOf, WeightFn};
+use super::encoding::{ColumnEncoding, RunDecoder};
 use super::ColumnValueRef;
+
+// ── UnsignedPrefix marker ────────────────────────────────────────────────────
+
+/// Marker trait for unsigned prefix types.
+///
+/// `get_index_for_prefix`, `get_index_for_total`, `find_prefix_in_slab`,
+/// and `advance_total` rely on monotonically increasing prefix sums.
+/// Signed prefix types (e.g. `i128`) can decrease, making these operations
+/// incorrect. This trait gates those methods at compile time.
+pub trait UnsignedPrefix {}
+impl UnsignedPrefix for u32 {}
+impl UnsignedPrefix for u64 {}
+impl UnsignedPrefix for u128 {}
 
 // ── PrefixValue trait ────────────────────────────────────────────────────────
 
@@ -27,8 +42,11 @@ pub trait PrefixValue: ColumnValueRef {
         + Add<Output = Self::Prefix>
         + Sub<Output = Self::Prefix>
         + Mul<Output = Self::Prefix>
+        + Div<Output = Self::Prefix>
         + AddAssign
         + SubAssign
+        + Sum
+        + TryInto<usize>
         + TryFrom<usize>;
 
     /// Convert one column value to its prefix contribution.
@@ -36,16 +54,66 @@ pub trait PrefixValue: ColumnValueRef {
 
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
-    fn slab_sum(data: &[u8], len: usize) -> Self::Prefix;
+    fn slab_sum(slab: &Slab<TailOf<Self>>) -> Self::Prefix {
+        let mut decoder = Self::Encoding::decoder(&slab.data);
+        let mut acc = Self::Prefix::default();
+        while let Some(run) = decoder.next_run() {
+            let p = Self::to_prefix(run.value);
+            let count = Self::Prefix::try_from(run.count).unwrap_or_default();
+            acc += p * count;
+        }
+        acc
+    }
 
     /// Compute the partial prefix sum of the first `count` items in a slab,
     /// returning `(prefix_sum, items_consumed)`.
-    fn partial_sum(data: &[u8], count: usize) -> Self::Prefix;
+    fn partial_sum(slab: &Slab<TailOf<Self>>, count: usize) -> Self::Prefix {
+        let mut decoder = Self::Encoding::decoder(&slab.data);
+        let mut acc = Self::Prefix::default();
+        let mut items = 0;
+        while let Some(run) = decoder.next_run() {
+            let take = run.count.min(count - items);
+            let p = Self::to_prefix(run.value);
+            let n = Self::Prefix::try_from(take).unwrap_or_default();
+            acc += p * n;
+            items += take;
+            if items >= count {
+                break;
+            }
+        }
+        acc
+    }
 
     /// Find the first index within a slab where the running sum reaches or
-    /// exceeds `target`.  Returns `(index_within_slab, remaining_prefix)`.
-    /// If the entire slab's sum is less than `target`, returns `(len, target - slab_sum)`.
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: Self::Prefix) -> (usize, Self::Prefix);
+    /// exceeds `target`.  Returns items consumed.
+    ///
+    /// Only correct for unsigned prefix types where sums are monotonically
+    /// increasing.  Callers are gated by `T::Prefix: UnsignedPrefix`.
+    fn find_prefix_in_slab(slab: &Slab<TailOf<Self>>, target: Self::Prefix) -> usize {
+        let zero = Self::Prefix::default();
+        let one_p = Self::Prefix::try_from(1).unwrap_or_default();
+        let mut decoder = Self::Encoding::decoder(&slab.data);
+        let mut acc = zero;
+        let mut items = 0;
+        while let Some(run) = decoder.next_run() {
+            let p = Self::to_prefix(run.value);
+            let n = Self::Prefix::try_from(run.count).unwrap_or_default();
+            let run_total = p * n;
+            if acc + run_total >= target {
+                // Target is within this run — ceiling division.
+                let remaining = target - acc;
+                let needed = (remaining + p - one_p) / p;
+                let needed_usize: usize = needed.try_into().unwrap_or(run.count);
+                assert!(needed_usize <= run.count);
+                acc += p * needed;
+                items += needed_usize;
+                break;
+            }
+            acc += run_total;
+            items += run.count;
+        }
+        items
+    }
 }
 
 // ── Compound weight ──────────────────────────────────────────────────────────
@@ -101,10 +169,10 @@ impl<T: PrefixValue> WeightFn<T> for PrefixWeightFn<T> {
     type Weight = PrefixSlabWeight<T::Prefix>;
 
     #[inline]
-    fn compute(slab: &Slab<super::column::TailOf<T>>) -> PrefixSlabWeight<T::Prefix> {
+    fn compute(slab: &Slab<TailOf<T>>) -> PrefixSlabWeight<T::Prefix> {
         PrefixSlabWeight {
             len: slab.len,
-            prefix: T::slab_sum(&slab.data, slab.len),
+            prefix: T::slab_sum(slab),
         }
     }
 }
@@ -241,21 +309,6 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.get_prefix(index + 1)
     }
 
-    /// Find the first index where the inclusive total (sum through that item)
-    /// reaches or exceeds `target`.
-    ///
-    /// Returns `self.len()` if the total sum is less than `target`.
-    pub fn get_index_for_total(&self, target: T::Prefix) -> usize {
-        let idx = self.get_index_for_prefix(target);
-        // get_index_for_prefix finds where the *exclusive* prefix reaches target,
-        // which is one past the item whose inclusive total first reaches it.
-        if idx > 0 {
-            idx - 1
-        } else {
-            0
-        }
-    }
-
     /// Returns the exclusive sum of values at indices `0..index` (before `index`).
     ///
     /// `get_prefix(0)` returns `Default::default()` (zero).
@@ -279,35 +332,8 @@ impl<T: PrefixValue> PrefixColumn<T> {
         } else {
             T::Prefix::default()
         };
-        let partial = T::partial_sum(&self.col.slabs[si].data, items_in_slab);
+        let partial = T::partial_sum(&self.col.slabs[si], items_in_slab);
         prefix_before + partial
-    }
-
-    /// Find the first index where the prefix sum reaches or exceeds `target`.
-    ///
-    /// Returns `self.len()` if the total sum is less than `target`.
-    pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
-        if target <= T::Prefix::default() {
-            return 0;
-        }
-        if self.col.is_empty() {
-            return 0;
-        }
-
-        // Binary lifting on the prefix component of the compound BIT.
-        let (si, prefix_before) = self.find_slab_by_prefix(target);
-
-        if si >= self.col.slabs.len() {
-            return self.col.len();
-        }
-
-        let remaining = target - prefix_before;
-        let slab = &self.col.slabs[si];
-        let (idx_in_slab, _) = T::find_prefix_in_slab(&slab.data, slab.len, remaining);
-
-        // Use the compound BIT to count items before this slab in O(log S).
-        let items_before = if si > 0 { self.len_query(si - 1) } else { 0 };
-        items_before + idx_in_slab
     }
 
     // ── Internal BIT queries ─────────────────────────────────────────────
@@ -408,6 +434,60 @@ impl<T: PrefixValue> PrefixColumn<T> {
         }
     }
 
+    /// Collect all values into a Vec (without prefix sums).
+    pub fn to_vec(&self) -> Vec<T::Get<'_>> {
+        self.col.to_vec()
+    }
+}
+
+// ── Unsigned-prefix-only methods ─────────────────────────────────────────────
+
+impl<T: PrefixValue> PrefixColumn<T>
+where
+    T::Prefix: UnsignedPrefix,
+{
+    /// Find the first index where the inclusive total (sum through that item)
+    /// reaches or exceeds `target`.
+    ///
+    /// Returns `self.len()` if the total sum is less than `target`.
+    pub fn get_index_for_total(&self, target: T::Prefix) -> usize {
+        let idx = self.get_index_for_prefix(target);
+        // get_index_for_prefix finds where the *exclusive* prefix reaches target,
+        // which is one past the item whose inclusive total first reaches it.
+        if idx > 0 {
+            idx - 1
+        } else {
+            0
+        }
+    }
+
+    /// Find the first index where the prefix sum reaches or exceeds `target`.
+    ///
+    /// Returns `self.len()` if the total sum is less than `target`.
+    pub fn get_index_for_prefix(&self, target: T::Prefix) -> usize {
+        if target <= T::Prefix::default() {
+            return 0;
+        }
+        if self.col.is_empty() {
+            return 0;
+        }
+
+        // Binary lifting on the prefix component of the compound BIT.
+        let (si, prefix_before) = self.find_slab_by_prefix(target);
+
+        if si >= self.col.slabs.len() {
+            return self.col.len();
+        }
+
+        let remaining = target - prefix_before;
+        let slab = &self.col.slabs[si];
+        let idx_in_slab = T::find_prefix_in_slab(slab, remaining);
+
+        // Use the compound BIT to count items before this slab in O(log S).
+        let items_before = if si > 0 { self.len_query(si - 1) } else { 0 };
+        items_before + idx_in_slab
+    }
+
     /// Binary lifting on the prefix component of the compound BIT.
     /// Returns `(slab_index, prefix_before_that_slab)`.
     fn find_slab_by_prefix(&self, target: T::Prefix) -> (usize, T::Prefix) {
@@ -432,436 +512,67 @@ impl<T: PrefixValue> PrefixColumn<T> {
         }
         (idx, pos)
     }
-
-    /// Collect all values into a Vec (without prefix sums).
-    pub fn to_vec(&self) -> Vec<T::Get<'_>> {
-        self.col.to_vec()
-    }
 }
 
-// ── RLE slab walking helpers ─────────────────────────────────────────────────
-
-/// Decode one signed LEB128 from `data`. Returns `(bytes_read, value)`.
-fn read_signed(data: &[u8]) -> Option<(usize, i64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::signed(&mut buf).ok()?;
-    Some((start - buf.len(), v))
-}
-
-/// Decode one unsigned LEB128 from `data`. Returns `(bytes_read, value)`.
-fn read_unsigned(data: &[u8]) -> Option<(usize, u64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::unsigned(&mut buf).ok()?;
-    Some((start - buf.len(), v))
-}
-
-// ── PrefixValue impls for RLE types ──────────────────────────────────────────
-
-/// Walk an RLE slab, calling `f(value_or_none, count)` for each run.
-/// Returns the accumulated result.
-fn walk_rle_runs<T, P, F>(
-    data: &[u8],
-    value_len_fn: fn(&[u8]) -> Option<usize>,
-    unpack_fn: fn(&[u8]) -> Option<(usize, T)>,
-    mut f: F,
-) -> P
-where
-    P: Copy + Default + AddAssign,
-    F: FnMut(Option<T>, usize) -> P,
-{
-    let mut byte_pos = 0;
-    let mut acc = P::default();
-
-    while byte_pos < data.len() {
-        let (cb, count_raw) = match read_signed(&data[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-
-        match count_raw {
-            n if n > 0 => {
-                // Repeat run
-                let count = n as usize;
-                let vs = byte_pos + cb;
-                let vl = value_len_fn(&data[vs..]).unwrap_or(0);
-                let val = unpack_fn(&data[vs..]).map(|(_, v)| v);
-                acc += f(val, count);
-                byte_pos = vs + vl;
-            }
-            n if n < 0 => {
-                // Literal run
-                let total = (-n) as usize;
-                let mut scan = byte_pos + cb;
-                for _ in 0..total {
-                    let (vl, val) = match unpack_fn(&data[scan..]) {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    acc += f(Some(val), 1);
-                    scan += vl;
-                }
-                byte_pos = scan;
-            }
-            _ => {
-                // Null run
-                let (ncb, null_count) = match read_unsigned(&data[byte_pos + cb..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                acc += f(None, null_count as usize);
-                byte_pos += cb + ncb;
-            }
-        }
-    }
-    acc
-}
-
-/// Walk an RLE slab, accumulating prefix sum for the first `limit` items.
-fn walk_rle_partial<T, P, F>(
-    data: &[u8],
-    limit: usize,
-    value_len_fn: fn(&[u8]) -> Option<usize>,
-    unpack_fn: fn(&[u8]) -> Option<(usize, T)>,
-    mut val_to_prefix: F,
-) -> P
-where
-    P: Copy + Default + AddAssign,
-    F: FnMut(Option<T>) -> P,
-{
-    let mut byte_pos = 0;
-    let mut items = 0usize;
-    let mut acc = P::default();
-
-    while byte_pos < data.len() && items < limit {
-        let (cb, count_raw) = match read_signed(&data[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-
-        match count_raw {
-            n if n > 0 => {
-                let count = n as usize;
-                let vs = byte_pos + cb;
-                let vl = value_len_fn(&data[vs..]).unwrap_or(0);
-                let val = unpack_fn(&data[vs..]).map(|(_, v)| v);
-                let take = count.min(limit - items);
-                let one = val_to_prefix(val);
-                for _ in 0..take {
-                    acc += one;
-                }
-                items += take;
-                byte_pos = vs + vl;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut scan = byte_pos + cb;
-                for _ in 0..total {
-                    if items >= limit {
-                        break;
-                    }
-                    let (vl, val) = match unpack_fn(&data[scan..]) {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    acc += val_to_prefix(Some(val));
-                    items += 1;
-                    scan += vl;
-                }
-                byte_pos = scan;
-            }
-            _ => {
-                let (ncb, null_count) = match read_unsigned(&data[byte_pos + cb..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                let take = (null_count as usize).min(limit - items);
-                // Nulls contribute default (zero).
-                items += take;
-                byte_pos += cb + ncb;
-            }
-        }
-    }
-    acc
-}
-
-/// Find the first index in an RLE slab where the running u128 sum >= target.
-///
-/// Uses O(1) ceiling division for repeat runs instead of per-item iteration.
-fn find_prefix_rle_u128(
-    data: &[u8],
-    len: usize,
-    target: u128,
-    value_len_fn: fn(&[u8]) -> Option<usize>,
-    unpack_fn: fn(&[u8]) -> Option<(usize, u64)>,
-) -> (usize, u128) {
-    let mut byte_pos = 0;
-    let mut items = 0usize;
-    let mut acc = 0u128;
-
-    while byte_pos < data.len() && items < len {
-        let (cb, count_raw) = match read_signed(&data[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-
-        match count_raw {
-            n if n > 0 => {
-                let count = n as usize;
-                let vs = byte_pos + cb;
-                let vl = value_len_fn(&data[vs..]).unwrap_or(0);
-                let one = unpack_fn(&data[vs..]).map(|(_, v)| v as u128).unwrap_or(0);
-                let run_total = one * count as u128;
-                if one == 0 || acc + run_total < target {
-                    acc += run_total;
-                    items += count;
-                } else {
-                    let remaining = target - acc;
-                    let needed = remaining.div_ceil(one) as usize;
-                    let needed = needed.min(count);
-                    items += needed;
-                    acc += one * needed as u128;
-                    return (items, acc - target);
-                }
-                byte_pos = vs + vl;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut scan = byte_pos + cb;
-                for _ in 0..total {
-                    let (vl, val) = match unpack_fn(&data[scan..]) {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    acc += val as u128;
-                    items += 1;
-                    scan += vl;
-                    if acc >= target {
-                        return (items, acc - target);
-                    }
-                }
-                byte_pos = scan;
-            }
-            _ => {
-                let (ncb, null_count) = match read_unsigned(&data[byte_pos + cb..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                items += null_count as usize;
-                byte_pos += cb + ncb;
-            }
-        }
-    }
-    (items, target.saturating_sub(acc))
-}
-
-/// Find the first index in an RLE slab where the running i128 sum >= target.
-fn find_prefix_rle_i128(
-    data: &[u8],
-    len: usize,
-    target: i128,
-    value_len_fn: fn(&[u8]) -> Option<usize>,
-    unpack_fn: fn(&[u8]) -> Option<(usize, i64)>,
-) -> (usize, i128) {
-    let mut byte_pos = 0;
-    let mut items = 0usize;
-    let mut acc = 0i128;
-
-    while byte_pos < data.len() && items < len {
-        let (cb, count_raw) = match read_signed(&data[byte_pos..]) {
-            Some(v) => v,
-            None => break,
-        };
-
-        match count_raw {
-            n if n > 0 => {
-                let count = n as usize;
-                let vs = byte_pos + cb;
-                let vl = value_len_fn(&data[vs..]).unwrap_or(0);
-                let one = unpack_fn(&data[vs..]).map(|(_, v)| v as i128).unwrap_or(0);
-                let run_total = one * count as i128;
-                if one == 0 || acc + run_total < target {
-                    acc += run_total;
-                    items += count;
-                } else if one > 0 {
-                    let remaining = target - acc;
-                    let needed = ((remaining + one - 1) / one) as usize;
-                    let needed = needed.min(count);
-                    items += needed;
-                    acc += one * needed as i128;
-                    return (items, acc - target);
-                } else {
-                    // Negative values: walk item by item (rare in practice)
-                    for _ in 0..count {
-                        acc += one;
-                        items += 1;
-                        if acc >= target {
-                            return (items, acc - target);
-                        }
-                    }
-                }
-                byte_pos = vs + vl;
-            }
-            n if n < 0 => {
-                let total = (-n) as usize;
-                let mut scan = byte_pos + cb;
-                for _ in 0..total {
-                    let (vl, val) = match unpack_fn(&data[scan..]) {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    acc += val as i128;
-                    items += 1;
-                    scan += vl;
-                    if acc >= target {
-                        return (items, acc - target);
-                    }
-                }
-                byte_pos = scan;
-            }
-            _ => {
-                let (ncb, null_count) = match read_unsigned(&data[byte_pos + cb..]) {
-                    Some(v) => v,
-                    None => break,
-                };
-                items += null_count as usize;
-                byte_pos += cb + ncb;
-            }
-        }
-    }
-    (items, if target > acc { target - acc } else { 0 })
-}
-
-// ── u64 impl ─────────────────────────────────────────────────────────────────
-
-fn u64_value_len(data: &[u8]) -> Option<usize> {
-    <Option<u64> as super::RleValue>::value_len(data)
-}
-
-fn u64_unpack(data: &[u8]) -> Option<(usize, u64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::unsigned(&mut buf).ok()?;
-    Some((start - buf.len(), v))
-}
+// ── PrefixValue impls using decoders ─────────────────────────────────────────
 
 impl PrefixValue for u64 {
     type Prefix = u128;
-
     fn to_prefix(val: u64) -> u128 {
         val as u128
     }
-
-    fn slab_sum(data: &[u8], _len: usize) -> u128 {
-        walk_rle_runs(data, u64_value_len, u64_unpack, |val, count| {
-            val.unwrap_or(0) as u128 * count as u128
-        })
-    }
-
-    fn partial_sum(data: &[u8], count: usize) -> u128 {
-        walk_rle_partial(data, count, u64_value_len, u64_unpack, |val| {
-            val.unwrap_or(0) as u128
-        })
-    }
-
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: u128) -> (usize, u128) {
-        find_prefix_rle_u128(data, len, target, u64_value_len, u64_unpack)
-    }
 }
-
-// ── Option<u64> impl ─────────────────────────────────────────────────────────
 
 impl PrefixValue for Option<u64> {
     type Prefix = u128;
-
     fn to_prefix(val: Option<u64>) -> u128 {
         val.unwrap_or(0) as u128
     }
-
-    fn slab_sum(data: &[u8], _len: usize) -> u128 {
-        walk_rle_runs(data, u64_value_len, u64_unpack, |val, count| {
-            val.unwrap_or(0) as u128 * count as u128
-        })
-    }
-
-    fn partial_sum(data: &[u8], count: usize) -> u128 {
-        walk_rle_partial(data, count, u64_value_len, u64_unpack, |val| {
-            val.unwrap_or(0) as u128
-        })
-    }
-
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: u128) -> (usize, u128) {
-        find_prefix_rle_u128(data, len, target, u64_value_len, u64_unpack)
-    }
-}
-
-// ── i64 impl ─────────────────────────────────────────────────────────────────
-
-fn i64_value_len(data: &[u8]) -> Option<usize> {
-    <Option<i64> as super::RleValue>::value_len(data)
-}
-
-fn i64_unpack(data: &[u8]) -> Option<(usize, i64)> {
-    let mut buf = data;
-    let start = buf.len();
-    let v = leb128::read::signed(&mut buf).ok()?;
-    Some((start - buf.len(), v))
 }
 
 impl PrefixValue for i64 {
     type Prefix = i128;
-
     fn to_prefix(val: i64) -> i128 {
         val as i128
     }
-
-    fn slab_sum(data: &[u8], _len: usize) -> i128 {
-        walk_rle_runs(data, i64_value_len, i64_unpack, |val, count| {
-            val.unwrap_or(0) as i128 * count as i128
-        })
-    }
-
-    fn partial_sum(data: &[u8], count: usize) -> i128 {
-        walk_rle_partial(data, count, i64_value_len, i64_unpack, |val| {
-            val.unwrap_or(0) as i128
-        })
-    }
-
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: i128) -> (usize, i128) {
-        find_prefix_rle_i128(data, len, target, i64_value_len, i64_unpack)
-    }
 }
-
-// ── Option<i64> impl ─────────────────────────────────────────────────────────
 
 impl PrefixValue for Option<i64> {
     type Prefix = i128;
-
     fn to_prefix(val: Option<i64>) -> i128 {
         val.unwrap_or(0) as i128
     }
+}
 
-    fn slab_sum(data: &[u8], _len: usize) -> i128 {
-        walk_rle_runs(data, i64_value_len, i64_unpack, |val, count| {
-            val.unwrap_or(0) as i128 * count as i128
-        })
+impl PrefixValue for u32 {
+    type Prefix = u64;
+    fn to_prefix(val: u32) -> u64 {
+        val as u64
     }
+}
 
-    fn partial_sum(data: &[u8], count: usize) -> i128 {
-        walk_rle_partial(data, count, i64_value_len, i64_unpack, |val| {
-            val.unwrap_or(0) as i128
-        })
+impl PrefixValue for Option<u32> {
+    type Prefix = u64;
+    fn to_prefix(val: Option<u32>) -> u64 {
+        val.unwrap_or(0) as u64
     }
+}
 
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: i128) -> (usize, i128) {
-        find_prefix_rle_i128(data, len, target, i64_value_len, i64_unpack)
+impl PrefixValue for std::num::NonZeroU32 {
+    type Prefix = u64;
+    fn to_prefix(val: std::num::NonZeroU32) -> u64 {
+        val.get() as u64
+    }
+}
+
+impl PrefixValue for Option<std::num::NonZeroU32> {
+    type Prefix = u64;
+    fn to_prefix(val: Option<std::num::NonZeroU32>) -> u64 {
+        val.map_or(0, |v| v.get() as u64)
     }
 }
 
 // ── bool impl ────────────────────────────────────────────────────────────────
-
-use super::leb::read_count as bool_read_count;
 
 impl PrefixValue for bool {
     type Prefix = u32;
@@ -869,82 +580,14 @@ impl PrefixValue for bool {
     fn to_prefix(val: bool) -> u32 {
         val as u32
     }
-
-    fn slab_sum(data: &[u8], _len: usize) -> u32 {
-        // Walk alternating runs starting with false. Sum the true run counts.
-        let mut byte_pos = 0;
-        let mut value = false;
-        let mut sum = 0u32;
-        while byte_pos < data.len() {
-            let (cb, count) = match bool_read_count(&data[byte_pos..]) {
-                Some(v) => v,
-                None => break,
-            };
-            if value {
-                sum += count as u32;
-            }
-            byte_pos += cb;
-            value = !value;
-        }
-        sum
-    }
-
-    fn partial_sum(data: &[u8], count: usize) -> u32 {
-        let mut byte_pos = 0;
-        let mut value = false;
-        let mut items = 0usize;
-        let mut sum = 0u32;
-        while byte_pos < data.len() && items < count {
-            let (cb, run_count) = match bool_read_count(&data[byte_pos..]) {
-                Some(v) => v,
-                None => break,
-            };
-            let take = run_count.min(count - items);
-            if value {
-                sum += take as u32;
-            }
-            items += take;
-            byte_pos += cb;
-            value = !value;
-        }
-        sum
-    }
-
-    fn find_prefix_in_slab(data: &[u8], len: usize, target: u32) -> (usize, u32) {
-        // We're counting trues. Walk runs; only true runs contribute.
-        let mut byte_pos = 0;
-        let mut value = false;
-        let mut items = 0usize;
-        let mut acc = 0u32;
-        while byte_pos < data.len() && items < len {
-            let (cb, run_count) = match bool_read_count(&data[byte_pos..]) {
-                Some(v) => v,
-                None => break,
-            };
-            if value {
-                // Each item adds 1. Use O(1) arithmetic.
-                let remaining = target - acc;
-                let needed = (remaining as usize).min(run_count);
-                acc += needed as u32;
-                items += needed;
-                if acc >= target {
-                    return (items, acc - target);
-                }
-                // Full run consumed but target not reached.
-                items += run_count - needed;
-            } else {
-                items += run_count;
-            }
-            byte_pos += cb;
-            value = !value;
-        }
-        (items, target.saturating_sub(acc))
-    }
 }
 
 // ── Default-valued PrefixColumn ──────────────────────────────────────────────
 
-impl<T: PrefixValue> PrefixColumn<T> {
+impl<T: PrefixValue> PrefixColumn<T>
+where
+    for<'a> T::Get<'a>: Default,
+{
     /// Deserialize with options. See [`LoadOpts`](super::LoadOpts).
     pub fn load_with(data: &[u8], opts: super::LoadOpts<T>) -> Result<Self, crate::PackError> {
         let col = Column::<T, PrefixWeightFn<T>>::load_with(data, opts)?;
@@ -1024,8 +667,6 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     /// O(log S + runs) — single BIT traversal combining slab lookup and
     /// prefix accumulation via `find_slab_with_prefix`.
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        use super::encoding::ColumnEncoding;
-
         if n >= self.inner.items_left {
             self.inner.pos += self.inner.items_left;
             self.inner.items_left = 0;
@@ -1055,7 +696,7 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
         let slab = &self.inner.slabs[si];
         let mut decoder = T::Encoding::decoder(&slab.data);
         let val = decoder.nth(offset)?;
-        let partial = T::partial_sum(&slab.data, offset + 1);
+        let partial = T::partial_sum(slab, offset + 1);
 
         let skipped = n + 1;
         self.inner.slab_idx = si;
@@ -1090,7 +731,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     /// See [`super::Run`] for run semantics.
     pub fn next_run(&mut self) -> Option<super::Run<(T::Prefix, T::Get<'a>)>> {
         let run = self.inner.next_run()?;
-        let count = T::Prefix::try_from(run.count).ok().unwrap();
+        let count = T::Prefix::try_from(run.count).unwrap_or_default();
         self.total += T::to_prefix(run.value) * count;
         self.pos += run.count;
         Some(super::Run {
@@ -1115,7 +756,12 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
         self.inner.items_left = range.end.saturating_sub(self.pos);
         self.nth(range.start - self.pos)
     }
+}
 
+impl<'a, T: PrefixValue> PrefixIter<'a, T>
+where
+    T::Prefix: UnsignedPrefix,
+{
     /// Advance the iterator until the inclusive total has increased by at
     /// least `val`, and return that item.
     ///
