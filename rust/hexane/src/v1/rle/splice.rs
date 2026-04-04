@@ -40,6 +40,16 @@ pub(crate) enum Postfix<'a, T: RleValue> {
     },
 }
 
+impl<T: RleValue> Postfix<'_, T> {
+    fn segments(&self) -> usize {
+        match self {
+            Self::Run { segments, .. } => *segments,
+            Self::Lit { segments, .. } => *segments,
+            Self::LonePlusLit { segments, .. } => *segments,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Prefix<'a, T: RleValue, V: AsColumnRef<T>> {
     state: RleState<'a, T, V>,
@@ -486,6 +496,96 @@ mod partition_tests {
             overflow_insert_check(&initial, index, &new_vals, max_seg);
         }
     }
+
+    // ── Partition edge case: k=1 into repeat after literal ──────────────
+
+    #[test]
+    fn partition_k1_repeat_after_literal() {
+        // [1, 2, 3, 3, 3] — literal [1, 2] then repeat [3, 3, 3]
+        // Delete at index 3 (k=1 into the repeat, was_lit=true for value 2)
+        let slab = encode_u64_slab(&[1, 2, 3, 3, 3]);
+        let p = find_partition::<u64, u64>(&slab, 3..4);
+        // Prefix should capture [1, 2, 3] — the literal + 1 item from repeat
+        assert_eq!(state_item_count(&p.prefix.state), 3);
+        // Postfix should be Run { count: 1, value: 3 }
+        match p.postfix.unwrap() {
+            Postfix::Run {
+                count: 1, value: 3, ..
+            } => {}
+            other => panic!("expected Run(1, 3), got {:?}", other),
+        }
+        roundtrip_check(&[1, 2, 3, 3, 3], 3, 4);
+    }
+
+    #[test]
+    fn partition_k1_repeat_after_literal_identity() {
+        // Identity splice (no delete, no insert) at every position in [1, 2, 3, 3, 3]
+        let vals = [1u64, 2, 3, 3, 3];
+        for i in 0..=vals.len() {
+            roundtrip_check(&vals, i, i);
+        }
+    }
+
+    #[test]
+    fn partition_lone_plus_lit_postfix() {
+        // [7, 7, 7, 1, 2, 3] — delete index 1, postfix has count=1 of repeat
+        // followed by a literal run. Depending on the peek, this is either
+        // LonePlusLit or Run(1, 7).
+        // The roundtrip is what matters — both variants produce correct output.
+        roundtrip_check(&[7, 7, 7, 1, 2, 3], 1, 2);
+    }
+
+    #[test]
+    fn partition_lone_plus_lit_delete_two_from_repeat() {
+        // [7, 7, 7, 1, 2, 3] — delete indices 0..2, leaving [7, 1, 2, 3]
+        roundtrip_check(&[7, 7, 7, 1, 2, 3], 0, 2);
+    }
+
+    #[test]
+    fn roundtrip_all_positions_repeat_then_literal() {
+        // Comprehensive: every (start, end) for a repeat-then-literal pattern
+        let vals = vec![5u64, 5, 5, 1, 2, 3, 4];
+        for i in 0..vals.len() {
+            for j in i..=vals.len() {
+                roundtrip_check(&vals, i, j);
+            }
+        }
+    }
+
+    #[test]
+    fn roundtrip_all_positions_literal_repeat_literal() {
+        // Pattern: literal, repeat, literal
+        let vals = vec![1u64, 2, 3, 3, 3, 4, 5, 6];
+        for i in 0..vals.len() {
+            for j in i..=vals.len() {
+                roundtrip_check(&vals, i, j);
+            }
+        }
+    }
+
+    // ── Overflow with postfix in literal ─────────────────────────────────
+
+    #[test]
+    fn overflow_postfix_in_literal() {
+        // [1, 2, 3, 4, 5, 6, 7, 8] all unique — insert enough to overflow
+        // at a point where the postfix falls inside the literal run.
+        let initial = [1u64, 2, 3, 4, 5, 6, 7, 8];
+        let new_vals = [10u64, 20, 30, 40, 50];
+        for index in 0..=initial.len() {
+            overflow_insert_check(&initial, index, &new_vals, 4);
+        }
+    }
+
+    #[test]
+    fn overflow_postfix_at_literal_repeat_junction() {
+        // Postfix lands at the literal→repeat boundary during overflow.
+        let initial = [1u64, 2, 3, 3, 3, 4, 5];
+        let new_vals = [10u64, 20, 30, 40, 50, 60, 70];
+        // Insert at every position
+        for index in 0..=initial.len() {
+            overflow_insert_check(&initial, index, &new_vals, 3);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -511,6 +611,7 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     max_segments: usize,
 ) -> SpliceBuf {
     let p = find_partition::<T, V>(slab, index..index + del);
+    let mut target_segments = max_segments;
 
     let mut result = SpliceBuf {
         range: p.outer,
@@ -527,10 +628,11 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
 
     // 1. Feed new values.
     for v in values {
-        if starting_segments + f.segments + state.pending_segments() >= max_segments {
+        if starting_segments + f.segments + state.pending_segments() >= target_segments {
             f += state.flush(&mut buf);
             if !overflowed {
                 overflowed = true;
+                target_segments = max_segments / 2;
                 result.wpos = f.wpos;
                 result.bytes = std::mem::take(&mut buf);
                 result.len = index + inserted;
@@ -558,37 +660,51 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     }
 
     // 2. Feed postfix + flush.
-    let (pf, postfix_segments) = state.flush_postfix(&mut buf, p.postfix);
-    f += pf;
+    let postfix_segments = p.postfix.as_ref().map(|p| p.segments()).unwrap_or(0);
 
     if !overflowed {
-        result.bytes = buf;
-        result.len = slab.len - del + inserted;
-        result.segments = p.prefix.segments + f.segments + postfix_segments;
-        result.rewrite = f.rewrite;
-        result.wpos = f.wpos;
-    } else {
-        // the postfix goes on the final slab
-        result.range.end = slab.data.len();
+        if p.prefix.segments + f.segments + postfix_segments <= max_segments {
+            f += state.flush_postfix(&mut buf, p.postfix).0;
+            result.bytes = buf;
+            result.wpos = f.wpos;
+            result.rewrite = f.rewrite;
+            result.len = slab.len - del + inserted;
+            result.segments = p.prefix.segments + f.segments + postfix_segments;
+            return result;
+        } else {
+            // overflow now!
 
-        let postfix_count = slab.len - index - del;
-        let len = inserted + postfix_count;
-        let segments = f.segments + postfix_segments;
-        let tail = f.wpos.merge(0, buf.len(), postfix_bytes.len(), slab.tail);
-        buf.extend_from_slice(postfix_bytes);
-        let data = std::mem::take(&mut buf);
-        result.overflow.push(Slab {
-            data,
-            len,
-            segments,
-            tail,
-        });
+            f += state.flush(&mut buf);
+            result.bytes = std::mem::take(&mut buf);
+            result.wpos = f.wpos;
+            result.rewrite = f.rewrite;
+            result.len = index + inserted;
+            result.segments = p.prefix.segments + f.segments;
+
+            f = FlushState::default();
+            inserted = 0;
+        }
     }
 
-    #[cfg(debug_assertions)]
-    for s in &result.overflow {
-        s.validate::<T>();
-    }
+    // overflowed
+
+    f += state.flush_postfix(&mut buf, p.postfix).0;
+
+    // the postfix goes on the final slab
+    result.range.end = slab.data.len();
+
+    let postfix_count = slab.len - index - del;
+    let len = inserted + postfix_count;
+    let segments = f.segments + postfix_segments;
+    let tail = f.wpos.merge(0, buf.len(), postfix_bytes.len(), slab.tail);
+    buf.extend_from_slice(postfix_bytes);
+    let data = std::mem::take(&mut buf);
+    result.overflow.push(Slab {
+        data,
+        len,
+        segments,
+        tail,
+    });
 
     result
 }

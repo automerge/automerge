@@ -29,7 +29,7 @@ pub trait ColumnEncoding: Default {
     fn fill(len: usize, value: <Self::Value as ColumnValueRef>::Get<'_>) -> Slab<Self::Tail>;
 
     /// Merge slab `b` into `a` in place. Both slabs must be non-empty.
-    fn merge_slabs(a: &mut Slab<Self::Tail>, b: &Slab<Self::Tail>);
+    fn merge_slabs(a: &mut Slab<Self::Tail>, b: Slab<Self::Tail>);
 
     /// Validate that `slab` is in canonical encoding form.
     ///
@@ -145,7 +145,7 @@ pub trait ColumnEncoding: Default {
         );
 
         // Try merging small neighbours at the boundaries.
-        let range = col.try_merge(range);
+        let range = col.try_merge_range(range);
 
         // Update BIT.
         if col.slabs.len() == old_slab_count && range.len() == 1 {

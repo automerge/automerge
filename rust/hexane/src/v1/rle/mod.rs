@@ -130,8 +130,12 @@ impl<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>> ColumnEncoding for
         }
     }
 
-    fn merge_slabs(a: &mut Slab, b: &Slab) {
-        rle_merge::<T>(a, b);
+    fn merge_slabs(a: &mut Slab, b: Slab) {
+        if a.len == 0 {
+            *a = b;
+        } else if b.len > 0 {
+            rle_merge::<T>(a, &b);
+        }
     }
 
     fn validate_encoding(slab: &[u8]) -> Result<SlabInfo<RleTail>, PackError> {

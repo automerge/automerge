@@ -468,7 +468,8 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
                 let mut flushed = Self::do_flush(other, buf);
                 let pos = buf.len();
                 buf.extend(encode_signed(-(lit as i64)));
-                flushed.wpos = WPos::lit(pos, 0, true); // fill in bytes later
+                // fill in bytes later in merge() -> with_lit_tail()
+                flushed.wpos = WPos::lit(pos, 0, true);
                 flushed
             }
         }

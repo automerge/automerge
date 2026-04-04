@@ -9,6 +9,8 @@ use crate::PackError;
 /// Type alias for the slab tail metadata of a column value type.
 pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
 
+const DEFAULT_MAX_SEG: usize = 32;
+
 // ── Slab ─────────────────────────────────────────────────────────────────────
 
 #[doc(hidden)]
@@ -44,30 +46,6 @@ impl<Tail: Copy + Clone + std::fmt::Debug + Default> Slab<Tail> {
                 && T::Encoding::decoder(&self.data)
                     .next()
                     .map_or(true, |v| v == default))
-    }
-
-    /// Validate that the slab's encoding, item count, and segment count are
-    /// consistent. Uses the decoder's next_run() to walk the slab, exercising
-    /// the same code path as splice.
-    #[cfg(debug_assertions)]
-    pub(crate) fn validate<T: super::RleValue>(&self) {
-        let bytes: &[u8] = &self.data;
-
-        let info = match T::Encoding::validate_encoding(bytes) {
-            Ok(info) => info,
-            Err(e) => panic!("slab encoding invalid: {e}\n  bytes={bytes:?}"),
-        };
-
-        assert_eq!(
-            self.len, info.len,
-            "slab len mismatch: stored={} actual={}\n  bytes={bytes:?}",
-            self.len, info.len,
-        );
-        assert_eq!(
-            self.segments, info.segments,
-            "slab segments mismatch: stored={} actual={}\n  bytes={bytes:?}",
-            self.segments, info.segments,
-        );
     }
 }
 
@@ -221,7 +199,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Default for Column<T, WF> {
 
 impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     pub fn new() -> Self {
-        Self::with_max_segments(16)
+        Self::with_max_segments(DEFAULT_MAX_SEG)
     }
 
     pub fn with_max_segments(max_segments: usize) -> Self {
@@ -268,7 +246,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
             slabs: vec![slab],
             bit,
             total_len: len,
-            max_segments: 16,
+            max_segments: DEFAULT_MAX_SEG,
             counter: 0,
             _phantom: PhantomData,
         }
@@ -279,7 +257,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// Much faster than repeated `insert` calls — encodes all values in a
     /// single O(n) pass and builds the slab tree in one shot.
     pub fn from_values(values: Vec<T>) -> Self {
-        Self::from_values_with_max_segments(values, 16)
+        Self::from_values_with_max_segments(values, DEFAULT_MAX_SEG)
     }
 
     /// Bulk-construct with a custom segment budget per slab.
@@ -296,7 +274,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     /// non-nullable column types (`Column<u64>`, `Column<String>`, …),
     /// null runs are rejected with [`PackError::InvalidValue`].
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
-        Self::load_verified(data, 16, None)
+        Self::load_verified(data, DEFAULT_MAX_SEG, None)
     }
 
     /// Build a column from the output of `load_and_verify`.
@@ -456,61 +434,51 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     // ── Merge ────────────────────────────────────────────────────────────────
 
-    /// Merge two adjacent slabs without rebuilding the BIT.
-    fn merge_slabs_no_rebuild(&mut self, a: usize, b: usize) {
-        if self.slabs[a].len == 0 {
-            self.slabs.remove(a);
-            return;
+    pub(crate) fn try_merge(&mut self, index_a: usize, index_b: usize) -> bool {
+        let max = self.max_segments;
+        let min = self.max_segments / 4;
+        if let Some(a) = self.slabs.get(index_a).map(|s| s.segments) {
+            if let Some(b) = self.slabs.get(index_b).map(|s| s.segments) {
+                if (a < min || b < min) && a + b <= max {
+                    let slab_b = self.slabs.remove(index_b);
+                    T::Encoding::merge_slabs(&mut self.slabs[index_a], slab_b);
+                    return true;
+                }
+            }
         }
-        if self.slabs[b].len == 0 {
-            self.slabs.remove(b);
-            return;
-        }
-        let slab_b = self.slabs.remove(b);
-        T::Encoding::merge_slabs(&mut self.slabs[a], &slab_b);
+        false
     }
 
     /// Try merging at both boundaries of a slab range without rebuilding the BIT.
     /// Returns the adjusted range accounting for any merges that happened.
-    pub(crate) fn try_merge(&mut self, range: Range<usize>) -> Range<usize> {
-        let half = self.max_segments / 2;
+    pub(crate) fn try_merge_range(&mut self, range: Range<usize>) -> Range<usize> {
         let mut start = range.start;
         let mut end = range.end;
 
-        // When we have a small slab at the end of a splice and the following
-        // pre-existing slab is also small
-
-        // Try merging at the right boundary: slab[end-1] + slab[end]
-        if end < self.slabs.len()
-            && end > 0
-            && self.slabs[end - 1].segments + self.slabs[end].segments <= half
-        {
-            self.merge_slabs_no_rebuild(end - 1, end);
-            // range absorbs the next slab
-        }
-
-        // When a splice makes two new small slabs - one is overflow from writing
-        // one is a partially deleted slab
-
-        // Try merging at the left boundary: slab[end - 2] + slab[end - 1]
-        if range.len() >= 2
-            && range.end >= 2
-            && self.slabs[end - 2].segments + self.slabs[end - 1].segments <= half
-        {
-            self.merge_slabs_no_rebuild(end - 2, end - 1);
-            end -= 1; // shortens the range
-        }
-
-        // When splice makes a small slab but preexisting one before it is already small
-
-        // Try merging at the left boundary: slab[start-1] + slab[start]
-        if start > 0
-            && start < self.slabs.len()
-            && self.slabs[start - 1].segments + self.slabs[start].segments <= half
-        {
-            self.merge_slabs_no_rebuild(start - 1, start);
-            start -= 1; // shifts the range one to the left
-            end -= 1;
+        if !range.is_empty() {
+            // external right
+            // [ . [. . . A] B .] -> [. [. . . AB] .]
+            //   0  1 2 3 4  5 6      0  1 2 3 4   5
+            self.try_merge(end - 1, end);
+            // internal left
+            // [ . [. . B A] . .] -> [. [. . BA] .]
+            //   0  1 2 3 4  5 6      0  1 2 3   4
+            if range.len() > 1 && end > 2 && self.try_merge(end - 2, end - 1) {
+                end -= 1;
+            }
+            // internal right
+            // [ . [A B . .] . .] -> [ . [AB . .] . .]
+            //   0  1 2 3 4  5 6       0  1  2 3  4 5
+            if (start..end).len() > 1 && self.try_merge(start, start + 1) {
+                end -= 1;
+            }
+            // external left
+            // [ B [A . . .] . .] -> [ [BA . . .] . .]
+            //   0  1 2 3 4  5 6        0  1 2 3  4 5
+            if start > 1 && self.try_merge(start - 1, start) {
+                start -= 1;
+                end -= 1;
+            }
         }
 
         start..end
