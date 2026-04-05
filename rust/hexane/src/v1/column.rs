@@ -9,7 +9,11 @@ use crate::PackError;
 /// Type alias for the slab tail metadata of a column value type.
 pub type TailOf<T> = <<T as ColumnValueRef>::Encoding as ColumnEncoding>::Tail;
 
-const DEFAULT_MAX_SEG: usize = 32;
+/// Default maximum number of RLE/bool segments per slab.
+///
+/// Slabs are loaded at half capacity (`max / 2`) to leave room for inserts
+/// without overflowing. A splice that exceeds `max` triggers an overflow split.
+pub const DEFAULT_MAX_SEG: usize = 32;
 
 // ── Slab ─────────────────────────────────────────────────────────────────────
 
@@ -198,10 +202,12 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Default for Column<T, WF> {
 }
 
 impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
+    /// Create an empty column with the default segment budget.
     pub fn new() -> Self {
         Self::with_max_segments(DEFAULT_MAX_SEG)
     }
 
+    /// Create an empty column with a custom segment budget per slab.
     pub fn with_max_segments(max_segments: usize) -> Self {
         Self {
             slabs: Vec::new(),
@@ -296,10 +302,12 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         })
     }
 
+    /// Total number of items in the column.
     pub fn len(&self) -> usize {
         self.total_len
     }
 
+    /// Returns `true` if the column contains no items.
     pub fn is_empty(&self) -> bool {
         self.total_len == 0
     }
@@ -321,21 +329,22 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
 
     /// Validate that the canonical encoding (`save()`) is well-formed.
     ///
-    /// Panics with a descriptive message if any encoding invariant is violated.
-    pub fn validate_encoding(&self) {
+    /// Returns `Ok(())` if the encoding is valid, or a [`PackError`] describing
+    /// the violation.
+    pub fn validate_encoding(&self) -> Result<(), PackError> {
         let bytes = self.save();
-        if let Err(e) = T::Encoding::validate_encoding(&bytes) {
-            panic!("invalid encoding: {e}");
-        }
+        T::Encoding::validate_encoding(&bytes)?;
+        Ok(())
     }
 
     /// Validate the canonical encoding and return its slab info.
-    pub fn validate_encoding_info(&self) -> super::encoding::SlabInfo<TailOf<T>> {
+    ///
+    /// Returns the slab metadata on success, or a [`PackError`] if invalid.
+    pub fn validate_encoding_info(
+        &self,
+    ) -> Result<super::encoding::SlabInfo<TailOf<T>>, PackError> {
         let bytes = self.save();
-        match T::Encoding::validate_encoding(&bytes) {
-            Ok(info) => info,
-            Err(e) => panic!("invalid encoding: {e}"),
-        }
+        T::Encoding::validate_encoding(&bytes)
     }
 
     /// Serialize all slabs into a single canonical byte array.
@@ -429,7 +438,7 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
         T::Encoding::splice(self, index, del, iter);
 
         #[cfg(debug_assertions)]
-        self.validate_encoding();
+        self.validate_encoding().unwrap();
     }
 
     // ── Merge ────────────────────────────────────────────────────────────────
@@ -581,7 +590,7 @@ where
 
     /// Returns `true` if every item in the column has the default value.
     ///
-    /// O(slabs) — checks each slab's single-segment first value against default.
+    /// O(S) — each slab must be single-segment with a default first value.
     /// An empty column is considered default.
     pub fn is_default(&self) -> bool {
         self.total_len == 0 || self.slabs.iter().all(|s| s.is_default::<T>())
@@ -735,11 +744,16 @@ impl<T: ColumnValueRef> Clone for Iter<'_, T> {
 }
 
 impl<'a, T: ColumnValueRef> Iter<'a, T> {
+    /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
         self.pos
     }
 
+    /// Returns the next run of identical values, merging across slab boundaries.
+    ///
+    /// For repeat runs, returns the full count. For literal runs, returns
+    /// count=1 per value. Null runs return the null value with the full count.
     pub fn next_run(&mut self) -> Option<super::Run<T::Get<'a>>> {
         use super::encoding::RunDecoder;
         if self.items_left == 0 {
@@ -795,6 +809,11 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
         })
     }
 
+    /// Moves the iterator window to `range` and returns the item at `range.start`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range.start < self.pos()`.
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<T::Get<'a>> {
         assert!(
             range.start >= self.pos,

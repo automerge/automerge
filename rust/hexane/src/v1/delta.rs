@@ -267,6 +267,7 @@ impl<T: DeltaValue> Default for DeltaColumn<T> {
 }
 
 impl<T: DeltaValue> DeltaColumn<T> {
+    /// Create an empty delta column with the default segment budget.
     pub fn new() -> Self {
         Self {
             inner: PrefixColumn::new(),
@@ -274,6 +275,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
+    /// Create an empty delta column with a custom segment budget per slab.
     pub fn with_max_segments(max_segments: usize) -> Self {
         Self {
             inner: PrefixColumn::with_max_segments(max_segments),
@@ -302,20 +304,27 @@ impl<T: DeltaValue> DeltaColumn<T> {
         })
     }
 
+    /// Total number of items in the column.
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Returns `true` if the column contains no items.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Number of slabs in the column.
     pub fn slab_count(&self) -> usize {
         self.inner.slab_count()
     }
 
-    pub fn validate_encoding(&self) {
-        self.inner.validate_encoding();
+    /// Validate that the canonical encoding is well-formed.
+    ///
+    /// Returns `Ok(())` if the encoding is valid, or a [`PackError`]
+    /// describing the violation.
+    pub fn validate_encoding(&self) -> Result<(), PackError> {
+        self.inner.validate_encoding()
     }
 
     /// Serialize the delta-encoded column to bytes.
@@ -344,7 +353,7 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
-    /// Inserts `value` at `index`, adjusting the following delta.
+    /// Inserts `value` at `index`
     /// Panics if `index > self.len()`.
     pub fn insert(&mut self, index: usize, value: T) {
         let len = self.inner.len();
@@ -384,11 +393,12 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
-    /// Removes the value at `index`, absorbing its delta into the next element.
-    /// Panics if `index >= self.len()`.
+    /// Removes the value at `index`
     pub fn remove(&mut self, index: usize) {
         let len = self.inner.len();
-        assert!(index < len, "remove index out of bounds");
+        if index >= len {
+            return;
+        }
 
         let delta = T::get_inner(self.inner.get_value(index).unwrap());
 

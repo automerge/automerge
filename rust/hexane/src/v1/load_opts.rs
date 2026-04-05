@@ -1,3 +1,4 @@
+use super::column::DEFAULT_MAX_SEG;
 use super::ColumnValueRef;
 
 /// Options for [`Column::load_with`](super::Column::load_with), [`PrefixColumn::load_with`](super::PrefixColumn::load_with), etc.
@@ -8,8 +9,8 @@ use super::ColumnValueRef;
 ///   default column when data is empty (requires `T::Get<'static>: Default`).
 /// - [`with_validation`](LoadOpts::with_validation) — validate each decoded
 ///   value with a function pointer.
-/// - [`with_max_segments`](LoadOpts::with_max_segments) — override the default
-///   slab segment budget (default: 16).
+/// - [`with_max_segments`](LoadOpts::with_max_segments) — override the
+///   slab segment budget.
 pub struct LoadOpts<T: ColumnValueRef> {
     pub(crate) length: Option<usize>,
     pub(crate) validate: Option<for<'a> fn(T::Get<'a>) -> Option<String>>,
@@ -29,7 +30,7 @@ impl<T: ColumnValueRef> LoadOpts<T> {
         Self {
             length: None,
             validate: None,
-            max_segments: 16,
+            max_segments: DEFAULT_MAX_SEG,
         }
     }
 
@@ -51,7 +52,7 @@ impl<T: ColumnValueRef> LoadOpts<T> {
         self
     }
 
-    /// Override the maximum number of segments per slab (default: 16).
+    /// Override the maximum number of segments per slab.
     pub fn with_max_segments(mut self, n: usize) -> Self {
         self.max_segments = n;
         self

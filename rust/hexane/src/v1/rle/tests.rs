@@ -92,7 +92,7 @@ mod load_verify_tests {
         let new_vals: Vec<u64> = (1000..1010).collect();
         col.splice(30, 0, new_vals);
 
-        col.validate_encoding();
+        col.validate_encoding().unwrap();
         assert_eq!(col.len(), 70);
         let vals: Vec<u64> = col.iter().collect();
         let mut expected: Vec<u64> = (0..30).collect();

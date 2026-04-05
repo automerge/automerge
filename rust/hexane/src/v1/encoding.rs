@@ -196,8 +196,15 @@ pub trait RunDecoder: Iterator {
     fn next_run(&mut self) -> Option<Run<Self::Item>>;
 }
 
+/// Metadata extracted from a validated slab encoding.
+///
+/// Returned by [`ColumnEncoding::validate_encoding`] and
+/// [`Column::validate_encoding_info`](super::Column::validate_encoding_info).
 pub struct SlabInfo<T> {
+    /// Number of RLE/bool segments in the slab.
     pub segments: usize,
+    /// Number of logical items in the slab.
     pub len: usize,
+    /// Per-encoding tail metadata (e.g. [`RleTail`](super::rle::RleTail) for RLE columns).
     pub tail: T,
 }
