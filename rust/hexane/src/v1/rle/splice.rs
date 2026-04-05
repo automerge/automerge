@@ -41,6 +41,13 @@ pub(crate) enum Postfix<'a, T: RleValue> {
 }
 
 impl<T: RleValue> Postfix<'_, T> {
+    fn pending(&self) -> usize {
+        match self {
+            Self::Run { .. } => 1,
+            Self::Lit { .. } => 1,
+            Self::LonePlusLit { .. } => 2,
+        }
+    }
     fn segments(&self) -> usize {
         match self {
             Self::Run { segments, .. } => *segments,
@@ -468,7 +475,7 @@ mod partition_tests {
 
     #[test]
     fn overflow_insert_many_at_mid() {
-        overflow_insert_check(&[1, 2, 3, 4, 5], 2, &[10, 20, 30, 40, 50], 3);
+        overflow_insert_check(&[1, 2, 3, 4, 5], 2, &[10, 20, 30, 40, 50], 5);
     }
 
     #[test]
@@ -492,7 +499,7 @@ mod partition_tests {
             let insert_len = (r.next_u32() % 20 + 1) as usize;
             let new_vals: Vec<u64> = (0..insert_len).map(|_| r.next_u64() % 5).collect();
             let index = r.next_u32() as usize % (initial_len + 1);
-            let max_seg = (r.next_u32() % 8 + 2) as usize;
+            let max_seg = initial_len + (r.next_u32() % 8) as usize;
             overflow_insert_check(&initial, index, &new_vals, max_seg);
         }
     }
@@ -572,7 +579,7 @@ mod partition_tests {
         let initial = [1u64, 2, 3, 4, 5, 6, 7, 8];
         let new_vals = [10u64, 20, 30, 40, 50];
         for index in 0..=initial.len() {
-            overflow_insert_check(&initial, index, &new_vals, 4);
+            overflow_insert_check(&initial, index, &new_vals, initial.len());
         }
     }
 
@@ -583,7 +590,7 @@ mod partition_tests {
         let new_vals = [10u64, 20, 30, 40, 50, 60, 70];
         // Insert at every position
         for index in 0..=initial.len() {
-            overflow_insert_check(&initial, index, &new_vals, 3);
+            overflow_insert_check(&initial, index, &new_vals, initial.len());
         }
     }
 }
@@ -609,6 +616,7 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
     values: impl Iterator<Item = V>,
     max_segments: usize,
 ) -> SpliceBuf {
+    assert!(slab.segments <= max_segments);
     let p = find_partition::<T, V>(slab, index..index + del);
     let mut target_segments = max_segments;
 
@@ -660,9 +668,10 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
 
     // 2. Feed postfix + flush.
     let postfix_segments = p.postfix.as_ref().map(|p| p.segments()).unwrap_or(0);
-
+    let postfix_pending = p.postfix.as_ref().map(|p| p.pending()).unwrap_or(0);
     if !overflowed {
-        if p.prefix.segments + f.segments + postfix_segments <= max_segments {
+        let pending = state.pending_segments() + postfix_pending;
+        if p.prefix.segments + pending + f.segments + postfix_segments <= max_segments {
             f += state.flush_postfix(&mut buf, p.postfix).0;
             result.bytes = buf;
             result.wpos = f.wpos;
@@ -685,7 +694,24 @@ fn build_splice_buf<T: RleValue, V: AsColumnRef<T>>(
         }
     }
 
-    // overflowed
+    // if the postfix wont fit - flush the last overflow slab
+    let pending = state.pending_segments() + postfix_pending;
+    if pending + f.segments + postfix_segments > max_segments {
+        f += state.flush(&mut buf);
+        let tail = f.wpos.as_tail(0, buf.len());
+        let data = std::mem::take(&mut buf);
+        let len = inserted;
+        let segments = f.segments;
+        result.overflow.push(Slab {
+            data,
+            len,
+            segments,
+            tail,
+        });
+        state = RleState::Empty;
+        f = FlushState::default();
+        inserted = 0;
+    }
 
     f += state.flush_postfix(&mut buf, p.postfix).0;
 
@@ -716,6 +742,7 @@ pub(crate) fn splice_slab<T: RleValue, V: AsColumnRef<T>>(
     max_segments: usize,
 ) -> Vec<Slab> {
     assert!(index + del <= slab.len, "del extends beyond slab");
+    assert!(slab.segments <= max_segments);
 
     let result = build_splice_buf::<T, V>(slab, index, del, values, max_segments);
     let wpos = result.wpos;
