@@ -204,16 +204,19 @@ impl<T: PrefixValue> Default for PrefixColumn<T> {
 }
 
 impl<T: PrefixValue> PrefixColumn<T> {
+    /// Create an empty prefix column with the default segment budget.
     pub fn new() -> Self {
         Self { col: Column::new() }
     }
 
+    /// Create an empty prefix column with a custom segment budget per slab.
     pub fn with_max_segments(max_segments: usize) -> Self {
         Self {
             col: Column::with_max_segments(max_segments),
         }
     }
 
+    /// Bulk-construct from a Vec of values.
     pub fn from_values(values: Vec<T>) -> Self {
         Self {
             col: Column::from_values(values),
@@ -237,10 +240,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     // ── Delegated read methods ───────────────────────────────────────────
 
+    /// Total number of items in the column.
     pub fn len(&self) -> usize {
         self.col.len()
     }
 
+    /// Returns `true` if the column contains no items.
     pub fn is_empty(&self) -> bool {
         self.col.is_empty()
     }
@@ -256,6 +261,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.get(index)
     }
 
+    /// Serialize the column into a byte array.
     pub fn save(&self) -> Vec<u8> {
         self.col.save()
     }
@@ -267,10 +273,12 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.save_to(out)
     }
 
+    /// Number of slabs in the column.
     pub fn slab_count(&self) -> usize {
         self.col.slab_count()
     }
 
+    /// Returns `(len, segments)` for each slab (for debugging/testing).
     pub fn slab_info(&self) -> Vec<(usize, usize)> {
         self.col.slab_info()
     }
@@ -279,20 +287,39 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.slab_data()
     }
 
-    pub fn validate_encoding(&self) {
+    /// Validate that the canonical encoding is well-formed.
+    ///
+    /// Returns `Ok(())` if the encoding is valid, or a [`PackError`](crate::PackError)
+    /// describing the violation.
+    pub fn validate_encoding(&self) -> Result<(), crate::PackError> {
         self.col.validate_encoding()
     }
 
     // ── Mutations (compound BIT maintained automatically) ────────────────
 
+    /// Inserts `value` at `index`, shifting subsequent elements right.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
     pub fn insert(&mut self, index: usize, value: impl super::AsColumnRef<T>) {
         self.col.insert(index, value);
     }
 
+    /// Removes the value at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) {
         self.col.remove(index);
     }
 
+    /// Removes `del` elements starting at `index` and inserts `values` in their place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index + del > self.len()`.
     pub fn splice<V: super::AsColumnRef<T>>(
         &mut self,
         index: usize,
@@ -308,7 +335,7 @@ impl<T: PrefixValue> PrefixColumn<T> {
     /// `index`).
     ///
     /// `get_total(0)` returns the value at index 0.
-    /// Panics if `index >= len`.
+    /// If `index >= len`, returns the sum of all values.
     pub fn get_total(&self, index: usize) -> T::Prefix {
         self.get_prefix(index + 1)
     }
@@ -751,7 +778,7 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
 impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
 
 impl<'a, T: PrefixValue> PrefixIter<'a, T> {
-    /// Returns the index of the next item to be yielded.
+    /// Index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {
         self.pos

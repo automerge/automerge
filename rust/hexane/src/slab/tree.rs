@@ -334,15 +334,17 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> SpanTree<T, W> {
     /// Panics if the tree is empty or `index` is out of bounds.
     pub fn update_at<F>(&mut self, index: usize, f: F)
     where
-        F: FnOnce(&mut T),
+        F: Fn(&mut T),
     {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
             let len = root.check();
             root.update_at(index, f);
             #[cfg(debug_assertions)]
-            debug_assert_eq!(len, root.check());
-            debug_assert_eq!(self.check_weight().as_ref(), self.weight());
+            {
+                assert_eq!(len, root.check());
+                assert_eq!(self.check_weight().as_ref(), self.weight());
+            }
         } else {
             panic!("update_at on empty tree")
         }
@@ -725,13 +727,17 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
 
     fn replace(&mut self, index: usize, element: T) -> T {
         let original_len = self.len();
+        #[cfg(feature = "slow_path_assertions")]
         debug_assert_eq!(&self.check_weight(), self.weight()); // FIXME
         if self.is_leaf() {
             self.weight.union(&W::alloc(&element));
             let v = mem::replace(&mut self.elements[index], element);
             self.subtract_weight(&W::alloc(&v));
-            debug_assert_eq!(self.check(), self.len());
-            debug_assert_eq!(&self.check_weight(), self.weight()); // FIXME
+            #[cfg(feature = "slow_path_assertions")]
+            {
+                debug_assert_eq!(self.check(), self.len());
+                debug_assert_eq!(&self.check_weight(), self.weight());
+            }
             v
         } else {
             let mut total_index = 0;
@@ -747,8 +753,11 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                         self.weight.union(&W::alloc(&element));
                         let v = mem::replace(&mut self.elements[child_index], element);
                         self.subtract_weight(&W::alloc(&v));
-                        debug_assert_eq!(self.check(), self.len());
-                        debug_assert_eq!(&self.check_weight(), self.weight());
+                        #[cfg(feature = "slow_path_assertions")]
+                        {
+                            debug_assert_eq!(self.check(), self.len());
+                            debug_assert_eq!(&self.check_weight(), self.weight());
+                        }
                         return v;
                     }
                     Ordering::Greater => {
@@ -756,8 +765,11 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                         let v = self.children[child_index].replace(index - total_index, element);
                         self.subtract_weight(&W::alloc(&v));
                         assert_eq!(original_len, self.len());
-                        debug_assert_eq!(self.check(), self.len());
-                        debug_assert_eq!(&self.check_weight(), self.weight());
+                        #[cfg(feature = "slow_path_assertions")]
+                        {
+                            debug_assert_eq!(self.check(), self.len());
+                            debug_assert_eq!(&self.check_weight(), self.weight());
+                        }
                         return v;
                     }
                 }
@@ -774,7 +786,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
 
     fn update_at<F>(&mut self, index: usize, f: F)
     where
-        F: FnOnce(&mut T),
+        F: Fn(&mut T),
     {
         if self.is_leaf() {
             let elem = &mut self.elements[index];
@@ -783,6 +795,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
             let new_w = W::alloc(elem);
             self.weight.union(&new_w);
             self.subtract_weight(&old_w);
+            #[cfg(feature = "slow_path_assertions")]
             debug_assert_eq!(&self.check_weight(), self.weight());
         } else {
             let mut total_index = 0;
@@ -801,6 +814,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                         let new_w = W::alloc(elem);
                         self.weight.union(&new_w);
                         self.subtract_weight(&old_w);
+                        #[cfg(feature = "slow_path_assertions")]
                         debug_assert_eq!(&self.check_weight(), self.weight());
                         return;
                     }
@@ -811,6 +825,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
                         let new_child_w = child.weight().clone();
                         self.weight.union(&new_child_w);
                         self.subtract_weight(&old_child_w);
+                        #[cfg(feature = "slow_path_assertions")]
                         debug_assert_eq!(&self.check_weight(), self.weight());
                         return;
                     }
@@ -832,6 +847,7 @@ impl<T: Clone + Debug + Default, W: SpanWeight<T>> TreeNode<T, W> {
         self.elements.push(middle);
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
+        #[cfg(feature = "slow_path_assertions")]
         debug_assert_eq!(&self.check_weight(), self.weight());
         assert!(self.is_full());
     }

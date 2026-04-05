@@ -140,11 +140,10 @@ pub trait RleValue: ColumnValueRef {
 
     /// Construct the `Get` value for a null entry.
     ///
+    /// # Panics
+    ///
     /// The default panics, which is correct for non-nullable types (`NULLABLE = false`).
     /// Nullable types (`Option<T>`) must override this to return `None`.
-    ///
-    /// The `slab` parameter is unused but anchors the lifetime so that
-    /// the return type `Self::Get<'_>` is well-formed for borrowing types.
     fn get_null<'a>() -> Self::Get<'a> {
         panic!("unexpected null in non-nullable column")
     }
@@ -398,8 +397,8 @@ impl RleValue for String {
         let s = std::str::from_utf8(&buf[..len]).map_err(|_| PackError::InvalidUtf8)?;
         Ok((hdr + len, s))
     }
-    /// Data was validated during load — UTF-8 was checked by try_unpack.
-    /// Data was validated during load, so the unwrap never fires.
+    /// Data was validated during load — UTF-8 was checked by try_unpack,
+    /// so the unwrap never fires.
     fn unpack(data: &[u8]) -> (usize, &str) {
         let mut cursor = data;
         let start = cursor.len();

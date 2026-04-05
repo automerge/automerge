@@ -596,7 +596,6 @@ struct SpliceBuf {
     segments: usize,
     rewrite: Option<RewriteHeader>,
     overflow: Vec<Slab>,
-    //tail: RleTail,
     wpos: WPos,
 }
 

@@ -174,6 +174,7 @@ impl<T: DeltaValue> Default for IndexedDeltaColumn<T> {
 }
 
 impl<T: DeltaValue> IndexedDeltaColumn<T> {
+    /// Create an empty indexed delta column.
     pub fn new() -> Self {
         Self {
             col: DeltaColumn::new(),
@@ -183,6 +184,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
         }
     }
 
+    /// Create an empty indexed delta column with a custom segment budget.
     pub fn with_max_segments(max_segments: usize) -> Self {
         Self {
             col: DeltaColumn::with_max_segments(max_segments),
@@ -192,6 +194,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
         }
     }
 
+    /// Bulk-construct from a Vec of realized values.
     pub fn from_values(values: Vec<T>) -> Self {
         let col = DeltaColumn::from_values(values);
         let (tree, tree_n) = build_tree(&col);
@@ -203,6 +206,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
         }
     }
 
+    /// Deserialize from bytes produced by [`save`](IndexedDeltaColumn::save).
     pub fn load(data: &[u8]) -> Result<Self, PackError> {
         let col = DeltaColumn::load(data)?;
         let (tree, tree_n) = build_tree(&col);
@@ -232,38 +236,58 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
 
     // ── Delegated read methods ───────────────────────────────────────────
 
+    /// Total number of items in the column.
     pub fn len(&self) -> usize {
         self.col.len()
     }
 
+    /// Returns `true` if the column contains no items.
     pub fn is_empty(&self) -> bool {
         self.col.is_empty()
     }
 
+    /// Returns the realized value at `index`, or `None` if out of bounds.
     pub fn get(&self, index: usize) -> Option<T> {
         self.col.get(index)
     }
 
+    /// Serialize the column into a byte array.
     pub fn save(&self) -> Vec<u8> {
         self.col.save()
     }
 
+    /// Number of slabs in the column.
     pub fn slab_count(&self) -> usize {
         self.col.slab_count()
     }
 
     // ── Mutations (rebuild segment tree after) ───────────────────────────
 
+    /// Inserts `value` at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
     pub fn insert(&mut self, index: usize, value: T) {
         self.col.insert(index, value);
         self.rebuild_tree();
     }
 
+    /// Removes the value at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) {
         self.col.remove(index);
         self.rebuild_tree();
     }
 
+    /// Removes `del` elements starting at `index` and inserts `values` in their place.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index + del > self.len()`.
     pub fn splice(&mut self, index: usize, del: usize, values: impl IntoIterator<Item = T>) {
         self.col.splice(index, del, values);
         self.rebuild_tree();
