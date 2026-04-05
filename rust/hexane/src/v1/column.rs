@@ -689,6 +689,32 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.items_left, Some(self.items_left))
     }
+
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        use super::encoding::RunDecoder;
+        let mut acc = init;
+        while self.items_left > 0 {
+            if let Some(run) = self.decoder.next_run() {
+                let count = run.count.min(self.items_left);
+                for _ in 0..count {
+                    acc = f(acc, run.value);
+                }
+                self.items_left -= count;
+                self.slab_remaining = self.slab_remaining.saturating_sub(count);
+            } else {
+                self.slab_idx += 1;
+                if self.slab_idx >= self.slabs.len() {
+                    break;
+                }
+                self.decoder = T::Encoding::decoder(&self.slabs[self.slab_idx].data);
+                self.slab_remaining = self.slabs[self.slab_idx].len;
+            }
+        }
+        acc
+    }
 }
 
 impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
