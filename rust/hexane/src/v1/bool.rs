@@ -88,7 +88,7 @@ pub(crate) fn find_partition(
     let mut suffix = None;
 
     while byte_pos < data.len() {
-        let (cb, count) = read_count(&data[byte_pos..])?;
+        let (cb, count) = read_count(&data[byte_pos..]).unwrap();
         let run_end_item = item_pos + count;
         let run_end_byte = byte_pos + cb;
 
@@ -145,7 +145,7 @@ pub(crate) fn find_partition(
 /// Builds a replacement buffer for the affected byte range and splices
 /// it directly into `slab_data`, avoiding a full slab copy.
 ///
-/// Returns `Some(new_segment_count)` on success.
+/// Returns overflow slabs `Vec<Slab>` on success.
 pub(crate) fn splice_slab(
     slab: &mut Slab,
     index: usize,
@@ -209,6 +209,7 @@ pub(crate) fn splice_slab(
                     slab.len = new_len;
                     slab.segments = segments;
                     slab.tail = tail;
+                    buf.clear();
                 } else {
                     overflow.push(Slab {
                         data: buf,
@@ -216,8 +217,8 @@ pub(crate) fn splice_slab(
                         segments,
                         tail,
                     });
+                    buf = Vec::new();
                 }
-                buf = Vec::new();
                 segments = 0;
                 len = 0;
                 tail = 0;
@@ -870,7 +871,7 @@ mod tests {
         for (i, &v) in expected.iter().enumerate() {
             assert_eq!(col.get(i), Some(v), "mismatch at {i}");
         }
-        col.validate_encoding();
+        col.validate_encoding().unwrap();
     }
 
     #[test]
@@ -934,7 +935,7 @@ mod tests {
         col.remove(0);
         assert_eq!(col.len(), 0);
         assert!(col.save().is_empty());
-        col.validate_encoding();
+        col.validate_encoding().unwrap();
     }
 
     #[test]

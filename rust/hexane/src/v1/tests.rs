@@ -86,7 +86,7 @@ where
             None => panic!("mismatch at {i}: got None, expected {v:?}"),
         }
     }
-    col.validate_encoding();
+    col.validate_encoding().unwrap();
 }
 
 /// Build a nullable column from (value, index) pairs, assert at end.
