@@ -315,6 +315,38 @@ impl<T: PrefixValue> PrefixColumn<T> {
         self.col.remove(index);
     }
 
+    /// Appends `value` to the end of the column.
+    pub fn push(&mut self, value: impl super::AsColumnRef<T>) {
+        self.col.push(value);
+    }
+
+    /// Removes and returns the last element, or `None` if empty.
+    pub fn pop(&mut self) -> Option<T> {
+        self.col.pop()
+    }
+
+    /// Returns the first value, or `None` if empty.
+    pub fn first_value(&self) -> Option<T::Get<'_>> {
+        self.col.first()
+    }
+
+    /// Returns the last value, or `None` if empty.
+    pub fn last_value(&self) -> Option<T::Get<'_>> {
+        self.col.last()
+    }
+
+    /// Removes all elements from the column.
+    pub fn clear(&mut self) {
+        self.col.clear();
+    }
+
+    /// Shortens the column to `len` elements.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    pub fn truncate(&mut self, len: usize) {
+        self.col.truncate(len);
+    }
+
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
     ///
     /// # Panics
@@ -873,6 +905,21 @@ where
 impl<T: PrefixValue> FromIterator<T> for PrefixColumn<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
+    }
+}
+
+impl<T: PrefixValue> Extend<T> for PrefixColumn<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.col.extend(iter);
+    }
+}
+
+impl<'a, T: PrefixValue> IntoIterator for &'a PrefixColumn<T> {
+    type Item = (T::Prefix, T::Get<'a>);
+    type IntoIter = PrefixIter<'a, T>;
+
+    fn into_iter(self) -> PrefixIter<'a, T> {
+        self.iter()
     }
 }
 
