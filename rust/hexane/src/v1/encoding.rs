@@ -113,12 +113,13 @@ pub trait ColumnEncoding: Default {
 
         // Apply remaining deletes to subsequent slabs.
         let mut remaining = overflow_del;
+        let drain_start = range.end;
         while remaining > 0 && range.end < col.slabs.len() {
             let slab_len = col.slabs[range.end].len;
             if remaining >= slab_len {
-                col.slabs.remove(range.end);
                 old_slab_len += slab_len;
                 remaining -= slab_len;
+                range.end += 1;
             } else {
                 old_slab_len += slab_len;
                 Self::splice_slab(
@@ -130,6 +131,18 @@ pub trait ColumnEncoding: Default {
                 );
                 range.end += 1; // include the partially deleted slab
                 break;
+            }
+        }
+        // Bulk-remove fully consumed slabs in one shift.
+        if drain_start < range.end {
+            let partial = if remaining == 0 {
+                range.end - drain_start
+            } else {
+                range.end - drain_start - 1
+            };
+            if partial > 0 {
+                col.slabs.drain(drain_start..drain_start + partial);
+                range.end -= partial;
             }
         }
 

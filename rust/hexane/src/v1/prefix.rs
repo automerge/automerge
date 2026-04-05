@@ -52,15 +52,19 @@ pub trait PrefixValue: ColumnValueRef {
     /// Convert one column value to its prefix contribution.
     fn to_prefix(val: Self::Get<'_>) -> Self::Prefix;
 
+    /// Prefix contribution of an entire run.
+    #[inline]
+    fn run_prefix(run: &super::Run<Self::Get<'_>>) -> Self::Prefix {
+        Self::to_prefix(run.value) * Self::Prefix::try_from(run.count).unwrap_or_default()
+    }
+
     /// Sum all values in a slab.  Walks the encoded runs directly for
     /// efficiency — O(segments) rather than O(items).
     fn slab_sum(slab: &Slab<TailOf<Self>>) -> Self::Prefix {
         let mut decoder = Self::Encoding::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         while let Some(run) = decoder.next_run() {
-            let p = Self::to_prefix(run.value);
-            let count = Self::Prefix::try_from(run.count).unwrap_or_default();
-            acc += p * count;
+            acc += Self::run_prefix(&run);
         }
         acc
     }
@@ -71,12 +75,10 @@ pub trait PrefixValue: ColumnValueRef {
         let mut decoder = Self::Encoding::decoder(&slab.data);
         let mut acc = Self::Prefix::default();
         let mut items = 0;
-        while let Some(run) = decoder.next_run() {
-            let take = run.count.min(count - items);
-            let p = Self::to_prefix(run.value);
-            let n = Self::Prefix::try_from(take).unwrap_or_default();
-            acc += p * n;
-            items += take;
+        while let Some(mut run) = decoder.next_run() {
+            run.count = run.count.min(count - items);
+            acc += Self::run_prefix(&run);
+            items += run.count;
             if items >= count {
                 break;
             }
@@ -96,16 +98,14 @@ pub trait PrefixValue: ColumnValueRef {
         let mut acc = zero;
         let mut items = 0;
         while let Some(run) = decoder.next_run() {
-            let p = Self::to_prefix(run.value);
-            let n = Self::Prefix::try_from(run.count).unwrap_or_default();
-            let run_total = p * n;
+            let run_total = Self::run_prefix(&run);
             if acc + run_total >= target {
                 // Target is within this run — ceiling division.
+                let p = Self::to_prefix(run.value);
                 let remaining = target - acc;
                 let needed = (remaining + p - one_p) / p;
                 let needed_usize: usize = needed.try_into().unwrap_or(run.count);
                 assert!(needed_usize <= run.count);
-                acc += p * needed;
                 items += needed_usize;
                 break;
             }
@@ -269,6 +269,10 @@ impl<T: PrefixValue> PrefixColumn<T> {
 
     pub fn slab_count(&self) -> usize {
         self.col.slab_count()
+    }
+
+    pub fn slab_info(&self) -> Vec<(usize, usize)> {
+        self.col.slab_info()
     }
 
     pub(crate) fn slab_data(&self) -> Vec<Vec<u8>> {
@@ -674,14 +678,21 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
         }
 
         // Fast path: target is within the current slab.
+        // Temporarily cap items_left so next_run yields exactly n+1 items,
+        // accumulate the prefix from each run, and return the final value.
         if n < self.inner.slab_remaining {
-            let val = self.inner.decoder.nth(n)?;
-            self.inner.items_left -= n + 1;
-            self.inner.slab_remaining -= n + 1;
-            self.inner.pos += n + 1;
+            let saved_items_left = self.inner.items_left;
+            self.inner.items_left = n + 1;
+
+            let mut val = None;
+            while let Some(run) = self.inner.next_run() {
+                self.total += T::run_prefix(&run);
+                val = Some(run.value);
+            }
+
+            self.inner.items_left = saved_items_left - (n + 1);
             self.pos += n + 1;
-            self.total = self.col.get_prefix(self.pos);
-            return Some((self.total, val));
+            return val.map(|v| (self.total, v));
         }
 
         // Combined BIT traversal: find slab + accumulate prefix in one pass.
@@ -714,6 +725,27 @@ impl<'a, T: PrefixValue> Iterator for PrefixIter<'a, T> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.inner.size_hint()
     }
+
+    fn last(mut self) -> Option<Self::Item> {
+        let n = self.inner.items_left;
+        if n == 0 {
+            return None;
+        }
+        self.nth(n - 1)
+    }
+
+    fn fold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        let mut acc = init;
+        while let Some(run) = self.next_run() {
+            for _ in 0..run.count {
+                acc = f(acc, run.value);
+            }
+        }
+        acc
+    }
 }
 
 impl<T: PrefixValue> ExactSizeIterator for PrefixIter<'_, T> {}
@@ -731,8 +763,7 @@ impl<'a, T: PrefixValue> PrefixIter<'a, T> {
     /// See [`super::Run`] for run semantics.
     pub fn next_run(&mut self) -> Option<super::Run<(T::Prefix, T::Get<'a>)>> {
         let run = self.inner.next_run()?;
-        let count = T::Prefix::try_from(run.count).unwrap_or_default();
-        self.total += T::to_prefix(run.value) * count;
+        self.total += T::run_prefix(&run);
         self.pos += run.count;
         Some(super::Run {
             count: run.count,
