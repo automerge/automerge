@@ -403,9 +403,58 @@ impl<T: ColumnValueRef, WF: WeightFn<T>> Column<T, WF> {
     }
 
     /// Removes the value at `index`.
+    ///
+    /// # Panics
+    ///
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) {
         self.splice(index, 1, std::iter::empty::<T>());
+    }
+
+    /// Appends `value` to the end of the column.
+    pub fn push(&mut self, value: impl AsColumnRef<T>) {
+        let len = self.total_len;
+        self.insert(len, value);
+    }
+
+    /// Removes and returns the last element, or `None` if empty.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.total_len == 0 {
+            return None;
+        }
+        let val = T::to_owned(self.get(self.total_len - 1)?);
+        self.remove(self.total_len - 1);
+        Some(val)
+    }
+
+    /// Returns the first element, or `None` if empty.
+    pub fn first(&self) -> Option<T::Get<'_>> {
+        self.get(0)
+    }
+
+    /// Returns the last element, or `None` if empty.
+    pub fn last(&self) -> Option<T::Get<'_>> {
+        if self.total_len == 0 {
+            None
+        } else {
+            self.get(self.total_len - 1)
+        }
+    }
+
+    /// Removes all elements from the column.
+    pub fn clear(&mut self) {
+        self.slabs.clear();
+        self.bit = vec![WF::Weight::default()];
+        self.total_len = 0;
+    }
+
+    /// Shortens the column to `len` elements.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.total_len {
+            self.splice(len, self.total_len - len, std::iter::empty::<T>());
+        }
     }
 
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
@@ -912,5 +961,25 @@ impl<'a, T: ColumnValueRef> Iter<'a, T> {
 impl<T: ColumnValueRef> FromIterator<T> for Column<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
+    }
+}
+
+// ── Extend ──────────────────────────────────────────────────────────────────
+
+impl<T: ColumnValueRef, WF: WeightFn<T>> Extend<T> for Column<T, WF> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let len = self.total_len;
+        self.splice(len, 0, iter);
+    }
+}
+
+// ── IntoIterator ────────────────────────────────────────────────────────────
+
+impl<'a, T: ColumnValueRef, WF: WeightFn<T>> IntoIterator for &'a Column<T, WF> {
+    type Item = T::Get<'a>;
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Iter<'a, T> {
+        self.iter()
     }
 }

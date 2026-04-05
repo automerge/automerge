@@ -416,7 +416,55 @@ impl<T: DeltaValue> DeltaColumn<T> {
         }
     }
 
+    /// Appends `value` to the end of the column.
+    pub fn push(&mut self, value: T) {
+        let len = self.inner.len();
+        self.insert(len, value);
+    }
+
+    /// Removes and returns the last realized value, or `None` if empty.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+        let val = self.get(self.inner.len() - 1)?;
+        self.remove(self.inner.len() - 1);
+        Some(val)
+    }
+
+    /// Returns the first realized value, or `None` if empty.
+    pub fn first(&self) -> Option<T> {
+        self.get(0)
+    }
+
+    /// Returns the last realized value, or `None` if empty.
+    pub fn last(&self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            self.get(self.inner.len() - 1)
+        }
+    }
+
+    /// Removes all elements from the column.
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Shortens the column to `len` elements.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    pub fn truncate(&mut self, len: usize) {
+        let cur = self.inner.len();
+        if len < cur {
+            self.splice(len, cur - len, std::iter::empty::<T>());
+        }
+    }
+
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
+    ///
+    /// # Panics
+    ///
     /// Panics if `index + del > self.len()`.
     pub fn splice(&mut self, index: usize, del: usize, values: impl IntoIterator<Item = T>) {
         let len = self.inner.len();
@@ -624,6 +672,25 @@ where
 impl<T: DeltaValue> FromIterator<T> for DeltaColumn<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from_values(iter.into_iter().collect())
+    }
+}
+
+impl<T: DeltaValue> Extend<T> for DeltaColumn<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let vals: Vec<T> = iter.into_iter().collect();
+        if !vals.is_empty() {
+            let len = self.len();
+            self.splice(len, 0, vals);
+        }
+    }
+}
+
+impl<'a, T: DeltaValue> IntoIterator for &'a DeltaColumn<T> {
+    type Item = T;
+    type IntoIter = DeltaIter<'a, T>;
+
+    fn into_iter(self) -> DeltaIter<'a, T> {
+        self.iter()
     }
 }
 

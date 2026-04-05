@@ -69,6 +69,9 @@ pub trait ColumnValueRef: 'static + Sized + AsColumnRef<Self> + Debug {
     /// The optimal return type for `get()`: owned for `Copy` types, borrowed
     /// for ref types (`&str`, `&[u8]`).
     type Get<'a>: Copy + PartialEq + Debug;
+
+    /// Convert a borrowed `Get` value back to an owned `Self`.
+    fn to_owned(val: Self::Get<'_>) -> Self;
 }
 
 /// Simplified [`ColumnValueRef`] for `Copy` RLE types where `Get<'a> = Self`.
@@ -95,6 +98,10 @@ pub trait ColumnValue: Copy + PartialEq + Debug + 'static {
 impl<T: ColumnValue> ColumnValueRef for T {
     type Encoding = T::Encoding;
     type Get<'a> = T;
+
+    fn to_owned(val: T) -> T {
+        val
+    }
 }
 
 /// Extension of [`ColumnValueRef`] with RLE-specific encoding/decoding methods.
@@ -161,6 +168,10 @@ pub trait RleValue: ColumnValueRef {
 impl<T: RleValue> ColumnValueRef for Option<T> {
     type Encoding = RleEncoding<Option<T>>;
     type Get<'a> = Option<T::Get<'a>>;
+
+    fn to_owned(val: Option<T::Get<'_>>) -> Option<T> {
+        val.map(T::to_owned)
+    }
 }
 
 impl<T: RleValue> AsColumnRef<Option<T>> for Option<T> {
@@ -211,6 +222,10 @@ impl<T: RleValue> RleValue for Option<T> {
 impl ColumnValueRef for bool {
     type Encoding = BoolEncoding;
     type Get<'a> = bool;
+
+    fn to_owned(val: bool) -> bool {
+        val
+    }
 }
 
 impl AsColumnRef<bool> for bool {
@@ -380,6 +395,10 @@ impl RleValue for std::num::NonZeroU32 {
 impl ColumnValueRef for String {
     type Encoding = RleEncoding<String>;
     type Get<'a> = &'a str;
+
+    fn to_owned(val: &str) -> String {
+        val.to_string()
+    }
 }
 
 impl RleValue for String {
@@ -418,6 +437,10 @@ impl RleValue for String {
 impl ColumnValueRef for Vec<u8> {
     type Encoding = RleEncoding<Vec<u8>>;
     type Get<'a> = &'a [u8];
+
+    fn to_owned(val: &[u8]) -> Vec<u8> {
+        val.to_vec()
+    }
 }
 
 impl RleValue for Vec<u8> {

@@ -122,7 +122,7 @@ pub trait ColumnEncoding: Default {
                 range.end += 1;
             } else {
                 old_slab_len += slab_len;
-                Self::splice_slab(
+                let (partial_overflow, _) = Self::splice_slab(
                     &mut col.slabs[range.end],
                     0,
                     remaining,
@@ -130,6 +130,11 @@ pub trait ColumnEncoding: Default {
                     col.max_segments,
                 );
                 range.end += 1; // include the partially deleted slab
+                if !partial_overflow.is_empty() {
+                    let pos = range.end;
+                    range.end += partial_overflow.len();
+                    col.slabs.splice(pos..pos, partial_overflow);
+                }
                 break;
             }
         }

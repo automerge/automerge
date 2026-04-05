@@ -283,6 +283,45 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
         self.rebuild_tree();
     }
 
+    /// Appends `value` to the end of the column.
+    pub fn push(&mut self, value: T) {
+        self.col.push(value);
+        self.rebuild_tree();
+    }
+
+    /// Removes and returns the last realized value, or `None` if empty.
+    pub fn pop(&mut self) -> Option<T> {
+        let val = self.col.pop();
+        self.rebuild_tree();
+        val
+    }
+
+    /// Returns the first realized value, or `None` if empty.
+    pub fn first(&self) -> Option<T> {
+        self.col.first()
+    }
+
+    /// Returns the last realized value, or `None` if empty.
+    pub fn last(&self) -> Option<T> {
+        self.col.last()
+    }
+
+    /// Removes all elements from the column.
+    pub fn clear(&mut self) {
+        self.col.clear();
+        self.rebuild_tree();
+    }
+
+    /// Shortens the column to `len` elements.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.len() {
+            self.col.truncate(len);
+            self.rebuild_tree();
+        }
+    }
+
     /// Removes `del` elements starting at `index` and inserts `values` in their place.
     ///
     /// # Panics
@@ -522,6 +561,24 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
             }
         }
         results
+    }
+}
+
+// ── Trait impls ─────────────────────────────────────────────────────────────
+
+impl<T: DeltaValue> FromIterator<T> for IndexedDeltaColumn<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from_values(iter.into_iter().collect())
+    }
+}
+
+impl<T: DeltaValue> Extend<T> for IndexedDeltaColumn<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let vals: Vec<T> = iter.into_iter().collect();
+        if !vals.is_empty() {
+            let len = self.len();
+            self.splice(len, 0, vals);
+        }
     }
 }
 

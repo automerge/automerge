@@ -2197,10 +2197,45 @@ fn cross_slab_delete_all() {
 }
 
 #[test]
+fn cross_slab_fuzz_regression() {
+    // Replay seed 799 from cross_slab_fuzz
+    use rand::{RngCore, SeedableRng};
+    let mut r = rand::rngs::SmallRng::seed_from_u64(799);
+
+    let n = (r.next_u32() % 20 + 5) as usize;
+    let vals: Vec<u64> = (0..n).map(|_| r.next_u64() % 5).collect();
+    let max_seg = (r.next_u32() % 6 + 3) as usize;
+    let mut col = multi_slab_col(&vals, max_seg);
+    let mut mirror = vals.clone();
+
+    for op in 0..10 {
+        let len = col.len();
+        if len == 0 {
+            break;
+        }
+        let idx = r.next_u32() as usize % len;
+        let max_del = (len - idx).min(5);
+        let del = r.next_u32() as usize % (max_del + 1);
+        let ins_count = r.next_u32() as usize % 4;
+        let new_vals: Vec<u64> = (0..ins_count).map(|_| r.next_u64() % 5).collect();
+
+        eprintln!(
+            "op={op} len={len} splice({idx}, {del}, {new_vals:?}) slabs={} info={:?}",
+            col.slab_count(),
+            col.slab_info()
+        );
+        col.splice(idx, del, new_vals.iter().copied());
+        mirror.splice(idx..idx + del, new_vals);
+        assert_eq!(col.to_vec(), mirror, "mismatch at op {op}");
+    }
+}
+
+#[test]
 fn cross_slab_fuzz() {
-    use rand::{rng, RngCore};
-    let mut r = rng();
-    for _ in 0..200 {
+    use rand::{RngCore, SeedableRng};
+    for seed in 0..1000u64 {
+        let mut r = rand::rngs::SmallRng::seed_from_u64(seed);
+        let round = seed;
         let n = (r.next_u32() % 20 + 5) as usize;
         let vals: Vec<u64> = (0..n).map(|_| r.next_u64() % 5).collect();
         let max_seg = (r.next_u32() % 6 + 3) as usize;
@@ -2208,7 +2243,7 @@ fn cross_slab_fuzz() {
         let mut mirror = vals.clone();
 
         // Perform 10 random operations.
-        for _ in 0..10 {
+        for op in 0..10 {
             let len = col.len();
             if len == 0 {
                 break;
@@ -2220,8 +2255,19 @@ fn cross_slab_fuzz() {
             let new_vals: Vec<u64> = (0..ins_count).map(|_| r.next_u64() % 5).collect();
 
             col.splice(idx, del, new_vals.iter().copied());
-            mirror.splice(idx..idx + del, new_vals);
-            assert_col(&col, &mirror);
+            mirror.splice(idx..idx + del, new_vals.clone());
+            if col.len() != mirror.len() || col.to_vec() != mirror {
+                panic!(
+                    "cross_slab_fuzz FAILED round={round} op={op}\n\
+                     initial vals={vals:?} max_seg={max_seg}\n\
+                     splice(idx={idx}, del={del}, ins={new_vals:?})\n\
+                     col={:?} (slabs={} info={:?})\n\
+                     mirror={mirror:?}",
+                    col.to_vec(),
+                    col.slab_count(),
+                    col.slab_info(),
+                );
+            }
         }
     }
 }
@@ -2255,14 +2301,11 @@ where
     );
 
     for (i, slab) in col.slabs.iter().enumerate() {
-        // TODO: fix empty slab after delete, then re-enable
-        // if col.total_len > 0 {
-        //     assert!(slab.len > 0, "slab {i} is empty but column has items");
-        // }
-        // TODO: fix splice overflow splitting, then re-enable this check
-        // assert!(slab.segments <= max_segments,
-        //     "slab {i}: segments={} exceeds max_segments={max_segments}", slab.segments);
-        let _ = max_segments;
+        assert!(
+            slab.segments <= max_segments,
+            "slab {i}: segments={} exceeds max_segments={max_segments}",
+            slab.segments
+        );
         let info = T::Encoding::validate_encoding(&slab.data)
             .unwrap_or_else(|e| panic!("slab {i} encoding invalid: {e}"));
         assert_eq!(slab.len, info.len, "slab {i}: len mismatch");
@@ -2377,8 +2420,16 @@ fn fuzz_option_u64_splice_exhaustive() {
                 .map(|_| choices[r.random_range(0..choices.len())])
                 .collect();
             let del = del_count.min(c.len() - pos);
-            c.splice(pos, del, new_vals);
-            validate_rle_column(&c);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.splice(pos, del, new_vals.clone());
+                validate_rle_column(&c);
+            }));
+            if result.is_err() {
+                panic!(
+                    "FAILED: del_count={del_count} ins_count={ins_count} pos={pos} del={del}\n  new_vals={new_vals:?}\n  col_len={} slabs={} info={:?}",
+                    col.len(), col.slab_count(), col.slab_info()
+                );
+            }
         }
     }
 }
