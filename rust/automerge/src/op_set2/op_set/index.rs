@@ -42,6 +42,10 @@ impl ObjIndex {
     pub(crate) fn insert(&mut self, id: OpId, obj_info: ObjInfo) {
         self.0.insert(id, obj_info);
     }
+
+    pub(crate) fn remove(&mut self, id: OpId) {
+        self.0.remove(&id);
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -173,7 +177,7 @@ impl IndexBuilder {
         inc.splice(0, 0, self.incs);
 
         let mut mark = MarkIndexColumn::new();
-        mark.splice(0, 0, self.marks);
+        mark.extend(0, self.marks);
 
         let obj_info = self.obj_info;
 

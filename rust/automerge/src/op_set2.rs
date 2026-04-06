@@ -14,5 +14,5 @@ pub use types::{ChangeMetadata, ScalarValue, ValueRef};
 
 pub(crate) use meta::{MetaCursor, ValueMeta};
 pub(crate) use op_set::{
-    OpIter, OpQuery, OpQueryTerm, OpSet, OpSetCheckpoint, ReadOpError, TopOpIter, VisibleOpIter,
+    OpIter, OpQuery, OpQueryTerm, OpSet, ReadOpError, TopOpIter, VisibleOpIter,
 };
