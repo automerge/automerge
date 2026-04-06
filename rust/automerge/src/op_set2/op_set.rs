@@ -12,7 +12,7 @@ use crate::types::{
 };
 use crate::AutomergeError;
 
-use super::op::{Op, OpLike, SuccCursors, SuccInsert};
+use super::op::{Op, OpLike, SuccCursors, SuccInsert, TxOp};
 
 use super::columns::Columns;
 
@@ -62,21 +62,15 @@ pub(crate) struct OpSet {
     pub(crate) text_encoding: TextEncoding,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct OpSetCheckpoint(OpSet);
-
 impl OpSet {
     #[cfg(test)]
     pub(crate) fn debug_cmp(&self, other: &Self) {
         self.cols.debug_cmp(&other.cols)
     }
 
-    pub(crate) fn save_checkpoint(&self) -> OpSetCheckpoint {
-        OpSetCheckpoint(self.clone())
-    }
-
-    pub(crate) fn load_checkpoint(&mut self, mut checkpoint: OpSetCheckpoint) {
-        std::mem::swap(&mut checkpoint.0, self);
+    #[cfg(test)]
+    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+        self.cols.save_checkpoint()
     }
 
     #[cfg(test)]
@@ -242,6 +236,16 @@ impl OpSet {
         added
     }
 
+    pub(crate) fn undo_op(&mut self, op: &TxOp) {
+        if !op.undo.is_empty() {
+            self.undo_succ(&op.undo);
+        }
+        self.cols.remove_ops(op.pos, &[op]);
+        if let Some(_) = op.obj_info() {
+            self.obj_info.remove(op.id());
+        }
+    }
+
     pub(crate) fn add_succ(&mut self, op_pos: &[SuccInsert]) {
         const NONE: Option<u64> = None;
         let mut succ_inc = 0;
@@ -261,6 +265,64 @@ impl OpSet {
                 self.cols.index.visible.splice(i.pos, 1, [false]);
                 self.cols.index.text.splice(i.pos, 1, [NONE]);
                 self.cols.index.top.splice(i.pos, 1, [false]);
+            }
+        }
+    }
+
+    pub(crate) fn add_succ_with_undo(&mut self, op_pos: &[SuccInsert]) -> Vec<SuccUndo> {
+        const NONE: Option<u64> = None;
+        let mut undo = vec![];
+        let mut succ_inc = 0;
+        let mut last_pos = None;
+        let mut expose = false;
+        let mut delete = false;
+        for i in op_pos.iter().rev() {
+            if last_pos == Some(i.pos) {
+                succ_inc += 1;
+            } else {
+                last_pos = Some(i.pos);
+                succ_inc = 1;
+            }
+            self.cols.succ_count.splice(i.pos, 1, [i.len + succ_inc]);
+            self.cols.succ_actor.splice(i.sub_pos, 0, [i.id.actoridx()]);
+            self.cols.succ_ctr.splice(i.sub_pos, 0, [i.id.icounter()]);
+            self.cols.index.inc.splice(i.sub_pos, 0, [i.inc]);
+            if i.inc.is_none() {
+                delete = true;
+                let visible = self.cols.index.visible.get(i.pos);
+                let text = self.cols.index.text.get(i.pos);
+                let top = self.cols.index.top.get(i.pos);
+                undo.push(SuccUndo::new(*i, visible, text, top));
+                self.cols.index.visible.splice(i.pos, 1, [false]);
+                self.cols.index.text.splice(i.pos, 1, [NONE]);
+                self.cols.index.top.splice(i.pos, 1, [false]);
+            } else if delete && !expose {
+                expose = true;
+                let top = self.cols.index.top.get(i.pos);
+                undo.push(SuccUndo::new(*i, None, None, top));
+                self.cols.index.top.splice(i.pos, 1, [true]);
+            } else {
+                undo.push(SuccUndo::new(*i, None, None, None));
+            }
+        }
+        undo
+    }
+
+    pub(crate) fn undo_succ(&mut self, op_pos: &[SuccUndo]) {
+        for undo in op_pos.iter().rev() {
+            let i = undo.succ;
+            self.cols.succ_count.splice(i.pos, 1, [i.len]);
+            self.cols.succ_actor.splice::<ActorIdx, _>(i.sub_pos, 1, []);
+            self.cols.succ_ctr.splice::<i64, _>(i.sub_pos, 1, []);
+            self.cols.index.inc.splice::<i64, _>(i.sub_pos, 1, []);
+            if let Some(vis) = undo.visible {
+                self.cols.index.visible.splice(i.pos, 1, [vis]);
+            }
+            if let Some(text) = undo.text {
+                self.cols.index.text.splice(i.pos, 1, [text]);
+            }
+            if let Some(top) = undo.top {
+                self.cols.index.top.splice(i.pos, 1, [top]);
             }
         }
     }
@@ -1322,6 +1384,30 @@ impl Iterator for IterObjIds<'_> {
             }
             (None, None) => None,
             _ => panic!(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) struct SuccUndo {
+    pub(crate) succ: SuccInsert,
+    pub(crate) visible: Option<bool>,
+    pub(crate) text: Option<Option<u64>>,
+    pub(crate) top: Option<bool>,
+}
+
+impl SuccUndo {
+    fn new(
+        succ: SuccInsert,
+        visible: Option<Option<Cow<'_, bool>>>,
+        text: Option<Option<Cow<'_, u64>>>,
+        top: Option<Option<Cow<'_, bool>>>,
+    ) -> Self {
+        Self {
+            succ,
+            visible: visible.flatten().as_deref().copied(),
+            text: text.map(|a| a.as_deref().copied()),
+            top: top.flatten().as_deref().copied(),
         }
     }
 }
