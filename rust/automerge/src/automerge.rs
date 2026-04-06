@@ -38,6 +38,9 @@ pub(crate) mod current_state;
 //#[cfg(test)]
 //mod tests;
 
+#[cfg(test)]
+mod rollback_tests;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
     Unused(ActorId),
@@ -417,15 +420,18 @@ impl Automerge {
 
         // SAFETY: this unwrap is safe as we always add 1
         let start_op = NonZeroU64::new(self.change_graph.max_op() + 1).unwrap();
-        let checkpoint = self.ops.save_checkpoint();
         TransactionArgs {
             actor_index,
             seq,
             start_op,
             deps,
-            checkpoint,
             scope,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn save_checkpoint(&self) -> std::collections::HashMap<&'static str, Vec<u8>> {
+        self.ops.save_checkpoint()
     }
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback

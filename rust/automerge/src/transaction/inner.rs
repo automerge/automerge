@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark, MarkSet};
 use crate::op_set2::change::build_change;
-use crate::op_set2::{Op, OpSet, OpSetCheckpoint, PropRef, SuccInsert, TxOp};
+use crate::op_set2::{Op, OpSet, PropRef, SuccInsert, TxOp};
 use crate::patches::PatchLog;
 use crate::types::{Clock, ElemId, ObjMeta, OpId, ScalarValue, SequenceType, TextEncoding, HEAD};
 use crate::Automerge;
@@ -27,7 +27,7 @@ pub(crate) struct TransactionInner {
     message: Option<String>,
     deps: Vec<ChangeHash>,
     scope: Option<Clock>,
-    checkpoint: OpSetCheckpoint,
+    //checkpoint: OpSetCheckpoint,
     pending: Vec<TxOp>,
 }
 
@@ -39,7 +39,7 @@ pub(crate) struct TransactionArgs {
     /// The sequence number of the change this transaction will create
     pub(crate) seq: u64,
     /// checkpoint of the op_set state needed for rollback
-    pub(crate) checkpoint: OpSetCheckpoint,
+    //pub(crate) checkpoint: OpSetCheckpoint,
     /// The start op of the change this transaction will create
     pub(crate) start_op: NonZeroU64,
     /// The dependencies of the change this transaction will create
@@ -54,7 +54,7 @@ impl TransactionInner {
             actor_index: actor,
             seq,
             start_op,
-            checkpoint,
+            //checkpoint,
             deps,
             scope,
         }: TransactionArgs,
@@ -65,7 +65,7 @@ impl TransactionInner {
             start_op,
             time: 0,
             message: None,
-            checkpoint,
+            //checkpoint,
             deps,
             pending: vec![],
             scope,
@@ -169,10 +169,17 @@ impl TransactionInner {
     /// operations.
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending.len();
-        doc.ops_mut().load_checkpoint(self.checkpoint);
+
+        for o in self.pending.iter().rev() {
+            doc.ops.undo_op(o);
+        }
+
+        //doc.ops_mut().load_checkpoint(self.checkpoint);
+
         if self.seq == 1 {
             doc.remove_actor(self.actor);
         }
+
         doc.remove_unused_actors(true);
         num
     }
@@ -261,13 +268,13 @@ impl TransactionInner {
         &mut self,
         doc: &mut Automerge,
         patch_log: &mut PatchLog,
-        op: TxOp,
+        mut op: TxOp,
         succ: &[SuccInsert],
         range: Range<usize>,
     ) {
         let added = doc.ops_mut().splice(op.pos, &[&op]);
 
-        doc.ops_mut().add_succ(succ);
+        op.undo = doc.ops_mut().add_succ_with_undo(succ);
 
         if self.scope.is_some() {
             doc.ops_mut().reset_top(range.start..(range.end + added));
@@ -336,6 +343,7 @@ impl TransactionInner {
 
         doc.ops_mut().splice(op.pos, &[&op]);
         self.finalize_op(doc.text_encoding(), patch_log, &op, marks);
+
         self.pending.push(op);
 
         Ok(id)
@@ -437,13 +445,6 @@ impl TransactionInner {
             .collect::<Vec<_>>();
 
         self.insert_local_op(doc, patch_log, op, &succ, query.range);
-
-        // inserts can delete a conflicted value reveal a counter
-        if let Some((i, s)) = succ.iter().rev().enumerate().find(|(_, s)| s.inc.is_some()) {
-            if i > 0 {
-                doc.ops.expose(s.pos)
-            }
-        }
 
         Ok(Some(id))
     }
@@ -654,14 +655,14 @@ impl TransactionInner {
             }
 
             let query_elemid = query.elemid().ok_or(AutomergeError::InvalidIndex(index))?;
-            let op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
+            let mut op = self.next_delete(obj, delete_index, query_elemid, &query.ops);
             let ops_pos = query
                 .ops
                 .iter()
                 .map(|o| o.add_succ(op.id(), None))
                 .collect::<Vec<_>>();
 
-            doc.ops_mut().add_succ(&ops_pos);
+            op.undo = doc.ops_mut().add_succ_with_undo(&ops_pos);
 
             deleted += step;
 
@@ -809,11 +810,11 @@ impl TransactionInner {
             )
             .unwrap();
 
-        let op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
+        let mut op = TxOp::list_del(self.next_id(), text_obj, index, elemid, [found.op.id]);
 
         let succ_pos = vec![found.op.add_succ(op.id(), None)];
 
-        doc.ops_mut().add_succ(&succ_pos);
+        op.undo = doc.ops_mut().add_succ_with_undo(&succ_pos);
 
         patch_log.delete_seq(text_obj.id, index, 1);
 

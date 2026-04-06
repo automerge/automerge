@@ -1,4 +1,4 @@
-use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction};
+use super::op_set::{MarkIndexBuilder, ObjInfo, OpSet, ResolvedAction, SuccUndo};
 use super::types::{Action, ActorCursor, ActorIdx, KeyRef, MarkData, OpType, PropRef, ScalarValue};
 use super::{ValueMeta, ValueRef};
 use hexane::{ColumnDataIter, DeltaCursor, IntCursor};
@@ -168,6 +168,7 @@ pub(crate) struct TxOp {
     pub(crate) pos: usize,
     pub(crate) noop: bool,
     pub(crate) bld: OpBuilder<'static>,
+    pub(crate) undo: Vec<SuccUndo>,
 }
 
 #[derive(Debug, Clone)]
@@ -273,6 +274,7 @@ impl TxOp {
             pos,
             index,
             noop,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -305,6 +307,7 @@ impl TxOp {
             index: 0,
             pos,
             noop,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -333,6 +336,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -361,6 +365,7 @@ impl TxOp {
             index: 0,
             obj_type: obj.typ,
             noop: false,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -390,6 +395,7 @@ impl TxOp {
             pos,
             index,
             noop: false,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -418,6 +424,7 @@ impl TxOp {
             pos: 0,
             index,
             noop: false,
+            undo: vec![],
             bld: OpBuilder {
                 id,
                 obj: obj.id,
@@ -914,7 +921,7 @@ impl ExactSizeIterator for SuccIncCursors<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) struct SuccInsert {
     pub(crate) id: OpId,
     pub(crate) pos: usize,
