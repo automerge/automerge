@@ -8,13 +8,13 @@ use std::fmt::Debug;
 pub(crate) struct OpsFoundIter<'a, I: Iterator<Item = Op<'a>>> {
     iter: I,
     start_pos: usize,
-    clock: Option<Clock>,
+    clock: Clock,
     last_key: Option<KeyRef<'a>>,
     found: Option<OpsFound<'a>>,
 }
 
 impl<'a, I: Iterator<Item = Op<'a>>> OpsFoundIter<'a, I> {
-    pub(crate) fn new(iter: I, clock: Option<Clock>) -> Self {
+    pub(crate) fn new(iter: I, clock: Clock) -> Self {
         Self {
             iter,
             clock,
@@ -41,7 +41,7 @@ impl<'a, I: OpQueryTerm<'a>> Iterator for OpsFoundIter<'a, I> {
             if let Some(found) = &mut self.found {
                 found.end_pos = op.pos + 1;
                 found.range = self.start_pos..(op.pos + 1);
-                if op.action != Action::Increment && op.scope_to_clock(self.clock.as_ref()) {
+                if op.action != Action::Increment && op.scope_to_clock(Some(&self.clock)) {
                     found.ops.push(op);
                 }
             }

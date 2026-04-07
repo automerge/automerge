@@ -533,20 +533,21 @@ impl OpSet {
         seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> OpsFound<'a> {
-        if clock.is_none() {
-            let found = if seq_type == SequenceType::List {
-                self.seek_list_ops_by_index_fast(obj, index)
-            } else {
-                self.seek_text_ops_by_index_fast(obj, index)
-            };
-            #[cfg(feature = "slow_path_assertions")]
-            {
-                let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
-                assert_eq!(found, slow, "fast != slow");
+        match clock {
+            None => {
+                let found = if seq_type == SequenceType::List {
+                    self.seek_list_ops_by_index_fast(obj, index)
+                } else {
+                    self.seek_text_ops_by_index_fast(obj, index)
+                };
+                #[cfg(feature = "slow_path_assertions")]
+                {
+                    let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
+                    assert_eq!(found, slow, "fast != slow");
+                }
+                found
             }
-            found
-        } else {
-            self.seek_ops_by_index_slow(obj, index, seq_type, clock)
+            Some(clock) => self.seek_ops_by_index_slow(obj, index, seq_type, clock),
         }
     }
 
@@ -555,12 +556,12 @@ impl OpSet {
         obj: &ObjId,
         index: usize,
         seq_type: SequenceType,
-        clock: Option<&Clock>,
+        clock: &Clock,
     ) -> OpsFound<'a> {
         let sub_iter = self.iter_obj(obj);
         let end = sub_iter.range.end;
         let mut end_pos = sub_iter.pos();
-        let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.cloned());
+        let iter = OpsFoundIter::new(sub_iter.no_marks(), clock.clone());
         let mut len = 0;
         let mut range = end_pos..end_pos;
         for mut ops in iter {
@@ -708,12 +709,14 @@ impl OpSet {
         seq_type: SequenceType,
         clock: Option<&Clock>,
     ) -> Option<FoundOpId<'_>> {
-        if clock.is_none() {
-            let found = self.seek_list_opid_fast(obj, opid, seq_type);
-            debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, seq_type, clock));
-            found
-        } else {
-            self.seek_list_opid_slow(obj, opid, seq_type, clock)
+        match clock {
+            None => {
+                let found = self.seek_list_opid_fast(obj, opid, seq_type);
+                #[cfg(feature = "slow_path_assertions")]
+                debug_assert_eq!(found, self.seek_list_opid_slow(obj, opid, seq_type, clock));
+                found
+            }
+            Some(clock) => self.seek_list_opid_slow(obj, opid, seq_type, clock),
         }
     }
 
@@ -745,10 +748,10 @@ impl OpSet {
         obj: &ObjId,
         opid: OpId,
         seq_type: SequenceType,
-        clock: Option<&Clock>,
+        clock: &Clock,
     ) -> Option<FoundOpId<'_>> {
         let op = self.iter_obj(obj).find(|op| op.id == opid)?;
-        let iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.cloned());
+        let iter = OpsFoundIter::new(self.iter_obj(obj).no_marks(), clock.clone());
         let mut index = 0;
         for ops in iter {
             if ops.end_pos > op.pos {
