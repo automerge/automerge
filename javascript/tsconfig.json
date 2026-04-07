@@ -13,7 +13,9 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "lib": ["es2022", "DOM"]
+    "lib": ["es2022", "DOM"],
+    "rootDir": "./",
+    "types": ["node", "mocha"]
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["./dist/**/*", "./node_modules", "./src/**/*.deno.ts"],
