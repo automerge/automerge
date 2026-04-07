@@ -10,6 +10,7 @@ mod color_json;
 mod examine;
 mod examine_sync;
 mod export;
+mod get;
 mod import;
 mod merge;
 
@@ -120,6 +121,20 @@ enum Command {
     /// Read an automerge sync messaage and print a JSON representation of it
     ExamineSync { input_file: Option<PathBuf> },
 
+    /// Fetch an Automerge document from a sync server
+    Get {
+        /// The document ID (e.g. "automerge:4FyLj6..." or just "4FyLj6...")
+        doc_id: String,
+
+        /// The file to write to. If omitted assumes stdout
+        #[clap(long("out"), short('o'))]
+        output_file: Option<PathBuf>,
+
+        /// Sync server URL (can also be set via SYNC_SERVER env var)
+        #[clap(long, env = "SYNC_SERVER", default_value = "wss://sync3.automerge.org")]
+        sync_server: String,
+    },
+
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
         /// The file to write to. If omitted assumes stdout
@@ -226,6 +241,20 @@ fn main() -> Result<()> {
                     eprintln!("Error: {:?}", e);
                 }
             }
+            Ok(())
+        }
+        Command::Get {
+            doc_id,
+            output_file,
+            sync_server,
+        } => {
+            let doc_id = doc_id.strip_prefix("automerge:").unwrap_or(&doc_id);
+            let output: Box<dyn std::io::Write> = if let Some(output_file) = output_file {
+                Box::new(File::create(output_file)?)
+            } else {
+                Box::new(std::io::stdout())
+            };
+            get::get(&sync_server, doc_id, output)?;
             Ok(())
         }
         Command::Merge { input, output_file } => {
