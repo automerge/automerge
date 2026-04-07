@@ -8,6 +8,7 @@
   ],
   "compilerOptions": {
     "target": "es6",
-    "outDir": "../dist/mjs"
+    "outDir": "../dist/mjs",
+    "rootDir": "../src"
   }
 }
