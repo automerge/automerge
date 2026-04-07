@@ -21,7 +21,7 @@ slow_path_assertions = ["hexane/slow_path_assertions"]
 hexane = { version = "0.2.1", path = "../hexane" }
 hex = "^0.4.3"
 leb128 = "^0.2.5"
-sha2 = "0.11.0-pre.5"
+sha2 = "0.11.0"
 thiserror = "^2.0.12"
 itertools = "0.14.0"
 flate2 = "^1.0.22"
