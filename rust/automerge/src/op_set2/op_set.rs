@@ -1,5 +1,5 @@
 use super::parents::Parents;
-use crate::clock::{Clock, ClockRange};
+use crate::clock::{Clock, ClockRange, RevocationClock};
 use crate::exid::ExId;
 use crate::iter::tools::{MergeIter, SkipIter, SkipWrap};
 use crate::marks::{MarkSet, RichTextQueryState};
@@ -532,6 +532,7 @@ impl OpSet {
         index: usize,
         seq_type: SequenceType,
         clock: Option<&Clock>,
+        revocation_clock: RevocationClock,
     ) -> OpsFound<'a> {
         match clock {
             None => {
@@ -542,7 +543,7 @@ impl OpSet {
                 };
                 #[cfg(feature = "slow_path_assertions")]
                 {
-                    let slow = self.seek_ops_by_index_slow(obj, index, seq_type, clock);
+                    let slow = self.seek_ops_by_index_slow(obj, index, seq_type, revocation_clock);
                     assert_eq!(found, slow, "fast != slow");
                 }
                 found

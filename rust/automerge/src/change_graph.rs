@@ -771,6 +771,19 @@ impl ChangeGraph {
         self.to_op_clock(clock)
     }
 
+    pub(crate) fn revocation_clock(&self) -> OpClock {
+        (0_u32..self.num_actors() as u32)
+            .map(|actor_idx| {
+                let actor_idx = ActorIdx(actor_idx);
+                if let Some(mask) = self.revocations_mask.get(&actor_idx) {
+                    mask.map(|c| c.into())
+                } else {
+                    Some(u32::MAX)
+                }
+            })
+            .collect()
+    }
+
     fn to_op_clock(&self, c: SeqClock) -> OpClock {
         c.iter()
             .map(|(actor, seq)| {

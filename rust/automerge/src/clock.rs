@@ -1,4 +1,4 @@
-use crate::types::OpId;
+use crate::{types::OpId, ActorId};
 
 use std::num::NonZeroU32;
 
@@ -7,6 +7,12 @@ pub(crate) struct Clock(pub(crate) Vec<u32>);
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct SeqClock(pub(crate) Vec<Option<NonZeroU32>>);
+
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct RevocationClock {
+    num_actors: usize,
+    clock: Option<Clock>,
+}
 
 impl SeqClock {
     pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, Option<NonZeroU32>)> + '_ {
@@ -115,6 +121,20 @@ impl ClockRange {
         match self {
             Self::Diff(before, _) => before.covers(id),
             _ => false,
+        }
+    }
+}
+
+impl RevocationClock {
+    pub(crate) fn new(num_actors: usize, clock: Option<Clock>) -> Self {
+        Self { num_actors, clock }
+    }
+
+    pub(crate) fn as_op_clock(&self) -> Option<Clock> {
+        if self.clock.is_some() {
+            self.clock.clone()
+        } else {
+            Some((0..self.num_actors).map(|_| Some(u32::MAX)).collect())
         }
     }
 }
