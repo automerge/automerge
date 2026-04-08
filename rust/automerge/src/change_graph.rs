@@ -100,6 +100,29 @@ impl AuthorMap {
             Ok(index) => index.into(),
         }
     }
+
+    fn get_actors_for_author<'a>(&'a self, author: &Author) -> impl Iterator<Item = usize> + 'a {
+        self.authors
+            .binary_search(author)
+            .ok()
+            .map(|idx| {
+                let idx = AuthorIdx::from(idx);
+                self.actor_author
+                    .iter()
+                    .enumerate()
+                    .filter_map(
+                        move |(i, a)| {
+                            if a.as_ref()? == &idx {
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        },
+                    )
+            })
+            .into_iter()
+            .flatten()
+    }
 }
 
 pub(crate) struct ChangeGraphCols(ChangeGraph);
@@ -249,11 +272,7 @@ impl ChangeGraph {
             self.revocations.all_dirty = false;
             for (author, heads) in &self.revocations.rules {
                 let clock = self.calculate_clock(self.heads_to_nodes(heads));
-                for a in get_actors_for_author(
-                    &self.author_map.authors,
-                    &self.author_map.actor_author,
-                    author,
-                ) {
+                for a in self.author_map.get_actors_for_author(author) {
                     self.revocations
                         .mask
                         .insert(a.into(), clock.get_for_actor(&a));
@@ -277,22 +296,14 @@ impl ChangeGraph {
                 match self.revocations.rules.get(&author) {
                     Some(heads) => {
                         let clock = self.calculate_clock(self.heads_to_nodes(heads));
-                        for a in get_actors_for_author(
-                            &self.author_map.authors,
-                            &self.author_map.actor_author,
-                            &author,
-                        ) {
+                        for a in self.author_map.get_actors_for_author(&author) {
                             self.revocations
                                 .mask
                                 .insert(a.into(), clock.get_for_actor(&a));
                         }
                     }
                     None => {
-                        for a in get_actors_for_author(
-                            &self.author_map.authors,
-                            &self.author_map.actor_author,
-                            &author,
-                        ) {
+                        for a in self.author_map.get_actors_for_author(&author) {
                             self.revocations.mask.remove(&a.into());
                         }
                     }
@@ -337,11 +348,7 @@ impl ChangeGraph {
         &self,
         author: &Author,
     ) -> impl Iterator<Item = usize> + '_ {
-        get_actors_for_author(
-            &self.author_map.authors,
-            &self.author_map.actor_author,
-            author,
-        )
+        self.author_map.get_actors_for_author(author)
     }
 
     pub(crate) fn assign_author(&mut self, author: Author, actor: usize) {
@@ -1512,26 +1519,4 @@ pub(crate) mod ids {
     pub(super) const DEPS_VAL_COL_SPEC:   ColumnSpec = ColumnSpec::new_delta(DEPS_COL_ID);
     pub(super) const EXTRA_META_COL_SPEC: ColumnSpec = ColumnSpec::new_value_metadata(EXTRA_COL_ID);
     pub(super) const EXTRA_VAL_COL_SPEC:  ColumnSpec = ColumnSpec::new_value(EXTRA_COL_ID);
-}
-
-fn get_actors_for_author<'a>(
-    authors: &'a [Author],
-    actor_author: &'a [Option<AuthorIdx>],
-    author: &Author,
-) -> impl Iterator<Item = usize> + 'a {
-    authors
-        .binary_search(author)
-        .ok()
-        .map(|idx| {
-            let idx = AuthorIdx::from(idx);
-            actor_author.iter().enumerate().filter_map(move |(i, a)| {
-                if a.as_ref()? == &idx {
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-        })
-        .into_iter()
-        .flatten()
 }
