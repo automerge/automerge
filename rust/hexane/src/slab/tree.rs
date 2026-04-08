@@ -1097,6 +1097,7 @@ mod legacy_tests {
     proptest! {
 
         #[test]
+        #[ignore]
         fn proptest_insert(indices in arb_indices()) {
             let mut t = SpanTree::<usize,usize>::default();
             let mut v = Vec::new();

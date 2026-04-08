@@ -1119,7 +1119,7 @@ mod tests {
 
     #[test]
     fn v0_v1_save_fuzz() {
-        use rand::Rng;
+        use rand::RngExt;
         use rand::SeedableRng;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(12345);
 
