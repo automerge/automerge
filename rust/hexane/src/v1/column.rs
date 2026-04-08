@@ -151,6 +151,12 @@ pub(crate) trait SlabFind {
     fn find_slab(&self, index: usize) -> (usize, usize);
 }
 
+impl SlabFind for () {
+    fn find_slab(&self, _index: usize) -> (usize, usize) {
+        (0, 0)
+    }
+}
+
 impl<T: ColumnValueRef, WF: WeightFn<T>> SlabFind for Column<T, WF> {
     #[inline]
     fn find_slab(&self, index: usize) -> (usize, usize) {
@@ -184,6 +190,15 @@ pub(crate) fn find_slab_bit<W: SlabWeight>(bit: &[W], index: usize, n: usize) ->
 }
 
 // ── Column ──────────────────────────────────────────────────────────────
+
+impl<T: ColumnValueRef, WF: WeightFn<T>> std::fmt::Debug for Column<T, WF> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Column")
+            .field("len", &self.total_len)
+            .field("slabs", &self.slabs.len())
+            .finish()
+    }
+}
 
 #[derive(Clone)]
 pub struct Column<T: ColumnValueRef, WF: WeightFn<T> = LenWeight> {
@@ -684,6 +699,21 @@ pub struct Iter<'a, T: ColumnValueRef> {
     pub(crate) counter: usize,
 }
 
+impl<T: ColumnValueRef> Default for Iter<'_, T> {
+    fn default() -> Self {
+        Self {
+            slabs: &[],
+            col: &(),
+            slab_idx: 0,
+            decoder: T::Encoding::decoder(&[]),
+            items_left: 0,
+            slab_remaining: 0,
+            pos: 0,
+            counter: 0,
+        }
+    }
+}
+
 impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
     type Item = T::Get<'a>;
 
@@ -777,6 +807,15 @@ impl<'a, T: ColumnValueRef> Iterator for Iter<'a, T> {
 
 impl<T: ColumnValueRef> ExactSizeIterator for Iter<'_, T> {}
 
+impl<T: ColumnValueRef> std::fmt::Debug for Iter<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Iter")
+            .field("pos", &self.pos)
+            .field("items_left", &self.items_left)
+            .finish()
+    }
+}
+
 impl<T: ColumnValueRef> Clone for Iter<'_, T> {
     fn clone(&self) -> Self {
         Self {
@@ -793,6 +832,22 @@ impl<T: ColumnValueRef> Clone for Iter<'_, T> {
 }
 
 impl<'a, T: ColumnValueRef> Iter<'a, T> {
+    /// Set the iterator to yield items up to (but not past) `pos`.
+    ///
+    /// Can both shorten and extend the iterator window. If `pos` is
+    /// beyond the column length, the iterator will cleanly return `None`
+    /// when it reaches the end of the data.
+    pub fn set_max(&mut self, pos: usize) {
+        if pos <= self.pos {
+            self.items_left = 0;
+            self.slab_remaining = 0;
+        } else {
+            self.items_left = pos - self.pos;
+            // slab_remaining may now be less than items_left — that's fine,
+            // the iterator will advance to the next slab when it runs out.
+        }
+    }
+
     /// Returns the index of the next item to be yielded.
     #[inline]
     pub fn pos(&self) -> usize {

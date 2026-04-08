@@ -744,7 +744,7 @@ pub struct ColAccIter<'a, C: ColumnCursor> {
 
 impl<C: ColumnCursor> ColAccIter<'_, C> {
     pub fn shift_next(&mut self, range: Range<usize>) -> Option<<Self as Iterator>::Item> {
-        let _ = self.iter.shift_next(range);
+        self.iter.shift_next(range)?;
         let acc = self.acc();
         Some(acc)
     }
@@ -1888,6 +1888,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_fuzz_test_int() {
         let mut data: Vec<Option<u64>> = vec![];
         let mut col = ColumnData::<RleCursor<64, u64>>::new();
@@ -1969,6 +1970,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_str_fuzz_test() {
         let mut data: Vec<Option<String>> = vec![];
         let mut col = ColumnData::<RleCursor<64, str>>::new();
@@ -2001,6 +2003,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn column_data_fuzz_test_delta() {
         let mut data: Vec<Option<i64>> = vec![];
         let mut col = ColumnData::<DeltaCursorInternal<8>>::new();

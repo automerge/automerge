@@ -2199,12 +2199,12 @@ fn cross_slab_delete_all() {
 #[test]
 fn cross_slab_fuzz_regression() {
     // Replay seed 799 from cross_slab_fuzz
-    use rand::{RngCore, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     let mut r = rand::rngs::SmallRng::seed_from_u64(799);
 
-    let n = (r.next_u32() % 20 + 5) as usize;
-    let vals: Vec<u64> = (0..n).map(|_| r.next_u64() % 5).collect();
-    let max_seg = (r.next_u32() % 6 + 3) as usize;
+    let n = r.random_range(0u32..20) as usize + 5;
+    let vals: Vec<u64> = (0..n).map(|_| r.random_range(0u64..5)).collect();
+    let max_seg = r.random_range(0u32..6) as usize + 3;
     let mut col = multi_slab_col(&vals, max_seg);
     let mut mirror = vals.clone();
 
@@ -2213,11 +2213,11 @@ fn cross_slab_fuzz_regression() {
         if len == 0 {
             break;
         }
-        let idx = r.next_u32() as usize % len;
+        let idx = r.random_range(0..len);
         let max_del = (len - idx).min(5);
-        let del = r.next_u32() as usize % (max_del + 1);
-        let ins_count = r.next_u32() as usize % 4;
-        let new_vals: Vec<u64> = (0..ins_count).map(|_| r.next_u64() % 5).collect();
+        let del = r.random_range(0..max_del + 1);
+        let ins_count = r.random_range(0u32..4) as usize;
+        let new_vals: Vec<u64> = (0..ins_count).map(|_| r.random_range(0u64..5)).collect();
 
         eprintln!(
             "op={op} len={len} splice({idx}, {del}, {new_vals:?}) slabs={} info={:?}",
@@ -2232,13 +2232,13 @@ fn cross_slab_fuzz_regression() {
 
 #[test]
 fn cross_slab_fuzz() {
-    use rand::{RngCore, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     for seed in 0..1000u64 {
         let mut r = rand::rngs::SmallRng::seed_from_u64(seed);
         let round = seed;
-        let n = (r.next_u32() % 20 + 5) as usize;
-        let vals: Vec<u64> = (0..n).map(|_| r.next_u64() % 5).collect();
-        let max_seg = (r.next_u32() % 6 + 3) as usize;
+        let n = r.random_range(0u32..20) as usize + 5;
+        let vals: Vec<u64> = (0..n).map(|_| r.random_range(0u64..5)).collect();
+        let max_seg = r.random_range(0u32..6) as usize + 3;
         let mut col = multi_slab_col(&vals, max_seg);
         let mut mirror = vals.clone();
 
@@ -2248,11 +2248,11 @@ fn cross_slab_fuzz() {
             if len == 0 {
                 break;
             }
-            let idx = r.next_u32() as usize % len;
+            let idx = r.random_range(0..len);
             let max_del = (len - idx).min(5);
-            let del = r.next_u32() as usize % (max_del + 1);
-            let ins_count = r.next_u32() as usize % 4;
-            let new_vals: Vec<u64> = (0..ins_count).map(|_| r.next_u64() % 5).collect();
+            let del = r.random_range(0..max_del + 1);
+            let ins_count = r.random_range(0u32..4) as usize;
+            let new_vals: Vec<u64> = (0..ins_count).map(|_| r.random_range(0u64..5)).collect();
 
             col.splice(idx, del, new_vals.iter().copied());
             mirror.splice(idx..idx + del, new_vals.clone());
@@ -2342,7 +2342,7 @@ fn validate_bool_column(col: &Column<bool>) {
 #[test]
 #[ignore]
 fn fuzz_bool_splice_exhaustive() {
-    use rand::{rng, Rng};
+    use rand::{rng, RngExt};
     let mut r = rng();
 
     let n = 200;
@@ -2383,7 +2383,7 @@ fn fuzz_bool_splice_exhaustive() {
 #[test]
 #[ignore]
 fn fuzz_option_u64_splice_exhaustive() {
-    use rand::{rng, Rng};
+    use rand::{rng, RngExt};
     let mut r = rng();
 
     let choices: [Option<u64>; 5] = [None, Some(1), Some(2), Some(3), Some(4)];
@@ -2436,7 +2436,7 @@ fn fuzz_option_u64_splice_exhaustive() {
 
 #[test]
 fn save_to_multi_column_concatenation() {
-    use rand::{rng, Rng};
+    use rand::{rng, RngExt};
     let mut r = rng();
 
     // Build columns of different types with random data.
