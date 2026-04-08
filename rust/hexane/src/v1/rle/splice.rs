@@ -416,13 +416,13 @@ mod partition_tests {
 
     #[test]
     fn roundtrip_fuzz() {
-        use rand::{rng, RngCore};
+        use rand::{rng, RngExt};
         let mut r = rng();
         for _ in 0..200 {
-            let len = (r.next_u32() % 30 + 3) as usize;
-            let vals: Vec<u64> = (0..len).map(|_| r.next_u64() % 5).collect();
-            let start = r.next_u32() as usize % len;
-            let end = start + (r.next_u32() as usize % (len - start + 1));
+            let len = r.random_range(0u32..30) as usize + 3;
+            let vals: Vec<u64> = (0..len).map(|_| r.random_range(0u64..5)).collect();
+            let start = r.random_range(0..len);
+            let end = start + r.random_range(0..len - start + 1);
             roundtrip_check(&vals, start, end.min(len));
         }
     }
@@ -491,15 +491,15 @@ mod partition_tests {
 
     #[test]
     fn overflow_fuzz() {
-        use rand::{rng, RngCore};
+        use rand::{rng, RngExt};
         let mut r = rng();
         for _ in 0..100 {
-            let initial_len = (r.next_u32() % 10 + 1) as usize;
-            let initial: Vec<u64> = (0..initial_len).map(|_| r.next_u64() % 5).collect();
-            let insert_len = (r.next_u32() % 20 + 1) as usize;
-            let new_vals: Vec<u64> = (0..insert_len).map(|_| r.next_u64() % 5).collect();
-            let index = r.next_u32() as usize % (initial_len + 1);
-            let max_seg = initial_len + (r.next_u32() % 8) as usize;
+            let initial_len = r.random_range(0u32..10) as usize + 1;
+            let initial: Vec<u64> = (0..initial_len).map(|_| r.random_range(0u64..5)).collect();
+            let insert_len = r.random_range(0u32..20) as usize + 1;
+            let new_vals: Vec<u64> = (0..insert_len).map(|_| r.random_range(0u64..5)).collect();
+            let index = r.random_range(0..initial_len + 1);
+            let max_seg = initial_len + r.random_range(0u32..8) as usize;
             overflow_insert_check(&initial, index, &new_vals, max_seg);
         }
     }

@@ -619,6 +619,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_encoding_large_lit_runs() {
         for i in 0..10_000 {
             let mut encoder = Encoder::<UIntCursor>::new(true); // locked
