@@ -2,7 +2,7 @@ use divan::Bencher;
 use hexane::v1;
 use std::time::Duration;
 
-use rand::{rng, RngCore};
+use rand::{rng, Rng};
 
 fn main() {
     divan::main();

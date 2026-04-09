@@ -246,6 +246,17 @@ impl<'a, T: RleValue, V: AsColumnRef<T>> RleState<'a, T, V> {
         }
     }
 
+    pub(crate) fn is_single_run_of(&self, value: impl Into<Cow<'a, T, V>>) -> bool {
+        let value = value.into();
+        match self {
+            RleState::Empty => true,
+            RleState::Lone(v) => v == &value,
+            RleState::Run(_, v) => v == &value,
+            RleState::Null(_) => value.is_null(),
+            _ => false,
+        }
+    }
+
     pub fn append(&mut self, buf: &mut Vec<u8>, value: impl Into<Cow<'a, T, V>>) -> FlushState {
         self.append_n(buf, value, 1)
     }
@@ -554,6 +565,7 @@ fn emit_null(buf: &mut Vec<u8>, count: usize) -> WPos {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v1::leb::{read_signed, read_unsigned};
     use crate::v1::rle::rle_validate_encoding;
 
     fn encode_vals(vals: &[u64]) -> Vec<u8> {
@@ -567,7 +579,6 @@ mod tests {
     }
 
     fn decode(buf: &[u8]) -> Vec<u64> {
-        use crate::v1::leb::read_signed;
         let mut result = Vec::new();
         let mut pos = 0;
         while pos < buf.len() {
@@ -590,7 +601,7 @@ mod tests {
                     pos = scan;
                 }
                 _ => {
-                    let (ncb, nc) = crate::v1::leb::read_unsigned(&buf[pos + cb..]).unwrap();
+                    let (ncb, nc) = read_unsigned(&buf[pos + cb..]).unwrap();
                     result.resize(result.len() + nc as usize, 0);
                     pos += cb + ncb;
                 }

@@ -196,11 +196,12 @@ impl Slab {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v1::rle::RleEncoding;
+    use crate::v1::leb::encode_signed;
+    use crate::v1::rle::state::{RleCow, RleState};
+    use crate::v1::rle::{RleDecoder, RleEncoding};
+    use crate::v1::{Column, ColumnValueRef};
 
-    fn check_validate2<T: RleValue + crate::v1::ColumnValueRef<Encoding = RleEncoding<T>>>(
-        data: &[u8],
-    ) {
+    fn check_validate2<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>>(data: &[u8]) {
         let v1 = rle_validate_encoding::<T>(data).unwrap();
         let v2 = rle_validate_encoding::<T>(data).unwrap();
         assert_eq!(v1.len, v2.len, "len mismatch");
@@ -222,7 +223,7 @@ mod tests {
             vec![1],             // single
             vec![],              // empty
         ] {
-            let col = crate::v1::Column::<u64>::from_values(vals.clone());
+            let col = Column::<u64>::from_values(vals.clone());
             for slab in &col.slabs {
                 check_validate2::<u64>(&slab.data);
             }
@@ -232,7 +233,7 @@ mod tests {
     #[test]
     fn validate_matches_nullable() {
         let vals: Vec<Option<u64>> = vec![Some(1), None, None, Some(2), Some(2), None];
-        let col = crate::v1::Column::<Option<u64>>::from_values(vals);
+        let col = Column::<Option<u64>>::from_values(vals);
         for slab in &col.slabs {
             check_validate2::<Option<u64>>(&slab.data);
         }
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn load_and_verify_matches() {
         let vals: Vec<u64> = (0..1000).map(|i| i % 7).collect();
-        let col = crate::v1::Column::<u64>::from_values(vals);
+        let col = Column::<u64>::from_values(vals);
         let saved = col.save();
         let v1 = rle_load_and_verify::<u64>(&saved, 16, None).unwrap();
         let v2 = rle_load_and_verify::<u64>(&saved, 16, None).unwrap();
@@ -369,7 +370,6 @@ mod tests {
     fn validate_boundary_repeat_then_literal_same_value_string() {
         // Build: Run(2, "aaa") then Lit ["aaa", "bbb"]
         // This must be rejected — "aaa" at boundary.
-        use crate::v1::rle::state::{RleCow, RleState};
         let mut buf = Vec::new();
         let mut state = RleState::<String, &str>::Empty;
         // Force a repeat of "aaa" × 2
@@ -377,7 +377,7 @@ mod tests {
         state.append(&mut buf, RleCow::Ref("aaa"));
         state.flush(&mut buf);
         // Now manually append a literal starting with "aaa"
-        buf.extend(crate::v1::leb::encode_signed(-2));
+        buf.extend(encode_signed(-2));
         // "aaa" = leb(3) + b"aaa"
         buf.push(3);
         buf.extend_from_slice(b"aaa");
@@ -402,13 +402,13 @@ mod tests {
 
     // ── Load: literal run split across slab boundary ────────────────────
 
-    fn load_roundtrip<T: RleValue + crate::v1::ColumnValueRef<Encoding = RleEncoding<T>>>(
+    fn load_roundtrip<T: RleValue + ColumnValueRef<Encoding = RleEncoding<T>>>(
         vals: Vec<T>,
         max_segments: usize,
     ) where
         for<'a> T::Get<'a>: std::fmt::Debug,
     {
-        let col = crate::v1::Column::<T>::from_values(vals.clone());
+        let col = Column::<T>::from_values(vals.clone());
         let saved = col.save();
         let slabs = rle_load_and_verify::<T>(&saved, max_segments, None).unwrap();
 
@@ -435,7 +435,7 @@ mod tests {
         // Concatenated values must match original.
         let mut loaded_vals = vec![];
         for slab in &slabs {
-            let decoder = crate::v1::rle::RleDecoder::<T>::new(&slab.data);
+            let decoder = RleDecoder::<T>::new(&slab.data);
             loaded_vals.extend(decoder);
         }
         let orig_vals: Vec<_> = col.iter().collect();
@@ -506,13 +506,13 @@ mod tests {
         // Load with small slabs, reassemble into a column, save, and verify
         // the saved bytes match the original.
         let vals: Vec<u64> = (0..200).map(|i| i % 13).collect();
-        let col = crate::v1::Column::<u64>::from_values(vals.clone());
+        let col = Column::<u64>::from_values(vals.clone());
         let saved = col.save();
-        let loaded = crate::v1::Column::<u64>::load(&saved).unwrap();
+        let loaded = Column::<u64>::load(&saved).unwrap();
         assert_eq!(loaded.to_vec(), col.to_vec());
         // Re-save and compare
         let resaved = loaded.save();
-        let reloaded = crate::v1::Column::<u64>::load(&resaved).unwrap();
+        let reloaded = Column::<u64>::load(&resaved).unwrap();
         assert_eq!(reloaded.to_vec(), col.to_vec());
     }
 }

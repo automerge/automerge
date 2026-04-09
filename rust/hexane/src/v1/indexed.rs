@@ -220,10 +220,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
 
     /// Deserialize with options (applied to the inner delta column).
     /// See [`LoadOpts`](super::LoadOpts).
-    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError>
-    where
-        for<'a> <T::Inner as super::ColumnValueRef>::Get<'a>: Default,
-    {
+    pub fn load_with(data: &[u8], opts: super::LoadOpts<T::Inner>) -> Result<Self, PackError> {
         let col = DeltaColumn::load_with(data, opts)?;
         let (tree, tree_n) = build_tree(&col);
         Ok(Self {
@@ -473,7 +470,7 @@ impl<T: DeltaValue> IndexedDeltaColumn<T> {
         let local_target = target - prefix_before;
 
         // Access the slab data through the inner PrefixColumn -> Column.
-        let slab_data = self.col.inner().slab_data();
+        let slab_data = self.col.inner().values().slab_data();
         let data = &slab_data[slab_idx];
 
         let mut byte_pos = 0;
@@ -601,7 +598,7 @@ fn build_tree<T: DeltaValue>(col: &DeltaColumn<T>) -> (Vec<RangeNode>, usize) {
     let mut tree = vec![RangeNode::default(); 2 * tree_n];
 
     // Fill leaves from slab data.
-    let slab_data = col.inner().slab_data();
+    let slab_data = col.inner().values().slab_data();
     for (i, data) in slab_data.iter().enumerate() {
         tree[tree_n + i] = compute_leaf_i64(data);
     }
